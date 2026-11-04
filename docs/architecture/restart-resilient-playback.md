@@ -259,7 +259,9 @@ stop on v1 or v2, session expiry, a stream abort, and an admin stop or terminate
 token lifetime (`playback.MaxTokenTTL`, 24h). The API reads it before it serves
 or reconstructs a session, and the offload node reads it (a node-local Redis
 GET, sub-ms, cached in process for about two seconds) before serving any bytes,
-returning `410 playback_session_ended` with no bytes on a hit. Enforcement is
+answering `410` with no media bytes on a hit. The token routes on the proxy and
+transcode node send a plain-text body; the API and the proxy's media-grant
+routes send JSON with the `playback_session_ended` code. Enforcement is
 **byte-withholding, not client cooperation** — a revoked client that ignores the
 410 keeps hitting a wall.
 
@@ -350,7 +352,7 @@ package.
   reconstruct is attempted.
 - The node guards: `internal/proxy/server.go` and
   `internal/transcodenode/server.go` consult the same marker on every
-  token-verified serve and answer `410` with no bytes.
+  token-verified serve and answer a plain-text `410` with no media bytes.
 - `nodesessions.SessionInfo` carries the numeric ownership keys
   (`auth_user_id`/`profile_id`/`media_file_id`), populated by the node from the
   verified token, to enrich the live admin "active streams" view (who/what, not
@@ -455,9 +457,14 @@ evolution:
   group, not individually. Detecting/limiting this needs a per-account
   concurrency cap or per-device session ids (device binding); deferred. Do not bind to client IP
   (mobile / CGNAT).
-- **Token in logs (tr-1).** Scrub the `?st=` token / path token from request
-  loggers (the jellycompat logger logs `RawQuery`; the native logger omits it).
-  The signature and the 24h token lifetime bound the exposure.
+- **Token in logs (tr-1).** Keep the `?st=` token and path tokens out of
+  request loggers. The native logger omits the query and redacts secret path
+  parameters. The jellycompat logger masks credential-named query keys
+  (`logredact.SanitizeQuery`); jellycompat stream tokens travel in the path of
+  node routes, not in requests that logger sees. The
+  signature only stops a forged or altered token: anyone who reads a logged
+  token can replay it until it expires (24h at most), so log retention is an
+  exposure of its own.
 - **Owner-identity (A).** Required before multi-front-end *integrated* transcode
   without sticky affinity; defines owner election, self-URL discovery, a
   peer-forward endpoint, and failover.
@@ -599,7 +606,8 @@ session ignores it.
 ### 12.4 Normal playback — native, multi-node (offloaded)
 
 > The `GET silo:streamauth:{sid}` guard below is shipped. A denied session
-> answers a plain-text `410` with no bytes; an absent marker or a
+> answers `410` with the plain-text body `playback session ended` and no
+> media bytes; an absent marker or a
 > Redis error serves.
 
 ```mermaid
@@ -617,7 +625,7 @@ sequenceDiagram
         N->>N: verifyToken(TOKEN)
         N->>R: GET silo:streamauth:{sid}   (deny marker, ~2s cached)
         alt deny
-            N-->>C: 410 (no bytes)
+            N-->>C: 410 (no media bytes)
         else allow / absent
             N->>R: Track silo:sessions:{node}:{sid}  (uid, mfid from claims)
             N->>T: proxy /transcode/{sid}/...
@@ -682,7 +690,7 @@ flowchart TD
     end
     subgraph Node["API, proxy, transcode node — every serve"]
         G[verifyToken OK] --> L{GET silo:streamauth:session_id}
-        L -- present deny --> F[410 playback_session_ended, no bytes]
+        L -- present deny --> F[410, no media bytes]
         L -- absent / redis-err --> SV[serve bytes  fail-open]
     end
 ```

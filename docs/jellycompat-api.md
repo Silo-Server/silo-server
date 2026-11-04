@@ -324,8 +324,9 @@ These changes do not implement every advanced query option. Compound sorts,
 full `IsMissing` semantics, multiple person-ID predicates, populated tag facets,
 and the `Tags` and `HasSubtitles` item filters remain outside this subset.
 `/Items` applies `StudioIds`, keeping items with any named studio; when no value
-names a studio, it returns no items. Season and episode listings do not filter
-by studio.
+names a studio, it returns no items. Episode listings filter by the parent
+series' studios, except the `AdjacentTo` window of `/Shows/{id}/Episodes`.
+Season listings do not filter by studio.
 
 ## Playback negotiation and media
 

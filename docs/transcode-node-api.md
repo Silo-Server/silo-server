@@ -32,12 +32,16 @@ default, adds a keyframe-planned mode. With it on, a fresh copy-video
 `POST /transcode/start` carries `keyframe_playlist: true` and the node echoes
 `keyframe_playlist: true` in the start response; the API rejects a missing echo
 and stops the transport. The echo confirms the node understood the request, not
-that it planned. A copy that starts at the beginning of a source with a known
-duration and a complete keyframe index serves one complete playlist planned
-from those keyframes; any other copy keeps FFmpeg's playlist. A keyframe-planned
-copy never seek-restarts: a request for a segment FFmpeg has not reached waits
-up to 30 seconds for the copy to get there, and a restart copies from the
-beginning again, so FFmpeg cuts the same segments.
+that it planned. A copy serves one complete playlist planned from the source's
+keyframes only when it starts at the beginning of the source, the duration is
+known, the keyframe index exists and records where the video ends, the plan
+fits within the synthetic playlist's 50,000-segment limit, and the node can
+record the plan in the session's output directory. Any other copy keeps
+FFmpeg's playlist. A keyframe-planned copy never seek-restarts. While FFmpeg is
+running, a request for a segment past the last one it produced waits up to 30
+seconds for the copy to get there. When FFmpeg has stopped, or the segment is
+behind the produced head and gone, the copy restarts from the beginning, so
+FFmpeg cuts the same segments.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.
