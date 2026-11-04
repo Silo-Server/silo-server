@@ -27,6 +27,9 @@ type ViewerPreferences struct {
 	// NextUpNewReleasesFirst is ui.next_up_new_releases_first, carried for the
 	// same reason.
 	NextUpNewReleasesFirst bool
+	// HideWatchedItemsOnHome is home.hide_watched_items, carried so Home
+	// requests read it from the scope too.
+	HideWatchedItemsOnHome bool
 	// Degraded reports that the read failed and the values are the contract
 	// defaults rather than the profile's own.
 	Degraded bool
@@ -43,7 +46,7 @@ type ViewerPreferences struct {
 // from the contract. Production callers pass the node's shared
 // *config.AdminDefaults so Home, Jellyfin clients and the settings pages agree.
 func ResolveViewerPreferences(
-	ctx context.Context, store userstore.UserStore, adminDefaults settingsresolve.ServerSettings, profileID string,
+	ctx context.Context, store ViewerPreferenceReader, adminDefaults settingsresolve.ServerSettings, profileID string,
 ) ViewerPreferences {
 	profileID = strings.TrimSpace(profileID)
 	if store == nil || profileID == "" {
@@ -63,6 +66,42 @@ type ViewerPreferenceReader interface {
 	settingsresolve.Store
 }
 
+// viewerPreferenceKeys are the settings ResolveViewerPreferencesStrict reads.
+var viewerPreferenceKeys = []string{
+	settingskeys.UiDisabledLibraryIds,
+	settingskeys.CatalogMetadataLanguage,
+	settingskeys.CatalogMetadataLanguageOverrides,
+	settingskeys.UiNextUpMode,
+	settingskeys.UiNextUpNewReleasesFirst,
+	settingskeys.HomeHideWatchedItems,
+}
+
+// ViewerPreferenceQuery is the candidate read that answers profileID's viewer
+// preferences, for a caller that sends it in a batch of its own and hands the
+// result to ResolveViewerPreferences as ViewerPreferenceRows. It reads every
+// key the resolution can ask for, so its rows cover the resolution's own read.
+func ViewerPreferenceQuery(profileID string) userstore.SettingResolutionQuery {
+	return userstore.SettingResolutionQuery{
+		Keys:       viewerPreferenceKeys,
+		ProfileIDs: []string{strings.TrimSpace(profileID)},
+	}
+}
+
+// ViewerPreferenceRows is a ViewerPreferenceReader over the result of a
+// ViewerPreferenceQuery read earlier: its rows, or the error reading them.
+type ViewerPreferenceRows struct {
+	Rows []userstore.SettingValue
+	Err  error
+}
+
+// ListSettingValuesForResolution answers with the rows read earlier. They
+// cover any read of the same profile's viewer preferences.
+func (r ViewerPreferenceRows) ListSettingValuesForResolution(
+	context.Context, userstore.SettingResolutionQuery,
+) ([]userstore.SettingValue, error) {
+	return r.Rows, r.Err
+}
+
 // ResolveViewerPreferencesStrict retains canonical precedence but propagates
 // dependency failures instead of weakening authority through a fallback.
 func ResolveViewerPreferencesStrict(
@@ -73,14 +112,7 @@ func ResolveViewerPreferencesStrict(
 		return ViewerPreferences{}, err
 	}
 	values, err := settingsresolve.New(contract).WithAdminDefaults(adminDefaults).Resolve(ctx, store,
-		settingsresolve.Context{ProfileID: profileID},
-		[]string{
-			settingskeys.UiDisabledLibraryIds,
-			settingskeys.CatalogMetadataLanguage,
-			settingskeys.CatalogMetadataLanguageOverrides,
-			settingskeys.UiNextUpMode,
-			settingskeys.UiNextUpNewReleasesFirst,
-		}, nil)
+		settingsresolve.Context{ProfileID: profileID}, viewerPreferenceKeys, nil)
 	if err != nil {
 		return ViewerPreferences{}, err
 	}
@@ -104,6 +136,8 @@ func ResolveViewerPreferencesStrict(
 			}
 		case settingskeys.UiNextUpNewReleasesFirst:
 			_ = json.Unmarshal(value.Value, &out.NextUpNewReleasesFirst)
+		case settingskeys.HomeHideWatchedItems:
+			_ = json.Unmarshal(value.Value, &out.HideWatchedItemsOnHome)
 		}
 	}
 	return out, nil

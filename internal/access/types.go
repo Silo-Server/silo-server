@@ -52,6 +52,9 @@ type Scope struct {
 	// ui.next_up_new_releases_first. It is set together with NextUpMode, so a
 	// scope whose NextUpMode is "" has not resolved it either.
 	NextUpNewReleasesFirst bool `json:"-"`
+	// HideWatchedItemsOnHome is the profile's resolved home.hide_watched_items,
+	// set together with NextUpMode in the same way.
+	HideWatchedItemsOnHome bool `json:"-"`
 	// PreferencesDegraded is set when the profile's viewer preferences could
 	// not be read and the scope carries their defaults (see
 	// ResolveViewerPreferences). It stays out of the access fingerprint, which
