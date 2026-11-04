@@ -270,6 +270,9 @@ type Dependencies struct {
 	// after an auth binding write.
 	AuthProviderSource     auth.PluginProviderSource
 	OnAuthProvidersChanged func(context.Context)
+	// OnPluginTasksChanged re-syncs plugin tasks on every API server after a
+	// task binding write; nil leaves the binding to the next restart.
+	OnPluginTasksChanged func(context.Context)
 	// AuthProviderRecheck re-checks sessions opened through an external
 	// sign-in provider at refresh (nil skips it).
 	AuthProviderRecheck *auth.ProviderRecheck
@@ -3074,6 +3077,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			restartStatus,
 		)
 		v2PluginHandler.SetAuthProvidersChanged(deps.OnAuthProvidersChanged)
+		v2PluginHandler.SetPluginTasksChanged(deps.OnPluginTasksChanged)
 		v2deps.AdminPluginInventory = v2PluginHandler
 		v2deps.AdminPluginConfiguration = v2PluginHandler
 		v2deps.AdminPluginLifecycle = v2PluginHandler
@@ -4600,6 +4604,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 									restartStatus,
 								)
 								pluginHandler.SetAuthProvidersChanged(deps.OnAuthProvidersChanged)
+								pluginHandler.SetPluginTasksChanged(deps.OnPluginTasksChanged)
 								r.Route("/plugins", func(r chi.Router) {
 									r.Get("/catalog-settings", pluginHandler.HandleGetCatalogSettings)
 									r.Put("/catalog-settings", pluginHandler.HandlePutCatalogSettings)

@@ -3647,12 +3647,29 @@ func main() {
 			taskMgr.Register(tasks.NewRecheckExternalIdentitiesTask(deps.DB, deps.AuthProviderRecheck))
 		}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
-			pluginTasks, err := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService).Tasks(appCtx)
-			if err != nil {
+			pluginTasks := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService, taskMgr)
+			if err := pluginTasks.Sync(appCtx); err != nil {
 				log.Fatalf("plugin task registry: %v", err)
 			}
-			for _, pluginTask := range pluginTasks {
-				taskMgr.Register(pluginTask)
+			// Plugin tasks follow this server's lifecycle changes and binding
+			// writes before their requests return, other servers' through
+			// plugins_changed, and a missed announcement or failed sync
+			// through the periodic resync.
+			pluginService.AddLifecycleHook(pluginTasks.SyncNow)
+			if err := eventBus.Subscribe(appCtx, cache.ChannelAdmin, func(event cache.Event) {
+				if event.Type == cache.EventPluginsChanged {
+					pluginTasks.RequestSync()
+				}
+			}); err != nil {
+				slog.Warn("subscribe plugin task changes failed; other servers' changes apply at the next periodic resync", "error", err,
+					"resync_interval", plugins.TaskSyncInterval)
+			}
+			go pluginTasks.RunSyncs(appCtx, plugins.TaskSyncInterval, plugins.TaskSyncRetryWait)
+			deps.OnPluginTasksChanged = func(ctx context.Context) {
+				pluginTasks.SyncNow(ctx)
+				if err := eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventPluginsChanged}); err != nil {
+					slog.WarnContext(ctx, "publish plugin task binding change failed", "component", "plugins", "error", err)
+				}
 			}
 		}
 

@@ -116,7 +116,23 @@ func (r *PgTriggerRepository) ReplaceSchedule(ctx context.Context, taskKey strin
 		return taskmanager.Schedule{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	saved, err := replaceSchedule(ctx, tx, taskKey, expected, triggers)
+	if err != nil {
+		return taskmanager.Schedule{}, err
+	}
+	return saved, tx.Commit(ctx)
+}
 
+// ReplaceScheduleInTx replaces a task's saved schedule inside the caller's
+// transaction, so the schedule commits or rolls back with the change that
+// implies it. Each process running the task installs it through
+// TaskManager.ReloadSchedule.
+func ReplaceScheduleInTx(ctx context.Context, tx pgx.Tx, taskKey string, triggers []taskmanager.TriggerConfig) error {
+	_, err := replaceSchedule(ctx, tx, taskKey, -1, triggers)
+	return err
+}
+
+func replaceSchedule(ctx context.Context, tx pgx.Tx, taskKey string, expected int64, triggers []taskmanager.TriggerConfig) (taskmanager.Schedule, error) {
 	inserted, err := tx.Exec(ctx, `INSERT INTO task_schedules (task_key) VALUES ($1) ON CONFLICT DO NOTHING`, taskKey)
 	if err != nil {
 		return taskmanager.Schedule{}, err
@@ -170,5 +186,5 @@ func (r *PgTriggerRepository) ReplaceSchedule(ctx context.Context, taskKey strin
 	if triggers == nil {
 		triggers = []taskmanager.TriggerConfig{}
 	}
-	return taskmanager.Schedule{Revision: revision, Triggers: triggers}, tx.Commit(ctx)
+	return taskmanager.Schedule{Revision: revision, Triggers: triggers}, nil
 }

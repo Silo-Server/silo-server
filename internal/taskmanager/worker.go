@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +29,13 @@ type taskWorker struct {
 	triggerChanged  atomic.Bool
 	mu              sync.RWMutex
 	scheduleMu      sync.Mutex
+	// schedule is the configs setTriggers last installed, including any the
+	// trigger factory could not build, so ReloadSchedule can tell whether
+	// the saved schedule differs from the one the worker runs.
+	schedule []TriggerConfig
+	// retired is closed when the task is unregistered; it ends the trigger
+	// loop, setTriggers no longer starts triggers and reserve refuses runs.
+	retired chan struct{}
 }
 
 func newTaskWorker(task Task, manager *TaskManager) *taskWorker {
@@ -36,6 +44,40 @@ func newTaskWorker(task Task, manager *TaskManager) *taskWorker {
 		manager:       manager,
 		state:         TaskStateIdle,
 		triggerUpdate: make(chan struct{}, 1),
+		retired:       make(chan struct{}),
+	}
+}
+
+// isRetired reports whether retire ran. Callers hold w.mu.
+func (w *taskWorker) isRetired() bool {
+	select {
+	case <-w.retired:
+		return true
+	default:
+		return false
+	}
+}
+
+// retire stops a worker its manager no longer holds: its triggers stop, its
+// trigger loop ends, and a run in progress is canceled and recorded as such.
+func (w *taskWorker) retire() {
+	w.mu.Lock()
+	if w.isRetired() {
+		w.mu.Unlock()
+		return
+	}
+	close(w.retired)
+	for _, tr := range w.triggers {
+		tr.Stop()
+	}
+	w.triggers = nil
+	cancel := w.cancel
+	if w.state == TaskStateRunning {
+		w.state = TaskStateCancelling
+	}
+	w.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 
@@ -85,6 +127,10 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 	}
 
 	w.triggers = nil
+	w.schedule = slices.Clone(configs)
+	if w.isRetired() {
+		configs = nil
+	}
 	spread := startSpread(w.task)
 	for _, cfg := range configs {
 		tr := factory(cfg)
@@ -141,10 +187,22 @@ func (p *progressReporter) SetResultData(data json.RawMessage) {
 	p.resultData = data
 }
 
+// runsSchedule reports whether configs is the schedule the worker runs.
+func (w *taskWorker) runsSchedule(configs []TriggerConfig) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return slices.Equal(w.schedule, configs)
+}
+
 // reserve claims the local worker before an asynchronous caller acknowledges it.
+// A retired worker answers ErrTaskNotFound: a caller that looked the worker up,
+// or a trigger firing consumed, before Unregister must not start a run after it.
 func (w *taskWorker) reserve(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.isRetired() {
+		return nil, nil, ErrTaskNotFound
+	}
 	if w.state == TaskStateRunning || w.state == TaskStateCancelling {
 		return nil, nil, ErrTaskAlreadyRunning
 	}

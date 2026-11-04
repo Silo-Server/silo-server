@@ -181,13 +181,13 @@ export function PluginSettingsPanels({
       {taskCapabilities.length > 0 ? (
         <DetailPanel
           title="Scheduled tasks"
-          description="Tasks are registered when the server starts, so turning one on or off takes effect after a restart. Once a task exists, change its schedule on its task page."
+          description="Turning a task on or off applies right away. Change a task's schedule on its task page."
         >
           <ul className="divide-y rounded-xl border">
             {taskCapabilities.map((capability) => {
               const binding = taskBindings.find((e) => e.capability_id === capability.id);
               const label = capability.display_name || capability.id;
-              const trigger = pluginTaskTrigger(binding?.trigger);
+              const trigger = pluginTaskTrigger(binding?.trigger, capability.default_schedule);
               const registered = installation.enabled && (binding?.enabled ?? true);
               return (
                 <li key={capability.id} className="flex items-center justify-between gap-4 p-3.5">
@@ -216,10 +216,10 @@ export function PluginSettingsPanels({
                       saveTaskBinding.mutate({
                         id: installation.id,
                         capabilityId: capability.id,
-                        body: {
-                          enabled: checked,
-                          trigger: binding?.trigger ?? { type: "startup" },
-                        },
+                        // Resend the stored trigger: a changed one replaces
+                        // the task's saved schedule. An empty trigger keeps
+                        // the manifest default.
+                        body: { enabled: checked, trigger: binding?.trigger ?? {} },
                       })
                     }
                   />

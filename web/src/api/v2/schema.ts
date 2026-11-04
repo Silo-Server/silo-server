@@ -3712,7 +3712,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the scheduled task binding for one capability and mark a server restart required. The whole row is assigned, so repeating the request converges on one stored binding. */
+    /** Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it, and a changed trigger replaces its saved schedule. The whole row is assigned, so repeating the request converges on one stored binding. */
     put: operations["updateAdminPluginTaskBinding"];
     post?: never;
     delete?: never;
@@ -18358,6 +18358,8 @@ export interface components {
        */
       callback_url?: string;
       config_schema: components["schemas"]["AdminPluginConfigSchema"][];
+      /** @description On a scheduled_task.v1 capability: the schedule its manifest declares, which the task uses until a binding sets one. Omitted when the manifest declares none the server can run; such a task runs once at each server start */
+      default_schedule?: components["schemas"]["AdminTaskTrigger"];
       description: string;
       display_name: string;
       id: string;
@@ -18677,12 +18679,12 @@ export interface components {
       updated_at: string;
     };
     AdminPluginTaskBindingResult: {
-      /** @description Always true: bindings load at server start */
+      /** @description False when the binding applied on every API server without a restart; true only on a server with no task scheduler, where it applies at the next start */
       restart_required: boolean;
     };
     AdminPluginTaskBindingWrite: {
       enabled: boolean;
-      /** @description Plugin-defined trigger document; omitted stores an empty object */
+      /** @description The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). Changing it replaces the task's saved schedule. Omitted stores an empty object; an empty or unrunnable trigger uses the manifest default_trigger, else one run at server start */
       trigger?: {
         [key: string]: unknown;
       };

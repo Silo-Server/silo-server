@@ -3509,9 +3509,19 @@ whole binding row keyed by installation and capability. The auth binding answers
 `X-Silo-Restart-Required: false`: sign-in providers rebuild on every node without a
 restart. An omitted `auto_provision` is true, and enabling an auth binding while another
 is enabled is 409 `provider_already_enabled`
-([external-sign-in.md](architecture/external-sign-in.md)). The task binding marks a server
-restart required and answers 200 with `restart_required` true, matching the legacy shape.
-An omitted task trigger stores an empty object. Both are naturally idempotent upserts.
+([external-sign-in.md](architecture/external-sign-in.md)). The task binding applies on
+every API server without a restart and answers 200 with `restart_required` false: a disabled
+binding removes the task from the task manager, an enabled one registers it, and a trigger
+that differs from the stored one replaces the task's saved schedule in the same transaction
+as the binding. Resending the stored
+trigger, as the plugin page's on/off switch does, keeps the saved schedule. `restart_required`
+is true only on a server with no task manager, where the binding applies at the next start.
+An omitted task trigger stores an empty object. A task whose binding has no trigger the task
+manager can run (an empty object, a malformed value, or an unknown type) uses the manifest's
+`scheduled_task.default_trigger` when it is valid, else it runs once at each server start
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). The frozen v1
+`PUT .../task-bindings/{capability_id}` shares this path, so it also applies live and answers
+`restart_required` false. Both are naturally idempotent upserts.
 
 All four require an acting administrator, restrict demo access, answer 404 for an unknown
 installation, 409 for the reserved built-in host row, 422 for a blank key or capability, and

@@ -137,6 +137,7 @@ type AdminPluginCapability struct {
 	CallbackURL           *string                   `json:"callback_url,omitempty" format:"uri-reference" doc:"On an installation's OAuth sign-in capability: the redirect URI to register at the provider, the v2 callback on the public URL (server.public_url). Empty while no public URL is configured; omitted for other capabilities and in the catalog" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
 	PostLogoutRedirectURL *string                   `json:"post_logout_redirect_url,omitempty" format:"uri-reference" doc:"On an installation's OAuth sign-in capability: the post-logout redirect URI to register at the provider for provider logout, the login page on the public URL. Empty while no public URL is configured; omitted for other capabilities and in the catalog" example:"https://silo.example.test/login"`
 	RequestRouter         *AdminPluginRequestRouter `json:"request_router,omitempty" doc:"On a request_router.v1 capability: which request server fields its plugin can do without. Omitted for other capability types"`
+	DefaultSchedule       *AdminTaskTrigger         `json:"default_schedule,omitempty" doc:"On a scheduled_task.v1 capability: the schedule its manifest declares, which the task uses until a binding sets one. Omitted when the manifest declares none the server can run; such a task runs once at each server start"`
 }
 
 // AdminPluginRequestRouter says which request server fields a
@@ -317,6 +318,11 @@ func adminPluginCapabilitiesOf(views []handlers.PluginCapabilityView) ([]AdminPl
 		capability := AdminPluginCapability{Type: v.Type, ID: v.ID, DisplayName: v.DisplayName, Description: v.Description, Subscriptions: NonNil(v.Subscriptions), ConfigSchema: schemas, Metadata: NonNilMap(PluginJSONValue(v.Metadata))}
 		if v.Type == sdkcapability.AuthProvider {
 			capability.SignInMode = auth.ProviderModeForAuthModes(v.AuthModes)
+		}
+		if v.Type == sdkcapability.ScheduledTask {
+			if trigger := plugins.ManifestDefaultTrigger(v.ScheduledTask); trigger != nil {
+				capability.DefaultSchedule = &AdminTaskTrigger{Type: string(trigger.Type), IntervalMs: trigger.IntervalMs, TimeOfDay: trigger.TimeOfDay, DayOfWeek: trigger.DayOfWeek}
+			}
 		}
 		if v.Type == sdkcapability.RequestRouter {
 			capability.RequestRouter = &AdminPluginRequestRouter{

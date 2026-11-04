@@ -507,6 +507,11 @@
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
 
+# A plugin task binding write saves the schedule its trigger implies in the same
+# transaction; every API server only loads it, so it survives restarts and a
+# task-page edit made after it, and a re-enabled task starts on it.
+./internal/plugins TestTaskBindingScheduleAppliesOnceOnEveryServerDB
+
 # A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.

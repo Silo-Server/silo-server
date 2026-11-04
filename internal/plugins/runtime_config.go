@@ -516,23 +516,41 @@ func (s *RuntimeConfigStore) UpsertTaskBinding(ctx context.Context, binding Task
 		return fmt.Errorf("marshaling plugin task binding trigger: %w", err)
 	}
 
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO plugin_task_bindings (plugin_installation_id, capability_id, enabled, trigger)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (plugin_installation_id, capability_id) DO UPDATE SET
-			enabled = EXCLUDED.enabled,
-			trigger = EXCLUDED.trigger,
-			updated_at = NOW()
-	`,
-		binding.InstallationID,
-		binding.CapabilityID,
-		binding.Enabled,
-		triggerJSON,
-	)
-	if err != nil {
-		return fmt.Errorf("upserting plugin task binding: %w", err)
-	}
-	return nil
+	// The row write and the schedule its trigger implies commit together.
+	// A write that finds the row locks it first, so concurrent writes of one
+	// binding each compare against the trigger the one before stored.
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		inserted, err := tx.Exec(ctx, `
+			INSERT INTO plugin_task_bindings (plugin_installation_id, capability_id, enabled, trigger)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (plugin_installation_id, capability_id) DO NOTHING
+		`, binding.InstallationID, binding.CapabilityID, binding.Enabled, triggerJSON)
+		if err != nil {
+			return fmt.Errorf("inserting plugin task binding: %w", err)
+		}
+		var previous *TaskBinding
+		if inserted.RowsAffected() == 0 {
+			var previousJSON []byte
+			if err := tx.QueryRow(ctx, `
+				SELECT trigger FROM plugin_task_bindings
+				WHERE plugin_installation_id = $1 AND capability_id = $2
+				FOR UPDATE
+			`, binding.InstallationID, binding.CapabilityID).Scan(&previousJSON); err != nil {
+				return fmt.Errorf("locking plugin task binding: %w", err)
+			}
+			previous = &TaskBinding{}
+			if err := json.Unmarshal(previousJSON, &previous.Trigger); err != nil {
+				return fmt.Errorf("unmarshaling plugin task binding trigger: %w", err)
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE plugin_task_bindings SET enabled = $3, trigger = $4, updated_at = NOW()
+				WHERE plugin_installation_id = $1 AND capability_id = $2
+			`, binding.InstallationID, binding.CapabilityID, binding.Enabled, triggerJSON); err != nil {
+				return fmt.Errorf("updating plugin task binding: %w", err)
+			}
+		}
+		return saveTaskBindingSchedule(ctx, tx, previous, &binding)
+	})
 }
 
 func (s *RuntimeConfigStore) GetTaskBinding(
