@@ -143,28 +143,46 @@ func (p *MeilisearchSearchProvider) visibleRankingBoundary(ctx context.Context, 
 	return position, nil
 }
 
-func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, req CatalogSearchRequest, config string) (*searchRankingSession, error) {
-	if p.client == nil || p.stateRepo == nil || !p.indexCoversRequest(req.ItemTypes) {
-		return nil, ErrSearchProviderFallback
+// rankingIndex returns the active index, its compatibility, and its result
+// window when Meilisearch can rank a search now. ErrSearchProviderFallback
+// means ranking falls back to PostgreSQL; ErrSearchWindowUnsupported means the
+// index is configured with a window Silo cannot use.
+func (p *MeilisearchSearchProvider) rankingIndex(ctx context.Context) (SearchIndexState, catalogSearchIndexCompatibility, int, error) {
+	if p.client == nil || p.stateRepo == nil {
+		return SearchIndexState{}, 0, 0, ErrSearchProviderFallback
 	}
 	if _, blocked := p.circuitBlocked(time.Now()); blocked {
-		return nil, ErrSearchProviderFallback
+		return SearchIndexState{}, 0, 0, ErrSearchProviderFallback
 	}
 	state, _, err := p.indexState(ctx)
-	if err != nil || strings.TrimSpace(state.ActiveIndexUID) == "" {
-		return nil, ErrSearchProviderFallback
+	if err != nil {
+		return SearchIndexState{}, 0, 0, fmt.Errorf("%w: %w", ErrSearchProviderFallback, err)
+	}
+	if strings.TrimSpace(state.ActiveIndexUID) == "" {
+		return SearchIndexState{}, 0, 0, ErrSearchProviderFallback
 	}
 	compatibility := catalogSearchMeilisearchIndexCompatibility(state.SchemaVersion, p.config.Embedder, p.config.IndexTypes, p.config.SemanticEnabled, p.config.BinaryQuantized)
 	if compatibility == catalogSearchIndexIncompatible {
-		return nil, ErrSearchProviderFallback
+		return SearchIndexState{}, 0, 0, ErrSearchProviderFallback
 	}
 	settings, err := p.client.GetSettings(ctx, state.ActiveIndexUID)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSearchProviderFallback, err)
+		return SearchIndexState{}, 0, 0, fmt.Errorf("%w: %w", ErrSearchProviderFallback, err)
 	}
 	window := settings.Pagination.MaxTotalHits
 	if window < 1 || window > meilisearchCandidateScanCap {
-		return nil, fmt.Errorf("%w: maxTotalHits must be between 1 and %d", ErrSearchWindowUnsupported, meilisearchCandidateScanCap)
+		return SearchIndexState{}, 0, 0, fmt.Errorf("%w: maxTotalHits must be between 1 and %d", ErrSearchWindowUnsupported, meilisearchCandidateScanCap)
+	}
+	return state, compatibility, window, nil
+}
+
+func (p *MeilisearchSearchProvider) createRankingSession(ctx context.Context, req CatalogSearchRequest, config string) (*searchRankingSession, error) {
+	if !p.indexCoversRequest(req.ItemTypes) {
+		return nil, ErrSearchProviderFallback
+	}
+	state, compatibility, window, err := p.rankingIndex(ctx)
+	if err != nil {
+		return nil, err
 	}
 	request, fallback := p.buildMeilisearchSearchRequest(ctx, req)
 	if compatibility == catalogSearchIndexKeywordOnly {
