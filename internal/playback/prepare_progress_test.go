@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 )
 
 type recordedPrepareProgress struct {
@@ -52,7 +53,7 @@ func (s *recordingFFmpegLogSink) WriteEvent(_ context.Context, sessionID string,
 
 func TestPrepareProgressWriterParsesBlocksAcrossWrites(t *testing.T) {
 	sink := &recordedPrepareProgress{}
-	w := newPrepareProgressWriter(sink, 100)
+	w := newPrepareProgressWriter(sink, 100, 0)
 	stream := "frame=10\nout_time_us=N/A\nspeed=N/A\nprogress=continue\n" +
 		"out_time_us=25000000\nspeed=3.4x\nprogress=continue\n" +
 		"out_time_ms=50500000\nspeed= 41x\nprogress=end\n"
@@ -74,9 +75,46 @@ func TestPrepareProgressWriterParsesBlocksAcrossWrites(t *testing.T) {
 	}
 }
 
+func TestPrepareProgressWriterMeasuresVideoFramesPastStalledOutTime(t *testing.T) {
+	sink := &recordedPrepareProgress{}
+	w := newPrepareProgressWriter(sink, 100, 25)
+	start := time.Unix(1000, 0)
+	clock := start
+	w.now = func() time.Time { return clock }
+	w.started = start
+	block := func(at time.Duration, frames, outTime string) {
+		clock = start.Add(at)
+		_, _ = w.Write([]byte("frame=" + frames + "\nout_time_us=" + outTime + "\nspeed=N/A\nprogress=continue\n"))
+	}
+	// A sparse subtitle stream has no packet yet: FFmpeg has no out_time.
+	block(10*time.Second, "500", "N/A")
+	// The first cue lands; out_time jumps to it and then holds.
+	block(20*time.Second, "1000", "30000000")
+	block(30*time.Second, "1500", "30000000")
+	// Frames past the end (duplicated by FFmpeg) never exceed the duration.
+	block(40*time.Second, "2600", "30000000")
+	// Without a frame rate the writer keeps FFmpeg's own reading.
+	plain := &recordedPrepareProgress{}
+	pw := newPrepareProgressWriter(plain, 100, 0)
+	_, _ = pw.Write([]byte("frame=1500\nout_time_us=30000000\nspeed=1.5x\nprogress=continue\n"))
+
+	want := []PrepareProgress{
+		{EncodedSeconds: 20, DurationSeconds: 100, Speed: 2},
+		{EncodedSeconds: 40, DurationSeconds: 100, Speed: 2},
+		{EncodedSeconds: 60, DurationSeconds: 100, Speed: 2},
+		{EncodedSeconds: 100, DurationSeconds: 100, Speed: 2.5},
+	}
+	if got := sink.all(); !slices.Equal(got, want) {
+		t.Fatalf("readings = %+v, want %+v", got, want)
+	}
+	if got := plain.all(); len(got) != 1 || got[0].EncodedSeconds != 30 || got[0].Speed != 1.5 {
+		t.Fatalf("readings without frame rate = %+v, want FFmpeg's 30s at 1.5x", got)
+	}
+}
+
 func TestPrepareProgressWriterUnknownDuration(t *testing.T) {
 	sink := &recordedPrepareProgress{}
-	w := newPrepareProgressWriter(sink, -5)
+	w := newPrepareProgressWriter(sink, -5, 0)
 	_, _ = w.Write([]byte("out_time_us=1000000\nprogress=end\n"))
 	got := sink.all()
 	if len(got) != 1 || got[0].DurationSeconds != 0 || got[0].EncodedSeconds != 1 {

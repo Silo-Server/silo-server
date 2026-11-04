@@ -586,6 +586,12 @@ func normalizeDynamicRangeV3(track models.VideoTrack) string {
 	return tonemap.DynamicRangeForVideoTrack(track)
 }
 
+// ParseFrameRate reads a probed frame rate ("24000/1001" or "23.976") as
+// frames per second; zero when absent or unreadable.
+func ParseFrameRate(value string) float64 {
+	return parseFrameRateV3(value)
+}
+
 func parseFrameRateV3(value string) float64 {
 	value = strings.TrimSpace(value)
 	if value == "" {
