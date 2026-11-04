@@ -1317,7 +1317,10 @@ Three scoping rules keep the stop from firing where it cannot help:
   sample entry's (VideoToolbox, browser MSE) fail it. A `failure_recovery` or
   `seek_failure_recovery` replan of a copy plan, unless blamed on a node, a
   proxy origin, the network or a subtitle route, marks the attempt `VideoCopyFailed` in its frozen recipe, and
-  the attempt's copy-unsafe source then gets only a transcode. Until then the
+  the planner then offers the attempt's copy-unsafe source no remux copy. The
+  mark does not gate direct play: once a quality or track change clears the
+  attempted keys, `original_http` may be tried again, and a transcode follows
+  only if it is not playable. Until then the
   notifier leaves a v3 attempt's copy alone. A strict decoder costs up to two
   failed routes (direct play, then the copy); a silent mis-decode is not caught.
 

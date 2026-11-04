@@ -6687,7 +6687,9 @@ const (
 // source, or a subtitle route. They do not mark the copy as failed. Any other
 // classification does, because a wrong mark costs a transcode, which plays,
 // while a missed one leaves a strict decoder retrying copies. The network names
-// are the ones the Silo apps send.
+// are the ones the Silo apps send. The web engine's browser_engine_read_failed
+// is left out on purpose: it also reports video that stopped while audio kept
+// playing, which is how a strict decoder fails a copy.
 var notVideoDecodeFailuresV3 = map[string]bool{
 	playback.FailureSubtitleHLSRenditionFailedV3: true,
 	playback.FailureSubtitleEmbeddedFailedV3:     true,
@@ -6698,7 +6700,6 @@ var notVideoDecodeFailuresV3 = map[string]bool{
 	"network_degraded":                           true,
 	"source_unavailable":                         true,
 	"seek_reanchor_network_failure":              true,
-	"browser_engine_read_failed":                 true,
 }
 
 // withoutFailedSubtitleRoutesV3 removes the subtitle routes this attempt may
