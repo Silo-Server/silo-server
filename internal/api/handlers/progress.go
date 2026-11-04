@@ -12,6 +12,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/clientclock"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -36,10 +37,17 @@ type ProgressLibraryLookup interface {
 	FilterAccessibleContentIDs(ctx context.Context, contentIDs []string, allowedFolderIDs, disabledFolderIDs []int, limits access.MaturityLimits) (map[string]bool, error)
 }
 
+// ProgressEpisodeLookup finds the episodes among content IDs, so a progress
+// event can name an episode's series.
+type ProgressEpisodeLookup interface {
+	GetByIDs(ctx context.Context, contentIDs []string) ([]*models.Episode, error)
+}
+
 // ProgressHandler handles watch progress and sync endpoints.
 type ProgressHandler struct {
 	storeProvider   userstore.UserStoreProvider
 	LibraryLookup   ProgressLibraryLookup
+	EpisodeLookup   ProgressEpisodeLookup
 	SettingsRepo    PlaybackSettingsReader
 	EventsHub       *evt.Hub
 	signalsNotifier SignalsChangedNotifier
@@ -130,7 +138,7 @@ func (h *ProgressHandler) HandleListProgress(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list progress")
 			return
 		}
-		entries, err = h.filterProgress(r.Context(), entries, libraryID)
+		entries, err = h.filterProgress(r.Context(), entries, libraryID, false)
 	} else {
 		entries, err = h.listProgressFrom(r.Context(), store, profileID, ProgressQuery{Status: status, LibraryID: libraryID, Limit: limit, Offset: offset})
 	}
@@ -164,9 +172,9 @@ type ProgressQuery struct {
 	Offset    int
 }
 
-// ListProgress is the status/pagination listing v1 GET /progress (without
-// ?since=) and v2 listProgress both serve: the store window, then the viewer
-// access and library filters. A failure is an *APIError.
+// ListProgress is the status/offset listing v1 GET /progress (without
+// ?since=) serves: the store window, then the viewer access and library
+// filters. A failure is an *APIError.
 func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileID string, q ProgressQuery) ([]userstore.WatchProgress, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
@@ -174,6 +182,10 @@ func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileI
 	}
 	return h.listProgressFrom(ctx, store, profileID, q)
 }
+
+// maxProgressRefillBatch caps one store read in ListProgressPage's refill
+// loop, and with it the IDs one access-filter query checks.
+const maxProgressRefillBatch = 1000
 
 // ListProgressPage is the keyset listing v2 listProgress serves: up to limit
 // rows the viewer may see, in the requested library, ordered by
@@ -189,30 +201,35 @@ func (h *ProgressHandler) ListProgress(ctx context.Context, userID int, profileI
 // row; because the store resumes strictly after that key, rows filtered out
 // between two emitted rows are simply re-read and re-dropped on the next
 // page, which costs a little work and never skips or repeats a match. The
-// loop is bounded by the profile's own progress rows (its personal data), a
-// set that stays small relative to the catalog.
+// loop is bounded by the profile's own progress rows (its personal data).
+// Rows the filters drop can still be most of them (removed titles, or IDs a
+// client wrote that never named a catalog item), so each refill doubles the
+// batch up to maxProgressRefillBatch: a long run of dropped rows costs a few
+// large queries, not a query pair per limit+1 rows.
 func (h *ProgressHandler) ListProgressPage(ctx context.Context, userID int, profileID string, status string, libraryID int, after *userstore.ProgressKey, limit int) ([]userstore.WatchProgress, bool, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil {
 		return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	want := limit + 1
+	size := want
 	matches := make([]userstore.WatchProgress, 0, want)
 	for len(matches) < want {
-		batch, err := store.ListProgressPage(ctx, profileID, status, after, want)
+		batch, err := store.ListProgressPage(ctx, profileID, status, after, size)
 		if err != nil {
 			return nil, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to list progress")
 		}
-		kept, err := h.filterProgress(ctx, batch, libraryID)
+		kept, err := h.filterProgress(ctx, batch, libraryID, true)
 		if err != nil {
 			return nil, false, err
 		}
 		matches = append(matches, kept...)
-		if len(batch) < want {
+		if len(batch) < size {
 			break
 		}
 		last := batch[len(batch)-1]
 		after = &userstore.ProgressKey{UpdatedAt: last.UpdatedAt, MediaItemID: last.MediaItemID}
+		size = max(want, min(size*2, maxProgressRefillBatch))
 	}
 	if len(matches) > limit {
 		return matches[:limit], true, nil
@@ -225,20 +242,23 @@ func (h *ProgressHandler) listProgressFrom(ctx context.Context, store userstore.
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list progress")
 	}
-	return h.filterProgress(ctx, entries, q.LibraryID)
+	return h.filterProgress(ctx, entries, q.LibraryID, false)
 }
 
 // filterProgress drops the rows the viewer may not see, then the rows outside
-// the requested library.
-func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstore.WatchProgress, libraryID int) ([]userstore.WatchProgress, error) {
+// the requested library. everyViewer is the v2 listing's rule; the frozen v1
+// listings keep checking restricted viewers only, because their offset pages
+// fetch no replacement for a dropped row and would come back short.
+func (h *ProgressHandler) filterProgress(ctx context.Context, entries []userstore.WatchProgress, libraryID int, everyViewer bool) ([]userstore.WatchProgress, error) {
 	var err error
-	// Drop entries the viewer can't access before they reach the client.
-	// Without this, a library-restricted profile receives progress rows for
-	// items outside its scope (e.g. an XXX title) and the client then fans out
-	// per-item detail fetches that 404 — a dead Continue Watching tile. Only
-	// runs for restricted profiles; unrestricted viewers are unaffected.
-	if scope, ok := access.GetScope(ctx); ok &&
-		(scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.Active()) {
+	// Drop entries the viewer can't open before they reach the client, or the
+	// client fans out per-item detail fetches that 404: a dead Continue
+	// Watching tile it cannot clear. That covers items outside a restricted
+	// profile's scope (e.g. an XXX title) and, with everyViewer, removed
+	// titles: deleting an item leaves its progress rows behind. The v2 sync
+	// and bootstrap paths check every viewer the same way.
+	scope, ok := access.GetScope(ctx)
+	if everyViewer || (ok && (scope.AllowedLibraryIDs != nil || len(scope.DisabledLibraryIDs) > 0 || scope.Active())) {
 		if h.LibraryLookup == nil {
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to apply access filter")
 		}
@@ -504,6 +524,7 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 
 	if hadSuccessfulUpdate {
 		notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
+		var published, checked []string
 		for i, item := range updates {
 			if item.CheckAccess && results[i].Status != "ok" {
 				continue
@@ -511,13 +532,20 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 			if item.MediaItemID == "" {
 				continue
 			}
+			published = append(published, item.MediaItemID)
+			if item.CheckAccess {
+				checked = append(checked, item.MediaItemID)
+			}
+		}
+		seriesByEpisode := h.episodeSeries(ctx, published, checked)
+		for _, id := range published {
 			publishUserStateEvent(
 				ctx,
 				h.EventsHub,
 				userID,
 				profileID,
-				item.MediaItemID,
-				"",
+				id,
+				seriesByEpisode[id],
 				"progress",
 				userStateEventState{},
 			)
@@ -525,4 +553,73 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 	}
 
 	return results, nil
+}
+
+// episodeSeries maps the episodes among contentIDs to their series, so a
+// client that hasn't cached an episode can still refresh its series and
+// seasons (#796). Without a lookup, or if it fails, events go out without a
+// series, as before.
+//
+// A series is named only for an episode the viewer may see: one in checked,
+// which the sync already filtered, or one the viewer's scope allows. The v1
+// sync writes unchecked IDs as given, and naming their series would tell a
+// restricted profile which series an out-of-scope episode belongs to.
+func (h *ProgressHandler) episodeSeries(ctx context.Context, contentIDs, checked []string) map[string]string {
+	if h.EventsHub == nil || h.EpisodeLookup == nil || len(contentIDs) == 0 {
+		return nil
+	}
+	visible := make(map[string]bool, len(contentIDs))
+	for _, id := range checked {
+		visible[id] = true
+	}
+	var unchecked []string
+	for _, id := range contentIDs {
+		if !visible[id] {
+			unchecked = append(unchecked, id)
+		}
+	}
+	h.markInScope(ctx, unchecked, visible)
+	ids := make([]string, 0, len(visible))
+	for _, id := range contentIDs {
+		if visible[id] {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	episodes, err := h.EpisodeLookup.GetByIDs(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "look up progress events' series", "component", "api", "error", err)
+		return nil
+	}
+	series := make(map[string]string, len(episodes))
+	for _, episode := range episodes {
+		if episode != nil && episode.SeriesID != "" {
+			series[episode.ContentID] = episode.SeriesID
+		}
+	}
+	return series
+}
+
+// markInScope marks the ids the viewer's scope allows as visible. Without a
+// scope or a library lookup, none are; on a lookup error, the ones it did
+// return are.
+func (h *ProgressHandler) markInScope(ctx context.Context, ids []string, visible map[string]bool) {
+	if len(ids) == 0 || h.LibraryLookup == nil {
+		return
+	}
+	scope, ok := access.GetScope(ctx)
+	if !ok {
+		return
+	}
+	allowed, err := h.LibraryLookup.FilterAccessibleContentIDs(ctx, ids, scope.AllowedLibraryIDs, scope.DisabledLibraryIDs, scope.MaturityLimits)
+	if err != nil {
+		slog.WarnContext(ctx, "check progress events' series access", "component", "api", "error", err)
+	}
+	for id, ok := range allowed {
+		if ok {
+			visible[id] = true
+		}
+	}
 }

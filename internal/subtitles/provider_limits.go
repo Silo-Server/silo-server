@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/naming"
 )
 
 const (
@@ -55,36 +58,85 @@ func ProviderErrorBody(body io.Reader) string {
 	return string(data)
 }
 
-// ExtractSubtitleFromZip returns the first subtitle entry in a ZIP archive.
-// An entry larger than MaxUploadSize fails with ErrSubtitleTooLarge, and
+// ErrNoEpisodeSubtitle reports an archive whose entries name episodes, none
+// of them the one requested.
+var ErrNoEpisodeSubtitle = errors.New("archive has no subtitle for the requested episode")
+
+// ExtractSubtitleFromZip returns the archive's subtitle entry for target. An
+// entry is target's when its name labels target's season and episode range
+// (S01E05, 1x05, S01E01E02); for a multi-episode file without such an entry,
+// the entry for its first episode is the closest. Without an episode target,
+// or when no entry labels an episode, it returns the first subtitle entry.
+// When entries label episodes but none is target's, it fails with
+// ErrNoEpisodeSubtitle rather than return another episode's subtitle. An
+// entry larger than MaxUploadSize fails with ErrSubtitleTooLarge, and
 // decompression stops once the limit is passed.
-func ExtractSubtitleFromZip(data []byte) ([]byte, SubtitleFormat, error) {
+func ExtractSubtitleFromZip(data []byte, target DownloadTarget) ([]byte, SubtitleFormat, error) {
 	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, "", fmt.Errorf("open zip: %w", err)
 	}
 
+	var first, firstEpisode *zip.File
+	labeled := false
+	end := max(target.EndEpisode, target.Episode)
 	for _, f := range reader.File {
-		format, err := FormatFromFilename(f.Name)
-		if err != nil {
+		if _, err := FormatFromFilename(f.Name); err != nil || strings.HasPrefix(f.Name, "__MACOSX/") {
 			continue
 		}
-		if f.UncompressedSize64 > MaxUploadSize {
-			return nil, "", fmt.Errorf("zip entry %q: %w: more than %d bytes", f.Name, ErrSubtitleTooLarge, MaxUploadSize)
+		if target.Episode == 0 {
+			return readZipEntry(f)
 		}
-		rc, err := f.Open()
-		if err != nil {
-			return nil, "", fmt.Errorf("open zip entry: %w", err)
+		season, entryStart, entryEnd, ok := naming.ExplicitEpisodeCoordinates(f.Name)
+		if ok && season == target.Season && entryStart == target.Episode {
+			if entryEnd == end {
+				return readZipEntry(f)
+			}
+			// Only reachable for a multi-episode target.
+			if entryEnd == entryStart && firstEpisode == nil {
+				firstEpisode = f
+			}
 		}
-		// archive/zip already fails reads past the declared size; this keeps
-		// the limit from depending on that.
-		content, err := readLimited(rc, MaxUploadSize)
-		_ = rc.Close()
-		if err != nil {
-			return nil, "", fmt.Errorf("read zip entry %q: %w", f.Name, err)
+		labeled = labeled || ok
+		if first == nil {
+			first = f
 		}
-		return content, format, nil
 	}
 
+	switch {
+	case firstEpisode != nil:
+		return readZipEntry(firstEpisode)
+	case labeled:
+		episodes := fmt.Sprintf("S%02dE%02d", target.Season, target.Episode)
+		if end > target.Episode {
+			episodes += fmt.Sprintf("-E%02d", end)
+		}
+		return nil, "", fmt.Errorf("%w: %s", ErrNoEpisodeSubtitle, episodes)
+	case first != nil:
+		return readZipEntry(first)
+	}
 	return nil, "", fmt.Errorf("no subtitle file found in zip archive")
+}
+
+// readZipEntry reads an entry whose name has a subtitle extension.
+func readZipEntry(f *zip.File) ([]byte, SubtitleFormat, error) {
+	format, err := FormatFromFilename(f.Name)
+	if err != nil {
+		return nil, "", err
+	}
+	if f.UncompressedSize64 > MaxUploadSize {
+		return nil, "", fmt.Errorf("zip entry %q: %w: more than %d bytes", f.Name, ErrSubtitleTooLarge, MaxUploadSize)
+	}
+	rc, err := f.Open()
+	if err != nil {
+		return nil, "", fmt.Errorf("open zip entry: %w", err)
+	}
+	// archive/zip already fails reads past the declared size; this keeps
+	// the limit from depending on that.
+	content, err := readLimited(rc, MaxUploadSize)
+	_ = rc.Close()
+	if err != nil {
+		return nil, "", fmt.Errorf("read zip entry %q: %w", f.Name, err)
+	}
+	return content, format, nil
 }

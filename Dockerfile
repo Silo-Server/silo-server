@@ -16,6 +16,8 @@ COPY web/ .
 # The v2 contract fixtures are imported by web tests, which `tsrs -b` type-checks
 # as part of the build; they live outside web/ so copy them explicitly.
 COPY contracts/api/v2/fixtures/ /app/contracts/api/v2/fixtures/
+# Web tests also import the shared design schema vectors under docs/.
+COPY docs/design/schemas/ /app/docs/design/schemas/
 RUN pnpm run build
 
 # Allow CI to inject prebuilt frontend assets via a named `frontend_dist`
@@ -55,7 +57,11 @@ RUN --network=none go build \
     -o /silo ./cmd/silo/
 
 # Stage 3: Runtime
-FROM debian:trixie-slim
+# CI rebuilds this stage without the layer cache (no-cache-filters: runtime in
+# trusted-linux-build.yml) so every image picks up Debian security updates; the
+# upgrade covers packages already in the base image between Debian's refreshes
+# of the trixie-slim tag.
+FROM debian:trixie-slim AS runtime
 ARG TARGETARCH
 ARG INTEL_GMMLIB_VERSION=22.10.0
 ARG INTEL_IGC_VERSION=2.34.4
@@ -63,6 +69,7 @@ ARG INTEL_IGC_BUILD=21428
 ARG INTEL_NEO_VERSION=26.18.38308.1
 ARG JELLYFIN_FFMPEG_VERSION=8.1.3-1
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
     curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
       | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg && \
@@ -72,6 +79,12 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
+# Explicit modern-runtime image option for isolated Intel Flex/DG2 devices.
+# The default preserves Media SDK for older supported Intel graphics.
+ARG INTEL_QSV_RUNTIME=auto
+COPY scripts/configure-intel-qsv-runtime.sh /tmp/configure-intel-qsv-runtime.sh
+RUN sh /tmp/configure-intel-qsv-runtime.sh "${INTEL_QSV_RUNTIME}" "${TARGETARCH}" && \
+    rm /tmp/configure-intel-qsv-runtime.sh
 # Debian's Intel OpenCL runtime lags the media hardware supported by the
 # Jellyfin FFmpeg build. Match Jellyfin's container packaging on amd64 so QSV
 # tone mapping can use the quality-preserving OpenCL path. Other architectures
@@ -97,6 +110,7 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 # ca-certificates updates do not reach. Use the system store instead, so a CA
 # that Debian removes stops being trusted by npm as well.
 ENV NODE_OPTIONS=--use-openssl-ca
+LABEL io.silo.intel-qsv-runtime="${INTEL_QSV_RUNTIME}"
 COPY --from=build /silo /usr/local/bin/silo
 EXPOSE 8080 8096 13378
 # Silo runs database migrations before its HTTP listener starts, and an

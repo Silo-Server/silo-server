@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -71,6 +72,9 @@ type SubtitleInventoryItemV3 struct {
 	Default         bool   `json:"default"`
 	HearingImpaired bool   `json:"hearing_impaired"`
 	Delivery        string `json:"delivery"`
+	// Unplayable marks a track no route can show. It still holds its
+	// ordinal; selecting it gets a subtitle_codec_unsupported terminal.
+	Unplayable bool `json:"unplayable,omitempty" doc:"No route can show this track: the server has no rendering, conversion, or burn-in route for its format, or doesn't recognize the format at all. Selecting it gets a subtitle_codec_unsupported terminal, so a client should list it as unavailable."`
 	// URL is the session-scoped sidecar URL, present only on
 	// SubtitleDeliverySidecarV3 tracks and only once a session exists.
 	URL string `json:"url,omitempty" format:"uri-reference"`
@@ -81,6 +85,18 @@ type SubtitleInventoryItemV3 struct {
 	// external and downloaded tracks whose timing can be corrected (SRT,
 	// WebVTT, ASS, SSA); stable across sessions and inventory reordering.
 	SyncKey string `json:"sync_key,omitempty"`
+	// StreamIndex and ContainerTrackID name an embedded track in the source
+	// itself, in the namespaces plan.subtitle.embedded uses, so a client can
+	// find the row's track in the stream it plays without counting tracks.
+	StreamIndex      *int   `json:"stream_index,omitempty" doc:"Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index"`
+	ContainerTrackID string `json:"container_track_id,omitempty" doc:"Embedded tracks only: the Matroska TrackNumber or MP4 track ID, omitted when unknown"`
+	// NativeSelectable marks an embedded track the client may switch to on
+	// the stream it already plays: selecting it under this plan's
+	// capabilities, delivery and audio yields subtitle.embedded.
+	NativeSelectable bool `json:"native_selectable,omitempty" doc:"Embedded tracks only: selecting this track, with the plan's delivery and audio, yields subtitle.embedded. The client may switch to it locally and report the change with a subtitle_track_changed replan, which returns a plan for the same media; url, when the row has one, stays the fallback; a bitmap track delivered only by burn-in has none."`
+	// HLSRendition places an embedded text track among the HLS stream's
+	// subtitle renditions (hls_subtitle_renditions_all_v1).
+	HLSRendition *SubtitleInventoryHLSRenditionV3 `json:"hls_rendition,omitempty" doc:"Embedded text tracks of an HLS plan under hls_subtitle_renditions_all_v1: the track's WebVTT rendition in the stream's SUBTITLES group. The client may select it in its player and report the change with a subtitle_track_changed replan, which keeps the stream; url stays the fallback."`
 	// downloadedSubtitleID is deliberately not serialized: clients address the
 	// opaque session URL, while the server uses the row ID to make that URL
 	// stable across inventory reordering and seek reanchors.
@@ -120,7 +136,7 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 	items := make([]SubtitleInventoryItemV3, 0, len(file.ExternalSubtitles)+len(file.SubtitleTracks)+len(additional))
 	for _, sub := range file.ExternalSubtitles {
 		item := subtitleInventoryItemV3(file.ID, len(items), SubtitleSourceExternalV3, sub.Format,
-			sub.Language, firstNonEmptySubtitleLabelV3(sub.Title, sub.EmbeddedTitle, filepath.Base(sub.Path), sub.Language),
+			sub.Language, firstNonEmptySubtitleLabelV3(sub.Title, sub.EmbeddedTitle, fspath.Display(filepath.Base(sub.Path)), sub.Language),
 			sub.Forced, sub.Default, sub.HearingImpaired)
 		if subtitles.SupportsRetime(subtitles.SubtitleFormat(sub.Format)) {
 			item.SyncKey = subtitles.ExternalSyncKey(sub.Path)
@@ -128,9 +144,14 @@ func BuildSubtitleInventoryV3(file *models.MediaFile, additional []SubtitleInven
 		items = append(items, item)
 	}
 	for _, track := range file.SubtitleTracks {
-		items = append(items, subtitleInventoryItemV3(file.ID, len(items), SubtitleSourceEmbeddedV3, track.Codec,
+		item := subtitleInventoryItemV3(file.ID, len(items), SubtitleSourceEmbeddedV3, track.Codec,
 			track.Language, firstNonEmptySubtitleLabelV3(track.Title, track.EmbeddedTitle, track.Language),
-			track.Forced, track.Default, track.HearingImpaired))
+			track.Forced, track.Default, track.HearingImpaired)
+		if track.Index >= 0 {
+			item.StreamIndex = new(track.Index)
+		}
+		item.ContainerTrackID = track.ContainerTrackID
+		items = append(items, item)
 	}
 	for _, entry := range additional {
 		source := entry.Source
@@ -334,6 +355,7 @@ func subtitleInventoryItemV3(fileID, combinedIndex int, source, codec, language,
 		Default:         isDefault,
 		HearingImpaired: hearingImpaired,
 		Delivery:        subtitleDeliveryClassV3(source, codec),
+		Unplayable:      !subtitleCodecRoutableV3(codec),
 	}
 }
 

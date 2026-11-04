@@ -113,7 +113,7 @@ func fetchPlexSeriesMetadata(ctx context.Context, client *PlexClient, baseURL, t
 	}
 	if missing := len(keys) - len(sweep.items); missing > 0 && sweep.firstErr != nil {
 		*warnings = append(*warnings, fmt.Sprintf(
-			"failed to fetch series metadata for %d of %d series; their episodes can only match on their own ids%s (first error: %v)",
+			warnPlexSeriesMetadataUnavailable+"; their episodes can only match on their own ids%s (first error: %v)",
 			missing, len(keys), plexSweepAbortedSuffix(sweep.aborted), sweep.firstErr))
 	}
 	return sweep.items, nil

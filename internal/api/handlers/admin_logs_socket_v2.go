@@ -157,7 +157,7 @@ func (h *AdminLogsSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-	h.Logs.serveLogStream(w, r.WithContext(ctx), websocket.Upgrader{Subprotocols: []string{AdminLogsSocketProtocol}, CheckOrigin: func(r *http.Request) bool {
+	h.Logs.serveLogStream(w, r.WithContext(ctx), websocket.Upgrader{Subprotocols: []string{AdminLogsSocketProtocol}, EnableCompression: true, CheckOrigin: func(r *http.Request) bool {
 		return socketOriginAllowed(r, h.currentPublicOrigin(), overlayOriginsFrom(h.overlayOrigins.Load()))
 	}})
 }

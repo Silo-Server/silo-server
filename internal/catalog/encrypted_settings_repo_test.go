@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"crypto/rand"
+	"maps"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -73,6 +74,10 @@ func newMemSettings() *memSettings { return &memSettings{m: map[string]string{}}
 func (s *memSettings) Get(_ context.Context, key string) (string, error) { return s.m[key], nil }
 func (s *memSettings) Set(_ context.Context, key, value string) error {
 	s.m[key] = value
+	return nil
+}
+func (s *memSettings) SetMany(_ context.Context, values map[string]string) error {
+	maps.Copy(s.m, values)
 	return nil
 }
 func (s *memSettings) GetMany(_ context.Context, keys ...string) (map[string]string, error) {

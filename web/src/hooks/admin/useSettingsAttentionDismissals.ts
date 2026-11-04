@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { useIsFetching } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef } from "react";
 
-import { useAuth } from "@/hooks/useAuth";
+import { useAdminServerSettings, useUpdateServerSetting } from "@/hooks/queries/admin/settings";
+import { adminKeys } from "@/hooks/queries/keys";
 import { useSettingsAttentionState, type SettingsHealthItem } from "./useSettingsHealth";
 
-const STORAGE_KEY_PREFIX = "silo.admin-dashboard.dismissed-attention.v1";
-
-/** Where this account's dismissals live in localStorage. */
-export function settingsAttentionDismissalsKey(userId: number): string {
-  return `${STORAGE_KEY_PREFIX}.u${userId}`;
-}
+/**
+ * The server setting that lists the hidden notices, as a JSON array of item
+ * ids. It is server-wide: one admin deciding the server runs without mail
+ * stops the notice for every admin, on every device.
+ */
+export const SETTINGS_ATTENTION_HIDDEN_KEY = "ui.dashboard.hidden_attention";
 
 /**
  * Whether the admin may hide an item from the Dashboard. Only setup the admin
@@ -20,29 +22,7 @@ export function isSettingsAttentionDismissible(item: SettingsHealthItem): boolea
   return item.state === "off";
 }
 
-// localStorage only notifies other tabs, so writes from this tab notify the
-// subscribers here themselves.
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  window.addEventListener("storage", listener);
-  return () => {
-    listeners.delete(listener);
-    window.removeEventListener("storage", listener);
-  };
-}
-
-function readRaw(key: string | null): string | null {
-  if (key === null) return null;
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function parseIds(raw: string | null): string[] {
+function parseIds(raw: string | undefined): string[] {
   if (!raw) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -54,90 +34,88 @@ function parseIds(raw: string | null): string[] {
   }
 }
 
-function writeIds(key: string, ids: readonly string[]) {
-  try {
-    if (ids.length === 0) {
-      window.localStorage.removeItem(key);
-    } else {
-      window.localStorage.setItem(key, JSON.stringify(ids));
-    }
-  } catch {
-    // Storage full or unavailable: the notice simply stays visible.
-  }
-  for (const listener of listeners) listener();
+function encodeIds(ids: readonly string[]): string {
+  return ids.length === 0 ? "" : JSON.stringify(ids);
 }
 
 export interface SettingsAttentionDismissals {
   /** The items the Dashboard notice shows. */
   visible: SettingsHealthItem[];
-  /** How many current items the admin has hidden. */
+  /** How many current items an admin has hidden. */
   hiddenCount: number;
+  /** A change is saving; another would race it on the settings version. */
+  saving: boolean;
   dismiss: (item: SettingsHealthItem) => void;
   restoreAll: () => void;
 }
 
 /**
- * The Dashboard's attention items with the ones this admin hid taken out.
+ * The Dashboard's attention items with the ones an admin hid taken out.
  *
- * Dismissals are kept per account in this browser, by item id. Only an item
- * in the dismissible state is hidden, so one that comes back in another state
+ * Dismissals live in a server setting, by item id. Only an item in the
+ * dismissible state is hidden, so one that comes back in another state
  * ("Restart pending") shows. A dismissal is forgotten when the Dashboard sees
  * its item resolve, so setup that was done and later undone asks for
- * attention again; setup undone without the Dashboard seeing it done stays
- * hidden, counted in the header chip.
+ * attention again; setup undone without any admin's Dashboard seeing it done
+ * stays hidden, counted in the header chip.
  */
 export function useSettingsAttentionDismissals(): SettingsAttentionDismissals {
   const { items, loaded } = useSettingsAttentionState();
-  const userId = useAuth().user?.id ?? null;
-  const key = userId === null ? null : settingsAttentionDismissalsKey(userId);
+  const { data: settings } = useAdminServerSettings();
+  const update = useUpdateServerSetting(settings);
+  const stored = settings?.[SETTINGS_ATTENTION_HIDDEN_KEY];
 
-  // The raw string is the snapshot: it compares by value, so an unrelated
-  // render never sees a "new" list.
-  const raw = useSyncExternalStore(
-    subscribe,
-    () => readRaw(key),
-    () => null,
-  );
-  const dismissed = useMemo(() => new Set(parseIds(raw)), [raw]);
+  // While a change saves, show it already made; the mutation stays pending
+  // until the refetched settings carry it.
+  const raw =
+    update.isPending && update.variables?.key === SETTINGS_ATTENTION_HIDDEN_KEY
+      ? update.variables.value
+      : stored;
+  const dismissed = useMemo(() => parseIds(raw), [raw]);
 
-  // The attention item ids this tab last saw for `key`, once every input
-  // had loaded.
-  const seen = useRef<{ key: string; ids: Set<string> } | null>(null);
+  const save = (ids: readonly string[]) =>
+    update.mutate({ key: SETTINGS_ATTENTION_HIDDEN_KEY, value: encodeIds(ids) });
 
   // Only an item that is gone — resolved — drops its dismissal. One passing
   // through another state keeps it: saving an unrelated playback setting turns
   // "Transcoding · Off" into "Restart pending" until the restart, after which
-  // it is "Off" again and should stay hidden. After the first full load only
-  // an item this tab saw go away counts as resolved: another tab's dismissal
-  // arrives through storage, and this tab's cached settings may predate it.
+  // it is "Off" again and should stay hidden. Settings and server status
+  // refetch separately after a save, and new settings with the old status can
+  // read a pending restart as resolved, so nothing is pruned while either is
+  // fetching. Each settings read is pruned at most once, so a failed write
+  // waits for the next read instead of looping.
+  const settingsFetching = useIsFetching({ queryKey: adminKeys.serverSettings() });
+  const statusFetching = useIsFetching({ queryKey: adminKeys.serverStatus() });
+  const refreshing = settingsFetching > 0 || statusFetching > 0;
+  const pruned = useRef<object | undefined>(undefined);
   useEffect(() => {
-    if (key === null || !loaded) return;
+    if (!loaded || refreshing || update.isPending || !settings || pruned.current === settings) {
+      return;
+    }
+    const ids = parseIds(stored);
     const current = new Set(items.map((item) => item.id));
-    const previous = seen.current?.key === key ? seen.current.ids : null;
-    seen.current = { key, ids: current };
-    const resolved = (id: string) => !current.has(id) && (previous === null || previous.has(id));
-    const ids = parseIds(readRaw(key));
-    const kept = ids.filter((id) => !resolved(id));
-    if (kept.length !== ids.length) writeIds(key, kept);
-  }, [items, key, loaded]);
+    const kept = ids.filter((id) => current.has(id));
+    if (kept.length === ids.length) return;
+    pruned.current = settings;
+    update.mutate({ key: SETTINGS_ATTENTION_HIDDEN_KEY, value: encodeIds(kept) });
+  }, [items, loaded, refreshing, settings, stored, update]);
 
   const visible = useMemo(
-    () => items.filter((item) => !isSettingsAttentionDismissible(item) || !dismissed.has(item.id)),
+    () =>
+      items.filter((item) => !isSettingsAttentionDismissible(item) || !dismissed.includes(item.id)),
     [dismissed, items],
   );
 
-  const dismiss = useCallback(
-    (item: SettingsHealthItem) => {
-      if (key === null || !isSettingsAttentionDismissible(item)) return;
-      const ids = parseIds(readRaw(key));
-      if (!ids.includes(item.id)) writeIds(key, [...ids, item.id]);
+  return {
+    visible,
+    hiddenCount: items.length - visible.length,
+    saving: update.isPending,
+    dismiss: (item) => {
+      if (update.isPending || !isSettingsAttentionDismissible(item)) return;
+      if (!dismissed.includes(item.id)) save([...dismissed, item.id]);
     },
-    [key],
-  );
-
-  const restoreAll = useCallback(() => {
-    if (key !== null) writeIds(key, []);
-  }, [key]);
-
-  return { visible, hiddenCount: items.length - visible.length, dismiss, restoreAll };
+    restoreAll: () => {
+      if (!update.isPending && dismissed.length > 0) save([]);
+    },
+  };
 }

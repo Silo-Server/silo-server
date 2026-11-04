@@ -33,8 +33,10 @@ server instance UUID that diagnostics also report. `protocol_versions` is
 `fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`,
 `bandwidth_probe_v1` and `connection_speed_v1`. With `connection_speed_v1` the
 response adds `bandwidth_probe_url`, the media-path probe below, on the origin
-the request arrived on. When that is the server's local-network origin (a local
-route), clients send the probe with the saved server's credentials and trust,
+the request arrived on. A reverse proxy that rewrites `Host` to a bare IP
+address and sends no `X-Forwarded-Host` leaves only the address it dialed;
+then the URL is on `server.public_url` when one is configured. When the origin
+is the server's local-network origin (a local route), clients send the probe with the saved server's credentials and trust,
 as they do for any request to that server. The response also adds the speed
 test schedule:
 `bandwidth_probe_automatic` (the `playback.bandwidth_probe_automatic` server
@@ -303,7 +305,8 @@ global position through `POST /api/v2/sync/progress`.
 Stop accepts `{installation_id, stop_id}` plus an optional final sample
 `{sequence, position, is_paused}`; `sequence` and `position` appear together or
 not at all. `stop_id` is a canonical UUID the client mints once and keeps on
-every retry. The first stop wins a compare-and-set on `stopped_at`: it applies
+every retry; a `stop_id` the server mints for its own ends (below) is refused
+with `400`. The first stop wins a compare-and-set on `stopped_at`: it applies
 the final sample when it is newer than the last progress, runs the stop and
 history writer, stops the local session and transcode, writes the stream deny
 marker and stores the receipt on the row. The reply is
@@ -319,8 +322,16 @@ stop call allows up to 30 seconds for pending progress, then a separate
 expires. A page reload discards this in-memory retry state.
 
 A session that expires or is aborted server-side is stopped under a
-server-minted `stop_id` (UUID v5 of the session id), so a later client stop
-replays and a start replay reports `session_expired`.
+server-minted `stop_id` (a UUID v5 of the session id, one for each of expiry
+and abort), so a later client stop replays and a start replay reports
+`session_expired`. Every way a session ends, on any API server, stops the row
+and claims the receipt's finalization before it writes watch history, provider
+events or the admin log; an end that loses that race writes none of them and
+only releases what its own server holds. An end that finds the row stopped by
+an end whose server died before finishing it, and whose claim has lapsed,
+finishes it as that end, with its provider events; an expiry of a copy on
+another server does the same. The admin log records the reason of the stop
+that won the row.
 
 A session an administrator ends without the player confirming it (a stop,
 pause or resume the player did not answer before its deadline, or a
@@ -353,7 +364,7 @@ id); clients never retry automatically and treat `429` as drop.
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
 | HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
-| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment |
+| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment, `sub_<track>_NNNNN.vtt` one of an on-demand rendition (`hls_subtitle_renditions_all_v1`) |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
@@ -368,7 +379,8 @@ client re-presents
 Ranges, conditional requests and HEAD keep their HTTP semantics; an
 unsatisfiable range is `416 range_not_satisfiable`. A failure before the first
 byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
-terminated session answers `410 playback_session_ended`.
+terminated session answers `410 playback_session_ended`. A subtitle sidecar the
+node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory

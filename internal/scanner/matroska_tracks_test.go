@@ -14,6 +14,15 @@ func mkvTrack(number, kind uint64, codec string) mediaprobe.MatroskaTrack {
 	return mediaprobe.MatroskaTrack{Number: number, Type: kind, CodecID: codec}
 }
 
+// idMatches are matches that only give IDs.
+func idMatches(ids ...string) []matroskaSubtitleMatch {
+	matches := make([]matroskaSubtitleMatch, len(ids))
+	for i, id := range ids {
+		matches[i].ID = id
+	}
+	return matches
+}
+
 const (
 	mkvVideo    = mediaprobe.MatroskaTrackTypeVideo
 	mkvAudio    = mediaprobe.MatroskaTrackTypeAudio
@@ -27,7 +36,7 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 		video     int
 		audio     int
 		subtitles []matroskaSubtitleStream
-		want      []string
+		want      []matroskaSubtitleMatch
 	}{
 		{
 			// A remux that dropped tracks 2 and 3 keeps the original numbers,
@@ -41,7 +50,7 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 			},
 			video: 1, audio: 1,
 			subtitles: []matroskaSubtitleStream{{2, "subrip"}, {3, "subrip"}},
-			want:      []string{"5", "6"},
+			want:      idMatches("5", "6"),
 		},
 		{
 			name: "subtitles interleaved with audio",
@@ -53,7 +62,7 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 			},
 			video: 1, audio: 1,
 			subtitles: []matroskaSubtitleStream{{1, "hdmv_pgs_subtitle"}, {3, "ass"}},
-			want:      []string{"20", "40"},
+			want:      idMatches("20", "40"),
 		},
 		{
 			// FFmpeg creates no stream for unsupported track types or
@@ -69,12 +78,13 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 			},
 			video: 1, audio: 1,
 			subtitles: []matroskaSubtitleStream{{2, "subrip"}},
-			want:      []string{"6"},
+			want:      idMatches("6"),
 		},
 		{
-			// FFmpeg reads S_TEXT/WEBVTT as no known codec; nothing can
-			// confirm what the stream is, so its ID stays empty.
-			name: "codec that cannot be corroborated",
+			// FFmpeg probes S_TEXT/WEBVTT as a stream with no codec, which
+			// only an entry it doesn't recognize corroborates. The server
+			// reads it through the index as WebVTT.
+			name: "track the server reads through the index",
 			tracks: []mediaprobe.MatroskaTrack{
 				mkvTrack(1, mkvVideo, "V_VP9"),
 				mkvTrack(2, mkvSubtitle, "S_TEXT/WEBVTT"),
@@ -82,7 +92,21 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 			},
 			video:     1,
 			subtitles: []matroskaSubtitleStream{{1, ""}, {2, "subrip"}},
-			want:      []string{"", "3"},
+			want:      []matroskaSubtitleMatch{{ID: "2", Codec: "webvtt", IndexOnly: true}, {ID: "3"}},
+		},
+		{
+			// Nothing confirms what these streams are, so their IDs stay
+			// empty: a codec FFprobe named for a CodecID FFmpeg doesn't
+			// recognize, and a CodecID the server can't read either.
+			name: "codecs that cannot be corroborated",
+			tracks: []mediaprobe.MatroskaTrack{
+				mkvTrack(1, mkvVideo, "V_VP9"),
+				mkvTrack(2, mkvSubtitle, "S_TEXT/WEBVTT"),
+				mkvTrack(3, mkvSubtitle, "S_KATE"),
+			},
+			video:     1,
+			subtitles: []matroskaSubtitleStream{{1, "webvtt"}, {2, ""}},
+			want:      idMatches("", ""),
 		},
 		{
 			// Legacy ASS aliases still corroborate the layout, but Media3
@@ -96,7 +120,7 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 			},
 			video:     1,
 			subtitles: []matroskaSubtitleStream{{1, "ass"}, {2, "ass"}, {3, "ass"}},
-			want:      []string{"", "", "4"},
+			want:      idMatches("", "", "4"),
 		},
 	}
 	for _, tc := range tests {
@@ -106,7 +130,7 @@ func TestMatroskaSubtitleTrackIDsMatchesByStreamPosition(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("ids = %q, want %q", got, tc.want)
+				t.Fatalf("matches = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
@@ -163,9 +187,9 @@ func TestMatroskaSubtitleTrackIDsRejectsUncertainLayouts(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ids, err := matroskaSubtitleTrackIDs(tc.tracks(), tc.video, tc.audio, tc.subtitles)
+			matches, err := matroskaSubtitleTrackIDs(tc.tracks(), tc.video, tc.audio, tc.subtitles)
 			if !errors.Is(err, errMatroskaLayoutMismatch) {
-				t.Fatalf("ids = %q, err = %v; want a layout mismatch", ids, err)
+				t.Fatalf("matches = %+v, err = %v; want a layout mismatch", matches, err)
 			}
 		})
 	}
@@ -192,5 +216,25 @@ func TestProbeFileRecordsMatroskaSubtitleTrackNumbers(t *testing.T) {
 		if got.Index != want.index || got.Codec != want.codec || got.ContainerTrackID != want.id {
 			t.Fatalf("subtitle %d = index %d codec %q id %q, want %+v", i, got.Index, got.Codec, got.ContainerTrackID, want)
 		}
+	}
+}
+
+// mkvmerge stores WebVTT as S_TEXT/WEBVTT, which FFprobe reports with no
+// codec. The scanner records it as the WebVTT track the server reads
+// through the index.
+func TestProbeFileRecordsIndexOnlyWebVTTTrack(t *testing.T) {
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe not installed")
+	}
+	probe, err := ProbeFile(context.Background(), ffprobe, "testdata/webvtt.mkv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(probe.SubtitleTracks) != 1 {
+		t.Fatalf("subtitle tracks %+v", probe.SubtitleTracks)
+	}
+	if got := probe.SubtitleTracks[0]; got.Index != 1 || got.Codec != "webvtt" || got.ContainerTrackID != "2" || !got.IndexOnly {
+		t.Fatalf("subtitle = %+v, want index-only WebVTT stream 1 as track 2", got)
 	}
 }

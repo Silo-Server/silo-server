@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -56,9 +57,11 @@ function collection(id: string, name: string, creator: string, shared = false): 
 
 function show() {
   render(
-    <MemoryRouter>
-      <Collections />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <Collections />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -77,38 +80,35 @@ describe("Collections page sharing", () => {
     ];
   });
 
-  it("splits own collections from the ones other profiles share", () => {
+  it("puts own collections first, then the ones other profiles share, naming each owner", () => {
     show();
-    const own = section("Your collections");
-    expect(within(own).getByRole("link", { name: "Rainy days" })).toBeTruthy();
-    expect(within(own).getByRole("link", { name: "Road trips" })).toBeTruthy();
-    expect(within(own).queryByRole("link", { name: "Family night" })).toBeNull();
-    // The Shared pill marks the profile's own shared collection.
-    expect(within(own).getAllByText("Shared")).toHaveLength(1);
-
-    const shared = section("Shared with me");
-    // Owners in the login's profile-list order.
+    const cards = within(section("All collections")).getAllByRole("listitem");
+    // Owners in the login's profile-list order; a shared card's link names its owner.
+    const card = (name: RegExp) =>
+      cards.findIndex((item) => within(item).queryByRole("link", { name }));
     expect(
-      within(shared)
-        .getAllByRole("heading")
-        .map((heading) => heading.textContent),
-    ).toEqual(["Shared with me", "by Kid", "by Parent"]);
-    expect(within(shared).getByRole("link", { name: "Family night" })).toBeTruthy();
-    expect(within(shared).getByRole("link", { name: "Cartoons" })).toBeTruthy();
+      [/^Rainy days$/, /^Road trips$/, /^Cartoons\s*by Kid$/, /^Family night\s*by Parent$/].map(
+        card,
+      ),
+    ).toEqual([0, 1, 2, 3]);
+    // The Shared pill marks the profile's own shared collection.
+    expect(within(cards[0]!).getByText("Shared")).toBeTruthy();
+    expect(within(cards[3]!).queryByText("Shared")).toBeNull();
   });
 
   it("offers management actions only on the profile's own collections", () => {
     show();
-    const own = section("Your collections");
+    const wall = section("All collections");
     expect(
-      within(own)
+      within(wall)
         .getAllByRole("button", { name: /^More for / })
         .map((button) => button.getAttribute("aria-label")),
     ).toEqual(["More for Rainy days", "More for Road trips"]);
-    expect(within(own).getAllByRole("button", { name: /^Drag / })).toHaveLength(2);
-    const shared = section("Shared with me");
-    expect(within(shared).queryAllByRole("button")).toHaveLength(0);
-    expect(within(shared).getByRole("link", { name: "Family night" })).toBeTruthy();
+    expect(within(wall).getAllByRole("button", { name: /^Drag / })).toHaveLength(2);
+    const familyNight = within(wall)
+      .getByRole("link", { name: /^Family night/ })
+      .closest("li")!;
+    expect(within(familyNight).queryAllByRole("button")).toHaveLength(0);
   });
 
   it("reorders only when the store supports it", () => {

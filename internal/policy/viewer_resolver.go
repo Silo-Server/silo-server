@@ -4,12 +4,18 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // ViewerResolver resolves viewer access scopes through the policy PDP.
@@ -21,6 +27,8 @@ type ViewerResolver struct {
 	groups       access.GroupPolicyProvider
 	unrated      access.UnratedContentPolicy
 	defaults     settingsresolve.ServerSettings
+	// shared, when set, is the pool Resolve sends its reads to as one batch.
+	shared *pgxpool.Pool
 }
 
 // WithUnratedContentPolicy installs the reader for access.unrated_content and
@@ -37,6 +45,29 @@ func (r *ViewerResolver) WithUnratedContentPolicy(policy access.UnratedContentPo
 func (r *ViewerResolver) WithAdminDefaults(defaults settingsresolve.ServerSettings) *ViewerResolver {
 	if r != nil {
 		r.defaults = defaults
+	}
+	return r
+}
+
+// sharedTablesProvider is a user store provider that reports whether every
+// account's profiles and setting values live in a pool's shared tables, as
+// pgstore.PostgresProvider does. The SQLite bridge's provider does not.
+type sharedTablesProvider interface {
+	StoresAccountsIn(pool *pgxpool.Pool) bool
+}
+
+// WithSharedTables lets Resolve send the reads of the account, its access
+// group, the profile and the profile's viewer preferences to pool as one
+// batch: one round trip in place of up to four. pool must be the one the
+// resolver's user and access-group repositories read. It takes effect only
+// when the user store provider keeps every account in pool's shared tables;
+// otherwise, as with a nil pool, Resolve reads each through its repository.
+func (r *ViewerResolver) WithSharedTables(pool *pgxpool.Pool) *ViewerResolver {
+	if r == nil || pool == nil {
+		return r
+	}
+	if shared, ok := r.storeFactory.(sharedTablesProvider); ok && shared.StoresAccountsIn(pool) {
+		r.shared = pool
 	}
 	return r
 }
@@ -73,6 +104,14 @@ func NewViewerResolver(
 
 // Resolve computes the effective viewer scope for the request.
 func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput) (access.Scope, error) {
+	if r.shared != nil {
+		return r.resolveBatched(ctx, input)
+	}
+	return r.resolveEach(ctx, input)
+}
+
+// resolveEach reads the facts one at a time through the repositories.
+func (r *ViewerResolver) resolveEach(ctx context.Context, input access.ResolveInput) (access.Scope, error) {
 	user, err := r.users.GetByID(ctx, input.UserID)
 	if err != nil {
 		return access.Scope{}, fmt.Errorf("loading user %d: %w", input.UserID, err)
@@ -99,6 +138,96 @@ func (r *ViewerResolver) Resolve(ctx context.Context, input access.ResolveInput)
 	}
 	preferences := access.ResolveViewerPreferences(ctx, store, r.defaults, input.ProfileID)
 	return r.ResolveFacts(ctx, input, user, profile, effective, preferences)
+}
+
+// viewerReads holds the results of resolveBatched's batch.
+type viewerReads struct {
+	user        *models.User
+	userErr     error
+	group       *access.GroupPolicy
+	groupErr    error
+	profile     *userstore.Profile
+	profileErr  error
+	preferences access.ViewerPreferenceRows
+	readGroup   bool
+}
+
+// resolveBatched reads the same facts as resolveEach, in the same order, as
+// one batch, and judges them in that order, so each answer and each failure
+// is the one resolveEach gives. A failed statement fails the batch's later
+// ones too; resolveEach would stop at the same failure, except for an access
+// group read that does not apply to the account, after which the facts are
+// read again one at a time.
+func (r *ViewerResolver) resolveBatched(ctx context.Context, input access.ResolveInput) (access.Scope, error) {
+	reads := r.sendViewerReads(ctx, input)
+	if reads.userErr != nil {
+		return access.Scope{}, fmt.Errorf("loading user %d: %w", input.UserID, reads.userErr)
+	}
+	user := reads.user
+	effective := access.ApplyGroupPolicy(user, nil)
+	if reads.readGroup {
+		switch {
+		case access.GroupApplies(user) && reads.groupErr != nil:
+			return access.Scope{}, fmt.Errorf("loading access group policy for user %d: %w", input.UserID, reads.groupErr)
+		case access.GroupApplies(user):
+			effective = access.ApplyGroupPolicy(user, reads.group)
+		case reads.groupErr != nil:
+			return r.resolveEach(ctx, input)
+		}
+	}
+
+	if input.ProfileID != "" {
+		if reads.profileErr != nil {
+			return access.Scope{}, fmt.Errorf("loading profile %s: %w", input.ProfileID, reads.profileErr)
+		}
+		if reads.profile == nil {
+			return access.Scope{}, access.ErrProfileNotFound
+		}
+	}
+	// Without a profile ResolveViewerPreferences reads nothing, and none was
+	// queued.
+	preferences := access.ResolveViewerPreferences(ctx, reads.preferences, r.defaults, input.ProfileID)
+	return r.ResolveFacts(ctx, input, user, reads.profile, effective, preferences)
+}
+
+// sendViewerReads sends resolveEach's reads as one batch and collects every
+// result before returning the connection. A request without a profile reads
+// no profile and no preferences, and a resolver without an access-group
+// provider reads no group.
+func (r *ViewerResolver) sendViewerReads(ctx context.Context, input access.ResolveInput) viewerReads {
+	batch := &pgx.Batch{}
+	readUser := auth.QueueUser(batch, input.UserID)
+	var readGroup func(pgx.BatchResults) (*access.GroupPolicy, error)
+	if r.groups != nil {
+		readGroup = access.QueueGroupPolicy(batch, input.UserID)
+	}
+	var readProfile func(pgx.BatchResults) (*userstore.Profile, error)
+	if input.ProfileID != "" {
+		readProfile = pgstore.QueueProfile(batch, input.UserID, input.ProfileID)
+	}
+	var readPreferences func(pgx.BatchResults) ([]userstore.SettingValue, error)
+	if strings.TrimSpace(input.ProfileID) != "" {
+		readPreferences = pgstore.QueueSettingValuesForResolution(batch, input.UserID, access.ViewerPreferenceQuery(input.ProfileID))
+	}
+
+	results := r.shared.SendBatch(ctx, batch)
+	// Close reports the first failed read again, and every read below is
+	// checked on its own.
+	defer func() { _ = results.Close() }()
+
+	var reads viewerReads
+	reads.user, reads.userErr = readUser(results)
+	if readGroup != nil {
+		reads.readGroup = true
+		reads.group, reads.groupErr = readGroup(results)
+	}
+	if readProfile != nil {
+		reads.profile, reads.profileErr = readProfile(results)
+	}
+	if readPreferences != nil {
+		reads.preferences.Rows, reads.preferences.Err = readPreferences(results)
+	}
+	return reads
 }
 
 // ResolveFacts evaluates the same PDP and PIN policy for facts loaded from one
@@ -196,9 +325,14 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	// settles on, including one an override lowered.
 	requireAdvisory := profile != nil && profile.RequireAdvisoryAge && decision.MaxAdvisoryAge > 0
 
+	var pinRevision int64
+	if profile != nil {
+		pinRevision = profile.PINRevision
+	}
 	return access.Scope{
 		UserID:              user.ID,
 		ProfileID:           input.ProfileID,
+		ProfilePINRevision:  pinRevision,
 		AllowedLibraryIDs:   allowed,
 		DisabledLibraryIDs:  disabled,
 		LibrariesRestricted: decision.LibrariesRestricted,
@@ -216,6 +350,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		MetadataLanguageOverrides:  preferences.MetadataLanguageOverrides,
 		NextUpMode:                 preferences.NextUpMode,
 		NextUpNewReleasesFirst:     preferences.NextUpNewReleasesFirst,
+		HideWatchedItemsOnHome:     preferences.HideWatchedItemsOnHome,
 		PreferencesDegraded:        preferences.Degraded,
 		PolicyRevision:             user.AccessPolicyRevision,
 		// The policy output is tighten-only (merged_profile_verified), so a

@@ -1,6 +1,15 @@
 package database
 
-import "testing"
+import (
+	"context"
+	"os"
+	"slices"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
 
 func TestRecommendPostgresOLTPSettings(t *testing.T) {
 	opts := PostgresTuneOptions{
@@ -48,6 +57,34 @@ func TestRecommendPostgresOLTPSettings(t *testing.T) {
 
 	if _, ok := byName["io_method"]; ok {
 		t.Fatal("io_method should only be emitted when explicitly configured")
+	}
+}
+
+// The startup settings are written before the database exists, so they must
+// not change with its size, and they must leave out io_method, which would
+// stop the server from starting if PostgreSQL rejected it.
+func TestRecommendPostgresStartupSettings(t *testing.T) {
+	opts := PostgresTuneOptions{
+		Enabled:           true,
+		Profile:           postgresTuneProfileOLTP,
+		MemoryBudgetBytes: 16 * sizeGB,
+		CPUs:              8,
+		Connections:       300,
+		Storage:           postgresTuneStorageNVMe,
+		OSType:            "linux",
+		IOMethod:          "io_uring",
+	}
+	want := []PostgresTuneSetting{
+		{Name: "shared_buffers", Value: "4GB", RequiresRestart: true},
+		{Name: "wal_buffers", Value: "16MB", RequiresRestart: true},
+		{Name: "huge_pages", Value: "try", RequiresRestart: true},
+		{Name: "max_worker_processes", Value: "8", RequiresRestart: true},
+	}
+	for _, dbSize := range []string{postgresTuneDBSizeAuto, postgresTuneDBSizeLessRAM, postgresTuneDBSizeMidRAM, postgresTuneDBSizeGreaterRAM} {
+		opts.DBSize = dbSize
+		if got := RecommendPostgresStartupSettings(opts, 18); !slices.Equal(got, want) {
+			t.Fatalf("DBSize %s: startup settings = %v, want %v", dbSize, got, want)
+		}
 	}
 }
 
@@ -155,5 +192,117 @@ func TestClassifyPostgresTuneDBSize(t *testing.T) {
 func TestParsePostgresTuneByteSizeRequiresUnit(t *testing.T) {
 	if _, err := parsePostgresTuneByteSize("16"); err == nil {
 		t.Fatal("expected bare memory value to be rejected")
+	}
+}
+
+// postgresStartupTuneSetting mirrors which tuned settings PostgreSQL reads
+// only at start. A new major version can move a setting either way: a
+// reloadable one in the startup file is wasted, and a restart-only one left
+// out brings back the restart a new cluster needs.
+func TestPostgresStartupSettingsMatchServerPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	major, err := postgresMajorVersion(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Enough memory and CPUs that every tuned setting is recommended.
+	opts := PostgresTuneOptions{
+		Enabled:           true,
+		MemoryBudgetBytes: 64 * sizeGB,
+		CPUs:              32,
+		Connections:       100,
+		Storage:           postgresTuneStorageSSD,
+		DBSize:            postgresTuneDBSizeMidRAM,
+		OSType:            "linux",
+		IOMethod:          "worker",
+	}
+	for _, setting := range RecommendPostgresOLTPSettings(opts, major) {
+		atStart, err := postgresSettingRequiresRestart(ctx, pool, setting.Name)
+		if err != nil {
+			t.Fatalf("%s: %v", setting.Name, err)
+		}
+		startup := postgresStartupTuneSetting(setting.Name, major)
+		leftOut := setting.Name == "max_connections" || setting.Name == "io_method"
+		if startup && !atStart {
+			t.Errorf("%s is reloadable on PostgreSQL %d; drop it from the startup settings", setting.Name, major)
+		}
+		if atStart && !startup && !leftOut {
+			t.Errorf("%s needs a restart on PostgreSQL %d; add it to the startup settings", setting.Name, major)
+		}
+	}
+}
+
+// ALTER SYSTEM writes postgresql.auto.conf for the whole cluster but changes
+// nothing until a reload or restart, which this test never does. It restores
+// the file's max_worker_processes entry when it finishes.
+func TestPostgresSettingsPendingRestartPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	const name = "max_worker_processes"
+	var running int
+	var source string
+	if err := pool.QueryRow(ctx, "SELECT setting::int, source FROM pg_settings WHERE name = $1", name).Scan(&running, &source); err != nil {
+		t.Fatal(err)
+	}
+	if source != "default" {
+		t.Skipf("%s runs from %s; the test needs its built-in default", name, source)
+	}
+	var saved *string
+	if err := pool.QueryRow(ctx, `SELECT (SELECT setting FROM pg_file_settings
+WHERE name = $1 AND sourcefile LIKE '%postgresql.auto.conf' ORDER BY seqno DESC LIMIT 1)`, name).Scan(&saved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		statement := "ALTER SYSTEM RESET " + name
+		if saved != nil {
+			statement = "ALTER SYSTEM SET " + name + " = " + quotePostgresLiteral(*saved)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := pool.Exec(ctx, statement); err != nil {
+			t.Error(err)
+		}
+	})
+
+	names := []string{name, "max_connections"}
+	for _, tt := range []struct {
+		name, statement string
+		want            []string
+	}{
+		{name: "set to the running value", statement: "ALTER SYSTEM SET " + name + " = " + strconv.Itoa(running)},
+		{name: "set to another value", statement: "ALTER SYSTEM SET " + name + " = " + strconv.Itoa(running+1), want: []string{name}},
+		{name: "reset while running on the default", statement: "ALTER SYSTEM RESET " + name},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, tt.statement); err != nil {
+				t.Fatal(err)
+			}
+			got, err := postgresSettingsPendingRestart(ctx, pool, names)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("pending = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

@@ -1,0 +1,8 @@
+{
+  "revision": "55812f2f44768ba282451fdcf9c63ac8516e2954a5f30f3fc501119ecad163ec",
+  "state": "available",
+  "allowed": true,
+  "item_listing": true,
+  "item_listing_max_content_ids": 200,
+  "item_change_events": true
+}

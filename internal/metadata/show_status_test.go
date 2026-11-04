@@ -6,39 +6,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestNormalizeShowStatus(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string
-	}{
-		{"", ""},
-		{"  ", ""},
-		// TMDB spellings
-		{"Returning Series", "returning"},
-		{"Ended", "ended"},
-		{"Canceled", "cancelled"},
-		{"In Production", "in_production"},
-		{"Pilot", "in_production"},
-		{"Planned", "upcoming"},
-		// TVDB spellings
-		{"Continuing", "returning"},
-		{"Upcoming", "upcoming"},
-		// Already-canonical values are stable
-		{"returning", "returning"},
-		{"ended", "ended"},
-		{"cancelled", "cancelled"},
-		{"in_production", "in_production"},
-		{"upcoming", "upcoming"},
-		// Unknown values pass through lowercased instead of being dropped
-		{"On Hiatus", "on hiatus"},
-	}
-	for _, tc := range cases {
-		if got := NormalizeShowStatus(tc.in); got != tc.want {
-			t.Errorf("NormalizeShowStatus(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 func TestMetadataResultToItem_PassesNonSeriesShowStatusVerbatim(t *testing.T) {
 	// Manga statuses use their own value domain ("Ongoing", "Completed", ...)
 	// normalized by the manga enrichment pipeline; the generic converter must

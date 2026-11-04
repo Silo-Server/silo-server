@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 type staticCatalogPaths struct {
@@ -99,5 +101,22 @@ func TestPathWithinRootRejectsSymlinkedOutputParent(t *testing.T) {
 	}
 	if !pathWithinRoot(root, filepath.Join(root, "artifact.mp4")) {
 		t.Fatal("direct child output was rejected")
+	}
+}
+
+// The catalog stores a non-UTF-8 file name in fspath encoding and the node is
+// handed that same string, so the lookup matches and the stat reaches the real
+// file.
+func TestCatalogPathAuthorizerAllowsEncodedNonUTF8Path(t *testing.T) {
+	rawPath := filepath.Join(t.TempDir(), "Takk for alt B\xe5rd Ylvis\xe5ker.mkv")
+	if err := os.WriteFile(rawPath, []byte("media"), 0o600); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	encoded := fspath.Encode(rawPath)
+	authorizer := NewCatalogPathAuthorizer(staticCatalogPaths{active: map[string]bool{encoded: true}})
+
+	allowed, err := authorizer.Allowed(context.Background(), encoded)
+	if err != nil || !allowed {
+		t.Fatalf("encoded catalog path: allowed = %v, err = %v", allowed, err)
 	}
 }

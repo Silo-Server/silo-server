@@ -228,7 +228,7 @@ func (p *Provider) fetchSubtitles(ctx context.Context, movieID int, lang string)
 	return resp.Data, nil
 }
 
-func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.SubtitleFormat, error) {
+func (p *Provider) Download(ctx context.Context, id string, target subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	if err := p.limiter.Wait(ctx); err != nil {
 		return nil, "", err
 	}
@@ -254,10 +254,10 @@ func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.S
 		return nil, "", fmt.Errorf("subsource: read download: %w", err)
 	}
 
-	// API returns a ZIP; extract the first subtitle file
+	// API returns a ZIP, which holds every episode for a season pack.
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Contains(contentType, "zip") {
-		content, format, err := subtitles.ExtractSubtitleFromZip(data)
+		content, format, err := subtitles.ExtractSubtitleFromZip(data, target)
 		if err != nil {
 			return nil, "", fmt.Errorf("subsource: %w", err)
 		}

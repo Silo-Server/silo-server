@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/plugins"
@@ -25,6 +26,8 @@ type AdminPluginRepositoryUpdateOutput struct{ Body AdminPluginRepository }
 
 func registerAdminPluginRepositoryUpdate(reg *Registry) {
 	op := Operation{Operation: humaOp("PUT", Prefix+"/admin/plugins/repositories/{id}", "updateAdminPluginRepository", "admin-plugins", "Update stored repository configuration. Blank name/URL are ignored. Managed configuration is read-only. Readback is current state, not a write revision; reconcile uncertain completion without replay."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
+	// A managed repository is read-only: 409.
+	op.Errors = []int{http.StatusConflict}
 	Register(reg, op, func(ctx context.Context, in *AdminPluginRepositoryUpdateInput) (*AdminPluginRepositoryUpdateOutput, error) {
 		id, err := intOfID(ID(in.ID))
 		if err != nil || id <= 0 {

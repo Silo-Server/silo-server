@@ -624,14 +624,31 @@ func GroupPolicyInTransaction(ctx context.Context, tx pgx.Tx, userID int) (*Grou
 func groupPolicyForUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, userID int) (*GroupPolicy, error) {
-	policy, err := scanGroupPolicy(db.QueryRow(ctx, `
+	return groupPolicyFromRow(db.QueryRow(ctx, groupPolicyForUserQuery, userID), userID)
+}
+
+// QueueGroupPolicy queues GetPolicyForUser's read on batch. The returned
+// function reads the result from the sent batch, in the order the batch's
+// reads were queued, with GetPolicyForUser's answer: nil for an account
+// without a group.
+func QueueGroupPolicy(batch *pgx.Batch, userID int) func(pgx.BatchResults) (*GroupPolicy, error) {
+	batch.Queue(groupPolicyForUserQuery, userID)
+	return func(results pgx.BatchResults) (*GroupPolicy, error) {
+		return groupPolicyFromRow(results.QueryRow(), userID)
+	}
+}
+
+const groupPolicyForUserQuery = `
 		SELECT g.id, g.library_ids, g.max_playback_quality, g.download_allowed,
 			g.download_transcode_allowed, g.transcode_allowed, g.audio_transcode_allowed,
 			g.max_streams, g.max_transcodes, g.max_remote_stream_bitrate_kbps, g.max_local_stream_bitrate_kbps,
 			g.max_profiles, g.allowed_permissions, g.requests_allowed
 		FROM users u
 		JOIN access_groups g ON g.id = u.access_group_id
-		WHERE u.id = $1`, userID))
+		WHERE u.id = $1`
+
+func groupPolicyFromRow(row pgx.Row, userID int) (*GroupPolicy, error) {
+	policy, err := scanGroupPolicy(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

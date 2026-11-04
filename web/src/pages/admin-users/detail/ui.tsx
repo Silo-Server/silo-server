@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
@@ -266,27 +267,32 @@ const AVATAR_GRADIENTS = [
   "from-sky-500 to-blue-600",
 ] as const;
 
-/** A round initial on one of five gradients, picked by `seed`. */
+/** A round avatar image, or an initial on one of five gradients (picked by `seed`)
+ * when there is no image or it fails to load. */
 export function InitialAvatar({
   name,
   seed,
+  src,
   size = "sm",
 }: {
   name: string;
   seed: number;
+  src?: string;
   size?: "sm" | "lg";
 }) {
   const gradient = AVATAR_GRADIENTS[Math.abs(Math.trunc(seed)) % AVATAR_GRADIENTS.length];
   return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        "inline-flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br font-semibold text-white uppercase",
-        gradient,
-        size === "lg" ? "size-14 text-2xl sm:size-16 sm:text-3xl" : "size-8 text-sm",
-      )}
-    >
-      {name.trim().charAt(0) || "?"}
-    </span>
+    <Avatar aria-hidden="true" className={size === "lg" ? "size-14 sm:size-16" : "size-8"}>
+      {src ? <AvatarImage src={src} alt="" /> : null}
+      <AvatarFallback
+        className={cn(
+          "bg-gradient-to-br font-semibold text-white uppercase",
+          gradient,
+          size === "lg" ? "text-2xl sm:text-3xl" : "text-sm",
+        )}
+      >
+        {name.trim().charAt(0) || "?"}
+      </AvatarFallback>
+    </Avatar>
   );
 }

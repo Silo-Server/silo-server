@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -571,6 +572,20 @@ func (s *Titles) PromoteWatchlistItem(ctx context.Context, access catalog.Access
 		slog.WarnContext(ctx, "watchlist promotion failed; the read continues without it",
 			"component", "watchlist", "user_id", v.UserID, "profile_id", v.ProfileID, "content_id", contentID, "error", err)
 	}
+}
+
+// QueuePromotable queues on b whether the access filter's profile has any
+// watchlist title entry. PromoteWatchlistItem can only promote one it has,
+// so a caller batching this with its own reads can skip the promotion's
+// queries for the many profiles without any. Closing the sent batch's results
+// without error sets *promotable.
+func (s *Titles) QueuePromotable(b *pgx.Batch, access catalog.AccessFilter, promotable *bool) {
+	*promotable = false
+	v, ok := viewerFromAccess(access)
+	if s == nil || !ok {
+		return
+	}
+	b.Queue(profileHasEntriesSQL, v.UserID, v.ProfileID).QueryRow(func(row pgx.Row) error { return row.Scan(promotable) })
 }
 
 func viewerFromAccess(access catalog.AccessFilter) (Viewer, bool) {

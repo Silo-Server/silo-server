@@ -3,17 +3,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SettingsAttentionState, SettingsHealthItem } from "./useSettingsHealth";
 import {
-  settingsAttentionDismissalsKey,
+  SETTINGS_ATTENTION_HIDDEN_KEY as KEY,
   useSettingsAttentionDismissals,
 } from "./useSettingsAttentionDismissals";
 
 const attentionMock = vi.fn<() => SettingsAttentionState>();
-const authMock = vi.fn<() => { user: { id: number } | null }>();
+// The server's settings map; a save replaces it, as the refetch would.
+let settings: Record<string, string> = {};
+const writes: string[] = [];
+let fetching = 0;
 
+vi.mock("@tanstack/react-query", () => ({ useIsFetching: () => fetching }));
 vi.mock("./useSettingsHealth", () => ({
   useSettingsAttentionState: () => attentionMock(),
 }));
-vi.mock("@/hooks/useAuth", () => ({ useAuth: () => authMock() }));
+vi.mock("@/hooks/queries/admin/settings", () => ({
+  useAdminServerSettings: () => ({ data: settings }),
+  useUpdateServerSetting: () => ({
+    isPending: false,
+    variables: undefined,
+    mutate: ({ key, value }: { key: string; value: string }) => {
+      writes.push(value);
+      settings = { ...settings, [key]: value };
+    },
+  }),
+}));
 
 const email: SettingsHealthItem = {
   id: "email",
@@ -40,19 +54,18 @@ const storageRestart: SettingsHealthItem = {
   action: { label: "Fix", page: "storage" },
 };
 
-const KEY = settingsAttentionDismissalsKey(7);
-
 function setItems(items: SettingsHealthItem[], loaded = true) {
   attentionMock.mockReturnValue({ items, loaded });
 }
 
 beforeEach(() => {
-  authMock.mockReturnValue({ user: { id: 7 } });
+  settings = {};
+  fetching = 0;
   setItems([email, publicUrl, storageRestart]);
 });
 
 afterEach(() => {
-  localStorage.clear();
+  writes.length = 0;
   vi.clearAllMocks();
 });
 
@@ -61,44 +74,34 @@ const visibleIds = (result: { current: { visible: SettingsHealthItem[] } }) =>
 
 describe("useSettingsAttentionDismissals", () => {
   it("hides a dismissed item and counts it until everything is restored", () => {
-    const { result } = renderHook(() => useSettingsAttentionDismissals());
+    const { result, rerender } = renderHook(() => useSettingsAttentionDismissals());
 
     act(() => result.current.dismiss(email));
+    rerender();
+    expect(settings[KEY]).toBe('["email"]');
     expect(visibleIds(result)).toEqual(["public-url", "storage"]);
     expect(result.current.hiddenCount).toBe(1);
 
     act(() => result.current.restoreAll());
+    rerender();
     expect(visibleIds(result)).toEqual(["email", "public-url", "storage"]);
     expect(result.current.hiddenCount).toBe(0);
-    expect(localStorage.getItem(KEY)).toBeNull();
+    expect(settings[KEY]).toBe("");
   });
 
   it("never hides a broken service or a pending restart", () => {
+    settings = { [KEY]: '["storage"]' };
     const { result } = renderHook(() => useSettingsAttentionDismissals());
 
     act(() => result.current.dismiss(storageRestart));
+    expect(writes).toEqual([]);
     expect(visibleIds(result)).toContain("storage");
     expect(result.current.hiddenCount).toBe(0);
   });
 
-  it("keeps dismissals per account and across remounts", () => {
-    const first = renderHook(() => useSettingsAttentionDismissals());
-    act(() => first.result.current.dismiss(publicUrl));
-    first.unmount();
-
-    expect(visibleIds(renderHook(() => useSettingsAttentionDismissals()).result)).not.toContain(
-      "public-url",
-    );
-
-    authMock.mockReturnValue({ user: { id: 8 } });
-    expect(visibleIds(renderHook(() => useSettingsAttentionDismissals()).result)).toContain(
-      "public-url",
-    );
-  });
-
   it("hides the item again once a passing restart is done", () => {
+    settings = { [KEY]: '["email"]' };
     const { result, rerender } = renderHook(() => useSettingsAttentionDismissals());
-    act(() => result.current.dismiss(email));
 
     setItems([{ ...email, state: "warn", stateText: "Restart pending" }, publicUrl]);
     rerender();
@@ -107,56 +110,59 @@ describe("useSettingsAttentionDismissals", () => {
     setItems([email, publicUrl]);
     rerender();
     expect(visibleIds(result)).toEqual(["public-url"]);
+    expect(writes).toEqual([]);
   });
 
   it("forgets a dismissal once the item resolves, so undoing the setup asks again", () => {
+    settings = { [KEY]: '["email","public-url"]' };
     const { result, rerender } = renderHook(() => useSettingsAttentionDismissals());
-    act(() => result.current.dismiss(email));
 
     setItems([publicUrl]);
     rerender();
-    expect(localStorage.getItem(KEY)).toBeNull();
+    expect(settings[KEY]).toBe('["public-url"]');
 
     setItems([email, publicUrl]);
     rerender();
-    expect(visibleIds(result)).toContain("email");
+    expect(visibleIds(result)).toEqual(["email"]);
+  });
+
+  it("prunes again when the same list comes back while the Dashboard stays open", () => {
+    settings = { [KEY]: '["email"]' };
+    setItems([publicUrl]);
+    const { result, rerender } = renderHook(() => useSettingsAttentionDismissals());
+    expect(settings[KEY]).toBe("");
+
+    setItems([email, publicUrl]);
+    rerender();
+    act(() => result.current.dismiss(email));
+    rerender();
+    expect(settings[KEY]).toBe('["email"]');
+
+    setItems([publicUrl]);
+    rerender();
+    expect(settings[KEY]).toBe("");
+  });
+
+  it("waits for settings and server status to finish refetching before pruning", () => {
+    settings = { [KEY]: '["email"]' };
+    fetching = 1;
+    setItems([publicUrl]);
+    const { rerender } = renderHook(() => useSettingsAttentionDismissals());
+    expect(writes).toEqual([]);
+
+    fetching = 0;
+    rerender();
+    expect(settings[KEY]).toBe("");
   });
 
   it("keeps dismissals while the attention inputs are still loading", () => {
-    const { result, rerender } = renderHook(() => useSettingsAttentionDismissals());
-    act(() => result.current.dismiss(email));
-
+    settings = { [KEY]: '["email"]' };
     setItems([], false);
-    rerender();
-    expect(JSON.parse(localStorage.getItem(KEY) ?? "[]")).toEqual(["email"]);
+    const { result, rerender } = renderHook(() => useSettingsAttentionDismissals());
+    expect(writes).toEqual([]);
 
     setItems([email, publicUrl]);
     rerender();
     expect(visibleIds(result)).toEqual(["public-url"]);
-  });
-
-  it("follows a dismissal made in another tab", () => {
-    const { result } = renderHook(() => useSettingsAttentionDismissals());
-
-    act(() => {
-      localStorage.setItem(KEY, JSON.stringify(["public-url"]));
-      window.dispatchEvent(new StorageEvent("storage", { key: KEY }));
-    });
-    expect(visibleIds(result)).not.toContain("public-url");
-  });
-
-  it("keeps another tab's dismissal of an item this tab's cache calls resolved", () => {
-    // This tab's settings still have email set up; another tab turned it off
-    // and hid the notice.
-    setItems([publicUrl]);
-    const { rerender } = renderHook(() => useSettingsAttentionDismissals());
-
-    act(() => {
-      localStorage.setItem(KEY, JSON.stringify(["email"]));
-      window.dispatchEvent(new StorageEvent("storage", { key: KEY }));
-    });
-    setItems([publicUrl]);
-    rerender();
-    expect(JSON.parse(localStorage.getItem(KEY) ?? "[]")).toEqual(["email"]);
   });
 });

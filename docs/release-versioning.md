@@ -3,7 +3,7 @@
 Silo uses GitHub Releases as the public record of shipped versions and their
 changes. There is no historical Silo release series yet: the repository has no
 release tags. Newly published default-branch container images are identified by
-an ordered `build-N`, `latest`, and a short commit SHA.
+an ordered `build-N`, `latest`, and the full commit SHA.
 
 ## Version format
 
@@ -52,7 +52,11 @@ tags that identify the same multi-platform image:
 | --- | --- |
 | `build-N` | Ordered build identifier. A larger number is a newer published build; gaps from unsuccessful or non-publishing workflow runs are expected. |
 | `latest` | Mutable pointer updated by successful default-branch publications. |
-| Short commit SHA | Exact source identity for the build. |
+| Full commit SHA | Exact source identity for the build. |
+
+The image bundles PostgreSQL, Redis, and Meilisearch. Earlier builds
+published it as `build-N-aio` and moved `aio`, while `build-N` and `latest`
+named an image without them; see [Omnibus image](architecture/omnibus-image.md#build).
 
 Build numbers are not release versions and do not carry compatibility or
 support guarantees. Pin a `build-N`, commit-SHA tag, or image digest when a

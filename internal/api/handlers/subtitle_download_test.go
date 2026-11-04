@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
+	"github.com/Silo-Server/silo-server/internal/subtitles/subsource"
 )
 
 type downloadRecordingProvider struct {
@@ -24,7 +29,7 @@ func (*downloadRecordingProvider) Name() string { return "example" }
 func (*downloadRecordingProvider) Search(context.Context, subtitles.SearchRequest) ([]subtitles.SubtitleResult, error) {
 	return nil, nil
 }
-func (p *downloadRecordingProvider) Download(context.Context, string) ([]byte, subtitles.SubtitleFormat, error) {
+func (p *downloadRecordingProvider) Download(context.Context, string, subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	p.calls++
 	return []byte("synthetic subtitle"), subtitles.FormatSRT, p.err
 }
@@ -148,5 +153,42 @@ func TestSubtitleDownloadFailureLogOmitsCredentials(t *testing.T) {
 	got := logs.String()
 	if !strings.Contains(got, "subtitle_id=/subtitle/1-2.zip ") || strings.Contains(got, "synthetic-id-key") || strings.Contains(got, "synthetic-error-key") {
 		t.Fatalf("failure log = %q", got)
+	}
+}
+
+// A season-pack result downloads one archive holding every episode; the file
+// the user is subtitling decides which entry is stored.
+func TestSubtitleDownloadPicksFileEpisodeFromSeasonPack(t *testing.T) {
+	cue := func(text string) string { return "1\n00:00:01,000 --> 00:00:02,000\n" + text + "\n" }
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	for _, name := range []string{"Show.S01E01.Pilot.ar.srt", "Show.S01E02.Second.ar.srt", "Show.S01E03.Third.ar.srt"} {
+		w, err := zw.Create("Show.S01/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.WriteString(w, cue(name))
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(archive.Bytes())
+	}))
+	t.Cleanup(server.Close)
+
+	repo := newMockSubtitleRepoForHandler()
+	manager := subtitles.NewManager(repo, newMockBlobStoreForHandler())
+	manager.RegisterProvider(subsource.New(subsource.Config{APIKey: "synthetic", BaseURL: server.URL}))
+	h := NewSubtitleSearchHandler(manager, repo, stubSubtitleMediaResolver{meta: &MediaFileMetadata{FileID: 42, FilePath: "/tv/Show/Show - 1x02.mkv", Season: 1, Episode: 2}})
+	h.FileAuthorizer = &MediaFileAuthorizer{FileResolver: stubMediaFileResolver{file: &models.MediaFile{ID: 42, ContentID: "series"}}, ItemAccess: stubItemAccessChecker{}}
+
+	row, err := h.DownloadStoredSubtitle(t.Context(), catalog.AccessFilter{UserID: 1}, subtitles.DownloadRequest{MediaFileID: 42, ProviderName: "subsource", SubtitleID: "7", Language: "ar"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("%x", sha256.Sum256([]byte(cue("Show.S01E02.Second.ar.srt")))); row.ContentSHA256 != want {
+		t.Fatalf("stored content hash %s, want the S01E02 entry (%s)", row.ContentSHA256, want)
 	}
 }

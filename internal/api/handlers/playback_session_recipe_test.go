@@ -377,16 +377,16 @@ func TestSessionRecipeRetentionOnStop(t *testing.T) {
 	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	t.Cleanup(node.Close)
 	for _, test := range []struct {
-		name          string
-		userInitiated bool
-		nodeURL       string
-		wantDeleted   bool
+		name        string
+		reason      PlaybackEndReason
+		nodeURL     string
+		wantDeleted bool
 	}{
-		{name: "system teardown", userInitiated: false, wantDeleted: false},
-		{name: "user stop", userInitiated: true, wantDeleted: true},
+		{name: "system teardown", wantDeleted: false},
+		{name: "user stop", reason: PlaybackEndStopped, wantDeleted: true},
 		// The teardown stops the node job and drops its recipe, so the card
 		// could only rebuild a session the node no longer serves.
-		{name: "system teardown of a remote transcode", userInitiated: false, nodeURL: node.URL, wantDeleted: true},
+		{name: "system teardown of a remote transcode", nodeURL: node.URL, wantDeleted: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			manager := playback.NewSessionManager(0, 0)
@@ -398,7 +398,7 @@ func TestSessionRecipeRetentionOnStop(t *testing.T) {
 			}}
 			handler.SessionRecipeStore = recipes
 
-			if err := handler.stopPlaybackSessionByID(context.Background(), "session-recipe-stop", test.userInitiated); err != nil {
+			if err := handler.stopPlaybackSessionByID(context.Background(), "session-recipe-stop", test.reason); err != nil {
 				t.Fatalf("stop: %v", err)
 			}
 			if deleted := len(recipes.deleted) == 1 && recipes.deleted[0] == "session-recipe-stop"; deleted != test.wantDeleted {

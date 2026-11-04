@@ -51,27 +51,31 @@ func TestThumbhashRejectsGarbage(t *testing.T) {
 // runs before the Go decode: hashing must not materialize the original's full
 // raster on the Go heap. A 6000×4000 JPEG decodes to ≥36 MiB in pure Go, and
 // under tens of concurrent image-cache workers that is an OOM risk; through
-// the vips path the Go side only ever decodes a ≤100px PNG. The 15 MiB bound
-// is far above the new path's real footprint and far below the old one's.
+// the vips path the Go side only ever decodes a ≤100px PNG. A header vips
+// rejects falls back to the Go decoder, which must refuse to allocate the
+// raster it declares, here 4 GiB. The 15 MiB bound is far above either path's
+// real footprint and far below a full raster.
 func TestThumbhashDoesNotDecodeFullRasterInGo(t *testing.T) {
-	data := largeTestJPEG(t, 6000, 4000)
+	for name, tc := range map[string]struct {
+		data    []byte
+		wantErr bool
+	}{
+		"large jpeg":              {largeTestJPEG(t, 6000, 4000), false},
+		"header too big for vips": {withPNGDimensions(t, testPNG(t, 60, 90), 1<<30, 1), true},
+	} {
+		runtime.GC()
+		var before runtime.MemStats
+		runtime.ReadMemStats(&before)
+		hash, err := Thumbhash(tc.data)
+		var after runtime.MemStats
+		runtime.ReadMemStats(&after)
 
-	runtime.GC()
-	var before runtime.MemStats
-	runtime.ReadMemStats(&before)
-	hash, err := Thumbhash(data)
-	if err != nil {
-		t.Fatalf("Thumbhash: %v", err)
-	}
-	if hash == "" {
-		t.Fatal("Thumbhash returned empty hash")
-	}
-	var after runtime.MemStats
-	runtime.ReadMemStats(&after)
-
-	allocated := after.TotalAlloc - before.TotalAlloc
-	if allocated > 15<<20 {
-		t.Fatalf("Thumbhash allocated %d bytes on the Go heap; the full raster is being decoded in Go", allocated)
+		if (err != nil) != tc.wantErr || (err == nil && hash == "") {
+			t.Errorf("%s: Thumbhash = %q, %v; want error %v", name, hash, err, tc.wantErr)
+		}
+		if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 15<<20 {
+			t.Errorf("%s: Thumbhash allocated %d bytes on the Go heap; the full raster is being decoded in Go", name, allocated)
+		}
 	}
 }
 
@@ -129,7 +133,7 @@ func TestPixelDataUndecodable(t *testing.T) {
 		"unknown":        {[]byte("not an image"), false},
 		"huge header":    {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 100_000, 100_000), false},
 		"just over cap":  {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 2_001, 2_000), false},
-		"one tall row":   {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 1, maxPixelCheckPixels+1), false},
+		"one tall row":   {withPNGDimensions(t, fullPNG[:len(fullPNG)/2], 1, maxGoDecodePixels+1), false},
 	} {
 		if got := PixelDataUndecodable(tc.data); got != tc.want {
 			t.Errorf("%s: PixelDataUndecodable = %v, want %v", name, got, tc.want)

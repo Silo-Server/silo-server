@@ -34,7 +34,7 @@ type WatchTogetherSuggestionCreateOutput struct {
 func registerWatchTogetherSuggestionCreate(reg *Registry) {
 	op := Operation{Operation: humaOp(http.MethodPost, Prefix+"/watch-together/rooms/{room_id}/suggestions", "createWatchTogetherSuggestion", "realtime", "Create a suggestion with a stable caller-selected identity. Exact live replay returns the identity; changed or deleted identities conflict without resurrection or repeat broadcast."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyUniqueConstraint}
 	op.DefaultStatus = http.StatusCreated
-	op.MaxBodyBytes = 32768
+	op.MaxBodyBytes = watchtogether.MaxSuggestionCreateBodyBytes
 	op.Errors = []int{409}
 	Register(reg, op, func(ctx context.Context, in *WatchTogetherSuggestionCreateInput) (*WatchTogetherSuggestionCreateOutput, error) {
 		svc := reg.deps.WatchTogetherSuggestionCreate
@@ -54,6 +54,8 @@ func registerWatchTogetherSuggestionCreate(reg *Registry) {
 			switch {
 			case errors.Is(err, watchtogether.ErrSuggestionIdentityConflict):
 				return nil, NewProblem(TypeConflict, "Suggestion identity was already used or deleted.")
+			case errors.Is(err, watchtogether.ErrSuggestionLimitReached):
+				return nil, NewProblem(TypeConflict, "This room has reached its suggestion limit.")
 			case errors.Is(err, watchtogether.ErrSuggestionCreateUnavailable):
 				return nil, unavailable("suggestion creation")
 			case errors.Is(err, watchtogether.ErrInvalidSelection):

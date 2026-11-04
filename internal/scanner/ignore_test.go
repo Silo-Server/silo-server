@@ -232,6 +232,27 @@ func TestSiloIgnoreSkipsMatchedFilesAndDirs(t *testing.T) {
 	assertFilePaths(t, files, root, []string{"Movie.mkv", "Sub/clip.mkv", "Sub/nested/Episode 01.mkv"})
 }
 
+// Names are fspath-encoded when listed; a pattern holding the raw bytes of a
+// non-UTF-8 name must match it, as it did before names were encoded.
+func TestIgnoreFilesMatchRawNonUTF8Names(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "B\xe5rd"), 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	writeTestFile(t, filepath.Join(root, "Movie.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, "Ylvis\xe5ker.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, "B\xe5rd", "Episode 01.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, "Other", "S\xf8n.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, "Other", "Keep.mkv"), "test")
+	writeTestFile(t, filepath.Join(root, ".siloignore"), "Ylvis\xe5ker.mkv\nB\xe5rd\n")
+	writeTestFile(t, filepath.Join(root, "Other", ".ignore"), "S?n.mkv\n")
+
+	files := collectTestFilePaths(t, root, "series")
+	assertFilePaths(t, files, root, []string{"Movie.mkv", "Other/Keep.mkv"})
+}
+
 func TestSiloIgnoreParentPatternsCascadeIntoSubdirectories(t *testing.T) {
 	t.Parallel()
 
@@ -256,8 +277,10 @@ func TestDirectoryNamedLikeMarkerIsNotAMarker(t *testing.T) {
 		writeTestFile(t, filepath.Join(root, name, "Episode 01.mkv"), "test")
 		writeTestFile(t, filepath.Join(root, "Movie.mkv"), "test")
 
+		// The directory is skipped as a hidden one, but it is no marker, so
+		// its parent is still scanned.
 		files := collectTestFilePaths(t, root, "series")
-		assertFilePaths(t, files, root, []string{name + "/Episode 01.mkv", "Movie.mkv"})
+		assertFilePaths(t, files, root, []string{"Movie.mkv"})
 	}
 }
 
@@ -382,5 +405,41 @@ func TestPodcastShowAudioFilesAppliesInheritedRootPatterns(t *testing.T) {
 	want := []string{filepath.Join(show, "Episode 01.mp3")}
 	if len(files) != len(want) || files[0] != want[0] {
 		t.Fatalf("audio files = %v, want %v", files, want)
+	}
+}
+
+// Hidden directories below a library root are skipped without being read, so
+// one the scan cannot open is not a walk failure. A library root is walked
+// whatever its name, and a scoped scan inside a hidden directory reads nothing.
+func TestHiddenDirectoriesAreSkipped(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), ".media")
+	writeTestFile(t, filepath.Join(root, "Alpha (2020)", "Alpha (2020).mkv"), "x")
+	writeTestFile(t, filepath.Join(root, ".tool-workspace", "Beta (2021)", "Beta (2021).mkv"), "x")
+	writeTestFile(t, filepath.Join(root, "Alpha (2020)", ".backup", "Alpha (2020).mkv"), "x")
+	writeTestFile(t, filepath.Join(root, "Gamma (2022)", "Gamma (2022).mkv"), "x")
+	// Dangling, so reading it would be a walk failure.
+	if err := os.Symlink(filepath.Join(root, "missing"), filepath.Join(root, ".tool-workspace", "broken")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "Gamma (2022)"), filepath.Join(root, ".linked")); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, libraryType := range []string{"movies", "series"} {
+		assertFilePaths(t, collectTestFilePaths(t, root, libraryType), root, []string{
+			"Alpha (2020)/Alpha (2020).mkv",
+			"Gamma (2022)/Gamma (2022).mkv",
+		})
+	}
+
+	scope := filepath.Join(root, ".tool-workspace", "Beta (2021)")
+	files, walkFailures, err := collectLogicalFilePaths(t.Context(), []string{scope}, "movies", []string{root})
+	if err != nil {
+		t.Fatalf("collectLogicalFilePaths: %v", err)
+	}
+	if len(files) != 0 || len(walkFailures) != 0 {
+		t.Fatalf("scope inside a hidden directory: files = %v, walkFailures = %v, want none", files, walkFailures)
 	}
 }

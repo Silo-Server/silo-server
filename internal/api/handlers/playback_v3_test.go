@@ -579,6 +579,39 @@ func TestHandleStartPlaybackV3DoesNotWaitForSessionSync(t *testing.T) {
 	close(syncer.release)
 }
 
+// preparedAtSessionManager records when the start path committed the session
+// state its prepared transport produced.
+type preparedAtSessionManager struct {
+	*playback.SessionManager
+	preparedAt time.Time
+}
+
+func (m *preparedAtSessionManager) UpdateStreamState(sessionID string, state playback.SessionStreamState) error {
+	err := m.SessionManager.UpdateStreamState(sessionID, state)
+	m.preparedAt = time.Now()
+	return err
+}
+
+// The startup grace must run from when the client gets its plan, not from
+// admission: transport preparation can take long enough that a grace started
+// at admission expires before the client's startup timeout (issue #3202).
+func TestHandleStartPlaybackV3StartsStartupGraceAfterTransportPreparation(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	manager := &preparedAtSessionManager{SessionManager: playback.NewSessionManager(0, 0)}
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	response := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, v3HandlerStartRequest()))
+	session, err := manager.GetSession(response.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manager.preparedAt.IsZero() || session.PlanCommittedAt.Before(manager.preparedAt) {
+		t.Fatalf("PlanCommittedAt = %v, before the transport was prepared at %v", session.PlanCommittedAt, manager.preparedAt)
+	}
+}
+
 func TestPlaybackStartSideEffectsPreserveImmediateStopScrobbleOrder(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	scrobbler := &orderedBlockingPlaybackScrobblerV3{
@@ -602,7 +635,7 @@ func TestPlaybackStartSideEffectsPreserveImmediateStopScrobbleOrder(t *testing.T
 	}
 	stopped := make(chan struct{})
 	go func() {
-		handler.finalizeSessionStop(context.Background(), session, false, "", true)
+		handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
 		close(stopped)
 	}()
 	select {
@@ -2947,6 +2980,27 @@ func TestHandleStartPlaybackV3SafariDolbyVisionRemuxServesHLSManifest(t *testing
 	handler.HandleGetTranscodeManifest(manifestRecorder, manifestRequest)
 	if manifestRecorder.Code != http.StatusOK || !strings.Contains(manifestRecorder.Body.String(), "#EXTM3U") {
 		t.Fatalf("manifest status=%d body=%s", manifestRecorder.Code, manifestRecorder.Body.String())
+	}
+}
+
+// A per-account cap must not present as server capacity: a busy server means
+// wait, a spent allowance means stop the other session. A fresh attempt works
+// once that session ends, so both caps stay retryable.
+func TestSessionStartErrorV3SeparatesAccountLimitsFromServerCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		err       error
+		reason    string
+		retryable bool
+	}{
+		{err: playback.ErrTooManyStreams, reason: "stream_limit_reached", retryable: true},
+		{err: playback.ErrTooManyTranscodes, reason: "transcode_limit_reached", retryable: true},
+		{err: playback.ErrTranscodingDisabled, reason: "transcoding_disabled"},
+		{err: playback.ErrPlaybackNotAllowed, reason: "policy_denied"},
+	} {
+		got := sessionStartErrorV3(fmt.Errorf("wrapped: %w", tc.err))
+		if got == nil || got.reason != tc.reason || got.retryable != tc.retryable {
+			t.Fatalf("sessionStartErrorV3(%v) = %#v, want reason %q retryable %v", tc.err, got, tc.reason, tc.retryable)
+		}
 	}
 }
 

@@ -54,7 +54,9 @@ Within item detail this covers cast and crew headshots too: they follow the
 same 500px image. Without the parameter they are that 500px image as well.
 
 Without the parameter, an episode still standing in for a backdrop in a section
-hero or Continue Watching uses the widest still rung that fits, 1280px.
+hero or Continue Watching uses the widest still rung that fits, 1280px. On
+`/api/v2` a Continue Watching or Next Up episode card shows a still only when
+its season and series have no backdrop (see below).
 
 The `/api/v2/catalog/people` operations do **not** take the parameter — their headshots are
 always the 500px variant. Browsing a person's filmography does honor it, because
@@ -169,6 +171,7 @@ GET /api/v2/images/capabilities
   },
   "season_list_artwork_param": "include_artwork",
   "episode_still_provenance": true,
+  "episode_parent_artwork": true,
   "extended_item_artwork": true,
   "sizes": ["small", "medium", "large", "original"],
   "widths": {
@@ -193,42 +196,25 @@ server will not honor the parameter, so keep using its per-context defaults.
 
 ## Publication and fallback
 
-Historical GC manifests are verified in the background before they become
-publication records; their listed keys alone do not prove upload completion.
-
-Catalog reads select cached artwork from durable publication and delivery
-records. They never issue storage HEAD requests or fetch artwork delivery URLs.
-The publisher records the exact variant keys after every upload succeeds;
-partially uploaded revisions are not advertised. The revision remains part of
-each key, so an old manifest cannot establish availability for new artwork.
-
-A bounded background task verifies both storage and the client-facing GET path.
-Publication makes a revision eligible for verification. Workers claim up to 100
-revisions per run, use at most 12 concurrent checks, and stop after one minute.
-A check that finds every key deliverable is repeated after a week. One that finds
-an undeliverable key, or a probe error, is retried after 15 minutes, doubling
-with each further failure up to a day. A large backlog can extend these
-intervals. A worker failure leaves a recoverable two-minute lease.
-Delivery verification is scoped to the storage and delivery configuration.
-Transport errors preserve the last completed verdict and are retried. Confirmed
-storage loss schedules image caching for regenerable provider artwork while
-retaining catalog pointers and surviving variants;
-delivery-only failures retain the catalog pointers and are checked again.
+Catalog reads select cached artwork from durable publication records. They
+never issue storage HEAD requests or fetch artwork delivery URLs. The publisher
+records the exact variant keys after every upload succeeds; a rung a ladder
+change added is advertised only once a publication includes it. The revision remains part of each key, so an old
+manifest cannot establish availability for new artwork. Silo is the only writer
+to the assets store and deletes a revision only after retiring it, so a
+published key is served as stored on every backend.
 
 On every storage backend, a size the artwork's revision did not publish, such as
 a rung a ladder change added that the ladder backfill has not generated yet,
 resolves to a smaller size it did publish. Legacy artwork without a
 publication manifest uses an established smaller size until the ladder backfill
-regenerates it. Before external delivery is verified, the server also avoids
-newly added wide rungs and selects a published smaller size or original. A
-completed delivery check restricts selection to working keys.
-If none remain, the URL is empty and the client should display its placeholder.
-Images can still fail at a particular client or CDN edge; this must not prevent
-rendering titles, episode counts, progress, or navigation.
+regenerates it. If none remain, the URL is empty and the client should display
+its placeholder. Images can still fail at a particular client or CDN edge; this
+must not prevent rendering titles, episode counts, progress, or navigation.
 
 `image_size=large` expresses the preferred size; the response may contain a
 smaller variant. The server caches resolved artwork URLs for at most five minutes
-so background recovery becomes visible without waiting for signature expiry.
+so regenerated artwork becomes visible without waiting for signature expiry.
 Cold resolver caches read the same durable records and never rediscover image
 availability through network probes.
 
@@ -279,6 +265,33 @@ the server knows the image's source; an absent field means unknown, even when th
 capability is true. Clients that hide unwatched episode stills use them to keep
 series and season artwork visible. See
 [episode spoiler protection](catalog-api.md#episode-spoiler-protection).
+
+## Episode parent artwork
+
+`"episode_parent_artwork": true` means episode cards can carry their series'
+and season's artwork next to their own: `series_poster_url`,
+`series_backdrop_url` and `season_poster_url`, each with a matching
+`*_thumbhash`. A client can draw an episode's hero from `series_backdrop_url`
+without fetching the episode's detail, since an episode card's `backdrop_url`
+is usually the episode still. In Continue Watching and Next Up rows,
+`/api/v2` episode cards instead carry the season backdrop as `backdrop_url`, or
+the series backdrop when the season has none, and keep the still only when
+neither exists. Frozen `/api/v1` cards keep the still. The poster fields follow
+`poster_width` and the backdrop field follows `backdrop_width`, like
+`poster_url` and `backdrop_url` on the same card.
+
+A season backdrop comes from a metadata provider that has one, or from an
+admin's pick, which locks the series' images. While they are unlocked,
+refreshing or identifying the series replaces the season backdrop with the
+provider's, or removes it when no provider has one. A pass that only fills
+missing metadata leaves a stored season backdrop alone.
+
+They appear on episode cards in Home and library sections (Continue Watching
+and Next Up included), catalog browse and search, Watch Tonight, and on episode
+detail (`getCatalogItem`). Each field is absent when the series or season has
+no such image. There is no season backdrop field; Continue Watching and Next Up
+rows show it as `backdrop_url`.
+The frozen `/api/v1` responses do not carry them.
 
 ## Jellyfin compatibility
 

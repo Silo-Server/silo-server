@@ -66,7 +66,7 @@ const (
 // repository is the persistence surface Service needs (satisfied by
 // *Repository; an interface so tests can fake it).
 type repository interface {
-	Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuedBy *int, expiresAt time.Time) error
+	Issue(ctx context.Context, userID int, expectedEmail, tokenHash string, issuer Issuer, expiresAt time.Time, delivery Delivery) error
 	IssueUnlessRecent(ctx context.Context, userID int, expectedEmail, tokenHash string, expiresAt time.Time, minAge time.Duration) (bool, error)
 	Withdraw(ctx context.Context, userID int, tokenHash string) error
 	Lookup(ctx context.Context, tokenHash string) (*Link, error)
@@ -83,6 +83,7 @@ type userDirectory interface {
 // sessionStarter signs the account in after a reset. Satisfied by *auth.Service.
 type sessionStarter interface {
 	Login(ctx context.Context, username, password, deviceName, ip string) (*auth.TokenPair, *models.User, error)
+	Logout(ctx context.Context, sessionID string) error
 }
 
 // Service orchestrates issuing and completing reset links.
@@ -156,6 +157,8 @@ type IssueInput struct {
 	UserID   int
 	IssuedBy int
 	Delivery Delivery
+	// ScopedKey marks a request made with a scoped API key.
+	ScopedKey bool
 }
 
 // IssueResult reports a stored link. It may accompany a delivery error; then
@@ -204,12 +207,9 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (*IssueResult, error
 	if err != nil {
 		return nil, fmt.Errorf("generate password reset token: %w", err)
 	}
-	var issuedBy *int
-	if in.IssuedBy > 0 {
-		issuedBy = &in.IssuedBy
-	}
 	expiresAt := s.now().Add(s.ttl)
-	if err := s.repo.Issue(ctx, user.ID, user.Email, tokenHash, issuedBy, expiresAt); err != nil {
+	issuer := Issuer{ID: in.IssuedBy, ScopedKey: in.ScopedKey}
+	if err := s.repo.Issue(ctx, user.ID, user.Email, tokenHash, issuer, expiresAt, in.Delivery); err != nil {
 		return nil, err
 	}
 
@@ -382,9 +382,29 @@ func (s *Service) Complete(ctx context.Context, token, password, deviceName, ip 
 	if s.sessionsRevoked != nil {
 		s.sessionsRevoked(ctx, user.ID)
 	}
-	pair, loggedIn, err := s.sessions.Login(ctx, user.Username, password, deviceName, ip)
+	// An account may have only an email; sign-in resolves either.
+	login := user.Username
+	if login == "" {
+		login = user.Email
+	}
+	pair, loggedIn, err := s.sessions.Login(ctx, login, password, deviceName, ip)
 	if err != nil {
 		return nil, user, errors.Join(ErrSessionStart, err)
+	}
+	// An email can still be another account's username when both predate the
+	// single identity space, so the sign-in may land on that account. Never
+	// hand its session to the person who reset this one.
+	if loggedIn == nil || loggedIn.ID != user.ID {
+		if pair != nil && pair.SessionID != "" {
+			// The session exists already: revoke it even if the caller has
+			// gone, but do not wait forever.
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			if err := s.sessions.Logout(cleanupCtx, pair.SessionID); err != nil {
+				return nil, user, errors.Join(ErrSessionStart, err)
+			}
+		}
+		return nil, user, ErrSessionStart
 	}
 	return pair, loggedIn, nil
 }

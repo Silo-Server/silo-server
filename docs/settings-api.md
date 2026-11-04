@@ -64,10 +64,10 @@ overlay-config and plugin operations. `X-Profile-Token` is optional everywhere.
 `If-None-Match` GET is not carried yet; it lands with the foundation caching rules, so a v2
 client compares the `ETag` (or the capability document's `contract_etag`) itself and re-fetches.
 
-`GET /api/v2/settings/contract/capabilities` returns nine settings-specific members plus the
+`GET /api/v2/settings/contract/capabilities` returns eleven settings-specific members plus the
 common `revision`, `state` and `allowed` fields. The previous numeric `revision` is now
 `manifest_revision`; string `revision` identifies the complete authorized capability document.
-All twelve fields are present, and `scopes` and `client_families` are never null. This capability
+All fourteen fields are present, and `scopes` and `client_families` are never null. This capability
 read supports `ETag` and `If-None-Match` revalidation with `Cache-Control: private, no-cache`;
 a matching authorized representation returns a bodyless `304`.
 
@@ -94,7 +94,9 @@ is illustrative):
   ],
   "supports_batched_effective": true,
   "supports_idempotent_writes": true,
-  "supports_atomic_shortcuts": true
+  "supports_atomic_shortcuts": true,
+  "supports_device_rename": true,
+  "supports_overlay_images": false
 }
 ```
 
@@ -104,7 +106,26 @@ gates the shortcut editor on `supports_atomic_shortcuts`. Read `supports_idempot
 care: the server computes the flag for the v1 `X-Silo-Mutation-Id` replay, but no v2 write
 declares that header (see "Writes have no mutation id" below), so a v2 client must not rely on
 replay semantics while the flag is `true`. The web client masks the flag to `false` for exactly
-this reason.
+this reason. `supports_overlay_images` says the server keeps the card overlay image library
+described under "Overlay configuration" below.
+
+### Overlay configuration
+
+`GET /api/v2/settings/overlay-config` returns the server-wide card overlay defaults: `enabled`,
+`defaults` (the administrator's `ui.card_overlays` document as a JSON string, absent when none
+is set), `quick_actions_enabled` and `quick_actions_default`, as v1 does. v2 adds two members
+the frozen v1 response does not carry:
+
+- `images` lists the card overlay image library in upload order, always present and possibly
+  empty. Each entry has `ref`, `name`, `url`, `width` and `height`. A card overlay document names
+  an image by `ref`; `url` is `/api/v2/overlay-images/{ref}`, a public read whose bytes never
+  change for a ref, served `immutable`. A failed library read degrades to an empty list instead
+  of failing the configuration every card depends on.
+- `image_uploads_available` says whether the server has the asset storage
+  `uploadAdminOverlayImage` needs. Without it the library stays empty.
+
+Administrators manage the library with `uploadAdminOverlayImage` and `deleteAdminOverlayImage`;
+see [admin-api.md](admin-api.md#card-overlay-images).
 
 ### Query parameters are repeated, not comma-separated
 
@@ -208,6 +229,11 @@ spends on `library_ids` plus `series_ids` — and a context may name both a `lib
 more than 100 contexts name both. Halving the declared bound keeps every valid context shape
 inside one request and leaves v1 and the store query untouched; a 101st context is a 422 at
 `body.contexts`.
+
+A repeated key returns its stored value once per mention, and the batch returns it again in every
+context. The stored values in one `resolveEffectiveSettings` or `listSettingValues` response are
+therefore bounded at 16 MiB in total; a request past that bound is a 422 at `body.keys`
+(`query.keys` on `listSettingValues`).
 
 ```http
 POST /api/v2/settings/values/effective
@@ -1010,7 +1036,7 @@ PUT /api/v1/admin/users/42/settings/values/ui.card_presentation?scope=profile_cl
 Authorization: Bearer <admin-token>
 Content-Type: application/json
 
-{"value":{"poster_size":"large","caption":"artwork"}}
+{"value":{"poster_size":"large","caption":"title_metadata"}}
 ```
 
 The five accepted `client_family` values are also returned by the capability

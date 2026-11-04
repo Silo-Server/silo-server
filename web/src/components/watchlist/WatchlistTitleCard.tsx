@@ -8,7 +8,6 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import { RequestDownloadBar } from "@/components/overlays/RequestDownloadBar";
 import { RequestAction, WatchlistAction } from "@/components/RequestPosterCard";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
-import { useUICustomization } from "@/hooks/useUICustomization";
 import {
   formatMediaType,
   requestDetailHref,
@@ -49,8 +48,6 @@ export default function WatchlistTitleCard({
   onRemove?: () => void;
   isRemoving?: boolean;
 }) {
-  const { cardPresentation } = useUICustomization();
-  const showCaption = cardPresentation.caption !== "artwork";
   const href = requestDetailHref(title.media_type, title.tmdb_id);
   const meta = [formatMediaType(title.media_type), title.year].filter(Boolean).join(" · ");
   const label = `${title.title} (${meta})`;
@@ -99,18 +96,14 @@ export default function WatchlistTitleCard({
         ) : null}
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>
-        {showCaption ? (
-          <>
-            <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
-              {title.title}
-            </ViewTransitionLink>
-            <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
-              {meta}
-            </ViewTransitionLink>
-          </>
-        ) : null}
-        {/* The status stays under every caption setting: with overlays off,
-            it is the only place the card says where the title stands. */}
+        <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
+          {title.title}
+        </ViewTransitionLink>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
+          {meta}
+        </ViewTransitionLink>
+        {/* With overlays off, the status is the only place the card says
+            where the title stands. */}
         <p
           className={cn(
             "mt-1.5 truncate text-[0.75rem]",

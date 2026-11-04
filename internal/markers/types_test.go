@@ -332,3 +332,17 @@ func TestDetectionToggleEnabled(t *testing.T) {
 		}
 	}
 }
+
+func TestShareByDefaultEnabled(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"":        false,
+		"true":    true,
+		" TRUE ":  true,
+		"false":   false,
+		" False ": false,
+	} {
+		if got := ShareByDefaultEnabled(raw); got != want {
+			t.Errorf("ShareByDefaultEnabled(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}

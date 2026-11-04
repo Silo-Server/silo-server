@@ -1,5 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowDownToLine, ArrowUpToLine, House, Plus } from "lucide-react";
+import { ArrowDownToLine, ArrowUpToLine, House, Plus, type LucideIcon } from "lucide-react";
 import {
   ActionMenu,
   type ActionMenuAction,
@@ -11,9 +11,9 @@ import { PillSwitcher } from "@/components/calm/PillSwitcher";
 import { SelectAllHeader } from "@/components/calm/SelectModeBar";
 import { Button } from "@/components/ui/button";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { describeRow, type DescribeContext } from "@/lib/homeRows/describe";
+import { describeRow, type DescribeContext, type DescriptionPart } from "@/lib/homeRows/describe";
 import { pageLabel, pageParam } from "@/lib/homeRows/pages";
-import type { HomeRow, HomeRowsAdapter } from "@/lib/homeRows/types";
+import type { HomeRow, HomeRowsListAdapter } from "@/lib/homeRows/types";
 import { cn } from "@/lib/utils";
 import { MobileDockBar } from "./MobileDockBar";
 import { ConflictBanner, LibraryPageNote, ReorderHint } from "./notes";
@@ -44,9 +44,9 @@ export interface SharedRowMenuItems {
 }
 
 /**
- * The Home rows page shell shared by admin Home rows and Settings > Home
- * Screen. Everything surface-specific comes from the adapter and the props;
- * nothing here reads the account role.
+ * The Home rows page shell shared by admin Home rows, Settings > Home Screen
+ * and Requests > Discover Page. Everything surface-specific comes from the
+ * adapter and the props; nothing here reads the account role.
  */
 export function HomeRowsPage({
   adapter,
@@ -58,12 +58,15 @@ export function HomeRowsPage({
   rowMenuItems,
   onOpenRow,
   collection,
+  describe,
+  rowIcon,
+  pageSwitcher = true,
   selection,
   focus,
   highlightRowId,
   children,
 }: {
-  adapter: HomeRowsAdapter;
+  adapter: HomeRowsListAdapter;
   title: string;
   subtitle: string;
   /** The More menu's items. */
@@ -73,6 +76,12 @@ export function HomeRowsPage({
   rowMenuItems: (row: HomeRow, shared: SharedRowMenuItems) => ActionMenuItem[];
   onOpenRow?: (row: HomeRow) => void;
   collection?: DescribeContext["collection"];
+  /** How a row reads in the list, for rows that aren't Home row kinds. */
+  describe?: (row: HomeRow) => DescriptionPart[];
+  /** A row's icon, for rows that aren't Home row kinds. */
+  rowIcon?: (row: HomeRow) => LucideIcon;
+  /** False for a surface with one page: the row count stands alone. */
+  pageSwitcher?: boolean;
   /** Present while select mode is on. */
   selection?: HomeRowsSelection;
   focus: RowFocus;
@@ -191,22 +200,26 @@ export function HomeRowsPage({
     >
       {notices}
 
-      <PillSwitcher
-        label="Page"
-        options={adapter.pages.map((option, index) => ({
-          value: pageParam(option.ref),
-          label: option.label,
-          icon: option.ref.kind === "home" ? House : undefined,
-          separated: index === 1,
-        }))}
-        value={pageParam(page)}
-        onChange={(value) => {
-          const next = adapter.pages.find((option) => pageParam(option.ref) === value);
-          if (next) adapter.setPage(next.ref);
-        }}
-        disabled={adapter.pending}
-        summary={summary}
-      />
+      {pageSwitcher ? (
+        <PillSwitcher
+          label="Page"
+          options={adapter.pages.map((option, index) => ({
+            value: pageParam(option.ref),
+            label: option.label,
+            icon: option.ref.kind === "home" ? House : undefined,
+            separated: index === 1,
+          }))}
+          value={pageParam(page)}
+          onChange={(value) => {
+            const next = adapter.pages.find((option) => pageParam(option.ref) === value);
+            if (next) adapter.setPage(next.ref);
+          }}
+          disabled={adapter.pending}
+          summary={summary}
+        />
+      ) : summary ? (
+        <p className="text-muted-foreground text-[13px]">{summary}</p>
+      ) : null}
       {page.kind === "library" ? <LibraryPageNote libraryName={label} /> : null}
       {adapter.conflict ? (
         <ConflictBanner busy={adapter.pending} onReload={() => void adapter.reload()} />
@@ -261,7 +274,8 @@ export function HomeRowsPage({
                       highlighted={row.id === highlightRowId}
                       surface={surface}
                       pageLabel={label}
-                      description={describeRow(row, describeContext)}
+                      description={describe ? describe(row) : describeRow(row, describeContext)}
+                      icon={rowIcon?.(row)}
                       peek={adapter.peek?.(row) ?? null}
                       selection={
                         selection

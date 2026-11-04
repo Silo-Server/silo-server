@@ -64,11 +64,10 @@ func registerAdminCatalogIntro(reg *Registry) {
 		{"redetect-intro", redetectAdminEpisodeIntroOperation, "redetect", "Explicitly rerun local intro detection for an episode; other items, movies included, are rejected."},
 	} {
 		op := adminItemMarkersOperation(action.suffix, action.id, action.summary)
-		if action.id == refreshAdminEpisodeMarkersOperation {
-			// Local-mode refreshes answer 409 like redetect-markers when
-			// detection cannot run or every missing kind is turned off.
-			op.Errors = append(op.Errors, http.StatusConflict)
-		}
+		// Local-mode refreshes answer 409 like redetect-markers when
+		// detection cannot run or every missing kind is turned off; an
+		// intro redetect answers 409 when detection cannot run.
+		op.Errors = append(op.Errors, http.StatusConflict)
 		Register(reg, op, func(ctx context.Context, in *AdminEpisodeMarkersInput) (*AdminEpisodeMarkersOutput, error) {
 			if reg.deps.AdminEpisodeMarkers == nil {
 				return nil, unavailable("episode marker analysis")

@@ -335,7 +335,7 @@ func TestBuildItemLocalizationRecordSkipsLocalCandidates(t *testing.T) {
 		},
 		MergeFillEmpty,
 		"de", "",
-		false, true)
+		false, true, false)
 
 	if loc.PosterPath != "" || loc.PosterSourcePath != "" {
 		t.Fatalf("localization picked up local candidate: path=%q source=%q", loc.PosterPath, loc.PosterSourcePath)
@@ -525,7 +525,7 @@ func TestApplyBestImagesStoredClearArtLogo(t *testing.T) {
 			existing := tc.existing
 			item := existing
 			applyBestImages(&item, tc.images, tc.mode, "en", "")
-			prepareItemImagesForQueue(&item, &existing, true)
+			prepareItemImagesForQueue(&item, &existing, true, false)
 			if item.LogoPath != tc.wantPath || item.LogoSourcePath != tc.wantSource {
 				t.Fatalf("logo = path %q source %q, want path %q source %q", item.LogoPath, item.LogoSourcePath, tc.wantPath, tc.wantSource)
 			}

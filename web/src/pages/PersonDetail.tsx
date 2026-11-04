@@ -247,6 +247,7 @@ export default function PersonDetail() {
 
         <ItemGrid
           totalItems={catalogQuery.data?.totalItems ?? 0}
+          knownItems={catalogQuery.data?.knownItems}
           pages={catalogQuery.data?.pages ?? new Map()}
           pageSize={limit}
           loading={catalogQuery.isLoading}

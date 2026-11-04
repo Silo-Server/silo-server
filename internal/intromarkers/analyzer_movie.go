@@ -208,7 +208,7 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 	if !tailReady {
 		return summary
 	}
-	tail, sampled := a.movieTail(ctx, candidate, deadline, &summary)
+	tail, sampled, stale := a.movieTail(ctx, candidate, deadline, &summary)
 	if tail == nil {
 		return summary
 	}
@@ -255,31 +255,47 @@ func (a *Analyzer) analyzeMovie(ctx context.Context, candidate Candidate, tailRe
 		}
 		return summary
 	}
-	if sampled {
-		if err := a.storeCreditsTail(ctx, candidate, movieTailSpec(candidate), *tail); err != nil {
-			summary.Errors = append(summary.Errors, err.Error())
-		}
+	// A cached tail stored before the file's markers were last invalidated
+	// is stored again with the file's current invalidation time, which
+	// settles the movie once more whether or not it placed credits. A timed
+	// out silence pass settles it too: a failure would not replace the
+	// complete row, so the movie would otherwise come back every run.
+	if !sampled && !stale {
+		return summary
+	}
+	if err := a.storeCreditsTail(ctx, candidate, movieTailSpec(candidate), *tail); err != nil {
+		summary.Errors = append(summary.Errors, err.Error())
 	}
 	return summary
+}
+
+// sameInstant reports whether two optional times are both absent or equal.
+func sameInstant(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }
 
 // movieTail returns the candidate's movie tail pass, from the cache or by
 // sampling it, and records how it was obtained in summary. sampled reports
 // a tail sampled now, which the caller stores once it has placed the
+// credits. stale reports a cached tail stored with another invalidation time
+// than the file's, which the caller stores again once it has placed the
 // credits. It returns no tail when the tail is unusable, backing off after
 // a failure, fails now, or deadline passed while it waited for ffmpeg.
-func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline time.Time, summary *RunSummary) (tail *creditsTail, sampled bool) {
+func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline time.Time, summary *RunSummary) (tail *creditsTail, sampled, stale bool) {
 	// Decided from the file's current probe metadata, which a probe repair
 	// can change without changing the file, so it is not stored.
 	if tailUnusableBeforeSampling(candidate) != "" {
 		summary.CreditsTailUnusable++
-		return nil, false
+		return nil, false, false
 	}
 	spec := movieTailSpec(candidate)
 	artifacts, err := a.loadCreditsArtifacts(ctx, []Candidate{candidate}, spec.key)
 	if err != nil {
 		summary.Errors = append(summary.Errors, err.Error())
-		return nil, false
+		return nil, false, false
 	}
 	var stored *mediaartifact.Artifact
 	if artifact, ok := artifacts[candidate.FileID]; ok {
@@ -289,26 +305,26 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 	switch {
 	case tail != nil:
 		summary.CreditsTailCacheHits++
-		return tail, false
+		return tail, false, !sameInstant(candidate.MarkersInvalidatedAt, stored.MarkersInvalidatedAt)
 	case state == mediaartifact.Skipped && stored.Status != mediaartifact.StatusFailed:
 		summary.CreditsTailUnusable++
-		return nil, false
+		return nil, false, false
 	case state == mediaartifact.Skipped:
-		return nil, false
+		return nil, false, false
 	}
 	release, err := a.ffmpegAcquirer()(ctx)
 	if err != nil {
-		return nil, false
+		return nil, false, false
 	}
 	if a.pastDeadline(deadline) {
 		release()
 		summary.MovieBudgetExhausted = true
-		return nil, false
+		return nil, false, false
 	}
 	sampledTail, sampleErr := a.movieSampler.SampleMovieTail(ctx, candidate)
 	release()
 	if ctx.Err() != nil {
-		return nil, false
+		return nil, false, false
 	}
 	// As with episodes, a clean run without keyframes points at the log
 	// format rather than the file, so it is retried later.
@@ -319,14 +335,14 @@ func (a *Analyzer) movieTail(ctx context.Context, candidate Candidate, deadline 
 	switch {
 	case err != nil:
 		summary.Errors = append(summary.Errors, err.Error())
-		return nil, false
+		return nil, false, false
 	case sampleErr != nil && !mediasample.Classify(sampleErr).Permanent():
 		summary.CreditsTailScanErrors++
-		return nil, false
+		return nil, false, false
 	case !usable:
 		summary.CreditsTailUnusable++
-		return nil, false
+		return nil, false, false
 	}
 	summary.CreditsTailScansComputed++
-	return &sampledTail, true
+	return &sampledTail, true, false
 }

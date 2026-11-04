@@ -94,7 +94,14 @@ func TestTranscodeProxyDoesNotAcknowledgeFailedDownstreamWrite(t *testing.T) {
 	claims := &streamtoken.Claims{SessionID: "public", TranscodeNode: node.URL}
 	req := httptest.NewRequest(http.MethodGet, "/stream/transcode/token/segment/seg_00007.ts", nil)
 	w := &failingCompletionResponseWriter{header: make(http.Header), remaining: 5}
-	server.proxyToTranscodeNode(w, req, claims, "/transcode/remote/segment/seg_00007.ts", "")
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+				t.Fatalf("failed downstream transfer ended with %v, want panic(http.ErrAbortHandler)", recovered)
+			}
+		}()
+		server.proxyToTranscodeNode(w, req, claims, "/transcode/remote/segment/seg_00007.ts", "")
+	}()
 
 	if got := acknowledgements.Load(); got != 0 {
 		t.Fatalf("failed downstream transfer produced %d acknowledgement(s)", got)

@@ -205,6 +205,32 @@ var resolverPlayMethodCases = []struct {
 		},
 		want: playback.PlayTranscode,
 	},
+	{
+		// The download's fallback encode would keep 1080p50, so keeping the
+		// original takes the same frame-rate trade as playback.
+		name: "a download keeps a 1080p50 original on an exact 4K30 decoder",
+		file: &models.MediaFile{
+			CodecVideo: "h264", CodecAudio: "aac", Container: "mp4",
+			Resolution: "1080p", Bitrate: 3_000,
+			VideoTracks: []models.VideoTrack{{
+				Codec: "h264", Profile: "High", Level: 42, Width: 1920, Height: 1080,
+				FrameRate: "50/1", Bitrate: 3_000, BitDepth: 8,
+			}},
+		},
+		caps: &playback.ClientCapabilities{
+			VideoEvidence: playback.EvidenceExactV3,
+			CodecsVideo:   []string{"h264"},
+			CodecsAudio:   []string{"aac"},
+			Containers:    []string{"mp4"},
+			MaxResolution: "2160p",
+			VideoDecode: []playback.VideoDecodeCapabilityV3{{
+				Codec: "h264", Profiles: []string{"high"}, Levels: []int{51}, BitDepths: []int{8},
+				MaxWidth: 3840, MaxHeight: 2160, MaxFrameRate: 30, MaxBitrateKbps: 300_000,
+				Hardware: true,
+			}},
+		},
+		want: playback.PlayDirect,
+	},
 }
 
 func TestResolverPlayMethod(t *testing.T) {

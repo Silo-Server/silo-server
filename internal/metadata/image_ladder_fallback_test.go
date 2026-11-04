@@ -49,7 +49,7 @@ func TestCatalogArtworkColdReadsNeverProbe(t *testing.T) {
 			key := fmt.Sprintf("tmdb/series/1/seasons/%d/poster/w1000.rev.webp", i)
 			paths = append(paths, key)
 			original := variantKey(key, "original")
-			manifest[original] = ArtworkAvailability{Published: []string{key, variantKey(key, "w500"), original}, External: true}
+			manifest[original] = ArtworkAvailability{Published: []string{key, variantKey(key, "w500"), original}}
 		}
 		resolver.SetArtworkAvailabilityReader(manifest)
 		urls := resolver.ResolveImageURLs(t.Context(), paths, "large")
@@ -57,8 +57,8 @@ func TestCatalogArtworkColdReadsNeverProbe(t *testing.T) {
 			t.Fatalf("got %d URLs", len(urls))
 		}
 		for _, key := range paths {
-			if !strings.HasSuffix(urls[key], variantKey(key, "w500")) {
-				t.Fatalf("unverified variant advertised: %s", urls[key])
+			if !strings.HasSuffix(urls[key], key) {
+				t.Fatalf("published variant not advertised: %s", urls[key])
 			}
 		}
 	}
@@ -81,9 +81,6 @@ func TestSelectPublishedVariant(t *testing.T) {
 		{"previous ladder's rung", ArtworkAvailability{Published: []string{variantKey(key, "w780"), medium, small, original}}, true, variantKey(key, "w780")},
 		{"previous ladder's rung too wide", ArtworkAvailability{Published: []string{variantKey(key, "w1280"), medium, original}}, true, medium},
 		{"original only", ArtworkAvailability{Published: []string{original}}, true, original},
-		{"delivery verified", ArtworkAvailability{Published: []string{key, medium, original}, External: true, Verified: true, Deliverable: []string{key}}, true, key},
-		{"delivery missing", ArtworkAvailability{Published: []string{key, medium, original}, External: true, Verified: true, Deliverable: []string{medium}}, true, medium},
-		{"delivery down", ArtworkAvailability{Published: []string{key, original}, External: true, Verified: true}, true, ""},
 		{"unpublished", ArtworkAvailability{}, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -146,23 +143,16 @@ func TestOriginalArtworkFallsBackToResizedVariant(t *testing.T) {
 		{"none available", nil, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, verified := range []bool{false, true} {
-				state := ArtworkAvailability{Published: tc.keys}
-				if verified {
-					state = ArtworkAvailability{Published: []string{original, large, medium}, External: true, Verified: true, Deliverable: tc.keys}
-				}
-				if got := selectPublishedVariant(original, state, true); got != tc.want {
-					t.Fatalf("verified=%v: got %q, want %q", verified, got, tc.want)
-				}
+			if got := selectPublishedVariant(original, ArtworkAvailability{Published: tc.keys}, true); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
 type recordingAvailability struct {
-	external bool
-	states   map[string]ArtworkAvailability
-	asked    []string
+	states map[string]ArtworkAvailability
+	asked  []string
 }
 
 func (r *recordingAvailability) ArtworkAvailability(_ context.Context, paths []string) (map[string]ArtworkAvailability, error) {
@@ -170,12 +160,10 @@ func (r *recordingAvailability) ArtworkAvailability(_ context.Context, paths []s
 	return r.states, nil
 }
 
-func (r *recordingAvailability) ExternalDelivery() bool { return r.external }
-
-// Where delivery cannot lag behind a write, only a rung a ladder change added
-// can be missing from a published revision, so established rungs resolve
-// without a lookup and only the added rung consults the manifest.
-func TestNonExternalReaderLooksUpOnlyAddedRungs(t *testing.T) {
+// Only a rung a ladder change added can be missing from a published revision,
+// so established rungs resolve without a lookup and only the added rung
+// consults the manifest.
+func TestReaderLooksUpOnlyAddedRungs(t *testing.T) {
 	medium := "tmdb/movies/1/poster/w500.rev.webp"
 	large := "tmdb/movies/2/poster/" + posterLargeRung + ".rev.webp"
 	reader := &recordingAvailability{states: map[string]ArtworkAvailability{
@@ -190,12 +178,5 @@ func TestNonExternalReaderLooksUpOnlyAddedRungs(t *testing.T) {
 	}
 	if want := variantKey(large, "w500"); got[large] != want {
 		t.Errorf("added rung resolved to %q, want the published %q", got[large], want)
-	}
-
-	// External delivery can lag behind any write, so every key is looked up.
-	external := &recordingAvailability{external: true}
-	resolvePublishedLadderKeys(t.Context(), external, []resolveEntry{{originalPath: medium}, {originalPath: large}})
-	if len(external.asked) != 2 {
-		t.Fatalf("external reader looked up %v, want both revisions", external.asked)
 	}
 }

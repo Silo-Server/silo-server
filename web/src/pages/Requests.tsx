@@ -3,6 +3,7 @@ import { Navigate, useSearchParams } from "react-router";
 import { Film, Info, Library, RefreshCw, Tv } from "lucide-react";
 import BrandCarousel from "@/components/BrandCarousel";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import MediaCarousel from "@/components/MediaCarousel";
 import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import RequestPosterCard from "@/components/RequestPosterCard";
@@ -13,23 +14,24 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { MediaRequest, RequestDiscoverySection, RequestMediaResult } from "@/api/types";
+import type { MediaRequest, RequestDiscoverySection } from "@/api/types";
 import {
   useCancelMediaRequest,
   useDiscoverGenres,
   useDiscoverNetworks,
   useDiscoverStudios,
   useMyMediaRequests,
+  useRemoveFailedMediaRequest,
   useRequestDiscovery,
 } from "@/hooks/queries/useRequests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate } from "@/lib/datetime";
 import {
   canCancelOwnRequest,
+  canRemoveOwnRequest,
   formatMediaType,
   formatRequestDate,
   formatSeasonList,
@@ -79,7 +81,11 @@ const STATUS_HELP: Array<{ state: RequestDisplayState; description: string }> = 
   { state: "available", description: "In your library and ready to watch." },
   { state: "declined", description: "An admin declined it." },
   { state: "cancelled", description: "Withdrawn before it was sent to the download automation." },
-  { state: "failed", description: "Silo or the download automation hit an error." },
+  {
+    state: "failed",
+    description:
+      "Silo or the download automation hit an error. You can remove it if nothing was delivered.",
+  },
 ];
 
 /**
@@ -181,93 +187,97 @@ function RequestsHub() {
 
 function DiscoverTab() {
   const discovery = useRequestDiscovery();
-  const studios = useDiscoverStudios();
-  const networks = useDiscoverNetworks();
-  const genres = useDiscoverGenres();
-  const { submit, isSubmitting } = useSubmitMediaRequest();
   const watchlist = useWatchlistTitleToggle();
 
   if (discovery.isLoading) return <DiscoverRowsSkeleton />;
 
+  if (discovery.isError) {
+    return (
+      <div className={cn(PAGE_GUTTER, "flex flex-col items-center gap-4 py-16 text-center")}>
+        <p className="text-muted-foreground text-sm">
+          TMDB couldn&rsquo;t be reached, so there is nothing to discover right now.
+        </p>
+        <button
+          type="button"
+          onClick={() => void discovery.refetch()}
+          className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
+        >
+          <RefreshCw className="h-4 w-4" />
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // The admin's layout sets the rows and their order; a title row without
+  // titles is not in sections and draws nothing.
+  const sections = new Map((discovery.data?.sections ?? []).map((s) => [s.key, s]));
   return (
     <div className="space-y-10">
-      {discovery.isError ? (
-        <div className={cn(PAGE_GUTTER, "flex flex-col items-center gap-4 py-16 text-center")}>
-          <p className="text-muted-foreground text-sm">
-            TMDB couldn&rsquo;t be reached, so there is nothing to discover right now.
-          </p>
-          <button
-            type="button"
-            onClick={() => void discovery.refetch()}
-            className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Retry
-          </button>
-        </div>
-      ) : (
-        (discovery.data ?? []).map((section) => (
-          <DiscoverRow
-            key={section.key}
-            section={section}
-            isSubmitting={isSubmitting}
-            onRequest={submit}
-            watchlist={watchlist}
-          />
-        ))
-      )}
-      <BrandCarousel
-        kind="studio"
-        title="Studios"
-        cards={studios.data}
-        isLoading={studios.isLoading}
-        isError={studios.isError}
-        onRetry={() => void studios.refetch()}
-      />
-      <BrandCarousel
-        kind="network"
-        title="Networks"
-        cards={networks.data}
-        isLoading={networks.isLoading}
-        isError={networks.isError}
-        onRetry={() => void networks.refetch()}
-      />
-      <BrandCarousel
-        kind="genre"
-        title="Genres"
-        cards={genres.data}
-        isLoading={genres.isLoading}
-        isError={genres.isError}
-        onRetry={() => void genres.refetch()}
-      />
+      {(discovery.data?.rows ?? []).map((row) => {
+        if (isBrandSourceType(row.type)) {
+          return <BrandRow key={row.key} type={row.type} title={row.title} />;
+        }
+        const section = sections.get(row.key);
+        return section ? (
+          <DiscoverRow key={row.key} section={section} watchlist={watchlist} />
+        ) : null;
+      })}
     </div>
+  );
+}
+
+const BRAND_ROW_SOURCES = {
+  studios: { kind: "studio", useCards: useDiscoverStudios },
+  networks: { kind: "network", useCards: useDiscoverNetworks },
+  genres: { kind: "genre", useCards: useDiscoverGenres },
+} as const;
+
+type BrandSourceType = keyof typeof BRAND_ROW_SOURCES;
+
+function isBrandSourceType(type: string): type is BrandSourceType {
+  return Object.hasOwn(BRAND_ROW_SOURCES, type);
+}
+
+/** A carousel of studios, networks or genres; its list loads only when the layout shows it. */
+function BrandRow({ type, title }: { type: BrandSourceType; title: string }) {
+  const { kind, useCards } = BRAND_ROW_SOURCES[type];
+  const cards = useCards();
+  return (
+    <BrandCarousel
+      kind={kind}
+      title={title}
+      cards={cards.data}
+      isLoading={cards.isLoading}
+      isError={cards.isError}
+      onRetry={() => void cards.refetch()}
+    />
   );
 }
 
 function DiscoverRow({
   section,
-  isSubmitting,
-  onRequest,
   watchlist,
 }: {
   section: RequestDiscoverySection;
-  isSubmitting: (item: RequestMediaResult) => boolean;
-  onRequest: (item: RequestMediaResult) => void;
   watchlist: ReturnType<typeof useWatchlistTitleToggle>;
 }) {
   if (section.results.length === 0) return null;
   return (
     <MediaCarousel
       title={section.title}
-      viewAllHref={section.total_pages > 1 ? requestDiscoverSectionHref(section.key) : undefined}
+      // A row trimmed to its size has more titles even on a one-page source.
+      viewAllHref={
+        section.total_pages > 1 || section.total_results > section.results.length
+          ? requestDiscoverSectionHref(section.key)
+          : undefined
+      }
     >
       {section.results.map((item) => (
         <RequestPosterCard
           key={`${item.media_type}-${item.tmdb_id}`}
           variant="discover"
           item={item}
-          isSubmitting={isSubmitting(item)}
-          onRequest={() => onRequest(item)}
           onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
           isWatchlistPending={watchlist.isPending(item)}
         />
@@ -292,6 +302,9 @@ function YoursTab({
   const cancelRequest = useCancelMediaRequest();
   const [cancelTarget, setCancelTarget] = useState<MediaRequest | null>(null);
   const cancellingID = cancelRequest.isPending ? cancelRequest.variables : undefined;
+  const removeRequest = useRemoveFailedMediaRequest();
+  const [removeTarget, setRemoveTarget] = useState<MediaRequest | null>(null);
+  const removingID = removeRequest.isPending ? removeRequest.variables : undefined;
   const groups = useMemo(() => groupRequests(requests), [requests]);
 
   let body;
@@ -349,6 +362,10 @@ function YoursTab({
                       canCancelOwnRequest(request) ? () => setCancelTarget(request) : undefined
                     }
                     isCancelling={cancellingID === request.id}
+                    onRemove={
+                      canRemoveOwnRequest(request) ? () => setRemoveTarget(request) : undefined
+                    }
+                    isRemoving={removingID === request.id}
                   />
                 ))}
               </ul>
@@ -379,6 +396,21 @@ function YoursTab({
         }}
         isPending={cancelRequest.isPending}
       />
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(null);
+        }}
+        title="Remove this request?"
+        description={`Your failed request for "${removeTarget?.title ?? ""}" will be deleted. You can request the title again later.`}
+        confirmLabel="Remove request"
+        cancelLabel="Keep request"
+        variant="destructive"
+        onConfirm={() => {
+          if (removeTarget) removeRequest.mutate(removeTarget.id);
+        }}
+        isPending={removeRequest.isPending}
+      />
     </div>
   );
 }
@@ -387,11 +419,16 @@ function RequestRow({
   request,
   onCancel,
   isCancelling,
+  onRemove,
+  isRemoving,
 }: {
   request: MediaRequest;
   /** Offered only while the request can still be withdrawn. */
   onCancel?: () => void;
   isCancelling: boolean;
+  /** Offered only on a failed request that delivered nothing. */
+  onRemove?: () => void;
+  isRemoving: boolean;
 }) {
   const state = requestDisplayState(request.status, request.outcome, request.state);
   const href = requestDetailHref(request.media_type, request.tmdb_id);
@@ -470,7 +507,7 @@ function RequestRow({
           ) : null}
         </div>
 
-        {onCancel || request.library_content_id ? (
+        {onCancel || onRemove || request.library_content_id ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {request.library_content_id ? (
               <Button asChild variant="outline" size="sm">
@@ -493,6 +530,18 @@ function RequestRow({
                 aria-label={`Cancel request for ${request.title}`}
               >
                 Cancel request
+              </Button>
+            ) : null}
+            {onRemove ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onRemove}
+                disabled={isRemoving}
+                aria-label={`Remove request for ${request.title}`}
+              >
+                Remove request
               </Button>
             ) : null}
           </div>

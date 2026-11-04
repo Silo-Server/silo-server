@@ -1,6 +1,9 @@
 package naming
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestExplicitEpisodeMarkersSupportLargeSeasonNumbers(t *testing.T) {
 	for _, tt := range []struct {
@@ -295,6 +298,21 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		{"/tv/Example 5/Example.5.1x01.Title.mkv", 1, 1, true},
 		{"/tv/Example SG-1/Example.SG-1.2x05.mkv", 2, 5, true},
 		{"/tv/Example Show/Season 1/[Group] Example Show - 02 [16x9 1080p].mkv", 1, 2, true},
+		{"/tv/Example Show/Example Show - [1x02] - Second.mkv", 1, 2, true},
+		{"/tv/Example Show/Example Show (1x02).mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show - [ 1x03 ].mkv", 1, 3, true},
+		{"/tv/Example Show/Season 1/Example Show - 02 [4x3].mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show - 02 (16x9).mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show - 02 [1920x1080].mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show [16x10] - 02.mkv", 1, 2, true},
+		{"/tv/Example Show/Season 1/Example Show - 03 - Title (2x14).mkv", 1, 3, true},
+		{"/tv/Example Show/Season 1/Example Show - E03 - Title [2x14].mkv", 1, 3, true},
+		{"/tv/24/Season 1/24 [1x02].mkv", 1, 2, true},
+		{"/tv/24/24 [1x02].mkv", 1, 2, true},
+		{"/tv/Example Show/03/03 (2x14).mkv", 3, 3, true},
+		{"/tv/Example Show/Season 1/[1x02] - Arrival (2018).mkv", 1, 2, true},
+		// Each bracketed code must not re-parse the text before it.
+		{"/tv/Example Show/Season 1/Example Show - 05" + strings.Repeat(" (11x11)", 30) + ".mkv", 1, 5, true},
 		{"/tv/Example Show/Season 1/Example.Show.1920x1080.E02.mkv", 1, 2, true},
 		{"/tv/Example Show/Example Show - 4x3 - Title.mkv", 4, 3, true},
 		{"/tv/Example Show/Season 1/Example.Show.16x9.E02.mkv", 1, 2, true},
@@ -322,6 +340,13 @@ func TestXCoordinatesRejectAudioLayoutsAndDimensions(t *testing.T) {
 		"/mixed/4x4.2019.1080p.mkv",
 		"/mixed/10x10 - 2018.mkv",
 		"/mixed/Example.Movie.176x144.3gp",
+		"/mixed/Example Movie [16x9].mkv",
+		"/mixed/Example Movie (4x3).mkv",
+		"/mixed/Example Movie [1920x1080].mkv",
+		"/mixed/Example Movie (2019)/Example Movie (2019) [2x1].mkv",
+		"/mixed/[10x10] (2018).mkv",
+		"/mixed/Example Movie [16X10].mkv",
+		"/mixed/Example Movie [WEB-DL (1x02)].mkv",
 	} {
 		t.Run(path, func(t *testing.T) {
 			if ctx := ResolvePathContext(path, "mixed", "/mixed"); ctx.Type != "movie" || ctx.HasEpisodePattern {

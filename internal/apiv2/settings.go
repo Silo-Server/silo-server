@@ -60,6 +60,7 @@ type SettingsContractCapabilities struct {
 	SupportsIdempotentWrites bool     `json:"supports_idempotent_writes" doc:"Whether repeating a value write converges on the same state" example:"true"`
 	SupportsAtomicShortcuts  bool     `json:"supports_atomic_shortcuts" doc:"Whether navigation shortcut list mutations are atomic" example:"true"`
 	SupportsDeviceRename     bool     `json:"supports_device_rename" doc:"Whether updateDevice can give a device a custom name, which listDevices returns as custom_name" example:"true"`
+	SupportsOverlayImages    bool     `json:"supports_overlay_images" doc:"Whether this server keeps a card overlay image library: getOverlayConfig lists it and card overlay documents may name its images" example:"true"`
 }
 
 // SettingsContractCapabilitiesOutput is the getSettingsContractCapabilities
@@ -75,10 +76,12 @@ type SettingsContractCapabilitiesOutput struct {
 // QuickActionsEnabled are defaults for profiles that have not chosen; an
 // explicit profile setting overrides them either way.
 type OverlayConfig struct {
-	Enabled             bool   `json:"enabled" doc:"Whether card overlays are enabled server-wide" example:"true"`
-	Defaults            string `json:"defaults,omitempty" doc:"Administrator-chosen overlay defaults document; absent when none is set" example:"{\"badges\":true}"`
-	QuickActionsEnabled bool   `json:"quick_actions_enabled" doc:"Default for profiles that have not chosen whether cards show quick actions" example:"false"`
-	QuickActionsDefault string `json:"quick_actions_default" doc:"Default quick-action mode; one of the ui.card_quick_actions values in the settings contract" example:"both"`
+	Enabled               bool           `json:"enabled" doc:"Whether card overlays are enabled server-wide" example:"true"`
+	Defaults              string         `json:"defaults,omitempty" doc:"Administrator-chosen overlay defaults document; absent when none is set" example:"{\"badges\":true}"`
+	QuickActionsEnabled   bool           `json:"quick_actions_enabled" doc:"Default for profiles that have not chosen whether cards show quick actions" example:"false"`
+	QuickActionsDefault   string         `json:"quick_actions_default" doc:"Default quick-action mode; one of the ui.card_quick_actions values in the settings contract" example:"both"`
+	Images                []OverlayImage `json:"images" doc:"Images administrators uploaded for badges, in upload order; card overlay documents name them by ref"`
+	ImageUploadsAvailable bool           `json:"image_uploads_available" doc:"Whether this server has the asset storage uploadAdminOverlayImage needs" example:"true"`
 }
 
 // OverlayConfigOutput is the getOverlayConfig response.
@@ -436,6 +439,7 @@ func (reg *Registry) getSettingsContractCapabilities(ctx context.Context, _ *Cap
 		SupportsIdempotentWrites: view.SupportsIdempotentWrites,
 		SupportsAtomicShortcuts:  view.SupportsAtomicShortcuts,
 		SupportsDeviceRename:     reg.deps.DeviceSettings != nil,
+		SupportsOverlayImages:    reg.deps.OverlayImages != nil,
 	}}, nil
 }
 
@@ -444,13 +448,16 @@ func (reg *Registry) getOverlayConfig(ctx context.Context, _ *struct{}) (*Overla
 		return nil, unavailable("settings")
 	}
 	view := reg.deps.Settings.OverlayConfig(ctx)
+	images, uploadsAvailable := reg.overlayImagesFor(ctx)
 	return &OverlayConfigOutput{
 		CacheControl: cachePrivateNoCache,
 		Body: OverlayConfig{
-			Enabled:             view.Enabled,
-			Defaults:            view.Defaults,
-			QuickActionsEnabled: view.QuickActionsEnabled,
-			QuickActionsDefault: view.QuickActionsDefault,
+			Enabled:               view.Enabled,
+			Defaults:              view.Defaults,
+			QuickActionsEnabled:   view.QuickActionsEnabled,
+			QuickActionsDefault:   view.QuickActionsDefault,
+			Images:                images,
+			ImageUploadsAvailable: uploadsAvailable,
 		},
 	}, nil
 }
@@ -852,7 +859,7 @@ type EffectiveSettingsQuery struct {
 	DeviceID       string   `query:"device_id" maxLength:"128" doc:"Another registered device of the profile to resolve for; absent means the declared device" example:"tv-1"`
 	LibraryIDs     []ID     `query:"library_ids,explode" maxItems:"200" doc:"Libraries whose profile_library values take part, one library_ids parameter per id" example:"[\"3\"]"`
 	SeriesIDs      []string `query:"series_ids,explode" maxItems:"200" doc:"Series whose profile_series values take part, one series_ids parameter per id" example:"[\"tv:12345\"]"`
-	ClientFamily   string   `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; required when a requested key has that scope" example:"tv"`
+	ClientFamily   string   `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; optional, and absence skips the profile_client layer" example:"tv"`
 	DeviceHeader   string   `header:"X-Silo-Device-Id" maxLength:"128" doc:"The client's stable device identifier; its profile_device values take part" example:"iphone-1"`
 	DeviceName     string   `header:"X-Silo-Device-Name" maxLength:"120" doc:"Optional display name recorded on the device registry" example:"Living room"`
 	DevicePlatform string   `header:"X-Silo-Device-Platform" maxLength:"40" doc:"Optional platform recorded on the device registry" example:"iOS"`
@@ -923,7 +930,7 @@ type EffectiveSettingsBatch struct {
 // profile_id, device_id, library_ids or series_ids parameters of
 // listEffectiveSettings; v1 read those on the batch route and ignored them.
 type EffectiveSettingsBatchTarget struct {
-	ClientFamily   string `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; required when a requested key has that scope" example:"tv"`
+	ClientFamily   string `header:"X-Silo-Client-Family" enum:"tv,mobile,tablet,desktop,web" doc:"The client family whose profile_client values take part; optional, and absence skips the profile_client layer" example:"tv"`
 	DeviceHeader   string `header:"X-Silo-Device-Id" maxLength:"128" doc:"The client's stable device identifier; its profile_device values take part" example:"iphone-1"`
 	DeviceName     string `header:"X-Silo-Device-Name" maxLength:"120" doc:"Optional display name recorded on the device registry" example:"Living room"`
 	DevicePlatform string `header:"X-Silo-Device-Platform" maxLength:"40" doc:"Optional platform recorded on the device registry" example:"iOS"`

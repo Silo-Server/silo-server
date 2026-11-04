@@ -416,7 +416,9 @@ func (h *ImagesHandler) resolveCatalogImageURL(ctx context.Context, contentID, i
 			if err := ensureAccessible(series); err != nil {
 				return catalog.ResolvedImageURL{}, false, err
 			}
-			if imageURL := h.imageURLForItem(ctx, season.PosterPath, "poster", series.BackdropPath, series.LogoPath, imageType, imageSize); imageURL.URL != "" {
+			// A season's own backdrop wins over the series', as in season detail.
+			backdropPath := firstNonEmpty(season.BackdropPath, series.BackdropPath)
+			if imageURL := h.imageURLForItem(ctx, season.PosterPath, "poster", backdropPath, series.LogoPath, imageType, imageSize); imageURL.URL != "" {
 				return imageURL, true, nil
 			}
 		} else if !errors.Is(err, catalog.ErrSeasonNotFound) {

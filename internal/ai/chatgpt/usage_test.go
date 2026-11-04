@@ -74,7 +74,8 @@ func TestUsagePauseBlocksReadinessAndPinnedRequestsUntilExplicitCheck(t *testing
 		t.Fatal(err)
 	}
 	store.values[authModeSetting] = "api_key"
-	store.values["ai.base_url"] = "https://api.example.test"
+	store.values["ai.providers"] = `{"version":1,"providers":[{"id":"api","type":"custom","name":"API","base_url":"https://api.example.test","capabilities":["chat"]}]}`
+	store.values["ai.text_provider_id"] = "api"
 	apiConfig, err := s.TextConfig(t.Context())
 	if err != nil || !apiConfig.TextConfigured() || apiConfig.ChatGPTUsageLimited != nil || apiConfig.ChatGPTUsageVerified != nil || apiConfig.ChatGPTTokenSource != nil {
 		t.Fatalf("pause affected API-key provider: %+v, %v", apiConfig, err)

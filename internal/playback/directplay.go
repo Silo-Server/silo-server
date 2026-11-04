@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
@@ -91,7 +92,7 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 	// WriteTimeout; roll the write deadline with progress instead.
 	streamWriter := httpstream.NewRollingDeadlineWriter(w)
 	w = streamWriter
-	f, err := os.Open(filePath)
+	f, err := fspath.Open(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, "file not found", http.StatusNotFound)

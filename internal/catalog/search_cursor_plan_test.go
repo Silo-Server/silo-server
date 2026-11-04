@@ -172,6 +172,7 @@ func TestSearchSQLReferencesEveryBoundArgument(t *testing.T) {
 	repo := &ItemRepository{}
 	value := func(s string) *string { return &s }
 	exactContinuation := &SearchCursor{Mode: searchCursorFTS, Keys: []QueryCursorValue{
+		{Kind: cursorKindNumber, Value: value("0")},
 		{Kind: cursorKindNumber, Value: value("1")}, {Kind: cursorKindNumber, Value: value("1")},
 		{Kind: cursorKindNumber, Value: value("0")}, {Kind: cursorKindNumber, Value: value("0")},
 		{Kind: cursorKindNumber, Value: value("0.1")}, {Kind: cursorKindNumber, Value: value("0")},

@@ -150,13 +150,17 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 // attributed to a single episode.
 func embyWatchedRecords(item embyItem, series embyItem) []Record {
 	record := normalizeEmbyItem(item, series)
-	count := item.IndexNumberEnd - item.IndexNumber + 1
-	if record.Kind != KindEpisode || !record.Played || count < 2 || count > maxEmbyEpisodeRange {
+	// The remote server supplies these numbers: bound them before subtracting,
+	// and loop over an offset so an end of math.MaxInt cannot wrap the counter.
+	first, last := item.IndexNumber, item.IndexNumberEnd
+	if record.Kind != KindEpisode || !record.Played || first < 0 || last <= first || last-first >= maxEmbyEpisodeRange {
 		return []Record{record}
 	}
+	count := last - first + 1
 	record.DurationSeconds /= float64(count)
 	records := []Record{record}
-	for episode := item.IndexNumber + 1; episode <= item.IndexNumberEnd; episode++ {
+	for offset := 1; offset < count; offset++ {
+		episode := first + offset
 		next := record
 		next.ExternalID = fmt.Sprintf("%s#E%d", item.ID, episode)
 		next.EpisodeNumber = episode

@@ -7,11 +7,14 @@ import (
 	"io/fs"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/ai/jobrunner"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -639,6 +642,31 @@ func TestExecuteSyncsSidecar(t *testing.T) {
 	assertTiming(t, f.jobs.applied[job.ID], truth, 7200)
 	if len(f.notifier.targets) != 1 || f.notifier.targets[0] != (subtitles.SyncTarget{MediaFileID: 9, ExternalPath: sidecar.Path}) {
 		t.Fatalf("notified %+v", f.notifier.targets)
+	}
+}
+
+// A sidecar whose name is not UTF-8 is stored fspath-encoded; the service
+// reads it through fspath, as NewService wires it.
+func TestExecuteSyncsSidecarWithNonUTF8Name(t *testing.T) {
+	truth := subtitles.Timing{Scale: 1, OffsetMS: -3200}
+	f := newFixture(t, truth, settingsMap{SettingExecution: ExecutionLocal}, "stereo")
+	data := f.svc.content.(*fakeSubtitles).data
+	raw := filepath.Join(t.TempDir(), "B\xe5rd.en.srt")
+	if err := os.WriteFile(raw, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	sidecar := models.ExternalSubtitle{Path: fspath.Encode(raw), Language: "en", Format: "srt"}
+	f.svc.files.(fakeFiles).file.ExternalSubtitles = []models.ExternalSubtitle{sidecar}
+	f.svc.readFile = fspath.ReadFile
+	external := &fakeExternal{}
+	f.svc.external = external
+
+	if _, err := external.EnsureExternalTiming(context.Background(), 9, subtitles.ContentSHA256(data), sidecar.Path, subtitles.FormatSRT); err != nil {
+		t.Fatal(err)
+	}
+	job := f.runExternal(t, external.row)
+	if job.Status != string(StatusSynced) {
+		t.Fatalf("status %s: %+v", job.Status, f.jobs.finished[job.ID])
 	}
 }
 

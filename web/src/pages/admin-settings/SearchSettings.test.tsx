@@ -20,15 +20,24 @@ vi.mock("@/hooks/queries/admin/settings", () => ({
   useCatalogSearchStatus: () => ({ data: undefined, isLoading: true }),
 }));
 
-const makeForm = (values: Record<string, string>, dirty: string[] = []) =>
+const makeForm = (
+  values: Record<string, string>,
+  dirty: string[] = [],
+  overrides: Record<string, unknown> = {},
+) =>
   fakeSettingsForm(values, {
     dirty,
     buildConnectionCheckRequest: vi.fn(() => ({ values: {}, dirty_keys: [] })),
+    ...overrides,
   });
 
 /** The page's one group, from static markup. */
-function render(values: Record<string, string>, dirty: string[] = []): HTMLElement {
-  useSettingsFormMock.mockReturnValue(makeForm(values, dirty));
+function render(
+  values: Record<string, string>,
+  dirty: string[] = [],
+  overrides: Record<string, unknown> = {},
+): HTMLElement {
+  useSettingsFormMock.mockReturnValue(makeForm(values, dirty, overrides));
   const container = document.createElement("div");
   container.innerHTML = renderToStaticMarkup(
     <MemoryRouter>
@@ -68,5 +77,35 @@ describe("SearchSettings", () => {
     ]);
 
     expect(group.textContent).toContain("Meilisearch URL");
+  });
+
+  it("locks the connection fields the environment sets, and only those", () => {
+    const group = render(
+      {
+        "catalog.search.provider": "meilisearch",
+        "catalog.search.meilisearch.url": "http://meilisearch:7700",
+      },
+      [],
+      {
+        sensitiveManagedByEnv: ["catalog.search.provider", "catalog.search.meilisearch.url"],
+      },
+    );
+
+    expect(group.querySelector("button[role=combobox]")?.hasAttribute("disabled")).toBe(true);
+    expect(group.textContent).toContain("Managed by SILO_SEARCH_PROVIDER.");
+    expect(
+      group.querySelector("input[value='http://meilisearch:7700']")?.hasAttribute("disabled"),
+    ).toBe(true);
+    expect(group.querySelector("input[type=password]")?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("holds the connection fields when it cannot tell which ones the environment sets", () => {
+    const group = render({ "catalog.search.provider": "meilisearch" }, [], {
+      sensitiveStatusError: true,
+    });
+
+    expect(group.querySelector("button[role=combobox]")?.hasAttribute("disabled")).toBe(true);
+    expect(group.querySelector("input[type=password]")?.hasAttribute("disabled")).toBe(true);
+    expect(group.textContent).toContain("Protected credential status could not be loaded.");
   });
 });

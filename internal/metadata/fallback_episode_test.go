@@ -2,7 +2,9 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -298,15 +300,22 @@ func (r *fakeSeasonRepo) Upsert(_ context.Context, s *models.Season) error {
 
 func (r *fakeSeasonRepo) applyUpsertLocked(s *models.Season) {
 	key := seasonKey(s.SeriesID, s.SeasonNumber)
-	if existing, ok := r.seasons[key]; ok {
+	existing, ok := r.seasons[key]
+	if ok {
 		// Preserve existing content_id (mirrors ON CONFLICT behavior).
 		s.ContentID = existing.ContentID
-		cp := *s
-		r.seasons[key] = &cp
-	} else {
-		cp := *s
-		r.seasons[key] = &cp
 	}
+	cp := *s
+	cp.WriteBackdrop, cp.BackdropFillOnly = false, false
+	// Like SeasonRepository, only a write marked WriteBackdrop changes the
+	// stored backdrop.
+	if !s.WriteBackdrop || (s.BackdropFillOnly && ok && existing.BackdropPath != "") {
+		cp.BackdropPath, cp.BackdropSourcePath, cp.BackdropThumbhash = "", "", ""
+		if ok {
+			cp.BackdropPath, cp.BackdropSourcePath, cp.BackdropThumbhash = existing.BackdropPath, existing.BackdropSourcePath, existing.BackdropThumbhash
+		}
+	}
+	r.seasons[key] = &cp
 }
 
 func (r *fakeSeasonRepo) BulkUpsert(_ context.Context, seasons []*models.Season) error {
@@ -318,6 +327,17 @@ func (r *fakeSeasonRepo) BulkUpsert(_ context.Context, seasons []*models.Season)
 	}
 	for _, s := range seasons {
 		r.applyUpsertLocked(s)
+	}
+	return nil
+}
+
+func (r *fakeSeasonRepo) ClearBackdropsExcept(_ context.Context, seriesID string, keep []int32) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.seasons {
+		if s.SeriesID == seriesID && !slices.Contains(keep, int32(s.SeasonNumber)) {
+			s.BackdropPath, s.BackdropSourcePath, s.BackdropThumbhash = "", "", ""
+		}
 	}
 	return nil
 }
@@ -1298,5 +1318,196 @@ func TestEnsureSeriesEpisodeLinks_CoalescesConcurrentFallbackWork(t *testing.T) 
 	}
 	if ep.MetadataSource != "scanner_fallback" {
 		t.Fatalf("expected synthesized episode metadata source scanner_fallback, got %q", ep.MetadataSource)
+	}
+}
+
+// claimAfterReadDebtRepo makes a refresh claim each row just after the sweep
+// reads it, as a nudge followed by ClaimDue can between the sweep's read and
+// its restart.
+type claimAfterReadDebtRepo struct {
+	*fakeRefreshDebtRepo
+}
+
+func (r *claimAfterReadDebtRepo) GetTarget(ctx context.Context, targetType, contentID string) (*models.MetadataRefreshDebt, error) {
+	debt, err := r.fakeRefreshDebtRepo.GetTarget(ctx, targetType, contentID)
+	if err == nil {
+		r.mu.Lock()
+		row := r.debts[fakeRefreshDebtKey(targetType, contentID)]
+		lease := time.Now().Add(RefreshDebtLeaseDuration)
+		row.NextRefreshAt = time.Now().Add(-time.Minute)
+		row.LeaseExpiresAt = &lease
+		row.AttemptCount++
+		r.mu.Unlock()
+	}
+	return debt, err
+}
+
+// TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes covers
+// issue #3340: a by-date file that aired after every stored episode proves the
+// stored episode list is behind, so the series must be refreshed even though
+// no placeholder episode can be built for it.
+func TestEnsureSeriesEpisodeLinks_QueuesRefreshForFilesPastStoredEpisodes(t *testing.T) {
+	// The parked row's last attempt ran on 2024-05-06: an episode that aired
+	// that day may postdate it, so only earlier dates count as seen.
+	lastAttempt := time.Date(2024, 5, 6, 12, 0, 0, 0, time.UTC)
+	parked := &models.MetadataRefreshDebt{
+		TargetType:    RefreshTargetItem,
+		ReasonMask:    RefreshDebtReasonEpisodeIncomplete,
+		Priority:      refreshDebtTerminalPriority,
+		AttemptCount:  refreshDebtEpisodeTerminalAttempts,
+		LastAttemptAt: &lastAttempt,
+		NextRefreshAt: time.Now().Add(refreshDebtTerminalDelay).Truncate(time.Second),
+	}
+	// A refresh that claimed the due row for its third attempt holds a lease
+	// and settles the row itself.
+	leaseExpires := time.Now().Add(time.Hour)
+	claimed := *parked
+	claimed.LeaseExpiresAt = &leaseExpires
+	claimed.NextRefreshAt = time.Now().Add(-time.Minute).Truncate(time.Second)
+	// Series debt that exhausted its attempts on lasting core-metadata debt
+	// still holds a viewer's trailer request. The episode reason it gains,
+	// alone or next to an earlier one, must start from no attempts.
+	terminalCore := *parked
+	terminalCore.ReasonMask = RefreshDebtReasonCoreMetadataIncomplete | RefreshDebtReasonTrailersRequested
+	terminalCore.Priority = refreshDebtPriority(terminalCore.ReasonMask)
+	terminalCore.AttemptCount = 5
+	terminalCore.NextRefreshAt = time.Now().Add(30 * 24 * time.Hour).Truncate(time.Second)
+	terminalMixed := terminalCore
+	terminalMixed.ReasonMask |= RefreshDebtReasonEpisodeIncomplete
+	for _, tc := range []struct {
+		name           string
+		fileDate       string
+		existing       *models.MetadataRefreshDebt
+		claimAfterRead bool
+		wantIncomplete bool
+		wantDue        bool
+	}{
+		{name: "file newer than stored episodes", fileDate: "2024-05-06", wantIncomplete: true, wantDue: true},
+		{name: "unknown date inside stored range", fileDate: "2024-05-02"},
+		{name: "parked debt ignores a date that has not aired", fileDate: "2099-01-01", existing: parked},
+		{name: "parked debt ignores a date its last attempt saw", fileDate: "2024-05-05", existing: parked, wantIncomplete: true},
+		{name: "parked debt restarts for a date aired on or after its last attempt", fileDate: "2024-05-06", existing: parked, wantIncomplete: true, wantDue: true},
+		{name: "terminal debt for another reason restarts with the episode reason", fileDate: "2024-05-06", existing: &terminalCore, wantIncomplete: true, wantDue: true},
+		{name: "terminal debt with other reasons restarts its episode reason", fileDate: "2024-05-06", existing: &terminalMixed, wantIncomplete: true, wantDue: true},
+		{name: "terminal debt for another reason ignores a date its last attempt saw", fileDate: "2024-05-05", existing: &terminalCore, wantIncomplete: true},
+		{name: "terminal debt with other reasons ignores a date its last attempt saw", fileDate: "2024-05-05", existing: &terminalMixed, wantIncomplete: true},
+		{name: "claimed debt is left to its claim", fileDate: "2024-05-06", existing: &claimed, wantIncomplete: true},
+		{name: "debt claimed after the sweep reads it is left to its claim", fileDate: "2024-05-06", existing: parked, claimAfterRead: true, wantIncomplete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newFallbackTestHarness()
+			debts := newFakeRefreshDebtRepo()
+			h.service.refreshDebtRepo = debts
+			if tc.claimAfterRead {
+				h.service.refreshDebtRepo = &claimAfterReadDebtRepo{fakeRefreshDebtRepo: debts}
+			}
+			ctx := context.Background()
+			const seriesID = "series-daily-behind"
+			seedAirDateSeries(ctx, t, h, seriesID,
+				&models.Episode{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1, Title: "Wednesday", TvdbID: "1001", AirDate: mustDate(t, "2024-05-01")},
+				&models.Episode{ContentID: "ep-2", SeasonNumber: 1, EpisodeNumber: 2, Title: "Friday", TvdbID: "1002", AirDate: mustDate(t, "2024-05-03")},
+			)
+			if tc.existing != nil {
+				existing := *tc.existing
+				existing.ContentID = seriesID
+				debts.debts[fakeRefreshDebtKey(RefreshTargetItem, seriesID)] = &existing
+			}
+			addAirDateFile(h, seriesID, 301, "/media/tv/Daily Show (2024)/Season 01/Daily Show (2024) - "+tc.fileDate+" - Episode.mkv")
+
+			if err := h.service.ensureSeriesEpisodeLinks(ctx, seriesID); err != nil {
+				t.Fatalf("ensureSeriesEpisodeLinks failed: %v", err)
+			}
+
+			item, err := h.itemRepo.GetByID(ctx, seriesID)
+			if err != nil {
+				t.Fatalf("load series: %v", err)
+			}
+			if item.EpisodeMetadataIncomplete != tc.wantIncomplete {
+				t.Errorf("EpisodeMetadataIncomplete = %v, want %v", item.EpisodeMetadataIncomplete, tc.wantIncomplete)
+			}
+			debt := debts.debts[fakeRefreshDebtKey(RefreshTargetItem, seriesID)]
+			switch {
+			case tc.claimAfterRead:
+				if debt == nil || debt.LeaseExpiresAt == nil || debt.AttemptCount != tc.existing.AttemptCount+1 {
+					t.Errorf("claimed debt = %+v, want the claim's row kept", debt)
+				}
+			case tc.existing != nil && !tc.wantDue:
+				if debt == nil || debt.Priority != tc.existing.Priority ||
+					debt.AttemptCount != tc.existing.AttemptCount || !debt.NextRefreshAt.Equal(tc.existing.NextRefreshAt) {
+					t.Errorf("parked debt changed: %+v", debt)
+				}
+			case tc.wantDue:
+				var kept int64
+				if tc.existing != nil {
+					kept = tc.existing.ReasonMask
+				}
+				if debt == nil || !hasRefreshDebtReason(debt.ReasonMask, RefreshDebtReasonEpisodeIncomplete) || debt.ReasonMask&kept != kept ||
+					debt.Priority != refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete) || debt.NextRefreshAt.After(time.Now()) || debt.AttemptCount != 0 {
+					t.Errorf("series debt = %+v, want fresh episode-incomplete debt due now that keeps reasons %d", debt, kept)
+				}
+			default:
+				if debt != nil {
+					t.Errorf("unexpected series debt %+v", debt)
+				}
+			}
+		})
+	}
+}
+
+// failingAirDateEpisodeRepo fails the air-date lookup the completeness sweep
+// runs for a series' unlinked by-date files.
+type failingAirDateEpisodeRepo struct {
+	*fakeEpisodeRepo
+}
+
+func (failingAirDateEpisodeRepo) ListBySeriesAndAirDates(context.Context, string, []string) (map[string][]*models.Episode, error) {
+	return nil, errors.New("air-date lookup failed")
+}
+
+// TestRefreshSeriesEpisodeMetadataState_KeepsSeriesDebtWhenByDateCheckFails
+// covers a failed by-date check: clearing the flag would let the refresh's
+// settle drop the series debt, the only trigger left for the unlinked file.
+func TestRefreshSeriesEpisodeMetadataState_KeepsSeriesDebtWhenByDateCheckFails(t *testing.T) {
+	h := newFallbackTestHarness()
+	debts := newFakeRefreshDebtRepo()
+	h.service.refreshDebtRepo = debts
+	ctx := context.Background()
+	const seriesID = "series-daily-check-fails"
+	seedAirDateSeries(ctx, t, h, seriesID,
+		&models.Episode{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1, Title: "Friday", TvdbID: "1001", AirDate: mustDate(t, "2024-05-03")},
+	)
+	item, err := h.itemRepo.GetByID(ctx, seriesID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.EpisodeMetadataIncomplete = true
+	if err := h.itemRepo.Upsert(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	queued := &models.MetadataRefreshDebt{
+		TargetType:    RefreshTargetItem,
+		ContentID:     seriesID,
+		ReasonMask:    RefreshDebtReasonEpisodeIncomplete,
+		Priority:      refreshDebtPriority(RefreshDebtReasonEpisodeIncomplete),
+		AttemptCount:  1,
+		NextRefreshAt: time.Now().Add(24 * time.Hour).Truncate(time.Second),
+	}
+	debts.debts[fakeRefreshDebtKey(RefreshTargetItem, seriesID)] = queued
+	addAirDateFile(h, seriesID, 301, "/media/tv/Daily Show (2024)/Season 01/Daily Show (2024) - 2024-05-06 - Episode.mkv")
+	h.service.episodeRepo = failingAirDateEpisodeRepo{fakeEpisodeRepo: h.episodeRepo}
+
+	if h.service.refreshSeriesEpisodeMetadataState(ctx, seriesID, time.Now()) {
+		t.Error("sweep reported success after the by-date check failed")
+	}
+	item, err = h.itemRepo.GetByID(ctx, seriesID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !item.EpisodeMetadataIncomplete {
+		t.Error("EpisodeMetadataIncomplete cleared after the by-date check failed")
+	}
+	if debt := debts.debts[fakeRefreshDebtKey(RefreshTargetItem, seriesID)]; debt == nil || debt.AttemptCount != 1 ||
+		!debt.NextRefreshAt.Equal(queued.NextRefreshAt) {
+		t.Errorf("series debt = %+v, want it kept as queued", debt)
 	}
 }

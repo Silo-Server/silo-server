@@ -29,12 +29,23 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `branding/…` | branding assets |
 | `collection-images/…` | collection artwork |
 | `library-posters/…` | library posters |
+| `overlay-images/…` | card overlay badge images, one `<sha256>.webp` per image the `overlay_images` table lists |
 | `chapter-images/…` | chapter thumbnails: one `{file_id}/{chapter_index}/w{width}.webp` per chapter at `playback.preview_image_width`, the key `thumbnail_path` holds |
 | `markers/…` | intro and credit markers |
 | `subtitles/…` | downloaded subtitles |
+| `subtitles/embedded/…` | kept embedded subtitle tracks (`internal/keptsub`): `{file_id}/{stream_index}-{sha256}.{mks,mp4}`, in the operational store (see below) |
 | `diagnostics/…` | diagnostic bundles |
 | `catalog-seeds/…` | admin job artifacts |
 | `profile-avatars/…` | profile avatars |
+
+Kept embedded subtitle tracks come from users' media and are never delivered to
+browsers, so they are kept in the operational store, never in a bucket whose
+objects can be read outside the server's own authorization. With no operational
+store (an S3 backend with no private bucket), they use the assets bucket only
+while its reads are presigned (`public_url_auth` `presigned`). Under `public` or
+`cloudflare_token` delivery nothing is kept, and tracks are read through their
+index or demuxed instead. The blob collector and sweep reach them in whichever
+store holds them (`blobgc.Namespace.Store`).
 
 Artwork keys start with a metadata provider segment, so they do not collide with
 the reserved prefixes. That is convention rather than enforcement:
@@ -60,7 +71,11 @@ Diagnostics orphan cleanup deletes only keys shaped exactly like a bundle,
 
 Images generated from a media file (chapter thumbnails, under
 `chapter-images/<media_files.id>/`) are deleted with their file
-(`internal/blobgc`). A trigger on `media_files` deletes, whichever path
+(`internal/blobgc`). Kept embedded subtitle tracks go the same way: a trigger
+on `embedded_subtitle_tracks` queues a stream's exact key whenever its row
+goes, by replacement, by a rescan that finds the file changed, or by the
+cascade from the file's deletion, and the sweep lists them by file
+(`keptsub.StreamBlobNamespace`, `keptsub.FileBlobNamespace`). A trigger on `media_files` deletes, whichever path
 deletes the row, queues the file's prefix in `blob_gc_queue` a day out; a
 check constraint admits the supported file, image, and trickplay prefixes. The Clean
 Removed Media Images task deletes due groups whose namespace reports them
@@ -191,8 +206,8 @@ reports no match instead of an error and the object is rewritten. A HEAD
 response has no body, so the 403 cannot say whether the key is missing (AWS S3
 answers 403 for a missing key when the credential lacks `s3:ListBucket`) or the
 credential is denied. The `PutObject` that follows reports a real denial with
-the backend's error code. Other reads (`Stat`, `ObjectExists`, delivery
-verification) still return a 403 as an error.
+the backend's error code. Other reads (`Stat`, `ObjectExists`) still return a
+403 as an error.
 
 Keys are relative, non-empty, and at most 1024 bytes. Empty segments, dot
 segments, backslashes, and control characters are rejected. Local storage
@@ -213,6 +228,18 @@ and the key prefix keep their case. Releases before the identity row
 lowercased the whole endpoint, so startup accepts a recorded S3 identity whose
 endpoint equals the configured one lowercased, with the bucket and key prefix
 matching exactly, and rewrites the row in the exact form.
+A local root is resolved through symlinks in its parent directories, so the
+same directory can resolve to another path after a link is added, such as the
+omnibus image's `/var/lib/silo` link to `/config/silo`. When the recorded root
+and the configured one resolve to the same path (`SameLocalRoot`), the
+store keeps reporting the recorded identity and the row is left as it is:
+trickplay manifests, delivery scopes, and sweep checkpoints are keyed by it,
+and an image that reaches the directory by the recorded path must still open
+it. The reconcile task and storage transitions compare a local identity they
+derive from settings the same way, so naming the active directory by its other
+path is not a move. The root's own name is never followed: a store refuses a
+root that is itself a link, so a recorded root replaced by a link to another
+directory is a different location and still needs the managed transition.
 The reconcile task certifies the same row after a manual sweep, and the storage
 sweep scopes its cursor to it. Once recorded, the admin settings API rejects
 any write that would resolve to a different identity with
@@ -240,10 +267,11 @@ rejected as invalid, since the store could not open on restart.
 
 Administrators change a recorded local or S3 location through the managed
 storage-transition API. `start_fresh` does not read the source;
-`preserve_uploads` copies personal artwork uploads and downloaded subtitles when
-the assets location changes, and profile avatars when the operational location
-changes. When the assets location changes, provider artwork returns to its saved
-provider URL under `start_fresh` and `preserve_uploads`. Cached NFO/sidecar
+`preserve_uploads` copies personal artwork uploads, card overlay images, and
+downloaded subtitles when the assets location changes, and profile avatars when
+the operational location changes. When the assets location changes, provider
+artwork returns to its saved provider URL under `start_fresh` and
+`preserve_uploads`. Cached NFO/sidecar
 artwork is not copied by either policy; refresh metadata for affected libraries
 after restart and artwork reconciliation. Backfill Metadata Images does not
 process local sidecar sources. `migrate_all` copies all data from each source
@@ -455,32 +483,28 @@ Every backend consults the publication manifest for a rung a ladder change
 added: existing revisions lack the new widest rung until the ladder backfill
 regenerates them, so a request for it gets a smaller rung the revision
 published, and artwork without a manifest is limited to its type's medium rung.
-Local storage publishes each object with an atomic rename, and direct S3 reads
-see an object as soon as its upload returns, so on those backends every other
-key resolves as held, without a lookup, and a published key that is
-nevertheless missing answers 404 and enqueues repair. Only external delivery (a
-public or token-authenticated read endpoint in front of S3) can lag behind a
-write. That configuration alone runs the `verify_artwork_delivery` task, and it
-consults the verified-keys manifest for every key.
+Every other key resolves as held, without a lookup. Catalog reads never probe
+storage or delivery.
 
-A verdict is scoped to the delivery configuration and is current only until
-the revision is published again. Publication records exact keys only after
-every upload succeeded, so it clears the verdict's timestamp and keeps its
-keys. Until the next check, the catalog advertises the published keys and
-demotes a rung that a ladder version added, unless the stale verdict already
-delivered that rung. Catalog reads never probe storage or delivery.
-
-The verifier claims revisions without a verdict since their latest publication
-before routine rechecks, so repaired artwork is not queued behind the catalog.
-A complete verdict is rechecked after a week. An incomplete verdict or a probe
-error retries after 15 minutes, doubling per consecutive failure up to a day.
-A probe error keeps the previous verdict. A run keeps claiming batches for
-about a minute and stops early when every probe in a batch fails. After a
-restart, and hourly after that, the verifier moves verdicts recorded under
-another delivery scope back to the pending lane. The hourly sweep catches
-verdicts that replicas still on the old configuration record during a rolling
-restart. Each run saves its counts, including probe errors,
-the last error, and the overdue backlog, as the task's result data.
+Silo is the only writer to the assets store, and its collectors delete a
+revision only after it is retired, so a published key stays in storage.
+Nothing rechecks published artwork on a timer: on a request-billed bucket,
+re-confirming every immutable object each week became the largest source of
+read requests. On local storage, a published key that is nevertheless missing
+is repaired when the server reads it: the signed artwork route and offline
+downloads read the store, answer 404, and enqueue repair. On S3, clients read
+objects without passing through the server. Objects removed there outside
+Silo, such as after bucket loss or a restore onto a bucket the collectors have
+since cleaned, are recovered by running `reconcile_artwork_cache` by hand. Its
+verify sweep checks each row's stored key and every other size the revision
+published. Provider artwork missing either is reset to its source for the
+backfill to cache again. Other artwork is cleared only when its stored key is
+gone; when only another size is missing, the intact original is kept and
+reported, since clearing an upload loses it and a refresh does not restore a
+locked sidecar or generated image.
+Seek-preview sheets are the one asset that confirms delivery through an
+external read endpoint before clients read them there (see
+[trickplay](trickplay.md)).
 
 Local URLs are root-relative, which is enough for clients of the API listener
 and for the Jellyfin and Audiobookshelf compatibility listeners, which mount

@@ -123,6 +123,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		scope.MetadataLanguageOverrides = preferences.MetadataLanguageOverrides
 		scope.NextUpMode = preferences.NextUpMode
 		scope.NextUpNewReleasesFirst = preferences.NextUpNewReleasesFirst
+		scope.HideWatchedItemsOnHome = preferences.HideWatchedItemsOnHome
 		scope.AllowedLibraryIDs, scope.LibrariesRestricted = effectiveLibraries(effective.LibraryIDs, profile)
 		verified, err := VerifyProfileForRequest(profile, input, user.ID, r.tokens)
 		if err != nil {
@@ -130,6 +131,7 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 		}
 		scope.ProfileVerified = verified
 		scope.PINVerificationSkipped = verified && profile.PINHash != "" && input.SkipPINVerification
+		scope.ProfilePINRevision = profile.PINRevision
 	}
 
 	scope.PreferencesDegraded = preferences.Degraded
@@ -312,4 +314,13 @@ func cloneInts(values []int) []int {
 	out := make([]int, len(values))
 	copy(out, values)
 	return out
+}
+
+// CheckProfileVerification checks request proof against a freshly loaded profile.
+// PIN exemptions cannot authorize household management of a locked profile.
+func (s Scope) CheckProfileVerification(profile *userstore.Profile) error {
+	if profile == nil || s.ProfileID != profile.ID || !s.ProfileVerified || s.PINVerificationSkipped || s.ProfilePINRevision != profile.PINRevision {
+		return ErrProfileUnverified
+	}
+	return nil
 }

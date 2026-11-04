@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,12 +53,66 @@ func (c *Consumer) Run(ctx context.Context, ch <-chan LogEntry) {
 	}.Run(ctx, ch)
 }
 
-// insertBatch performs a bulk INSERT into the activity_log table.
+// recordLastActivity moves each account's user_last_activity row forward to
+// its newest entry in the batch. Accounts are written in id order so batches
+// from different nodes lock the same rows in the same order and cannot
+// deadlock; an older timestamp never overwrites a newer one.
+func recordLastActivity(ctx context.Context, pool *pgxpool.Pool, entries []LogEntry) error {
+	latest := map[int]time.Time{}
+	for _, e := range entries {
+		if e.UserID == nil {
+			continue
+		}
+		if ts, ok := latest[*e.UserID]; !ok || e.Timestamp.After(ts) {
+			latest[*e.UserID] = e.Timestamp
+		}
+	}
+	if len(latest) == 0 {
+		return nil
+	}
+	ids := slices.Sorted(maps.Keys(latest))
+	times := make([]time.Time, len(ids))
+	for i, id := range ids {
+		times[i] = latest[id]
+	}
+	// The join skips accounts deleted since the request was logged.
+	_, err := pool.Exec(ctx, `
+		INSERT INTO user_last_activity (user_id, last_active_at)
+		SELECT v.user_id, v.ts
+		FROM unnest($1::bigint[], $2::timestamptz[]) WITH ORDINALITY AS v(user_id, ts, n)
+		JOIN users u ON u.id = v.user_id
+		ORDER BY v.n
+		ON CONFLICT (user_id) DO UPDATE SET last_active_at = EXCLUDED.last_active_at
+		WHERE user_last_activity.last_active_at < EXCLUDED.last_active_at`, ids, times)
+	if err != nil {
+		return fmt.Errorf("recording last activity: %w", err)
+	}
+	return nil
+}
+
+// insertBatch stores a batch in activity_log and records its accounts' last
+// activity, including requests whose audited mutation already stored the row.
 func (c *Consumer) insertBatch(ctx context.Context, entries []LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
+	stored := slices.DeleteFunc(slices.Clone(entries), func(e LogEntry) bool { return e.Persisted })
+	if len(stored) > 0 {
+		if err := c.insertRows(ctx, stored); err != nil {
+			return err
+		}
+	}
+	// The rows are stored; a failure here only leaves last activity stale
+	// until the account's next batch, so it must not retry the insert.
+	if err := recordLastActivity(ctx, c.pool, entries); err != nil {
+		slog.WarnContext(ctx, "activitylog: failed to record last activity", "component", "activitylog", "error", err)
+	}
+	return nil
+}
 
+// insertRows performs a bulk INSERT into the activity_log table and publishes
+// the stored rows to the live tail.
+func (c *Consumer) insertRows(ctx context.Context, entries []LogEntry) error {
 	var b strings.Builder
 	b.WriteString("INSERT INTO activity_log (timestamp, client_ip, user_id, impersonator_user_id, session_id, playback_session_id, request_id, node_id, method, path, path_pattern, status_code, user_agent, duration_ms) VALUES ")
 

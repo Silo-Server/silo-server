@@ -11,9 +11,10 @@ import { v2 } from "@/api/v2/request";
 import {
   browseDiscoverV2,
   cancelMediaRequestV2,
+  removeFailedMediaRequestV2,
   createMediaRequestV2,
   followRequestMediaV2,
-  getDiscoverSectionV2,
+  getDiscoverRowV2,
   getRequestMediaDetailV2,
   unfollowRequestMediaV2,
   listDiscoverGenresV2,
@@ -109,7 +110,7 @@ export function useRequestFeatureStatus(
 export function useRequestDiscoverySection(section: string) {
   return useInfiniteQuery({
     queryKey: requestKeys.discoverySection(section),
-    queryFn: ({ pageParam }) => getDiscoverSectionV2(section, pageParam),
+    queryFn: ({ pageParam }) => getDiscoverRowV2(section, pageParam),
     initialPageParam: 1,
     getNextPageParam: nextDiscoverySectionPage,
     enabled: section.trim().length > 0,
@@ -118,20 +119,23 @@ export function useRequestDiscoverySection(section: string) {
 }
 
 /**
- * The page after lastPage in a Discover row. For a rating-restricted profile
- * the server may read several TMDB pages to fill one and answers with
- * next_page; page + 1 would repeat titles. Once the row has answered with a
- * cursor, a page without one is the last. Otherwise pages are numbered, up
- * to TMDB's cap.
+ * The page after lastPage in a Discover row. When the server reads several
+ * source pages to fill one (a rating-restricted profile, a row that leaves out
+ * titles the library has, or titles dropped as repeats) it answers with
+ * next_page, since page + 1 would repeat titles; a next_page past the last
+ * page means that read reached the end, and one that does not move forward
+ * is ignored as the end. A page without one read a single source page, so
+ * page + 1 follows, up to TMDB's cap.
  */
 export function nextDiscoverySectionPage(
   lastPage: RequestDiscoverySection,
-  allPages: RequestDiscoverySection[],
+  _allPages: RequestDiscoverySection[],
   lastPageParam: number,
 ): number | undefined {
-  if (lastPage.next_page && lastPage.next_page > lastPageParam) return lastPage.next_page;
-  if (allPages.some((page) => page.next_page)) return undefined;
-  return lastPageParam < tmdbPageCount(lastPage.total_pages) ? lastPageParam + 1 : undefined;
+  const pageCount = tmdbPageCount(lastPage.total_pages);
+  const cursor = lastPage.next_page;
+  if (cursor) return cursor > lastPageParam && cursor <= pageCount ? cursor : undefined;
+  return lastPageParam < pageCount ? lastPageParam + 1 : undefined;
 }
 
 export interface DiscoverBrandQueryOptions {
@@ -330,6 +334,23 @@ export function useCancelMediaRequest() {
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Failed to cancel request");
+    },
+  });
+}
+
+export function useRemoveFailedMediaRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    retry: false,
+    mutationFn: (id: string) => removeFailedMediaRequestV2(id),
+    onSuccess: () => {
+      toast.success("Request removed");
+    },
+    // A refused removal still refreshes: an admin may have retried it, and the
+    // row should show what happened.
+    onSettled: () => invalidateRequestSurfaces(queryClient),
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to remove request");
     },
   });
 }

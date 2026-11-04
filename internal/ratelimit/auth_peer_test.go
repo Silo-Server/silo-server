@@ -230,3 +230,173 @@ func TestAuthPeerRateStaysWithinLimiterBounds(t *testing.T) {
 		t.Fatalf("peer rate for maximal settings = %+v, want values within the limiter's bounds", got)
 	}
 }
+
+// Autoscan deliveries carry a source token that the per-endpoint budget
+// cannot see. Once that budget (or the forwarded peer's share of it) is spent,
+// a request the endpoint's admission check accepts is still served, and every
+// other request is refused as before. The per-address request budget applies
+// to both.
+func TestAuthEndpointHandlerAdmitsRecognizedRequestsOverEndpointBudget(t *testing.T) {
+	cases := []struct {
+		name         string
+		forwardedFor func() string
+	}{
+		{name: "direct client", forwardedFor: func() string { return "" }},
+		{name: "rotating forwarded clients", forwardedFor: func() string {
+			return fmt.Sprintf("%s.%d.%d", randomClientNet(), rand.IntN(256), 1+rand.IntN(254))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mw := newAuthLimitMiddleware(t)
+			mw.cfg.AuthEndpoints = map[string]AuthEndpointConfig{"autoscan_webhook": {RequestsPerMinute: 1, Burst: 2}}
+			mw.cfg.IPReqPerSecond, mw.cfg.IPReqPerMinute, mw.cfg.IPBurst = 1000, 6000, 1000
+			admitted := 0
+			mw.AdmitOverEndpointBudget("autoscan_webhook", func(r *http.Request) bool {
+				admitted++
+				return r.Header.Get("X-Known") == "yes"
+			})
+			trusted, err := clientip.ParseCIDRs(clientip.DefaultTrustedProxies)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := clientip.Middleware(clientip.NewResolver(trusted))(
+				mw.AuthEndpointHandler("autoscan_webhook")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusAccepted)
+				})))
+			peer := randomPrivatePeer()
+			if tc.forwardedFor() == "" {
+				peer = fmt.Sprintf("%s.%d.%d", randomClientNet(), rand.IntN(256), 1+rand.IntN(254))
+			}
+			send := func(known bool) int {
+				req := httptest.NewRequest(http.MethodPost, "/api/v2/autoscan/webhooks/t", nil)
+				req.RemoteAddr = peer + ":40000"
+				if xff := tc.forwardedFor(); xff != "" {
+					req.Header.Set("X-Forwarded-For", xff)
+				}
+				if known {
+					req.Header.Set("X-Known", "yes")
+				}
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				return rec.Code
+			}
+
+			// Spend the budget with unknown requests until one is refused.
+			refused := false
+			for range 30 {
+				if send(false) == http.StatusTooManyRequests {
+					refused = true
+					break
+				}
+			}
+			if !refused {
+				t.Fatal("unknown requests were never refused")
+			}
+			if admitted != 1 {
+				t.Fatalf("admission check ran %d times before the budget was spent, want only for the refused request", admitted)
+			}
+			for i := range 5 {
+				if code := send(true); code != http.StatusAccepted {
+					t.Fatalf("recognized request %d over the endpoint budget = %d, want 202", i, code)
+				}
+			}
+			if code := send(false); code != http.StatusTooManyRequests {
+				t.Fatalf("unknown request after recognized ones = %d, want 429", code)
+			}
+		})
+	}
+}
+
+func TestAuthEndpointHandlerAdmissionDoesNotLiftAddressBudget(t *testing.T) {
+	mw := newAuthLimitMiddleware(t)
+	mw.cfg.IPReqPerSecond, mw.cfg.IPReqPerMinute, mw.cfg.IPBurst = 0.001, 0.06, 1
+	mw.AdmitOverEndpointBudget("autoscan_webhook", func(*http.Request) bool { return true })
+	handler := mw.AuthEndpointHandler("autoscan_webhook")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	ip := fmt.Sprintf("%s.%d.%d", randomClientNet(), rand.IntN(256), 1+rand.IntN(254))
+	codes := []int{}
+	for range 2 {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/autoscan/webhooks/t", nil)
+		req = req.WithContext(clientip.SetContext(req.Context(), ip))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		codes = append(codes, rec.Code)
+	}
+	if !slices.Equal(codes, []int{http.StatusAccepted, http.StatusTooManyRequests}) {
+		t.Fatalf("codes = %v, want the per-address budget to refuse the second request", codes)
+	}
+}
+
+// Checking a request over the endpoint budget costs a lookup. Each client's
+// checks spend a budget ten times the endpoint's, so one prober cannot use up
+// the checks of the real senders it shares a reverse proxy with. A forwarded
+// request's check also spends a cap on the connection's own address, a
+// hundred times the endpoint's, so a sender rotating forwarding headers
+// still gets a bounded number of lookups. With one request a minute that is
+// ten checks per client and a hundred per connection.
+func TestAuthEndpointHandlerBoundsAdmissionChecks(t *testing.T) {
+	newHandler := func(t *testing.T) (http.Handler, *int) {
+		t.Helper()
+		mw := newAuthLimitMiddleware(t)
+		mw.cfg.AuthEndpoints = map[string]AuthEndpointConfig{"autoscan_webhook": {RequestsPerMinute: 1, Burst: 2}}
+		checks := 0
+		mw.AdmitOverEndpointBudget("autoscan_webhook", func(r *http.Request) bool {
+			checks++
+			return r.Header.Get("X-Known") == "yes"
+		})
+		trusted, err := clientip.ParseCIDRs(clientip.DefaultTrustedProxies)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return clientip.Middleware(clientip.NewResolver(trusted))(
+			mw.AuthEndpointHandler("autoscan_webhook")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Known") == "yes" {
+					w.WriteHeader(http.StatusAccepted)
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}))), &checks
+	}
+	send := func(h http.Handler, peer, client string, known bool) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/v2/autoscan/webhooks/t", nil)
+		req.RemoteAddr = peer + ":40000"
+		req.Header.Set("X-Forwarded-For", client)
+		if known {
+			req.Header.Set("X-Known", "yes")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	t.Run("one prober behind a proxy leaves the other clients' checks", func(t *testing.T) {
+		h, checks := newHandler(t)
+		peer, clients := randomPrivatePeer(), randomClientNet()
+		prober, sender := clients+".1.1", clients+".2.2"
+		for range 50 {
+			send(h, peer, prober, false)
+		}
+		if *checks != 10 {
+			t.Fatalf("prober's admission checks = %d, want 10", *checks)
+		}
+		for range 3 {
+			send(h, peer, sender, true) // spend the sender's own endpoint budget
+		}
+		if code := send(h, peer, sender, true); code != http.StatusAccepted {
+			t.Fatalf("real delivery behind the same proxy = %d, want 202", code)
+		}
+	})
+
+	t.Run("rotating forwarded clients are capped per connection", func(t *testing.T) {
+		h, checks := newHandler(t)
+		peer, clients := randomPrivatePeer(), randomClientNet()
+		for i := range 300 {
+			send(h, peer, fmt.Sprintf("%s.%d.%d", clients, i/250, 1+i%250), false)
+		}
+		if *checks != 100 {
+			t.Fatalf("admission checks = %d, want 100 from one connection", *checks)
+		}
+	})
+}

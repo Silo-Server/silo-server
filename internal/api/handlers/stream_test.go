@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -775,12 +777,20 @@ func TestSubtitleExplicitWindow(t *testing.T) {
 func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, script string
-		status       int
-		interrupted  bool
+		// codec is the track's, subrip when empty; busy makes the node
+		// admit no more whole-track reads.
+		codec       string
+		busy        bool
+		status      int
+		interrupted bool
 	}{
-		{"before_output", "exit 1", http.StatusInternalServerError, false},
-		{"after_output", "printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nPartial\\n\\n'; exit 1", http.StatusOK, true},
-		{"complete", "printf 'WEBVTT\\n\\n00:20:01.000 --> 00:20:02.000\\nComplete\\n\\n'", http.StatusOK, false},
+		{name: "before_output", script: "exit 1", status: http.StatusInternalServerError},
+		{name: "after_output", script: "printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nPartial\\n\\n'; exit 1", status: http.StatusOK, interrupted: true},
+		{name: "complete", script: "printf 'WEBVTT\\n\\n00:20:01.000 --> 00:20:02.000\\nComplete\\n\\n'", status: http.StatusOK},
+		// A busy node answers before any byte, without a demux (the script
+		// would fail it).
+		{name: "busy_text", script: "exit 1", busy: true, status: http.StatusServiceUnavailable},
+		{name: "busy_sup", script: "exit 1", codec: "hdmv_pgs_subtitle", busy: true, status: http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
@@ -789,8 +799,19 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			}
 			handler := NewStreamHandler(nil, nil)
 			handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{FFmpegPath: ffmpeg} }
-			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/media.mkv", SubtitleTracks: []models.SubtitleTrack{{Codec: "subrip"}}}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.streamEmbeddedSubtitle(w, r, file, 0, "vtt") }))
+			if tc.busy {
+				dir := t.TempDir()
+				handler.SubtitleCache = playback.NewSubtitleCache(func() string { return dir })
+				handler.SubtitleCache.SetEmbeddedSource(busySubtitleSource{})
+			}
+			codec, format := cmp.Or(tc.codec, "subrip"), []string{"vtt"}
+			if playback.IsPGS(codec) {
+				format = nil
+			}
+			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/media.mkv", SubtitleTracks: []models.SubtitleTrack{{Codec: codec, Index: 2}}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				handler.streamEmbeddedSubtitle(w, r, file, 0, format...)
+			}))
 			defer server.Close()
 			response, err := server.Client().Get(server.URL)
 			if err != nil {
@@ -801,6 +822,9 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			if response.StatusCode != tc.status {
 				t.Fatalf("status=%d, want %d", response.StatusCode, tc.status)
 			}
+			if retry := response.Header.Get("Retry-After"); tc.busy && retry != strconv.Itoa(playback.SubtitleReadsRetryAfter) {
+				t.Fatalf("Retry-After %q on a busy answer", retry)
+			}
 			if tc.interrupted && err == nil {
 				t.Fatal("failed extraction ended with successful EOF")
 			}
@@ -809,4 +833,24 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+// busySubtitleSource is the embedded subtitle source of a node that admits
+// no more whole-track reads.
+type busySubtitleSource struct{}
+
+func (busySubtitleSource) WholeTrack(context.Context, string, playback.EmbeddedSubtitleRef) (*playback.SubtitlePacketInput, error) {
+	return nil, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) Window(context.Context, string, playback.EmbeddedSubtitleRef, time.Duration, time.Duration) (*playback.SubtitlePacketInput, error) {
+	return nil, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) DemuxCopy(context.Context, string, playback.EmbeddedSubtitleRef) (playback.DemuxCopy, error) {
+	return playback.DemuxCopy{}, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) KeepDemuxed(context.Context, string, playback.EmbeddedSubtitleRef, playback.DemuxCopy, int64, time.Time) error {
+	return playback.ErrSubtitleReadsBusy
 }

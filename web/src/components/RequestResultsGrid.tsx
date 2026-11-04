@@ -3,15 +3,14 @@ import RequestPosterCard from "@/components/RequestPosterCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoadMoreOnScroll } from "@/components/LoadMoreOnScroll";
-import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { cardGridClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 
 /**
- * TMDB titles on the library's poster grid, each with the hover Request
- * and watchlist actions. Used by the Discover, studio/network/genre, and search "Request to
+ * TMDB titles on the library's poster grid, each with the hover watchlist
+ * action. Used by the Discover, studio/network/genre, and search "Request to
  * add" grids.
  */
 export default function RequestResultsGrid({
@@ -29,7 +28,6 @@ export default function RequestResultsGrid({
   className?: string;
 }) {
   const { cardPresentation } = useUICustomization();
-  const { submit, isSubmitting } = useSubmitMediaRequest();
   const watchlist = useWatchlistTitleToggle();
   return (
     <div className={cn(cardGridClasses(cardPresentation.poster_size), className)}>
@@ -38,8 +36,6 @@ export default function RequestResultsGrid({
           key={`${item.media_type}-${item.tmdb_id}`}
           variant="discover"
           item={item}
-          isSubmitting={isSubmitting(item)}
-          onRequest={() => submit(item)}
           onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
           isWatchlistPending={watchlist.isPending(item)}
           fluid
