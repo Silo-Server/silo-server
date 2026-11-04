@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 type pagingEntry struct {
@@ -126,6 +128,7 @@ func TestFetchMDBListJSONReportsTheFeedError(t *testing.T) {
 		wantPrefix bool
 	}{
 		{name: "private list", body: `{"error": "This List is Private"}`, want: "mdblist: This List is Private"},
+		{name: "secret in the reason", body: `{"error": "Invalid api_key=abc123"}`, want: "mdblist: Invalid api_key=" + logredact.Placeholder},
 		{name: "long reason", body: `{"error": "` + strings.Repeat("x", mdblistFeedErrorMaxRunes+50) + `"}`, want: "mdblist: " + strings.Repeat("x", mdblistFeedErrorMaxRunes)},
 		{name: "object without a reason", body: `{"items": []}`, want: "parsing mdblist response: ", wantPrefix: true},
 		{name: "not JSON", body: `<!DOCTYPE html>`, want: "parsing mdblist response: ", wantPrefix: true},

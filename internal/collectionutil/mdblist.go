@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // MDBListRequestTimeout bounds one MDBList fetch when the base client sets no
@@ -216,7 +218,7 @@ func fetchMDBListJSONPage[T any](ctx context.Context, client *http.Client, pageU
 }
 
 // mdblistFeedErrorMaxRunes bounds the feed's own error text, which is stored
-// and shown as the sync message.
+// and shown as the sync message after secret assignments are masked.
 const mdblistFeedErrorMaxRunes = 200
 
 // mdblistFeedError returns the message of the {"error": "..."} object the
@@ -229,7 +231,7 @@ func mdblistFeedError(body []byte) string {
 	if json.Unmarshal(body, &feedErr) != nil {
 		return ""
 	}
-	msg := strings.TrimSpace(feedErr.Error)
+	msg := logredact.RedactSecretAssignments(strings.TrimSpace(feedErr.Error))
 	if runes := []rune(msg); len(runes) > mdblistFeedErrorMaxRunes {
 		msg = string(runes[:mdblistFeedErrorMaxRunes])
 	}
