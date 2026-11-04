@@ -32,6 +32,7 @@ import {
   speakersFromMask,
   unpackPCM,
   type PCMFormat,
+  type PreviousAudioFrame,
 } from "./audioMix";
 import { isFFmpegAudioCodec, type FFmpegAudioCodec } from "./codecs";
 import {
@@ -687,17 +688,16 @@ async function runAudio(run: number, position: number): Promise<void> {
   activeAudioDecoder = decoder;
   let mix: { key: string; matrix: Float32Array } | null = null;
   let resampler: LinearResampler | null = null;
-  // Where this run's last decoded frame ended.
-  let previousEnd: number | null = null;
+  let previous: PreviousAudioFrame | null = null;
 
   const emit = (decoded: DecodedAudio) => {
     if (run !== generation) return;
     let planes = decoded.planes;
     const frames = planes[0]?.length ?? 0;
     if (frames === 0) return;
-    let timestamp = continuousAudioStart(decoded.timestamp, previousEnd);
+    let timestamp = continuousAudioStart(decoded.timestamp, previous);
     const end = timestamp + frames / decoded.sampleRate;
-    previousEnd = end;
+    previous = { stamped: decoded.timestamp, end };
     if (end <= position) return;
     if (timestamp < position) {
       const skip = Math.min(frames, Math.round((position - timestamp) * decoded.sampleRate));
