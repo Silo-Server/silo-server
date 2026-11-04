@@ -4705,6 +4705,10 @@ export function VideoPlayer({
   const sessionFramed = framedSessionId === sessionId;
   const startupCover = !isPlayerReady || (awaitingFirstFrame && !sessionFramed);
   const transportReloading = awaitingFirstFrame && sessionFramed && isPlayerReady && !error;
+  // A room seek makes the room wait as well; its panel shows while the reload
+  // runs, in place of the buffering spinner.
+  const roomSyncShown =
+    roomSyncWaiting && isPlayerReady && (!awaitingFirstFrame || transportReloading);
   let stallLabel: string | null = null;
   if (watchTogetherSync.catchingUp) stallLabel = "Catching up to the party";
   else if (bufferingQuality.outage) stallLabel = "Reconnecting…";
@@ -5257,7 +5261,7 @@ export function VideoPlayer({
       )}
 
       {/* Room sync overlay */}
-      {!isDetached && roomSyncWaiting && !awaitingFirstFrame && isPlayerReady && (
+      {!isDetached && roomSyncShown && (
         <div
           role="status"
           aria-label="Syncing playback"

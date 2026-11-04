@@ -485,6 +485,18 @@ describe("VideoPlayer room catch-up", () => {
     };
   }
 
+  it("shows the sync panel while a seek reloads the transport for a waiting room", async () => {
+    const { connection, command, video, rerenderPlayer } = setup(100);
+    // The replanned transport has no media yet.
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_NOTHING,
+    });
+    rerenderPlayer({ watchTogetherConnection: waitingSeek(connection, command), planRevision: 2 });
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Syncing playback" })).toBeInTheDocument();
+  });
+
   it("pauses displaced playback and offers an explicit room rejoin", async () => {
     const { connection, video, rerenderPlayer } = setup(100);
     vi.mocked(video.pause).mockClear();
