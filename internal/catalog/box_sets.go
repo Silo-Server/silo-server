@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -547,20 +548,21 @@ func (e *QueryExecutor) searchBoxSetCollections(ctx context.Context, query strin
 	patterns := make([]string, 0, len(words))
 	namePatterns := []string{}
 	suffixPatterns := []string{}
-	// Name words that open the stem, or open one of its words, rank a name
-	// match: "harry" finds "Harry Potter" before "Dirty Harry".
-	leadPatterns := []string{}
-	wordStartPatterns := []string{}
+	// Query words that open the stem, or open one of its words, rank a name
+	// match: "harry" finds "Harry Potter" before "Dirty Harry", and "man"
+	// finds "Ant-Man" before "Human".
+	leadPatterns := make([]string, 0, len(words))
+	wordStartPatterns := make([]string, 0, len(words))
 	for _, word := range words {
 		escaped := escapePrefixForLike(word)
 		pattern := "%" + escaped + "%"
 		patterns = append(patterns, pattern)
+		leadPatterns = append(leadPatterns, escaped+"%")
+		wordStartPatterns = append(wordStartPatterns, `[^[:alnum:]]`+regexp.QuoteMeta(word))
 		if boxSetSuffixWords[word] {
 			suffixPatterns = append(suffixPatterns, pattern)
 		} else {
 			namePatterns = append(namePatterns, pattern)
-			leadPatterns = append(leadPatterns, escaped+"%")
-			wordStartPatterns = append(wordStartPatterns, "% "+escaped+"%")
 		}
 	}
 	with, from, args, err := e.visibleCollectionMovies(QueryDefinition{MediaScope: playableTypeMovie, LibraryIDs: libraryIDs}, access)
@@ -582,7 +584,7 @@ func (e *QueryExecutor) searchBoxSetCollections(ctx context.Context, query strin
 	// Name matches come first: those whose stem opens with a query word,
 	// then those with a word that does, then the rest; within each, shorter
 	// names, then box sets with more movies the viewer sees.
-	nameRank := fmt.Sprintf(`CASE WHEN %[1]s LIKE ANY($%[2]d::text[]) THEN 0 WHEN %[1]s LIKE ANY($%[3]d::text[]) THEN 1 ELSE 2 END`,
+	nameRank := fmt.Sprintf(`CASE WHEN %[1]s LIKE ANY($%[2]d::text[]) THEN 0 WHEN %[1]s ~ ANY($%[3]d::text[]) THEN 1 ELSE 2 END`,
 		boxSetStemSQL, leadIdx, wordStartIdx)
 	// Grouping the movies the viewer can see by collection keeps only
 	// collections with such a movie, so matches elsewhere do not use up the
