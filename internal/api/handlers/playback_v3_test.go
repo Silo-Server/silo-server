@@ -1460,26 +1460,42 @@ func TestHandleReplanPlaybackV3FailedCopyOfMultiPPSSourceTranscodes(t *testing.T
 		return response
 	}
 
+	// The attempted keys alone also walk the plan off a copy, so each step
+	// checks the persisted mark as well as the route.
+	copyFailedMark := func(step string, want bool) {
+		t.Helper()
+		record, err := handler.PlanStoreV3.GetAttempt(t.Context(), active.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record.FrozenRecipe.VideoCopyFailed != want {
+			t.Fatalf("%s: persisted VideoCopyFailed = %v, want %v", step, record.FrozenRecipe.VideoCopyFailed, want)
+		}
+	}
 	// Direct play failing is not a copy failure: the copy is still offered.
 	active = replan(1, playback.ReplanOperationFailureRecoveryV3, "decoder_error")
 	if active.PlaybackPlan.Delivery != playback.DeliveryRemuxProgressiveV3 {
 		t.Fatalf("after direct-play failure delivery = %q, want the progressive copy", active.PlaybackPlan.Delivery)
 	}
+	copyFailedMark("direct-play failure", false)
 	// A subtitle route failing is not the video decoder's: the next copy is still offered.
 	active = replan(2, playback.ReplanOperationFailureRecoveryV3, playback.FailureSubtitleEmbeddedFailedV3)
 	if !playback.PlanCopiesVideoV3(*active.PlaybackPlan) {
 		t.Fatalf("after a subtitle failure delivery = %q, want another copy", active.PlaybackPlan.Delivery)
 	}
-	// The copy fails: recovery skips any remaining remux variant and transcodes.
+	copyFailedMark("subtitle failure", false)
+	// The copy fails: recovery transcodes, and the mark is persisted.
 	active = replan(3, playback.ReplanOperationFailureRecoveryV3, "decoder_error")
 	if active.PlaybackPlan.Delivery != playback.DeliveryTranscodeHLSV3 {
 		t.Fatalf("after copy failure delivery = %q, want a transcode", active.PlaybackPlan.Delivery)
 	}
-	// A later replan of the attempt keeps refusing the copy.
+	copyFailedMark("copy failure", true)
+	// A later replan of the attempt keeps refusing the copy and keeps the mark.
 	active = replan(4, playback.ReplanOperationQualityChangeV3, "")
 	if playback.PlanCopiesVideoV3(*active.PlaybackPlan) {
 		t.Fatalf("quality change after a failed copy delivery = %q, want no copy", active.PlaybackPlan.Delivery)
 	}
+	copyFailedMark("quality change", true)
 }
 
 func TestHandleReplanPlaybackV3SeekReanchorPreservesFallbackRecipe(t *testing.T) {
