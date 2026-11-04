@@ -318,14 +318,18 @@ func (h *ProfileHandler) ListProfiles(ctx context.Context, userID int) (ProfileL
 
 // GetProfile reads one profile of the account: 404 not_found when the
 // account has no profile with that ID, so another account's profile is
-// never found. v2 getAdminUserProfile calls it.
+// never found, and 500 when the store fails. v2 getAdminUserProfile calls
+// it.
 func (h *ProfileHandler) GetProfile(ctx context.Context, userID int, profileID string) (ProfileView, error) {
 	store, err := h.storeProvider.ForUser(ctx, userID)
 	if err != nil || store == nil {
 		return ProfileView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
 	profile, err := store.GetProfile(ctx, profileID)
-	if err != nil || profile == nil {
+	if err != nil {
+		return ProfileView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load profile")
+	}
+	if profile == nil {
 		return ProfileView{}, apiError(http.StatusNotFound, "not_found", "Profile not found")
 	}
 	return h.toProfileResponse(ctx, store, *profile), nil
