@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	publicevents "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/events"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/events"
@@ -86,16 +86,12 @@ var eventRetryDelays = []time.Duration{
 // Deliveries are not ordered. An event is lost before it is stored when its
 // server dies first, when the intake is full, or when the write fails.
 //
-// Events come from two places on the producing server:
-//
-//   - ObservePublish, registered on the cache.ObservedEventBus, receives the
-//     catalog, admin and playback events host code publishes on the bus.
-//     Redis hands those to every server, so subscribing to them would store
-//     each one once per server.
-//   - The events.Hub, for envelopes published on this server. This is the
-//     path plugin-published events take (RuntimeHostServer.PublishEvent
-//     stamps `plugin.<id>.` and writes an envelope on ChannelPlugins).
-//     Envelopes the hub relays from other servers are theirs to store.
+// Events come from the events.Hub: envelopes published on this server.
+// Envelopes the hub relays from other servers are theirs to store. Only the
+// events in the SDK's catalog (pkg/pluginsdk/events) and plugin events reach
+// plugins; plugin events take this path too (RuntimeHostServer.PublishEvent
+// stamps `plugin.<id>.` and writes an envelope on ChannelPlugins). Each
+// payload is rewritten into its catalog shape before it is stored.
 //
 // Dispatch is fan-out only: every subscriber to event_name receives the event.
 // Plugins wanting to address a single peer should embed a target identifier
@@ -207,8 +203,7 @@ func NewEventDispatcherWithTypedResolver(
 
 // Start follows lifecycle changes from other servers, takes envelopes from
 // the hub, and starts storing and delivering events until ctx ends or Stop
-// is called. Bus events arrive through ObservePublish, which the caller
-// registers.
+// is called.
 func (d *EventDispatcher) Start(ctx context.Context) error {
 	ctx, d.cancel = context.WithCancel(ctx)
 	if err := d.bus.Subscribe(ctx, cache.ChannelAdmin, func(event cache.Event) {
@@ -263,20 +258,6 @@ func (d *EventDispatcher) mayHaveSubscribers(eventName string) bool {
 	return !ok || len(index[eventName]) > 0
 }
 
-// ObservePublish takes an event this server published on the bus. It is a
-// cache.PublishObserver and never blocks the publisher.
-func (d *EventDispatcher) ObservePublish(channel string, event cache.Event) {
-	switch channel {
-	case cache.ChannelCatalog, cache.ChannelAdmin, cache.ChannelPlayback:
-	default:
-		return
-	}
-	if !d.mayHaveSubscribers(event.Type) {
-		return
-	}
-	d.offer(busEvent(event))
-}
-
 // offer queues an event without waiting, and logs it when the intake is full.
 func (d *EventDispatcher) offer(produced producedEvent) {
 	select {
@@ -286,21 +267,36 @@ func (d *EventDispatcher) offer(produced producedEvent) {
 	}
 }
 
-func busEvent(event cache.Event) producedEvent {
-	return producedEvent{
-		id:      ulid.Make().String(),
-		name:    event.Type,
-		payload: func() *structpb.Struct { return decodeStringPayload(event.Payload) },
-	}
-}
-
 func hubEvent(env events.Envelope) producedEvent {
 	return producedEvent{
 		id:             env.EventID,
 		name:           env.Event,
 		targetPluginID: env.TargetPluginID,
-		payload:        func() *structpb.Struct { return decodeRawJSON(env.Data) },
+		payload:        func() *structpb.Struct { return publicPayload(env) },
 	}
+}
+
+// publicPayload rewrites an envelope's data into the public shape the SDK's
+// event catalog defines, so fields the host adds internally never reach
+// plugins. A notification names only its profile, and profile IDs repeat
+// across accounts, so the account the envelope is addressed to is added.
+func publicPayload(env events.Envelope) *structpb.Struct {
+	raw := env.Data
+	if env.Event == publicevents.NotificationCreated && env.UserID > 0 {
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err == nil && fields != nil {
+			fields["user_id"] = env.UserID
+			if withUser, err := json.Marshal(fields); err == nil {
+				raw = withUser
+			}
+		}
+	}
+	projected, err := publicevents.Project(env.Event, raw)
+	if err != nil {
+		slog.Warn("plugin event dispatcher: payload doesn't match the event catalog, event not delivered to plugins", "component", "plugins", "event_name", env.Event, "event_id", env.EventID, "error", err)
+		return nil
+	}
+	return decodeRawJSON(projected)
 }
 
 // consumeHub reads until Stop unsubscribes, so envelopes published while the
@@ -368,24 +364,6 @@ func (d *EventDispatcher) store(ctx context.Context, produced producedEvent) {
 		return
 	}
 	d.wakeDeliveries()
-}
-
-// decodeStringPayload tries to JSON-decode a cache.Event.Payload string into a
-// structpb. Plugin consumers expect top-level fields (e.g. p["libraryId"]), so
-// when the payload parses we pass it through as-is. If it doesn't parse — the
-// payload is an opaque id rather than JSON — we still hand the raw value over
-// under "raw" so the consumer can ignore it without misreading nil fields.
-func decodeStringPayload(raw string) *structpb.Struct {
-	if raw == "" {
-		return nil
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(raw), &m); err == nil {
-		s, _ := structpb.NewStruct(m)
-		return s
-	}
-	s, _ := structpb.NewStruct(map[string]any{"raw": raw})
-	return s
 }
 
 func decodeRawJSON(raw json.RawMessage) *structpb.Struct {
@@ -505,6 +483,11 @@ func (d *EventDispatcher) buildIndex(ctx context.Context) (index map[string][]ev
 			}
 			for _, eventName := range subscriptionsOf(capability) {
 				if _, ok := indexed[eventName]; ok {
+					continue
+				}
+				// Only catalog and plugin events reach plugins; the host's
+				// internal event names are not a contract.
+				if _, deliverable := publicevents.AccessOf(eventName); !deliverable {
 					continue
 				}
 				indexed[eventName] = struct{}{}

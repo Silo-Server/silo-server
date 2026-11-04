@@ -13,22 +13,36 @@ Deliveries are not ordered.
 Only the API server that produced an event stores it, so the number of API
 servers does not change how often a plugin hears of it.
 
-- Host code publishes catalog, admin and playback events on the
-  [Redis event bus](redis-event-bus.md). Redis hands every message to every
-  node, so the dispatcher does not subscribe to those channels. `main.go`
-  wraps the bus in `cache.ObservedEventBus` and registers
-  `EventDispatcher.ObservePublish`, which sees each event the process itself
-  publishes. Without Redis the bus delivers nothing, and the observer still
-  runs.
-- Envelopes published on the `events.Hub`, which is where
-  `RuntimeHost.PublishEvent` puts plugin-published events. Each hub also
-  relays other nodes' envelopes to its local subscribers; the dispatcher
-  takes only envelopes whose `SourceID` is its own hub's.
+The dispatcher reads envelopes published on the `events.Hub`. Each hub also
+relays other nodes' envelopes to its local subscribers; the dispatcher takes
+only envelopes whose `SourceID` is its own hub's, and skips `V2Only` ones.
+`RuntimeHost.PublishEvent` puts plugin-published events on the hub too.
 
-Both paths check the subscriber index before queueing, so events no plugin
-subscribes to cost a map lookup and never take a place in the intake queue.
-A bus event gets a new ULID as its `event_id`. An envelope keeps its
-`EventID`.
+It does not read the [Redis event bus](redis-event-bus.md). Bus event types
+are internal cache and coordination signals, not a plugin contract, and
+Redis hands every message to every node.
+
+## Which events plugins receive
+
+Plugins receive only the events in the SDK's catalog
+(`silo-plugin-sdk` `pkg/pluginsdk/events`, documented in its `docs/events.md`)
+and plugin events (`plugin.<plugin_id>.<name>`). The subscriber index leaves
+out any other name a manifest lists, so an internal event such as
+`user_state.changed` never reaches a plugin.
+
+Before an event is stored, `events.Project` rewrites its payload into the
+catalog's public shape: the fields of the SDK payload type and nothing else.
+A field the host adds for its own clients therefore stays off the plugin
+contract until the SDK type adds it. `notification.created` also gets the
+envelope's `user_id`, because profile IDs repeat across accounts.
+
+`TestEventCatalogMatchesProducers` projects what each producer publishes and
+fails when a producer change drops a catalog field, or when the SDK catalog
+gains an event without a producer case.
+
+The index check happens before queueing, so events no plugin subscribes to
+cost a map lookup and never take a place in the intake queue. An envelope
+keeps its `EventID`.
 
 ## Outbox
 
@@ -64,6 +78,9 @@ published while the server drains its requests after its context ended.
 - Never deliver plugin events from a bus subscription or from relayed hub
   envelopes. Every node receives those, and each would deliver the event
   again.
+- Only catalog and plugin events reach plugins, in their projected shape.
+  Delivering another name, or a payload that skipped `events.Project`, makes
+  an internal detail part of the plugin contract.
 - A claim must stay a `MATERIALIZED` CTE. As
   `id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` the planner may run the
   subquery more than once and claim more than `n` rows.
@@ -80,11 +97,10 @@ published while the server drains its requests after its context ended.
 ## Limits
 
 - An event is lost before it is stored when its server dies first, when the
-  intake queue (1024 events) is full, or when the outbox write fails. A full
-  queue drops bus events with a log line. Hub envelopes wait in the hub's
-  64-envelope buffer for the dispatcher, and `Hub.Dropped` counts the ones it
-  drops; once the server's context has ended, they are dropped with a log
-  line too.
+  intake queue (1024 events) is full, or when the outbox write fails.
+  Envelopes wait in the hub's 64-envelope buffer for the dispatcher, and
+  `Hub.Dropped` counts the ones it drops; once the server's context has
+  ended, they are dropped with a log line.
 - Each server delivers four events at a time across all plugins. A plugin
   that hangs holds a slot for 10 seconds per attempt, or a minute when it
   will not start, so its backlog delays other plugins' events.
@@ -95,12 +111,11 @@ published while the server drains its requests after its context ended.
   up to a minute when the message is lost, miss the new subscriber.
 - One process sees each event, so a plugin that keeps per-process state
   cannot use events to keep every process's copy current.
-- During a rolling upgrade, servers on older builds still deliver from their
-  bus and hub subscriptions, once per server, without retries and without an
-  `event_id`, until they are replaced.
+- During a rolling upgrade, servers on older builds still deliver internal
+  event names and unprojected payloads until they are replaced.
 
 ## Plugin contract
 
-The SDK documents what plugin authors can rely on: `HandleEventRequest.event_id`
-and the "Receiving events" section of `silo-plugin-sdk`'s
-`docs/runtime-host.md`.
+The SDK documents what plugin authors can rely on: the event catalog and
+payloads in `silo-plugin-sdk`'s `docs/events.md`, `HandleEventRequest.event_id`,
+and the "Receiving events" section of its `docs/runtime-host.md`.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/events"
@@ -124,14 +125,18 @@ func (s *memoryDeliveryStore) busy() bool {
 	return false
 }
 
-// dispatchBusEvent runs event through d the way the API server that
-// published it does, then delivers everything due and waits for it.
-func (d *EventDispatcher) dispatchBusEvent(ctx context.Context, event cache.Event) {
-	d.store(ctx, busEvent(event))
-	d.deliverDue(ctx)
+// catalogEnvelope is a catalog event as this server's hub hands it over.
+func catalogEnvelope(name, data string) events.Envelope {
+	return events.Envelope{Event: name, EventID: ulid.Make().String(), Data: json.RawMessage(data)}
 }
 
-// dispatchEnvelope is dispatchBusEvent for an envelope published on d's hub.
+// scanCompleted is a scan.completed event with a minimal payload.
+func scanCompleted() events.Envelope {
+	return catalogEnvelope("scan.completed", `{"id":"scan-1","library_id":7,"status":"completed"}`)
+}
+
+// dispatchEnvelope runs env through d the way the API server that published
+// it does, then delivers everything due and waits for it.
 func (d *EventDispatcher) dispatchEnvelope(ctx context.Context, env events.Envelope) {
 	d.store(ctx, hubEvent(env))
 	d.deliverDue(ctx)
@@ -257,13 +262,11 @@ func newFixture(t *testing.T, subs []string, want int) (cache.EventBus, *events.
 	if err := d.Start(ctx); err != nil {
 		t.Fatalf("start dispatcher: %v", err)
 	}
-	observed := cache.NewObservedEventBus(bus)
-	observed.ObservePublishes(d.ObservePublish)
 	t.Cleanup(func() {
 		cancel()
 		d.Stop()
 	})
-	return observed, hub, client
+	return bus, hub, client
 }
 
 func waitFor(t *testing.T, c *recordingClient) {
@@ -282,34 +285,6 @@ func waitFor(t *testing.T, c *recordingClient) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for events; got %d, want %d", len(c.get()), c.want)
-	}
-}
-
-func TestDispatcher_BusEvent_DecodesJSONPayloadIntoFields(t *testing.T) {
-	bus, _, client := newFixture(t, []string{"library.media_added"}, 1)
-
-	body, _ := json.Marshal(map[string]any{
-		"libraryId": "lib-1",
-		"mediaType": "movie",
-		"mediaId":   "media-xyz",
-		"tmdbId":    603,
-	})
-	_ = bus.Publish(context.Background(), cache.ChannelCatalog, cache.Event{
-		Type:    "library.media_added",
-		Payload: string(body),
-	})
-
-	waitFor(t, client)
-	got := client.get()
-	if len(got) != 1 {
-		t.Fatalf("got %d events", len(got))
-	}
-	p := got[0].GetPayload().AsMap()
-	if p["libraryId"] != "lib-1" {
-		t.Errorf("libraryId: got %v want lib-1; full payload=%v", p["libraryId"], p)
-	}
-	if _, wrapped := p["payload"]; wrapped {
-		t.Error("payload should not be wrapped under \"payload\" key")
 	}
 }
 
@@ -337,5 +312,33 @@ func TestDispatcher_HubPluginEvent_ReachesConsumer(t *testing.T) {
 	p := got[0].GetPayload().AsMap()
 	if p["requestId"] != "01J" {
 		t.Errorf("requestId: got %v want 01J; full payload=%v", p["requestId"], p)
+	}
+}
+
+// A catalog event reaches plugins in its public shape: fields the host adds
+// for its own clients are dropped, and a notification names its account,
+// since profile IDs repeat across accounts.
+func TestDispatcher_NotificationReachesConsumerInItsPublicShape(t *testing.T) {
+	_, hub, client := newFixture(t, []string{"notification.created"}, 1)
+
+	if err := hub.Publish(context.Background(), events.Envelope{
+		Channel:   events.ChannelNotifications,
+		Event:     "notification.created",
+		Data:      json.RawMessage(`{"id":"d1","type":"episode.available","profile_id":"p1","series_title":"Severance","poster_thumbhash":"abc","read_at":null,"created_at":"2026-11-04T10:00:00Z"}`),
+		UserID:    7,
+		ProfileID: "p1",
+	}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+
+	waitFor(t, client)
+	payload := client.get()[0].GetPayload().AsMap()
+	if payload["user_id"] != float64(7) || payload["profile_id"] != "p1" || payload["series_title"] != "Severance" {
+		t.Fatalf("payload = %v, want the account, profile and title", payload)
+	}
+	for _, internal := range []string{"poster_thumbhash", "read_at"} {
+		if _, leaked := payload[internal]; leaked {
+			t.Errorf("payload carries %q, which isn't in the event catalog: %v", internal, payload)
+		}
 	}
 }
