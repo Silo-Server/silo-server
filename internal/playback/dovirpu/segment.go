@@ -14,6 +14,10 @@ import (
 // or a profile other than 7 or 8. A partly written one fails differently.
 var ErrUnsupportedInit = errors.New("dovirpu: init segment cannot carry Profile 8.1")
 
+// ErrNoRPUConverted reports a media segment that has RPUs but none of them
+// converted: served, it would carry no Dolby Vision metadata at all.
+var ErrNoRPUConverted = errors.New("dovirpu: no RPU in the segment could be converted")
+
 // Track describes the video track of a fragmented MP4 init segment.
 type Track struct {
 	ID        uint32
@@ -433,19 +437,28 @@ func InitTrack(f ReadFile) (Track, error) {
 }
 
 // ConvertSegmentFile applies ConvertSegment to a media segment file, writing
-// back only the bytes that changed.
+// back only the bytes that changed. The file is left untouched when
+// ConvertSegment fails or when the segment has RPUs and none converted
+// (ErrNoRPUConverted), so a retry fails the same way instead of finding the
+// RPUs already turned into filler.
 func ConvertSegmentFile(f File, track Track) (SegmentStats, error) {
 	b, err := readAll(f)
 	if err != nil {
 		return SegmentStats{}, err
 	}
 	stats, dirty, err := ConvertSegment(b, track)
+	if err == nil && stats.Converted == 0 && stats.Dropped > 0 {
+		err = ErrNoRPUConverted
+	}
+	if err != nil {
+		return stats, err
+	}
 	for _, r := range dirty {
-		if _, werr := f.WriteAt(b[r[0]:r[1]], int64(r[0])); werr != nil {
-			return stats, werr
+		if _, err := f.WriteAt(b[r[0]:r[1]], int64(r[0])); err != nil {
+			return stats, err
 		}
 	}
-	return stats, err
+	return stats, nil
 }
 
 func readAll(f ReadFile) ([]byte, error) {

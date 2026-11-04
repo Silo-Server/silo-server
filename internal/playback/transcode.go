@@ -3212,12 +3212,10 @@ func (s *TranscodeSession) convertDV81(name string, lease *SegmentLease, session
 	if name == hlsInitSegmentName {
 		return nil
 	}
+	// A segment that cannot be converted, including one where no RPU
+	// converted (dovirpu.ErrNoRPUConverted), is left unchanged and fails
+	// every request.
 	stats, err := dovirpu.ConvertSegmentFile(lease.File, track)
-	if err == nil && stats.Converted == 0 && stats.Dropped > 0 {
-		// Not one RPU converted: serving it would claim Dolby Vision 8.1
-		// for frames that carry no Dolby Vision metadata at all.
-		err = errors.New("no RPU could be converted")
-	}
 	if err != nil {
 		slog.Error("playback: dolby vision 8.1 segment conversion failed", "session", sessionID, "segment", name, "error", err)
 		return fmt.Errorf("convert segment to dolby vision 8.1: %w", err)

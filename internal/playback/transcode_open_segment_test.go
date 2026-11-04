@@ -145,12 +145,14 @@ func TestOpenSegmentDV81(t *testing.T) {
 	}
 	_ = lease.Close()
 	// A segment none of whose RPUs converted must not be served under the
-	// Dolby Vision 8.1 claim.
-	if lease, err := session.OpenSegment("seg_00001.m4s"); err == nil || errors.Is(err, ErrSegmentNotFound) {
-		if lease != nil {
-			_ = lease.Close()
+	// Dolby Vision 8.1 claim, on a retry either.
+	for attempt := 1; attempt <= 2; attempt++ {
+		if lease, err := session.OpenSegment("seg_00001.m4s"); err == nil || errors.Is(err, ErrSegmentNotFound) {
+			if lease != nil {
+				_ = lease.Close()
+			}
+			t.Fatalf("unconvertible segment, attempt %d: err = %v, want a conversion failure", attempt, err)
 		}
-		t.Fatalf("unconvertible segment: err = %v, want a conversion failure", err)
 	}
 	// FFmpeg recreates init.mp4 when it restarts. A media segment must not
 	// depend on it once its track is known.
