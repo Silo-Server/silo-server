@@ -353,8 +353,8 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
               <code>{copy.command}</code>
             </pre>
           ) : null}
-          {phase.failure.kind === "rejected" && phase.failure.message ? (
-            <p className="text-muted-foreground text-xs break-words">{phase.failure.message}</p>
+          {copy.detail ? (
+            <p className="text-muted-foreground text-xs break-words">{copy.detail}</p>
           ) : null}
         </div>
       );

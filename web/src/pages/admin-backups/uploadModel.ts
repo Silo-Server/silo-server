@@ -146,6 +146,8 @@ export interface FailureCopy {
   command?: string;
   /** Whether "Try again" continues the same upload. */
   resumable: boolean;
+  /** The server's own explanation, shown under the body; absent when the body is it. */
+  detail?: string;
 }
 
 const REJECTION_COPY: Record<UploadRejectionReason, Omit<FailureCopy, "resumable">> = {
@@ -194,8 +196,16 @@ export function failureCopy(failure: UploadFailure): FailureCopy {
         body: `Part ${failure.part + 1} of ${failure.partCount} didn't arrive. The parts already sent are kept, so trying again picks up where it stopped.`,
         resumable: true,
       };
-    case "rejected":
-      return { ...REJECTION_COPY[failure.reason], resumable: false };
+    case "rejected": {
+      const copy = REJECTION_COPY[failure.reason];
+      // An upload encrypted with another key is explained by the server's
+      // message, decrypt command included: show it once, in place of the
+      // page's own advice. The other reasons keep the page's line and add
+      // the server's detail under it.
+      if (failure.reason === "encrypted" && failure.message)
+        return { title: copy.title, body: failure.message, resumable: false };
+      return { ...copy, detail: failure.message || undefined, resumable: false };
+    }
     case "signed_out":
       return {
         title: "You were signed out",

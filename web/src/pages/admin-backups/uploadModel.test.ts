@@ -93,6 +93,24 @@ describe("failures", () => {
     );
   });
 
+  it("shows an encrypted rejection's server message once, in place of the page's advice", () => {
+    const encrypted = failureCopy({
+      kind: "rejected",
+      reason: "encrypted",
+      message: "Run decrypt.",
+    });
+    expect(encrypted).toMatchObject({ body: "Run decrypt." });
+    expect(encrypted.command).toBeUndefined();
+    expect(encrypted.detail).toBeUndefined();
+    const other = failureCopy({
+      kind: "rejected",
+      reason: "not_a_restore_set",
+      message: "bad tar",
+    });
+    expect(other.detail).toBe("bad tar");
+    expect(other.body).not.toBe("bad tar");
+  });
+
   it("checks a received file again after its check stopped", () => {
     const failure = failureOfError(problem("internal_error", 500), "complete", limits);
     expect(failure.kind).toBe("check_failed");
