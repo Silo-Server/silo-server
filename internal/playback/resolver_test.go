@@ -261,6 +261,15 @@ var resolverPlayMethodCases = []struct {
 		edit: func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
 		want: playback.PlayDirect,
 	},
+	{
+		// A container-only remux copies the audio, so it is no transcode and
+		// still goes ahead with transcoding off.
+		name:      "audio-only media needing only a new container remuxes with transcode disabled",
+		file:      &models.MediaFile{BaseType: "audiobook", CodecAudio: "aac", Container: "mkv", AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}},
+		edit:      func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want:      playback.PlayRemux,
+		wantAudio: &no,
+	},
 }
 
 func TestResolverPlayMethod(t *testing.T) {
