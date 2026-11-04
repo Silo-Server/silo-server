@@ -3775,17 +3775,44 @@ describe("VideoPlayer first frame", () => {
 
     // Switching transports empties the element with load(), which resets the
     // position and queues a timeupdate while no source has data. It is not the
-    // new transport's first frame, and the loading overlay stays up for it.
+    // new transport's first frame, and the spinner stays up for it.
     rerenderPlayer({ planRevision: 2 });
     fireEvent.timeUpdate(video);
     fireEvent.seeked(video);
     expect(onFirstFrame).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("status", { name: "Loading video" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Buffering" })).toBeInTheDocument();
 
     fireEvent.playing(video);
     expect(onFirstFrame).toHaveBeenCalledTimes(2);
     fireFrameTimeUpdate(video);
     expect(onFirstFrame).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the controls uncovered while a replan reloads a session that has played", async () => {
+    const { container, rerenderPlayer } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    expect(screen.getByRole("status", { name: "Loading video" })).toBeInTheDocument();
+    fireEvent.playing(video);
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+
+    // A seek outside the buffer replans the same session. Its new transport
+    // shows the buffering spinner over the controls, not the startup cover.
+    rerenderPlayer({ planRevision: 2 });
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Buffering" })).toBeInTheDocument();
+    fireEvent.playing(video);
+    expect(screen.queryByRole("status", { name: "Buffering" })).not.toBeInTheDocument();
+
+    // A new session, such as the next episode, starts behind the cover again.
+    rerenderPlayer({
+      sessionId: "session-2",
+      streamUrl: "/api/v1/stream/session-2",
+      planRevision: 3,
+    });
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-2"));
+    expect(screen.getByRole("status", { name: "Loading video" })).toBeInTheDocument();
   });
 });
 
