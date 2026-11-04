@@ -173,10 +173,12 @@ func Resolve(file *models.MediaFile, caps ClientCapabilities, settings AdminSett
 	}
 
 	// Converting audio-only media's audio is its transcode, so with
-	// transcoding off a source whose audio the client cannot decode is served
-	// as it is, as it was before audio-only media skipped the video decision.
-	// A container-only remux copies the audio and still goes ahead.
-	if audioOnly && !audioOK && !settings.TranscodeEnabled {
+	// transcoding off a source whose audio the client cannot decode, or that
+	// MP4 cannot hold so the remux would encode it (FLAC), is served as it
+	// is, as it was before audio-only media skipped the video decision. A
+	// container-only remux that copies the audio still goes ahead.
+	if audioOnly && !settings.TranscodeEnabled &&
+		(!audioOK || !preparedAudioCopyable(file.CodecAudio, normalizeCodecV3(file.CodecAudio))) {
 		return &PlayDecision{
 			Method: PlayDirect,
 			File:   file,

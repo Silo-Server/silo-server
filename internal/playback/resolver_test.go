@@ -270,6 +270,17 @@ var resolverPlayMethodCases = []struct {
 		want:      playback.PlayRemux,
 		wantAudio: &no,
 	},
+	{
+		// The client decodes FLAC, but MP4 cannot hold it, so a remux would
+		// encode the audio: with transcoding off the book is served as it is.
+		name: "audio-only FLAC the remux would encode falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "flac", Container: "flac", AudioTracks: []models.AudioTrack{{Codec: "flac", Channels: 2}}},
+		edit: func(c *playback.ClientCapabilities, s *playback.AdminSettings) {
+			c.CodecsAudio = append(c.CodecsAudio, "flac")
+			s.TranscodeEnabled = false
+		},
+		want: playback.PlayDirect,
+	},
 }
 
 func TestResolverPlayMethod(t *testing.T) {
