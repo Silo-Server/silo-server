@@ -122,6 +122,19 @@ func (a *applier) smartCollectionCreated(collectionType, id string) func(context
 // collectionTypeSmart is a collection whose items its rules choose.
 const collectionTypeSmart = "smart"
 
+// collectionRestoredMessage says what restoring onto a collection here
+// did: the items it added and the groups it put the collection back in,
+// each only when there were any.
+func collectionRestoredMessage(added, grouped int) string {
+	switch {
+	case grouped == 0:
+		return fmt.Sprintf("Added %s to the collection here.", counted(added, "item", "items"))
+	case added == 0:
+		return fmt.Sprintf("Put the collection here back in %s.", counted(grouped, "group", "groups"))
+	}
+	return fmt.Sprintf("Added %s to the collection here and put it back in %s.", counted(added, "item", "items"), counted(grouped, "group", "groups"))
+}
+
 // restoreOntoCollection adds the items a collection here lacks and puts its
 // memberships back in their groups. The collection's parent is locked
 // first, before anything that can take a library's order revision (a
@@ -144,7 +157,7 @@ func (a *applier) restoreOntoCollection(ctx context.Context, tx pgx.Tx, id strin
 		return unchanged(item), nil
 	}
 	item.Outcome = OutcomeRestored
-	item.Message = fmt.Sprintf("Added %d items to the collection here and put it back in %d groups.", len(added), grouped)
+	item.Message = collectionRestoredMessage(len(added), grouped)
 	return applied{item: item}, nil
 }
 
