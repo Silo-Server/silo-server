@@ -190,6 +190,9 @@ func (b *fakeBus) Close() error { return nil }
 type fakeInstallationStore struct {
 	installations []*Installation
 	capabilities  map[int][]*Capability
+	// approved is each installation's approved event access; nil approves
+	// every class for every installation.
+	approved map[int][]string
 }
 
 func (s *fakeInstallationStore) ListEnabled(_ context.Context) ([]*Installation, error) {
@@ -197,6 +200,22 @@ func (s *fakeInstallationStore) ListEnabled(_ context.Context) ([]*Installation,
 }
 func (s *fakeInstallationStore) ListCapabilities(_ context.Context, id int) ([]*Capability, error) {
 	return s.capabilities[id], nil
+}
+func (s *fakeInstallationStore) ApprovedEventAccess(context.Context) (map[int][]string, error) {
+	return approvedOrAll(s.approved, s.installations), nil
+}
+
+// approvedOrAll returns approved, or every access class for every
+// installation when approved is nil.
+func approvedOrAll(approved map[int][]string, installations []*Installation) map[int][]string {
+	if approved != nil {
+		return approved
+	}
+	all := make(map[int][]string, len(installations))
+	for _, installation := range installations {
+		all[installation.ID] = []string{"admin", "user_data"}
+	}
+	return all
 }
 
 type recordingClient struct {

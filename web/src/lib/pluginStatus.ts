@@ -9,7 +9,10 @@ export interface PluginStatus {
   /** Text color for the label; empty for the neutral states. */
   textClass: string;
   title?: string;
-  /** The plugin needs an admin: it is failing, restarting, or missing required settings. */
+  /**
+   * The plugin needs an admin: it is failing, restarting, missing required
+   * settings, or waiting for its permissions to be approved.
+   */
   attention: boolean;
   /** Sort rank: problems first (most severe first), healthy plugins next, off plugins last. */
   rank: number;
@@ -42,7 +45,9 @@ export function pluginStatus(installation: PluginInstallation): PluginStatus {
       rank: 2,
     };
   }
-  return { ...indicator, textClass: "", attention: false, rank: 3 };
+  // A plugin waiting for approval keeps its runtime label; the tile's badge names the wait.
+  const pending = Boolean(installation.permissions_pending);
+  return { ...indicator, textClass: "", attention: pending, rank: pending ? 2 : 3 };
 }
 
 export type InstalledFilter = "all" | "attention" | "update" | "off";

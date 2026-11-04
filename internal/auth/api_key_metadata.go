@@ -182,17 +182,7 @@ func (r *APIKeyRepository) DeleteByAdminConditional(ctx context.Context, id int6
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	if err := auditmutation.LockActors(ctx, tx); err != nil {
-		return err
-	}
-	before, err := lockAPIKeyMetadata(ctx, tx, id, guard)
-	if err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `DELETE FROM api_keys WHERE id=$1`, id); err != nil {
-		return err
-	}
-	audit, err := recordAPIKeyMutation(ctx, tx, before, nil)
+	audit, err := deleteAPIKeyTx(ctx, tx, id, guard)
 	if err != nil {
 		return err
 	}
@@ -201,6 +191,35 @@ func (r *APIKeyRepository) DeleteByAdminConditional(ctx context.Context, id int6
 	}
 	auditmutation.CommitMutation(ctx, audit)
 	return nil
+}
+
+// DeleteByAdminTx deletes any API key inside the caller's transaction, as
+// DeleteByAdminConditional does with an Any precondition: ErrAPIKeyNotFound
+// when the key is gone. The caller runs committed after tx commits, which
+// publishes the audit entry, and never runs it otherwise.
+func (r *APIKeyRepository) DeleteByAdminTx(ctx context.Context, tx pgx.Tx, id int64) (func(), error) {
+	audit, err := deleteAPIKeyTx(ctx, tx, id, APIKeyPrecondition{Any: true})
+	if err != nil {
+		return nil, err
+	}
+	return func() { auditmutation.CommitMutation(ctx, audit) }, nil
+}
+
+// deleteAPIKeyTx deletes the key and records its audit row in tx. The audit
+// row's account locks come before the key row lock, the order an account
+// deletion takes them in.
+func deleteAPIKeyTx(ctx context.Context, tx pgx.Tx, id int64, guard APIKeyPrecondition) (*auditmutation.Entry, error) {
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return nil, err
+	}
+	before, err := lockAPIKeyMetadata(ctx, tx, id, guard)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM api_keys WHERE id=$1`, id); err != nil {
+		return nil, err
+	}
+	return recordAPIKeyMutation(ctx, tx, before, nil)
 }
 
 // apiKeyAuditValues is the API key audit allowlist: the key's configuration,

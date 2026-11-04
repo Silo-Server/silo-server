@@ -107,9 +107,10 @@ type RuntimeHostServer struct {
 	configSetter     GlobalConfigSetter
 	installationID   int
 
-	hostInfo      HostInfoFunc
-	instanceState InstanceStateStore
-	networkAccess NetworkAccessBroker
+	hostInfo           HostInfoFunc
+	instanceState      InstanceStateStore
+	networkAccess      NetworkAccessBroker
+	hostAPICredentials HostAPICredentialSource
 	// ingressToken is the token issued to this process instance; pushes are
 	// accepted only while it is current.
 	ingressToken string
@@ -129,6 +130,9 @@ type RuntimeHostOptions struct {
 	HostInfo           HostInfoFunc
 	InstanceState      InstanceStateStore
 	NetworkAccess      NetworkAccessBroker
+	// HostAPICredentials answers GetHostAPICredential. When nil, as on proxy
+	// nodes, the RPC is Unimplemented.
+	HostAPICredentials HostAPICredentialSource
 	Logger             hclog.Logger
 	// EventRatePerSec caps PublishEvent; <= 0 takes DefaultPublishEventRatePerSec.
 	EventRatePerSec int
@@ -155,6 +159,7 @@ func NewRuntimeHostServerWithOptions(opts RuntimeHostOptions) *RuntimeHostServer
 	s.hostInfo = opts.HostInfo
 	s.instanceState = opts.InstanceState
 	s.networkAccess = opts.NetworkAccess
+	s.hostAPICredentials = opts.HostAPICredentials
 	s.provider = opts.NetworkAccessProvider
 	s.ingressToken = opts.IngressToken
 	s.logger = opts.Logger
@@ -414,10 +419,8 @@ func (s *RuntimeHostServer) GetHostInfo(ctx context.Context, _ *pluginv1.GetHost
 	if resp.PublicBaseUrl != "" && info.PluginContentPrefix != "" && s.installationID > 0 {
 		resp.PluginProxyBaseUrl = resp.PublicBaseUrl + info.PluginContentPrefix + "/plugins/" + strconv.Itoa(s.installationID)
 	}
+	resp.InternalBaseUrl = internalBaseURL(info)
 	for _, listener := range info.Listeners {
-		if listener.Name == ListenerAPI && listener.Address != "" {
-			resp.InternalBaseUrl = "http://" + listener.Address
-		}
 		resp.Listeners = append(resp.Listeners, &pluginv1.HostListener{
 			Name:        listener.Name,
 			Address:     listener.Address,
@@ -428,6 +431,48 @@ func (s *RuntimeHostServer) GetHostInfo(ctx context.Context, _ *pluginv1.GetHost
 		if token, ok := s.networkAccess.IngressToken(s.installationID); ok {
 			resp.IngressToken = token
 		}
+	}
+	return resp, nil
+}
+
+// internalBaseURL is the loopback base URL of the host's API listener, or
+// empty when the host has none.
+func internalBaseURL(info HostInfo) string {
+	for _, listener := range info.Listeners {
+		if listener.Name == ListenerAPI && listener.Address != "" {
+			return "http://" + listener.Address
+		}
+	}
+	return ""
+}
+
+// GetHostAPICredential returns the API key the host issued for this
+// installation's approved host_api_scopes, with the host's internal base URL.
+// The installation is the one the host started this process for. A test run
+// of a plugin, or an installation with nothing approved, gets
+// FAILED_PRECONDITION; a host that issues no keys answers Unimplemented.
+func (s *RuntimeHostServer) GetHostAPICredential(ctx context.Context, _ *pluginv1.GetHostAPICredentialRequest) (*pluginv1.GetHostAPICredentialResponse, error) {
+	if s.hostAPICredentials == nil {
+		return nil, status.Error(codes.Unimplemented, "this host does not issue host API credentials")
+	}
+	if s.installationID <= 0 {
+		return nil, status.Error(codes.FailedPrecondition, "a test run of a plugin has no host API key")
+	}
+	credential, err := s.hostAPICredentials.HostAPICredential(ctx, s.installationID)
+	if errors.Is(err, ErrHostAPINotGranted) {
+		return nil, status.Error(codes.FailedPrecondition, err.Error())
+	}
+	if err != nil {
+		s.logger.Warn("host API credential lookup failed", "plugin_id", s.pluginID, "installation_id", s.installationID, "error", err)
+		return nil, status.Error(codes.Internal, "host API credential lookup failed")
+	}
+	resp := &pluginv1.GetHostAPICredentialResponse{Token: credential.Token, Scopes: credential.Scopes}
+	if s.hostInfo != nil {
+		info, err := s.hostInfo(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("host info: %w", err)
+		}
+		resp.BaseUrl = internalBaseURL(info)
 	}
 	return resp, nil
 }

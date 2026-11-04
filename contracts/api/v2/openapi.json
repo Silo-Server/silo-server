@@ -14513,6 +14513,38 @@
         ],
         "type": "object"
       },
+      "AdminPluginEventAccess": {
+        "additionalProperties": false,
+        "properties": {
+          "approved": {
+            "description": "Access classes an administrator approved. The plugin receives events of these classes and of no others that need approval.",
+            "items": {
+              "enum": [
+                "admin",
+                "user_data"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "required": {
+            "description": "Access classes of the events the plugin subscribes to that need approval: admin (server operations such as playback activity, scans and jobs) and user_data (one profile's personal data, such as its notifications). Public and plugin events need none. The vocabulary is open: ignore a class you don't know.",
+            "items": {
+              "enum": [
+                "admin",
+                "user_data"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "required",
+          "approved"
+        ],
+        "type": "object"
+      },
       "AdminPluginForm": {
         "additionalProperties": false,
         "properties": {
@@ -14689,6 +14721,80 @@
         ],
         "type": "object"
       },
+      "AdminPluginHostAPIKey": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "The key on the API keys page, where it can be revoked; omitted while none is issued",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "issued": {
+            "description": "True while a host API key is issued to the plugin",
+            "type": "boolean"
+          },
+          "owner_user_id": {
+            "description": "The account the key acts as: the administrator whose approval issued it. It stops working if that account loses the admin role or is disabled, and is deleted with the account. Omitted while none is issued",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "usable": {
+            "description": "True while the issued key can act for the plugin. False when none is issued, when the account it acts as is no longer an enabled administrator, or when this server can't read it (it was stored under another SECRET_KEY). An unusable key grants nothing: the plugin is pending and an approval issues a replacement",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "issued",
+          "usable"
+        ],
+        "type": "object"
+      },
+      "AdminPluginHostAPIScopes": {
+        "additionalProperties": false,
+        "properties": {
+          "approved": {
+            "description": "Scopes the plugin's usable host API key carries; empty while none is usable, including after the key was revoked or its account lost the admin role",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requested": {
+            "description": "The manifest's host_api_scopes",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "required": {
+            "description": "The requested scopes this server can issue",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "unsupported": {
+            "description": "The requested scopes this server doesn't know; they are never granted",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "requested",
+          "required",
+          "unsupported",
+          "approved"
+        ],
+        "type": "object"
+      },
       "AdminPluginInstallCreate": {
         "additionalProperties": false,
         "properties": {
@@ -14783,6 +14889,10 @@
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
           },
+          "permissions_pending": {
+            "description": "True while the installation asks for event access or host API scopes an administrator hasn't approved; see getAdminPluginInstallationPermissions",
+            "type": "boolean"
+          },
           "plugin_id": {
             "type": "string"
           },
@@ -14871,6 +14981,7 @@
           "auth_bindings",
           "task_bindings",
           "runtime",
+          "permissions_pending",
           "created_at",
           "updated_at"
         ],
@@ -14892,6 +15003,55 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "AdminPluginPermissions": {
+        "additionalProperties": false,
+        "properties": {
+          "approved_at": {
+            "description": "The last explicit approval; omitted when none was given, such as when event access was approved by installing the plugin",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "approved_by_user_id": {
+            "description": "The administrator who gave the last explicit approval; omitted when none was given or the account was deleted",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "event_access": {
+            "$ref": "#/components/schemas/AdminPluginEventAccess"
+          },
+          "host_api_key": {
+            "$ref": "#/components/schemas/AdminPluginHostAPIKey"
+          },
+          "host_api_scopes": {
+            "$ref": "#/components/schemas/AdminPluginHostAPIScopes"
+          },
+          "installation_id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "pending": {
+            "description": "True while the plugin asks for event access or host API scopes that aren't approved. It keeps what was approved before until an administrator approves the rest",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "installation_id",
+          "event_access",
+          "host_api_scopes",
+          "pending",
+          "host_api_key"
+        ],
         "type": "object"
       },
       "AdminPluginPresentation": {
@@ -103908,6 +104068,449 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/plugins/installations/{id}/permissions": {
+      "get": {
+        "operationId": "getAdminPluginInstallationPermissions",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPluginPermissions"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read what one installation asks to receive and call, and what an administrator approved: the event access classes its subscriptions need, the host API scopes its manifest requests, and the host API key issued for them. The key itself is never returned. The ETag validates the whole representation; approving requires it. The reserved builtin row is 409.",
+        "tags": [
+          "admin-plugins"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/plugins/installations/{id}/permissions/approval": {
+      "put": {
+        "operationId": "approveAdminPluginInstallationPermissions",
+        "parameters": [
+          {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "pattern": "^[1-9][0-9]*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPluginPermissions"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Approve everything the installation asks for now, as the acting administrator. If-Match must carry the ETag of the permissions read the administrator approved; the server compares it with the permissions inside the approval's transaction, so a plugin update that asks for more, or another approval, landing in between is 412 with the current ETag and changes nothing. When the installation requests host API scopes this server knows and has no usable key with exactly those, a key acting as the acting administrator is issued and the previous key revoked in the same transaction; when it requests none, its key is revoked. The event subscriber index rebuilds on every server; the plugin is not restarted.",
+        "tags": [
+          "admin-plugins"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },

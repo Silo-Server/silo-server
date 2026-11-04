@@ -154,7 +154,12 @@ state (`plugin_auth_identities.refresh_state`, AAD
 [external-sign-in.md](external-sign-in.md#provider-re-check)). After a
 `SECRET_KEY` change that state no longer decrypts: it is sent as none, the
 OIDC plugin answers `UNSUPPORTED`, and those identities' sessions fall back to
-the absolute session age until the person signs in again. Plugin runtime configuration is encrypted as one opaque
+the absolute session age until the person signs in again. The host API key issued to a
+plugin (`plugin_permission_grants.api_key_ciphertext`, AAD
+`plugin_permission_grants:api_key_ciphertext:<installation id>:<key id>`) is covered too;
+after a `SECRET_KEY` change the key no longer opens, the plugin shows as pending and gets
+`FAILED_PRECONDITION`, and an administrator's next approval issues a new key
+([plugin-permissions.md](plugin-permissions.md)). Plugin runtime configuration is encrypted as one opaque
 row-bound envelope rather than by manifest field. Consequently, runtime code
 must use `RuntimeConfigStore`; database JSON-member queries and indexes are not
 supported for `plugin_runtime_configs.config_value`.

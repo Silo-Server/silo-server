@@ -270,6 +270,8 @@ PUT /api/v2/admin/plugins/installations/{id}/auth-binding	non-media
 POST /api/v2/admin/plugins/installations/{id}/auth-binding/test	non-media
 PUT /api/v2/admin/plugins/installations/{id}/config	non-media
 POST /api/v2/admin/plugins/installations/{id}/config/test	non-media
+GET /api/v2/admin/plugins/installations/{id}/permissions	non-media
+PUT /api/v2/admin/plugins/installations/{id}/permissions/approval	non-media
 POST /api/v2/admin/plugins/installations/{id}/restart	non-media
 PUT /api/v2/admin/plugins/installations/{id}/task-bindings/{capability_id}	non-media
 POST /api/v2/admin/plugins/installations/{id}/update	non-media
@@ -1595,6 +1597,8 @@ PUT /api/v2/admin/plugins/installations/{id}/auth-binding	non-media
 POST /api/v2/admin/plugins/installations/{id}/auth-binding/test	non-media
 PUT /api/v2/admin/plugins/installations/{id}/config	non-media
 POST /api/v2/admin/plugins/installations/{id}/config/test	non-media
+GET /api/v2/admin/plugins/installations/{id}/permissions	non-media
+PUT /api/v2/admin/plugins/installations/{id}/permissions/approval	non-media
 POST /api/v2/admin/plugins/installations/{id}/restart	non-media
 PUT /api/v2/admin/plugins/installations/{id}/task-bindings/{capability_id}	non-media
 POST /api/v2/admin/plugins/installations/{id}/update	non-media

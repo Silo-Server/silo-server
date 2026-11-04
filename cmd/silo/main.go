@@ -1862,6 +1862,11 @@ func main() {
 		installer := plugins.NewInstaller(installationStore, plugins.InstallerOptions{
 			BaseDir: pluginCacheDir,
 		})
+		// Approvals rebuild every API server's event subscriber index through
+		// the lifecycle path; pluginService is assigned below.
+		pluginPermissions := plugins.NewPermissionService(installationStore, deps.SecretCipher,
+			auth.PluginHostAPIKeys{Keys: auth.NewAPIKeyRepository(deps.DB)},
+			func(ctx context.Context) { pluginService.OnLifecycleChange(ctx) })
 
 		libSource := pluginLibrarySource{groups: accessGroupStore}
 		if deps.FolderRepo != nil {
@@ -1935,9 +1940,10 @@ func main() {
 					return runtimeConfigStore.PutGlobalConfig(ctx, installationID, key, value)
 				},
 			),
-			HostInfo:      hostInfo,
-			InstanceState: instanceStateStore,
-			NetworkAccess: networkAccess,
+			HostInfo:           hostInfo,
+			InstanceState:      instanceStateStore,
+			NetworkAccess:      networkAccess,
+			HostAPICredentials: pluginPermissions,
 			Logger: hclog.New(&hclog.LoggerOptions{
 				Name:   "plugin-host",
 				Level:  hclog.Info,
@@ -1952,6 +1958,7 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
+		pluginService.SetPermissions(pluginPermissions)
 		// Crashes of resident plugins (network access providers) reach the
 		// supervisor through the host's exit watcher so they restart with
 		// backoff instead of waiting for the next lazy RPC.
@@ -2043,6 +2050,15 @@ func main() {
 					})
 				}
 			}
+		}
+		// Installations from before permission grants keep the event access
+		// they had. This runs before the catalog auto-update below, so an
+		// update never meets an installation without a grant to hold back
+		// what it newly asks for.
+		if granted, err := installationStore.EnsurePermissionGrants(appCtx); err != nil {
+			log.Fatalf("record plugin permission grants: %v", err)
+		} else if granted > 0 {
+			slog.Info("recorded plugin permission grants for existing installations", "component", "plugins", "installations", granted)
 		}
 		if err := pluginService.PreloadEnabled(appCtx); err != nil {
 			log.Fatalf("preload enabled plugins: %v", err)

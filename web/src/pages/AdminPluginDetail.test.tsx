@@ -49,6 +49,8 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
   useTestPluginConfig: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useSavePluginAuthBinding: () => ({ mutate: saveAuthBindingMock, isPending: false }),
   useSavePluginTaskBinding: () => ({ mutate: saveTaskBindingMock, isPending: false }),
+  useAdminPluginPermissions: () => query(undefined),
+  useApprovePluginPermissions: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@/lib/buildPluginHref", () => ({

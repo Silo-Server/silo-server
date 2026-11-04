@@ -795,6 +795,104 @@ export function useRestartPluginInstallation() {
   };
 }
 
+export type PluginPermissions =
+  V2Result<"GET /api/v2/admin/plugins/installations/{id}/permissions">;
+
+/** The permissions read, with the validator an approval of exactly them sends. */
+export type PluginPermissionsView = PluginPermissions & { etag: string };
+
+/** A strong validator an approval can send as If-Match; never a deliberate "*". */
+function isApprovalValidator(etag: string): boolean {
+  return etag !== "" && etag !== "*" && !etag.startsWith("W/");
+}
+
+/** What one installation asks to receive and call, and what an administrator approved. */
+export function useAdminPluginPermissions(installationId: number) {
+  const profileContext = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [...adminKeys.pluginPermissions(installationId), ...profileScopeKey(profileContext)],
+    queryFn: async (): Promise<PluginPermissionsView> => {
+      if (!profileContext || !isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      let etag = "";
+      const permissions = await v2("GET /api/v2/admin/plugins/installations/{id}/permissions", {
+        path: { id: String(installationId) },
+        profileContext,
+        onResponse: (response) => {
+          etag = response.headers.get("ETag") ?? "";
+        },
+      });
+      if (!isApprovalValidator(etag))
+        throw new Error("Plugin permissions revision unavailable. Reload before approving.");
+      return { ...permissions, etag };
+    },
+    staleTime: ADMIN_STALE_TIME,
+    enabled: profileContext !== null,
+  });
+}
+
+type PluginPermissionsApprovalIntent = PluginLifecycleIntent & { etag: string };
+
+/**
+ * Approves the permissions the administrator read: the request carries their
+ * ETag, so a plugin update or another approval landing in between is 412. A
+ * 412 reloads the panel with the current requirements and approves nothing.
+ */
+export function useApprovePluginPermissions() {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    retry: false,
+    mutationFn: async ({ id, etag, profileContext }: PluginPermissionsApprovalIntent) => {
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      const permissions = await v2(
+        "PUT /api/v2/admin/plugins/installations/{id}/permissions/approval",
+        {
+          path: { id: String(id) },
+          profileContext,
+          headers: { "If-Match": etag },
+          retryAuthentication: false,
+        },
+      );
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      return permissions;
+    },
+    onSuccess: (_result, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      toast.success("Permissions approved");
+      void queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() });
+      // An approval can issue or revoke the plugin's API key.
+      void queryClient.invalidateQueries({ queryKey: adminKeys.apiKeys() });
+    },
+    onError: (error, intent) => {
+      if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      if (error instanceof V2ProblemError && error.status === 412) {
+        toast.error(
+          "This plugin's permissions changed since you opened them. Review what it asks for now, then approve again.",
+        );
+        void queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() });
+        return;
+      }
+      toast.error(lifecycleFailure(error, "Couldn't approve the plugin's permissions"));
+    },
+  });
+  return {
+    ...mutation,
+    mutate: (id: number, etag: string) => {
+      if (!isApprovalValidator(etag)) {
+        toast.error("Reload this plugin's permissions before approving them.");
+        return;
+      }
+      try {
+        mutation.mutate({ ...captureInstallation(id), etag });
+      } catch {
+        toast.error("Select an administrator profile before approving a plugin's permissions.");
+      }
+    },
+  };
+}
+
 export function useDeletePluginInstallation() {
   const queryClient = useQueryClient();
   const mutation = useMutation({
