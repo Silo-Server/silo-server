@@ -242,9 +242,6 @@ func TestCopySafetyNotifierUsesSessionPlayMethodWithoutAnAttempt(t *testing.T) {
 	}
 }
 
-// The Jellyfin-protocol surface picks direct stream from the device profile
-// alone, so a compat client reconnects onto the identical remux. Stopping it
-// would be a mid-stream interruption that buys nothing.
 // A v3 attempt is offered the copy of a multi-PPS source on purpose and leaves
 // it only once a copy has failed on the client; the verdict alone does not stop
 // it.
@@ -269,6 +266,9 @@ func TestCopySafetyNotifierLeavesV3CopiesThatHaveNotFailed(t *testing.T) {
 	}
 }
 
+// The Jellyfin-protocol surface picks direct stream from the device profile
+// alone, so a compat client reconnects onto the identical remux. Stopping it
+// would be a mid-stream interruption that buys nothing.
 func TestCopySafetyNotifierLeavesJellyfinCompatSessionsAlone(t *testing.T) {
 	sessions, hub, tracker, control := newCopySafetyFixture(t)
 	ctx := WithClientInfo(context.Background(), ClientInfo{Name: "Infuse", IsCompat: true})

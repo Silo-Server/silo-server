@@ -1316,7 +1316,8 @@ Three scoping rules keep the stop from firing where it cannot help:
   apply in-band parameter sets (Media3) play the copy; ones that trust only the
   sample entry's (VideoToolbox, browser MSE) fail it. A `failure_recovery` or
   `seek_failure_recovery` replan of a copy plan, unless blamed on a node, a
-  proxy origin, the network or a subtitle route, marks the attempt `VideoCopyFailed` in its frozen recipe, and
+  proxy origin, the network, the audio renderer or a subtitle route, marks the
+  attempt `VideoCopyFailed` in its frozen recipe, and
   the planner then offers the attempt's copy-unsafe source no remux copy. The
   mark does not gate direct play: once a quality or track change clears the
   attempted keys, `original_http` may be tried again, and a transcode follows

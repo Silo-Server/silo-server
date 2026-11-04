@@ -6678,18 +6678,21 @@ func sameEmbeddedSubtitleRouteV3(left, right *playback.EmbeddedSubtitleV3) bool 
 }
 
 const (
-	failureHTTPV3         = "http_failure"
-	failureNetworkErrorV3 = "network_error"
+	failureHTTPV3          = "http_failure"
+	failureNetworkErrorV3  = "network_error"
+	failureAudioRendererV3 = "audio_renderer_error"
 )
 
 // notVideoDecodeFailuresV3 lists the failure classifications that say a copy
 // route failed for a reason other than the video decoder: the network, the
-// source, or a subtitle route. They do not mark the copy as failed. Any other
-// classification does, because a wrong mark costs a transcode, which plays,
-// while a missed one leaves a strict decoder retrying copies. The network names
-// are the ones the Silo apps send. The web engine's browser_engine_read_failed
-// is left out on purpose: it also reports video that stopped while audio kept
-// playing, which is how a strict decoder fails a copy.
+// source, the audio renderer, or a subtitle route. They do not mark the copy as
+// failed; an audio failure recovers on a copy with the audio converted to AAC,
+// not on a video transcode. Any other classification does, because a wrong
+// mark costs a transcode, which plays, while a missed one leaves a strict
+// decoder retrying copies. The network names are the ones the Silo apps send.
+// The web engine's browser_engine_read_failed is left out on purpose: it also
+// reports video that stopped while audio kept playing, which is how a strict
+// decoder fails a copy.
 var notVideoDecodeFailuresV3 = map[string]bool{
 	playback.FailureSubtitleHLSRenditionFailedV3: true,
 	playback.FailureSubtitleEmbeddedFailedV3:     true,
@@ -6700,6 +6703,7 @@ var notVideoDecodeFailuresV3 = map[string]bool{
 	"network_degraded":                           true,
 	"source_unavailable":                         true,
 	"seek_reanchor_network_failure":              true,
+	failureAudioRendererV3:                       true,
 }
 
 // withoutFailedSubtitleRoutesV3 removes the subtitle routes this attempt may
