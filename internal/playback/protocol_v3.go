@@ -1642,7 +1642,9 @@ func validateHDRCapabilitiesV3(hdr *HDRCapabilitiesV3) error {
 	}
 	seenProfiles := make(map[int]struct{}, len(hdr.DolbyVisionProfileLevels))
 	for _, capability := range hdr.DolbyVisionProfileLevels {
-		if capability.Profile <= 0 || capability.MaxLevel < 1 || capability.MaxLevel > 13 {
+		// Profile 0 (dvav.per) is a real, if legacy, profile; MediaTek TV
+		// decoders list it alongside the modern ones.
+		if capability.Profile < 0 || capability.MaxLevel < 1 || capability.MaxLevel > 13 {
 			return errors.New("invalid dolby vision profile level capability")
 		}
 		if _, exists := seenProfiles[capability.Profile]; exists {
