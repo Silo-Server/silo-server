@@ -281,6 +281,14 @@ var resolverPlayMethodCases = []struct {
 		},
 		want: playback.PlayDirect,
 	},
+	{
+		// The primary AAC track would copy, but the FLAC second track would
+		// be encoded, so with transcoding off the book is served as it is.
+		name: "audio-only media with a track the remux would encode falls to direct with transcode disabled",
+		file: &models.MediaFile{BaseType: "audiobook", CodecAudio: "aac", Container: "mkv", AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}, {Codec: "flac", Channels: 2}}},
+		edit: func(_ *playback.ClientCapabilities, s *playback.AdminSettings) { s.TranscodeEnabled = false },
+		want: playback.PlayDirect,
+	},
 }
 
 func TestResolverPlayMethod(t *testing.T) {

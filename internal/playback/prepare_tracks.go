@@ -173,6 +173,21 @@ func preparedAudioCopyable(codec, primaryCodec string) bool {
 	return normalized == primaryCodec || normalized == audioCodecAACV3 || normalized == audioCodecMP3
 }
 
+// preparedRemuxEncodesAudio reports whether a remux of file that asks to copy
+// its audio would still encode some of it, because a track's codec cannot be
+// copied into MP4. Without a track inventory only the primary codec is known.
+func preparedRemuxEncodesAudio(file *models.MediaFile) bool {
+	if !PreparedTracksAvailable(file) {
+		return !preparedAudioCopyable(file.CodecAudio, normalizeCodecV3(file.CodecAudio))
+	}
+	for _, track := range PlanPreparedTracks(file, PreparedAudioCopy, -1).Audio {
+		if track.Codec != PreparedAudioCopy {
+			return true
+		}
+	}
+	return false
+}
+
 // preparedTextSubtitleCodecs lists embedded plain-text subtitle codecs that
 // convert to MP4 timed text without losing content.
 var preparedTextSubtitleCodecs = map[string]bool{
