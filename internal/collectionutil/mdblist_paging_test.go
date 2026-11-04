@@ -117,23 +117,29 @@ func TestFetchMDBListJSONBoundsAFeedThatIgnoresPaging(t *testing.T) {
 func TestFetchMDBListJSONReportsTheFeedError(t *testing.T) {
 	t.Parallel()
 
+	// The decoding rows match only this package's prefix: the rest is
+	// encoding/json's wording, which is not a contract.
 	tests := []struct {
-		name string
-		body string
-		want string
+		name       string
+		body       string
+		want       string
+		wantPrefix bool
 	}{
 		{name: "private list", body: `{"error": "This List is Private"}`, want: "mdblist: This List is Private"},
 		{name: "long reason", body: `{"error": "` + strings.Repeat("x", mdblistFeedErrorMaxRunes+50) + `"}`, want: "mdblist: " + strings.Repeat("x", mdblistFeedErrorMaxRunes)},
-		{name: "object without a reason", body: `{"items": []}`, want: "parsing mdblist response: json: cannot unmarshal object into Go value of type []collectionutil.pagingEntry"},
-		{name: "not JSON", body: `<!DOCTYPE html>`, want: "parsing mdblist response: invalid character '<' looking for beginning of value"},
+		{name: "object without a reason", body: `{"items": []}`, want: "parsing mdblist response: ", wantPrefix: true},
+		{name: "not JSON", body: `<!DOCTYPE html>`, want: "parsing mdblist response: ", wantPrefix: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			feed := &fakeMDBListFeed{body: tt.body}
 			_, err := FetchMDBListJSON[pagingEntry](context.Background(), &http.Client{Transport: feed}, "https://mdblist.com/lists/example-user/private", 0)
-			if err == nil || err.Error() != tt.want {
-				t.Fatalf("error = %v, want %q", err, tt.want)
+			if err == nil {
+				t.Fatalf("error = nil, want %q", tt.want)
+			}
+			if got := err.Error(); got != tt.want && (!tt.wantPrefix || !strings.HasPrefix(got, tt.want)) {
+				t.Fatalf("error = %q, want %q (prefix %v)", got, tt.want, tt.wantPrefix)
 			}
 		})
 	}
