@@ -1429,7 +1429,7 @@ func TestHandleReplanPlaybackV3FailedCopyOfMultiPPSSourceTranscodes(t *testing.T
 	t.Cleanup(func() { handler.tm.CloseTranscodeSession(active.SessionID, "") })
 
 	var attempted []string
-	replan := func(index int, operation playback.ReplanOperationV3) playback.DecisionResponseV3 {
+	replan := func(index int, operation playback.ReplanOperationV3, classification string) playback.DecisionResponseV3 {
 		currentKey := playback.PlanAttemptKeyV3(*active.PlaybackPlan, startRequest.ClientPlaybackContext.Output.OutputContextID, nil)
 		request := playback.ReplanRequestV3{
 			ProtocolVersion: playback.ProtocolV3, Operation: operation,
@@ -1446,7 +1446,7 @@ func TestHandleReplanPlaybackV3FailedCopyOfMultiPPSSourceTranscodes(t *testing.T
 		if operation == playback.ReplanOperationFailureRecoveryV3 {
 			attempted = append(attempted, currentKey)
 			request.AttemptedPlanKeys = append([]string(nil), attempted...)
-			request.Failure = playback.FailureV3{Classification: "decoder_error"}
+			request.Failure = playback.FailureV3{Classification: classification}
 		}
 		body, err := json.Marshal(request)
 		if err != nil {
@@ -1461,17 +1461,22 @@ func TestHandleReplanPlaybackV3FailedCopyOfMultiPPSSourceTranscodes(t *testing.T
 	}
 
 	// Direct play failing is not a copy failure: the copy is still offered.
-	active = replan(1, playback.ReplanOperationFailureRecoveryV3)
+	active = replan(1, playback.ReplanOperationFailureRecoveryV3, "decoder_error")
 	if active.PlaybackPlan.Delivery != playback.DeliveryRemuxProgressiveV3 {
 		t.Fatalf("after direct-play failure delivery = %q, want the progressive copy", active.PlaybackPlan.Delivery)
 	}
-	// The copy fails: recovery skips the HLS remux and transcodes.
-	active = replan(2, playback.ReplanOperationFailureRecoveryV3)
+	// A subtitle route failing is not the video decoder's: the next copy is still offered.
+	active = replan(2, playback.ReplanOperationFailureRecoveryV3, playback.FailureSubtitleEmbeddedFailedV3)
+	if !playback.PlanCopiesVideoV3(*active.PlaybackPlan) {
+		t.Fatalf("after a subtitle failure delivery = %q, want another copy", active.PlaybackPlan.Delivery)
+	}
+	// The copy fails: recovery skips any remaining remux variant and transcodes.
+	active = replan(3, playback.ReplanOperationFailureRecoveryV3, "decoder_error")
 	if active.PlaybackPlan.Delivery != playback.DeliveryTranscodeHLSV3 {
 		t.Fatalf("after copy failure delivery = %q, want a transcode", active.PlaybackPlan.Delivery)
 	}
 	// A later replan of the attempt keeps refusing the copy.
-	active = replan(3, playback.ReplanOperationQualityChangeV3)
+	active = replan(4, playback.ReplanOperationQualityChangeV3, "")
 	if playback.PlanCopiesVideoV3(*active.PlaybackPlan) {
 		t.Fatalf("quality change after a failed copy delivery = %q, want no copy", active.PlaybackPlan.Delivery)
 	}

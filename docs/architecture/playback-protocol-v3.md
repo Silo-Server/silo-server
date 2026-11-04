@@ -1284,14 +1284,15 @@ feature, no connection, no `completed` result within `deadline_ms` (an ack
 alone does not stop the clock), or a `rejected` result, and the session is
 terminated instead. That is deliberate, and it is the whole
 backwards-compatibility story: a client shipped before this token sees its
-session end, runs the recovery it already has, and its fresh attempt is planned
-against the persisted verdict — which lands it on a transcode. No client has to
+session end, runs the recovery it already has, and its fresh attempt re-plans
+the route (a multi-PPS source is still offered the copy first; see below). No client has to
 implement anything to stay correct; the feature only buys a seamless switch
 instead of a stopped session.
 
 An inconclusive scan changes nothing: nothing is persisted, no command is
 pushed, and live sessions keep the route they were given. Only a positive
-"this source cannot be copied" verdict withdraws a plan.
+"this source cannot be copied" verdict withdraws a plan, and from a v3 attempt
+only once a copy has failed on the client (see the copy-first rule below).
 
 Three scoping rules keep the stop from firing where it cannot help:
 
@@ -1313,8 +1314,8 @@ Three scoping rules keep the stop from firing where it cannot help:
 - **A multi-PPS source is copied first, for every client.** Decoders that
   apply in-band parameter sets (Media3) play the copy; ones that trust only the
   sample entry's (VideoToolbox, browser MSE) fail it. A `failure_recovery` or
-  `seek_failure_recovery` replan of a copy plan, unless blamed on a node or
-  proxy origin, marks the attempt `VideoCopyFailed` in its frozen recipe, and
+  `seek_failure_recovery` replan of a copy plan, unless blamed on a node,
+  a proxy origin or a subtitle route, marks the attempt `VideoCopyFailed` in its frozen recipe, and
   the attempt's copy-unsafe source then gets only a transcode. Until then the
   notifier leaves a v3 attempt's copy alone. A strict decoder costs up to two
   failed routes (direct play, then the copy); a silent mis-decode is not caught.

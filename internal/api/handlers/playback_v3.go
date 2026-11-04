@@ -5632,10 +5632,11 @@ type replanPassV3 struct {
 // audioDegraded is the audio selection's state before planning.
 func (h *PlaybackHandler) planReplanV3(r *http.Request, p replanPlanningV3, start playback.StartRequestV3, effectiveFile *models.MediaFile, audioIndex int, audioDegraded bool) (replanPassV3, *transportErrorV3) {
 	// An output change that falls back to the playing edition plans under the
-	// same estimate, and so the same limit.
+	// same estimate, and so the same limit, and still refuses a failed copy.
 	currentEffectiveStart := p.currentEffectiveStart
 	currentEffectiveStart.BandwidthEstimateKbps = start.BandwidthEstimateKbps
 	currentEffectiveStart.BandwidthEstimateSource = start.BandwidthEstimateSource
+	currentEffectiveStart.VideoCopyFailed = start.VideoCopyFailed
 	additional, inventoryErr := h.listDownloadedSubtitlesV3(r.Context(), effectiveFile)
 	if inventoryErr != nil && (p.operation == playback.ReplanOperationTrackChangeV3 || p.operation == playback.ReplanOperationQualityChangeV3) && selectsDownloadedSubtitleV3(effectiveFile, start) {
 		// A failed lookup says nothing about whether the selected track
@@ -6115,9 +6116,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// A video stream-copy that failed on the client stays refused for the
 		// rest of the attempt, so a multi-PPS source lands on a transcode instead
 		// of the next remux variant. A failure on an unreachable node or proxy
-		// origin is not the decoder's. It goes on the durable recipe now because
-		// a terminal or transport error persists this record unchanged.
-		if !proxyOriginRecovery && !nodeRecovery && playback.PlanCopiesVideoV3(record.CurrentPlan) {
+		// origin, or of a subtitle route, is not the video decoder's. It goes on
+		// the durable recipe now because a terminal or transport error persists
+		// this record unchanged.
+		subtitleFailure := req.Failure.Classification == playback.FailureSubtitleHLSRenditionFailedV3 ||
+			req.Failure.Classification == playback.FailureSubtitleEmbeddedFailedV3
+		if !proxyOriginRecovery && !nodeRecovery && !subtitleFailure && playback.PlanCopiesVideoV3(record.CurrentPlan) {
 			record.FrozenRecipe.VideoCopyFailed = true
 		}
 		// Always exclude the durable server recipe so stale or malformed client
