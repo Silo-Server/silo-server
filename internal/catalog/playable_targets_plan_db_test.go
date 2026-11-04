@@ -18,14 +18,24 @@ type playableTargetSQLCapture struct {
 	args  []any
 }
 
-func (c *playableTargetSQLCapture) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if strings.HasPrefix(strings.TrimSpace(data.SQL), "WITH requested AS") && strings.Contains(data.SQL, "SELECT COALESCE(") {
-		c.query, c.args = data.SQL, slices.Clone(data.Args)
-	}
+func (*playableTargetSQLCapture) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
 	return ctx
 }
 
 func (*playableTargetSQLCapture) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (*playableTargetSQLCapture) TraceBatchStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceBatchStartData) context.Context {
+	return ctx
+}
+
+// The resolver sends its statement inside a batch with the JIT guard.
+func (c *playableTargetSQLCapture) TraceBatchQuery(_ context.Context, _ *pgx.Conn, data pgx.TraceBatchQueryData) {
+	if strings.HasPrefix(strings.TrimSpace(data.SQL), "WITH requested AS") && strings.Contains(data.SQL, "SELECT COALESCE(") {
+		c.query, c.args = data.SQL, slices.Clone(data.Args)
+	}
+}
+
+func (*playableTargetSQLCapture) TraceBatchEnd(context.Context, *pgx.Conn, pgx.TraceBatchEndData) {}
 
 type playableTargetPlan struct {
 	Relation       string               `json:"Relation Name"`
