@@ -173,8 +173,8 @@ func TestRequestExecutionFingerprintBindsRecipeButNotArtifactHandle(t *testing.T
 	if got := changed.ExecutionFingerprint(); got == want {
 		t.Fatal("byte-affecting duration did not change execution fingerprint")
 	}
-	// A node must map an audiobook's video as optional, so the flag travels
-	// and an older node that drops it cannot return the matching fingerprint.
+	// A node must leave an audiobook's cover art out, so the flag travels and
+	// an older node that drops it cannot return the matching fingerprint.
 	changed = NewRequest("attempt-a", playback.TranscodeOpts{InputPath: "/media/book.flac", TargetCodecVideo: "copy", TargetCodecAudio: "aac", AudioOnly: true})
 	wire, err := json.Marshal(changed)
 	if err != nil {

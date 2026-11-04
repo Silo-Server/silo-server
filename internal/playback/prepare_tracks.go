@@ -206,7 +206,7 @@ func PreparedSubtitleSidecarFormat(codec string) string {
 // title (MP4 handler name), and disposition are written explicitly.
 func appendPreparedTrackArgs(args []string, opts TranscodeOpts) []string {
 	plan := opts.PreparedTracks
-	args = append(args, "-map", preparedVideoMap(opts))
+	args = appendPreparedVideoMap(args, opts)
 	for _, track := range plan.Audio {
 		args = append(args, "-map", fmt.Sprintf("0:a:%d", track.SourceIndex))
 	}
@@ -244,14 +244,16 @@ func appendPreparedTrackArgs(args []string, opts TranscodeOpts) []string {
 	return args
 }
 
-// preparedVideoMap maps the source's video. Audio-only media has at most a
-// cover picture, so its map is optional and a file without one still
-// prepares; any other source must have its video stream.
-func preparedVideoMap(opts TranscodeOpts) string {
+// appendPreparedVideoMap maps the source's video stream, which every source
+// but audio-only media must have. An audiobook or podcast has at most a cover
+// picture, in whatever format it was embedded (MP4 refuses a GIF or BMP
+// cover), so its prepared file carries no video: clients show the server's
+// artwork, as they do when streaming it.
+func appendPreparedVideoMap(args []string, opts TranscodeOpts) []string {
 	if opts.AudioOnly {
-		return "0:v:0?"
+		return args
 	}
-	return "0:v:0"
+	return append(args, "-map", "0:v:0")
 }
 
 // appendPreparedStreamMetadata writes an MP4-compatible language (ISO 639-2)

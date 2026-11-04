@@ -109,9 +109,9 @@ type Request struct {
 	// and therefore cannot return the matching execution fingerprint.
 	TrackRecipeVersion string                   `json:"track_recipe_version,omitempty"`
 	PreparedTracks     *playback.PreparedTracks `json:"prepared_tracks,omitempty"`
-	// AudioOnly makes the video map optional for an audiobook or podcast
-	// with no cover art. Older nodes ignore it and therefore cannot return
-	// the matching execution fingerprint.
+	// AudioOnly leaves an audiobook's or podcast's cover art out of the
+	// prepared file, which maps no video for it. Older nodes ignore it and
+	// therefore cannot return the matching execution fingerprint.
 	AudioOnly     bool    `json:"audio_only,omitempty"`
 	TotalDuration float64 `json:"total_duration,omitempty"`
 	// LogSessionID labels the node's FFmpeg log lines with the durable job's

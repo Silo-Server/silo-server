@@ -182,10 +182,10 @@ func TestPlanPreparedTracksSkipsUndecodableAudio(t *testing.T) {
 	}
 }
 
-// An audiobook may have no cover art at all, so its prepared remux maps video
-// only when there is one, in both layouts; a video file still requires its
-// video stream.
-func TestBuildPrepareFileArgsMakesVideoOptionalForAudioOnlyMedia(t *testing.T) {
+// An audiobook's only picture is cover art, which may be missing or in a
+// format MP4 refuses, so its prepared file maps no video in either layout; a
+// video file still requires its video stream.
+func TestBuildPrepareFileArgsMapsNoVideoForAudioOnlyMedia(t *testing.T) {
 	file := &models.MediaFile{BaseType: "audiobook", CodecAudio: "flac", AudioTracks: []models.AudioTrack{{Codec: "flac", Channels: 2}}}
 	for _, tc := range []struct {
 		name      string
@@ -193,9 +193,9 @@ func TestBuildPrepareFileArgsMakesVideoOptionalForAudioOnlyMedia(t *testing.T) {
 		tracks    *PreparedTracks
 		want      string
 	}{
-		{"audio-only, prepared tracks", true, PlanPreparedTracks(file, "aac", -1), "-map 0:v:0? -map 0:a:0 -dn"},
-		{"audio-only, legacy layout", true, nil, "-map 0:v:0? -map 0:a:0? -sn -dn"},
-		{"video, prepared tracks", false, PlanPreparedTracks(file, "aac", -1), "-map 0:v:0 -map 0:a:0 -dn"},
+		{"audio-only, prepared tracks", true, PlanPreparedTracks(file, "aac", -1), "-map_chapters -1 -map 0:a:0 -dn"},
+		{"audio-only, legacy layout", true, nil, "-map_chapters -1 -map 0:a:0? -sn -dn"},
+		{"video, prepared tracks", false, PlanPreparedTracks(file, "aac", -1), "-map_chapters -1 -map 0:v:0 -map 0:a:0 -dn"},
 	} {
 		joined := strings.Join(buildPrepareFileArgs(TranscodeOpts{
 			InputPath: "/media/in.flac", TargetCodecVideo: "copy", TargetCodecAudio: "aac", AudioOnly: tc.audioOnly,
