@@ -84,8 +84,11 @@ genre samplers) and co-watch pairs do not use embeddings and stay.
 The reset runs synchronously while holding the embeddings, taste profile and
 recommendation jobs' claims and the stale profile sweep's lock, so none of
 them runs beside it on any server. It returns `409` while any of them is
-running, while a catalog import with embeddings runs, or while saved embedding
-settings wait for a server restart, and `500` when the reset fails. A failure
+running, while a catalog import with embeddings runs, or while a saved
+embedding model or embedding base URL differs from the one the server runs
+with (a saved change waiting for a server restart; other saved embedding
+settings, such as the auth token, do not block it), and `500` when the reset
+fails. A failure
 before the commit leaves every row in place. A failed commit can also answer
 `500` after PostgreSQL committed the reset, so read the status counts before
 retrying.
