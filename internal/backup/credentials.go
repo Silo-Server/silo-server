@@ -442,8 +442,8 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 		_, _ = fmt.Fprintf(out, "Kept %d with less than they had: %s\n", len(carriedRows.Limited), strings.Join(carriedRows.Limited, "; "))
 	}
 	if len(carriedRows.Stricter) > 0 {
-		_, _ = fmt.Fprintf(out, "Kept %d security switches as this server has them, stricter than the backup: %s\n",
-			len(carriedRows.Stricter), strings.Join(carriedRows.Stricter, ", "))
+		kept := counted(len(carriedRows.Stricter), "security switch as this server has it", "security switches as this server has them")
+		_, _ = fmt.Fprintf(out, "Kept %s, stricter than the backup: %s\n", kept, strings.Join(carriedRows.Stricter, ", "))
 	}
 	return nil
 }

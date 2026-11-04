@@ -661,21 +661,33 @@ func (s *swap) reopen(ctx context.Context) error {
 	if s.manifest != nil {
 		printMissing(s.out, s.manifest)
 	}
+	renames := fmt.Sprintf(`  ALTER DATABASE %s RENAME TO %s;
+  ALTER DATABASE %s RENAME TO %s;
+  ALTER DATABASE %s WITH ALLOW_CONNECTIONS true;
+`, quoteIdent(h.LiveDatabase), quoteIdent(h.RestoredDatabase),
+		quoteIdent(h.BeforeDatabase), quoteIdent(h.LiveDatabase),
+		quoteIdent(h.LiveDatabase))
+	// The overwritten files and the step that copies them back exist only
+	// when the restore wrote files (the journal records each before it is
+	// written); a database-only restore wrote none.
+	if len(s.j.blobs) == 0 {
+		_, _ = fmt.Fprintf(s.out, `Restored %s into %s.
+The previous database is kept as %s, closed to connections. The restore wrote no files.
+Once the restored server works, drop it:
+  DROP DATABASE %s;
+To go back instead, stop Silo, then:
+%s`, h.BackupID, h.LiveDatabase, h.BeforeDatabase, quoteIdent(h.BeforeDatabase), renames)
+		return nil
+	}
 	_, _ = fmt.Fprintf(s.out, `Restored %s into %s.
 The previous database is kept as %s, closed to connections, and the files the restore replaced are under %s.
 Once the restored server works, drop them:
   DROP DATABASE %s;
   (delete %s from the blob store)
 To go back instead, stop Silo, copy the files under %s back over their keys, then:
-  ALTER DATABASE %s RENAME TO %s;
-  ALTER DATABASE %s RENAME TO %s;
-  ALTER DATABASE %s WITH ALLOW_CONNECTIONS true;
-`, h.BackupID, h.LiveDatabase, h.BeforeDatabase, h.PreservePrefix,
+%s`, h.BackupID, h.LiveDatabase, h.BeforeDatabase, h.PreservePrefix,
 		quoteIdent(h.BeforeDatabase), h.PreservePrefix,
-		h.PreservePrefix,
-		quoteIdent(h.LiveDatabase), quoteIdent(h.RestoredDatabase),
-		quoteIdent(h.BeforeDatabase), quoteIdent(h.LiveDatabase),
-		quoteIdent(h.LiveDatabase))
+		h.PreservePrefix, renames)
 	return nil
 }
 
