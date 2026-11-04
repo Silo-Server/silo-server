@@ -34,13 +34,14 @@ func TestVideoWalkListsSidecarsOfEveryDirectoryItReads(t *testing.T) {
 	writeSidecarWalkFile(t, filepath.Join(season, "Show S01E01.srt"))
 	writeSidecarWalkFile(t, filepath.Join(root, "Empty", "readme.txt"))
 
-	files, failures, listing, err := collectLogicalFilePathsAndSidecars(t.Context(), []string{root}, "series", nil)
+	files, failures, walk, err := collectLogicalFilePaths(t.Context(), []string{root}, "series", nil)
 	if err != nil || len(failures) != 0 {
 		t.Fatalf("walk: err=%v failures=%v", err, failures)
 	}
 	if len(files) != 1 {
 		t.Fatalf("files = %v, want the one episode", files)
 	}
+	listing := walk.sidecars
 	for dir, want := range map[string][]string{
 		show:                         {"Poster.JPG", "tvshow.nfo"},
 		season:                       {"Show S01E01.nfo"},
@@ -65,12 +66,12 @@ func TestBookWalkListsNoSidecars(t *testing.T) {
 	writeSidecarWalkFile(t, filepath.Join(root, "Author", "Book.epub"))
 	writeSidecarWalkFile(t, filepath.Join(root, "Author", "cover.jpg"))
 
-	_, _, listing, err := collectLogicalFilePathsAndSidecars(t.Context(), []string{root}, "ebooks", nil)
+	_, _, walk, err := collectLogicalFilePaths(t.Context(), []string{root}, "ebooks", nil)
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
-	if listing != nil {
-		t.Fatalf("an ebook walk listed sidecars: %v", listing)
+	if walk.sidecars != nil {
+		t.Fatalf("an ebook walk listed sidecars: %v", walk.sidecars)
 	}
 }
 

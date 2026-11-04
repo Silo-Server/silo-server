@@ -259,16 +259,21 @@ function summarizeScanResult(result: AutoscanScanResult | undefined): ScanResult
   if (result.missing_skipped_protected > 0)
     parts.push(`${result.missing_skipped_protected.toLocaleString()} kept (storage offline)`);
   if (result.errors > 0) parts.push(plural(result.errors, "error"));
+  // Every scan that finds a file of an unsupported type counts it again, so
+  // the count is reported without making the run read as a change.
+  const notCataloged =
+    result.unsupported_files > 0
+      ? [`${plural(result.unsupported_files, "file")} not cataloged`]
+      : [];
   if (parts.length === 0) {
-    return {
-      text:
-        result.unchanged > 0
-          ? `No changes · ${result.unchanged.toLocaleString()} unchanged`
-          : "No changes",
-      tone: "none",
-    };
+    const none = ["No changes"];
+    if (result.unchanged > 0) none.push(`${result.unchanged.toLocaleString()} unchanged`);
+    return { text: [...none, ...notCataloged].join(" · "), tone: "none" };
   }
-  return { text: parts.join(" · "), tone: result.errors > 0 ? "errors" : "changes" };
+  return {
+    text: [...parts, ...notCataloged].join(" · "),
+    tone: result.errors > 0 ? "errors" : "changes",
+  };
 }
 
 function ScanResultText({

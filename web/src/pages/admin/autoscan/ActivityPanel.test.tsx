@@ -157,6 +157,7 @@ const emptyResult = {
   memberships_removed: 0,
   errors: 0,
   skipped: 0,
+  unsupported_files: 0,
 };
 
 it("distinguishes skipped, productive, and pending scans in the scan history", () => {
@@ -177,6 +178,12 @@ it("distinguishes skipped, productive, and pending scans in the scan history", (
         },
         { ...baseScan, id: "01ITEMS", result: { ...emptyResult, items_deleted: 3 } },
         { ...baseScan, id: "01MEMBERS", result: { ...emptyResult, memberships_removed: 2 } },
+        { ...baseScan, id: "01UNSUPPORTED", result: { ...emptyResult, unsupported_files: 7 } },
+        {
+          ...baseScan,
+          id: "01NEWUNSUPPORTED",
+          result: { ...emptyResult, new: 1, unsupported_files: 1 },
+        },
         { ...baseScan, id: "01RUNNING", status: "running" },
       ]}
       librariesByID={librariesByID}
@@ -193,7 +200,10 @@ it("distinguishes skipped, productive, and pending scans in the scan history", (
   expect(table.getByText("3 items removed")).toBeTruthy();
   // So is dropping a title from this library without deleting it.
   expect(table.getByText("2 titles removed from library")).toBeTruthy();
-  expect(table.getAllByText(/^No changes/)).toHaveLength(1);
+  // Files skipped for their type are reported, but are not a change.
+  expect(table.getByText("No changes · 7 files not cataloged")).toBeTruthy();
+  expect(table.getByText("1 new · 1 file not cataloged")).toBeTruthy();
+  expect(table.getAllByText(/^No changes/)).toHaveLength(2);
   const runningRow = table.getByText("01RUNNING").closest("tr");
   expect(runningRow && within(runningRow).getAllByText("-").length).toBeGreaterThan(0);
 });

@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "library_id": "1",
+      "library_name": "Movies",
+      "directory_path": "/media/movies/Ronin (1998)/VIDEO_TS",
+      "reason": "dvd_vob",
+      "message": "DVD VOB files are not cataloged; remux the DVD title to a single file",
+      "file_count": 2,
+      "file_names": [
+        "VIDEO_TS.VOB",
+        "VTS_01_1.VOB"
+      ],
+      "first_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
+    },
+    {
+      "library_id": "1",
+      "library_name": "Movies",
+      "directory_path": "/media/movies/Manhunter (1986)",
+      "reason": "realmedia",
+      "message": "RealMedia files are not cataloged",
+      "file_count": 1,
+      "file_names": [
+        "Manhunter (1986).rmvb"
+      ],
+      "first_seen_at": "2026-01-02T03:04:05.678Z",
+      "last_seen_at": "2026-01-02T03:04:05.678Z"
+    }
+  ],
+  "page": {
+    "next_cursor": "eyJ2IjoxLCJwIjp7Im8iOjJ9fQ.T2fVRp6iSFREInoojjY_VG_NS3wygUbLwUPHIl5H9lI",
+    "has_more": true
+  },
+  "total": 3
+}

@@ -22,7 +22,7 @@ func (f *fakeAdminAutoscanScans) ReadAdminAutoscanScans(_ context.Context, in au
 	if in.Offset > 0 {
 		return nil, 1, f.err
 	}
-	return []autoscan.ScanWithEvent{{ScanRunSummary: autoscan.ScanRunSummary{ID: "scan-a", MediaFolderID: 7, Mode: "file", Status: "completed", RequestedAt: new(time.Date(2026, 9, 1, 0, 0, 0, 123456789, time.UTC))}, AutoscanEventID: new(int64(9007199254740993))}}, 1, f.err
+	return []autoscan.ScanWithEvent{{ScanRunSummary: autoscan.ScanRunSummary{ID: "scan-a", MediaFolderID: 7, Mode: "file", Status: "completed", RequestedAt: new(time.Date(2026, 9, 1, 0, 0, 0, 123456789, time.UTC)), Result: &autoscan.ScanResult{UnsupportedFiles: 7}}, AutoscanEventID: new(int64(9007199254740993))}}, 1, f.err
 }
 func TestAdminAutoscanScans(t *testing.T) {
 	f := new(fakeAdminAutoscanScans)
@@ -46,6 +46,10 @@ func TestAdminAutoscanScans(t *testing.T) {
 	}
 	if page.Page == nil || !page.Page.HasMore || len(page.Items) != 1 || page.Total != 1 {
 		t.Fatal(page)
+	}
+	// A run that found only files of an unsupported type must not read as a no-op.
+	if !strings.Contains(rec.Body.String(), `"unsupported_files":7`) {
+		t.Fatal(rec.Body.String())
 	}
 	next := path + "?limit=1&q=needle&cursor=" + url.QueryEscape(page.Page.NextCursor)
 	rec = do(t, h, "GET", next, "", bearer(adminToken))
