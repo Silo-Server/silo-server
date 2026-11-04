@@ -30168,6 +30168,8 @@ export interface components {
        * @example Tools/Utilities
        */
       category?: string;
+      /** @description Global config keys the operator has filled in; a per-account setting that depends on one can only be offered when it is present. Values are never included. Empty, never null. */
+      configured_global_keys: string[];
       /**
        * @description Installation identifier
        * @example 3

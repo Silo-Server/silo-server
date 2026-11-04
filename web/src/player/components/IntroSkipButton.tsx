@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { markerProvenanceLabel } from "@/lib/markerProvenance";
 import type { PlayerMarkerProvenance } from "../types";
@@ -24,6 +24,12 @@ interface IntroSkipButtonProps {
   provenance?: PlayerMarkerProvenance | null;
   showConfidence?: boolean;
   showSource?: boolean;
+  /**
+   * Rendered UNDER the pill, as the next child of the prompt's own column — the
+   * report control. Absent draws nothing, so a viewer without the integration sees
+   * the prompt exactly as it was.
+   */
+  trailing?: ReactNode;
 }
 
 /**
@@ -40,6 +46,7 @@ export function IntroSkipButton({
   provenance,
   showConfidence = false,
   showSource = false,
+  trailing,
 }: IntroSkipButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -105,7 +112,11 @@ export function IntroSkipButton({
       {caption ? (
         <span className="pr-3 text-xs font-medium text-white/75 drop-shadow">{caption}</span>
       ) : null}
-      {button}
+      {/* The action row holds the pill and nothing else. Anything trailing (the
+          report control) is a sibling of this row, so it lands UNDER the pill —
+          the column already right-aligns its children. */}
+      <span className="flex items-center gap-2">{button}</span>
+      {trailing}
     </div>
   );
 }
