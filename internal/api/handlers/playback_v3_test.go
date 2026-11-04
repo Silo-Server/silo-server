@@ -1478,12 +1478,12 @@ func TestHandleReplanPlaybackV3FailedCopyOfMultiPPSSourceTranscodes(t *testing.T
 		t.Fatalf("after direct-play failure delivery = %q, want the progressive copy", active.PlaybackPlan.Delivery)
 	}
 	copyFailedMark("direct-play failure", false)
-	// A subtitle route failing is not the video decoder's: the next copy is still offered.
-	active = replan(2, playback.ReplanOperationFailureRecoveryV3, playback.FailureSubtitleEmbeddedFailedV3)
+	// A network (or subtitle) failure is not the video decoder's: the next copy is still offered.
+	active = replan(2, playback.ReplanOperationFailureRecoveryV3, "transport_stall")
 	if !playback.PlanCopiesVideoV3(*active.PlaybackPlan) {
-		t.Fatalf("after a subtitle failure delivery = %q, want another copy", active.PlaybackPlan.Delivery)
+		t.Fatalf("after a network failure delivery = %q, want another copy", active.PlaybackPlan.Delivery)
 	}
-	copyFailedMark("subtitle failure", false)
+	copyFailedMark("network failure", false)
 	// The copy fails: recovery transcodes, and the mark is persisted.
 	active = replan(3, playback.ReplanOperationFailureRecoveryV3, "decoder_error")
 	if active.PlaybackPlan.Delivery != playback.DeliveryTranscodeHLSV3 {

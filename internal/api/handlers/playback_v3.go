@@ -6116,12 +6116,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// A video stream-copy that failed on the client stays refused for the
 		// rest of the attempt, so a multi-PPS source lands on a transcode instead
 		// of the next remux variant. A failure on an unreachable node or proxy
-		// origin, or of a subtitle route, is not the video decoder's. It goes on
-		// the durable recipe now because a terminal or transport error persists
-		// this record unchanged.
-		subtitleFailure := req.Failure.Classification == playback.FailureSubtitleHLSRenditionFailedV3 ||
-			req.Failure.Classification == playback.FailureSubtitleEmbeddedFailedV3
-		if !proxyOriginRecovery && !nodeRecovery && !subtitleFailure && playback.PlanCopiesVideoV3(record.CurrentPlan) {
+		// origin, of the network, or of a subtitle route is not the video
+		// decoder's. It goes on the durable recipe now because a terminal or
+		// transport error persists this record unchanged.
+		if !proxyOriginRecovery && !nodeRecovery && !notVideoDecodeFailuresV3[req.Failure.Classification] && playback.PlanCopiesVideoV3(record.CurrentPlan) {
 			record.FrozenRecipe.VideoCopyFailed = true
 		}
 		// Always exclude the durable server recipe so stale or malformed client
@@ -6677,6 +6675,30 @@ func sameEmbeddedSubtitleRouteV3(left, right *playback.EmbeddedSubtitleV3) bool 
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+const (
+	failureHTTPV3         = "http_failure"
+	failureNetworkErrorV3 = "network_error"
+)
+
+// notVideoDecodeFailuresV3 lists the failure classifications that say a copy
+// route failed for a reason other than the video decoder: the network, the
+// source, or a subtitle route. They do not mark the copy as failed. Any other
+// classification does, because a wrong mark costs a transcode, which plays,
+// while a missed one leaves a strict decoder retrying copies. The network names
+// are the ones the Silo apps send.
+var notVideoDecodeFailuresV3 = map[string]bool{
+	playback.FailureSubtitleHLSRenditionFailedV3: true,
+	playback.FailureSubtitleEmbeddedFailedV3:     true,
+	"transport_stall":                            true,
+	"transport_failure":                          true,
+	failureHTTPV3:                                true,
+	failureNetworkErrorV3:                        true,
+	"network_degraded":                           true,
+	"source_unavailable":                         true,
+	"seek_reanchor_network_failure":              true,
+	"browser_engine_read_failed":                 true,
 }
 
 // withoutFailedSubtitleRoutesV3 removes the subtitle routes this attempt may
