@@ -298,7 +298,10 @@ network sign-in, and device-code collection, on v1 and v2) reads the request's
 settings device headers: name to 120 characters, platform to 40. An id longer than 128 characters
 or not made of letters, digits, `.`, `_`, `:` and `-` is dropped, and the sign-in still succeeds.
 On v2, a repeated header or an id with other characters is refused with `422 validation_failed`
-before the sign-in runs, as on every v2 operation; an id that is only too long is dropped. `device_name` is the
+before the sign-in runs, as on every v2 operation, and each of these operations declares the three
+headers, so an id longer than 128 characters is refused with `422 validation_failed` too (an
+`out_of_range` error at `header.X-Silo-Device-Id`, as on the settings operations). Name and
+platform are declared without a limit and clamped, so a long name never refuses a sign-in. `device_name` is the
 reported name, else the `User-Agent`; a device-code sign-in falls back to the name the device
 started the request with, then its `User-Agent`, then `This device`. A name or platform that is
 not valid UTF-8 is dropped. These values are client-reported: they serve display and audit, and

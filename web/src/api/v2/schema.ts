@@ -91165,7 +91165,14 @@ export interface operations {
   pollDeviceLogin: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -91575,7 +91582,14 @@ export interface operations {
   login: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -91797,7 +91811,14 @@ export interface operations {
   signInWithNetworkIdentity: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
       path: {
         /** @description The network provider's plugin installation, as listAuthProviders shows it */
         id: string;
@@ -92280,7 +92301,14 @@ export interface operations {
   completeOAuthLogin: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
       path?: never;
       cookie?: {
         /** @description Completion cookie the callback set in the browser it sent to the web completion page (HttpOnly, path-scoped to this operation, two minutes). The browser sends it by itself; a web code redeemed without it, or with another browser's, is 400 invalid_grant and stays redeemable. Native codes ignore it */
@@ -93039,7 +93067,14 @@ export interface operations {
   setupServer: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -93218,7 +93253,14 @@ export interface operations {
   signup: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
       path?: never;
       cookie?: never;
     };
@@ -112772,6 +112814,12 @@ export interface operations {
       query?: never;
       header?: {
         "User-Agent"?: string;
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
       };
       path: {
         token: string;
@@ -124344,6 +124392,12 @@ export interface operations {
       query?: never;
       header?: {
         "User-Agent"?: string;
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
       };
       path: {
         token: string;

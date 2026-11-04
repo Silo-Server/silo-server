@@ -103,6 +103,7 @@ type PasswordResetLookupOutput struct {
 
 // PasswordResetCompleteInput sets the new password through a link.
 type PasswordResetCompleteInput struct {
+	SignInDeviceHeaders
 	Token     string `path:"token" minLength:"1" maxLength:"128"`
 	UserAgent string `header:"User-Agent"`
 	Body      struct {
