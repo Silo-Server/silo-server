@@ -300,7 +300,9 @@ export default function ItemGrid(props: ItemGridProps) {
   // so the row the viewer was on (or jumped to) is where they see it, and
   // render the rows there now rather than on the next scroll event. A target
   // the window it waited for can't hold, because the list got shorter
-  // meanwhile, is dropped.
+  // meanwhile, is dropped. It runs after every commit: a target can be set by
+  // a commit that changes nothing else this effect reads (a column change
+  // that keeps the window), and one left pending stops the window moving.
   useLayoutEffect(() => {
     const target = windowScrollRef.current;
     if (!target) return;
@@ -317,7 +319,7 @@ export default function ItemGrid(props: ItemGridProps) {
       { behavior: "instant" },
     );
     virtualizer.measure();
-  }, [requestedWindowStart, windowStart, windowRows, rowHeight, virtualizer]);
+  });
 
   const virtualRows = virtualizer.getVirtualItems();
   const showsItems = !loading && totalItems > 0;

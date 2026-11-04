@@ -289,6 +289,27 @@ describe("ItemGrid row window", () => {
     expect(onTopRowChange).toHaveBeenLastCalledWith(80_000, 80_003);
   });
 
+  it("keeps the viewer's item when a column change keeps the window", () => {
+    usePointer(true);
+    const { gridRef, onTopRowChange, rerender } = renderGrid(100_000, pagesAround(110));
+    // Item 11,000 is row 5,500, in the middle of a window starting at 3,500.
+    act(() => gridRef.current?.scrollToItem(11_000));
+
+    // Three columns: the item is now row 3,666, still inside that window, so
+    // the window's start, size and pitch all stay as they were.
+    gridLayout.columnCount = 3;
+    act(() => rerender(100_000));
+
+    expect(window.scrollY).toBe(166 * 300);
+    expect(onTopRowChange).toHaveBeenLastCalledWith(10_998, 11_000);
+
+    // The landed move leaves nothing pending: a rest near the window's end
+    // still moves it.
+    act(() => userScroll(3_100 * 300));
+    act(() => settle());
+    expect(window.scrollY).toBe(1_100 * 300);
+  });
+
   it("keeps a short touch grid at its full height", () => {
     usePointer(true);
     const { gridRef, extent } = renderGrid(1_000, pagesAround(0, 1, 9));
