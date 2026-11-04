@@ -688,7 +688,16 @@ func (s *PostgresUserStore) ClearProgressBatch(ctx context.Context, profileID st
 }
 
 func (s *PostgresUserStore) GetProgress(ctx context.Context, profileID, mediaItemID string) (*userstore.WatchProgress, error) {
-	row := s.pool.QueryRow(ctx, `
+	wp, err := scanProgressRow(s.pool.QueryRow(ctx, progressSQL, s.userID, profileID, mediaItemID))
+	if err != nil {
+		return nil, fmt.Errorf("getting progress: %w", err)
+	}
+	return wp, nil
+}
+
+// progressSQL reads one item's visible progress row: $1 user, $2 profile,
+// $3 media item.
+const progressSQL = `
 		SELECT profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at,
 		       last_file_id, last_resolution, last_hdr, last_codec_video, last_edition_key
 		FROM user_watch_progress
@@ -700,17 +709,15 @@ func (s *PostgresUserStore) GetProgress(ctx context.Context, profileID, mediaIte
 			  AND hhi.profile_id = user_watch_progress.profile_id
 			  AND hhi.media_item_id = user_watch_progress.media_item_id
 			  AND user_watch_progress.updated_at <= hhi.hidden_before
-		  )`,
-		s.userID, profileID, mediaItemID,
-	)
+		  )`
+
+// scanProgressRow reads the row progressSQL selects, nil when there is none.
+func scanProgressRow(row pgx.Row) (*userstore.WatchProgress, error) {
 	wp, err := scanWatchProgress(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("getting progress: %w", err)
-	}
-	return wp, nil
+	return wp, err
 }
 
 // progressListSelect is the projection, profile scope, and hidden-item

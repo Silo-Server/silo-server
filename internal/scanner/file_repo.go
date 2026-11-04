@@ -88,6 +88,12 @@ const mfOverlayFileColumns = `mf.content_id, mf.episode_id, mf.media_folder_id, 
 	mf.codec_video, mf.codec_audio, mf.resolution, mf.audio_channels, mf.hdr, mf.container,
 	mf.video_tracks, mf.audio_tracks, mf.subtitle_tracks, mf.external_subtitles, mf.edition_key`
 
+// mfEpisodeListFileColumns adds what a season's episode list shows for each
+// version beyond its overlay badges: the file ID, the size, and the probe
+// timestamps MediaFile.ProbeRejected reads.
+const mfEpisodeListFileColumns = mfOverlayFileColumns + `,
+	mf.id, mf.file_size, mf.probe_updated_at, mf.probe_failed_at`
+
 // mfFileColumns qualifies every column with the "mf" alias for use in JOIN queries
 // where unqualified "id" would be ambiguous.
 const mfFileColumns = `mf.id, mf.content_id, mf.episode_id, mf.extra_id, mf.season_number, mf.episode_number,
@@ -751,6 +757,19 @@ func scanMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 }
 
 func scanOverlayMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
+	return scanOverlayMediaFilesWith(rows, nil)
+}
+
+// scanEpisodeListMediaFiles scans rows selected with mfEpisodeListFileColumns.
+func scanEpisodeListMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
+	return scanOverlayMediaFilesWith(rows, func(f *models.MediaFile) []any {
+		return []any{&f.ID, &f.FileSize, &f.ProbeUpdatedAt, &f.ProbeFailedAt}
+	})
+}
+
+// scanOverlayMediaFilesWith scans the overlay columns followed by the
+// destinations extra returns for each file, if any.
+func scanOverlayMediaFilesWith(rows pgx.Rows, extra func(*models.MediaFile) []any) ([]*models.MediaFile, error) {
 	var files []*models.MediaFile
 	for rows.Next() {
 		var f models.MediaFile
@@ -759,7 +778,7 @@ func scanOverlayMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 		var hdr *bool
 		var videoTracksJSON, audioTracksJSON, subtitleTracksJSON, externalSubtitlesJSON []byte
 
-		if err := rows.Scan(
+		dest := []any{
 			&contentID,
 			&episodeID,
 			&f.MediaFolderID,
@@ -775,7 +794,11 @@ func scanOverlayMediaFiles(rows pgx.Rows) ([]*models.MediaFile, error) {
 			&subtitleTracksJSON,
 			&externalSubtitlesJSON,
 			&editionKey,
-		); err != nil {
+		}
+		if extra != nil {
+			dest = append(dest, extra(&f)...)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scanning overlay media file: %w", err)
 		}
 
@@ -3758,49 +3781,39 @@ func (r *servedEpisodeRows) Scan(dest ...any) error {
 // episode IDs, excluding files that are marked missing. A multi-episode file
 // is listed under every requested episode it spans.
 func (r *FileRepository) ListByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
-	grouped := make(map[string][]*models.MediaFile, len(episodeIDs))
-	if len(episodeIDs) == 0 {
-		return grouped, nil
-	}
-
-	query := `SELECT served.episode_id, ` + mfFileColumns + `
-		FROM (` + catalog.ServedEpisodeFilesSQL + `) served(episode_id, file_id)
-		JOIN media_files mf ON mf.id = served.file_id
-		ORDER BY served.episode_id ASC, mf.id ASC`
-	// Each connection keeps one generic plan. Planning takes about 1 ms,
-	// several times what a short season takes to read. PostgreSQL would plan
-	// again for every list shorter than ten, because the generic plan is
-	// priced for ten episodes; longer lists already run on it. Both branches
-	// look up each requested episode by index whatever the list's length.
-	var served *servedEpisodeRows
-	var files []*models.MediaFile
-	var scanErr error
-	err := readtx.Query(ctx, r.pool, query, []any{episodeIDs}, func(rows pgx.Rows) error {
-		served = &servedEpisodeRows{Rows: rows}
-		files, scanErr = scanMediaFiles(served)
-		return scanErr
-	}, readtx.GenericPlan)
-	if scanErr != nil {
-		return nil, scanErr
-	}
-	if err != nil {
-		return nil, fmt.Errorf("querying files by episode_ids: %w", err)
-	}
-	for i, file := range files {
-		grouped[served.episodeIDs[i]] = append(grouped[served.episodeIDs[i]], file)
-	}
-	return grouped, nil
+	return r.listServedEpisodeFiles(ctx, episodeIDs, mfFileColumns, scanMediaFiles, "files")
 }
 
 // ListOverlayFilesByEpisodeIDs returns a lightweight media-file projection for
 // building overlay summaries, grouped by episode ID.
 func (r *FileRepository) ListOverlayFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
+	return r.listServedEpisodeFiles(ctx, episodeIDs, mfOverlayFileColumns, scanOverlayMediaFiles, "overlay files")
+}
+
+// ListEpisodeListFilesByEpisodeIDs returns the media-file projection a
+// season's episode list renders (mfEpisodeListFileColumns), grouped by
+// episode ID.
+func (r *FileRepository) ListEpisodeListFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error) {
+	return r.listServedEpisodeFiles(ctx, episodeIDs, mfEpisodeListFileColumns, scanEpisodeListMediaFiles, "episode list files")
+}
+
+// listServedEpisodeFiles selects columns for the files served under the given
+// episodes and groups them by episode ID, in episode then file ID order. Files
+// marked missing are left out, and a multi-episode file is listed under every
+// requested episode it spans.
+func (r *FileRepository) listServedEpisodeFiles(
+	ctx context.Context,
+	episodeIDs []string,
+	columns string,
+	scan func(pgx.Rows) ([]*models.MediaFile, error),
+	what string,
+) (map[string][]*models.MediaFile, error) {
 	grouped := make(map[string][]*models.MediaFile, len(episodeIDs))
 	if len(episodeIDs) == 0 {
 		return grouped, nil
 	}
 
-	query := `SELECT served.episode_id, ` + mfOverlayFileColumns + `
+	query := `SELECT served.episode_id, ` + columns + `
 		FROM (` + catalog.ServedEpisodeFilesSQL + `) served(episode_id, file_id)
 		JOIN media_files mf ON mf.id = served.file_id
 		ORDER BY served.episode_id ASC, mf.id ASC`
@@ -3814,14 +3827,14 @@ func (r *FileRepository) ListOverlayFilesByEpisodeIDs(ctx context.Context, episo
 	var scanErr error
 	err := readtx.Query(ctx, r.pool, query, []any{episodeIDs}, func(rows pgx.Rows) error {
 		served = &servedEpisodeRows{Rows: rows}
-		files, scanErr = scanOverlayMediaFiles(served)
+		files, scanErr = scan(served)
 		return scanErr
 	}, readtx.GenericPlan)
 	if scanErr != nil {
 		return nil, scanErr
 	}
 	if err != nil {
-		return nil, fmt.Errorf("querying overlay files by episode_ids: %w", err)
+		return nil, fmt.Errorf("querying %s by episode_ids: %w", what, err)
 	}
 	for i, file := range files {
 		grouped[served.episodeIDs[i]] = append(grouped[served.episodeIDs[i]], file)

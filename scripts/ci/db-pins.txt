@@ -70,8 +70,10 @@
 # once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
 
-# Seek previews: one availability lookup per item or episode page.
+# Seek previews: one availability lookup per item or episode page, and none
+# for a detail that leaves previews out.
 ./internal/catalog TestTrickplayAvailabilityBatchesItemDetails
+./internal/catalog TestItemDetailSkipsPlaybackPreviewsOnlyWhenAsked
 ./internal/catalog TestTrickplayAvailabilityBatchesEpisodeDetails
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
@@ -147,6 +149,10 @@
 # Shared personal collections: a listing resolves each other owner's access
 # once, and a profile's own collections resolve nobody.
 ./internal/api/handlers TestPersonalCollectionOwnerLookupBudgetDB
+
+# Viewer access: the account, its access group, the profile and its viewer
+# preferences cost one batch, and answer what reading each on its own does.
+./internal/policy TestViewerResolverBatchedReadsMatchEachDB
 
 # Metadata refresh: season and episode writes cost the same number of
 # statements for 1 and 100 episodes; episode refresh debt the same for 1, 100

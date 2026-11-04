@@ -3,7 +3,10 @@ package catalog
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/ctxerr"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -110,6 +113,101 @@ func (s *DetailService) prefetchAudioResolvers(
 		resolvers[key.contentID].resolvedLang[key.libraryID] = audioLanguageFromResolved(resolved[i])
 	}
 	return resolvers
+}
+
+// prefetchMoviePlaybackDefaults resolves, for one movie's detail, the
+// lookups r and effectiveSubtitleDefaults would otherwise make one query at a
+// time. One settings read covers the audio language for each library the
+// files are in and the subtitle settings, each context ranked as it would be
+// alone. One batch reads the stored audio and subtitle preference rows when
+// the store keeps them beside the catalog; otherwise r reads its row lazily
+// and the subtitle row is read here as effectiveSubtitleDefaults reads it.
+// The original language comes from item, the row resolveOriginalLanguage
+// would read again. It returns the subtitle defaults; ok is false when r has
+// no store or the settings read fails, and the caller resolves them itself.
+func (s *DetailService) prefetchMoviePlaybackDefaults(
+	ctx context.Context,
+	filter AccessFilter,
+	item *models.MediaItem,
+	files []*models.MediaFile,
+	r *audioPrefResolver,
+) (defaults subtitleDefaults, ok bool) {
+	if r == nil || !r.valid {
+		return defaults, false
+	}
+	var libraryIDs []int
+	contexts := []settingsresolve.Context{}
+	for _, file := range files {
+		if file == nil || slices.Contains(libraryIDs, file.MediaFolderID) {
+			continue
+		}
+		libraryIDs = append(libraryIDs, file.MediaFolderID)
+		contexts = append(contexts, r.audioLanguageContext(file.MediaFolderID))
+	}
+	contexts = append(contexts, subtitleSettingsContext(filter, item.ContentID, files))
+	keys := append([]string{settingskeys.PlaybackAudioLanguage}, subtitleSettingKeys...)
+	resolved, err := s.settingsResolver().ResolveContexts(ctx, r.store, contexts, keys, nil)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "batched playback settings resolution failed; resolving one at a time", "component", "catalog", "error", err)
+		return defaults, false
+	}
+	for i, libraryID := range libraryIDs {
+		r.resolvedLang[libraryID] = audioLanguageFromResolved(effectiveForKey(resolved[i], settingskeys.PlaybackAudioLanguage))
+	}
+	defaults.applySettings(resolved[len(libraryIDs)])
+
+	if audio, subtitle, read := s.readPlaybackPreferences(ctx, r.store, filter.ProfileID, item.ContentID); read {
+		r.audioDone = true
+		if audio != nil {
+			r.audioPref = &playback.AudioTrackPreference{
+				AudioTrackIndex: audio.AudioTrackIndex,
+				AudioLanguage:   audio.AudioLanguage,
+				TrackSignature:  audio.TrackSignature,
+			}
+		}
+		defaults.applyPreference(subtitle)
+	} else if pref, err := r.store.GetSubtitlePreference(ctx, filter.ProfileID, item.ContentID); err == nil {
+		defaults.applyPreference(pref)
+	}
+
+	if s.originalLangFn == nil && s.itemRepo != nil {
+		r.originalDone = true
+		r.originalLang = strings.TrimSpace(item.OriginalLanguage)
+	}
+	return defaults, true
+}
+
+// readPlaybackPreferences reads the stored audio and subtitle preference rows
+// for one movie or series in one round trip on the catalog pool. read is false
+// when the store keeps them elsewhere or the batch fails.
+func (s *DetailService) readPlaybackPreferences(ctx context.Context, store userstore.UserStore, profileID, contentID string) (*userstore.AudioPreference, *userstore.SubtitlePreference, bool) {
+	if s.itemRepo == nil || s.itemRepo.pool == nil {
+		return nil, nil, false
+	}
+	var batch pgx.Batch
+	var state userstore.ItemViewerState
+	if !userstore.QueueItemViewerState(store, &batch, userstore.ItemViewerStateQuery{
+		ProfileID:           profileID,
+		MediaItemID:         contentID,
+		PlaybackPreferences: true,
+	}, &state) {
+		return nil, nil, false
+	}
+	if err := s.itemRepo.pool.SendBatch(ctx, &batch).Close(); err != nil {
+		return nil, nil, false
+	}
+	return state.AudioPreference, state.SubtitlePreference, true
+}
+
+// effectiveForKey is the part of one context's resolution that answers key,
+// in the shape a single-key resolution of it has.
+func effectiveForKey(resolved []settingsresolve.Effective, key string) []settingsresolve.Effective {
+	for i := range resolved {
+		if resolved[i].Key == key {
+			return resolved[i : i+1]
+		}
+	}
+	return nil
 }
 
 // prefillAudioPreferences hands each resolver its stored audio preference
