@@ -10921,7 +10921,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy. Only titles the acting profile can see are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Household managers only. */
+    /** Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy; a stored collection's copy reads at most its first 100,000 entries not yet allowed. Only titles the acting profile can see are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Household managers only. */
     post: operations["allowCollectionTitles"];
     delete?: never;
     options?: never;

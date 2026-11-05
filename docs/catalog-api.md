@@ -565,7 +565,9 @@ answers `403` otherwise.
   holds now (for a smart collection, what its query matches for the acting
   profile), as individual allowances, and answers how many were new. One copy
   allows at most 10,000 titles; copying a stored collection again continues
-  with titles the profile is not yet allowed.
+  with titles the profile is not yet allowed. A stored collection's copy
+  also reads at most 100,000 entries, so titles the acting profile cannot see
+  count toward that bound on every copy.
 
 An allowed title is visible and playable for the profile everywhere content is
 reached, Jellyfin clients included. A series allowance covers its seasons and
