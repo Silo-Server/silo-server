@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/device_binding_mismatch",
+  "title": "Device binding mismatch",
+  "status": 403,
+  "detail": "The binding secret does not match the binding this request was started with.",
+  "instance": "urn:silo:request:00000000000000000000018b"
+}

@@ -6970,6 +6970,23 @@
       "body_file": "get_current_user_ok.json"
     },
     {
+      "name": "get_device_login_bound",
+      "operation_id": "getDeviceLogin",
+      "scenario": "The lookup of a request started with a session binding carries the binding, which a sender compares with the binding of the request whose code the person compared.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/device?code=1357-2468"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLogin",
+      "body_file": "get_device_login_bound.json"
+    },
+    {
       "name": "get_device_login_capability_ok",
       "operation_id": "getDeviceLoginCapability",
       "scenario": "Device pairing support before login.",
@@ -13325,6 +13342,24 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PlaybackMutation",
       "body_file": "playback_stop_replayed.json"
+    },
+    {
+      "name": "poll_device_login_binding_mismatch",
+      "operation_id": "pollDeviceLogin",
+      "scenario": "A poll of a bound request without the secret its binding was made from: 403 under the domain's own type, and the request is left as it was.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/poll",
+        "body": "{\"device_code\":\"dev-bound\"}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "poll_device_login_binding_mismatch.json"
     },
     {
       "name": "poll_device_login_device_code_required",

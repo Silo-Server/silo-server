@@ -3,5 +3,5 @@
   "title": "Session expired",
   "status": 401,
   "detail": "Session has been revoked.",
-  "instance": "urn:silo:request:00000000000000000000019d"
+  "instance": "urn:silo:request:00000000000000000000019f"
 }

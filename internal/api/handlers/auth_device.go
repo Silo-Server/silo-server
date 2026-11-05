@@ -178,7 +178,9 @@ func (h *AuthHandler) HandleDevicePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.PollDeviceLogin(auth.WithClientDevice(r.Context(), r.Header), req.DeviceCode)
+	// v1 has no binding secret, so a request started bound through v2 is
+	// never collected here.
+	result, err := h.PollDeviceLogin(auth.WithClientDevice(r.Context(), r.Header), req.DeviceCode, "")
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -255,6 +257,9 @@ func (h *AuthHandler) StartDeviceLogin(ctx context.Context, input auth.DeviceLog
 		if errors.Is(err, auth.ErrDeviceLoginBadPurpose) {
 			return nil, fieldError("client_purpose", "Invalid device login purpose")
 		}
+		if errors.Is(err, auth.ErrDeviceLoginBadBinding) {
+			return nil, fieldError("binding", "binding must be 43 characters of unpadded base64url")
+		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to start device login")
 	}
 	return result, nil
@@ -280,16 +285,24 @@ func (h *AuthHandler) LookupDeviceLogin(ctx context.Context, input auth.DeviceLo
 	return info, nil
 }
 
+// DeviceBindingMismatchCode is the error code of a poll of a bound request
+// that lacks its binding secret; v2 answers it as its own problem type.
+const DeviceBindingMismatchCode = "device_binding_mismatch"
+
 // PollDeviceLogin advances the pairing state machine for the waiting device.
-// v1 POST /auth/device/poll and v2 pollDeviceLogin both call it.
-func (h *AuthHandler) PollDeviceLogin(ctx context.Context, deviceCode string) (*DeviceLoginPollView, error) {
+// v1 POST /auth/device/poll and v2 pollDeviceLogin both call it; only v2
+// passes a binding secret.
+func (h *AuthHandler) PollDeviceLogin(ctx context.Context, deviceCode, bindingSecret string) (*DeviceLoginPollView, error) {
 	if h.device == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Device login is not configured")
 	}
-	result, err := h.device.Poll(ctx, deviceCode)
+	result, err := h.device.Poll(ctx, deviceCode, bindingSecret)
 	if err != nil {
 		if errors.Is(err, auth.ErrDeviceLoginNotFound) {
 			return nil, apiError(http.StatusNotFound, "not_found", "Device login request not found")
+		}
+		if errors.Is(err, auth.ErrDeviceLoginBindingMismatch) {
+			return nil, apiError(http.StatusForbidden, DeviceBindingMismatchCode, "The binding secret does not match the binding this request was started with")
 		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to poll device login")
 	}

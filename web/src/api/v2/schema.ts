@@ -6242,7 +6242,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Poll a pairing request from the device and collect its tokens once approved. */
+    /**
+     * Poll a pairing request from the device and collect its tokens once approved.
+     * @description A request started with binding is polled only with its binding_secret: a poll without it, or with another secret, is 403 device_binding_mismatch and leaves the request unchanged.
+     */
     post: operations["pollDeviceLogin"];
     delete?: never;
     options?: never;
@@ -24065,6 +24068,11 @@ export interface components {
     };
     DeviceLogin: {
       /**
+       * @description The session binding the device started the request with; absent for an unbound request. An approver that compared one request's code can approve later requests carrying the same binding without comparing again
+       * @example Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU
+       */
+      binding?: string;
+      /**
        * @description Purpose the request was opened with: device_login, remote_playback, or jellyfin_quick_connect for a Jellyfin app signing in with Quick Connect, which is approved for a profile through approve-handoff
        * @example device_login
        */
@@ -24168,6 +24176,11 @@ export interface components {
       remote_playback_handoff: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /**
+       * @description Whether startDeviceLogin accepts binding, getDeviceLogin reports it, and pollDeviceLogin requires the matching binding_secret for a bound request
+       * @example true
+       */
+      session_binding: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -30317,6 +30330,11 @@ export interface components {
     };
     PollDeviceLoginInputBody: {
       /**
+       * @description For a request started with binding: the secret, as base64url without padding, whose SHA-256 is the binding. Required on every poll of a bound request; ignored otherwise
+       * @example AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+       */
+      binding_secret?: string;
+      /**
        * @description The device code from startDeviceLogin
        * @example d3v1c3c0d3
        */
@@ -32669,6 +32687,11 @@ export interface components {
       total: number;
     };
     StartDeviceLoginInputBody: {
+      /**
+       * @description Session binding: base64url without padding of SHA-256 of a 32-byte secret the device keeps. getDeviceLogin shows it to the approver, and every poll of the request must send the secret as binding_secret. Omit for an unbound request; an empty string is malformed like any other value
+       * @example Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU
+       */
+      binding?: string;
       /**
        * @description Pairing purpose; defaults to device_login. remote_playback requires temporary=true and is approved through approve-handoff
        * @example device_login
@@ -91762,6 +91785,15 @@ export interface operations {
       };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

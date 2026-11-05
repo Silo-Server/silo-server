@@ -29193,6 +29193,13 @@
       "DeviceLogin": {
         "additionalProperties": false,
         "properties": {
+          "binding": {
+            "description": "The session binding the device started the request with; absent for an unbound request. An approver that compared one request's code can approve later requests carrying the same binding without comparing again",
+            "examples": [
+              "Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU"
+            ],
+            "type": "string"
+          },
           "client_purpose": {
             "description": "Purpose the request was opened with: device_login, remote_playback, or jellyfin_quick_connect for a Jellyfin app signing in with Quick Connect, which is approved for a profile through approve-handoff",
             "examples": [
@@ -29380,6 +29387,13 @@
             "description": "Opaque revision of this document",
             "type": "string"
           },
+          "session_binding": {
+            "description": "Whether startDeviceLogin accepts binding, getDeviceLogin reports it, and pollDeviceLogin requires the matching binding_secret for a bound request",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -29397,6 +29411,7 @@
           "protocol_versions",
           "cancel",
           "opened_signal",
+          "session_binding",
           "revision",
           "state"
         ],
@@ -43937,6 +43952,14 @@
       "PollDeviceLoginInputBody": {
         "additionalProperties": false,
         "properties": {
+          "binding_secret": {
+            "description": "For a request started with binding: the secret, as base64url without padding, whose SHA-256 is the binding. Required on every poll of a bound request; ignored otherwise",
+            "examples": [
+              "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          },
           "device_code": {
             "description": "The device code from startDeviceLogin",
             "examples": [
@@ -49152,6 +49175,14 @@
       "StartDeviceLoginInputBody": {
         "additionalProperties": false,
         "properties": {
+          "binding": {
+            "description": "Session binding: base64url without padding of SHA-256 of a 32-byte secret the device keeps. getDeviceLogin shows it to the approver, and every poll of the request must send the secret as binding_secret. Omit for an unbound request; an empty string is malformed like any other value",
+            "examples": [
+              "Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU"
+            ],
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
           "client_purpose": {
             "description": "Pairing purpose; defaults to device_login. remote_playback requires temporary=true and is approved through approve-handoff",
             "enum": [
@@ -138327,6 +138358,7 @@
     },
     "/api/v2/auth/device/poll": {
       "post": {
+        "description": "A request started with binding is polled only with its binding_secret: a poll without it, or with another secret, is 403 device_binding_mismatch and leaves the request unchanged.",
         "operationId": "pollDeviceLogin",
         "parameters": [
           {
@@ -138397,6 +138429,16 @@
               }
             },
             "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
