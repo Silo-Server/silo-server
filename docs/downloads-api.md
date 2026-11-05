@@ -374,8 +374,8 @@ accepts `media_file_id`: an episode file of the same series that serves as a
 version template. Each episode then gets its version closest to that file,
 matched on edition, then resolution, HDR and video codec, with the highest
 resolution breaking ties; watch history is not read. The template's own episode
-gets the template file. A file that is missing or belongs to another title is
-`404 not_found`. Access rules still narrow the candidates, and `quality` still
+gets the template file. A file that is missing, belongs to another title, or
+sits in a library the profile can't open is `404 not_found`. Access rules still narrow the candidates, and `quality` still
 applies on top of the chosen source. Like `quality`, the template applies to
 entries the page registers; existing managed entries keep their file unless an
 `expected_entries` guard names them. Without `batch_version`, a series page

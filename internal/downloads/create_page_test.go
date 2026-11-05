@@ -146,15 +146,17 @@ func TestSeriesPageFollowsTheVersionTemplatePostgres(t *testing.T) {
 
 func TestSeriesPageRejectsAVersionTemplateFromAnotherSeries(t *testing.T) {
 	for name, template := range map[string]*models.MediaFile{
-		"other series": {ID: 11, ContentID: "other", EpisodeID: "ep-x"},
-		"movie file":   {ID: 11, ContentID: "series"},
+		"other series":       {ID: 11, ContentID: "other", EpisodeID: "ep-x"},
+		"movie file":         {ID: 11, ContentID: "series"},
+		"unreadable library": {ID: 11, ContentID: "series", EpisodeID: "ep-1", MediaFolderID: 2},
 	} {
 		t.Run(name, func(t *testing.T) {
 			pager := &createEpisodePager{rows: []*models.Episode{{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1}}}
 			files := &createFileResolver{rows: map[string][]*models.MediaFile{"ep-1": {{ID: 10, ContentID: "series", EpisodeID: "ep-1"}}}, single: template}
 			svc := NewService(nil, nil, nil, files, createItemResolver{}, pager, fakeUserRepo{&models.User{ID: 1, DownloadAllowed: new(true)}}, &syncAccess{}, nil, &config.DownloadConfig{Enabled: true})
 			req := CreateRequest{ContentID: "series", ProfileID: "profile", BatchID: "intent", StrictIdentity: true, VersionTemplateFileID: 11}
-			if _, err := svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, catalog.AccessFilter{}); !errors.Is(err, catalog.ErrItemNotFound) {
+			filter := catalog.AccessFilter{AllowedLibraryIDs: []int{0, 1}}
+			if _, err := svc.CreateSeriesPage(t.Context(), 1, req, new(1), nil, 10, filter); !errors.Is(err, catalog.ErrItemNotFound) {
 				t.Fatalf("err = %v, want ErrItemNotFound", err)
 			}
 		})

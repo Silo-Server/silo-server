@@ -728,7 +728,12 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 		if err != nil {
 			return nil, "", nil, err
 		}
-		if template.ContentID != req.ContentID || template.EpisodeID == "" {
+		// The template must be a file of this series in a library the viewer
+		// can open. The quality ceiling is left out: a preset can still bring
+		// a larger version under it.
+		libraries := filter
+		libraries.MaxPlaybackQuality = ""
+		if template.ContentID != req.ContentID || template.EpisodeID == "" || !catalog.FileAllowedByAccess(template, libraries) {
 			return nil, "", nil, catalog.ErrItemNotFound
 		}
 	}
