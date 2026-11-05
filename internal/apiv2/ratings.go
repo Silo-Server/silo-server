@@ -62,7 +62,7 @@ func registerRatings(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/ratings", opListRatings, "ratings",
-			"List the acting profile's ratings, most recently rated first."),
+			"List the acting profile's ratings, most recently rated first; items the viewer may not see are omitted."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
 	}, func(ctx context.Context, in *RatingListInput) (*RatingCollectionOutput, error) {
@@ -70,7 +70,7 @@ func registerRatings(reg *Registry) {
 	})
 	Register(reg, Operation{
 		Operation: humaOp(http.MethodGet, Prefix+"/ratings/{item_id}", "getRating", "ratings",
-			"Answer the acting profile's rating of the item, or 404 when the profile has not rated it."),
+			"Answer the acting profile's rating of the item, or 404 when the profile has not rated it (or the viewer may not see it)."),
 		Class:         ClassProfileScoped,
 		ServiceBacked: true,
 	}, reg.getRating)
@@ -84,6 +84,10 @@ func registerRatings(reg *Registry) {
 	Register(reg, Operation{Operation: del, Class: ClassProfileScoped, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}, reg.deleteRating)
 }
 
+// getRating answers the rating of an item the viewer may see; an item
+// outside the viewer's access is a 404, rated or not. The v2 listener reads
+// no device header, so the access filter carries no device id, as the
+// favorites operations do.
 func (reg *Registry) getRating(ctx context.Context, in *RatingItemInput) (*RatingEntryOutput, error) {
 	if reg.deps.Ratings == nil {
 		return nil, unavailable("ratings")
@@ -92,7 +96,7 @@ func (reg *Registry) getRating(ctx context.Context, in *RatingItemInput) (*Ratin
 	if p != nil {
 		return nil, p
 	}
-	r, found, err := reg.deps.Ratings.GetRating(ctx, userID, profileID, string(in.ItemID))
+	r, found, err := reg.deps.Ratings.GetRating(ctx, userID, profileID, string(in.ItemID), handlers.AccessFilterFromContext(ctx, ""))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -102,9 +106,8 @@ func (reg *Registry) getRating(ctx context.Context, in *RatingItemInput) (*Ratin
 	return &RatingEntryOutput{Body: RatingEntry{ItemID: ID(r.MediaItemID), Rating: r.Rating, RatedAt: NewInstant(r.RatedAt)}}, nil
 }
 
-// setRating records the rating for an item the viewer may see. The v2
-// listener reads no device header, so the access filter carries no device
-// id, as the favorites operations do.
+// setRating records the rating for an item the viewer may see, with the
+// same access filter getRating uses.
 func (reg *Registry) setRating(ctx context.Context, in *RatingSetInput) (*struct{}, error) {
 	if reg.deps.Ratings == nil {
 		return nil, unavailable("ratings")
@@ -130,8 +133,13 @@ type ratingPosition struct {
 	MediaItemID string `json:"m"`
 }
 
-// listRatings answers from the same listing v1 GET /ratings uses, paged by
-// keyset; a limit+1 probe decides has_more.
+// listRatings answers the profile's ratings of items the viewer may see,
+// paged by keyset; a limit+1 probe decides has_more. The store filters by
+// the viewer's access in the page query, so the probe and the cursor row are
+// always visible items and a cursor never names a title the viewer may not
+// see. The cursor is
+// bound to the viewer policy that filtered the page, as the favorites cursor
+// is.
 func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *RatingListInput) (*RatingCollectionOutput, error) {
 	if reg.deps.Ratings == nil {
 		return nil, unavailable("ratings")
@@ -140,7 +148,7 @@ func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *Rati
 	if p != nil {
 		return nil, p
 	}
-	scope := CursorScope{OperationID: opListRatings, Security: strconv.Itoa(userID) + "/" + profileID, Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}
+	scope := ratingsScope(ctx, userID, profileID)
 	var after *mediacatalog.RatingKey
 	if in.Cursor != "" {
 		var pos ratingPosition
@@ -153,7 +161,7 @@ func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *Rati
 		}
 		after = &mediacatalog.RatingKey{RatedAt: ratedAt, MediaItemID: pos.MediaItemID}
 	}
-	ratings, err := reg.deps.Ratings.ListRatingsPage(ctx, userID, profileID, after, in.Limit+1)
+	ratings, err := reg.deps.Ratings.ListRatingsPage(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), after, in.Limit+1)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -172,6 +180,20 @@ func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *Rati
 	return &RatingCollectionOutput{Body: RatingCollection{Collection: Paginated(items, next)}}, nil
 }
 
+// ratingsScope binds a ratings cursor to the profile and the viewer policy
+// that filters its rows, and to the keyset it pages by.
+func ratingsScope(ctx context.Context, userID int, profileID string) CursorScope {
+	return CursorScope{
+		OperationID: opListRatings,
+		Security:    strconv.Itoa(userID) + "/" + profileID + "/" + viewerScopeDigest(ctx),
+		Sort:        "-rated_at,-item_id",
+		Tiebreaker:  tiebreakerItemID,
+	}
+}
+
+// deleteRating runs no access check, as v1 does: a profile can drop its own
+// rating of an item that has since left its scope, and the 204 is the same
+// whether or not a rating existed, so it reveals nothing about the item.
 func (reg *Registry) deleteRating(ctx context.Context, in *RatingItemInput) (*struct{}, error) {
 	if reg.deps.Ratings == nil {
 		return nil, unavailable("ratings")
