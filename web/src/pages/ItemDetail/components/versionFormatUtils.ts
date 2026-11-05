@@ -77,9 +77,9 @@ export function extractSourceHint(fileName: string): string | null {
   return null;
 }
 
-// An episode token such as S01E01, S01E01E02 or S01E01-E02.
+// An episode token such as S01E01, S01E01E02, S01E01-E02 or S01E01-S01E02.
 // Lookarounds rather than \b, so an underscore counts as a separator.
-const EPISODE_TOKEN = /(?<![a-z0-9])S\d{1,4}E\d{1,4}(?:[-_.]?E\d{1,4})*(?![a-z0-9])/i;
+const EPISODE_TOKEN = /(?<![a-z0-9])S\d{1,4}E\d{1,4}(?:[-_.]?(?:S\d{1,4})?E\d{1,4})*(?![a-z0-9])/i;
 
 function fileStem(fileName: string | undefined): string {
   const name = fileName?.trim() ?? "";
