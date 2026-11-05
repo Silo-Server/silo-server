@@ -10348,7 +10348,8 @@
             "enum": [
               "pending",
               "matched",
-              "unmatched"
+              "unmatched",
+              null
             ],
             "type": [
               "string",
@@ -44802,7 +44803,8 @@
             "description": "Playback ceiling; null removes it",
             "enum": [
               "1080p",
-              "2160p"
+              "2160p",
+              null
             ],
             "examples": [
               "1080p"

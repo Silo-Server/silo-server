@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,7 +48,8 @@ const (
 // each status its class implies; non-public operations require the bearer
 // scheme and public ones carry no security; no schema is a free-form object
 // unless it is marked as an extension bag; date, URL, and language or
-// country members declare their shape (lintValueShape).
+// country members declare their shape (lintValueShape); a nullable enum
+// lists null (lintNullableEnum).
 func Lint(doc []byte) []string {
 	var d document
 	if err := json.Unmarshal(doc, &d); err != nil {
@@ -351,12 +353,31 @@ func lintMemberShapes(fail func(string, ...any), where string, s *schema) {
 	if s == nil || s.Ref != "" {
 		return
 	}
+	lintNullableEnum(fail, where, s)
 	for _, name := range sortedKeys(s.Properties) {
 		member := s.Properties[name]
 		lintValueShape(fail, where+"."+name, name, "", member)
 		lintMemberShapes(fail, where+"."+name, member)
 	}
 	lintMemberShapes(fail, where+".items", s.Items)
+}
+
+// lintNullableEnum requires a nullable schema with an enum to list null in
+// it: JSON Schema applies type and enum separately, so a validator holding
+// ["string", "null"] and an enum of strings alone refuses null. A member in
+// apiv2.NullEnumWithheld must still be such an enum, so its entry goes with
+// the member it was written for.
+func lintNullableEnum(fail func(string, ...any), where string, s *schema) {
+	refused := s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil)
+	if reason, withheld := apiv2.NullEnumWithheld[strings.TrimPrefix(where, "components.schemas.")]; withheld {
+		if !refused {
+			fail("%s: no longer a nullable enum without null; delete its apiv2.NullEnumWithheld entry (%s)", where, reason)
+		}
+		return
+	}
+	if refused {
+		fail("%s: nullable enum does not list null", where)
+	}
 }
 
 // lintValueShape requires a string member (or a string array's items) whose
@@ -477,7 +498,11 @@ type schema struct {
 	Properties           map[string]*schema `json:"properties"`
 	Items                *schema            `json:"items"`
 	AdditionalProperties any                `json:"additionalProperties"`
-	Extensions           map[string]any     `json:"-"`
+	Enum                 []any              `json:"enum"`
+	// Nullable is set when the type list names "null"; Type keeps the
+	// other name.
+	Nullable   bool           `json:"-"`
+	Extensions map[string]any `json:"-"`
 }
 
 // schemaType is the JSON Schema `type` member: a single name, or in OpenAPI
@@ -513,6 +538,12 @@ func (s *schema) UnmarshalJSON(b []byte) error {
 	}
 	*s = schema(p)
 	s.Extensions = extensions(b)
+	var typed struct {
+		Type []string `json:"type"`
+	}
+	if json.Unmarshal(b, &typed) == nil {
+		s.Nullable = slices.Contains(typed.Type, "null")
+	}
 	return nil
 }
 
