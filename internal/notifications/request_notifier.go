@@ -201,7 +201,7 @@ func (n *RequestFulfillmentNotifier) notifyFulfilledProfile(ctx context.Context,
 const requestLifecycleDispatchTimeout = 30 * time.Second
 
 // requestLifecycleBackend is the slice of System the lifecycle adapter uses.
-// Both methods detach internally, so the adapter itself stays synchronous.
+// Every method detaches internally, so the adapter itself stays synchronous.
 // The unexported method keeps the interface in-package, leaving *System as
 // the only production implementation.
 type requestLifecycleBackend interface {

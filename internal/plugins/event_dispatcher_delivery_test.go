@@ -247,6 +247,17 @@ func TestUndeliverablePayloadIsDropped(t *testing.T) {
 	}
 }
 
+// TestPayloadOffTheCatalogIsNotQueued: a payload that doesn't fit its
+// catalog type is dropped, not queued without its data.
+func TestPayloadOffTheCatalogIsNotQueued(t *testing.T) {
+	ctx := t.Context()
+	d, deliveries := newDeliveryFixture(&flakyClient{})
+	d.store(ctx, hubEvent(catalogEnvelope("scan.completed", `{"id":"scan-1","library_id":"seven"}`)))
+	if pending := deliveries.pending(); len(pending) != 0 {
+		t.Fatalf("outbox = %+v, want empty", pending)
+	}
+}
+
 // TestOnlyCatalogEventsAreQueued: once the index is built, an event no
 // installation subscribes to never takes a place in the intake, and neither
 // does an internal event a plugin subscribed to anyway.

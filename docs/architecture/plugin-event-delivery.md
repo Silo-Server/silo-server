@@ -34,7 +34,8 @@ Before an event is stored, `events.Project` rewrites its payload into the
 catalog's public shape: the fields of the SDK payload type and nothing else.
 A field the host adds for its own clients therefore stays off the plugin
 contract until the SDK type adds it. `notification.created` also gets the
-envelope's `user_id`, because profile IDs repeat across accounts.
+envelope's `user_id`, because profile IDs repeat across accounts. An event
+whose payload doesn't fit its catalog type is logged and not stored.
 
 Request lifecycle events (`request.submitted`, `.approved`, `.declined`,
 `.fulfilled`) exist only for plugins: `notifications.System` publishes them

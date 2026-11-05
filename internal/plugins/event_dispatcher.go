@@ -161,8 +161,8 @@ type producedEvent struct {
 	// installations.
 	targetPluginID string
 	// payload decodes the event's payload. It runs on the intake goroutine,
-	// off the publisher's.
-	payload func() *structpb.Struct
+	// off the publisher's. An error means the event is not delivered.
+	payload func() (*structpb.Struct, error)
 }
 
 func NewEventDispatcher(
@@ -280,7 +280,7 @@ func hubEvent(env events.Envelope) producedEvent {
 		id:             env.EventID,
 		name:           env.Event,
 		targetPluginID: env.TargetPluginID,
-		payload:        func() *structpb.Struct { return publicPayload(env) },
+		payload:        func() (*structpb.Struct, error) { return publicPayload(env) },
 	}
 }
 
@@ -288,7 +288,8 @@ func hubEvent(env events.Envelope) producedEvent {
 // event catalog defines, so fields the host adds internally never reach
 // plugins. A notification names only its profile, and profile IDs repeat
 // across accounts, so the account the envelope is addressed to is added.
-func publicPayload(env events.Envelope) *structpb.Struct {
+// Data that doesn't match the event's catalog type is an error.
+func publicPayload(env events.Envelope) (*structpb.Struct, error) {
 	raw := env.Data
 	if env.Event == publicevents.NotificationCreated && env.UserID > 0 {
 		var fields map[string]any
@@ -301,10 +302,9 @@ func publicPayload(env events.Envelope) *structpb.Struct {
 	}
 	projected, err := publicevents.Project(env.Event, raw)
 	if err != nil {
-		slog.Warn("plugin event dispatcher: payload doesn't match the event catalog, event not delivered to plugins", "component", "plugins", "event_name", env.Event, "event_id", env.EventID, "error", err)
-		return nil
+		return nil, err
 	}
-	return decodeRawJSON(projected)
+	return decodeRawJSON(projected), nil
 }
 
 // consumeHub reads until Stop unsubscribes, so envelopes published while the
@@ -348,8 +348,13 @@ func (d *EventDispatcher) store(ctx context.Context, produced producedEvent) {
 	if len(subscribers) == 0 {
 		return
 	}
+	decoded, err := produced.payload()
+	if err != nil {
+		slog.WarnContext(ctx, "plugin event dispatcher: payload doesn't match the event catalog, event not delivered to plugins", "component", "plugins", "event_name", produced.name, "event_id", produced.id, "error", err)
+		return
+	}
 	var payload json.RawMessage
-	if decoded := produced.payload(); decoded != nil {
+	if decoded != nil {
 		encoded, err := decoded.MarshalJSON()
 		if err != nil {
 			slog.WarnContext(ctx, "plugin event dispatcher: encode payload failed, event not delivered to plugins", "component", "plugins", "event_name", produced.name, "event_id", produced.id, "error", err)
