@@ -99,9 +99,15 @@ func TestListRejectsOversizedResponses(t *testing.T) {
 // are empty.
 func TestListObjectInfosStopsEndlessListing(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		keys int
-	}{{"entries", 3}, {"empty pages", 0}} {
+		name     string
+		keys     int
+		requests int32
+	}{
+		// 0, 3, 6, 9 entries are under the ceiling of 10; 12 stops it.
+		{"entries", 3, 4},
+		// Five empty pages reach the page ceiling of 5.
+		{"empty pages", 0, 5},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prevEntries, prevPages := maxListEntries, maxListPages
 			maxListEntries, maxListPages = 10, 5
@@ -122,6 +128,9 @@ func TestListObjectInfosStopsEndlessListing(t *testing.T) {
 			_, err := client.ListObjectInfos(ctx, "silo", "p/")
 			if !errors.Is(err, ErrListingTooLarge) {
 				t.Fatalf("err = %v after %d requests, want ErrListingTooLarge", err, calls.Load())
+			}
+			if got := calls.Load(); got != tc.requests {
+				t.Fatalf("stopped after %d requests, want %d", got, tc.requests)
 			}
 		})
 	}
