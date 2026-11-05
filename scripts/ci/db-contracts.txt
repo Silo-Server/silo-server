@@ -819,3 +819,6 @@
 # in_watchlist after the batch read the watchlist first.
 ./internal/userstore/pgstore TestQueueItemViewerStateMatchesSingleReads
 ./internal/api/handlers TestItemDetailViewerStateBatchDB
+
+# Watch-sync admission commits one manual reservation across repository instances.
+./internal/watchsync TestSyncRunAdmissionDB
