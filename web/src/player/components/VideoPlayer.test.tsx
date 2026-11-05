@@ -3960,6 +3960,43 @@ describe("VideoPlayer source timeline", () => {
     expect(subtitleTimeline.assOffsetSeconds).toBe(0);
   });
 
+  it("keeps a seek made while a native HLS transport reloads", async () => {
+    const plan = fixturePlanV3({
+      delivery: "server_remux_hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: {
+        source_start_seconds: 42,
+        player_start_seconds: 7,
+        stream_origin_seconds: 35,
+        timeline_offset_seconds: 0,
+        can_seek_anywhere: true,
+        seek_restoration: "player_position",
+      },
+    });
+    const { container, rerenderPlayer } = renderPlayer({ plan, initialPosition: 42 });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    fireEvent.loadedMetadata(video);
+    fireEvent.playing(video);
+
+    // A quality change replans the session; the controls stay usable while the
+    // new transport loads, and the viewer seeks before its metadata arrives.
+    rerenderPlayer({ plan, planRevision: 2, streamUrl: "/api/v1/stream/session-1?revision=2" });
+    await waitFor(() => expect(video.src).toContain("revision=2"));
+    act(() => {
+      controls.current!.onSeek(300);
+    });
+    fireEvent.loadedMetadata(video);
+
+    expect(video.currentTime).toBe(300);
+  });
+
   // Chrome keeps a Matroska file's container start time on its clock, so a
   // file that starts 30 s in reports currentTime 30 at its first frame.
   // Subtitle cues, the resume seek, and the reported position all have to

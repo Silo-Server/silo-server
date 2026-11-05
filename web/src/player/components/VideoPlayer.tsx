@@ -1056,6 +1056,8 @@ export function VideoPlayer({
   backendDurationRef.current = backendDuration;
   const effectiveInitialPosition = plan.timeline.player_start_seconds;
   const canSeekAnywhere = plan.timeline.can_seek_anywhere;
+  const canSeekAnywhereRef = useRef(canSeekAnywhere);
+  canSeekAnywhereRef.current = canSeekAnywhere;
   // The menu is the plan's. The session's preference decides whether Auto is
   // lit, since `auto` names no rung; otherwise the plan names the entry it
   // delivers.
@@ -2702,7 +2704,13 @@ export function VideoPlayer({
     const attachNativeHLS = () => {
       video.src = effectiveStreamUrl;
       nativeHLSMetadataHandler = () => {
-        video.currentTime = effectiveInitialPosition;
+        // A seek the viewer made while the transport loaded wins over the
+        // start position; on a seek-anywhere plan it never replans.
+        const pendingSeconds = canSeekAnywhereRef.current ? pendingSeekTimeRef.current : null;
+        video.currentTime =
+          pendingSeconds === null
+            ? effectiveInitialPosition
+            : toPlayerTime(pendingSeconds, timelineOffsetRef.current);
         attemptAutoplayWhenReady();
       };
       video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
