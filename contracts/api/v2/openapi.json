@@ -5674,6 +5674,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "item_metadata": {
+            "description": "listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -5693,6 +5697,7 @@
           "item_listing",
           "item_listing_max_content_ids",
           "item_change_events",
+          "item_metadata",
           "revision",
           "state",
           "allowed"
@@ -5762,18 +5767,61 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "air_date": {
+            "description": "Air date of an episode, YYYY-MM-DD; absent when unknown and for a movie or series",
+            "format": "date",
+            "type": "string"
+          },
+          "cast": {
+            "description": "Actors and guest stars of a movie or series in credit order, only with include_people; absent when there are none. No photos",
+            "items": {
+              "$ref": "#/components/schemas/CastCredit"
+            },
+            "type": "array"
+          },
           "content_id": {
             "examples": [
               "movie-tmdb-949"
             ],
             "type": "string"
           },
+          "content_rating": {
+            "description": "Stored content rating of a movie or series; absent when unknown and for an episode",
+            "examples": [
+              "PG-13"
+            ],
+            "type": "string"
+          },
+          "crew": {
+            "description": "Other credits of a movie or series, only with include_people; absent when there are none. No photos",
+            "items": {
+              "$ref": "#/components/schemas/CrewCredit"
+            },
+            "type": "array"
+          },
           "episode_number": {
             "description": "An episode's number in its season; absent otherwise",
             "format": "int64",
             "type": "integer"
           },
+          "first_air_date": {
+            "description": "First air date of a series, YYYY-MM-DD; absent when unknown and for a movie or episode",
+            "format": "date",
+            "type": "string"
+          },
+          "genres": {
+            "description": "Stored genres of a movie or series, not localized; absent when there are none and for an episode",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "imdb_id": {
+            "type": "string"
+          },
+          "last_air_date": {
+            "description": "Last air date of a series as its metadata provider reports it, YYYY-MM-DD; absent when unknown and for a movie or episode",
+            "format": "date",
             "type": "string"
           },
           "library_ids": {
@@ -5787,6 +5835,38 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "networks": {
+            "description": "Networks a series aired on; absent when there are none and for a movie or episode",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rating_imdb": {
+            "description": "Stored IMDb rating of a movie or series on IMDb's 0-10 scale",
+            "format": "double",
+            "type": "number"
+          },
+          "rating_rt_audience": {
+            "description": "Stored Rotten Tomatoes audience score of a movie or series, a percentage, whether or not title pages show it",
+            "format": "int64",
+            "type": "integer"
+          },
+          "rating_rt_critic": {
+            "description": "Stored Rotten Tomatoes critic score of a movie or series, a percentage, whether or not title pages show it",
+            "format": "int64",
+            "type": "integer"
+          },
+          "rating_tmdb": {
+            "description": "Stored TMDB rating of a movie or series on TMDB's 0-10 scale",
+            "format": "double",
+            "type": "number"
+          },
+          "release_date": {
+            "description": "Release date of a movie or series (a series may store its first air date here), YYYY-MM-DD; absent when unknown and for an episode",
+            "format": "date",
+            "type": "string"
           },
           "season_number": {
             "description": "An episode's season; absent otherwise",
@@ -5807,6 +5887,13 @@
               "matched"
             ],
             "type": "string"
+          },
+          "studios": {
+            "description": "Production studios of a movie or series; absent when there are none and for an episode",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "title": {
             "description": "Episode title for an episode; empty when the episode has none",
@@ -72682,6 +72769,16 @@
               },
               "maxItems": 200,
               "type": "array"
+            }
+          },
+          {
+            "description": "Also return cast and crew on movies and series. Send it only when getAdminCatalogCapabilities reports item_metadata",
+            "explode": false,
+            "in": "query",
+            "name": "include_people",
+            "schema": {
+              "description": "Also return cast and crew on movies and series. Send it only when getAdminCatalogCapabilities reports item_metadata",
+              "type": "boolean"
             }
           }
         ],

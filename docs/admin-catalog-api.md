@@ -62,14 +62,40 @@ starts a new listing. `content_ids` is a set, so repeating or reordering ids
 keeps the cursor. Ids that are not present movies, series or episodes are left
 out without an error, which is how a caller learns an item left the catalog.
 Each page is read in one snapshot with at most two statements, whatever it
-holds; later pages read the live catalog, so an item added behind the cursor
-appears on the next full pass, not this one.
+holds, or three with `include_people`. Later pages read the live catalog, so an
+item added behind the cursor appears on the next full pass, not this one.
 
 Each item carries `content_id`, `type`, `title`, `year`, the provider ids, and
 `library_ids`: every enabled library it is present in, whatever `library_id`
 filters. A movie or series also has `status`, its metadata match state. An
 episode has `series_id`, `series_title`, `season_number` and `episode_number`;
 its `year` is its air-date year.
+
+A movie or series also carries its stored metadata, so a tool can match rules
+across a library without reading each item as a profile: `genres`,
+`content_rating`, `studios`, `networks` (a series' broadcasters), and the four
+stored ratings `rating_imdb`, `rating_tmdb` (both 0–10), `rating_rt_critic` and
+`rating_rt_audience` (percentages), and its dates as `YYYY-MM-DD`:
+`release_date` (a series may store its first air date here too), and on a
+series `first_air_date` and `last_air_date`, the latter as the metadata provider
+reports it. These are the stored values, not translated
+into any profile's language and not narrowed by any profile's access. Like the
+metadata editor, the listing serves every stored rating, whether or not title
+pages show that source (see "Ratings on title pages" in
+[catalog-api.md](catalog-api.md)). Each field is absent when empty or unknown.
+Episodes carry none of them, only their own `air_date`; read the rest from the
+series row named by `series_id`. A season's last air date is the latest
+`air_date` among the episode rows with that `season_number`.
+
+`include_people=true` also returns `cast` (actors and guest stars, in credit
+order) and `crew` (every other credit, with its `job`) on movies and series, in
+the item detail's credit shape without photos: `photo_url` and
+`photo_thumbhash` are always absent. Like every filter, it is bound into the
+cursor. Credits make a page larger: a 200-item page with typical metadata
+holds several thousand credits, about a megabyte of JSON. A person's credits
+are read live, so renaming or merging a person changes every item they are
+credited on without a `catalog.item.changed` event; a mirror that keeps credits
+picks that up on its next full pass.
 
 `added_at` is when Silo first saw the item. Without `library_id` it is the
 earliest first-seen time across the item's enabled libraries. With `library_id`
@@ -104,8 +130,9 @@ with `content_ids`, and drop any the listing no longer returns. Fetch on
 `metadata_updated` too: titles, years and provider ids change through it.
 
 `GET /api/v2/admin/catalog/capabilities` reports `item_listing`,
-`item_listing_max_content_ids`, and `item_change_events`, true when the socket
-carries those changes. The listing and the events have no Apple, Android, or
+`item_listing_max_content_ids`, `item_change_events`, true when the socket
+carries those changes, and `item_metadata`, true when items carry the stored
+metadata above and the listing accepts `include_people`. The listing and the events have no Apple, Android, or
 Jellyfin compatibility callers; Jellyfin clients read the catalog through their
 own item queries.
 
