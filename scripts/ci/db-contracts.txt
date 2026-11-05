@@ -817,3 +817,22 @@
 # in_watchlist after the batch read the watchlist first.
 ./internal/userstore/pgstore TestQueueItemViewerStateMatchesSingleReads
 ./internal/api/handlers TestItemDetailViewerStateBatchDB
+
+# Count availability preserves v2 editors and known-ID v1 repair/delete.
+./internal/api/handlers TestCollectionCountAvailabilityRecoveryDB
+./internal/api/handlers TestLibraryCollectionLegacyCountRecoveryDB
+./internal/apiv2 TestCollectionCountUnavailableRecoveryDB
+
+# Composed raw budgets return validation errors and keep legacy recovery usable.
+./internal/api/handlers TestLibraryCollectionComposedUpdateRecoveryDB
+./internal/apiv2 TestCatalogComposedBudgetValidationDB
+
+# Personal collection definition admission reads the merged state under its write lock.
+./internal/api/handlers TestPersonalCollectionCompositionConcurrentUpdatesDB
+./internal/userstore/pgstore TestPostgresCollectionCompositionWriteLockDB
+./internal/userstore/pgstore TestPostgresCollectionCompositionRecoveryDB
+
+# Atomic v2 collection append uses stored tails and preserves access boundaries.
+./internal/userstore/pgstore TestPostgresCollectionAtomicAppendDB
+./internal/catalog TestLibraryCollectionAtomicAppendDB
+./internal/api/handlers TestPersonalCollectionAppendBoundariesDB

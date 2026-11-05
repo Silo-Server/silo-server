@@ -215,6 +215,9 @@ func parseCatalogSkipTotal(raw string) bool {
 }
 
 func parseCatalogOverlay(values url.Values) (catalogOverlay, error) {
+	if err := validateCatalogURLStructure(values); err != nil {
+		return catalogOverlay{}, err
+	}
 	def := QueryDefinition{
 		Match:  normalizeCatalogMatch(values.Get("match")),
 		Groups: []QueryGroup{},
@@ -275,6 +278,9 @@ func parseCatalogOverlay(values url.Values) (catalogOverlay, error) {
 		return catalogOverlay{}, err
 	}
 	def.Groups = append(def.Groups, explicitGroups...)
+	if err := ValidateQueryStructure(def); err != nil {
+		return catalogOverlay{}, err
+	}
 
 	hasExplicitSort := values.Get("sort") != "" || values.Get("order") != ""
 	if hasExplicitSort {
@@ -290,6 +296,9 @@ func parseCatalogOverlay(values url.Values) (catalogOverlay, error) {
 }
 
 func parseCatalogGroups(values url.Values) ([]QueryGroup, error) {
+	if err := validateCatalogURLStructure(values); err != nil {
+		return nil, err
+	}
 	groupBuilders := map[int]*catalogGroupBuilder{}
 
 	for key, rawValues := range values {

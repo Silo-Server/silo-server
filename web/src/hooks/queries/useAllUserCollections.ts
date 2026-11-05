@@ -16,6 +16,7 @@ export interface CollectionOption {
   collection_type?: LibraryCollection["collection_type"];
   last_sync_status?: LibraryCollection["last_sync_status"];
   item_count?: number;
+  item_count_status?: string;
   poster_url?: string;
   poster_thumbhash?: string;
 }
@@ -25,7 +26,12 @@ type UserCollectionSummary = Pick<Collection, "id" | "name"> &
   Partial<
     Pick<
       Collection,
-      "creator_profile_id" | "collection_type" | "item_count" | "poster_url" | "poster_thumbhash"
+      | "creator_profile_id"
+      | "collection_type"
+      | "item_count"
+      | "item_count_status"
+      | "poster_url"
+      | "poster_thumbhash"
     >
   >;
 
@@ -45,6 +51,7 @@ export function buildAllUserCollectionOptions(
       group: "My Collections",
       collection_type: collection.collection_type,
       item_count: collection.item_count,
+      item_count_status: collection.item_count_status,
       poster_url: collection.poster_url,
       poster_thumbhash: collection.poster_thumbhash,
     });
@@ -76,6 +83,7 @@ export function buildAllUserCollectionOptions(
         collection_type: collection.collection_type,
         last_sync_status: collection.last_sync_status,
         item_count: collection.item_count,
+        item_count_status: collection.item_count_status,
         poster_url: collection.poster_url,
         poster_thumbhash: collection.poster_thumbhash,
       };

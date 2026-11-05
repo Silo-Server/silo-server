@@ -9,7 +9,7 @@ import { normalizeQueryDefinition } from "@/api/types";
 import { v2, V2ProblemError } from "@/api/v2/request";
 import { withETag } from "@/api/v2/etag";
 
-type AdminCollection = components["schemas"]["AdminCollection"];
+type AdminCollection = components["schemas"]["AdminCollection"] & { item_count_status?: string };
 export function adminCollectionFromV2(value: AdminCollection): LibraryCollection {
   return {
     ...value,

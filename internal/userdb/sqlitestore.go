@@ -310,8 +310,8 @@ func (s *SQLiteUserStore) ListCollections(_ context.Context, profileID string) (
 	return ListCollections(s.db, profileID)
 }
 
-func (s *SQLiteUserStore) UpdateCollection(_ context.Context, input userstore.UpdateCollectionInput) error {
-	return UpdateCollection(s.db, input)
+func (s *SQLiteUserStore) UpdateCollection(ctx context.Context, input userstore.UpdateCollectionInput) error {
+	return UpdateCollection(ctx, s.db, input)
 }
 
 func (s *SQLiteUserStore) DeleteCollection(_ context.Context, id string) error {

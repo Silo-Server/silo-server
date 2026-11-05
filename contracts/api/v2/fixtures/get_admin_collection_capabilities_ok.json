@@ -1,5 +1,5 @@
 {
-  "revision": "f9622d80ff66956bdd64fcc3445fe57706ac2ce1c8b02df9e470959604c20337",
+  "revision": "2ef17297fd6caa0977748c8be07653c01c5bf08b7e73b86bb3884b59ebccbc1b",
   "state": "available",
   "allowed": true,
   "groups": true,
@@ -11,6 +11,7 @@
   ],
   "artwork": true,
   "item_reorder": true,
+  "item_append": false,
   "template_summaries": true,
   "mdblist_search": true,
   "schedule_time_zone": {

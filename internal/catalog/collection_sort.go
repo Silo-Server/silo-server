@@ -26,6 +26,9 @@ func QueryCollectionItemsBySort(
 	limit int,
 	displayQueryDefinition string,
 ) ([]*models.MediaItem, int, error) {
+	if err := ValidatePersonalCollectionQueryBudget("", displayQueryDefinition); err != nil {
+		return nil, 0, err
+	}
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, 0, nil
 	}

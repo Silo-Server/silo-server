@@ -1,15 +1,7 @@
 package catalog
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"maps"
-	"strings"
-	"sync"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // personalMembershipSourceWhere limits a query to one personal collection's
@@ -29,6 +21,13 @@ type PersonalCollectionDefinition struct {
 // personalCollectionCountQuery uses the catalog view's predicates for visible
 // members or smart matches, including its display filter and item limit.
 func personalCollectionCountQuery(userID int, c PersonalCollectionDefinition, access AccessFilter) (string, []any, error) {
+	source := ""
+	if IsLiveQueryType(c.CollectionType) {
+		source = c.QueryDefinition
+	}
+	if err := ValidatePersonalCollectionQueryBudget(source, c.DisplayQueryDefinition); err != nil {
+		return "", nil, err
+	}
 	display := QueryDefinition{}.Normalize()
 	canonical, err := NormalizeDisplayQueryFragment([]byte(c.DisplayQueryDefinition))
 	if err != nil {
@@ -63,139 +62,4 @@ func personalCollectionCountQuery(userID int, c PersonalCollectionDefinition, ac
 	executor.SourceArgs = args
 	display.MediaScope = def.MediaScope
 	return executor.buildCountQuery(display, access)
-}
-
-// Collection counts run as at most collectionCountConcurrency concurrent
-// statements of at most collectionCountBatchSize definitions each. One
-// statement evaluates its counts one after another, so a single batch makes
-// the list wait for the sum of every smart definition; splitting it bounds the
-// wait by the slowest batch while keeping round trips per call small.
-const (
-	collectionCountConcurrency = 4
-	collectionCountBatchSize   = 32
-)
-
-type collectionCountStatement struct {
-	id, sql string
-	args    []any
-}
-
-// CountPersonalCollections batches dynamic counts, runs the batches
-// concurrently, and evaluates identical smart definitions once per call.
-// Counts remain scoped to this viewer and request; catalog/watch changes are
-// never hidden behind a cross-request cache. Failed definitions are absent
-// from the returned map so callers can preserve their existing fallback.
-func CountPersonalCollections(ctx context.Context, pool *pgxpool.Pool, userID int, collections []PersonalCollectionDefinition, access AccessFilter) (map[string]int, error) {
-	counts := make(map[string]int, len(collections))
-	seen := make(map[PersonalCollectionDefinition]string, len(collections))
-	aliases := make(map[string][]string)
-	var queries []collectionCountStatement
-	var failures []error
-	for _, c := range collections {
-		key := c
-		if IsLiveQueryType(c.CollectionType) {
-			key.ID = ""
-		}
-		if id, ok := seen[key]; ok {
-			aliases[id] = append(aliases[id], c.ID)
-			continue
-		}
-		sql, args, err := personalCollectionCountQuery(userID, c, access)
-		if err != nil {
-			failures = append(failures, fmt.Errorf("collection %s: %w", c.ID, err))
-			continue
-		}
-		seen[key] = c.ID
-		queries = append(queries, collectionCountStatement{id: c.ID, sql: sql, args: args})
-	}
-	batchCounts, batchFailures := runCollectionCountStatements(ctx, pool, queries)
-	maps.Copy(counts, batchCounts)
-	failures = append(failures, batchFailures...)
-	for id, copies := range aliases {
-		if count, ok := counts[id]; ok {
-			for _, copyID := range copies {
-				counts[copyID] = count
-			}
-		}
-	}
-	return counts, errors.Join(failures...)
-}
-
-// runCollectionCountStatements runs count statements in batches, as the
-// constants above describe, and returns each statement's count keyed by its
-// id. A statement that fails is absent from the counts and listed in the
-// failures.
-func runCollectionCountStatements(ctx context.Context, pool *pgxpool.Pool, queries []collectionCountStatement) (map[string]int, []error) {
-	counts := make(map[string]int, len(queries))
-	if len(queries) == 0 {
-		return counts, nil
-	}
-	batchSize := min(collectionCountBatchSize, (len(queries)+collectionCountConcurrency-1)/collectionCountConcurrency)
-	var (
-		mu       sync.Mutex
-		wg       sync.WaitGroup
-		failures []error
-		sem      = make(chan struct{}, collectionCountConcurrency)
-	)
-	for start := 0; start < len(queries); start += batchSize {
-		batch := queries[start:min(start+batchSize, len(queries))]
-		wg.Go(func() {
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			batchCounts, batchFailures := countCollectionBatch(ctx, pool, batch)
-			mu.Lock()
-			defer mu.Unlock()
-			maps.Copy(counts, batchCounts)
-			failures = append(failures, batchFailures...)
-		})
-	}
-	wg.Wait()
-	return counts, failures
-}
-
-// countCollectionBatch evaluates one batch in a single statement. A
-// bad persisted definition must not suppress unrelated counts in its batch, so
-// a failed batch is retried one definition at a time.
-func countCollectionBatch(ctx context.Context, pool *pgxpool.Pool, batch []collectionCountStatement) (map[string]int, []error) {
-	counts := make(map[string]int, len(batch))
-	parts := make([]string, 0, len(batch))
-	var args []any
-	for _, q := range batch {
-		idArg := len(args) + 1
-		args = append(args, q.id)
-		parts = append(parts, fmt.Sprintf("SELECT $%d::text, (%s)", idArg, rebindSQLPlaceholders(q.sql, len(args))))
-		args = append(args, q.args...)
-	}
-	rows, err := pool.Query(ctx, strings.Join(parts, " UNION ALL "), args...)
-	if err == nil {
-		for rows.Next() {
-			var id string
-			var count int
-			if err = rows.Scan(&id, &count); err != nil {
-				break
-			}
-			counts[id] = count
-		}
-		rows.Close()
-		if err == nil {
-			err = rows.Err()
-		}
-	}
-	if err == nil {
-		return counts, nil
-	}
-	if ctx.Err() != nil {
-		return nil, []error{ctx.Err()}
-	}
-	clear(counts)
-	var failures []error
-	for _, q := range batch {
-		var count int
-		if err := pool.QueryRow(ctx, q.sql, q.args...).Scan(&count); err != nil {
-			failures = append(failures, fmt.Errorf("collection %s: %w", q.id, err))
-			continue
-		}
-		counts[q.id] = count
-	}
-	return counts, failures
 }

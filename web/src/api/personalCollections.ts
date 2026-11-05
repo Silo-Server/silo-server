@@ -15,7 +15,7 @@ import { withETag } from "@/api/v2/etag";
 import { v2, type V2Body, type V2Result } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
 
-type CollectionV2 = components["schemas"]["PersonalCollection"];
+type CollectionV2 = components["schemas"]["PersonalCollection"] & { item_count_status?: string };
 
 export function collectionFromV2(value: CollectionV2): Collection {
   return {

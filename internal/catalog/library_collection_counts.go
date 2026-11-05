@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -204,4 +207,94 @@ func buildCountVisibleStoredMembersSQL(collectionIDs []string, access AccessFilt
 	sql.WriteString("\n            AND " + MangaChapterExclusionWhere("mi"))
 	sql.WriteString("\n            GROUP BY lci.collection_id")
 	return sql.String(), args
+}
+
+// Viewer counts of server collections run as at most
+// collectionCountConcurrency concurrent statements of at most
+// collectionCountBatchSize definitions each. One statement evaluates its
+// counts one after another, so a single batch makes the list wait for the sum
+// of every smart definition; splitting it bounds the wait by the slowest batch
+// while keeping round trips per call small. Their definitions pass structural
+// admission in ResolveLibraryCollectionMembership first.
+const (
+	collectionCountConcurrency = 4
+	collectionCountBatchSize   = 32
+)
+
+// runCollectionCountStatements runs count statements in batches, as the
+// constants above describe, and returns each statement's count keyed by its
+// id. A statement that fails is absent from the counts and listed in the
+// failures.
+func runCollectionCountStatements(ctx context.Context, pool *pgxpool.Pool, queries []collectionCountStatement) (map[string]int, []error) {
+	counts := make(map[string]int, len(queries))
+	if len(queries) == 0 {
+		return counts, nil
+	}
+	batchSize := min(collectionCountBatchSize, (len(queries)+collectionCountConcurrency-1)/collectionCountConcurrency)
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		failures []error
+		sem      = make(chan struct{}, collectionCountConcurrency)
+	)
+	for start := 0; start < len(queries); start += batchSize {
+		batch := queries[start:min(start+batchSize, len(queries))]
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			batchCounts, batchFailures := countCollectionBatch(ctx, pool, batch)
+			mu.Lock()
+			defer mu.Unlock()
+			maps.Copy(counts, batchCounts)
+			failures = append(failures, batchFailures...)
+		})
+	}
+	wg.Wait()
+	return counts, failures
+}
+
+// countCollectionBatch evaluates one batch in a single statement. A
+// bad persisted definition must not suppress unrelated counts in its batch, so
+// a failed batch is retried one definition at a time.
+func countCollectionBatch(ctx context.Context, pool *pgxpool.Pool, batch []collectionCountStatement) (map[string]int, []error) {
+	counts := make(map[string]int, len(batch))
+	parts := make([]string, 0, len(batch))
+	var args []any
+	for _, q := range batch {
+		parts = append(parts, collectionCountSQLPart(q, len(args)))
+		args = append(args, q.id)
+		args = append(args, q.args...)
+	}
+	rows, err := pool.Query(ctx, strings.Join(parts, " UNION ALL "), args...)
+	if err == nil {
+		for rows.Next() {
+			var id string
+			var count int
+			if err = rows.Scan(&id, &count); err != nil {
+				break
+			}
+			counts[id] = count
+		}
+		rows.Close()
+		if err == nil {
+			err = rows.Err()
+		}
+	}
+	if err == nil {
+		return counts, nil
+	}
+	if ctx.Err() != nil {
+		return nil, []error{ctx.Err()}
+	}
+	clear(counts)
+	var failures []error
+	for _, q := range batch {
+		var count int
+		if err := pool.QueryRow(ctx, q.sql, q.args...).Scan(&count); err != nil {
+			failures = append(failures, fmt.Errorf("collection %s: %w", q.id, err))
+			continue
+		}
+		counts[q.id] = count
+	}
+	return counts, failures
 }

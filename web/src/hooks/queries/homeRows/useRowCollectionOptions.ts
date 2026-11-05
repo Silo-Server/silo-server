@@ -31,6 +31,7 @@ export function adminCollectionOptions(
         library_name: libraryName,
         collection_type: collection.collection_type,
         item_count: collection.item_count,
+        item_count_status: collection.item_count_status,
         poster_url: collection.poster_url,
         poster_thumbhash: collection.poster_thumbhash,
       };

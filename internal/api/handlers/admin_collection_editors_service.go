@@ -232,7 +232,7 @@ func (h *LibraryCollectionHandler) AdminCollectionItemsOrder(ctx context.Context
 }
 
 func (h *LibraryCollectionHandler) AdminCollectionFeatures(context.Context) userstore.CollectionFeatures {
-	return userstore.CollectionFeatures{Groups: h.GroupRepo != nil, Imports: h.service != nil, Artwork: h.ArtworkStore != nil, ItemReorder: h.repo != nil}
+	return userstore.CollectionFeatures{Groups: h.GroupRepo != nil, Imports: h.service != nil, Artwork: h.ArtworkStore != nil, ItemReorder: h.repo != nil, ItemAppend: h.repo != nil}
 }
 func (h *LibraryCollectionHandler) AdminCollectionTemplateCatalog(context.Context) templates.Catalog {
 	return h.templateRegistry().Catalog()

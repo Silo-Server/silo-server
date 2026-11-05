@@ -1,5 +1,5 @@
 {
-  "revision": "6a87601d9e894507e052de99b434f0e5ab0aac86724c3801b517fef58c4d5aa2",
+  "revision": "c2bcd2dc3f9d26d6fb98518bb947f01cd077bb7888ce83e755f6579499b0d520",
   "state": "available",
   "allowed": true,
   "groups": false,
@@ -8,6 +8,7 @@
   "import_sources": [],
   "artwork": false,
   "item_reorder": false,
+  "item_append": false,
   "display_filter_fields": [
     "type",
     "watched"
@@ -43,5 +44,6 @@
   "sync_schedule_editable": false,
   "contains_item": true,
   "preview_posters": true,
+  "count_availability": false,
   "poster_collages": false
 }
