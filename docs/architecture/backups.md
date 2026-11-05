@@ -79,8 +79,11 @@ the private bucket ([Destinations](#destinations), [Encryption](#encryption)).
   backup folder (a full restore's overwritten files) is skipped by listing
   after it, as a delimiter would. A folder with more than 32 objects, which
   no backup writes, is read only that far and is `unreadable`: its contents
-  are unknown. Other servers' folders are named one request each, at most
-  100, and the upload sweep reads at most 100,000 objects.
+  are unknown. One listing reads at most 256 MiB of manifests
+  (`maxListedManifestBytes`, judged by their listed sizes before any is
+  read); past it the remaining folders are `unreadable` and kept. Other
+  servers' folders are named one request each, at most 100, and the
+  upload sweep reads at most 100,000 objects.
 - **The listing reads a manifest once.** A manifest is not rewritten after
   its backup completes, so the Backups listing (which the page polls every
   few seconds while a backup runs) keeps each manifest it read and checked,

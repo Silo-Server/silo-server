@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -243,7 +244,7 @@ const probeKey = RootPrefix + ".silo-connection-test"
 
 // TestS3 checks a bucket the way backups use it: it reaches the bucket
 // (HeadBucket), then writes a probe object under the key prefix and deletes
-// it. It reports the first step that failed, never the backend's free-form
+// it, reading it back first. It reports the first step that failed, never the backend's free-form
 // message, which can echo credentials.
 func TestS3(ctx context.Context, c S3Config) S3TestResult {
 	if strings.TrimSpace(c.Endpoint) == "" {
@@ -256,8 +257,18 @@ func TestS3(ctx context.Context, c S3Config) S3TestResult {
 	if err := client.HeadBucket(ctx, c.Bucket); err != nil {
 		return s3TestFailure(err, S3StepBucket)
 	}
-	if err := client.PutObject(ctx, c.Bucket, probeKey, []byte("Silo connection test. Safe to delete.\n")); err != nil {
+	probe := []byte("Silo connection test. Safe to delete.\n")
+	if err := client.PutObject(ctx, c.Bucket, probeKey, probe); err != nil {
 		return s3TestFailure(err, S3StepPermission)
+	}
+	// Listing, restore, and download read objects back, so credentials
+	// that can write but not read would take backups nobody can use.
+	got, err := client.GetObject(ctx, c.Bucket, probeKey)
+	if err != nil {
+		return s3TestFailure(err, S3StepPermission)
+	}
+	if !bytes.Equal(got, probe) {
+		return S3TestResult{Step: S3StepPermission, Message: "Silo wrote a test file but read back different contents."}
 	}
 	if err := client.DeleteObject(ctx, c.Bucket, probeKey); err != nil {
 		result := s3TestFailure(err, S3StepPermission)

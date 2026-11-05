@@ -148,6 +148,11 @@ func (s *Service) listFolders(ctx context.Context, t target, serverID string) ([
 	return s.readFolders(ctx, t, serverID, &s.manifests)
 }
 
+// maxListedManifestBytes bounds the manifest bytes one listing reads. A
+// backup's manifest is a few KiB, up to MaxManifestBytes with a long
+// missing-file list, so this covers far more backups than rotation keeps.
+const maxListedManifestBytes = 256 << 20
+
 func (s *Service) readFolders(ctx context.Context, t target, serverID string, cache *manifestCache) ([]folder, error) {
 	listed, err := listBackupFolders(ctx, t, serverPrefix(serverID))
 	if err != nil {
@@ -155,6 +160,9 @@ func (s *Service) readFolders(ctx context.Context, t target, serverID string, ca
 	}
 	out := make([]folder, 0, len(listed))
 	cached := map[string]bool{}
+	// read is the manifest bytes this listing has taken; past
+	// maxListedManifestBytes the rest are left unread (unreadable).
+	var read int64
 	for _, l := range listed {
 		at, kind, _ := ParseFolderName(l.id)
 		f := folder{id: l.id, kind: kind, at: at}
@@ -181,6 +189,15 @@ func (s *Service) readFolders(ctx context.Context, t target, serverID string, ca
 		// From here the folder's listing is complete.
 		if _, ok := sizes[ManifestName]; !ok {
 			f.noManifest = true
+			out = append(out, f)
+			continue
+		}
+		// Manifests are kept while the listing is built. A destination
+		// holding many large ones, or one a writer filled, must not take
+		// the process's memory: the rest are unknown, never swept.
+		if read += manifestObject.Size; read > maxListedManifestBytes {
+			f.unreadable = true
+			slog.WarnContext(ctx, "backup manifests exceed what one listing reads; leaving the rest unread", "component", "backup", "id", l.id)
 			out = append(out, f)
 			continue
 		}
