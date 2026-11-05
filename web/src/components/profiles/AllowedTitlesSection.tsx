@@ -18,6 +18,18 @@ import { useDebounce } from "@/hooks/useDebounce";
 const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
 
+/** A list that could not load, with a retry, in place of a wrong empty state. */
+function LoadError({ what, onRetry }: { what: string; onRetry: () => void }) {
+  return (
+    <p role="alert" className="text-muted-foreground flex items-center gap-2 text-sm">
+      Couldn't load the {what}.
+      <Button type="button" variant="link" size="sm" onClick={onRetry}>
+        Retry
+      </Button>
+    </p>
+  );
+}
+
 /**
  * The profile editor's "Allowed titles" and "Allowed collections": what the
  * household's primary profile lets this limited profile watch above its
@@ -46,6 +58,8 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
 
       {titles.isLoading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
+      ) : titles.isError && !titles.data ? (
+        <LoadError what="allowed titles" onRetry={() => void titles.refetch()} />
       ) : (titles.data ?? []).length === 0 ? (
         <p className="text-muted-foreground text-sm">No titles allowed yet.</p>
       ) : (
@@ -83,6 +97,9 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
         </ul>
       )}
 
+      {collections.isError && !collections.data ? (
+        <LoadError what="allowed collections" onRetry={() => void collections.refetch()} />
+      ) : null}
       {(collections.data ?? []).length > 0 ? (
         <div className="space-y-2">
           <h4 className="text-sm font-medium">Allowed collections</h4>
