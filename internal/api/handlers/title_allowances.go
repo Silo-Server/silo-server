@@ -29,18 +29,18 @@ type titleAllowanceStore interface {
 	ListTitleAllowances(ctx context.Context, userID int, profileID string) ([]userstore.TitleAllowance, error)
 	// SetTitleAllowance adds or removes one title allowance and reports
 	// whether a row changed.
-	SetTitleAllowance(ctx context.Context, userID int, profileID, contentID string, allowed bool) (bool, error)
+	SetTitleAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, contentID string, allowed bool) (bool, error)
 	// ListCollectionAllowances lists the profile's collection allowances,
 	// newest first.
 	ListCollectionAllowances(ctx context.Context, userID int, profileID string) ([]userstore.CollectionAllowance, error)
 	// SetCollectionAllowance adds or removes one collection allowance and
 	// reports whether a row changed.
-	SetCollectionAllowance(ctx context.Context, userID int, profileID, collectionID string, allowed bool) (bool, error)
+	SetCollectionAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, collectionID string, allowed bool) (bool, error)
 	// CollectionItemIDs lists the media items a personal collection stores.
 	CollectionItemIDs(ctx context.Context, userID int, collectionID string) ([]string, error)
 	// AllowTitles adds a title allowance for every movie and series among
 	// contentIDs and returns how many were new.
-	AllowTitles(ctx context.Context, userID int, profileID string, contentIDs []string) (int, error)
+	AllowTitles(ctx context.Context, m userstore.AllowanceManager, profileID string, contentIDs []string) (int, error)
 }
 
 // smartCollectionQuery evaluates a smart collection's query for a viewer
@@ -105,23 +105,38 @@ func (h *TitleAllowanceHandler) Supported(context.Context, int) bool {
 }
 
 // manage opens the account's user store after checking that allowances are
-// kept and the actor manages the household.
-func (h *TitleAllowanceHandler) manage(ctx context.Context, actor AllowanceActor) (userstore.UserStore, error) {
+// kept and the actor manages the household, and returns the manager a write
+// rechecks in its transaction.
+func (h *TitleAllowanceHandler) manage(ctx context.Context, actor AllowanceActor) (userstore.UserStore, userstore.AllowanceManager, error) {
+	manager := userstore.AllowanceManager{UserID: actor.UserID}
 	if !h.Supported(ctx, actor.UserID) {
-		return nil, apiError(http.StatusNotImplemented, "unsupported", "Title allowances need the PostgreSQL user store")
+		return nil, manager, apiError(http.StatusNotImplemented, "unsupported", "Title allowances need the PostgreSQL user store")
 	}
 	store, err := h.personal.storeProvider.ForUser(ctx, actor.UserID)
 	if err != nil || store == nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
+		return nil, manager, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	allowed, _, err := householdManagerAs(ctx, store, actor.ActiveProfileID, actor.VerifyProfile)
+	allowed, acting, err := householdManagerAs(ctx, store, actor.ActiveProfileID, actor.VerifyProfile)
 	if err != nil {
-		return nil, profileManagementError(err)
+		return nil, manager, profileManagementError(err)
 	}
 	if !allowed {
-		return nil, apiError(http.StatusForbidden, "forbidden", "Only the primary profile can manage allowed titles")
+		return nil, manager, apiError(http.StatusForbidden, "forbidden", "Only the primary profile can manage allowed titles")
 	}
-	return store, nil
+	if acting != nil {
+		manager.ProfileID, manager.PINRevision = acting.ID, acting.PINRevision
+	}
+	return store, manager, nil
+}
+
+// allowanceWriteError answers a failed allowance write: a manager whose PIN
+// changed after authorization is refused as unverified, as other household
+// writes are; anything else is a server failure with the given message.
+func allowanceWriteError(err error, message string) error {
+	if errors.Is(err, userstore.ErrAllowanceManagerChanged) {
+		return profileManagementError(access.ErrProfileUnverified)
+	}
+	return apiError(http.StatusInternalServerError, "internal_error", message)
 }
 
 // targetProfile loads a profile on the account, 404 when there is none.
@@ -152,7 +167,7 @@ func requireMaturityLimits(p *userstore.Profile) error {
 // ListAllowedTitles lists a profile's own title allowances, newest first, and
 // the cards of the allowed titles the actor may see, in the same order.
 func (h *TitleAllowanceHandler) ListAllowedTitles(ctx context.Context, actor AllowanceActor, profileID string) ([]userstore.TitleAllowance, []CollectionItemView, error) {
-	store, err := h.manage(ctx, actor)
+	store, _, err := h.manage(ctx, actor)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -175,7 +190,7 @@ func (h *TitleAllowanceHandler) ListAllowedTitles(ctx context.Context, actor All
 // may see, and a title in a library the profile can reach. Removing an absent
 // allowance succeeds and changes nothing.
 func (h *TitleAllowanceHandler) SetTitleAllowance(ctx context.Context, actor AllowanceActor, profileID, itemID string, allowed bool) error {
-	store, err := h.manage(ctx, actor)
+	store, manager, err := h.manage(ctx, actor)
 	if err != nil {
 		return err
 	}
@@ -188,8 +203,8 @@ func (h *TitleAllowanceHandler) SetTitleAllowance(ctx context.Context, actor All
 			return err
 		}
 	}
-	if _, err := h.allowances.SetTitleAllowance(ctx, actor.UserID, profileID, itemID, allowed); err != nil {
-		return apiError(http.StatusInternalServerError, "internal_error", "Failed to change the allowed title")
+	if _, err := h.allowances.SetTitleAllowance(ctx, manager, profileID, itemID, allowed); err != nil {
+		return allowanceWriteError(err, "Failed to change the allowed title")
 	}
 	return nil
 }
@@ -286,7 +301,7 @@ func libraryOnly(scope access.Scope) catalog.AccessFilter {
 // standing of every other profile on the account: whether it already sees the
 // title, is allowed it, or could be.
 func (h *TitleAllowanceHandler) TitleAllowanceStates(ctx context.Context, actor AllowanceActor, itemID string) ([]ProfileAllowanceState, error) {
-	store, err := h.manage(ctx, actor)
+	store, _, err := h.manage(ctx, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +368,7 @@ func (h *TitleAllowanceHandler) stateFor(ctx context.Context, userID int, profil
 // ListAllowedCollections lists a profile's collection allowances, newest
 // first.
 func (h *TitleAllowanceHandler) ListAllowedCollections(ctx context.Context, actor AllowanceActor, profileID string) ([]userstore.CollectionAllowance, error) {
-	store, err := h.manage(ctx, actor)
+	store, _, err := h.manage(ctx, actor)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +388,7 @@ func (h *TitleAllowanceHandler) ListAllowedCollections(ctx context.Context, acto
 // household manager alone decide what the collection holds. Other collections
 // are copied with AllowCollectionTitles instead.
 func (h *TitleAllowanceHandler) SetCollectionAllowance(ctx context.Context, actor AllowanceActor, profileID, collectionID string, allowed bool) error {
-	store, err := h.manage(ctx, actor)
+	store, manager, err := h.manage(ctx, actor)
 	if err != nil {
 		return err
 	}
@@ -393,8 +408,8 @@ func (h *TitleAllowanceHandler) SetCollectionAllowance(ctx context.Context, acto
 			return apiError(http.StatusUnprocessableEntity, "collection_not_live", "Only a manual collection the primary profile created can be allowed as it changes; copy its titles instead")
 		}
 	}
-	if _, err := h.allowances.SetCollectionAllowance(ctx, actor.UserID, profileID, collectionID, allowed); err != nil {
-		return apiError(http.StatusInternalServerError, "internal_error", "Failed to change the allowed collection")
+	if _, err := h.allowances.SetCollectionAllowance(ctx, manager, profileID, collectionID, allowed); err != nil {
+		return allowanceWriteError(err, "Failed to change the allowed collection")
 	}
 	return nil
 }
@@ -405,7 +420,7 @@ func (h *TitleAllowanceHandler) SetCollectionAllowance(ctx context.Context, acto
 // matches for the actor, and another collection's stored items are filtered
 // by the actor's access.
 func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor AllowanceActor, profileID, collectionID string) (int, error) {
-	store, err := h.manage(ctx, actor)
+	store, manager, err := h.manage(ctx, actor)
 	if err != nil {
 		return 0, err
 	}
@@ -429,9 +444,9 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if err != nil {
 		return 0, err
 	}
-	added, err := h.allowances.AllowTitles(ctx, actor.UserID, profileID, ids)
+	added, err := h.allowances.AllowTitles(ctx, manager, profileID, ids)
 	if err != nil {
-		return 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to allow the collection's titles")
+		return 0, allowanceWriteError(err, "Failed to allow the collection's titles")
 	}
 	return added, nil
 }

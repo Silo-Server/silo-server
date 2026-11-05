@@ -1,6 +1,9 @@
 package userstore
 
-import "slices"
+import (
+	"errors"
+	"slices"
+)
 
 // TitleAllowance is one movie or series a limited profile may watch above its
 // maturity limits.
@@ -34,3 +37,18 @@ var AllowanceTitleTypes = []string{"movie", "series"}
 func AllowableTitleType(itemType string) bool {
 	return slices.Contains(AllowanceTitleTypes, itemType)
 }
+
+// AllowanceManager is who writes an allowance: the account, and the acting
+// primary profile with the PIN revision its authorization saw. A write locks
+// that profile and refuses with ErrAllowanceManagerChanged when its PIN
+// changed since, so revoked PIN proof cannot finish a pending write. An empty
+// ProfileID (an account-level caller) skips the check.
+type AllowanceManager struct {
+	UserID      int
+	ProfileID   string
+	PINRevision int64
+}
+
+// ErrAllowanceManagerChanged reports that the acting profile's PIN changed
+// after the write was authorized.
+var ErrAllowanceManagerChanged = errors.New("allowance manager PIN changed")

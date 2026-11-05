@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -49,16 +50,16 @@ func (s *TitleAllowances) ListTitleAllowances(ctx context.Context, userID int, p
 	})
 }
 
-func (s *TitleAllowances) SetTitleAllowance(ctx context.Context, userID int, profileID, contentID string, allowed bool) (bool, error) {
+func (s *TitleAllowances) SetTitleAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, contentID string, allowed bool) (bool, error) {
 	if allowed {
-		return s.changeAllowances(ctx, userID, toggleAudit(profileID, auditFieldAllowedTitle, contentID, true), `
+		return s.changeAllowances(ctx, m, toggleAudit(profileID, auditFieldAllowedTitle, contentID, true), `
 			INSERT INTO profile_title_allowances (user_id, profile_id, content_id)
 			VALUES ($1, $2, $3)
-			ON CONFLICT DO NOTHING`, userID, profileID, contentID)
+			ON CONFLICT DO NOTHING`, m.UserID, profileID, contentID)
 	}
-	return s.changeAllowances(ctx, userID, toggleAudit(profileID, auditFieldAllowedTitle, contentID, false), `
+	return s.changeAllowances(ctx, m, toggleAudit(profileID, auditFieldAllowedTitle, contentID, false), `
 		DELETE FROM profile_title_allowances
-		WHERE user_id = $1 AND profile_id = $2 AND content_id = $3`, userID, profileID, contentID)
+		WHERE user_id = $1 AND profile_id = $2 AND content_id = $3`, m.UserID, profileID, contentID)
 }
 
 func (s *TitleAllowances) ListCollectionAllowances(ctx context.Context, userID int, profileID string) ([]userstore.CollectionAllowance, error) {
@@ -87,16 +88,16 @@ func (s *TitleAllowances) ListCollectionAllowances(ctx context.Context, userID i
 	})
 }
 
-func (s *TitleAllowances) SetCollectionAllowance(ctx context.Context, userID int, profileID, collectionID string, allowed bool) (bool, error) {
+func (s *TitleAllowances) SetCollectionAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, collectionID string, allowed bool) (bool, error) {
 	if allowed {
-		return s.changeAllowances(ctx, userID, toggleAudit(profileID, auditFieldAllowedCollection, collectionID, true), `
+		return s.changeAllowances(ctx, m, toggleAudit(profileID, auditFieldAllowedCollection, collectionID, true), `
 			INSERT INTO profile_collection_allowances (user_id, profile_id, collection_id)
 			VALUES ($1, $2, $3)
-			ON CONFLICT DO NOTHING`, userID, profileID, collectionID)
+			ON CONFLICT DO NOTHING`, m.UserID, profileID, collectionID)
 	}
-	return s.changeAllowances(ctx, userID, toggleAudit(profileID, auditFieldAllowedCollection, collectionID, false), `
+	return s.changeAllowances(ctx, m, toggleAudit(profileID, auditFieldAllowedCollection, collectionID, false), `
 		DELETE FROM profile_collection_allowances
-		WHERE user_id = $1 AND profile_id = $2 AND collection_id = $3`, userID, profileID, collectionID)
+		WHERE user_id = $1 AND profile_id = $2 AND collection_id = $3`, m.UserID, profileID, collectionID)
 }
 
 // CollectionItemIDs lists the media items a personal collection stores. Smart
@@ -114,16 +115,16 @@ func (s *TitleAllowances) CollectionItemIDs(ctx context.Context, userID int, col
 
 // AllowTitles adds a title allowance for every movie and series among
 // contentIDs and returns how many were new.
-func (s *TitleAllowances) AllowTitles(ctx context.Context, userID int, profileID string, contentIDs []string) (int, error) {
+func (s *TitleAllowances) AllowTitles(ctx context.Context, m userstore.AllowanceManager, profileID string, contentIDs []string) (int, error) {
 	if len(contentIDs) == 0 {
 		return 0, nil
 	}
-	changed, err := s.changeAllowancesCount(ctx, userID, copyAudit(profileID), `
+	changed, err := s.changeAllowancesCount(ctx, m, copyAudit(profileID), `
 		INSERT INTO profile_title_allowances (user_id, profile_id, content_id)
 		SELECT $1, $2, mi.content_id
 		FROM media_items mi
 		WHERE mi.content_id = ANY($3) AND mi.type = ANY($4)
-		ON CONFLICT DO NOTHING`, userID, profileID, contentIDs, userstore.AllowanceTitleTypes)
+		ON CONFLICT DO NOTHING`, m.UserID, profileID, contentIDs, userstore.AllowanceTitleTypes)
 	return int(changed), err
 }
 
@@ -159,8 +160,8 @@ func copyAudit(profileID string) allowanceAudit {
 	}}
 }
 
-func (s *TitleAllowances) changeAllowances(ctx context.Context, userID int, audit allowanceAudit, query string, args ...any) (bool, error) {
-	n, err := s.changeAllowancesCount(ctx, userID, audit, query, args...)
+func (s *TitleAllowances) changeAllowances(ctx context.Context, m userstore.AllowanceManager, audit allowanceAudit, query string, args ...any) (bool, error) {
+	n, err := s.changeAllowancesCount(ctx, m, audit, query, args...)
 	return n > 0, err
 }
 
@@ -168,13 +169,17 @@ func (s *TitleAllowances) changeAllowances(ctx context.Context, userID int, audi
 // advances the account's access_policy_revision and records its audit row in
 // the same transaction, the way every other change to what a profile may see
 // does. The audit row is written only on a request that records domain
-// actions (an Audited v2 operation).
-func (s *TitleAllowances) changeAllowancesCount(ctx context.Context, userID int, audit allowanceAudit, query string, args ...any) (int64, error) {
+// actions (an Audited v2 operation). It first locks the acting manager's
+// profile and refuses when its PIN changed since authorization.
+func (s *TitleAllowances) changeAllowancesCount(ctx context.Context, m userstore.AllowanceManager, audit allowanceAudit, query string, args ...any) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("beginning allowance change: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := checkAllowanceManager(ctx, tx, m); err != nil {
+		return 0, err
+	}
 	tag, err := tx.Exec(ctx, query, args...)
 	if err != nil {
 		return 0, fmt.Errorf("changing allowances: %w", err)
@@ -182,7 +187,7 @@ func (s *TitleAllowances) changeAllowancesCount(ctx context.Context, userID int,
 	if tag.RowsAffected() == 0 {
 		return 0, nil
 	}
-	if _, err := tx.Exec(ctx, "UPDATE users SET access_policy_revision = access_policy_revision + 1 WHERE id = $1", userID); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE users SET access_policy_revision = access_policy_revision + 1 WHERE id = $1", m.UserID); err != nil {
 		return 0, fmt.Errorf("advancing access policy revision: %w", err)
 	}
 	entry, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionProfileUpdated, auditmutation.TargetProfile,
@@ -195,4 +200,25 @@ func (s *TitleAllowances) changeAllowancesCount(ctx context.Context, userID int,
 	}
 	auditmutation.CommitMutation(ctx, entry)
 	return tag.RowsAffected(), nil
+}
+
+// checkAllowanceManager locks the acting manager's profile and refuses with
+// userstore.ErrAllowanceManagerChanged when it is gone or its PIN changed
+// since authorization. An account-level manager (no profile) passes.
+func checkAllowanceManager(ctx context.Context, tx pgx.Tx, m userstore.AllowanceManager) error {
+	if m.ProfileID == "" {
+		return nil
+	}
+	var current bool
+	err := tx.QueryRow(ctx, "SELECT pin_revision = $3 FROM user_profiles WHERE user_id = $1 AND id = $2 FOR UPDATE",
+		m.UserID, m.ProfileID, m.PINRevision).Scan(&current)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return userstore.ErrAllowanceManagerChanged
+	case err != nil:
+		return fmt.Errorf("checking the allowance manager: %w", err)
+	case !current:
+		return userstore.ErrAllowanceManagerChanged
+	}
+	return nil
 }

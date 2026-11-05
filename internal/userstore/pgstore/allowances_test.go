@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -33,6 +34,12 @@ type allowanceFixture struct {
 }
 
 func (f allowanceFixture) id(suffix string) string { return f.prefix + "-" + suffix }
+
+// manager is the primary profile writing at the PIN revision it was created
+// with.
+func (f allowanceFixture) manager() userstore.AllowanceManager {
+	return userstore.AllowanceManager{UserID: f.userID, ProfileID: "parent"}
+}
 
 var allowanceFixtureTitles = map[string]string{
 	"movie-allowed":    "movie",
@@ -124,15 +131,15 @@ func (f allowanceFixture) allowAll(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()
 	for _, id := range []string{"movie-allowed", "series-allowed"} {
-		if changed, err := f.allow.SetTitleAllowance(ctx, f.userID, "kid", f.id(id), true); err != nil || !changed {
+		if changed, err := f.allow.SetTitleAllowance(ctx, f.manager(), "kid", f.id(id), true); err != nil || !changed {
 			t.Fatalf("SetTitleAllowance(%s) = %v, %v", id, changed, err)
 		}
 	}
-	if changed, err := f.allow.SetTitleAllowance(ctx, f.userID, "kid", f.id("movie-allowed"), true); err != nil || changed {
+	if changed, err := f.allow.SetTitleAllowance(ctx, f.manager(), "kid", f.id("movie-allowed"), true); err != nil || changed {
 		t.Fatalf("repeating an allowance = %v, %v; want no change", changed, err)
 	}
 	for _, id := range []string{f.live, f.smart, f.teens} {
-		if _, err := f.allow.SetCollectionAllowance(ctx, f.userID, "kid", id, true); err != nil {
+		if _, err := f.allow.SetCollectionAllowance(ctx, f.manager(), "kid", id, true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -210,10 +217,24 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 		// movie-collection is allowed through the collection but not as a
 		// title, so it and movie-smart are new; the audiobook never is.
 		for pass, want := range []int{2, 0} {
-			added, err := f.allow.AllowTitles(ctx, f.userID, "kid", ids)
+			added, err := f.allow.AllowTitles(ctx, f.manager(), "kid", ids)
 			if err != nil || added != want {
 				t.Fatalf("AllowTitles pass %d = %d, %v; want %d", pass, added, err, want)
 			}
+		}
+	})
+
+	t.Run("a write after the manager's PIN changed is refused", func(t *testing.T) {
+		if _, err := f.pool.Exec(ctx, `UPDATE user_profiles SET pin_revision = pin_revision + 1 WHERE user_id = $1 AND id = 'parent'`, f.userID); err != nil {
+			t.Fatal(err)
+		}
+		changed, err := f.allow.SetTitleAllowance(ctx, f.manager(), "kid", f.id("movie-hidden"), true)
+		if !errors.Is(err, userstore.ErrAllowanceManagerChanged) || changed {
+			t.Fatalf("SetTitleAllowance with a stale PIN revision = %v, %v; want ErrAllowanceManagerChanged", changed, err)
+		}
+		var rows int
+		if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM profile_title_allowances WHERE user_id = $1 AND content_id = $2`, f.userID, f.id("movie-hidden")).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("refused write left %d rows (%v)", rows, err)
 		}
 	})
 

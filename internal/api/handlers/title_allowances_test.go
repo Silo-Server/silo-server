@@ -32,7 +32,7 @@ func (s *memoryAllowances) ListTitleAllowances(_ context.Context, _ int, profile
 	return out, nil
 }
 
-func (s *memoryAllowances) SetTitleAllowance(_ context.Context, _ int, profileID, contentID string, allowed bool) (bool, error) {
+func (s *memoryAllowances) SetTitleAllowance(_ context.Context, _ userstore.AllowanceManager, profileID, contentID string, allowed bool) (bool, error) {
 	key := profileID + "/" + contentID
 	if s.titles[key] == allowed {
 		return false, nil
@@ -49,7 +49,7 @@ func (s *memoryAllowances) ListCollectionAllowances(context.Context, int, string
 	return nil, nil
 }
 
-func (s *memoryAllowances) SetCollectionAllowance(context.Context, int, string, string, bool) (bool, error) {
+func (s *memoryAllowances) SetCollectionAllowance(context.Context, userstore.AllowanceManager, string, string, bool) (bool, error) {
 	return true, nil
 }
 
@@ -57,7 +57,7 @@ func (s *memoryAllowances) CollectionItemIDs(context.Context, int, string) ([]st
 	return nil, nil
 }
 
-func (s *memoryAllowances) AllowTitles(context.Context, int, string, []string) (int, error) {
+func (s *memoryAllowances) AllowTitles(context.Context, userstore.AllowanceManager, string, []string) (int, error) {
 	return 0, nil
 }
 
