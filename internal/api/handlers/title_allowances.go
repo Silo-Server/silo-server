@@ -57,6 +57,7 @@ type TitleAllowanceHandler struct {
 	scopes     apimw.ViewerResolver
 	allowances titleAllowanceStore
 	smart      smartCollectionQuery
+	owners     catalog.PersonalCollectionAccess
 }
 
 // NewTitleAllowanceHandler builds the service from the personal-data handler,
@@ -71,6 +72,16 @@ func NewTitleAllowanceHandler(personal *PersonalDataHandler, scopes apimw.Viewer
 func (h *TitleAllowanceHandler) WithSmartCollections(query *catalog.QueryExecutor) *TitleAllowanceHandler {
 	if h != nil && query != nil {
 		h.smart = query
+	}
+	return h
+}
+
+// WithCollectionOwners resolves the owner's access for copies of another
+// profile's collection, and returns the handler. Without it such copies fail
+// closed.
+func (h *TitleAllowanceHandler) WithCollectionOwners(owners catalog.PersonalCollectionAccess) *TitleAllowanceHandler {
+	if h != nil {
+		h.owners = owners
 	}
 	return h
 }
@@ -442,9 +453,10 @@ func checkLiveCollection(ctx context.Context, store userstore.UserStore, actor A
 
 // AllowCollectionTitles allows a profile every movie and series a personal
 // collection the actor can see holds now, and returns how many were new. Only
-// titles the actor may see are copied: a smart collection holds what its query
-// matches for the actor, and another collection's stored items are filtered
-// by the actor's access.
+// titles the actor sees in the collection are copied: for another profile's
+// collection, titles both the actor and the owner can access. A smart
+// collection holds what its query matches under that access, and a stored
+// collection's items are filtered by it.
 func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor AllowanceActor, profileID, collectionID string) (int, error) {
 	store, manager, err := h.manage(ctx, actor)
 	if err != nil {
@@ -465,7 +477,13 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if err != nil {
 		return 0, err
 	}
-	checks := copyChecks{actor: actor.Viewer.Access, target: libraryOnly(target)}
+	// The actor sees another profile's collection limited to what its owner
+	// can access, as every read of it is (catalog.PersonalCollectionFilter).
+	seen, err := catalog.PersonalCollectionFilter(ctx, h.owners, actor.Viewer.Access, actor.UserID, actor.ActiveProfileID, collection.CreatorProfileID)
+	if err != nil {
+		return 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve the collection owner's access")
+	}
+	checks := copyChecks{actor: seen, target: libraryOnly(target)}
 	var ids []string
 	if catalog.IsLiveQueryType(collection.CollectionType) {
 		ids, err = h.smartCollectionTitles(ctx, checks, collection)

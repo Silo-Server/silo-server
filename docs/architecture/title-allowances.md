@@ -78,8 +78,14 @@ The list is the union of:
   does again.
 
 Copying a collection (`AllowCollectionTitles`) writes individual title
-allowances and does not follow later changes. A smart collection stores no
-items, so its copy is what its query matches for the household manager now.
+allowances and does not follow later changes. It copies what the household
+manager sees in the collection: for another profile's collection, only titles
+its owner can access too (`catalog.PersonalCollectionFilter`, as every read of
+it applies), so a member hidden from its owner never becomes an allowance. A
+smart collection stores no items, so its copy is what its query matches under
+that access now. Each copied title must also be in a library the target
+profile can reach; that check runs separately, because a title can sit in
+several libraries.
 
 When titles merge (provider-ID merges and catalog reattribution), title
 allowances move to the surviving title like favorites and ratings do.

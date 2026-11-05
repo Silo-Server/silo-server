@@ -3181,7 +3181,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if viewerResolver != nil && deps.DB != nil {
 			if shared, ok := deps.UserStoreProvider.(interface{ StoresAccountsIn(*pgxpool.Pool) bool }); ok && shared.StoresAccountsIn(deps.DB) {
 				v2deps.TitleAllowances = handlers.NewTitleAllowanceHandler(personalDataHandler, viewerResolver, pgstore.NewTitleAllowances(deps.DB)).
-					WithSmartCollections(&catalog.QueryExecutor{Pool: deps.DB})
+					WithSmartCollections(&catalog.QueryExecutor{Pool: deps.DB}).
+					WithCollectionOwners(collectionOwners)
 			}
 		}
 	}

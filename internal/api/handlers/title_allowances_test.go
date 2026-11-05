@@ -428,3 +428,45 @@ func TestAllowCollectionTitlesChecksActorAndTargetSeparately(t *testing.T) {
 		}
 	})
 }
+
+// ownerLibraries resolves a collection owner's access as its allowed
+// libraries.
+type ownerLibraries map[string][]int
+
+func (o ownerLibraries) OwnerFilter(_ context.Context, _ int, ownerProfileID string) (catalog.AccessFilter, error) {
+	return catalog.AccessFilter{AllowedLibraryIDs: o[ownerProfileID]}, nil
+}
+
+// A copy of another profile's shared collection takes only what the actor
+// sees in it, titles its owner can access too, so it never turns a member
+// hidden from the owner into an allowance.
+func TestAllowCollectionTitlesKeepsToTheOwnersAccess(t *testing.T) {
+	ctx := context.Background()
+	base := newHouseholdTestStore(t)
+	for _, p := range []userstore.Profile{{ID: "parent", Name: "Parent"}, {ID: "kid", Name: "Kid", MaxContentRating: "PG"}, {ID: "teen", Name: "Teen"}} {
+		if err := base.CreateProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	collection, err := base.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "teen", Name: "Teen's list", CollectionType: "manual", IsShared: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := libraryItemRepo{
+		markItemRepo: markItemRepo{items: map[string]*models.MediaItem{
+			"movie:owner-hidden": {ContentID: "movie:owner-hidden", Type: "movie", ContentRating: "R"},
+			"movie:shared":       {ContentID: "movie:shared", Type: "movie", ContentRating: "R"},
+		}},
+		library: map[string]int{"movie:owner-hidden": 1, "movie:shared": 2},
+	}
+	store := &memoryAllowances{titles: map[string]bool{}, candidates: []string{"movie:owner-hidden", "movie:shared"}}
+	h := NewTitleAllowanceHandler(
+		NewPersonalDataHandler(testUserStoreProvider{store: base}, repo),
+		libraryScopes{libraries: map[string][]int{"kid": {1, 2}}}, store,
+	).WithCollectionOwners(ownerLibraries{"teen": {2}})
+	actor := AllowanceActor{UserID: 1, ActiveProfileID: "parent", VerifyProfile: func(*userstore.Profile) error { return nil }}
+	added, err := h.AllowCollectionTitles(ctx, actor, "kid", collection.ID)
+	if err != nil || added != 1 || !slices.Equal(store.copied, []string{"movie:shared"}) {
+		t.Fatalf("AllowCollectionTitles = %d, %v; copied %v; want only movie:shared", added, err, store.copied)
+	}
+}
