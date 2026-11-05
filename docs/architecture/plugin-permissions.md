@@ -122,6 +122,20 @@ installation with nothing approved or its key revoked, gets
   an empty scope list.
 - The API never returns the key. Approval responses name its ID and owner.
 
+## Backups
+
+A full restore keeps the live server's API keys and carries the live grants
+with them (`internal/backup`, `secretTables`), for the installations the
+restored data has. A grant names its key only where the restore kept that key;
+one whose key it dropped (the key's owner is not in the backup, or has more
+authority there) keeps its approvals without a key, so the plugin is pending,
+and the restore reports it. `host_api_scopes` comes with the live release
+(`CarryPluginReleases`). An installation whose id is another plugin in the
+restored data comes back off without a grant. A restore that keeps no live
+credentials (another deployment's backup, or a separate restore) restores no
+grants: at the next start `EnsurePermissionGrants` gives each installation the
+events it subscribes to and leaves its scopes pending.
+
 ## Limits
 
 - A plugin that read its key keeps it in memory. After a rotation or
@@ -132,3 +146,8 @@ installation with nothing approved or its key revoked, gets
 - A demotion or disabling of the key's owner that commits while an approval
   keeps that key leaves the key unusable once both commit. The permissions
   read then shows the plugin pending, and the next approval replaces the key.
+- A full restore that drops a grant (its installation is not in the backup,
+  or its id is another plugin there) keeps the key the grant named, which the
+  API keys carry kept on its own. Nothing can present that key afterwards (its
+  only sealed copy went with the grant), but it stays listed on its owner's API
+  keys page until an administrator deletes it.

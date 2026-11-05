@@ -1912,7 +1912,10 @@ that holds a bearer secret or a public capability, each one way:
   with their tokens (one removed since would sync again), and plugins'
   configuration and stored state, which hold the keys and tokens a plugin
   presents to its service and which the server cannot tell apart from a
-  plugin's other settings. A restore
+  plugin's other settings. Plugins' permission grants are carried with
+  them: a grant names its host API key only where the carry kept that key,
+  and otherwise keeps its approvals without one, so the plugin waits for
+  approval ([plugin-permissions.md](plugin-permissions.md#backups)). A restore
   never brings back the backup's rows: one revoked after the backup would
   work again, and one created since would stop working. They stay in the
   dump (`marker_edit_audit` refers to API keys), and the restore replaces
@@ -1922,14 +1925,14 @@ that holds a bearer secret or a public capability, each one way:
   are carried like the credentials above (a node or catalog removed since
   the backup stays removed), and each plugin installation the live
   server has, by id and plugin, takes the live release (version, install
-  path, repository, stored archive, and capabilities;
-  `CarryPluginReleases`), so a release replaced since the backup is never
+  path, repository, stored archive, capabilities, and requested host API
+  scopes; `CarryPluginReleases`), so a release replaced since the backup is never
   launched again; a catalog it names that the restored data lacks is
   dropped from the reference rather than failing the restore. An
   installation whose id is another plugin here, and
   every installation of another deployment's backup or a separate
-  restore, comes back off and is listed; one only the backup has is off
-  by its stricter switch. The trusted proxies are a stricter-of setting.
+  restore, comes back off and is listed, without a permission grant; one
+  only the backup has is off by its stricter switch. The trusted proxies are a stricter-of setting.
 - Custom access policies only tighten decisions, so a newer one lost to
   the backup would widen access: their documents and versions
   (`liveTables`) are taken from the live server as one unit, with the

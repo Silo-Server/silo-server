@@ -496,6 +496,7 @@ func checkCredentials(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn, in
 	checkCarryAuthority(t, loader, pool, dsn, into, restored, userID, keptID, liveKeys)
 	checkCarryInvitation(t, loader, pool, dsn, into, restored, "invite-"+suffix)
 	checkCarryAutoProvision(t, loader, pool, dsn, into, restored)
+	checkCarryPluginGrant(t, loader, pool, dsn, into, restored, userID, newUser)
 	checkOutboundConnections(t, loader, pool, dsn, into, restored, userID)
 	checkInterruptedWork(t, loader, pool, dsn, into, restored, userID)
 	checkOutboundSettings(t, loader, pool, dsn, into, restored)
@@ -697,8 +698,9 @@ func checkStricterFlags(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn, 
 
 // checkLiveReleasesAndNodes: what the server launches or routes clients
 // through is the live server's. A plugin both have runs the live release,
-// archive and capabilities included; one whose id is another plugin here
-// comes back off and is reported; a stream node removed since the backup
+// archive, capabilities, and requested host API scopes included; one whose
+// id is another plugin here comes back off and is reported, without the
+// other plugin's permission grant; a stream node removed since the backup
 // stays removed.
 func checkLiveReleasesAndNodes(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn, into string, restored *pgxpool.Pool) {
 	t.Helper()
@@ -728,20 +730,33 @@ func checkLiveReleasesAndNodes(t *testing.T, loader PGLoader, pool *pgxpool.Pool
 	install(restored, same, "release-plugin", "1.0.0", "backup")
 	install(pool, other, "live-plugin", "1.0.0", "live")
 	install(restored, other, "backup-plugin", "1.0.0", "backup")
+	exec(pool, `UPDATE plugin_installations SET host_api_scopes = '{library.read}' WHERE id = $1`, same)
+	// The credential carry gave each installation the live grant of its id,
+	// including the one that is another plugin here.
+	for _, id := range []int64{same, other} {
+		exec(restored, `INSERT INTO plugin_permission_grants (plugin_installation_id, approved_event_access) VALUES ($1, '{user_data}')`, id)
+	}
 	off, err := loader.CarryPluginReleases(ctx, into, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var version, checksum, capability string
+	var scopes []string
 	var enabled bool
-	if err := restored.QueryRow(ctx, `SELECT i.version, a.checksum, c.capability_id FROM plugin_installations i
+	if err := restored.QueryRow(ctx, `SELECT i.version, a.checksum, c.capability_id, i.host_api_scopes FROM plugin_installations i
 		JOIN plugin_archives a ON a.plugin_installation_id = i.id JOIN plugin_capabilities c ON c.plugin_installation_id = i.id
-		WHERE i.id = $1`, same).Scan(&version, &checksum, &capability); err != nil || version != "2.0.0" || checksum != "live" || capability != "2.0.0" {
-		t.Fatalf("a plugin both have runs %s %s %s (%v), want the live release", version, checksum, capability, err)
+		WHERE i.id = $1`, same).Scan(&version, &checksum, &capability, &scopes); err != nil || version != "2.0.0" || checksum != "live" || capability != "2.0.0" ||
+		!slices.Equal(scopes, []string{"library.read"}) {
+		t.Fatalf("a plugin both have runs %s %s %s asking for %v (%v), want the live release", version, checksum, capability, scopes, err)
 	}
 	if err := restored.QueryRow(ctx, `SELECT enabled FROM plugin_installations WHERE id = $1`, other).Scan(&enabled); err != nil || enabled ||
 		!slices.ContainsFunc(off, func(s string) bool { return strings.Contains(s, "backup-plugin") }) {
 		t.Fatalf("an installation of another plugin here: enabled %v (%v), reported %v; want it off and reported", enabled, err, off)
+	}
+	var grants []int64
+	if err := restored.QueryRow(ctx, `SELECT coalesce(array_agg(plugin_installation_id), '{}') FROM plugin_permission_grants WHERE plugin_installation_id = ANY($1)`,
+		[]int64{same, other}).Scan(&grants); err != nil || !slices.Equal(grants, []int64{same}) {
+		t.Fatalf("grants after the release carry: %v (%v); want only the plugin both have keeping its own", grants, err)
 	}
 	// Reinstalled since the backup from a catalog added since: the live
 	// release names a catalog the backup does not have.
@@ -1000,6 +1015,71 @@ func checkCarryAutoProvision(t *testing.T, loader PGLoader, pool *pgxpool.Pool, 
 	}
 	if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil || limited(carried) || !provisions() {
 		t.Fatalf("carried %+v (%v), provisions %v; want account creation kept under the same policy", carried, err, provisions())
+	}
+}
+
+// checkCarryPluginGrant: a plugin's permission grant is the live one, with
+// the host API key it names. Where the carry drops that key (its owner is
+// not in the backup) the grant keeps its approvals without a key, so the
+// plugin waits for approval, and is reported; an approver the backup lacks
+// is cleared rather than failing the restore on its foreign key.
+func checkCarryPluginGrant(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn, into string, restored *pgxpool.Pool, userID, newUser int64) {
+	t.Helper()
+	ctx := t.Context()
+	var installation int64
+	if err := pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled) VALUES ('granted-plugin', '1.0.0', '/plugins/g', true) RETURNING id`).Scan(&installation); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, installation)
+	})
+	if _, err := restored.Exec(ctx, `INSERT INTO plugin_installations (id, plugin_id, version, install_path, enabled) VALUES ($1, 'granted-plugin', '1.0.0', '/plugins/g', true)`, installation); err != nil {
+		t.Fatal(err)
+	}
+	key := func(owner int64) int64 {
+		t.Helper()
+		var id int64
+		if err := pool.QueryRow(ctx, `INSERT INTO api_keys (user_id, label, key_hash) VALUES ($1, 'Plugin: granted-plugin', encode(sha256(convert_to($2, 'UTF8')), 'hex')) RETURNING id`,
+			owner, "plugin-"+randomHex(t, 4)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id = $1`, id) })
+		return id
+	}
+	grant := func(approver, keyID int64) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO plugin_permission_grants (plugin_installation_id, approved_event_access, approved_host_api_scopes, approved_by_user_id, approved_at, api_key_id, api_key_ciphertext)
+			VALUES ($1, '{user_data}', '{library.read}', $2, now(), $3, 'enc:v1:sealed')
+			ON CONFLICT (plugin_installation_id) DO UPDATE SET approved_by_user_id = EXCLUDED.approved_by_user_id, api_key_id = EXCLUDED.api_key_id`, installation, approver, keyID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() (access []string, approver, keyID *int64, sealed *string) {
+		t.Helper()
+		if err := restored.QueryRow(ctx, `SELECT approved_event_access, approved_by_user_id, api_key_id, api_key_ciphertext FROM plugin_permission_grants WHERE plugin_installation_id = $1`,
+			installation).Scan(&access, &approver, &keyID, &sealed); err != nil {
+			t.Fatal(err)
+		}
+		return access, approver, keyID, sealed
+	}
+	report := fmt.Sprintf("permissions of plugin installation %d: ", installation)
+	reported := func(c CarriedCredentials) bool {
+		return slices.ContainsFunc(c.Limited, func(s string) bool { return strings.HasPrefix(s, report) })
+	}
+
+	kept := key(userID)
+	grant(userID, kept)
+	carried, err := loader.CarryCredentials(ctx, into, dsn)
+	if access, approver, keyID, sealed := read(); err != nil || reported(carried) || !slices.Equal(access, []string{"user_data"}) ||
+		approver == nil || *approver != userID || keyID == nil || *keyID != kept || sealed == nil {
+		t.Fatalf("carried %+v (%v): grant %v by %v, key %v sealed %v; want the live grant with its key", carried, err, access, approver, keyID, sealed)
+	}
+
+	grant(newUser, key(newUser))
+	carried, err = loader.CarryCredentials(ctx, into, dsn)
+	if access, approver, keyID, sealed := read(); err != nil || !reported(carried) || !slices.Equal(access, []string{"user_data"}) ||
+		approver != nil || keyID != nil || sealed != nil {
+		t.Fatalf("carried %+v (%v): grant %v by %v, key %v sealed %v; want the approvals kept without the dropped key or the missing approver", carried, err, access, approver, keyID, sealed)
 	}
 }
 
