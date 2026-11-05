@@ -81,7 +81,11 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
       {titles.isLoading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : titles.isError && !allowedTitles ? null : (allowedTitles ?? []).length === 0 ? (
-        <p className="text-muted-foreground text-sm">No titles allowed yet.</p>
+        // Cards the acting profile can't see are left out of each page, so
+        // an empty page is an empty list only when no page follows.
+        titles.hasNextPage ? null : (
+          <p className="text-muted-foreground text-sm">No titles allowed yet.</p>
+        )
       ) : (
         <ul aria-label="Allowed titles" className="grid gap-2 sm:grid-cols-2">
           {(allowedTitles ?? []).map((item) => (

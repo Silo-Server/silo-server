@@ -1,4 +1,10 @@
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { Profile } from "@/api/types";
 import { catalogItemFromV2 } from "@/api/v2/catalog";
@@ -160,6 +166,19 @@ export function useAllowedCollections(profileId: string, enabled: boolean) {
   });
 }
 
+/**
+ * Refreshes what an allowance change for profileId can affect. Its title list
+ * starts over at the first page: refetching an infinite list reads every
+ * loaded page in turn.
+ */
+function refreshAllowances(queryClient: QueryClient, profileId: string) {
+  void queryClient.resetQueries({ queryKey: titleAllowanceKeys.titles(profileId) });
+  void queryClient.invalidateQueries({
+    queryKey: titleAllowanceKeys.all,
+    predicate: (query) => query.queryKey[1] !== "titles",
+  });
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
@@ -187,8 +206,8 @@ export function useSetTitleAllowance() {
     onError: (err) => {
       toast.error(errorMessage(err, "Failed to change the allowed title"));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: titleAllowanceKeys.all });
+    onSettled: (_data, _err, { profileId }) => {
+      refreshAllowances(queryClient, profileId);
     },
   });
 }
@@ -216,8 +235,8 @@ export function useSetCollectionAllowance() {
     onError: (err) => {
       toast.error(errorMessage(err, "Failed to change the allowed collection"));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: titleAllowanceKeys.all });
+    onSettled: (_data, _err, { profileId }) => {
+      refreshAllowances(queryClient, profileId);
     },
   });
 }
@@ -242,8 +261,8 @@ export function useAllowCollectionTitles() {
     onError: (err) => {
       toast.error(errorMessage(err, "Failed to allow the collection's titles"));
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: titleAllowanceKeys.all });
+    onSettled: (_data, _err, { profileId }) => {
+      refreshAllowances(queryClient, profileId);
     },
   });
 }
