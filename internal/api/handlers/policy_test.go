@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,21 +16,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/policy"
 )
-
-func TestPolicyEditorDisabledGatesEditorEndpoints(t *testing.T) {
-	handler := NewPolicyHandler(policy.NewSystem(nil, nil, nil), nil, nil, func() bool { return false })
-
-	rec := httptest.NewRecorder()
-	req := newPolicyHandlerRequest(http.MethodPost, "/admin/policy/validate", map[string]any{
-		"domain": policy.DomainScope,
-		"source": validHandlerPolicySource(),
-	}, nil)
-	handler.HandleValidate(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, body = %s, want forbidden", rec.Code, rec.Body.String())
-	}
-}
 
 func newPolicyHandlerRequest(method, target string, payload any, params map[string]string) *http.Request {
 	var body io.Reader
@@ -56,6 +42,22 @@ func newPolicyHandlerRequest(method, target string, payload any, params map[stri
 		TokenType: auth.TokenTypeAccess,
 	})
 	return req.WithContext(ctx)
+}
+
+// The editor kill switch closes every editor operation, while the decision
+// log, which needs no editor, stays readable.
+func TestAdminPolicyReadyGatesEditor(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		handler := NewPolicyHandler(policy.NewSystem(nil, nil, nil), nil, nil, func() bool { return enabled })
+		err := handler.AdminPolicyReady(true, false, false)
+		var apiErr *APIError
+		if refused := errors.As(err, &apiErr) && apiErr.Status == http.StatusForbidden && apiErr.Code == "policy_editor_disabled"; refused == enabled {
+			t.Fatalf("editor enabled=%v: err = %v", enabled, err)
+		}
+		if err := handler.AdminPolicyReady(false, false, false); err != nil {
+			t.Fatalf("editor enabled=%v: a non-editor operation was gated: %v", enabled, err)
+		}
+	}
 }
 
 func validHandlerPolicySource() string {

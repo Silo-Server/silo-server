@@ -356,8 +356,8 @@ func (h *CollectionHandler) collectionViewsCounted(ctx context.Context, store us
 }
 
 // collagesForRead is the collage service a read of personal collections uses:
-// /api/v2 reads show collages, while the frozen /api/v1 bridge keeps showing
-// only uploaded and imported posters.
+// the list operations marked by WithNativeAPIV2 show collages; other reads
+// show only uploaded and imported posters.
 func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCollages) *catalog.PersonalCollectionCollages {
 	if !isNativeAPIV2(ctx) {
 		return nil
@@ -365,8 +365,8 @@ func collagesForRead(ctx context.Context, collages *catalog.PersonalCollectionCo
 	return collages
 }
 
-// memberCountsForRead returns memberCounts on /api/v2 and nil elsewhere: the
-// frozen /api/v1 list routes keep counting members on every read.
+// memberCountsForRead returns memberCounts for the list operations marked by
+// WithNativeAPIV2 and nil for other reads, which count members afresh.
 func memberCountsForRead(ctx context.Context, memberCounts *catalog.PersonalCollectionMemberCounts) *catalog.PersonalCollectionMemberCounts {
 	if !isNativeAPIV2(ctx) {
 		return nil
@@ -393,15 +393,6 @@ func collectionGroupView(g userstore.CollectionGroup) CollectionGroupView {
 		DefaultSortMode: string(g.DefaultSortMode),
 		SortOrder:       g.SortOrder,
 	}
-}
-
-// posterFileReader is the multipart poster part of a v1 request; nil when
-// the request is not multipart.
-func posterFileReader(r *http.Request) func() ([]byte, error) {
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/") {
-		return nil
-	}
-	return func() ([]byte, error) { return readCollectionImageMultipart(r, collectionImagePoster) }
 }
 
 // PersonalCollectionFeatures describes the acting account's storage support.

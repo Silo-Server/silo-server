@@ -57,15 +57,6 @@ func IsLegacyID(id string) bool {
 	return ok
 }
 
-// LegacyIDs returns the built-in rows' IDs in default order.
-func LegacyIDs() []string {
-	ids := make([]string, len(legacyRows))
-	for i, r := range legacyRows {
-		ids[i] = r.ID
-	}
-	return ids
-}
-
 func legacyRow(r Row) Row {
 	chart := *r.Chart
 	r.Chart = &chart

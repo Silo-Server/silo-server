@@ -3,11 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -16,6 +12,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
+// TestAccessGroupUpdateLibraryPolicyDB: an omitted library list keeps the
+// group's libraries, null lifts the restriction, an empty list hides every
+// library, and a populated one restricts to it, both as stored and as the
+// members' resolved scope sees it.
 func TestAccessGroupUpdateLibraryPolicyDB(t *testing.T) {
 	f := newPagingIntegrationFixture(t)
 	f.exec(t, `UPDATE users SET email=username||'@example.invalid', password_hash='' WHERE id=$1`, f.account)
@@ -34,28 +34,26 @@ func TestAccessGroupUpdateLibraryPolicyDB(t *testing.T) {
 	resolver := access.NewResolver(auth.NewUserRepository(f.pool), pgstore.NewPostgresProvider(f.pool), nil, store)
 	executor := &catalog.QueryExecutor{Pool: f.pool}
 	for _, tc := range []struct {
-		name  string
-		body  string
-		want  []int
-		count int
+		name      string
+		libraries *[]int
+		want      []int
+		count     int
 	}{
-		{"omitted", `{}`, []int{f.library}, 4},
-		{"null", `{"library_ids":null}`, nil, 5},
-		{"empty", `{"library_ids":[]}`, []int{}, 0},
-		{"populated", fmt.Sprintf(`{"library_ids":[%d]}`, f.hidden), []int{f.hidden}, 1},
+		{"omitted", nil, []int{f.library}, 4},
+		{"null", new([]int(nil)), nil, 5},
+		{"empty", new([]int{}), []int{}, 0},
+		{"populated", new([]int{f.hidden}), []int{f.hidden}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := store.Update(t.Context(), group.ID, access.UpdateGroupInput{LibraryIDs: new([]int{f.library})}); err != nil {
 				t.Fatal(err)
 			}
-			id := strconv.FormatInt(group.ID, 10)
-			rec := httptest.NewRecorder()
-			h.HandleUpdate(rec, accessGroupRequestWithID(http.MethodPut, "/api/v1/admin/access-groups/"+id, strings.NewReader(tc.body), id))
-			if rec.Code != http.StatusOK {
-				t.Fatalf("update status = %d, body %s", rec.Code, rec.Body.String())
+			updated, err := h.UpdateAdminAccessGroup(t.Context(), group.ID, access.UpdateGroupInput{LibraryIDs: tc.libraries}, access.GroupPrecondition{Any: true})
+			if err != nil {
+				t.Fatalf("update: %v", err)
 			}
-			if got := decodeAccessGroupResponse(t, rec).LibraryIDs; !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("response library_ids = %#v, want %#v", got, tc.want)
+			if !reflect.DeepEqual(updated.LibraryIDs, tc.want) {
+				t.Errorf("updated library_ids = %#v, want %#v", updated.LibraryIDs, tc.want)
 			}
 			var ids []int
 			if err := f.pool.QueryRow(t.Context(), `SELECT library_ids FROM access_groups WHERE id=$1`, group.ID).Scan(&ids); err != nil {

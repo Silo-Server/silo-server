@@ -1,15 +1,10 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"testing"
-
-	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/metadata"
@@ -70,220 +65,7 @@ func (f *fakeMatchMetadataService) Process(_ context.Context, req metadata.Proce
 
 // --- Helpers ---
 
-func buildMatchRouter(h *AdminMatchHandler) *chi.Mux {
-	r := chi.NewRouter()
-	r.Post("/admin/items/{id}/match/search", h.HandleSearchItemMatchCandidates)
-	r.Post("/admin/items/{id}/match/apply", h.HandleApplyItemMatch)
-	return r
-}
-
 // --- Tests ---
-
-func TestAdminMatchSearch_FallsBackToItemMetadata(t *testing.T) {
-	items := &fakeMatchItemLookup{
-		items: map[string]*models.MediaItem{
-			"item-2": {ContentID: "item-2", Title: "Inception", Year: 2010, Type: "movie"},
-		},
-	}
-	var capturedQuery metadata.SearchQuery
-	metaSvc := &fakeMatchMetadataService{
-		searchResults: []metadata.MatchCandidate{},
-	}
-	// Wrap to capture the query.
-	captureSvc := &capturingMetadataService{
-		inner: metaSvc,
-	}
-
-	h := NewAdminMatchHandler(items, nil, captureSvc)
-	router := buildMatchRouter(h)
-
-	// Send empty title/year -- handler should use item's metadata.
-	body, _ := json.Marshal(matchSearchRequest{})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-2/match/search", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	capturedQuery = captureSvc.lastQuery
-	if capturedQuery.Title != "Inception" {
-		t.Errorf("expected title fallback to 'Inception', got %q", capturedQuery.Title)
-	}
-	if capturedQuery.Year != 2010 {
-		t.Errorf("expected year fallback to 2010, got %d", capturedQuery.Year)
-	}
-}
-
-func TestAdminMatchSearch_AcceptsGenericProviderIDsAndLibraryID(t *testing.T) {
-	items := &fakeMatchItemLookup{
-		items: map[string]*models.MediaItem{
-			"ebook-1": {ContentID: "ebook-1", Title: "Example Book", Year: 2024, Type: "ebook"},
-		},
-	}
-	folders := &fakeMatchFolderLookup{
-		folderIDs: map[string][]int{"ebook-1": {7, 8}},
-	}
-	captureSvc := &capturingMetadataService{
-		inner: &fakeMatchMetadataService{searchResults: []metadata.MatchCandidate{}},
-	}
-
-	h := NewAdminMatchHandler(items, folders, captureSvc)
-	router := buildMatchRouter(h)
-
-	libraryID := 8
-	body, _ := json.Marshal(matchSearchRequest{
-		ProviderIDs: map[string]string{
-			" ISBN ":    " 9780000000001 ",
-			"goodreads": " ",
-		},
-		TmdbID:    "12345",
-		LibraryID: &libraryID,
-	})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/ebook-1/match/search", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	if captureSvc.lastFolderID != 8 {
-		t.Fatalf("folderID = %d, want 8", captureSvc.lastFolderID)
-	}
-	if captureSvc.lastQuery.ContentType != "ebook" {
-		t.Fatalf("ContentType = %q, want ebook", captureSvc.lastQuery.ContentType)
-	}
-	if got := captureSvc.lastQuery.ProviderIDs["isbn"]; got != "9780000000001" {
-		t.Fatalf("ProviderIDs[isbn] = %q, want 9780000000001", got)
-	}
-	if got := captureSvc.lastQuery.ProviderIDs["tmdb"]; got != "12345" {
-		t.Fatalf("ProviderIDs[tmdb] = %q, want 12345", got)
-	}
-	if _, ok := captureSvc.lastQuery.ProviderIDs["goodreads"]; ok {
-		t.Fatalf("blank provider IDs should be ignored, got %v", captureSvc.lastQuery.ProviderIDs)
-	}
-}
-
-func TestAdminMatchApply_PreservesContentID(t *testing.T) {
-	items := &fakeMatchItemLookup{
-		items: map[string]*models.MediaItem{
-			"item-3": {ContentID: "item-3", Title: "Interstellar", Year: 2014, Type: "movie"},
-		},
-	}
-	metaSvc := &fakeMatchMetadataService{
-		processResult: &metadata.ProcessResult{
-			ContentID: "item-3",
-			Updated:   true,
-		},
-	}
-
-	h := NewAdminMatchHandler(items, nil, metaSvc)
-	router := buildMatchRouter(h)
-
-	body, _ := json.Marshal(matchApplyRequest{
-		ProviderIDs: map[string]string{"tmdb": "157336"},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-3/match/apply", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var resp matchApplyResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-
-	// The original content_id must be preserved (not replaced with a new ID).
-	if resp.ContentID != "item-3" {
-		t.Errorf("expected content_id 'item-3' preserved, got %q", resp.ContentID)
-	}
-	if !resp.Updated {
-		t.Error("expected updated=true")
-	}
-
-	// Verify the Process call used ModeIdentify with the original content_id.
-	if metaSvc.lastProcess.ContentID != "item-3" {
-		t.Errorf("expected Process called with content_id 'item-3', got %q", metaSvc.lastProcess.ContentID)
-	}
-	if metaSvc.lastProcess.Mode != metadata.ModeIdentify {
-		t.Errorf("expected ModeIdentify, got %d", metaSvc.lastProcess.Mode)
-	}
-	if metaSvc.lastProcess.ProviderIDs["tmdb"] != "157336" {
-		t.Errorf("expected provider_ids tmdb=157336, got %v", metaSvc.lastProcess.ProviderIDs)
-	}
-}
-
-func TestAdminMatchApply_NormalizesProviderIDKeys(t *testing.T) {
-	items := &fakeMatchItemLookup{
-		items: map[string]*models.MediaItem{
-			"item-5": {ContentID: "item-5", Title: "Test", Type: "movie"},
-		},
-	}
-	metaSvc := &fakeMatchMetadataService{
-		processResult: &metadata.ProcessResult{ContentID: "item-5", Updated: true},
-	}
-	h := NewAdminMatchHandler(items, nil, metaSvc)
-	router := buildMatchRouter(h)
-
-	body, _ := json.Marshal(matchApplyRequest{
-		ProviderIDs: map[string]string{
-			" TMDB ": " 157336 ",
-			"blank":  "   ",
-		},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-5/match/apply", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := metaSvc.lastProcess.ProviderIDs["tmdb"]; got != "157336" {
-		t.Errorf("Process provider_ids[tmdb] = %q, want 157336 (keys/values must be normalized)", got)
-	}
-	if _, ok := metaSvc.lastProcess.ProviderIDs[" TMDB "]; ok {
-		t.Errorf("Process received raw key %q, want normalized keys only: %v", " TMDB ", metaSvc.lastProcess.ProviderIDs)
-	}
-	if _, ok := metaSvc.lastProcess.ProviderIDs["blank"]; ok {
-		t.Errorf("blank provider IDs should be dropped, got %v", metaSvc.lastProcess.ProviderIDs)
-	}
-}
-
-func TestAdminMatchApply_RejectsAllBlankProviderIDs(t *testing.T) {
-	items := &fakeMatchItemLookup{
-		items: map[string]*models.MediaItem{
-			"item-6": {ContentID: "item-6", Title: "Test", Type: "movie"},
-		},
-	}
-	h := NewAdminMatchHandler(items, nil, &fakeMatchMetadataService{})
-	router := buildMatchRouter(h)
-
-	body, _ := json.Marshal(matchApplyRequest{
-		ProviderIDs: map[string]string{"tmdb": "   ", " ": "123"},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/admin/items/item-6/match/apply", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for all-blank provider_ids, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
 
 // capturingMetadataService wraps a fake to capture the query passed to SearchAndNormalize.
 type capturingMetadataService struct {
@@ -331,5 +113,71 @@ func TestAdminMatchApply_PublishesOldAndNewContentIDs(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != "movie-tmdb-124905" || got[1] != "movie-tmdb-929" {
 		t.Fatalf("catalog item changes = %v, want old then new content ID", got)
+	}
+}
+
+// A search falls back to the item's own title, year, and type, normalizes
+// provider IDs, and searches the library the caller names.
+func TestSearchAdminItemMatchesBuildsTheQuery(t *testing.T) {
+	items := &fakeMatchItemLookup{items: map[string]*models.MediaItem{
+		"item-2":  {ContentID: "item-2", Title: "Inception", Year: 2010, Type: "movie"},
+		"ebook-1": {ContentID: "ebook-1", Title: "Example Book", Year: 2024, Type: "ebook"},
+	}}
+	folders := &fakeMatchFolderLookup{folderIDs: map[string][]int{"ebook-1": {7, 8}}}
+
+	capture := &capturingMetadataService{inner: &fakeMatchMetadataService{searchResults: []metadata.MatchCandidate{}}}
+	if _, err := NewAdminMatchHandler(items, nil, capture).SearchAdminItemMatches(t.Context(), "item-2", AdminMatchSearchRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if capture.lastQuery.Title != "Inception" || capture.lastQuery.Year != 2010 {
+		t.Fatalf("query = %+v, want the item's title and year", capture.lastQuery)
+	}
+
+	capture = &capturingMetadataService{inner: &fakeMatchMetadataService{searchResults: []metadata.MatchCandidate{}}}
+	libraryID := 8
+	if _, err := NewAdminMatchHandler(items, folders, capture).SearchAdminItemMatches(t.Context(), "ebook-1", AdminMatchSearchRequest{
+		ProviderIDs: map[string]string{" ISBN ": " 9780000000001 ", "goodreads": " "},
+		TmdbID:      "12345",
+		LibraryID:   &libraryID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	query := capture.lastQuery
+	if capture.lastFolderID != 8 || query.ContentType != "ebook" || query.ProviderIDs["isbn"] != "9780000000001" || query.ProviderIDs["tmdb"] != "12345" {
+		t.Fatalf("folder %d query %+v", capture.lastFolderID, query)
+	}
+	if _, ok := query.ProviderIDs["goodreads"]; ok {
+		t.Fatalf("blank provider IDs should be ignored, got %v", query.ProviderIDs)
+	}
+}
+
+// Apply identifies the existing item by its content ID with normalized
+// provider IDs: a key like " TMDB " must not slip past the provider-ID
+// handling downstream, and a request with no usable ID is refused.
+func TestApplyAdminItemMatchNormalizesProviderIDs(t *testing.T) {
+	items := &fakeMatchItemLookup{items: map[string]*models.MediaItem{"item-5": {ContentID: "item-5", Title: "Test", Type: "movie"}}}
+
+	metaSvc := &fakeMatchMetadataService{processResult: &metadata.ProcessResult{ContentID: "item-5", Updated: true}}
+	result, err := NewAdminMatchHandler(items, nil, metaSvc).ApplyAdminItemMatch(t.Context(), "item-5", AdminMatchApplyRequest{
+		ProviderIDs: map[string]string{" TMDB ": " 157336 ", "blank": "   "},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ContentID != "item-5" || !result.Updated {
+		t.Fatalf("result = %+v", result)
+	}
+	process := metaSvc.lastProcess
+	if process.ContentID != "item-5" || process.Mode != metadata.ModeIdentify || len(process.ProviderIDs) != 1 || process.ProviderIDs["tmdb"] != "157336" {
+		t.Fatalf("Process request = %+v, want identify of item-5 with tmdb=157336 only", process)
+	}
+
+	metaSvc = &fakeMatchMetadataService{}
+	_, err = NewAdminMatchHandler(items, nil, metaSvc).ApplyAdminItemMatch(t.Context(), "item-5", AdminMatchApplyRequest{
+		ProviderIDs: map[string]string{"tmdb": "   ", " ": "123"},
+	})
+	requireAdminError(t, err, http.StatusBadRequest, "")
+	if metaSvc.lastProcess.ContentID != "" {
+		t.Fatalf("all-blank provider IDs reached Process: %+v", metaSvc.lastProcess)
 	}
 }

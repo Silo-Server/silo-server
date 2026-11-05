@@ -259,23 +259,6 @@ func onViewNotConfigured(cause error) *APIError {
 		Message: "On-view translation is not enabled on this server", cause: cause}
 }
 
-// SearchPeople answers up to limit people matching query that the viewer can
-// see through at least one credit, as person detail requires; limit <= 0 is 20.
-func (h *PeopleHandler) SearchPeople(ctx context.Context, query string, limit int, filter catalog.AccessFilter) ([]PersonView, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-	people, err := h.personRepo.SearchAlphabetical(ctx, query, limit, filter)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "search_failed", err.Error())
-	}
-	resp := make([]PersonView, len(people))
-	for i, p := range people {
-		resp[i] = h.toResponse(ctx, p)
-	}
-	return resp, nil
-}
-
 // SearchPeopleScoped serves v2 people search with media scope and exact-name ranking.
 func (h *PeopleHandler) SearchPeopleScoped(ctx context.Context, query string, limit int, mediaScope string, filter catalog.AccessFilter) ([]PersonView, error) {
 	people, err := h.personRepo.SearchScoped(ctx, query, limit, mediaScope, filter)

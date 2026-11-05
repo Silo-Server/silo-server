@@ -2,14 +2,10 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -95,39 +91,6 @@ func (c HomeDismissalCommand) validate() error {
 	return nil
 }
 
-func (h *HomeDismissalHandler) HandleUpsertDismissal(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	surface := chi.URLParam(r, "surface")
-	itemID := chi.URLParam(r, "item_id")
-
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-	if !validHomeSurface(surface) {
-		writeError(w, http.StatusBadRequest, "bad_request", "Surface is invalid")
-		return
-	}
-
-	var req upsertHomeDismissalRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	// The frozen v1 contract keeps per-card dismissals; only v2 drops shows.
-	if err := h.dismissHomeItem(r.Context(), false, HomeDismissalCommand{
-		UserID: userID, ProfileID: profileID, Surface: surface, ItemID: itemID,
-		SeriesID: req.SeriesID, ProgressUpdatedAt: req.ProgressUpdatedAt,
-	}); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // DismissHomeItem records the dismissal and publishes the user-state event.
 // It is an idempotent upsert: repeating it refreshes the dismissal stamp.
 //
@@ -189,29 +152,6 @@ func (h *HomeDismissalHandler) dismissHomeItem(ctx context.Context, dropSeries b
 	return nil
 }
 
-func (h *HomeDismissalHandler) HandleDeleteDismissal(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	surface := chi.URLParam(r, "surface")
-	itemID := chi.URLParam(r, "item_id")
-
-	if itemID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-	if !validHomeSurface(surface) {
-		writeError(w, http.StatusBadRequest, "bad_request", "Surface is invalid")
-		return
-	}
-
-	if err := h.undismissHomeItem(r.Context(), false, userID, profileID, surface, itemID); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // UndismissHomeItem removes the dismissal, if any, and publishes the
 // user-state event. Removing an absent dismissal succeeds. For an episode or a
 // series it also undrops the series.
@@ -266,8 +206,4 @@ func (h *HomeDismissalHandler) dispatchDropped(ctx context.Context, userID int, 
 		ProfileID: profileID,
 		SeriesIDs: []string{seriesID},
 	})
-}
-
-func validHomeSurface(surface string) bool {
-	return surface == userstore.HomeSurfaceContinueWatching || surface == userstore.HomeSurfaceNextUp
 }

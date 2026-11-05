@@ -762,14 +762,6 @@ func (s *Service) CreateSource(ctx context.Context, input CreateSourceInput) (*S
 	return s.repo.CreateSource(ctx, input)
 }
 
-func (s *Service) UpdateSource(ctx context.Context, id int, input UpdateSourceInput) (*Source, error) {
-	return s.repo.UpdateSource(ctx, id, input)
-}
-
-func (s *Service) DeleteSource(ctx context.Context, id int) error {
-	return s.repo.DeleteSource(ctx, id)
-}
-
 func resolveConnectionMode(input CreateRunInput) (string, error) {
 	if input.ServerURL != "" {
 		return "", fmt.Errorf("direct server_url imports are no longer supported")

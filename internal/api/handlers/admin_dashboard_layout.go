@@ -1,17 +1,13 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 )
 
 // maxDashboardLayoutBytes bounds the PUT body. The layout is a short list of
@@ -38,28 +34,6 @@ var (
 	errDashboardLayoutMissing     = errors.New("layout is required")
 	errDashboardLayoutNotObject   = errors.New("layout must be a JSON object")
 )
-
-// parseDashboardLayoutPayload validates a PUT body and returns the document to
-// store. The server treats the layout as opaque past requiring a JSON object:
-// widget ids and spans are the web client's vocabulary, and it already
-// sanitizes them on load, so validating them here would only add a second
-// place to update whenever a widget is added.
-func parseDashboardLayoutPayload(body []byte) (json.RawMessage, error) {
-	var req adminDashboardLayoutRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		return nil, errDashboardLayoutInvalidJSON
-	}
-	// Unmarshal already checked the syntax of the whole document, so the first
-	// non-space byte is enough to tell an object from any other JSON value.
-	raw := json.RawMessage(bytes.TrimSpace(req.Layout))
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return nil, errDashboardLayoutMissing
-	}
-	if raw[0] != '{' {
-		return nil, errDashboardLayoutNotObject
-	}
-	return raw, nil
-}
 
 // adminDashboardCapabilitiesResponse advertises the admin dashboard surface a
 // server supports. Every field is additive and true on a server that has this
@@ -98,110 +72,6 @@ type adminDashboardCapabilitiesResponse struct {
 	// offline-download aggregate and that timeseries points carry the
 	// additive `download_egress_kbps` split.
 	DownloadsStats bool `json:"downloads_stats"`
-}
-
-// HandleGetDashboardCapabilities handles GET /admin/dashboard/capabilities.
-func (h *AdminHandler) HandleGetDashboardCapabilities(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, adminDashboardCapabilitiesResponse{
-		ServerLayouts:    true,
-		Timeseries:       true,
-		PlaybackActivity: true,
-		TopActivity:      true,
-		Health:           true,
-		LogLevelList:     true,
-		WatchProviders:   true,
-		DownloadsStats:   true,
-	})
-}
-
-// HandleGetDashboardLayout handles GET /admin/dashboard/layout.
-func (h *AdminHandler) HandleGetDashboardLayout(w http.ResponseWriter, r *http.Request) {
-	if h.pool == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	var (
-		layout    json.RawMessage
-		updatedAt time.Time
-	)
-	err := h.pool.QueryRow(r.Context(),
-		`SELECT layout, updated_at FROM admin_dashboard_layouts WHERE user_id = $1`,
-		userID,
-	).Scan(&layout, &updatedAt)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		writeJSON(w, http.StatusOK, adminDashboardLayoutResponse{})
-		return
-	case err != nil:
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load dashboard layout")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, adminDashboardLayoutResponse{Layout: layout, UpdatedAt: &updatedAt})
-}
-
-// HandlePutDashboardLayout handles PUT /admin/dashboard/layout.
-func (h *AdminHandler) HandlePutDashboardLayout(w http.ResponseWriter, r *http.Request) {
-	if h.pool == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDashboardLayoutBytes))
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusBadRequest, "bad_request", "Dashboard layout is too large")
-			return
-		}
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	layout, err := parseDashboardLayoutPayload(body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
-		return
-	}
-
-	if _, err := h.writeAdminDashboardLayout(r.Context(), userID, layout, nil); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save dashboard layout")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleDeleteDashboardLayout handles DELETE /admin/dashboard/layout. Deleting
-// the row resets the admin to the default layout; it is idempotent.
-func (h *AdminHandler) HandleDeleteDashboardLayout(w http.ResponseWriter, r *http.Request) {
-	if h.pool == nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Database not configured")
-		return
-	}
-	userID := apimw.GetUserID(r.Context())
-	if userID == 0 {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
-		return
-	}
-
-	if _, err := h.writeAdminDashboardLayout(r.Context(), userID, nil, nil); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to reset dashboard layout")
-		return
-	}
-
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // AdminDashboardLayoutView is one atomic account layout/revision snapshot.

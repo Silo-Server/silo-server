@@ -1,17 +1,14 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"fmt"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strings"
 	"testing"
 
-	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -479,100 +476,34 @@ func TestApplyDiversityFilterPreservesItemsInNonAvoidSections(t *testing.T) {
 	}
 }
 
-// TestSaveProfileOverridesAdminOnlyRecipeFollowsActingAdmin: a child profile
-// on an admin's account is not the admin an admin-only recipe asks for.
-func TestSaveProfileOverridesAdminOnlyRecipeFollowsActingAdmin(t *testing.T) {
-	h := &SectionHandler{}
-	body := []byte(`{"scope":"home","library_id":"","overrides":[{"is_user_added":true,"user_section_type":"admin_curated_list","user_config":{"item_ids":["a"]}}]}`)
-	req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "admin", UserID: 1})
-	ctx = apimw.SetProfileID(ctx, "kid")
-	ctx = access.SetScope(ctx, access.Scope{UserID: 1, ProfileID: "kid", ProfileVerified: true})
-	ctx = apimw.SetActingAdminDecider(ctx, func(_ context.Context, in apimw.ActingAdminRequest) (bool, error) {
-		return in.ProfileID == "parent", nil
-	})
-	rec := httptest.NewRecorder()
-
-	h.HandleSaveProfileOverrides(rec, req.WithContext(ctx))
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 Forbidden, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestSaveProfileOverridesUnknownRecipeReturnsBadRequest verifies that an
-// unregistered user_section_type is rejected before reaching the store.
-func TestSaveProfileOverridesUnknownRecipeReturnsBadRequest(t *testing.T) {
-	h := &SectionHandler{}
-	body := []byte(`{"scope":"home","library_id":"","overrides":[{"is_user_added":true,"user_section_type":"no_such_recipe","user_config":{}}]}`)
-	req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 1})
-	ctx = apimw.SetProfileID(ctx, "p1")
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	h.HandleSaveProfileOverrides(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 Bad Request, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestSaveProfileOverridesLegacyShapeCannotBypassGate verifies that a non-admin
-// cannot smuggle an admin-only recipe past the gate by omitting is_user_added
-// and using the legacy section_type/config fields. The resolver treats any
-// override with empty section_id as user-added, so the save handler must too.
-func TestSaveProfileOverridesLegacyShapeCannotBypassGate(t *testing.T) {
-	h := &SectionHandler{}
-	// section_id is empty and is_user_added is omitted — pre-fix this skipped
-	// the gate entirely, even though the resolver would still surface this as
-	// a user-added admin_curated_list section.
-	body := []byte(`{"scope":"home","library_id":"","overrides":[{"section_id":"","section_type":"admin_curated_list","config":{"item_ids":["a"]}}]}`)
-	req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 1})
-	ctx = apimw.SetProfileID(ctx, "p1")
-	req = req.WithContext(ctx)
-	rec := httptest.NewRecorder()
-
-	h.HandleSaveProfileOverrides(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 Forbidden for legacy-shape bypass, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestSaveProfileOverridesRejectsOversizedItemLimit: the fetchers size their
-// buffers from item_limit, so a profile override above the admin cap is
-// refused before the store is touched. The cap itself reaches the store.
-func TestSaveProfileOverridesRejectsOversizedItemLimit(t *testing.T) {
+// A profile override the resolver could not run, or one whose item_limit
+// would size the fetchers' buffers past the admin cap, is refused before the
+// store is touched.
+func TestSaveProfileOverridesRejectsBeforeTheStore(t *testing.T) {
+	over := sections.MaxItemLimit + 1
+	huge := 1_000_000_000
 	for _, tc := range []struct {
-		limit    int
-		wantCode int
+		name  string
+		write SectionOverrideWrite
+		code  string
 	}{
-		{sections.MaxItemLimit + 1, http.StatusBadRequest},
-		{1_000_000_000, http.StatusBadRequest},
-		// No store is wired, so a value that passes validation fails there.
-		{sections.MaxItemLimit, http.StatusInternalServerError},
+		{"unknown recipe", SectionOverrideWrite{IsUserAdded: true, UserSectionType: "no_such_recipe", UserConfig: []byte(`{}`)}, "unknown_recipe"},
+		{"item_limit over the cap", SectionOverrideWrite{ID: "o1", SectionID: "s1", ItemLimit: &over}, "invalid_item_limit"},
+		{"huge item_limit", SectionOverrideWrite{ID: "o1", SectionID: "s1", ItemLimit: &huge}, "invalid_item_limit"},
 	} {
-		h := &SectionHandler{}
-		body := []byte(fmt.Sprintf(`{"scope":"home","library_id":"","overrides":[{"id":"o1","section_id":"s1","item_limit":%d}]}`, tc.limit))
-		req := httptest.NewRequest(http.MethodPut, "/profile/sections", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		ctx := apimw.SetClaims(req.Context(), &auth.Claims{Role: "user", UserID: 1})
-		ctx = apimw.SetProfileID(ctx, "p1")
-		rec := httptest.NewRecorder()
-
-		h.HandleSaveProfileOverrides(rec, req.WithContext(ctx))
-
-		if rec.Code != tc.wantCode {
-			t.Fatalf("item_limit %d: status = %d, want %d; body=%s", tc.limit, rec.Code, tc.wantCode, rec.Body.String())
-		}
-		if tc.wantCode == http.StatusBadRequest && !strings.Contains(rec.Body.String(), "invalid_item_limit") {
-			t.Fatalf("item_limit %d: body = %s, want invalid_item_limit", tc.limit, rec.Body.String())
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			store := &sourcePolicyStore{}
+			h := &SectionHandler{StoreProvider: sourcePolicyProvider{store: store}}
+			ctx := apimw.SetClaims(t.Context(), &auth.Claims{Role: "user", UserID: 1})
+			err := h.SaveProfileOverrides(ctx, SectionOverridesQuery{UserID: 1, ProfileID: "p1", Scope: "home"}, []SectionOverrideWrite{tc.write})
+			apiErr, ok := errors.AsType[*APIError](err)
+			if !ok || apiErr.Status != http.StatusBadRequest || apiErr.Code != tc.code {
+				t.Fatalf("err = %#v, want 400 %s", err, tc.code)
+			}
+			if store.overrides != nil {
+				t.Fatalf("refused save reached the store: %+v", store.overrides)
+			}
+		})
 	}
 }
 

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -113,17 +112,6 @@ type AdminRateLimitAuthEndpointUpdate struct {
 	Burst             *int     `json:"burst,omitempty"`
 }
 
-// HandleGetConfig handles GET /admin/rate-limits/config.
-func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.ReadAdminRateLimitConfig(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	resp.SessionQuota = nil // v1 is frozen; the session quota is a v2 setting
-	writeJSON(w, http.StatusOK, resp)
-}
-
 // ReadAdminRateLimitConfig reads desired settings once and adds process observations.
 func (h *RateLimitHandler) ReadAdminRateLimitConfig(ctx context.Context) (AdminRateLimitConfigView, error) {
 	// One read serves the rate values, the stored backend, and the
@@ -177,23 +165,6 @@ func (h *RateLimitHandler) adminRateLimitConfigView(values map[string]string) Ad
 	}
 
 	return resp
-}
-
-// HandleUpdateConfig handles PUT /admin/rate-limits/config.
-func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var req rateLimitConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	req.SessionQuota = nil // v1 is frozen; the session quota is a v2 setting
-
-	result, err := h.UpdateAdminRateLimitConfig(r.Context(), req, nil)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, result)
 }
 
 type AdminRateLimitUpdateResult struct {

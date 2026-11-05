@@ -2,14 +2,12 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -84,31 +82,6 @@ type matchApplyResponse struct {
 	Updated   bool   `json:"updated"`
 }
 
-// HandleSearchItemMatchCandidates handles POST /admin/items/{id}/match/search.
-// It searches metadata providers for candidate matches based on the given
-// query parameters (title, year, external IDs) and returns normalized,
-// deduplicated candidates.
-func (h *AdminMatchHandler) HandleSearchItemMatchCandidates(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	var req matchSearchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	out, err := h.SearchAdminItemMatches(r.Context(), contentID, req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
 type AdminMatchSearchResult = matchSearchResponse
 type AdminMatchSearchRequest = matchSearchRequest
 
@@ -155,31 +128,6 @@ func (h *AdminMatchHandler) SearchAdminItemMatches(ctx context.Context, contentI
 	}
 
 	return AdminMatchSearchResult{Candidates: candidates}, nil
-}
-
-// HandleApplyItemMatch handles POST /admin/items/{id}/match/apply.
-// It applies the user-selected provider IDs to the item via ModeIdentify. A
-// local item, or one whose match the choice corrects, moves to the content_id
-// its new identity derives; the response carries the resulting content_id.
-func (h *AdminMatchHandler) HandleApplyItemMatch(w http.ResponseWriter, r *http.Request) {
-	contentID := chi.URLParam(r, "id")
-	if contentID == "" {
-		writeError(w, http.StatusBadRequest, "bad_request", "Item ID is required")
-		return
-	}
-
-	var req matchApplyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	out, err := h.ApplyAdminItemMatch(r.Context(), contentID, req)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
 }
 
 type AdminMatchApplyResult = matchApplyResponse

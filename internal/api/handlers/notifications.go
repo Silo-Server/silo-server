@@ -2,14 +2,8 @@ package handlers
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -76,239 +70,12 @@ type wsTicketResponse struct {
 	ExpiresIn int    `json:"expires_in"`
 }
 
-func parseNotificationsLimit(r *http.Request, fallback int) int {
-	raw := r.URL.Query().Get("limit")
-	if raw == "" {
-		return fallback
-	}
-	limit, err := strconv.Atoi(raw)
-	if err != nil || limit <= 0 {
-		return fallback
-	}
-	return min(limit, notificationsMaxLimit)
-}
-
-// HandleList handles GET /notifications (newest-first inbox page).
-func (h *NotificationsHandler) HandleList(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	unreadOnly := r.URL.Query().Get("status") == "unread"
-	limit := parseNotificationsLimit(r, notificationsDefaultLimit)
-
-	var before *notifications.Cursor
-	if raw := r.URL.Query().Get("before"); raw != "" {
-		cursor, err := notifications.DecodeCursor(raw)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid before cursor")
-			return
-		}
-		before = &cursor
-	}
-
-	rows, err := h.system.Deliveries.ListInbox(r.Context(), userID, profileID, unreadOnly, limit, before)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to list notifications")
-		return
-	}
-	response := notificationListResponse{Notifications: h.system.PayloadsForRows(r.Context(), rows)}
-	if len(rows) == limit {
-		last := rows[len(rows)-1]
-		response.NextCursor = notifications.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}.Encode()
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-// HandleSync handles GET /notifications/sync — the forward (ascending) cursor
-// sync used by clients waking from a push or reconnecting after a gap.
-func (h *NotificationsHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	limit := parseNotificationsLimit(r, notificationsSyncLimit)
-
-	var since *notifications.Cursor
-	if raw := r.URL.Query().Get("since"); raw != "" {
-		cursor, err := notifications.DecodeCursor(raw)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "bad_request", "Invalid since cursor")
-			return
-		}
-		since = &cursor
-	}
-
-	rows, err := h.system.Deliveries.ListSync(r.Context(), userID, profileID, since, limit)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to sync notifications")
-		return
-	}
-	unread, err := h.system.Deliveries.UnreadCount(r.Context(), userID, profileID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to count unread notifications")
-		return
-	}
-
-	response := notificationSyncResponse{
-		Notifications: h.system.PayloadsForRows(r.Context(), rows),
-		UnreadCount:   unread,
-	}
-	if len(rows) > 0 {
-		last := rows[len(rows)-1]
-		response.NextCursor = notifications.Cursor{CreatedAt: last.CreatedAt, ID: last.ID}.Encode()
-	} else if since != nil {
-		response.NextCursor = since.Encode()
-	}
-	writeJSON(w, http.StatusOK, response)
-}
-
-// HandleGet handles GET /notifications/{id}; 404 for other profiles' rows.
-func (h *NotificationsHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	row, err := h.system.Deliveries.GetByID(r.Context(), userID, profileID, id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load notification")
-		return
-	}
-	if row == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Notification not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, h.system.PayloadForRow(r.Context(), *row))
-}
-
-// HandleApplePushDisplay handles GET /notifications/push/apple/display/{delivery_id}.
-// It returns only compact display metadata for notification-service-extension
-// enrichment, scoped to the active profile.
-func (h *NotificationsHandler) HandleApplePushDisplay(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	id := chi.URLParam(r, "delivery_id")
-	if id == "" {
-		writeError(w, http.StatusNotFound, "not_found", "Notification not found")
-		return
-	}
-	row, err := h.system.Deliveries.GetByID(r.Context(), userID, profileID, id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load notification")
-		return
-	}
-	if row == nil {
-		writeError(w, http.StatusNotFound, "not_found", "Notification not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, notifications.BuildNotificationDisplay(*row))
-}
-
-// HandleUnreadCount handles GET /notifications/unread-count.
-func (h *NotificationsHandler) HandleUnreadCount(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	count, err := h.system.Deliveries.UnreadCount(r.Context(), userID, profileID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to count unread notifications")
-		return
-	}
-	writeJSON(w, http.StatusOK, unreadCountResponse{Count: count})
-}
-
-// HandleMarkRead handles POST /notifications/{id}/read. Idempotent.
-func (h *NotificationsHandler) HandleMarkRead(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	transitioned, err := h.system.Deliveries.MarkRead(r.Context(), userID, profileID, id)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to mark notification read")
-		return
-	}
-	if !transitioned {
-		// Already read is fine (idempotent); unknown IDs are a 404.
-		exists, err := h.system.Deliveries.Exists(r.Context(), userID, profileID, id)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal_error", "Failed to mark notification read")
-			return
-		}
-		if !exists {
-			writeError(w, http.StatusNotFound, "not_found", "Notification not found")
-			return
-		}
-	}
-	if transitioned {
-		h.publishReadEvent(r, userID, profileID, id)
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// HandleReadAll handles POST /notifications/read-all.
-func (h *NotificationsHandler) HandleReadAll(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	if _, err := h.system.Deliveries.MarkAllRead(r.Context(), userID, profileID); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to mark notifications read")
-		return
-	}
-	h.publishReadEvent(r, userID, profileID, "")
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// publishReadEvent lets other connected tabs of the same profile reconcile
-// read state. An empty id means "all read".
-func (h *NotificationsHandler) publishReadEvent(r *http.Request, userID int, profileID, id string) {
-	if h.hub == nil {
-		return
-	}
-	payload := map[string]any{"profile_id": profileID}
-	if id != "" {
-		payload["id"] = id
-	} else {
-		payload["all"] = true
-	}
-	_ = h.hub.PublishJSON(r.Context(), evt.ChannelNotifications, notifications.EventNotificationRead,
-		payload, evt.PublishOptions{UserID: userID, ProfileID: profileID})
-}
-
-// HandleGetPreferences handles GET /notifications/preferences.
-func (h *NotificationsHandler) HandleGetPreferences(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-	prefs, err := h.system.Preferences.Get(r.Context(), userID, profileID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load notification preferences")
-		return
-	}
-	writeJSON(w, http.StatusOK, prefs)
-}
-
 type updatePreferencesRequest struct {
 	Enabled                *bool `json:"enabled"`
 	NotifyFavorites        *bool `json:"notify_favorites"`
 	NotifyWatchlist        *bool `json:"notify_watchlist"`
 	NotifyContinueWatching *bool `json:"notify_continue_watching"`
 	NotifyNextUp           *bool `json:"notify_next_up"`
-}
-
-// HandleUpdatePreferences handles PUT /notifications/preferences. Fields are
-// optional; omitted fields keep their current value. Idempotent.
-func (h *NotificationsHandler) HandleUpdatePreferences(w http.ResponseWriter, r *http.Request) {
-	userID := apimw.GetUserID(r.Context())
-	profileID := apimw.GetProfileID(r.Context())
-
-	var req updatePreferencesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-
-	prefs, err := h.system.Preferences.Patch(r.Context(), userID, profileID, notifications.PreferencePatch{Enabled: req.Enabled, NotifyFavorites: req.NotifyFavorites, NotifyWatchlist: req.NotifyWatchlist, NotifyContinueWatching: req.NotifyContinueWatching, NotifyNextUp: req.NotifyNextUp})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save notification preferences")
-		return
-	}
-	writeJSON(w, http.StatusOK, prefs)
 }
 
 type capabilityResponse struct {
@@ -354,12 +121,6 @@ type capabilityWebhooks struct {
 	Available      bool     `json:"available"`
 	MaxPerProfile  int      `json:"max_per_profile"`
 	SupportedTypes []string `json:"supported_types"`
-}
-
-// HandleCapability handles GET /notifications/capability. Clients render
-// setup UI from this response instead of introspecting admin settings.
-func (h *NotificationsHandler) HandleCapability(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, h.NotificationCapabilities(r.Context()))
 }
 
 // NotificationCapabilitiesView is shared by both API projections.
@@ -439,25 +200,4 @@ func (h *NotificationsHandler) NotificationCapabilities(ctx context.Context) Not
 		Email:       email,
 		Discord:     discordCap,
 	}
-}
-
-// HandleMintWSTicket handles POST /events/ws-ticket: mints a short-lived
-// single-use websocket handshake ticket bound to (user, profile). Long-lived
-// tokens must never ride the websocket query string — reverse-proxy access
-// logs capture it. The profile's PIN proof stays server-side with the ticket,
-// so the socket can recheck it after the PIN changes.
-func (h *NotificationsHandler) HandleMintWSTicket(w http.ResponseWriter, r *http.Request) {
-	ticket, ttl, err := h.system.Tickets.Mint(r.Context(), notifications.Ticket{
-		UserID:       apimw.GetUserID(r.Context()),
-		ProfileID:    apimw.GetProfileID(r.Context()),
-		ProfileToken: r.Header.Get("X-Profile-Token"),
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to mint websocket ticket")
-		return
-	}
-	writeJSON(w, http.StatusOK, wsTicketResponse{
-		Ticket:    ticket,
-		ExpiresIn: int(ttl.Seconds()),
-	})
 }

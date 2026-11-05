@@ -3,7 +3,6 @@ package handlers
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -89,16 +88,6 @@ func (h *AdminMarkerProvidersHandler) providerDescriptions() map[string]markers.
 	return out
 }
 
-// HandleListProviders lists registered providers with their config + capability.
-func (h *AdminMarkerProvidersHandler) HandleListProviders(w http.ResponseWriter, r *http.Request) {
-	out, err := h.ListMarkerProviders(r.Context())
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
-}
-
 type MarkerProviderConfigView = providerConfigResponse
 type MarkerUserStatsView = markerUserStatsResponse
 
@@ -136,57 +125,6 @@ func (h *AdminMarkerProvidersHandler) ListMarkerProviders(ctx context.Context) (
 		return cmp.Compare(a.Provider, b.Provider)
 	})
 	return out, nil
-}
-
-// HandleUpdateProvider updates a provider's config row.
-func (h *AdminMarkerProvidersHandler) HandleUpdateProvider(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.Config == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
-		return
-	}
-	provider, err := decodedURLParam(r, "provider")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider ID")
-		return
-	}
-	if _, ok := h.Config.Get(provider); !ok {
-		writeError(w, http.StatusNotFound, "not_found", "Unknown marker provider")
-		return
-	}
-	var body MarkerProviderUpdate
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
-		return
-	}
-	out, err := h.updateMarkerProvider(r.Context(), provider, body)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// HandleValidateProvider validates the provider's configured key and returns stats.
-func (h *AdminMarkerProvidersHandler) HandleValidateProvider(w http.ResponseWriter, r *http.Request) {
-	if h == nil || h.Registry == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "Marker providers are not configured")
-		return
-	}
-	provider, err := decodedURLParam(r, "provider")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "Invalid provider ID")
-		return
-	}
-	out, err := h.ValidateMarkerProvider(r.Context(), provider)
-	if err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	if !out.Valid {
-		writeJSON(w, http.StatusOK, map[string]any{"valid": false, "error": out.Error})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"valid": true, "stats": out.Stats})
 }
 
 func toProviderConfigResponse(c markers.ProviderConfig, isSubmitter bool, desc markers.ProviderDescriptor) providerConfigResponse {

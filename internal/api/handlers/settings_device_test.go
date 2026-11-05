@@ -1,19 +1,15 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 
-	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
@@ -86,310 +82,6 @@ func newIsolatedProfileTestStore(t *testing.T, suffix string) userstore.UserStor
 	return store
 }
 
-func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewSettingsHandler(testUserStoreProvider{store: store})
-
-	body := bytes.NewBufferString(`{"value":"{\"fontSize\":\"xxlarge\"}"}`)
-	req := httptest.NewRequest(http.MethodPut, "/settings/device/subtitle_appearance", body)
-	req.Header.Set(deviceIDHeader, "iphone")
-	req.Header.Set(deviceNameHeader, "Example iPhone")
-	req.Header.Set(devicePlatformHeader, "iOS")
-	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
-	rec := httptest.NewRecorder()
-
-	handler.HandleSetSubtitleAppearanceDeviceOverride(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("set status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	entry, err := store.GetDeviceSetting(context.Background(), "profile-1", "iphone", SubtitleAppearanceSettingKey)
-	if err != nil {
-		t.Fatalf("GetDeviceSetting: %v", err)
-	}
-	if entry == nil || entry.Value != `{"fontSize":"xxlarge"}` || entry.DevicePlatform != "iOS" {
-		t.Fatalf("entry = %#v", entry)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/settings/subtitle_appearance/effective", nil)
-	req.Header.Set(deviceIDHeader, "iphone")
-	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
-	rec = httptest.NewRecorder()
-
-	handler.HandleGetEffectiveSubtitleAppearance(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var resp EffectiveSubtitleAppearanceView
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !resp.HasDeviceOverride || resp.EffectiveValue != `{"fontSize":"xxlarge"}` || resp.GlobalValue != "" {
-		t.Fatalf("response = %#v", resp)
-	}
-
-	req = httptest.NewRequest(http.MethodDelete, "/settings/device/subtitle_appearance", nil)
-	req.Header.Set(deviceIDHeader, "iphone")
-	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
-	rec = httptest.NewRecorder()
-	handler.HandleDeleteSubtitleAppearanceDeviceOverride(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	entry, err = store.GetDeviceSetting(context.Background(), "profile-1", "iphone", SubtitleAppearanceSettingKey)
-	if err != nil {
-		t.Fatalf("GetDeviceSetting after delete: %v", err)
-	}
-	if entry != nil {
-		t.Fatalf("entry after delete = %#v, want nil", entry)
-	}
-}
-
-func TestLegacyDeviceSettingsMirrorCanonicalRows(t *testing.T) {
-	store := newProfileTestStore(t)
-	handler := NewSettingsHandler(testUserStoreProvider{store: store})
-	send := func(method, key string, body []byte) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, "/settings/device/"+key, bytes.NewReader(body))
-		req = withRouteParams(req, map[string]string{"key": key})
-		req.Header.Set(deviceIDHeader, "living-room")
-		req = req.WithContext(apimw.SetProfileID(
-			apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-1"))
-		rec := httptest.NewRecorder()
-		if method == http.MethodPut {
-			handler.HandleSetDeviceSetting(rec, req)
-		} else {
-			handler.HandleDeleteDeviceSetting(rec, req)
-		}
-		return rec
-	}
-	canonical := func(key string) *userstore.SettingValue {
-		t.Helper()
-		value, err := store.GetSettingValue(context.Background(), userstore.SettingIdentity{
-			Key: key, Scope: settingscontract.ScopeProfileDevice,
-			ProfileID: "profile-1", DeviceID: "living-room",
-		})
-		if err != nil {
-			t.Fatalf("GetSettingValue(%s): %v", key, err)
-		}
-		return value
-	}
-
-	appearance := `{"fontSize":"large"}`
-	body, _ := json.Marshal(setSettingRequest{Value: appearance})
-	if rec := send(http.MethodPut, SubtitleAppearanceSettingKey, body); rec.Code != http.StatusNoContent {
-		t.Fatalf("appearance PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	if value := canonical("playback.subtitle_appearance"); value == nil || string(value.Value) != appearance {
-		t.Fatalf("canonical appearance = %+v", value)
-	}
-
-	if rec := send(http.MethodPut, "playback.preferred_quality", []byte(`{"value":"1080p-high"}`)); rec.Code != http.StatusNoContent {
-		t.Fatalf("quality PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	if value := canonical("playback.preferred_quality"); value == nil || string(value.Value) != `"1080p"` {
-		t.Fatalf("canonical quality = %+v", value)
-	}
-	if value := canonical("playback.max_bitrate_kbps"); value == nil || string(value.Value) != `10000` {
-		t.Fatalf("canonical bitrate = %+v", value)
-	}
-	if rec := send(http.MethodPut, "playback.preferred_quality", []byte(`{"value":"auto"}`)); rec.Code != http.StatusNoContent {
-		t.Fatalf("quality auto PUT = %d: %s", rec.Code, rec.Body.String())
-	}
-	if value := canonical("playback.max_bitrate_kbps"); value != nil {
-		t.Fatalf("stale bitrate survived auto: %+v", value)
-	}
-	if rec := send(http.MethodDelete, "playback.preferred_quality", nil); rec.Code != http.StatusNoContent {
-		t.Fatalf("quality DELETE = %d: %s", rec.Code, rec.Body.String())
-	}
-	if value := canonical("playback.preferred_quality"); value != nil {
-		t.Fatalf("quality survived delete: %+v", value)
-	}
-}
-
-func TestEffectiveSettingsAreIsolatedPerProfileOnSameDevice(t *testing.T) {
-	store := newProfileTestStore(t)
-	if err := store.CreateProfile(context.Background(), userstore.Profile{ID: "profile-2", Name: "Guest"}); err != nil {
-		t.Fatalf("CreateProfile: %v", err)
-	}
-	if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
-		ProfileID: "profile-1",
-		DeviceID:  "shared-tv",
-		Key:       "player.playback_speed",
-		Value:     "1.5",
-	}); err != nil {
-		t.Fatalf("SetDeviceSetting profile-1: %v", err)
-	}
-	if err := store.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
-		ProfileID: "profile-2",
-		DeviceID:  "shared-tv",
-		Key:       "player.playback_speed",
-		Value:     "0.75",
-	}); err != nil {
-		t.Fatalf("SetDeviceSetting profile-2: %v", err)
-	}
-
-	handler := NewSettingsHandler(testUserStoreProvider{store: store})
-
-	req := httptest.NewRequest(http.MethodGet, "/settings/effective?keys=player.playback_speed", nil)
-	req.Header.Set(deviceIDHeader, "shared-tv")
-	req = req.WithContext(apimw.SetProfileID(apimw.SetClaims(req.Context(), &auth.Claims{UserID: 7}), "profile-2"))
-	rec := httptest.NewRecorder()
-
-	handler.HandleGetEffectiveSettings(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var resp effectiveSettingsResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Settings) != 1 {
-		t.Fatalf("settings len = %d", len(resp.Settings))
-	}
-	if got := resp.Settings[0]; got.ProfileID != "profile-2" || got.EffectiveValue != "0.75" {
-		t.Fatalf("effective setting = %#v", got)
-	}
-}
-
-func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
-	store1 := newIsolatedProfileTestStore(t, "one")
-	store2 := newIsolatedProfileTestStore(t, "two")
-	if err := store1.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
-		ProfileID:      "profile-1",
-		DeviceID:       "living-room",
-		DeviceName:     "Living Room TV",
-		DevicePlatform: "tvOS",
-		Key:            "player.playback_speed",
-		Value:          "1.25",
-	}); err != nil {
-		t.Fatalf("SetDeviceSetting store1: %v", err)
-	}
-	if err := store1.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
-		ProfileID:      "profile-1",
-		DeviceID:       "living-room",
-		DeviceName:     "Living Room TV",
-		DevicePlatform: "tvOS",
-		Key:            "player.audio_sync_ms",
-		Value:          "120",
-	}); err != nil {
-		t.Fatalf("SetDeviceSetting store1 second: %v", err)
-	}
-	store1Registry, ok := store1.(userstore.DeviceRegistry)
-	if !ok {
-		t.Fatalf("store1 does not support device registry")
-	}
-	if err := store1Registry.RegisterDevice(context.Background(), userstore.DeviceEntry{
-		ProfileID:      "profile-1",
-		DeviceID:       "bedroom",
-		DeviceName:     "Bedroom TV",
-		DevicePlatform: "Android TV",
-	}); err != nil {
-		t.Fatalf("RegisterDevice store1: %v", err)
-	}
-	canonicalBedroom, err := store1.UpsertSettingValue(context.Background(), userstore.SettingIdentity{
-		Key:       "playback.subtitle_mode",
-		Scope:     settingscontract.ScopeProfileDevice,
-		ProfileID: "profile-1",
-		DeviceID:  "bedroom",
-	}, json.RawMessage(`"always"`))
-	if err != nil {
-		t.Fatalf("UpsertSettingValue canonical bedroom override: %v", err)
-	}
-	if err := store2.SetDeviceSetting(context.Background(), userstore.DeviceSettingEntry{
-		ProfileID:      "profile-1",
-		DeviceID:       "phone",
-		DeviceName:     "Travel Phone",
-		DevicePlatform: "iOS",
-		Key:            "player.hdr_enabled",
-		Value:          "false",
-	}); err != nil {
-		t.Fatalf("SetDeviceSetting store2: %v", err)
-	}
-
-	handler := &AdminHandler{
-		userRepo: testAdminUserRepo{
-			users: map[int]*models.User{
-				7:  {ID: 7, Username: "alice", Email: "alice@example.com"},
-				11: {ID: 11, Username: "bob", Email: "bob@example.com"},
-			},
-		},
-		storeProv: mappedTestUserStoreProvider{
-			stores: map[int]userstore.UserStore{
-				7:  store1,
-				11: store2,
-			},
-		},
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/admin/devices", nil)
-	rec := httptest.NewRecorder()
-	handler.HandleListDevices(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var listResp adminDevicesListResponse
-	if err := json.NewDecoder(rec.Body).Decode(&listResp); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if len(listResp.Devices) != 3 {
-		t.Fatalf("devices len = %d, want 3", len(listResp.Devices))
-	}
-	var bedroom *adminDeviceSummaryResponse
-	for i := range listResp.Devices {
-		if listResp.Devices[i].DeviceID == "bedroom" {
-			bedroom = &listResp.Devices[i]
-			break
-		}
-	}
-	if bedroom == nil {
-		t.Fatalf("registered device without overrides missing: %#v", listResp.Devices)
-	}
-	if bedroom.OverrideCount != 1 || bedroom.ProfileCount != 1 || bedroom.DeviceName != "Bedroom TV" ||
-		bedroom.LastUpdated != canonicalBedroom.UpdatedAt {
-		t.Fatalf("registered device summary = %#v", bedroom)
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/admin/devices/7/living-room", nil)
-	req = withRouteParams(req, map[string]string{"user_id": "7", "device_id": "living-room"})
-	rec = httptest.NewRecorder()
-	handler.HandleGetDevice(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("detail status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	var detailResp adminDeviceDetailResponse
-	if err := json.NewDecoder(rec.Body).Decode(&detailResp); err != nil {
-		t.Fatalf("decode detail: %v", err)
-	}
-	if detailResp.Username != "alice" || detailResp.DeviceName != "Living Room TV" {
-		t.Fatalf("detail response = %#v", detailResp)
-	}
-	if len(detailResp.Settings) != 2 {
-		t.Fatalf("detail settings len = %d, want 2", len(detailResp.Settings))
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/admin/devices/7/bedroom", nil)
-	req = withRouteParams(req, map[string]string{"user_id": "7", "device_id": "bedroom"})
-	rec = httptest.NewRecorder()
-	handler.HandleGetDevice(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("registered detail status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&detailResp); err != nil {
-		t.Fatalf("decode registered detail: %v", err)
-	}
-	if detailResp.DeviceName != "Bedroom TV" || detailResp.OverrideCount != 1 ||
-		detailResp.LastUpdated != canonicalBedroom.UpdatedAt {
-		t.Fatalf("registered detail response = %#v", detailResp)
-	}
-	if len(detailResp.Settings) != 0 {
-		t.Fatalf("registered detail settings len = %d, want 0", len(detailResp.Settings))
-	}
-	if len(detailResp.Profiles) != 1 || detailResp.Profiles[0].ProfileID != "profile-1" {
-		t.Fatalf("registered detail profiles = %#v", detailResp.Profiles)
-	}
-}
-
 func TestAdminDeviceSummaryDeduplicatesMirroredLegacyAlias(t *testing.T) {
 	for name, keys := range map[string][2]string{
 		"subtitle appearance": {SubtitleAppearanceSettingKey, settingskeys.PlaybackSubtitleAppearance},
@@ -450,6 +142,128 @@ func TestAdminDeviceSummaryCountsAMirroredPairOnce(t *testing.T) {
 	}
 	if len(summaries[0].Profiles) != 1 || summaries[0].Profiles[0].OverrideCount != 1 {
 		t.Errorf("per-profile summary = %#v, want one override", summaries[0].Profiles)
+	}
+}
+
+// TestSubtitleAppearanceDeviceOverrideRoundTrip: the device override is stored
+// for the acting profile only, mirrored to its canonical profile_device row so
+// both spellings agree, and cleared from both.
+func TestSubtitleAppearanceDeviceOverrideRoundTrip(t *testing.T) {
+	store := newProfileTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "profile-2", Name: "Guest"}); err != nil {
+		t.Fatalf("CreateProfile: %v", err)
+	}
+	handler := NewSettingsHandler(testUserStoreProvider{store: store})
+	device := NewDeviceMetadata("iphone", "Example iPhone", "iOS")
+	cmd := DeviceSettingCommand{UserID: 7, ProfileID: "profile-1", Device: device, Key: SubtitleAppearanceSettingKey}
+	canonical := userstore.SettingIdentity{
+		Key: settingskeys.PlaybackSubtitleAppearance, Scope: settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "iphone",
+	}
+
+	const appearance = `{"fontSize":"xxlarge"}`
+	if err := handler.SetDeviceSetting(ctx, cmd, appearance); err != nil {
+		t.Fatalf("SetDeviceSetting: %v", err)
+	}
+	entry, err := store.GetDeviceSetting(ctx, "profile-1", "iphone", SubtitleAppearanceSettingKey)
+	if err != nil || entry == nil || entry.Value != appearance || entry.DevicePlatform != "iOS" {
+		t.Fatalf("legacy entry = %#v (%v)", entry, err)
+	}
+	if value, err := store.GetSettingValue(ctx, canonical); err != nil || value == nil || string(value.Value) != appearance {
+		t.Fatalf("canonical mirror = %+v (%v), want %s", value, err, appearance)
+	}
+
+	view, err := handler.EffectiveSubtitleAppearance(ctx, 7, "profile-1", device)
+	if err != nil || !view.HasDeviceOverride || view.EffectiveValue != appearance || view.GlobalValue != "" {
+		t.Fatalf("effective = %#v (%v)", view, err)
+	}
+	// Another profile on the same device does not see this profile's override.
+	view, err = handler.EffectiveSubtitleAppearance(ctx, 7, "profile-2", device)
+	if err != nil || view.HasDeviceOverride || view.EffectiveValue == appearance {
+		t.Fatalf("sibling effective = %#v (%v), want no override", view, err)
+	}
+
+	if err := handler.DeleteDeviceSetting(ctx, cmd); err != nil {
+		t.Fatalf("DeleteDeviceSetting: %v", err)
+	}
+	if entry, err := store.GetDeviceSetting(ctx, "profile-1", "iphone", SubtitleAppearanceSettingKey); err != nil || entry != nil {
+		t.Fatalf("legacy entry after delete = %#v (%v), want nil", entry, err)
+	}
+	if value, err := store.GetSettingValue(ctx, canonical); err != nil || value != nil {
+		t.Fatalf("canonical mirror after delete = %+v (%v), want nil", value, err)
+	}
+}
+
+// TestAdminCanListAndInspectDevicesAcrossUsers: the admin fleet view spans
+// every account, and a device that only registered and holds only canonical
+// overrides still appears with its count and last change.
+func TestAdminCanListAndInspectDevicesAcrossUsers(t *testing.T) {
+	ctx := context.Background()
+	store1 := newIsolatedProfileTestStore(t, "one")
+	store2 := newIsolatedProfileTestStore(t, "two")
+	for _, key := range []string{"player.playback_speed", "player.audio_sync_ms"} {
+		if err := store1.SetDeviceSetting(ctx, userstore.DeviceSettingEntry{
+			ProfileID: "profile-1", DeviceID: "living-room", DeviceName: "Living Room TV",
+			DevicePlatform: "tvOS", Key: key, Value: "1",
+		}); err != nil {
+			t.Fatalf("SetDeviceSetting store1 %s: %v", key, err)
+		}
+	}
+	if err := store1.(userstore.DeviceRegistry).RegisterDevice(ctx, userstore.DeviceEntry{
+		ProfileID: "profile-1", DeviceID: "bedroom", DeviceName: "Bedroom TV", DevicePlatform: "Android TV",
+	}); err != nil {
+		t.Fatalf("RegisterDevice store1: %v", err)
+	}
+	canonicalBedroom, err := store1.UpsertSettingValue(ctx, userstore.SettingIdentity{
+		Key: "playback.subtitle_mode", Scope: settingscontract.ScopeProfileDevice,
+		ProfileID: "profile-1", DeviceID: "bedroom",
+	}, json.RawMessage(`"always"`))
+	if err != nil {
+		t.Fatalf("UpsertSettingValue canonical bedroom override: %v", err)
+	}
+	if err := store2.SetDeviceSetting(ctx, userstore.DeviceSettingEntry{
+		ProfileID: "profile-1", DeviceID: "phone", DeviceName: "Travel Phone",
+		DevicePlatform: "iOS", Key: "player.hdr_enabled", Value: "false",
+	}); err != nil {
+		t.Fatalf("SetDeviceSetting store2: %v", err)
+	}
+
+	handler := &AdminHandler{
+		userRepo: testAdminUserRepo{users: map[int]*models.User{
+			7:  {ID: 7, Username: "alice", Email: "alice@example.com"},
+			11: {ID: 11, Username: "bob", Email: "bob@example.com"},
+		}},
+		storeProv: mappedTestUserStoreProvider{stores: map[int]userstore.UserStore{7: store1, 11: store2}},
+	}
+
+	devices, err := handler.ReadAdminDevices(ctx)
+	if err != nil {
+		t.Fatalf("ReadAdminDevices: %v", err)
+	}
+	if len(devices) != 3 {
+		t.Fatalf("devices = %d, want 3: %#v", len(devices), devices)
+	}
+	var bedroom *AdminDeviceSummaryView
+	for i := range devices {
+		if devices[i].DeviceID == "bedroom" {
+			bedroom = &devices[i]
+		}
+	}
+	if bedroom == nil || bedroom.OverrideCount != 1 || bedroom.ProfileCount != 1 ||
+		bedroom.DeviceName != "Bedroom TV" || bedroom.LastUpdated != canonicalBedroom.UpdatedAt {
+		t.Fatalf("registered device summary = %#v", bedroom)
+	}
+
+	detail, err := handler.ReadAdminDevice(ctx, "7", "living-room")
+	if err != nil || detail.Username != "alice" || detail.DeviceName != "Living Room TV" || len(detail.Settings) != 2 {
+		t.Fatalf("living-room detail = %#v (%v)", detail, err)
+	}
+	detail, err = handler.ReadAdminDevice(ctx, "7", "bedroom")
+	if err != nil || detail.DeviceName != "Bedroom TV" || detail.OverrideCount != 1 ||
+		detail.LastUpdated != canonicalBedroom.UpdatedAt || len(detail.Settings) != 0 ||
+		len(detail.Profiles) != 1 || detail.Profiles[0].ProfileID != "profile-1" {
+		t.Fatalf("registered detail = %#v (%v)", detail, err)
 	}
 }
 
