@@ -79,3 +79,22 @@ func (h *EventsHandler) upgradeEventSocket(w http.ResponseWriter, r *http.Reques
 	}
 	return upgrader.Upgrade(w, r, nil)
 }
+
+func (h *EventsHandler) subscribeEventSocket() (<-chan evt.Envelope, func()) {
+	if h.subscribeSocket != nil {
+		return h.subscribeSocket()
+	}
+	return h.hub.Subscribe()
+}
+
+// startEventSocketAuthority starts the connection's authority watchers and
+// reports false when the connection was canceled during the upgrade.
+func startEventSocketAuthority(ctx context.Context, cancel context.CancelFunc, start func(context.Context, context.CancelFunc)) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if start != nil {
+		start(ctx, cancel)
+	}
+	return true
+}

@@ -353,18 +353,11 @@ func (h *EventsHandler) serveWebSocket(w http.ResponseWriter, r *http.Request, c
 	configureWebSocket(conn)
 	conn.SetReadLimit(maxEventsFrameBytes)
 
-	if ctx.Err() != nil {
+	if !startEventSocketAuthority(ctx, cancel, startAuthority) {
 		return
 	}
-	if startAuthority != nil {
-		startAuthority(ctx, cancel)
-	}
 
-	subscribe := h.hub.Subscribe
-	if h.subscribeSocket != nil {
-		subscribe = h.subscribeSocket
-	}
-	eventsCh, unsubscribe := subscribe()
+	eventsCh, unsubscribe := h.subscribeEventSocket()
 	defer func() {
 		_ = conn.Close()
 		unsubscribe()

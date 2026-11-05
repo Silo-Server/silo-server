@@ -24,7 +24,7 @@ func TestClientSocketMountedSurfacesShareAccountAndProcessCapacity(t *testing.T)
 	}
 	native := handlers.NewEventsHandler(evt.NewHub("fixture", nil), nil, nil, nil, nil, nil, nil)
 	native.SetClientSocketAdmission(admission, t.Context(), nil)
-	tickets := evt.NewSocketTicketStore(nil)
+	tickets := evt.NewSocketTicketStore(nil, evt.SocketAudienceEvents)
 	v2 := &handlers.EventsSocketV2{Events: native, Tickets: tickets, Validate: func(ctx context.Context, id evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		return ctx, &auth.Claims{UserID: id.UserID, Role: "user"}, nil
 	}}

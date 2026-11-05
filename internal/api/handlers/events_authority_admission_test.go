@@ -20,7 +20,7 @@ import (
 
 type authorityAdmissionSession struct{ revoked atomic.Bool }
 
-func (s *authorityAdmissionSession) ActiveSession(context.Context, string) (auth.SessionAuthority, bool, error) {
+func (s *authorityAdmissionSession) ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error) {
 	return auth.SessionAuthority{Role: "admin"}, !s.revoked.Load(), nil
 }
 
