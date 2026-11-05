@@ -42,6 +42,10 @@ renderer follows, and the uploaded images badges can use.
 - `items` holds one entry per badge: `enabled`, `position`, optional `accentColor` and `showIcon`,
   and optional uploaded-image references (see below). `order` ranks badges that share a position;
   an empty list means registry order.
+- Two combined badges repeat what standalone badges show. While `resolution_hdr` is enabled,
+  clients hide `resolution` and `hdr`; while `resolution_hdr_audio` is enabled, they hide
+  `resolution`, `hdr`, `audio` and `resolution_hdr`. The hidden badges keep their stored
+  `enabled` value, so turning the combined badge off brings them back.
 
 ## Positions and the status corner
 
@@ -95,6 +99,7 @@ matches the same keys:
 | `resolution` | `overlay_summary.resolution`, such as `2160p` or `1080p` |
 | `hdr` | `overlay_summary.hdr`, such as `DV`, `DV HDR10`, `HDR10`, `HLG` |
 | `resolution_hdr` | the resolution and HDR keys joined by a space (`2160p DV HDR10`), or the resolution alone |
+| `resolution_hdr_audio` | the resolution, HDR and audio keys the file has, joined by a space (`2160p DV HDR10 Atmos`, `1080p TrueHD`) |
 | `audio`, `audio_channels`, `video_codec`, `container`, `aspect_ratio`, `release_type`, `edition` | the `overlay_summary` field of the same name |
 | `content_rating`, `original_language`, `studio`, `network` | the item field of the same name |
 | `show_status` | the normalized status: `Returning`, `Ended`, `Cancelled` or `Upcoming` |
@@ -108,3 +113,7 @@ Settings revision 25 added the edge positions, the `plate` and `band` presets, `
 image references. A server below revision 25 rejects a document that uses any of
 them, so a client writes them only when the server advertises revision 25 or later; the web client
 otherwise maps the edge rails back to the corner on the same side and drops the rest.
+
+Settings revision 26 added the `resolution_hdr_audio` badge. A server below revision 26 rejects a
+document that contains it, so a client offers that badge only when the server advertises revision
+26 or later.
