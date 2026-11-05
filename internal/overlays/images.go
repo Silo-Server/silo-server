@@ -34,6 +34,10 @@ const (
 	imageKeyPrefix = "overlay-images/"
 )
 
+// ImageKeyPrefix is where uploaded overlay images live in the assets store:
+// ImageKeyPrefix + ref. A backup carries what is under it.
+const ImageKeyPrefix = imageKeyPrefix
+
 var (
 	ErrImageNotFound           = errors.New("overlays: image not found")
 	ErrUnsupportedImage        = errors.New("overlays: unsupported image")

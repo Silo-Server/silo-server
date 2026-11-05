@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 func TestNormalizePersonalSortPreferenceRequest(t *testing.T) {
 	for _, kind := range []string{userstore.CollectionKindWatchlist, userstore.CollectionKindFavorites} {
-		if gotKind, gotID, ok := normalizeCollectionRef(kind, "ignored"); !ok || gotKind != kind || gotID != userstore.PersonalSortPreferenceCollectionID {
-			t.Fatalf("normalizeCollectionRef(%q) = %q/%q/%v", kind, gotKind, gotID, ok)
+		if gotKind, gotID, ok := catalog.NormalizeSortPreferenceRef(kind, "ignored"); !ok || gotKind != kind || gotID != userstore.PersonalSortPreferenceCollectionID {
+			t.Fatalf("catalog.NormalizeSortPreferenceRef(%q) = %q/%q/%v", kind, gotKind, gotID, ok)
 		}
 		for _, valid := range []struct {
 			field, wantOrder string
@@ -19,8 +20,8 @@ func TestNormalizePersonalSortPreferenceRequest(t *testing.T) {
 			{field: "last_air_date", wantOrder: "desc"},
 			{field: "runtime", wantOrder: "desc"},
 		} {
-			if field, order, ok := normalizeSortPreference(kind, valid.field, ""); !ok || field != valid.field || order != valid.wantOrder {
-				t.Fatalf("normalizeSortPreference(%q, %s) = %q/%q/%v", kind, valid.field, field, order, ok)
+			if field, order, ok := catalog.NormalizeSortPreference(kind, valid.field, ""); !ok || field != valid.field || order != valid.wantOrder {
+				t.Fatalf("catalog.NormalizeSortPreference(%q, %s) = %q/%q/%v", kind, valid.field, field, order, ok)
 			}
 		}
 		for _, invalid := range []struct{ field, order string }{
@@ -29,8 +30,8 @@ func TestNormalizePersonalSortPreferenceRequest(t *testing.T) {
 			{field: "not_a_sort"},
 			{field: "title", order: "sideways"},
 		} {
-			if _, _, ok := normalizeSortPreference(kind, invalid.field, invalid.order); ok {
-				t.Fatalf("normalizeSortPreference(%q, %q, %q) accepted invalid sort", kind, invalid.field, invalid.order)
+			if _, _, ok := catalog.NormalizeSortPreference(kind, invalid.field, invalid.order); ok {
+				t.Fatalf("catalog.NormalizeSortPreference(%q, %q, %q) accepted invalid sort", kind, invalid.field, invalid.order)
 			}
 		}
 	}

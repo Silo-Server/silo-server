@@ -22,9 +22,10 @@ authority belongs to the account: a secondary profile on an administrator accoun
 not inherit it. A few deliberately public reads outside `/api/v2/admin` (marked
 `public` in the route tables) are documented beside the admin writes they pair with.
 
-This document covers only the operations listed below. The rest of the
-admin surface predates it and is currently documented by the code and by the
-design documents under `docs/design/`.
+This document covers only the operations listed below. Backups are in
+[backups-api.md](backups-api.md). The rest of the admin surface predates it
+and is currently documented by the code and by the design documents under
+`docs/design/`.
 
 ## Wire conventions
 
@@ -2617,7 +2618,13 @@ bound to acting account/profile/access, normalized filters and page size. Source
 time precision is retained; response timestamps use UTC milliseconds and IDs use
 decimal strings. `user_id` is the subject account; `impersonator_user_id` separately
 identifies the impersonating account when recorded. Existing audit metadata and
-collector redaction behavior are unchanged. Pagination is a live retained view,
+collector redaction behavior are preserved. Audit `user_agent` is diagnostic text:
+capture and persistence keep an owned prefix of at most 512 UTF-8 bytes, replacing
+invalid UTF-8 runs and NUL bytes with U+FFFD. A valid rune crossing the prefix
+boundary is omitted. Newly written rows carry the same metadata in history and
+live updates; history also limits the database projection for older rows without
+rewriting those rows. Request headers and authentication/device identity are
+unaffected. Pagination is a live retained view,
 without snapshot, late-commit or retention completeness guarantees.
 
 The web logs page uses the scoped v2 HTTP readers for application and audit

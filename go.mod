@@ -21,6 +21,7 @@ require (
 )
 
 require (
+	filippo.io/age v1.3.2
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/andybalholm/brotli v1.2.1
@@ -58,6 +59,7 @@ require (
 
 require (
 	cloud.google.com/go v0.123.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/PuerkitoBio/goquery v1.8.0 // indirect
 	github.com/TwiN/go-color v1.4.1 // indirect
 	github.com/agnivade/levenshtein v1.2.1 // indirect
@@ -132,7 +134,7 @@ require (
 )
 
 require (
-	github.com/Silo-Server/silo-plugin-sdk v0.32.2-0.20261104213721-6aed6cd5d07d
+	github.com/Silo-Server/silo-plugin-sdk v0.32.2-0.20261105162846-0a3e9dc07ed0
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.14 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.30 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.30 // indirect

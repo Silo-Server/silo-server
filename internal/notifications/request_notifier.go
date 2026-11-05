@@ -163,7 +163,11 @@ func (n *RequestFulfillmentNotifier) AnnounceFulfilled(ctx context.Context, req 
 	if n == nil || n.backend == nil {
 		return
 	}
-	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestFulfilled, requestEventInfoFor(req))
+	// The server-channel fulfilled post does not name the requester; only the
+	// plugin event carries req's requester name.
+	info := requestEventInfoFor(req)
+	info.RequesterName = ""
+	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestFulfilled, info)
 	n.backend.publishRequestEvent(ctx, ServerChannelEventRequestFulfilled, req)
 }
 
@@ -201,7 +205,9 @@ func (n *RequestFulfillmentNotifier) notifyFulfilledProfile(ctx context.Context,
 const requestLifecycleDispatchTimeout = 30 * time.Second
 
 // requestLifecycleBackend is the slice of System the lifecycle adapter uses.
-// Every method detaches internally, so the adapter itself stays synchronous.
+// The channel post and the requester delivery detach internally, and the
+// plugin event publishes inline with a bounded Redis call, so the adapter
+// itself stays synchronous.
 // The unexported method keeps the interface in-package, leaving *System as
 // the only production implementation.
 type requestLifecycleBackend interface {
