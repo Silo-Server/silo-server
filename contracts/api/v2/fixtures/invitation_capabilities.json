@@ -1,6 +1,7 @@
 {
-  "revision": "d41626e5b18eee5ac67e2812df285fb04a37f263b73a8d0b4733b67e3d77e999",
+  "revision": "db362d642c29b925c4e7781425f866dbb678ed1580f1a338ad39087c6aac4f5d",
   "state": "available",
   "default_profile": true,
-  "profileless": true
+  "profileless": true,
+  "token_in_body": true
 }

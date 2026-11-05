@@ -10,8 +10,10 @@ and claim links. No raw claim token is retained for response replay.
 | Method | Path under `/api/v2` | Behavior |
 | --- | --- | --- |
 | GET | `/invitations/capabilities` | Public support and profile-store capability |
-| GET | `/invitations/{token}` | Claim-screen details for an eligible token |
-| POST | `/invitations/{token}/accept` | Atomically create the account; report login separately |
+| POST | `/invitations/lookup` | Claim-screen details for an eligible token |
+| POST | `/invitations/accept` | Atomically create the account; report login separately |
+| GET | `/invitations/{token}` | Deprecated path form of `/invitations/lookup` |
+| POST | `/invitations/{token}/accept` | Deprecated path form of `/invitations/accept` |
 | GET | `/admin/invitations/capabilities` | Administrator support and profile-store capability |
 | GET | `/admin/invitations` | Bounded administrator history page |
 | GET | `/admin/invitations/{id}` | Administrator metadata, without a claim token or digest |
@@ -19,10 +21,22 @@ and claim links. No raw claim token is retained for response replay.
 | POST | `/admin/invitations/{id}/resend` | Replace the exact pending/expired source with a new invitation |
 | DELETE | `/admin/invitations/{id}` | Idempotently revoke that link; never delete an account |
 
-Capabilities use the shared `revision` and `state` head, plus `default_profile`
-and `profileless`. `default_profile` reflects the actual selected provider's
-transaction capability, including its notification wrapper. It is false for
-SQLite; profileless acceptance remains available. Capability is not a live
+Claim links carry the token as the URL fragment (`/invite#{token}`), which
+browsers never send to the server, so it stays out of proxy and CDN access logs
+and `Referer` headers. Lookup (`lookupInvitationLink`) and acceptance
+(`acceptInvitationLink`) take it as `token` in the JSON body. The path forms
+(`lookupInvitation`, `acceptInvitation`) put it back in the URL. They answer the
+same way but are deprecated (RFC 9745 `Deprecation` and `Link` headers) and stay
+only for released Android builds; they leave `/api/v2` before the 1.0 lock, once
+a shipped Android build uses the body operations. The web client still opens
+links issued in the older `/invite/{token}` form.
+
+Capabilities use the shared `revision` and `state` head, plus `default_profile`,
+`profileless`, and `token_in_body`. `token_in_body` is true when the body
+operations exist; older servers omit it, so a client checks it before sending a
+token and otherwise uses the path forms. `default_profile` reflects the actual
+selected provider's transaction capability, including its notification wrapper.
+It is false for SQLite; profileless acceptance remains available. Capability is not a live
 storage health check. A claim lookup's `acceptance_available` is false when that
 particular invitation requires an unsupported default profile. The route remains
 present and a refused operation returns a typed capability problem. The
@@ -39,8 +53,9 @@ stays bound to its address. `note` is the inviter's note, empty when none. Unkno
 tokens return the same `404 not_found`. Real storage errors return a safe server
 error rather than being disguised as missing tokens.
 
-Acceptance takes `{password}`, plus `email` when the lookup reported
-`email_required`, and returns **201** after the account and invitation commit.
+Lookup takes `{token}`. Acceptance takes `{token, password}`, plus `email` when
+the lookup reported `email_required`, and returns **201** after the account and
+invitation commit.
 Passwords require at least eight characters and at most 72 UTF-8 bytes. `email`
 is ignored for an emailed invitation. For a link invitation, a missing or invalid
 address returns `422 validation_failed` at `body.email`, and an address that

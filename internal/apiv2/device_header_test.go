@@ -108,7 +108,8 @@ func TestSignInOperationsBoundDeviceID(t *testing.T) {
 		"/auth/setup",
 		"/auth/signup",
 		"/invitations/tok/accept",
-		"/password-resets/tok/complete",
+		"/invitations/accept",
+		"/password-resets/complete",
 		"/auth/device/poll",
 	} {
 		p := requireProblem(t, do(t, h, http.MethodPost, Prefix+path, `{}`, map[string]string{"X-Silo-Device-Id": strings.Repeat("x", 129)}), TypeValidationFailed)

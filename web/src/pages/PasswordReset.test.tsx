@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setAccessToken, setRefreshToken } from "@/api/client";
-import { json, problemResponse, renderRoutes } from "./authPage.test-support";
+import { json, problemResponse, renderBrowserRoutes } from "./authPage.test-support";
 import PasswordReset from "./PasswordReset";
 import completed from "../../../contracts/api/v2/fixtures/password_reset_completed.json";
 import lookupFixture from "../../../contracts/api/v2/fixtures/password_reset_lookup.json";
@@ -30,13 +30,20 @@ let lookup: () => Promise<Response>;
 let selfService: string;
 const fetchMock = vi.fn<typeof fetch>();
 
-function mount() {
-  return renderRoutes("/reset-password/secret-token", {
-    "/reset-password/:token": <PasswordReset />,
-    "/profiles": <p>Profile picker</p>,
-    "/login": <p>Ordinary login</p>,
-    "/forgot-password": <p>Request a link</p>,
-  });
+const routes = {
+  "/reset-password": <PasswordReset />,
+  "/reset-password/:token": <PasswordReset />,
+  "/profiles": <p>Profile picker</p>,
+  "/login": <p>Ordinary login</p>,
+  "/forgot-password": <p>Request a link</p>,
+};
+/** Opens `entry`, the emailed link by default. */
+function mount(entry = "/reset-password#secret-token") {
+  return renderBrowserRoutes(entry, routes);
+}
+/** Reloads the current history entry, its state included. */
+function reload() {
+  return renderBrowserRoutes(undefined, routes);
 }
 async function fill(password = "new-password", confirmation = password) {
   fireEvent.change(await screen.findByLabelText("New password"), { target: { value: password } });
@@ -47,7 +54,9 @@ async function fill(password = "new-password", confirmation = password) {
 function send() {
   fireEvent.submit(screen.getByRole("button", { name: "Save password" }).closest("form")!);
 }
-const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+const calls = (path: string) => fetchMock.mock.calls.filter(([url]) => String(url).includes(path));
+const posts = () => calls("/password-resets/complete");
+const bodyOf = ([, init]: Parameters<typeof fetch>) => JSON.parse(String(init?.body));
 
 beforeEach(() => {
   auth.user = null;
@@ -60,7 +69,9 @@ beforeEach(() => {
     if (String(url).includes("/capabilities/password-reset")) {
       return json({ ...capabilityFixture, state: selfService });
     }
-    return options?.method === "POST" ? submit() : lookup();
+    if (String(url).includes("/password-resets/complete")) return submit();
+    if (String(url).includes("/password-resets/lookup")) return lookup();
+    throw new Error(`unexpected request ${options?.method} ${String(url)}`);
   });
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -68,6 +79,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "/");
 });
 
 it("sets the password through the link, signs in, and continues to the profiles", async () => {
@@ -79,9 +91,33 @@ it("sets the password through the link, signs in, and continues to the profiles"
   expect(auth.completeLogin).toHaveBeenCalledWith(
     expect.objectContaining({ access_token: completed.tokens.access_token }),
   );
-  const [url, init] = posts()[0]!;
-  expect(String(url)).toContain("/api/v2/password-resets/secret-token/complete");
-  expect(JSON.parse(String(init?.body))).toEqual({ password: "new-password" });
+  expect(bodyOf(calls("/password-resets/lookup")[0]!)).toEqual({ token: "secret-token" });
+  expect(bodyOf(posts()[0]!)).toEqual({ token: "secret-token", password: "new-password" });
+  for (const [url] of fetchMock.mock.calls) expect(String(url)).not.toContain("secret-token");
+});
+
+it("takes the token out of the address bar and keeps it across a reload", async () => {
+  const before = window.history.length;
+  const { unmount } = mount();
+  await screen.findByText(new RegExp(`For ${lookupFixture.username}`));
+  expect(window.location.pathname).toBe("/reset-password");
+  expect(window.location.hash).toBe("");
+  expect(window.history.length).toBe(before);
+
+  unmount();
+  reload();
+  await screen.findByText(new RegExp(`For ${lookupFixture.username}`));
+  expect(calls("/password-resets/lookup").map(bodyOf)).toEqual([
+    { token: "secret-token" },
+    { token: "secret-token" },
+  ]);
+});
+
+it("opens a link that carries the token in its path", async () => {
+  mount("/reset-password/path-token");
+  await screen.findByText(new RegExp(`For ${lookupFixture.username}`));
+  expect(window.location.pathname).toBe("/reset-password");
+  expect(calls("/password-resets/lookup").map(bodyOf)).toEqual([{ token: "path-token" }]);
 });
 
 it("checks the new password before spending the link", async () => {
@@ -129,6 +165,12 @@ it("explains an unusable link", async () => {
   expect(screen.queryByLabelText("New password")).toBeNull();
   await screen.findByText(/Ask your admin for a new link/);
   expect(screen.queryByRole("link", { name: "Request a new link" })).toBeNull();
+});
+
+it("explains a link that arrived without its token", async () => {
+  mount("/reset-password");
+  await screen.findByText("Incomplete link");
+  expect(calls("/password-resets/lookup")).toHaveLength(0);
 });
 
 it("asks a signed-in visitor to sign out before using the link", async () => {

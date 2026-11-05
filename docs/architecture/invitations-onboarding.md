@@ -32,7 +32,8 @@ wins over expired.
 ## Token model
 
 Token handling mirrors the email-verification flow: 32 random bytes,
-`base64.RawURLEncoding` in the claim URL (`/invite/<token>`), SHA-256 hex
+`base64.RawURLEncoding` as the claim URL's fragment (`/invite#<token>`, which
+browsers never send to the server), SHA-256 hex
 stored at rest as `token_hash`. The raw token exists in the sent email (or in
 the create response when mail is unconfigured) and nowhere else — a database
 dump yields no usable links.

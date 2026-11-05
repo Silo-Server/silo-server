@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { onTestFinished } from "vitest";
+import { MemoryRouter, Route, Routes, RouterProvider, createBrowserRouter } from "react-router";
 
 /** Renders `routes` (path to element) at `entry`, with `outside` above the routes. */
 export function renderRoutes(
@@ -20,6 +21,26 @@ export function renderRoutes(
           ))}
         </Routes>
       </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+/**
+ * Renders `routes` on the window's real history, so a test can read what the
+ * address bar holds. Pass `entry` to open that address first; omit it to
+ * reload the current entry, history state included.
+ */
+export function renderBrowserRoutes(entry: string | undefined, routes: Record<string, ReactNode>) {
+  if (entry !== undefined) window.history.replaceState(null, "", entry);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createBrowserRouter(
+    Object.entries(routes).map(([path, element]) => ({ path, element })),
+  );
+  // A browser router listens to the window until disposed.
+  onTestFinished(() => router.dispose());
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
 }

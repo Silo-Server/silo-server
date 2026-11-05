@@ -111,10 +111,10 @@ func assertInvitationLifecycleEffects(t *testing.T, e *Env, id string, resp resp
 	if wireID != strconv.FormatInt(newID, 10) {
 		t.Error("response id differs from inserted row")
 	}
-	if !strings.HasPrefix(body.ClaimURL, publicURL+"/invite/") {
+	if !strings.HasPrefix(body.ClaimURL, publicURL+"/invite#") {
 		t.Fatal("claim link base differs")
 	}
-	token := strings.TrimPrefix(body.ClaimURL, publicURL+"/invite/")
+	token := strings.TrimPrefix(body.ClaimURL, publicURL+"/invite#")
 	raw, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil || len(raw) != 32 || len(token) != 43 {
 		t.Fatal("invalid fresh claim token")

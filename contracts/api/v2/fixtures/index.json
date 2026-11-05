@@ -9302,7 +9302,9 @@
       "expected_status": 201,
       "response_headers": {
         "Cache-Control": "no-store",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Deprecation": "@1792627200",
+        "Link": "<https://siloserver.org/docs/api/>; rel=\"deprecation\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/InvitationAcceptance",
@@ -9320,7 +9322,9 @@
       "expected_status": 201,
       "response_headers": {
         "Cache-Control": "no-store",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Deprecation": "@1792627200",
+        "Link": "<https://siloserver.org/docs/api/>; rel=\"deprecation\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/InvitationAcceptance",
@@ -9344,6 +9348,60 @@
       "body_file": "invitation_capabilities.json"
     },
     {
+      "name": "invitation_link_accepted",
+      "operation_id": "acceptInvitationLink",
+      "scenario": "Invitation lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/invitations/accept",
+        "body": "{\"token\":\"pending\",\"password\":\"synthetic-password\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/InvitationAcceptance",
+      "body_file": "invitation_link_accepted.json"
+    },
+    {
+      "name": "invitation_link_accepted_sign_in_required",
+      "operation_id": "acceptInvitationLink",
+      "scenario": "Invitation lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/invitations/accept",
+        "body": "{\"token\":\"sign-in-required\",\"password\":\"synthetic-password\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/InvitationAcceptance",
+      "body_file": "invitation_link_accepted_sign_in_required.json"
+    },
+    {
+      "name": "invitation_link_lookup",
+      "operation_id": "lookupInvitationLink",
+      "scenario": "Invitation lifecycle with synthetic identities and credentials.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/invitations/lookup",
+        "body": "{\"token\":\"pending\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/InvitationLookup",
+      "body_file": "invitation_link_lookup.json"
+    },
+    {
       "name": "invitation_lookup",
       "operation_id": "lookupInvitation",
       "scenario": "Invitation lifecycle with synthetic identities and credentials.",
@@ -9354,7 +9412,9 @@
       "expected_status": 200,
       "response_headers": {
         "Cache-Control": "no-store",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Deprecation": "@1792627200",
+        "Link": "<https://siloserver.org/docs/api/>; rel=\"deprecation\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/InvitationLookup",
@@ -12901,12 +12961,12 @@
     },
     {
       "name": "password_reset_completed",
-      "operation_id": "completePasswordReset",
+      "operation_id": "completePasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/password-resets/live/complete",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/password-resets/complete",
+        "body": "{\"token\":\"live\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -12919,12 +12979,12 @@
     },
     {
       "name": "password_reset_completed_sign_in_required",
-      "operation_id": "completePasswordReset",
+      "operation_id": "completePasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
         "method": "POST",
-        "path": "/api/v2/password-resets/sign-in-required/complete",
-        "body": "{\"password\":\"synthetic-password\"}"
+        "path": "/api/v2/password-resets/complete",
+        "body": "{\"token\":\"sign-in-required\",\"password\":\"synthetic-password\"}"
       },
       "expected_status": 200,
       "response_headers": {
@@ -12937,11 +12997,12 @@
     },
     {
       "name": "password_reset_lookup",
-      "operation_id": "lookupPasswordReset",
+      "operation_id": "lookupPasswordResetLink",
       "scenario": "Password reset link lifecycle with synthetic identities and credentials.",
       "request": {
-        "method": "GET",
-        "path": "/api/v2/password-resets/live"
+        "method": "POST",
+        "path": "/api/v2/password-resets/lookup",
+        "body": "{\"token\":\"live\"}"
       },
       "expected_status": 200,
       "response_headers": {

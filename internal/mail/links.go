@@ -21,6 +21,14 @@ func AccountLinkBase(ctx context.Context, settings SettingReader, fallback strin
 	return strings.TrimRight(fallback, "/")
 }
 
+// AccountLink is the address of the web screen at path that redeems a
+// one-time token, such as a password reset or an invitation. The token is the
+// URL fragment, which browsers never send to the server, so it stays out of
+// proxy and CDN access logs and Referer headers.
+func AccountLink(base, path, token string) string {
+	return base + path + "#" + token
+}
+
 // ServerName is the branded server name account emails and their landing
 // screens show, defaulting to "Silo".
 func ServerName(ctx context.Context, settings SettingReader) string {

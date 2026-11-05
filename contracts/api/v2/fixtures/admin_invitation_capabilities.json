@@ -1,8 +1,9 @@
 {
-  "revision": "03f880d6f06bd0e346a5f68463218f5476dc82046f69ed857446345aa5980c24",
+  "revision": "e9a1250cf02de4811ff55266d1d011060427f618aa1f22842b76acf653b05eff",
   "state": "available",
   "allowed": true,
   "default_profile": true,
   "profileless": true,
+  "token_in_body": true,
   "email_delivery": false
 }

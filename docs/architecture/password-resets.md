@@ -24,8 +24,12 @@ bounded at one row per account.
 
 **Stored as a digest.** Tokens use the invitation scheme (`auth.NewLinkToken`): 32
 random bytes, base64url in the link, SHA-256 hex at rest. The raw token exists
-only in the email or in the one response that discloses a shared link. The request
-log redacts the `{token}` path parameter.
+only in the email or in the one response that discloses a shared link. The link
+carries it as the URL fragment (`/reset-password#<token>`), which browsers never send
+to the server, and the public operations take it in the request body, so no request
+line or `Referer` header in front of Silo holds it. Links issued before this form
+(`/reset-password/<token>`) still open, and their first request still carries the
+token until they expire.
 
 **Bound to the password it replaces.** Each row records a SHA-256 fingerprint of
 `users.password_hash` at issue time, and a link only resolves while the account
