@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/logstream"
@@ -61,6 +62,10 @@ type metadataQuery func(context.Context, string, ...any) []any
 
 func (q metadataQuery) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	return &metadataRows{values: q(ctx, sql, args...)}, nil
+}
+
+func (metadataQuery) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, nil
 }
 
 type metadataRows struct {

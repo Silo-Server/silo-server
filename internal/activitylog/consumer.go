@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
@@ -18,10 +19,15 @@ import (
 // Consumer batch-inserts one node's activity log entries into PostgreSQL and
 // fans them out to the admin live tail.
 type Consumer struct {
-	pool      queryer
+	pool      consumerDB
 	batchSize int
 	interval  time.Duration
 	streamHub *logstream.Hub
+}
+
+type consumerDB interface {
+	queryer
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }
 
 // NewConsumer creates a new activity log consumer.
@@ -58,7 +64,7 @@ func (c *Consumer) Run(ctx context.Context, ch <-chan LogEntry) {
 // its newest entry in the batch. Accounts are written in id order so batches
 // from different nodes lock the same rows in the same order and cannot
 // deadlock; an older timestamp never overwrites a newer one.
-func recordLastActivity(ctx context.Context, pool *pgxpool.Pool, entries []LogEntry) error {
+func recordLastActivity(ctx context.Context, pool consumerDB, entries []LogEntry) error {
 	latest := map[int]time.Time{}
 	for _, e := range entries {
 		if e.UserID == nil {
