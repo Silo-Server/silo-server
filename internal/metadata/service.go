@@ -2857,15 +2857,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 	// A correction can replace the show without moving the id, such as over a
-	// dead anchor nothing can claim. A move already handled the old show's edits.
-	// Any stored ID that is still part of the identity shows the same show.
-	if req.identityCorrection && contentID == contentIDBeforeMoves &&
-		!sharesProviderID(accumulator.ProviderIDs, storedIdentityProviderIDs(existingItem), req.durableProviderIDs) &&
-		normalizeItemTypeForContentID(contentType) == matchContentTypeSeries {
-		if err := s.clearSeriesChildEdits(ctx, contentID); err != nil {
-			return nil, err
-		}
-	}
+	// dead anchor nothing can claim. The edits go in the transaction that stores
+	// the new identity. A move already handled them.
+	clearChildEdits := req.identityCorrection && contentID == contentIDBeforeMoves &&
+		normalizeItemTypeForContentID(contentType) == matchContentTypeSeries &&
+		correctionNamesDifferentShow(contentType, storedItemIdentity(existingItem, req.durableProviderIDs), accumulator.ProviderIDs)
 
 	suppressProviderIDValues(durableIDs, accumulator.recordedStaleProviderIDs)
 	suppressProviderIDValues(durableIDs, accumulator.sameRunStaleProviderIDs)
@@ -3096,6 +3092,7 @@ func (s *MetadataService) mergeAndPersist(
 		len(durableIDs) == 0,
 		contentType,
 		req.Mode == ModeIdentify,
+		clearChildEdits,
 	)
 	if err != nil {
 		return nil, err
@@ -3277,13 +3274,14 @@ func (s *MetadataService) persistItemAndProviderIDs(
 	missingDurableIDs bool,
 	contentType string,
 	identityChosen bool,
+	clearChildEdits bool,
 ) (string, error) {
 	if item == nil || strings.TrimSpace(item.ContentID) == "" {
 		return "", fmt.Errorf("content_id is required")
 	}
 	if itemRepo, ok := s.itemRepo.(*catalog.ItemRepository); ok && s.dbPool != nil {
 		if providerRepo, ok := s.providerIDRepo.(*catalog.ProviderIDRepository); ok && providerRepo != nil {
-			return s.persistItemAndProviderIDsTx(ctx, itemRepo, providerRepo, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType, identityChosen)
+			return s.persistItemAndProviderIDsTx(ctx, itemRepo, providerRepo, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType, identityChosen, clearChildEdits)
 		}
 	}
 	contentID, err := s.persistItemAndProviderIDsLegacy(ctx, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType)
@@ -3304,9 +3302,10 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 	missingDurableIDs bool,
 	contentType string,
 	identityChosen bool,
+	clearChildEdits bool,
 ) (string, error) {
 	contentID := item.ContentID
-	err := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen)
+	err := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen, clearChildEdits)
 	if err == nil {
 		return contentID, nil
 	}
@@ -3323,7 +3322,8 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 	}
 	item.ContentID = reboundTo
 	clearDroppedIdentityColumns(item, dropped)
-	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen); retryErr != nil {
+	// The row conflict recovery merged into holds its own edits.
+	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen, false); retryErr != nil {
 		return "", fmt.Errorf("persisting provider IDs after conflict recovery for %s: %w", reboundTo, retryErr)
 	}
 	return reboundTo, nil
@@ -3357,6 +3357,7 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	item *models.MediaItem,
 	providerIDs map[string]string,
 	identityChosen bool,
+	clearChildEdits bool,
 ) error {
 	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
@@ -3380,6 +3381,11 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	// (identify_sticky.go).
 	if identityChosen {
 		if err := catalog.MarkIdentityChosenTx(ctx, tx, item.ContentID); err != nil {
+			return err
+		}
+	}
+	if clearChildEdits {
+		if err := catalog.ClearSeriesChildEditsTx(ctx, tx, item.ContentID); err != nil {
 			return err
 		}
 	}
@@ -10483,18 +10489,20 @@ func rejectIdentityProviderIDs(rejected providerIDValueSet, chosen map[string]st
 	}
 }
 
-// sharesProviderID reports whether ids holds a trusted identity value from any
-// of the stored sources.
-func sharesProviderID(ids map[string]string, sources ...map[string]string) bool {
-	for _, source := range sources {
-		for _, key := range trustedSearchIDKeys {
-			stored := normalizeProviderIDComparisonValue(key, source[key])
-			if stored != "" && stored == normalizeProviderIDComparisonValue(key, ids[key]) {
-				return true
-			}
+// correctionNamesDifferentShow reports whether a correction's resolved IDs name
+// a different title than the stored ones: they contradict on the first ID both
+// carry, or share no ID that would show they are the same title.
+func correctionNamesDifferentShow(itemType string, stored, resolved map[string]string) bool {
+	if identityProviderIDsContradict(itemType, stored, resolved) {
+		return true
+	}
+	for _, key := range trustedSearchIDKeys {
+		value := normalizeProviderIDComparisonValue(key, stored[key])
+		if value != "" && value == normalizeProviderIDComparisonValue(key, resolved[key]) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func mediaItemWithProviderIDs(item *models.MediaItem, providerIDs map[string]string) *models.MediaItem {

@@ -118,6 +118,19 @@ func newIdentifyLockFixture(pool *pgxpool.Pool) *identifyLockFixture {
 	}
 }
 
+func (f *identifyLockFixture) storeOnDeadAnchor(t *testing.T, pool *pgxpool.Pool, seriesID, dead string, ids map[string]string) {
+	t.Helper()
+	if _, err := pool.Exec(t.Context(), `UPDATE media_items SET tvdb_id = $2, tmdb_id = $3 WHERE content_id = $1`, seriesID, ids["tvdb"], ids["tmdb"]); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.providerIDs.ReplaceByContentID(t.Context(), seriesID, ids); err != nil {
+		t.Fatal(err)
+	}
+	upsertStaleProviderIDValues(t.Context(), NewStaleMediaIDRepository(pool), seriesID, providerIDValueSet{"tvdb": {dead: {}}})
+	f.service.staleIDRepo = NewStaleMediaIDRepository(pool)
+	t.Cleanup(func() { f.service.staleIDRepo = nil })
+}
+
 func (f *identifyLockFixture) assertLocksKept(t *testing.T, seriesID string) {
 	t.Helper()
 	season, episode := f.read(t, seriesID)
@@ -170,26 +183,29 @@ func TestIdentify_SeasonEpisodeLocksFollowTheShow(t *testing.T) {
 		assertEditsCleared(t, pool, seriesID, season, episode)
 	})
 
-	t.Run("a second correction on a kept dead anchor clears the edits", func(t *testing.T) {
-		dead, previous, right := strconv.FormatInt(630_000_000+nonce, 10), strconv.FormatInt(730_000_000+nonce, 10), strconv.FormatInt(830_000_000+nonce, 10)
-		seriesID := f.seed(t, dead)
-		cleanup(t, seriesID, "series-tvdb-"+right)
-		// An earlier correction left the id on the dead anchor and stored another show.
-		if _, err := pool.Exec(t.Context(), `UPDATE media_items SET tvdb_id = $2 WHERE content_id = $1`, seriesID, previous); err != nil {
-			t.Fatal(err)
-		}
-		if err := providerIDs.ReplaceByContentID(t.Context(), seriesID, map[string]string{"tvdb": previous}); err != nil {
-			t.Fatal(err)
-		}
-		upsertStaleProviderIDValues(t.Context(), NewStaleMediaIDRepository(pool), seriesID, providerIDValueSet{"tvdb": {dead: {}}})
-		f.service.staleIDRepo = NewStaleMediaIDRepository(pool)
-		t.Cleanup(func() { f.service.staleIDRepo = nil })
-		if got := f.identify(t, seriesID, right); got != seriesID {
-			t.Fatalf("identify moved to %q, want the id kept at %q", got, seriesID)
-		}
-		season, episode := f.read(t, seriesID)
-		assertEditsCleared(t, pool, seriesID, season, episode)
-	})
+	// An earlier correction left each series on a dead anchor and stored another
+	// show's IDs, so correcting it again doesn't move the content ID.
+	for _, tc := range []struct {
+		name string
+		tmdb string
+	}{
+		{"a second correction on a kept dead anchor clears the edits", ""},
+		{"a shared lower-priority id doesn't hide a different show", "4242"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nonce := time.Now().UnixNano() % 100_000_000
+			dead, previous, right := strconv.FormatInt(630_000_000+nonce, 10), strconv.FormatInt(730_000_000+nonce, 10), strconv.FormatInt(830_000_000+nonce, 10)
+			seriesID := f.seed(t, dead)
+			cleanup(t, seriesID, "series-tvdb-"+right)
+			f.storeOnDeadAnchor(t, pool, seriesID, dead, map[string]string{"tvdb": previous, "tmdb": tc.tmdb})
+			chosen := map[string]string{"tvdb": right, "tmdb": tc.tmdb}
+			if got := f.identifyChoosing(t, seriesID, chosen, chosen); got != seriesID {
+				t.Fatalf("identify moved to %q, want the id kept at %q", got, seriesID)
+			}
+			season, episode := f.read(t, seriesID)
+			assertEditsCleared(t, pool, seriesID, season, episode)
+		})
+	}
 
 	t.Run("the same show chosen by another provider's id keeps the edits", func(t *testing.T) {
 		tvdb, tmdb := strconv.FormatInt(840_000_000+nonce, 10), strconv.FormatInt(850_000_000+nonce, 10)

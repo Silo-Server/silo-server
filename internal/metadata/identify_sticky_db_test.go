@@ -88,13 +88,13 @@ func TestPersistMarksIdentityWithTheIdentityWritePostgres(t *testing.T) {
 	}
 
 	item := &models.MediaItem{ContentID: chosen, Type: "movie", Title: "Chosen", SortTitle: "chosen", Status: "matched"}
-	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"tmdb": tmdbID}, true); err == nil {
+	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"tmdb": tmdbID}, true, false); err == nil {
 		t.Fatal("persist succeeded although another item owns the provider ID")
 	}
 	if isChosen(chosen) {
 		t.Error("a failed identity write left the Identify mark")
 	}
-	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"imdb": "tt" + tmdbID}, true); err != nil {
+	if err := svc.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, map[string]string{"imdb": "tt" + tmdbID}, true, false); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
 	if !isChosen(chosen) {

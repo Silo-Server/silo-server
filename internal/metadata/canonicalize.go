@@ -200,29 +200,6 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	return nil
 }
 
-// clearSeriesChildEdits clears the season and episode edits of a series that
-// keeps its content id while naming a different show.
-func (s *MetadataService) clearSeriesChildEdits(ctx context.Context, seriesID string) error {
-	if s.dbPool == nil {
-		return nil
-	}
-	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
-	if err != nil {
-		return fmt.Errorf("begin series child edit clear: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if err := catalog.GuardMetadataCurationItems(ctx, tx, seriesID); err != nil {
-		return err
-	}
-	if err := catalog.ClearSeriesChildEditsTx(ctx, tx, seriesID); err != nil {
-		return err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit series child edit clear: %w", err)
-	}
-	return nil
-}
-
 // seriesChildRenames lists the season and episode ids of series `from` that
 // were composed from its anchor, paired with the same composition under `to`.
 // Children on any other id (Sonyflake ids from before the series matched) keep

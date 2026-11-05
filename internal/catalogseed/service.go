@@ -2658,7 +2658,7 @@ func nonNilStrings(values []string) []string {
 }
 
 func cloneInts(values []int) []int {
-	if values == nil {
+	if len(values) == 0 {
 		return []int{}
 	}
 	return append([]int(nil), values...)
