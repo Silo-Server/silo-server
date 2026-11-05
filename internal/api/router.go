@@ -1800,6 +1800,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		adminHandler.BeforeServerSettingCommit = deps.BeforeServerSettingCommit
+		if deps.Backups != nil {
+			adminHandler.BackupKeyCheck = deps.Backups.KeyCheck()
+		}
 		if deps.RecWorker != nil {
 			adminHandler.RecWorker = deps.RecWorker
 		}

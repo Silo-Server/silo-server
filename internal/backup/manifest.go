@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 )
 
@@ -74,7 +76,16 @@ type Manifest struct {
 	PgDumpVersion     string   `json:"pg_dump_version"`
 	ExcludedTableData []string `json:"excluded_table_data"`
 
+	// Objects are named as stored: db.dump.age and so on when Encrypted.
 	Objects []ObjectEntry `json:"objects"`
+	// Encrypted is false for every object at the default destination. The
+	// S3 destination encrypts every object but the manifest with age, under
+	// the passphrase secret.BackupPassphrase derives from SECRET_KEY.
+	// omitempty keeps an unencrypted manifest's encoding, and so its MAC,
+	// what builds from before this field wrote: every field added to the
+	// manifest after it first shipped must encode to nothing at its zero
+	// value (TestManifestsOfEarlierBuildsStillVerify).
+	Encrypted bool `json:"encrypted,omitempty"`
 	// KeyCheck is the SECRET_KEY check value (secret.KeyCheckValue). A restore
 	// with another key cannot read encrypted settings and credentials.
 	KeyCheck string `json:"key_check"`
@@ -119,6 +130,19 @@ func (m *Manifest) macInput() ([]byte, error) {
 	return json.Marshal(&c)
 }
 
+// withEncryptedFalse is macInput's encoding of an unencrypted manifest as
+// builds wrote it while `encrypted` had no omitempty: "encrypted":false
+// right before "key_check", which follows it in Manifest. Inside a string
+// the encoder escapes the quote, so the first match is that field's.
+func withEncryptedFalse(data []byte) []byte {
+	const next = `,"key_check":`
+	i := bytes.Index(data, []byte(next))
+	if i < 0 {
+		return data
+	}
+	return slices.Concat(data[:i], []byte(`,"encrypted":false`), data[i:])
+}
+
 // sign sets m.MAC under key; a nil key leaves m unsigned.
 func (m *Manifest) sign(key []byte) error {
 	if key == nil {
@@ -159,9 +183,12 @@ func (m *Manifest) checkMAC(key []byte, keyCheck string) (authenticated bool, er
 	if err != nil {
 		return false, err
 	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(data)
-	if !hmac.Equal(mac.Sum(nil), want) {
+	verifies := func(data []byte) bool {
+		mac := hmac.New(sha256.New, key)
+		mac.Write(data)
+		return hmac.Equal(mac.Sum(nil), want)
+	}
+	if !verifies(data) && (m.Encrypted || !verifies(withEncryptedFalse(data))) {
 		return false, ErrManifestTampered
 	}
 	return true, nil
@@ -229,8 +256,10 @@ func (m *Manifest) Size() int64 {
 	return total
 }
 
-// object finds the object named name (db.dump, blobs.tar, restore-set.tar).
-func (m *Manifest) object(name string) (ObjectEntry, bool) {
+// object finds the object of base (db.dump, blobs.tar, restore-set.tar)
+// under its stored name.
+func (m *Manifest) object(base string) (ObjectEntry, bool) {
+	name := storedName(base, m.Encrypted)
 	for _, o := range m.Objects {
 		if o.Name == name {
 			return o, true
@@ -287,7 +316,7 @@ func (m *Manifest) validate() error {
 	if err := validateApplied(m.AppliedMigrations, m.GooseVersion); err != nil {
 		return err
 	}
-	if err := validateObjects(m.Objects, m.RestoreSet != nil); err != nil {
+	if err := validateObjects(m.Objects, m.RestoreSet != nil, m.Encrypted); err != nil {
 		return err
 	}
 	if err := m.RestoreSet.validate(); err != nil {
@@ -305,11 +334,12 @@ func (m *Manifest) validate() error {
 }
 
 // validateObjects requires exactly db.dump, blobs.tar, and restore-set.tar
-// when the manifest describes one, each once, with a size and a SHA-256.
-func validateObjects(objects []ObjectEntry, restoreSet bool) error {
-	want := map[string]bool{DumpName: false, BlobsName: false}
+// when the manifest describes one, each once, with a size and a SHA-256;
+// each named .age when encrypted.
+func validateObjects(objects []ObjectEntry, restoreSet, encrypted bool) error {
+	want := map[string]bool{storedName(DumpName, encrypted): false, storedName(BlobsName, encrypted): false}
 	if restoreSet {
-		want[RestoreSetName] = false
+		want[storedName(RestoreSetName, encrypted)] = false
 	}
 	for _, o := range objects {
 		seen, known := want[o.Name]

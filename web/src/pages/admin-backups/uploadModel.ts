@@ -7,6 +7,12 @@ import { backupDateTime, knownSiloVersion, sourceServerName } from "./backupPres
 /** How many times one part is sent before the upload stops and offers a retry. */
 const UPLOAD_PART_ATTEMPTS = 3;
 
+/**
+ * The command that removes another server's encryption, shown when an upload
+ * is encrypted. It reads SECRET_KEY from the environment.
+ */
+const DECRYPT_COMMAND = "silo backup decrypt restore-set.tar.age -o restore-set.tar";
+
 const KB = 1024;
 const MB = KB * 1024;
 const GB = MB * 1024;
@@ -42,7 +48,9 @@ export function limitLabel(bytes: number): string {
   return `${+(bytes / MB).toFixed(1)} MB`;
 }
 
-export type SniffResult = "restore_set" | "not_a_restore_set";
+export type SniffResult = "restore_set" | "encrypted" | "not_a_restore_set";
+
+const AGE_HEADERS = ["age-encryption.org/", "-----BEGIN AGE ENCRYPTED FILE-----"];
 
 function ascii(bytes: Uint8Array, start: number, end: number): string {
   let out = "";
@@ -54,17 +62,39 @@ function ascii(bytes: Uint8Array, start: number, end: number): string {
 }
 
 /**
- * What the first bytes of a file say it is, before uploading it: a tar whose
- * first entry is restore-set.json (directly, or behind the PAX header Silo's
- * writer puts first). The server checks the whole file again; this only saves
- * uploading something it would refuse.
+ * What the first bytes of a file say it is, before uploading it: an age
+ * encrypted file, or a tar whose first entry is restore-set.json (directly,
+ * or behind the PAX header Silo's writer puts first). The server checks the
+ * whole file again; this only saves uploading something it would refuse.
  */
 export function sniffRestoreSet(head: Uint8Array): SniffResult {
+  const start = ascii(head, 0, 64);
+  if (AGE_HEADERS.some((header) => start.startsWith(header))) return "encrypted";
   if (head.length < 512 || ascii(head, 257, 262) !== "ustar") return "not_a_restore_set";
   const name = ascii(head, 0, 100);
   return name === "restore-set.json" || name.endsWith("/restore-set.json")
     ? "restore_set"
     : "not_a_restore_set";
+}
+
+/**
+ * Shown while an encrypted file uploads. Only the server can tell whose
+ * SECRET_KEY encrypted it: an age file's header names no key, only a salt.
+ */
+export const ENCRYPTED_NOTICE =
+  "Encrypted: this server can read it only if it was made with this server's SECRET_KEY.";
+
+/**
+ * What the dialog does with a sniffed file before uploading it: refuse what
+ * is not a restore set, and upload the rest. An encrypted file goes to the
+ * server, which reads one made with its own SECRET_KEY and refuses any other
+ * with the decrypt command; the notice says so while it uploads.
+ */
+export function sniffDecision(
+  sniffed: SniffResult,
+): { upload: false } | { upload: true; notice: string | null } {
+  if (sniffed === "not_a_restore_set") return { upload: false };
+  return { upload: true, notice: sniffed === "encrypted" ? ENCRYPTED_NOTICE : null };
 }
 
 /** Why an upload stopped, in the cases the dialog tells apart. */
@@ -112,8 +142,12 @@ export function failureOfError(
 export interface FailureCopy {
   title: string;
   body: string;
+  /** A command to show in a code block. */
+  command?: string;
   /** Whether "Try again" continues the same upload. */
   resumable: boolean;
+  /** The server's own explanation, shown under the body; absent when the body is it. */
+  detail?: string;
 }
 
 const REJECTION_COPY: Record<UploadRejectionReason, Omit<FailureCopy, "resumable">> = {
@@ -124,6 +158,11 @@ const REJECTION_COPY: Record<UploadRejectionReason, Omit<FailureCopy, "resumable
   newer_silo: {
     title: "This backup is from a newer Silo",
     body: "Upgrade this server first, then upload it again.",
+  },
+  encrypted: {
+    title: "This file is encrypted",
+    body: "It's encrypted with another server's SECRET_KEY. Run this with that server's SECRET_KEY set, then upload restore-set.tar.",
+    command: DECRYPT_COMMAND,
   },
   checksum_mismatch: {
     title: "The file changed while it was uploading",
@@ -157,8 +196,16 @@ export function failureCopy(failure: UploadFailure): FailureCopy {
         body: `Part ${failure.part + 1} of ${failure.partCount} didn't arrive. The parts already sent are kept, so trying again picks up where it stopped.`,
         resumable: true,
       };
-    case "rejected":
-      return { ...REJECTION_COPY[failure.reason], resumable: false };
+    case "rejected": {
+      const copy = REJECTION_COPY[failure.reason];
+      // An upload encrypted with another key is explained by the server's
+      // message, decrypt command included: show it once, in place of the
+      // page's own advice. The other reasons keep the page's line and add
+      // the server's detail under it.
+      if (failure.reason === "encrypted" && failure.message)
+        return { title: copy.title, body: failure.message, resumable: false };
+      return { ...copy, detail: failure.message || undefined, resumable: false };
+    }
     case "signed_out":
       return {
         title: "You were signed out",

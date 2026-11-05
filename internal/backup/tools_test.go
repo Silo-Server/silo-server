@@ -192,7 +192,7 @@ func TestCheckSeparateTargets(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkSeparateTargets(tc.opts)
+			err := checkSeparateTargets(t.Context(), tc.opts)
 			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
 				t.Fatalf("checkSeparateTargets = %v, want %q", err, tc.want)
 			}

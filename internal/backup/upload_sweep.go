@@ -250,7 +250,7 @@ func (s *Service) lockForUploadSweep(ctx context.Context) (Held, error) {
 // attempt, so an object this finds unnamed and old can never be named
 // later.
 func (s *Service) sweepUploadObjects(ctx context.Context) (swept, warnings []string) {
-	objects, err := s.opts.Destination.List(ctx, uploadsPrefix)
+	objects, err := listObjects(ctx, s.opts.Destination, uploadsPrefix, maxUploadObjects)
 	if err != nil {
 		return nil, []string{"listing uploads: " + err.Error()}
 	}

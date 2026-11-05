@@ -56,41 +56,51 @@ func TestOperationPublishesOnlyWhileItHoldsTheLock(t *testing.T) {
 	}
 }
 
-// TestRecentBackupWarning: the 48-hour warning reads the recorded latest
-// success, or the newest backup at the destination when the status row has
-// none (a full restore empties it). A backup whose manifest this server
-// cannot authenticate is no success, whatever completion time it claims.
-func TestRecentBackupWarning(t *testing.T) {
+// TestRecentBackupWarningSpansDestinations: the 48-hour warning reads the
+// latest success at any destination, so switching to a destination with no
+// copies yet says that instead, and a backup there clears it. A backup whose
+// manifest this server cannot authenticate is no success here, whatever
+// completion time it claims.
+func TestRecentBackupWarningSpansDestinations(t *testing.T) {
 	ctx := t.Context()
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := now.Add(-72 * time.Hour)
-	status := &recordingStatus{rec: StatusRecord{LastSuccessAt: &old}}
+	elsewhere := now.Add(-2 * time.Hour)
+	status := &recordingStatus{rec: StatusRecord{LastSuccessAt: &elsewhere}}
 	svc := New(Options{Destination: NewStoreDestination(store), Status: status, Now: func() time.Time { return now },
 		ServerID: func(context.Context) (string, error) { return "server", nil }})
-	warned := func() bool {
+	codes := func() []string {
 		t.Helper()
 		listing, err := svc.List(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return slices.ContainsFunc(listing.Warnings, func(w Warning) bool { return w.Code == WarningNoRecentBackup })
+		var out []string
+		for _, w := range listing.Warnings {
+			if w.Code == WarningNoRecentBackup || w.Code == WarningNoBackupsAtDestination {
+				out = append(out, w.Code)
+			}
+		}
+		return out
 	}
-	if !warned() {
-		t.Fatal("no warning for a success three days ago")
+	if got := codes(); !slices.Equal(got, []string{WarningNoBackupsAtDestination}) {
+		t.Fatalf("a recent backup elsewhere: warnings %v, want only %s", got, WarningNoBackupsAtDestination)
 	}
-	recent := now.Add(-2 * time.Hour)
-	status.rec.LastSuccessAt = &recent
-	if warned() {
-		t.Fatal("a warning for a success two hours ago")
+	old := now.Add(-72 * time.Hour)
+	status.rec.LastSuccessAt = &old
+	if got := codes(); !slices.Equal(got, []string{WarningNoBackupsAtDestination, WarningNoRecentBackup}) {
+		t.Fatalf("an old backup elsewhere: warnings %v", got)
+	}
+	putPlainBackup(t, store, "server", FolderName(now.Add(-time.Hour), KindNightly))
+	if got := codes(); len(got) != 0 {
+		t.Fatalf("a recent backup here: warnings %v", got)
 	}
 	status.rec.LastSuccessAt = nil
-	putPlainBackup(t, store, "server", FolderName(now.Add(-time.Hour), KindNightly))
-	if warned() {
-		t.Fatal("a warning with a recent backup here and no recorded success")
+	if got := codes(); len(got) != 0 {
+		t.Fatalf("a backup here and no recorded success (a full restore emptied the status): warnings %v", got)
 	}
 
 	// With manifests checked, an unsigned one that claims to complete next
@@ -105,8 +115,10 @@ func TestRecentBackupWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if listing.LastSuccessAt != nil || !warned() {
-		t.Fatalf("an unverified manifest set the last success to %v; want none, and the warning", listing.LastSuccessAt)
+	old = now.Add(-72 * time.Hour)
+	status.rec.LastSuccessAt = &old
+	if got := codes(); listing.LastSuccessAt != nil || !slices.Equal(got, []string{WarningNoBackupsAtDestination, WarningNoRecentBackup}) {
+		t.Fatalf("an unverified manifest: last success %v, warnings %v; want none, and both warnings", listing.LastSuccessAt, got)
 	}
 }
 

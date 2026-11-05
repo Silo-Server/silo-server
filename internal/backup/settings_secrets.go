@@ -47,6 +47,7 @@ var restoredSecretSettings = strings.Fields(`
 	s3.public_access_key s3.public_secret_key s3.public_token_secret
 	s3.private_access_key s3.private_secret_key s3.user_db_access_key s3.user_db_secret_key
 	s3.operational_access_key s3.operational_secret_key s3.operational_token_secret
+	backup.s3.secret_key
 	storage.transition.target redis.url redis.sentinel_password
 	tmdb.api_key mdblist.api_key introdb.api_key
 	ai.providers ai.chatgpt.credentials ai.api_key ai.asr_api_key subtitle_ai.api_key

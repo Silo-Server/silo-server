@@ -4,7 +4,10 @@ package backup
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"os"
 	"time"
 )
 
@@ -29,8 +32,9 @@ func downloadable(m *Manifest) []ObjectEntry {
 const (
 	// ScopeFull is every stored object as it is, with the manifest.
 	ScopeFull = "full"
-	// ScopeRestoreSet is restore-set.tar alone: the file an upload on
-	// another server takes.
+	// ScopeRestoreSet is restore-set.tar alone, decrypted: the file an
+	// upload on another server takes. An encrypted one streams decrypted
+	// through this server, never presigned.
 	ScopeRestoreSet = "restore-set"
 )
 
@@ -47,6 +51,9 @@ func (s *Service) DownloadLinks(ctx context.Context, id, scope string, ttl time.
 		entry, ok := m.object(RestoreSetName)
 		if !ok {
 			return nil, ErrNoRestoreSet
+		}
+		if m.Encrypted {
+			return s.decryptedRestoreSetLink(m, entry)
 		}
 		objects = []ObjectEntry{entry}
 	}
@@ -65,11 +72,27 @@ func (s *Service) DownloadLinks(ctx context.Context, id, scope string, ttl time.
 	return links, nil
 }
 
-// OpenObject streams one stored object of a complete backup as it is.
+// decryptedRestoreSetLink is the one link of an encrypted backup's restore
+// set: unsigned, for the caller to sign, since this server streams it
+// decrypted. The size is the stored one; the decrypted file is slightly
+// smaller.
+func (s *Service) decryptedRestoreSetLink(m *Manifest, entry ObjectEntry) ([]ObjectLink, error) {
+	if err := s.readable(m); err != nil {
+		return nil, err
+	}
+	return []ObjectLink{{Name: RestoreSetName, Size: entry.Size}}, nil
+}
+
+// OpenObject streams one object of a complete backup: a stored object as it
+// is, or, for an encrypted backup, restore-set.tar decrypted with this
+// server's key, released only once the stored bytes matched the manifest.
 func (s *Service) OpenObject(ctx context.Context, id, name string) (io.ReadCloser, int64, error) {
 	b, err := s.completeBackup(ctx, id)
 	if err != nil {
 		return nil, 0, err
+	}
+	if b.manifest.Encrypted && name == RestoreSetName {
+		return s.verifiedPlain(ctx, b, RestoreSetName)
 	}
 	for _, obj := range downloadable(b.manifest) {
 		if obj.Name == name {
@@ -77,6 +100,53 @@ func (s *Service) OpenObject(ctx context.Context, id, name string) (io.ReadClose
 		}
 	}
 	return nil, 0, ErrNotFound
+}
+
+// ErrStoredMismatch reports a stored object whose size or SHA-256 is not
+// the manifest's: it was replaced or damaged after the backup.
+var ErrStoredMismatch = errors.New("the stored file does not match its checksum in the backup's manifest")
+
+// verifiedPlain decrypts one object of an encrypted backup into an unlinked
+// temporary file while hashing the stored bytes, and returns the plaintext
+// only when they match the manifest's size and SHA-256. An object
+// substituted under the same key (it decrypts fine) is refused before a
+// byte of it is released. The temporary file has no name once created, so
+// nothing is left behind even if the process dies.
+func (s *Service) verifiedPlain(ctx context.Context, b storedBackup, base string) (io.ReadCloser, int64, error) {
+	want, ok := b.manifest.object(base)
+	if !ok {
+		return nil, 0, ErrNotFound
+	}
+	r, err := s.openPlain(ctx, b, base)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = r.Close() }()
+	spool, err := os.CreateTemp("", "silo-"+base+"-*")
+	if err != nil {
+		return nil, 0, err
+	}
+	_ = os.Remove(spool.Name())
+	fail := func(err error) (io.ReadCloser, int64, error) {
+		_ = spool.Close()
+		return nil, 0, err
+	}
+	// The plaintext of an age file is never larger than its ciphertext.
+	n, err := io.Copy(spool, io.LimitReader(ctxReader{ctx: ctx, r: r}, want.Size+1))
+	if err != nil {
+		return fail(fmt.Errorf("decrypting %s: %w", want.Name, err))
+	}
+	stored, err := r.storedEntry(want.Name)
+	if err != nil {
+		return fail(fmt.Errorf("reading %s: %w", want.Name, err))
+	}
+	if n > want.Size || stored.Size != want.Size || stored.SHA256 != want.SHA256 {
+		return fail(fmt.Errorf("%s: %w", want.Name, ErrStoredMismatch))
+	}
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return fail(err)
+	}
+	return spool, n, nil
 }
 
 // storedBackup is a complete backup at the current destination.
@@ -106,13 +176,32 @@ func (s *Service) completeBackup(ctx context.Context, id string) (storedBackup, 
 	return storedBackup{t: t, serverID: serverID, id: id, manifest: m}, nil
 }
 
-// openPlain opens one object of a backup. The stored bytes are hashed as
-// they are read; the caller checks storedEntry against the manifest once it
-// has read through.
-func (s *Service) openPlain(ctx context.Context, b storedBackup, name string) (*storedReader, error) {
-	body, _, err := b.t.Open(ctx, objectKey(b.serverID, b.id, name))
+// readable refuses an encrypted backup this server's key cannot open,
+// naming both keys by their check values.
+func (s *Service) readable(m *Manifest) error {
+	if !m.Encrypted {
+		return nil
+	}
+	if s.opts.ArchiveKey == nil || m.KeyCheck != s.opts.KeyCheck {
+		return &WrongKeyError{Backup: m.KeyCheck, Server: s.opts.KeyCheck}
+	}
+	return nil
+}
+
+// openPlain opens one object of a backup by its base name, decrypted when
+// the backup is encrypted. The stored bytes are hashed as they are read; the
+// caller checks storedEntry against the manifest once it has read through.
+func (s *Service) openPlain(ctx context.Context, b storedBackup, base string) (*storedReader, error) {
+	if err := s.readable(b.manifest); err != nil {
+		return nil, err
+	}
+	body, _, err := b.t.Open(ctx, objectKey(b.serverID, b.id, storedName(base, b.manifest.Encrypted)))
 	if err != nil {
 		return nil, err
 	}
-	return openStored(body), nil
+	var key *ArchiveKey
+	if b.manifest.Encrypted {
+		key = s.opts.ArchiveKey
+	}
+	return openStored(body, key)
 }

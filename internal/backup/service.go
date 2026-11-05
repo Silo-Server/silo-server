@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"maps"
 	"path"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -33,9 +32,8 @@ var (
 	// ErrSQLiteUserStore refuses a backup that could not include user data.
 	ErrSQLiteUserStore = errors.New("Backups need the PostgreSQL user store. Import your SQLite user store first.") //nolint:staticcheck // shown to admins as written
 	// ErrNoDestination reports that the default destination does not exist:
-	// backups are written to the operational store on this server's local
-	// storage, and an S3 artwork backend has none.
-	ErrNoDestination = errors.New("this server has no local storage for backups; backups need local artwork storage")
+	// an S3 artwork backend with no private bucket has no operational store.
+	ErrNoDestination = errors.New("this server has no private storage for backups; configure a private S3 bucket, or use local artwork storage")
 	// ErrNotEnoughSpace refuses a local backup that could fill the disk the
 	// database shares.
 	ErrNotEnoughSpace = errors.New("not enough free space at the backup destination")
@@ -56,6 +54,11 @@ type SettingsReader interface {
 	Get(ctx context.Context, key string) (string, error)
 }
 
+// SettingsWriter writes one server_settings row, encrypting sensitive keys.
+type SettingsWriter interface {
+	Set(ctx context.Context, key, value string) error
+}
+
 // TaskStarter starts the backup task on this process.
 type TaskStarter interface {
 	StartTask(key string) (taskmanager.TaskInfo, error)
@@ -68,14 +71,22 @@ type Options struct {
 	DatabaseURL string
 	Settings    SettingsReader
 	// Stores are the blob stores backups copy blobs from. Destination is
-	// the default destination, the operational store on local storage; nil
-	// when none exists. Uploads always use it.
+	// the default destination, the operational store; nil when none exists.
+	// Uploads always use it. backup.destination=s3 writes backups to the
+	// backup.s3.* bucket instead. Backups in a bucket, either one, are
+	// encrypted.
 	Stores      blobstore.Stores
 	Destination Destination
 	Locker      Locker
 	ServerID    func(context.Context) (string, error)
 	// KeyCheck is secret.KeyCheckValue of this server's SECRET_KEY.
 	KeyCheck string
+	// ArchiveKey encrypts every object written to a bucket (the S3
+	// destination, or the default one on a private bucket) and decrypts
+	// encrypted backups and uploads. Nil refuses both.
+	ArchiveKey *ArchiveKey
+	// SettingsWriter records the confirmed key check value; nil cannot.
+	SettingsWriter SettingsWriter
 	// ManifestKey is secret.BackupManifestKey of this server's SECRET_KEY:
 	// backups sign their manifests with it, and every read of one checks
 	// it. Nil writes unsigned manifests and checks none (tests).
@@ -149,6 +160,9 @@ func New(opts Options) *Service {
 	if opts.Now == nil {
 		opts.Now = time.Now
 	}
+	if opts.KeyCheck == "" && opts.ArchiveKey != nil {
+		opts.KeyCheck = opts.ArchiveKey.Check
+	}
 	if opts.FindTools == nil {
 		opts.FindTools = FindTools
 	}
@@ -165,16 +179,34 @@ func New(opts Options) *Service {
 	return &Service{opts: opts, stores: stores}
 }
 
-// Configured reports whether the destination exists: this server has an
-// operational store on local storage. It probes nothing.
-func (s *Service) Configured() bool { return s.opts.Destination != nil }
+// Configured reports whether the current destination exists: the default
+// one has an operational store, or backup.destination is s3, and a bucket
+// has the archive key its backups are encrypted with. It reads the setting
+// but probes nothing; a setting it cannot read reports false.
+func (s *Service) Configured() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	destination, err := s.destinationSetting(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "reading the backup destination failed", "component", "backup", "error", err)
+		return false
+	}
+	if s.encrypts(destination) && s.opts.ArchiveKey == nil {
+		return false
+	}
+	return destination == DestinationS3 || s.opts.Destination != nil
+}
 
 // Destinations lists the destinations this server can write to.
 func (s *Service) Destinations() []string {
-	if s.opts.Destination == nil {
-		return nil
+	var out []string
+	if s.opts.Destination != nil && (!s.opts.Destination.Encrypted() || s.opts.ArchiveKey != nil) {
+		out = append(out, DestinationDefault)
 	}
-	return []string{DestinationDefault}
+	if s.opts.ArchiveKey != nil {
+		out = append(out, DestinationS3)
+	}
+	return out
 }
 
 // SetTaskStarter wires "Back up now" to the task manager, which is built
@@ -446,8 +478,8 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 	if err != nil {
 		return RunResult{}, err
 	}
-	t := prep.t
-	if err := checkFreeSpace(ctx, t, prep.folders); err != nil {
+	t, err := prepareTarget(ctx, prep.t, prep.folders)
+	if err != nil {
 		return RunResult{}, err
 	}
 	includeFingerprints, includeSubtitles, err := s.contentSettings(ctx)
@@ -488,7 +520,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 	}
 
 	progress(10, "Dumping the database")
-	dumpEntry, tocMode, err := s.dump(ctx, t, tools, snapshot, excluded, objectKey(serverID, id, DumpName))
+	dumpEntry, tocMode, err := s.dump(ctx, t, tools, snapshot, excluded, objectKey(serverID, id, t.name(DumpName)))
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -501,7 +533,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 	objects = append([]ObjectEntry{dumpEntry}, objects...)
 
 	progress(70, fmt.Sprintf("Copying %d referenced files", len(facts.blobs)))
-	blobEntry, copied, err := s.writeBlobs(ctx, t, objectKey(serverID, id, BlobsName), facts.blobs)
+	blobEntry, copied, err := s.writeBlobs(ctx, t, objectKey(serverID, id, t.name(BlobsName)), facts.blobs)
 	if err != nil {
 		return RunResult{}, err
 	}
@@ -516,6 +548,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 		ExcludedTableData: excluded,
 		Objects:           append(objects, blobEntry),
 		RestoreSet:        restoreSet,
+		Encrypted:         t.key != nil,
 		KeyCheck:          s.opts.KeyCheck,
 		TOCCheck:          tocMode,
 		Blobs:             BlobSummary{Count: copied.count, Bytes: copied.bytes, IncludesSubtitles: includeSubtitles},
@@ -565,12 +598,27 @@ func writeManifest(ctx context.Context, t target, m *Manifest, key []byte) error
 }
 
 // preflight refuses what no backup on this server could survive, and
-// returns the destination a backup starting now writes to.
+// returns the destination a backup starting now writes to. Encrypted
+// backups (any bucket) are paused while the confirmed key check value is
+// not this server's.
 func (s *Service) preflight(ctx context.Context) (target, error) {
 	if s.sqliteUserStore() {
 		return target{}, ErrSQLiteUserStore
 	}
-	return s.target(ctx)
+	t, err := s.target(ctx)
+	if err != nil {
+		return target{}, err
+	}
+	if t.key != nil {
+		confirmed, err := s.keyConfirmed(ctx)
+		if err != nil {
+			return target{}, err
+		}
+		if !confirmed {
+			return target{}, ErrKeyNotConfirmed
+		}
+	}
+	return t, nil
 }
 
 func (s *Service) sqliteUserStore() bool {
@@ -628,6 +676,36 @@ func checkFreeSpace(ctx context.Context, t target, folders []folder) error {
 	return nil
 }
 
+// prepareTarget checks a local destination's free space and sizes a
+// bucket's upload parts, both from the previous backup. The returned target
+// carries the part size; the shared default destination is never changed.
+func prepareTarget(ctx context.Context, t target, folders []folder) (target, error) {
+	if d, ok := t.Destination.(partSizer); ok {
+		t.Destination = d.withPartSize(partSizeFor(largestObject(folders)))
+	}
+	return t, checkFreeSpace(ctx, t, folders)
+}
+
+// largestObject is the largest object of the newest complete backup whose
+// manifest this server authenticated: the size the next backup's objects
+// are likely to reach.
+func largestObject(folders []folder) int64 {
+	var largest int64
+	var newest time.Time
+	for _, f := range folders {
+		// An unverified manifest's sizes could be anyone's: a huge one
+		// would size every part to the largest S3 takes, held in memory.
+		if f.manifest == nil || !f.verified || !f.at.After(newest) {
+			continue
+		}
+		newest, largest = f.at, 0
+		for _, o := range f.manifest.Objects {
+			largest = max(largest, o.Size)
+		}
+	}
+	return largest
+}
+
 // writeBlobs streams blobs.tar into the destination while hashing it.
 func (s *Service) writeBlobs(ctx context.Context, t target, key string, refs []blobRef) (ObjectEntry, blobCopyResult, error) {
 	pr, pw := io.Pipe()
@@ -668,7 +746,7 @@ func folderTime(id string, started time.Time) time.Time {
 // outside it.
 func (s *Service) restoreSetFor(ctx context.Context, t target, tx pgx.Tx, closeSnapshot func(), serverID, id string, created time.Time, progress func(float64, string)) ([]ObjectEntry, *RestoreSetSummary, error) {
 	progress(60, "Writing the restore set")
-	entry, summary, err := s.writeRestoreSet(ctx, t, tx, closeSnapshot, objectKey(serverID, id, RestoreSetName),
+	entry, summary, err := s.writeRestoreSet(ctx, t, tx, closeSnapshot, objectKey(serverID, id, t.name(RestoreSetName)),
 		restoreSetMeta{serverID: serverID, keyCheck: s.opts.KeyCheck, createdAt: created, version: buildinfo.Current().Display})
 	closeSnapshot()
 	if err != nil {
@@ -744,14 +822,16 @@ func (s *Service) rotate(ctx context.Context, held Held, t target, serverID stri
 		pinned[active.backupID] = true
 	}
 	for _, id := range planRotation(folders, keep, now, pinned) {
-		if err := t.DeletePrefix(ctx, folderPrefix(serverID, id)); err != nil {
+		if err := deleteBackupFolder(ctx, t, folderPrefix(serverID, id)); err != nil {
+			// A bucket that refuses deletes (object lock) leaves retention to
+			// its lifecycle rules.
 			warnings = append(warnings, fmt.Sprintf("could not delete %s: %v", id, err))
 			continue
 		}
 		rotated = append(rotated, id)
 	}
 	for _, id := range planSweep(folders, now) {
-		if err := t.DeletePrefix(ctx, folderPrefix(serverID, id)); err != nil {
+		if err := deleteBackupFolder(ctx, t, folderPrefix(serverID, id)); err != nil {
 			warnings = append(warnings, fmt.Sprintf("could not delete incomplete %s: %v", id, err))
 			continue
 		}
@@ -763,93 +843,6 @@ func (s *Service) rotate(ctx context.Context, held Held, t target, serverID stri
 		slog.WarnContext(ctx, "backup rotation", "component", "backup", "warning", w)
 	}
 	return rotated, swept, warnings
-}
-
-// folders lists this server's backup folders at t, reading each manifest.
-func (s *Service) folders(ctx context.Context, t target, serverID string) ([]folder, error) {
-	return s.readFolders(ctx, t, serverID, nil)
-}
-
-// listFolders is folders for the listing, through the manifest cache: a
-// manifest listed unchanged since the listing last read it is not read
-// again. Rotation and a backup's own checks read every manifest.
-func (s *Service) listFolders(ctx context.Context, t target, serverID string) ([]folder, error) {
-	return s.readFolders(ctx, t, serverID, &s.manifests)
-}
-
-func (s *Service) readFolders(ctx context.Context, t target, serverID string, cache *manifestCache) ([]folder, error) {
-	objects, err := t.List(ctx, serverPrefix(serverID))
-	if err != nil {
-		return nil, err
-	}
-	byID := map[string]*folder{}
-	var order []string
-	listedManifest := map[string]bool{}
-	cached := map[string]bool{}
-	for _, obj := range objects {
-		rest := strings.TrimPrefix(obj.Key, serverPrefix(serverID))
-		id, name, ok := strings.Cut(rest, "/")
-		if !ok {
-			continue
-		}
-		at, kind, ok := ParseFolderName(id)
-		if !ok {
-			continue
-		}
-		f := byID[id]
-		if f == nil {
-			f = &folder{id: id, kind: kind, at: at}
-			byID[id] = f
-			order = append(order, id)
-		}
-		f.size += obj.Size
-		if obj.ModTime.After(f.newest) {
-			f.newest = obj.ModTime
-		}
-		if name == ManifestName {
-			listedManifest[id] = true
-			m, err := s.cachedManifest(ctx, t, serverID, id, obj, cache, cached)
-			if err != nil {
-				f.tampered = errors.Is(err, ErrManifestTampered)
-				f.unreadable = !f.tampered
-				slog.WarnContext(ctx, "unreadable backup manifest", "component", "backup", "id", id, "error", err)
-				continue
-			}
-			f.manifest, f.verified = m, m.authenticated || s.opts.ManifestKey == nil
-		}
-	}
-	if cache != nil {
-		cache.keepOnly(cacheLocation(t, serverPrefix(serverID)), cached)
-	}
-	out := make([]folder, 0, len(order))
-	for _, id := range order {
-		f := byID[id]
-		// The listing above is whole or an error: a folder without a
-		// manifest object in it has none.
-		f.noManifest = !listedManifest[id]
-		out = append(out, *f)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].at.After(out[j].at) })
-	return out, nil
-}
-
-// cachedManifest is readManifest through cache, when there is one, for the
-// manifest object obj of backup id; seen collects the cache locations the
-// listing saw.
-func (s *Service) cachedManifest(ctx context.Context, t target, serverID, id string, obj blobstore.ObjectInfo, cache *manifestCache, seen map[string]bool) (*Manifest, error) {
-	if cache == nil {
-		return s.readManifest(ctx, t, serverID, id)
-	}
-	location := cacheLocation(t, obj.Key)
-	seen[location] = true
-	if m, ok := cache.get(location, obj); ok {
-		return m, nil
-	}
-	m, err := s.readManifest(ctx, t, serverID, id)
-	if err == nil {
-		cache.put(cacheLocation(t, serverPrefix(serverID)), location, obj, m)
-	}
-	return m, err
 }
 
 // readManifest reads and checks the manifest of backup id of serverID: it
@@ -883,24 +876,56 @@ func readManifestObject(ctx context.Context, t target, key string) (*Manifest, e
 	if err != nil {
 		return nil, err
 	}
+	if t.Encrypted() && !m.Encrypted {
+		return nil, ErrPlaintextInBucket
+	}
 	m.storedSize = int64(len(data))
 	return m, nil
 }
 
-// target is the destination one operation uses.
+// ErrPlaintextInBucket refuses a manifest that says its backup is not
+// encrypted where every backup is. The manifest is the one object a backup
+// leaves in plaintext: anyone who can write the bucket could otherwise pass
+// off a dump and restore set of their own, with hashes they chose, which
+// only the encryption of every other object (keyed by SECRET_KEY) rules out.
+var ErrPlaintextInBucket = errors.New("a backup in a bucket must be encrypted, and this manifest says it is not; it was not written by this server")
+
+// target is the destination one operation uses, read from the settings when
+// it starts, and the key its new objects are encrypted with: nil stores
+// them as they are.
 type target struct {
 	Destination
+	key *ArchiveKey
 }
 
-// put streams r into key and returns the stored object's entry: its name,
-// size, and SHA-256.
+// name is the stored name of a new object of base at t.
+func (t target) name(base string) string { return storedName(base, t.key != nil) }
+
+// put streams plaintext r into key, encrypting when t encrypts, and returns
+// the stored object's entry: its name, size, and the SHA-256 of the stored
+// bytes.
 func (t target) put(ctx context.Context, key string, r io.Reader) (ObjectEntry, error) {
+	body := r
+	if t.key != nil {
+		enc := t.key.encryptingReader(r)
+		defer func() { _ = enc.Close() }()
+		body = enc
+	}
 	sum := newSum()
-	if err := t.Put(ctx, key, io.TeeReader(r, sum)); err != nil {
+	if err := t.Put(ctx, key, io.TeeReader(body, sum)); err != nil {
 		return ObjectEntry{}, err
 	}
 	return sum.entry(path.Base(key)), nil
 }
+
+// WrongKeyError is an encrypted backup taken with another SECRET_KEY.
+type WrongKeyError struct{ Backup, Server string }
+
+func (e *WrongKeyError) Error() string {
+	return fmt.Sprintf("this backup is encrypted with a different SECRET_KEY (key check %s; this server's is %s), so this server cannot read it", e.Backup, e.Server)
+}
+
+func (e *WrongKeyError) Unwrap() error { return ErrWrongKey }
 
 // sum hashes and counts the bytes written through it.
 type sum struct {
