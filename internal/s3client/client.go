@@ -110,7 +110,7 @@ func NewClient(cfg BucketConfig) *Client {
 
 	role := telemetry.Role(cfg.Role)
 	s3Client := s3.New(s3.Options{
-		APIOptions:   []func(*middleware.Stack) error{observeS3(role), markThrottled},
+		APIOptions:   []func(*middleware.Stack) error{observeS3(role), markThrottled, boundListResponses},
 		HTTPClient:   observedHTTPClient{inner: sharedHTTPClient(), role: role},
 		Region:       region,
 		BaseEndpoint: aws.String(cfg.Endpoint),
@@ -963,7 +963,24 @@ func (c *Client) ListObjects(ctx context.Context, bucket, prefix string) ([]stri
 	return keys, nil
 }
 
-// ListObjectInfos lists objects with the given prefix and returns summary metadata.
+// ErrListingTooLarge reports a full listing that passed maxListEntries or
+// maxListPages. Callers that need every key of a larger prefix page through it
+// with ListObjectInfosAfter or ListObjectInfosPage.
+var ErrListingTooLarge = errors.New("s3 listing exceeds the full-listing limit")
+
+// Full-listing ceilings. Real callers list one item's images, one backup
+// upload's parts (a terabyte at the 1 MiB minimum part size), catalog seeds, or
+// diagnostic reports, all well under a million keys. The ceilings stop an endpoint that keeps returning truncated pages with
+// fresh continuation tokens from growing the result, or the request count,
+// without bound. Variables so tests can lower them.
+var (
+	maxListEntries = 1_000_000
+	maxListPages   = 10_000
+)
+
+// ListObjectInfos lists objects with the given prefix and returns summary
+// metadata. It returns ErrListingTooLarge past maxListEntries entries or
+// maxListPages pages.
 func (c *Client) ListObjectInfos(ctx context.Context, bucket, prefix string) ([]ObjectInfo, error) {
 	var objects []ObjectInfo
 	prefixedPrefix := c.prefixedKey(prefix)
@@ -973,7 +990,10 @@ func (c *Client) ListObjectInfos(ctx context.Context, bucket, prefix string) ([]
 		Prefix: aws.String(prefixedPrefix),
 	})
 
-	for paginator.HasMorePages() {
+	for pages := 0; paginator.HasMorePages(); pages++ {
+		if pages == maxListPages || len(objects) >= maxListEntries {
+			return nil, fmt.Errorf("s3 ListObjectsV2 %s prefix=%s: %w (%d pages, %d entries)", bucket, prefix, ErrListingTooLarge, pages, len(objects))
+		}
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("s3 ListObjectsV2 %s prefix=%s: %w", bucket, prefix, err)

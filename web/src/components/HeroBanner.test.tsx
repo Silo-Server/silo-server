@@ -274,6 +274,37 @@ describe("HeroBanner", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("keeps each fading backdrop moving until its own fade ends", () => {
+    vi.useFakeTimers();
+    const items = [
+      ...twoSlides(),
+      movieSlide({ content_id: "movie-3", title: "Third", backdrop_url: "/third.jpg" }),
+    ];
+    const { container, unmount } = render(hero({ items }));
+    const motion = (src: string) =>
+      container.querySelector<HTMLImageElement>(`img[src="${src}"]`)?.style.animation;
+    const nextSlide = () => act(() => screen.getByRole("button", { name: "Next slide" }).click());
+
+    nextSlide();
+    act(() => vi.advanceTimersByTime(100));
+    nextSlide();
+
+    // The first slide is still fading, so it keeps its motion.
+    expect(motion("/first.jpg")).toBe("var(--animate-ken-burns-a)");
+    expect(motion("/second.jpg")).toBe("var(--animate-ken-burns-b)");
+
+    act(() => vi.advanceTimersByTime(900));
+    expect(motion("/first.jpg")).toBe("none");
+    expect(motion("/second.jpg")).toBe("var(--animate-ken-burns-b)");
+
+    act(() => vi.advanceTimersByTime(100));
+    expect(motion("/second.jpg")).not.toBe("var(--animate-ken-burns-b)");
+    expect(motion("/third.jpg")).toBe("var(--animate-ken-burns-a)");
+
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("starts only the active and next backdrop requests, including wraparound", () => {
     const { container } = render(hero({ items: tenSlides() }));
     const sources = () =>
