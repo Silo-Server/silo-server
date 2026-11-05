@@ -169,14 +169,23 @@ func (s *TitleAllowances) changeAllowances(ctx context.Context, m userstore.Allo
 // advances the account's access_policy_revision and records its audit row in
 // the same transaction, the way every other change to what a profile may see
 // does. The audit row is written only on a request that records domain
-// actions (an Audited v2 operation). It first locks the acting manager's
-// profile and refuses when its PIN changed since authorization.
+// actions (an Audited v2 operation). It first locks the account, then the
+// acting manager's profile, and refuses when that PIN changed since
+// authorization.
 func (s *TitleAllowances) changeAllowancesCount(ctx context.Context, m userstore.AllowanceManager, audit allowanceAudit, query string, args ...any) (int64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("beginning allowance change: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Account rows before the profile row, as account deletion and audited
+	// profile writes take them; the reverse order could deadlock with them.
+	if err := auditmutation.LockActors(ctx, tx); err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec(ctx, "SELECT 1 FROM users WHERE id = $1 FOR NO KEY UPDATE", m.UserID); err != nil {
+		return 0, fmt.Errorf("locking the account: %w", err)
+	}
 	if err := checkAllowanceManager(ctx, tx, m); err != nil {
 		return 0, err
 	}
