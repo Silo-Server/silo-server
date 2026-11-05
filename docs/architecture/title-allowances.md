@@ -56,9 +56,13 @@ collection (by id) holds, and reads only whole-title entries
 (`sub_item_id = ''`), as collection membership does elsewhere. Below the bound
 the list is exact. A profile allowed more sees at most 10,000, which ones is
 unspecified and can change between reads, and the rest stay hidden, so the
-bound fails closed. Writes are not capped: checking a live collection's
-future size at write time would be imprecise and racy, and the read bound
-alone keeps each request's cost fixed.
+bound fails closed. The bound caps the rows the read returns, not the
+entries it scans: an entry left out as a repeat is still read, so a profile
+whose live collections overlap heavily can scan up to their total membership
+before it has 10,000 titles. Those are manual collections the primary
+profile fills by hand, and each scanned entry costs index probes. Writes are
+not capped: checking a live collection's future size at write time would be
+imprecise and racy.
 
 The list is the union of:
 
