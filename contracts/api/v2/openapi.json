@@ -204736,7 +204736,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy and up to the 10,000 titles a profile may be allowed in all; a stored collection's copy reads at most its first 100,000 entries not yet allowed. Only titles the acting profile can see are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Not retryable: a repeated copy of a stored collection with more titles than one copy takes continues with the next ones, so after an uncertain response read listAllowedTitles before copying again. Household managers only.",
+        "summary": "Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy and up to the 10,000 titles a profile may be allowed in all; a stored collection's copy reads at most its first 100,000 entries not yet allowed. Only titles the acting profile can see, in libraries the target profile can reach, are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Not retryable: a repeated copy of a stored collection with more titles than one copy takes continues with the next ones, so after an uncertain response read listAllowedTitles before copying again. Household managers only.",
         "tags": [
           "profiles"
         ],

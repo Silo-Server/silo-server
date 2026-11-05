@@ -562,7 +562,7 @@ answers `403` otherwise.
   for a collection that no longer qualifies and so allows nothing.
 - `POST /api/v2/profiles/{id}/allowed-titles/copy-collection` with
   `{"collection_id": ...}` allows the movies and series a personal collection
-  holds now (for a smart collection, what its query matches for the acting
+  holds now, in libraries the profile can reach (for a smart collection, what its query matches for the acting
   profile), as individual allowances, and answers how many were new. One copy
   allows at most 10,000 titles; copying a stored collection again continues
   with titles the profile is not yet allowed. A stored collection's copy

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,6 +112,14 @@ func (r libraryItemRepo) EnsureAccessible(ctx context.Context, id string, filter
 		return catalog.ErrItemNotFound
 	}
 	return nil
+}
+
+func (r libraryItemRepo) EnsureAccessibleIDs(ctx context.Context, ids []string, filter catalog.AccessFilter) (map[string]bool, error) {
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = r.EnsureAccessible(ctx, id, filter) == nil
+	}
+	return out, nil
 }
 
 // TestTitleAllowanceAuthority pins who may allow what: only the household's
@@ -245,5 +254,39 @@ func TestAllowCollectionTitlesPagesPastHiddenTitles(t *testing.T) {
 	added, err := h.AllowCollectionTitles(ctx, actor, "kid", collection.ID)
 	if err != nil || added != 3 || len(store.copied) != 3 {
 		t.Fatalf("AllowCollectionTitles = %d, %v; copied %v; want the 3 visible titles past the hidden ones", added, err, store.copied)
+	}
+}
+
+// A copy keeps only titles in a library the target profile can reach, the
+// rule a single allowance applies, so a later library change cannot turn on
+// an above-limit allowance nobody granted for that library.
+func TestAllowCollectionTitlesSkipsUnreachableLibraries(t *testing.T) {
+	ctx := context.Background()
+	base := newHouseholdTestStore(t)
+	for _, p := range []userstore.Profile{{ID: "parent", Name: "Parent"}, {ID: "kid", Name: "Kid", MaxContentRating: "PG"}} {
+		if err := base.CreateProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	collection, err := base.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "parent", Name: "List", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := libraryItemRepo{
+		markItemRepo: markItemRepo{items: map[string]*models.MediaItem{
+			"movie:r":     {ContentID: "movie:r", Type: "movie", ContentRating: "R"},
+			"movie:other": {ContentID: "movie:other", Type: "movie", ContentRating: "R"},
+		}},
+		library: map[string]int{"movie:r": 1, "movie:other": 2},
+	}
+	store := &memoryAllowances{titles: map[string]bool{}, candidates: []string{"movie:r", "movie:other"}}
+	h := NewTitleAllowanceHandler(
+		NewPersonalDataHandler(testUserStoreProvider{store: base}, repo),
+		libraryScopes{libraries: map[string][]int{"kid": {1}}}, store,
+	)
+	actor := AllowanceActor{UserID: 1, ActiveProfileID: "parent", VerifyProfile: func(*userstore.Profile) error { return nil }}
+	added, err := h.AllowCollectionTitles(ctx, actor, "kid", collection.ID)
+	if err != nil || added != 1 || !slices.Equal(store.copied, []string{"movie:r"}) {
+		t.Fatalf("AllowCollectionTitles = %d, %v; copied %v; want only movie:r", added, err, store.copied)
 	}
 }

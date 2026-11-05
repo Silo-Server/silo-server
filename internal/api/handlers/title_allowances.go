@@ -474,6 +474,9 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if err := requireAllowanceRoom(profile, 1); err != nil {
 		return 0, err
 	}
+	if ids, err = h.reachableBy(ctx, actor.UserID, profileID, ids); err != nil {
+		return 0, err
+	}
 	// A copy takes what fits under the profile's bound.
 	ids = ids[:min(len(ids), userstore.MaxAllowedTitles-len(profile.AllowedTitleIDs))]
 	added, err := h.allowances.AllowTitles(ctx, manager, profileID, ids)
@@ -494,6 +497,24 @@ const (
 	copyPageSize          = 1_000
 	maxScannedCopyEntries = 100_000
 )
+
+// reachableBy keeps the ids in a library the profile can reach, the rule a
+// single allowance applies (no_library_access): a copy must not store an
+// allowance a later library change would turn on without a new grant.
+func (h *TitleAllowanceHandler) reachableBy(ctx context.Context, userID int, profileID string, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return ids, nil
+	}
+	scope, err := h.contentScope(ctx, userID, profileID)
+	if err != nil {
+		return nil, err
+	}
+	reachable, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, ids, libraryOnly(scope))
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check the profile's library access")
+	}
+	return slices.DeleteFunc(ids, func(id string) bool { return !reachable[id] }), nil
+}
 
 // storedCollectionTitles lists, in the collection's order, up to
 // maxCopiedTitles of the stored movies and series of a collection that the
