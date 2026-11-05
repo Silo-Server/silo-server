@@ -17,6 +17,7 @@ import (
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	publicevents "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/events"
 
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
@@ -44,22 +45,26 @@ type pluginSendResult struct {
 	message    string
 	retryAfter time.Duration
 	duration   time.Duration
+	// unavailable marks a send no plugin took: the kind's plugin is off,
+	// removed, or couldn't be reached. The destination isn't at fault.
+	unavailable bool
 }
 
 // pluginSendResultOf maps a plugin's answer onto what the sender does. A
 // gRPC error, a timeout, or an unreachable plugin is temporary. An empty
 // response acknowledges the message. An outcome from a newer SDK that this
 // host doesn't know drops the message without touching the destination,
-// which can neither loop nor lose a working destination.
+// which can neither loop nor lose a working destination. The plugin's
+// message is stored and shown to the owner, so credential assignments in it
+// are masked.
 func pluginSendResultOf(resp *pluginv1.SendNotificationResponse, err error) pluginSendResult {
 	if err != nil {
-		message := "The plugin didn't answer."
 		if errors.Is(err, ErrPluginChannelUnavailable) {
-			message = "The plugin that provides this destination isn't available."
+			return pluginSendResult{outcome: pluginSendRetry, message: "The plugin that provides this destination isn't available.", unavailable: true}
 		}
-		return pluginSendResult{outcome: pluginSendRetry, message: message}
+		return pluginSendResult{outcome: pluginSendRetry, message: "The plugin didn't answer."}
 	}
-	result := pluginSendResult{message: resp.GetMessage()}
+	result := pluginSendResult{message: logredact.SanitizeText(resp.GetMessage())}
 	switch resp.GetOutcome() {
 	case pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_UNSPECIFIED,
 		pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DELIVERED:
@@ -210,7 +215,15 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 		}
 		return
 	}
-	// The retry schedule ran out: about a day of failures in a row.
+	// The retry schedule ran out: about a day of failures in a row. When no
+	// plugin took the last send, the message is dropped but the destination
+	// stays enabled, so it resumes once its plugin is back.
+	if result.unavailable {
+		if finalize(WebhookOutcomeFailed, result.message, nil) {
+			s.recordFailure(ctx, d, result)
+		}
+		return
+	}
 	if finalize(WebhookOutcomeAutoDisabled, result.message, nil) {
 		s.recordFailure(ctx, d, result)
 		s.disable(ctx, d, "Deliveries failed for 24 hours", result.message)
@@ -249,7 +262,7 @@ func (s *pluginDestinationSender) send(ctx context.Context, host PluginChannelHo
 	result := pluginSendResultOf(resp, err)
 	result.duration = time.Since(started)
 	if err != nil && !errors.Is(err, ErrPluginChannelUnavailable) && ctx.Err() == nil {
-		s.logger.WarnContext(ctx, "plugin destination send failed", "destination_id", d.ID, "plugin_id", d.PluginID, "error", err)
+		s.logger.WarnContext(ctx, "plugin destination send failed", "destination_id", d.ID, "plugin_id", d.PluginID, "error", logredact.SanitizeText(err.Error()))
 	}
 	return result
 }

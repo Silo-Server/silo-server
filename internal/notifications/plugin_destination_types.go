@@ -27,18 +27,12 @@ type PluginChannel struct {
 	Description string
 	// Schema is the destination settings form the plugin declares.
 	Schema *pluginv1.ConfigSchema
-}
-
-// SecretFields lists the settings the form marks secret: write-only, never
-// returned by the API.
-func (c PluginChannel) SecretFields() []string {
-	var out []string
-	for _, field := range c.Schema.GetAdminForm().GetFields() {
-		if field.GetSecret() {
-			out = append(out, field.GetKey())
-		}
-	}
-	return out
+	// SecretFields lists the top-level settings that are write-only, never
+	// returned by the API. The host classifies them by the plugin runtime's
+	// rules for config schemas: a secret or password form control, or a
+	// writeOnly or password-format JSON Schema property, nested ones
+	// included.
+	SecretFields []string
 }
 
 // declaredFields returns the top-level properties of the settings JSON

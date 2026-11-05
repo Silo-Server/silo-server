@@ -49,7 +49,7 @@ func TestMergePluginSettings(t *testing.T) {
 		AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{
 			{Key: "topic"}, {Key: "token", Secret: true}, {Key: "priority"},
 		}},
-	}}
+	}, SecretFields: []string{"token"}}
 	stored := map[string]any{"topic": "alerts", "token": "s3cret", "priority": float64(3)}
 	for _, tc := range []struct {
 		name    string

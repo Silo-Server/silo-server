@@ -6,6 +6,11 @@ import { notificationScope } from "@/api/v2/notifications";
 import type { NotificationPreferences } from "@/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SchemaForm } from "@/components/admin/plugins/SchemaForm";
+import {
+  buildSchemaValues,
+  parseFieldTypes,
+  type BuildSchemaValuesOptions,
+} from "@/components/admin/plugins/schemaFormUtils";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -131,12 +136,32 @@ function DestinationFormDialog({
     ),
   };
 
+  // The form keeps number inputs as text and shows defaults it never
+  // stores, so settings go out typed as the schema declares them.
+  const settingsToSend = (options?: BuildSchemaValuesOptions) =>
+    form
+      ? buildSchemaValues(
+          form,
+          settings,
+          parseFieldTypes(channel?.settings_form.json_schema),
+          options,
+        )
+      : settings;
+
   const submit = () => {
     const onError = (error: unknown) =>
       toast.error(pluginDestinationErrorMessage(error, "The destination couldn't be saved"));
     if (editing) {
       update.mutate(
-        { id: destination.id, etag: destination.etag, name: name.trim(), settings, ...reasons },
+        {
+          id: destination.id,
+          etag: destination.etag,
+          name: name.trim(),
+          // An update merges over the stored settings, so an emptied field
+          // must be sent as an explicit clear.
+          settings: settingsToSend({ explicitClears: true }),
+          ...reasons,
+        },
         { onSuccess: () => onOpenChange(false), onError },
       );
       return;
@@ -147,7 +172,7 @@ function DestinationFormDialog({
         plugin_id: channel.plugin_id,
         capability_id: channel.capability_id,
         name: name.trim(),
-        settings,
+        settings: settingsToSend(),
         ...reasons,
       },
       {

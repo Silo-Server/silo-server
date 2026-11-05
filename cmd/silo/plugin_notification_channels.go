@@ -25,12 +25,15 @@ func (h pluginChannelHost) Channels(ctx context.Context) ([]notifications.Plugin
 	}
 	out := make([]notifications.PluginChannel, 0, len(channels))
 	for _, channel := range channels {
+		schema := channel.Descriptor.GetDestinationSchema()
+		_, secrets := plugins.ConfigSchemaFieldSets(schema)
 		out = append(out, notifications.PluginChannel{
 			PluginChannelRef: notifications.PluginChannelRef{PluginID: channel.PluginID, CapabilityID: channel.CapabilityID},
 			PluginName:       channel.PluginID,
 			DisplayName:      channel.Descriptor.GetDisplayName(),
 			Description:      channel.Descriptor.GetDescription(),
-			Schema:           channel.Descriptor.GetDestinationSchema(),
+			Schema:           schema,
+			SecretFields:     secrets,
 		})
 	}
 	return out, nil

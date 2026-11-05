@@ -10,6 +10,8 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
+	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
 // pluginValidateTimeout bounds a plugin's ValidateDestination call.
@@ -119,7 +121,7 @@ func (s *PluginDestinationService) Create(ctx context.Context, userID int, profi
 		PluginID:               channel.PluginID,
 		CapabilityID:           channel.CapabilityID,
 		Name:                   name,
-		Enabled:                true,
+		Enabled:                boolOrDefault(in.Enabled, true),
 		NotifyFavorites:        boolOrDefault(in.NotifyFavorites, true),
 		NotifyWatchlist:        boolOrDefault(in.NotifyWatchlist, true),
 		NotifyContinueWatching: boolOrDefault(in.NotifyContinueWatching, true),
@@ -294,7 +296,8 @@ func (s *PluginDestinationService) validate(ctx context.Context, channel PluginC
 		return fmt.Errorf("%w: %w", ErrPluginChannelUnavailable, err)
 	}
 	if !resp.GetValid() {
-		message := resp.GetMessage()
+		// The reason reaches the client, and secret settings never may.
+		message := logredact.SanitizeText(resp.GetMessage())
 		if message == "" {
 			message = "The plugin didn't accept these settings."
 		}
@@ -309,7 +312,7 @@ func (s *PluginDestinationService) validate(ctx context.Context, channel PluginC
 // clearSecrets removes secrets. Fields the schema doesn't declare are
 // refused.
 func mergePluginSettings(channel PluginChannel, stored, write map[string]any, clearSecrets []string) (map[string]any, error) {
-	secrets := channel.SecretFields()
+	secrets := channel.SecretFields
 	declared, restricted := channel.declaredFields()
 	merged := make(map[string]any, len(stored)+len(write))
 	for key, value := range stored {
@@ -342,7 +345,7 @@ func mergePluginSettings(channel PluginChannel, stored, write map[string]any, cl
 // publicPluginSettings splits stored settings into what the owner may read
 // and the names of the secret fields that hold a value.
 func publicPluginSettings(channel PluginChannel, stored map[string]any) (map[string]any, []string) {
-	secrets := channel.SecretFields()
+	secrets := channel.SecretFields
 	public := make(map[string]any, len(stored))
 	var set []string
 	for key, value := range stored {

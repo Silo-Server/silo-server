@@ -24,6 +24,8 @@ type scriptedChannelHost struct {
 	sent     []*pluginv1.SendNotificationRequest
 	// during runs inside the next send, before it answers.
 	during func()
+	// unavailable makes sends fail as if the plugin were turned off.
+	unavailable bool
 }
 
 func (h *scriptedChannelHost) Channels(context.Context) ([]PluginChannel, error) {
@@ -34,6 +36,7 @@ func (h *scriptedChannelHost) Channels(context.Context) ([]PluginChannel, error)
 			JsonSchema: `{"type":"object","properties":{"topic":{"type":"string"},"token":{"type":"string"}}}`,
 			AdminForm:  &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{Key: "topic"}, {Key: "token", Secret: true}}},
 		},
+		SecretFields: []string{"token"},
 	}}, nil
 }
 
@@ -51,6 +54,9 @@ func (h *scriptedChannelHost) SendNotification(_ context.Context, _ PluginChanne
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.unavailable {
+		return nil, ErrPluginChannelUnavailable
+	}
 	h.sent = append(h.sent, req)
 	if len(h.outcomes) == 0 {
 		return &pluginv1.SendNotificationResponse{}, nil
@@ -125,6 +131,35 @@ func enqueueTestAttempt(t *testing.T, pool *pgxpool.Pool, repo *PluginDestinatio
 
 func anyRevision(int64) error { return nil }
 
+// processTestAttempt queues one of account A's deliveries to the
+// destination as its attemptNumber-th try, claims it, and processes it.
+func processTestAttempt(t *testing.T, pool *pgxpool.Pool, sender *pluginDestinationSender, destinationID string, attemptNumber int) DeliveryAttempt {
+	t.Helper()
+	ctx := t.Context()
+	deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
+	enqueueTestAttempt(t, pool, sender.repo, deliveryID, destinationID)
+	if _, err := pool.Exec(ctx, `UPDATE plugin_destination_delivery_attempts SET attempt_number = $2 WHERE notification_delivery_id = $1`,
+		deliveryID, attemptNumber-1); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := sender.repo.ClaimPendingForDelivery(ctx, deliveryID)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %d attempts, %v", len(claimed), err)
+	}
+	// A second claim finds nothing: the lease hides the attempt.
+	if again, _ := sender.repo.ClaimPendingForDelivery(ctx, deliveryID); len(again) != 0 {
+		t.Fatalf("claimed the same attempt twice")
+	}
+	sender.processAttempt(ctx, claimed[0])
+	var attempt DeliveryAttempt
+	if err := pool.QueryRow(ctx, `SELECT `+pluginDestinationAttemptColumns+` FROM plugin_destination_delivery_attempts WHERE id = $1`, claimed[0].ID).
+		Scan(&attempt.ID, &attempt.NotificationDeliveryID, &attempt.TargetID, &attempt.AttemptNumber, &attempt.AttemptedAt,
+			&attempt.NextRetryAt, &attempt.Outcome, &attempt.FailureMessage); err != nil {
+		t.Fatal(err)
+	}
+	return attempt
+}
+
 // Profile IDs repeat across accounts: account B's "default" profile must
 // never read, change or delete account A's destination.
 func TestPluginDestinationsStayOnTheirAccountDB(t *testing.T) {
@@ -192,24 +227,7 @@ func TestPluginDestinationDeliveryOutcomesDB(t *testing.T) {
 	send := func(outcome *pluginv1.SendNotificationResponse) DeliveryAttempt {
 		t.Helper()
 		host.outcomes = append(host.outcomes, outcome)
-		deliveryID := insertTestDelivery(t, pool, accountA, sharedID)
-		enqueueTestAttempt(t, pool, sender.repo, deliveryID, d.ID)
-		claimed, err := sender.repo.ClaimPendingForDelivery(ctx, deliveryID)
-		if err != nil || len(claimed) != 1 {
-			t.Fatalf("claim = %d attempts, %v", len(claimed), err)
-		}
-		// A second claim finds nothing: the lease hides the attempt.
-		if again, _ := sender.repo.ClaimPendingForDelivery(ctx, deliveryID); len(again) != 0 {
-			t.Fatalf("claimed the same attempt twice")
-		}
-		sender.processAttempt(ctx, claimed[0])
-		var attempt DeliveryAttempt
-		if err := pool.QueryRow(ctx, `SELECT `+pluginDestinationAttemptColumns+` FROM plugin_destination_delivery_attempts WHERE id = $1`, claimed[0].ID).
-			Scan(&attempt.ID, &attempt.NotificationDeliveryID, &attempt.TargetID, &attempt.AttemptNumber, &attempt.AttemptedAt,
-				&attempt.NextRetryAt, &attempt.Outcome, &attempt.FailureMessage); err != nil {
-			t.Fatal(err)
-		}
-		return attempt
+		return processTestAttempt(t, pool, sender, d.ID, 1)
 	}
 
 	retry := send(&pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_RETRY, RetryAfterSeconds: 600, Message: "rate limited"})
@@ -226,6 +244,18 @@ func TestPluginDestinationDeliveryOutcomesDB(t *testing.T) {
 	}
 	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); got.ConsecutiveFailures != 0 || got.LastSuccessAt == nil {
 		t.Fatalf("after delivery the destination is %+v, want the streak reset", got)
+	}
+
+	// A plugin that stays off through the whole retry schedule drops the
+	// message but leaves the destination enabled for when it's back.
+	host.unavailable = true
+	unavailable := processTestAttempt(t, pool, sender, d.ID, webhookMaxAttempts)
+	host.unavailable = false
+	if unavailable.Outcome != WebhookOutcomeFailed {
+		t.Fatalf("after the schedule ran out with the plugin off the attempt is %s, want failed", unavailable.Outcome)
+	}
+	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || got.DisabledReason != nil || len(notices) != 0 {
+		t.Fatalf("after the plugin was off the destination is %+v with %d notices, want it enabled", got, len(notices))
 	}
 
 	invalid := send(&pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, Message: "token revoked"})

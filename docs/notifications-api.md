@@ -570,8 +570,10 @@ same ID, answers `404`.
 returns the kinds enabled plugins provide now, unpaginated. Each names its
 `plugin_id` and `capability_id`, which stay stable across plugin upgrades, a
 `display_name` and `description`, and `settings_form`, the plugin's settings
-schema and form (the shape of an admin plugin config schema). Fields the form
-marks `secret` are write-only.
+schema and form (the shape of an admin plugin config schema). Settings are
+write-only when the form marks them `secret` or gives them a password control,
+or when their JSON Schema property is `writeOnly` or has `format: password`,
+nested ones included, as for plugin configuration.
 
 ### List destinations
 

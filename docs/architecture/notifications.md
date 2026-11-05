@@ -356,8 +356,9 @@ to the plugin service, so neither package imports the other.
 - **Rows.** `notification_plugin_destinations` names a kind by `plugin_id`
   and `capability_id`, which survive plugin upgrades and reinstalls. Settings
   are one `enc:v1:` envelope bound to the row id
-  (`notification_plugin_destination:<id>:config`). Secret form fields are
-  never returned; a write that leaves one blank keeps the stored value.
+  (`notification_plugin_destination:<id>:config`). Secret fields, classified
+  by `plugins.ConfigSchemaFieldSets` as for plugin configuration, are never
+  returned; a write that leaves one blank keeps the stored value.
 - **Enqueue.** Like webhooks, attempts are enqueued in the fanout
   transaction, filtered by the destination's reason flags and a per-profile
   limit of 30 a minute, and in `DispatchOperational` when
@@ -375,11 +376,14 @@ to the plugin service, so neither package imports the other.
   call has 15 seconds. A plugin's `RETRY` (or an error) walks the schedule,
   honoring `retry_after_seconds` up to 6 hours; `FAILED` drops the message;
   `DESTINATION_INVALID` drops it and disables the destination at once. An
-  exhausted schedule disables it too. Disabling applies only while the
-  destination still has the settings the failed send used, so an owner who
-  fixes them during that send isn't disabled. Disabling posts a
-  `plugin_destination.auto_disabled` notice that reaches no webhook or
-  plugin destination.
+  exhausted schedule disables it too, unless the plugin was off, removed or
+  unreachable for the last attempt: the message is then dropped and the
+  destination stays enabled for when the plugin is back. Disabling applies
+  only while the destination still has the settings the failed send used,
+  so an owner who fixes them during that send isn't disabled. Disabling
+  posts a `plugin_destination.auto_disabled` notice that reaches no webhook
+  or plugin destination. Plugin messages and errors are masked with
+  `logredact.SanitizeText` before they are stored, logged or returned.
 - **Multi-node.** Any API server may claim an attempt and calls its own
   plugin process. A send that outlives its lease can still repeat (its
   result is then discarded); the request's `delivery_key` is the same on
