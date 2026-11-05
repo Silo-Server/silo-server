@@ -140,7 +140,10 @@ is unconditional. `WriteInstanceStateResponse.version` is the version just
 written. The version check is part of the write statement and runs under
 the scope's advisory lock, so two servers cannot both land at one version;
 a create-only write on a full scope fails with `RESOURCE_EXHAUSTED`, not
-`ABORTED`. The version is not part of the AAD.
+`ABORTED`. The version is not part of the AAD. A database trigger, not the
+write statement, advances the version on every update, so a write from a
+server on an older release during a rolling deploy still moves it and a
+conditional write cannot land over it.
 
 ## Proxy nodes
 

@@ -123,7 +123,9 @@ func (s *InstanceStateStore) Write(ctx context.Context, installationID int, scop
 	// Writers to one scope are serialized by a transaction-scoped advisory
 	// lock so two concurrent new keys cannot both observe the same count and
 	// overshoot the key budget. Each statement below checks the version in
-	// its own WHERE, so the condition and the write are one step.
+	// its own WHERE, so the condition and the write are one step. A trigger
+	// advances the version on every update, including an older release's
+	// during a rolling deploy, so the statements leave the column alone.
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("writing plugin instance state: %w", err)
@@ -154,7 +156,7 @@ func replaceInstanceState(ctx context.Context, tx pgx.Tx, installationID int, sc
 	var version int64
 	err := tx.QueryRow(ctx, `
 		UPDATE plugin_instance_state
-		SET state_value = $4, version = version + 1, updated_at = NOW()
+		SET state_value = $4, updated_at = NOW()
 		WHERE plugin_installation_id = $1 AND host_scope = $2 AND state_key = $3 AND version = $5
 		RETURNING version
 	`, installationID, scope, key, sealed, expectedVersion).Scan(&version)
@@ -183,7 +185,6 @@ func upsertInstanceState(ctx context.Context, tx pgx.Tx, installationID int, sco
 		) < $5
 		ON CONFLICT (plugin_installation_id, host_scope, state_key) DO UPDATE SET
 			state_value = EXCLUDED.state_value,
-			version = plugin_instance_state.version + 1,
 			updated_at = NOW()
 		WHERE $6::boolean
 		RETURNING version

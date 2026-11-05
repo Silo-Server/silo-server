@@ -161,3 +161,32 @@ func TestInstanceStateConditionalWritesPostgres(t *testing.T) {
 		}
 	})
 }
+
+// TestInstanceStateVersionAdvancesOnAnyUpdatePostgres covers a rolling
+// deploy: a server on an older release updates a key without touching the
+// version column, and a conditional write at the version read before that
+// update must still fail.
+func TestInstanceStateVersionAdvancesOnAnyUpdatePostgres(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := context.Background()
+	store := NewInstanceStateStore(pool, instanceStateTestCipher(t))
+	id := seedResidentQueryInstallation(t, pool, true)
+	version, err := store.Write(ctx, id, HostScopeAPI, "k", []byte("a"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The older release's upsert never sets the column.
+	if _, err := pool.Exec(ctx, `
+		UPDATE plugin_instance_state SET updated_at = NOW()
+		WHERE plugin_installation_id = $1 AND host_scope = $2 AND state_key = 'k'
+	`, id, HostScopeAPI); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Write(ctx, id, HostScopeAPI, "k", []byte("b"), &version); !errors.Is(err, pluginhost.ErrInstanceStateVersionConflict) {
+		t.Fatalf("write at the version before an older release's update = %v, want conflict", err)
+	}
+	got, gotVersion, err := store.Read(ctx, id, HostScopeAPI, "k")
+	if err != nil || string(got) != "a" || gotVersion != version+1 {
+		t.Fatalf("read = %q@%d, %v; want %q@%d", got, gotVersion, err, "a", version+1)
+	}
+}
