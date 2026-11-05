@@ -150,12 +150,13 @@ var profileByIDQuery = `
 // series, as a title allowance may name (userstore.AllowanceTitleTypes).
 //
 // Every request the profile makes reads this, so it reads at most
-// userstore.MaxAllowedTitles rows: UNION ALL with no ORDER BY lets PostgreSQL
-// stop as soon as it has them rather than reading every member of every live
-// collection. The rows may repeat and come in no order; profileFromRow sorts
-// and deduplicates them. Titles past the bound stay hidden, which fails
-// closed. userIDExpr and profileIDExpr are SQL expressions for the profile's
-// key.
+// allowedTitleRowLimit rows: UNION ALL with no ORDER BY lets PostgreSQL stop
+// as soon as it has them rather than reading every member of every live
+// collection. The collection branch leaves out titles the profile is allowed
+// directly, so only titles in more than one allowed collection repeat;
+// profileFromRow deduplicates the rows and keeps at most
+// userstore.MaxAllowedTitles of them. userIDExpr and profileIDExpr are SQL
+// expressions for the profile's key.
 func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	return `
 	           SELECT content_id FROM profile_title_allowances ta
@@ -169,8 +170,15 @@ func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	           WHERE ca.user_id = ` + userIDExpr + ` AND ca.profile_id = ` + profileIDExpr + `
 	             AND c.collection_type = 'manual' AND creator.is_primary
 	             AND mi.type IN ('movie', 'series')
-	           LIMIT ` + strconv.Itoa(userstore.MaxAllowedTitles)
+	             AND NOT EXISTS (SELECT 1 FROM profile_title_allowances dup
+	                 WHERE dup.user_id = ca.user_id AND dup.profile_id = ca.profile_id AND dup.content_id = ci.media_item_id)
+	           LIMIT ` + strconv.Itoa(allowedTitleRowLimit)
 }
+
+// allowedTitleRowLimit bounds the allowance rows one profile read takes:
+// twice the titles it keeps, so titles held by more than one allowed
+// collection do not use up the bound before deduplication.
+const allowedTitleRowLimit = 2 * userstore.MaxAllowedTitles
 
 func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	var libraryIDs []int
@@ -189,7 +197,8 @@ func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	}
 	if len(allowedTitleIDs) > 0 {
 		slices.Sort(allowedTitleIDs)
-		p.AllowedTitleIDs = slices.Compact(allowedTitleIDs)
+		allowedTitleIDs = slices.Compact(allowedTitleIDs)
+		p.AllowedTitleIDs = allowedTitleIDs[:min(len(allowedTitleIDs), userstore.MaxAllowedTitles)]
 	}
 	return p, nil
 }

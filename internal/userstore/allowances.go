@@ -24,11 +24,12 @@ type CollectionAllowance struct {
 	CreatedAt    string
 }
 
-// MaxAllowedTitles bounds the allowed titles one profile's read takes,
-// directly and through live collections together. The list is read with
-// every request the profile makes, so a profile allowed more than this sees
-// only this many of them, and the rest stay hidden, rather than slowing every
-// request.
+// MaxAllowedTitles bounds the distinct allowed titles one profile's read
+// keeps, directly and through live collections together. The list is read
+// with every request the profile makes, so the read takes a bounded number of
+// rows (pgstore.ProfileAllowedTitleIDsSQL); a profile allowed more than this
+// sees at most this many of them, and the rest stay hidden, rather than
+// slowing every request.
 const MaxAllowedTitles = 10_000
 
 // CollectionPosition is a stored collection entry's place in the

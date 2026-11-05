@@ -572,7 +572,8 @@ answers `403` otherwise.
   allowed titles before copying again.
 
 A profile sees at most 10,000 of its allowed titles, from its own allowances
-and its live collections together; past that, the rest stay hidden.
+and its live collections together. Past that, which ones it sees is
+unspecified and the rest stay hidden.
 
 An allowed title is visible and playable for the profile everywhere content is
 reached, Jellyfin clients included. A series allowance covers its seasons and
