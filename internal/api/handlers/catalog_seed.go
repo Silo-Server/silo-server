@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -67,7 +66,6 @@ type catalogSeedErrorResponse struct {
 }
 
 const catalogSeedImportPrefix = "catalog-seeds/"
-const remoteCatalogSeedTimeout = 10 * time.Minute
 const catalogSeedPublishExpiry = 7 * 24 * time.Hour
 
 func (h *CatalogSeedHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +314,6 @@ const defaultLocalImportDir = "/catalog-seeds"
 var (
 	errCatalogSeedImportSourceUnavailable = errors.New("catalog imports from stored artifacts require configured storage")
 	errCatalogSeedImportInvalidLocalPath  = errors.New("Local path must point to an existing .json.gz file")
-	errCatalogSeedImportInvalidRemoteURL  = errors.New("Remote URL must point to an http(s) .json.gz file")
 )
 
 func (h *CatalogSeedHandler) SetLocalImportDir(dir string) {
@@ -367,41 +364,6 @@ func (h *CatalogSeedHandler) readImportDataFromArtifactKey(ctx context.Context, 
 		return nil, errCatalogSeedImportSourceUnavailable
 	}
 	return h.store.GetObject(ctx, h.store.Bucket(), artifactKey)
-}
-
-func readImportDataFromRemoteURL(ctx context.Context, remoteURL string) ([]byte, error) {
-	parsed, err := url.Parse(remoteURL)
-	if err != nil {
-		return nil, errCatalogSeedImportInvalidRemoteURL
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, errCatalogSeedImportInvalidRemoteURL
-	}
-	if !strings.HasSuffix(strings.ToLower(parsed.Path), ".json.gz") {
-		return nil, errCatalogSeedImportInvalidRemoteURL
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, remoteURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("building remote catalog seed request: %w", err)
-	}
-
-	client := &http.Client{Timeout: remoteCatalogSeedTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("downloading remote catalog seed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("downloading remote catalog seed: unexpected status %d", resp.StatusCode)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("reading remote catalog seed: %w", err)
-	}
-	return data, nil
 }
 
 func (h *CatalogSeedHandler) resolveExportJobArtifactRef(ctx context.Context, jobID string) (string, string, error) {
