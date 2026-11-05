@@ -133,11 +133,12 @@ type ratingPosition struct {
 	MediaItemID string `json:"m"`
 }
 
-// listRatings answers from the same listing v1 GET /ratings uses, paged by
-// keyset, without the items the viewer may not see. A limit+1 probe decides
-// has_more from the raw rows and the cursor is the last raw row of the page,
-// so a hidden entry never hides the rows behind it. The cursor is bound to
-// the viewer policy that filtered the page, as the favorites cursor is.
+// listRatings answers the profile's ratings of items the viewer may see,
+// paged by keyset; a limit+1 probe decides has_more. The seam reads past
+// hidden ratings, so the probe and the cursor row are always visible items
+// and a cursor never names a title the viewer may not see. The cursor is
+// bound to the viewer policy that filtered the page, as the favorites cursor
+// is.
 func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *RatingListInput) (*RatingCollectionOutput, error) {
 	if reg.deps.Ratings == nil {
 		return nil, unavailable("ratings")
@@ -159,7 +160,7 @@ func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *Rati
 		}
 		after = &mediacatalog.RatingKey{RatedAt: ratedAt, MediaItemID: pos.MediaItemID}
 	}
-	ratings, visible, err := reg.deps.Ratings.ListRatingsPage(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), after, in.Limit+1)
+	ratings, err := reg.deps.Ratings.ListRatingsPage(ctx, userID, profileID, handlers.AccessFilterFromContext(ctx, ""), after, in.Limit+1)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -173,9 +174,7 @@ func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *Rati
 	}
 	items := make([]RatingEntry, 0, len(ratings))
 	for _, r := range ratings {
-		if visible[r.MediaItemID] {
-			items = append(items, RatingEntry{ItemID: ID(r.MediaItemID), Rating: r.Rating, RatedAt: NewInstant(r.RatedAt)})
-		}
+		items = append(items, RatingEntry{ItemID: ID(r.MediaItemID), Rating: r.Rating, RatedAt: NewInstant(r.RatedAt)})
 	}
 	return &RatingCollectionOutput{Body: RatingCollection{Collection: Paginated(items, next)}}, nil
 }

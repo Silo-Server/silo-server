@@ -1450,7 +1450,10 @@ decided from the raw store rows, so an entry the catalog no longer has or the vi
 see never hides the rows behind it. Ratings follow the same access rule as the two lists: the
 lists omit items the viewer may not see, `getRating` and v1 `GET /ratings/{item_id}` answer `404`
 for such an item whether or not it was rated, and the stored rating is kept, so it shows again
-once the restriction is lifted. Removing a favorite, watchlist entry or rating runs no access
+once the restriction is lifted. `RatingsHandler.ListRatingsPage` reads past hidden ratings until it
+has a full page of visible ones, so the probe row and the cursor row of `listRatings` are always
+items the viewer may see: a cursor payload is signed, not encrypted, and must not name a hidden
+title. Removing a favorite, watchlist entry or rating runs no access
 check, so a profile can drop an entry for an item that has since left its scope; the answer is
 the same `204` whether or not the entry existed. The v1 handlers call the same seams
 (`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their

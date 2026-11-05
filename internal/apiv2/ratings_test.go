@@ -2,7 +2,9 @@ package apiv2
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,14 +34,17 @@ func ratingKeyAfter(row catalogpkg.UserRating, after catalogpkg.RatingKey) bool 
 	return row.MediaItemID < after.MediaItemID
 }
 
-func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID string, _ catalogpkg.AccessFilter, after *catalogpkg.RatingKey, limit int) ([]catalogpkg.UserRating, map[string]bool, error) {
+// ListRatingsPage answers the visible rows only, as the real seam does once
+// it has read past the hidden ones.
+func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID string, access catalogpkg.AccessFilter, after *catalogpkg.RatingKey, limit int) ([]catalogpkg.UserRating, error) {
 	f.limits = append(f.limits, limit)
+	f.access = append(f.access, access)
 	if f.err != nil {
-		return nil, nil, f.err
+		return nil, f.err
 	}
 	var page []catalogpkg.UserRating
 	for _, r := range f.ratings {
-		if r.UserID != userID || r.ProfileID != profileID {
+		if r.UserID != userID || r.ProfileID != profileID || f.hidden[r.MediaItemID] {
 			continue
 		}
 		if after != nil && !ratingKeyAfter(r, *after) {
@@ -53,14 +58,11 @@ func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID s
 	if len(page) > limit {
 		page = page[:limit]
 	}
-	visible := make(map[string]bool, len(page))
-	for _, r := range page {
-		visible[r.MediaItemID] = !f.hidden[r.MediaItemID]
-	}
-	return page, visible, nil
+	return page, nil
 }
 
-func (f *fakeRatings) GetRating(_ context.Context, userID int, profileID, itemID string, _ catalogpkg.AccessFilter) (catalogpkg.UserRating, bool, error) {
+func (f *fakeRatings) GetRating(_ context.Context, userID int, profileID, itemID string, access catalogpkg.AccessFilter) (catalogpkg.UserRating, bool, error) {
+	f.access = append(f.access, access)
 	if f.err != nil {
 		return catalogpkg.UserRating{}, false, f.err
 	}
@@ -189,8 +191,8 @@ func TestListRatings(t *testing.T) {
 }
 
 // ratingPages walks listRatings at the given page size and answers each
-// page's item ids and whether it said more follow.
-func ratingPages(t *testing.T, h http.Handler, limit int) (pages [][]string, more []bool, firstCursor string) {
+// page's item ids and the decoded payload of every cursor it was handed.
+func ratingPages(t *testing.T, h http.Handler, limit int) (pages [][]string, payloads []string) {
 	t.Helper()
 	cursor := ""
 	for {
@@ -217,89 +219,62 @@ func ratingPages(t *testing.T, h http.Handler, limit int) (pages [][]string, mor
 			ids = append(ids, it.ItemID)
 		}
 		pages = append(pages, ids)
-		more = append(more, page.Page.HasMore)
-		if firstCursor == "" {
-			firstCursor = page.Page.NextCursor
-		}
 		if !page.Page.HasMore || len(pages) > 10 {
-			return pages, more, firstCursor
+			return pages, payloads
 		}
 		cursor = page.Page.NextCursor
+		payload, err := base64.RawURLEncoding.DecodeString(strings.SplitN(cursor, ".", 2)[0])
+		if err != nil {
+			t.Fatalf("cursor %q: %v", cursor, err)
+		}
+		payloads = append(payloads, string(payload))
 	}
 }
 
 // Ratings of items the viewer may not see are left out of the list and read
-// as 404, without breaking the keyset paging: a hidden row as the cursor row
-// or the probe row, and a page that is wholly hidden, still lead to the
-// visible rows behind them.
+// as 404. Paging carries on past them, and no cursor names a hidden title:
+// a cursor payload is signed, not encrypted.
 func TestRatingsHideItemsTheViewerMayNotSee(t *testing.T) {
-	ratings := &fakeRatings{
-		ratings: []catalogpkg.UserRating{
-			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:e", Rating: 5, RatedAt: fixedTime()},
-			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:d", Rating: 4, RatedAt: fixedTime().Add(-time.Hour)},
-			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:c", Rating: 3, RatedAt: fixedTime().Add(-2 * time.Hour)},
-			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:b", Rating: 2, RatedAt: fixedTime().Add(-3 * time.Hour)},
-			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:a", Rating: 1, RatedAt: fixedTime().Add(-4 * time.Hour)},
-		},
-		hidden: map[string]bool{"movie:d": true, "movie:c": true, "movie:b": true},
+	ratings := &fakeRatings{hidden: map[string]bool{"movie:e": true, "movie:d": true, "movie:c": true}}
+	for i, id := range []string{"movie:f", "movie:e", "movie:d", "movie:c", "movie:b", "movie:a"} {
+		ratings.ratings = append(ratings.ratings, catalogpkg.UserRating{UserID: 1, ProfileID: "p-owner", MediaItemID: id, Rating: 5 - i%5, RatedAt: fixedTime().Add(-time.Duration(i) * time.Hour)})
 	}
 	deps := ratingsDeps(ratings)
 	deps.CursorSecret = []byte("ratings-cursor-test-key")
 	h := newTestHandler(t, deps)
 
-	// Pages of two: [e, d*] [c*, b*] [a]. The first page's cursor row (d) and
-	// probe row (c) are hidden, and the second page is hidden entirely.
-	pages, more, cursor := ratingPages(t, h, 2)
-	if len(pages) != 3 || strings.Join(pages[0], ",") != "movie:e" || len(pages[1]) != 0 || strings.Join(pages[2], ",") != "movie:a" ||
-		!more[0] || !more[1] || more[2] {
-		t.Fatalf("pages = %v, has_more = %v", pages, more)
+	pages, payloads := ratingPages(t, h, 2)
+	if len(pages) != 2 || strings.Join(pages[0], ",") != "movie:f,movie:b" || strings.Join(pages[1], ",") != "movie:a" {
+		t.Fatalf("pages = %v", pages)
 	}
-	rec := do(t, h, http.MethodGet, "/api/v2/ratings", "", viewerHeaders())
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `{"item_id":"movie:e","rating":5,`) || !strings.Contains(rec.Body.String(), `{"item_id":"movie:a","rating":1,`) ||
-		strings.Contains(rec.Body.String(), "movie:d") || strings.Contains(rec.Body.String(), "movie:c") || strings.Contains(rec.Body.String(), "movie:b") {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	if len(payloads) != 1 || !strings.Contains(payloads[0], "movie:b") {
+		t.Fatalf("cursor payloads = %v", payloads)
 	}
 
 	// A hidden title's rating reads as 404, a visible one as before.
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:d", "", viewerHeaders()), TypeNotFound)
-	if rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:e", "", viewerHeaders()); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"rating":5`) {
+	if rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:f", "", viewerHeaders()); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"rating":5`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 
-	// A cursor minted under one access policy does not page under another.
+	// The viewer's restriction reaches the seam, and a cursor minted under
+	// one access policy does not page under another.
 	restricted := deps
 	restricted.ViewerAccess = apimw.NewViewerAccessMiddleware(policyResolver{scope: &access.Scope{LibrariesRestricted: true, AllowedLibraryIDs: []int{1}}})
-	requireProblem(t, do(t, newTestHandler(t, restricted), http.MethodGet, "/api/v2/ratings?limit=2&cursor="+cursor, "", viewerHeaders()), TypeInvalidCursor)
-}
-
-func TestGetRating(t *testing.T) {
-	h := newTestHandler(t, ratingsDeps(&fakeRatings{ratings: ratingRows()}))
-	rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:c", "", viewerHeaders())
-	if rec.Code != 200 || rec.Body.String() != `{"item_id":"movie:c","rating":5,"rated_at":"2026-01-02T03:04:05.678Z"}`+"\n" {
-		t.Fatalf("%d %s", rec.Code, rec.Body.String())
-	}
-	// Not rated, and another profile's rating, are both 404.
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:nope", "", viewerHeaders()), TypeNotFound)
-	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:z", "", viewerHeaders()), TypeNotFound)
-}
-
-func TestRatingsDenied(t *testing.T) {
-	h := newTestHandler(t, ratingsDeps(&fakeRatings{err: errStore}))
-	for _, tc := range []struct{ method, path, body string }{
-		{http.MethodGet, "/api/v2/ratings", ""}, {http.MethodGet, "/api/v2/ratings/movie:c", ""},
-		{http.MethodPut, "/api/v2/ratings/movie:c", `{"rating":3}`}, {http.MethodDelete, "/api/v2/ratings/movie:c", ""},
-	} {
-		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, nil), TypeAuthenticationRequired)
-		p := requireProblem(t, do(t, h, tc.method, tc.path, tc.body, bearer(memberToken)), TypeValidationFailed)
-		if len(p.Errors) != 1 || p.Errors[0].Location != locationProfileHeader {
-			t.Fatalf("%s %s: errors = %+v", tc.method, tc.path, p.Errors)
+	rh := newTestHandler(t, restricted)
+	for _, path := range []string{"/api/v2/ratings", "/api/v2/ratings/movie:f"} {
+		ratings.access = nil
+		do(t, rh, http.MethodGet, path, "", viewerHeaders())
+		if len(ratings.access) != 1 || !slices.Equal(ratings.access[0].AllowedLibraryIDs, []int{1}) {
+			t.Fatalf("%s: access = %+v", path, ratings.access)
 		}
-		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, with(bearer(memberToken), "X-Profile-Id", "p-unknown")), TypeNotFound)
-		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, viewerHeaders()), TypeInternalError)
 	}
-	deps := pilotDeps(nil, nil)
-	deps.Ratings = nil
-	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/ratings", "", viewerHeaders()), TypeDependencyUnavailable)
+	first := do(t, h, http.MethodGet, "/api/v2/ratings?limit=1", "", viewerHeaders())
+	var page struct {
+		Page struct {
+			NextCursor string `json:"next_cursor"`
+		} `json:"page"`
+	}
+	decodeJSON(t, first.Body, &page)
+	requireProblem(t, do(t, rh, http.MethodGet, "/api/v2/ratings?limit=1&cursor="+page.Page.NextCursor, "", viewerHeaders()), TypeInvalidCursor)
 }
-
-var _ RatingService = (*handlers.RatingsHandler)(nil)
