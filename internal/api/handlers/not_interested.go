@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -23,13 +24,18 @@ func (h *PersonalDataHandler) ListNotInterestedPage(ctx context.Context, viewer 
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	entries, err := visibleListPage(ctx, h, viewer, after, limit, "Failed to list Not interested titles",
-		func(after *userstore.ListKey, n int) ([]userstore.NotInterestedEntry, error) {
+	entries, err := visibleListPage(ctx, h, viewer, after, limit, personalListSource[userstore.NotInterestedEntry]{
+		list: catalog.PersonalListNotInterested, store: store, failure: "Failed to list Not interested titles",
+		read: func(after *userstore.ListKey, n int) ([]userstore.NotInterestedEntry, error) {
 			return store.ListNotInterestedPage(ctx, viewer.ProfileID, after, n)
 		},
-		func(e userstore.NotInterestedEntry) userstore.ListKey {
+		keyOf: func(e userstore.NotInterestedEntry) userstore.ListKey {
 			return userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID}
-		})
+		},
+		fromRow: func(r catalog.PersonalListRow) userstore.NotInterestedEntry {
+			return userstore.NotInterestedEntry{ProfileID: r.ProfileID, MediaItemID: r.MediaItemID, AddedAt: r.AddedAt}
+		},
+	})
 	if err != nil {
 		return nil, nil, err
 	}

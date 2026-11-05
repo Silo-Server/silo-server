@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userdb"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // markItemRepo answers the items it holds; anything else is not found.
@@ -288,9 +289,10 @@ func TestPersonalListPagesSkipHiddenEntries(t *testing.T) {
 
 // Favorites and the watchlist can hold episodes, and an episode gets a card
 // when its series is visible. The list pages keep such entries by the same
-// rule, against the real catalog: under a TV-only restriction the episode
-// and its series are answered and the movie is skipped, and under a
-// movies-only restriction only the movie is.
+// rule, against the real catalog and with both user stores (SQLite reads
+// and checks in batches, PostgreSQL filters in one query): under a TV-only
+// restriction the episode and its series are answered and the movie is
+// skipped, and under a movies-only restriction only the movie is.
 func TestPersonalListPagesKeepVisibleEpisodesDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -332,14 +334,17 @@ func TestPersonalListPagesKeepVisibleEpisodesDB(t *testing.T) {
 		}
 	}
 
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	entries := []string{episode, movie, series} // newest first
+
+	// SQLite user store: the lists are read and checked in batches.
 	db, err := userdb.NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
 	if err != nil {
 		t.Fatalf("open user database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	for _, table := range []string{"favorites", "watchlist"} {
-		for i, id := range []string{episode, movie, series} {
+		for i, id := range entries {
 			if _, err := db.DB.Exec(`INSERT INTO `+table+` (profile_id, media_item_id, added_at) VALUES ('p1', ?, ?)`,
 				id, start.Add(-time.Duration(i)*time.Minute).Format(time.RFC3339)); err != nil {
 				t.Fatalf("seed %s: %v", table, err)
@@ -347,37 +352,65 @@ func TestPersonalListPagesKeepVisibleEpisodesDB(t *testing.T) {
 		}
 	}
 
-	h := NewPersonalDataHandler(testUserStoreProvider{store: userdb.NewSQLiteUserStore(db.DB)}, catalog.NewItemRepository(pool))
-	h.SetEpisodeRepo(catalog.NewEpisodeRepository(pool))
-	for _, tc := range []struct {
-		name    string
-		allowed []int
-		want    string
+	// PostgreSQL user store: one query applies the access filter.
+	var pgUser int
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, prefix).Scan(&pgUser); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, pgUser) })
+	for _, table := range []string{"user_favorites", "user_watchlist"} {
+		for i, id := range entries {
+			if _, err := pool.Exec(ctx, `INSERT INTO `+table+` (user_id, profile_id, media_item_id, added_at) VALUES ($1, 'p1', $2, $3)`,
+				pgUser, id, start.Add(-time.Duration(i)*time.Minute)); err != nil {
+				t.Fatalf("seed %s: %v", table, err)
+			}
+		}
+	}
+	pgStore, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, pgUser)
+	if err != nil {
+		t.Fatalf("open postgres user store: %v", err)
+	}
+
+	for _, backend := range []struct {
+		name   string
+		userID int
+		store  userstore.UserStore
 	}{
-		{"TV only", []int{tv}, episode + "," + series},
-		{"movies only", []int{movies}, movie},
+		{"sqlite", 1, userdb.NewSQLiteUserStore(db.DB)},
+		{"postgres", pgUser, pgStore},
 	} {
-		viewer := PersonalListViewer{UserID: 1, ProfileID: "p1", Access: catalog.AccessFilter{UserID: 1, ProfileID: "p1", AllowedLibraryIDs: tc.allowed}}
-		favorites, favCards, err := h.ListFavoritesPage(ctx, viewer, nil, 10)
-		if err != nil {
-			t.Fatalf("%s favorites: %v", tc.name, err)
-		}
-		watchlist, watchCards, err := h.ListWatchlistPage(ctx, viewer, nil, 10)
-		if err != nil {
-			t.Fatalf("%s watchlist: %v", tc.name, err)
-		}
-		var favIDs, watchIDs []string
-		for _, e := range favorites {
-			favIDs = append(favIDs, e.MediaItemID)
-		}
-		for _, e := range watchlist {
-			watchIDs = append(watchIDs, e.MediaItemID)
-		}
-		if strings.Join(favIDs, ",") != tc.want || len(favCards) != len(favorites) {
-			t.Errorf("%s favorites: entries %v, %d cards; want %s", tc.name, favIDs, len(favCards), tc.want)
-		}
-		if strings.Join(watchIDs, ",") != tc.want || len(watchCards) != len(watchlist) {
-			t.Errorf("%s watchlist: entries %v, %d cards; want %s", tc.name, watchIDs, len(watchCards), tc.want)
+		h := NewPersonalDataHandler(testUserStoreProvider{store: backend.store}, catalog.NewItemRepository(pool))
+		h.SetEpisodeRepo(catalog.NewEpisodeRepository(pool))
+		for _, tc := range []struct {
+			name    string
+			allowed []int
+			want    string
+		}{
+			{"TV only", []int{tv}, episode + "," + series},
+			{"movies only", []int{movies}, movie},
+		} {
+			viewer := PersonalListViewer{UserID: backend.userID, ProfileID: "p1", Access: catalog.AccessFilter{UserID: backend.userID, ProfileID: "p1", AllowedLibraryIDs: tc.allowed}}
+			favorites, favCards, err := h.ListFavoritesPage(ctx, viewer, nil, 10)
+			if err != nil {
+				t.Fatalf("%s %s favorites: %v", backend.name, tc.name, err)
+			}
+			watchlist, watchCards, err := h.ListWatchlistPage(ctx, viewer, nil, 10)
+			if err != nil {
+				t.Fatalf("%s %s watchlist: %v", backend.name, tc.name, err)
+			}
+			var favIDs, watchIDs []string
+			for _, e := range favorites {
+				favIDs = append(favIDs, e.MediaItemID)
+			}
+			for _, e := range watchlist {
+				watchIDs = append(watchIDs, e.MediaItemID)
+			}
+			if strings.Join(favIDs, ",") != tc.want || len(favCards) != len(favorites) {
+				t.Errorf("%s %s favorites: entries %v, %d cards; want %s", backend.name, tc.name, favIDs, len(favCards), tc.want)
+			}
+			if strings.Join(watchIDs, ",") != tc.want || len(watchCards) != len(watchlist) {
+				t.Errorf("%s %s watchlist: entries %v, %d cards; want %s", backend.name, tc.name, watchIDs, len(watchCards), tc.want)
+			}
 		}
 	}
 }

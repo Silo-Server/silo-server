@@ -208,13 +208,18 @@ func (h *PersonalDataHandler) ListFavoritesPage(ctx context.Context, viewer Pers
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	favorites, err := visibleListPage(ctx, h, viewer, after, limit, "Failed to list favorites",
-		func(after *userstore.ListKey, n int) ([]userstore.Favorite, error) {
+	favorites, err := visibleListPage(ctx, h, viewer, after, limit, personalListSource[userstore.Favorite]{
+		list: catalog.PersonalListFavorites, store: store, failure: "Failed to list favorites",
+		read: func(after *userstore.ListKey, n int) ([]userstore.Favorite, error) {
 			return store.ListFavoritesPage(ctx, viewer.ProfileID, after, n)
 		},
-		func(f userstore.Favorite) userstore.ListKey {
+		keyOf: func(f userstore.Favorite) userstore.ListKey {
 			return userstore.ListKey{AddedAt: f.AddedAt, MediaItemID: f.MediaItemID}
-		})
+		},
+		fromRow: func(r catalog.PersonalListRow) userstore.Favorite {
+			return userstore.Favorite{ProfileID: r.ProfileID, MediaItemID: r.MediaItemID, AddedAt: r.AddedAt}
+		},
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -456,13 +461,18 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	entries, err := visibleListPage(ctx, h, viewer, after, limit, "Failed to list watchlist",
-		func(after *userstore.ListKey, n int) ([]userstore.WatchlistEntry, error) {
+	entries, err := visibleListPage(ctx, h, viewer, after, limit, personalListSource[userstore.WatchlistEntry]{
+		list: catalog.PersonalListWatchlist, store: store, failure: "Failed to list watchlist",
+		read: func(after *userstore.ListKey, n int) ([]userstore.WatchlistEntry, error) {
 			return store.ListWatchlistPage(ctx, viewer.ProfileID, after, n)
 		},
-		func(e userstore.WatchlistEntry) userstore.ListKey {
+		keyOf: func(e userstore.WatchlistEntry) userstore.ListKey {
 			return userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID}
-		})
+		},
+		fromRow: func(r catalog.PersonalListRow) userstore.WatchlistEntry {
+			return userstore.WatchlistEntry{ProfileID: r.ProfileID, MediaItemID: r.MediaItemID, AddedAt: r.AddedAt}
+		},
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -481,10 +491,28 @@ func (h *PersonalDataHandler) ListWatchlistPage(ctx context.Context, viewer Pers
 // query once it starts reading past hidden entries.
 const listScanBatchMax = 400
 
-// visibleListPage reads a personal list's keyset pages from after until it
-// has limit entries the viewer may see or the store runs out, and answers
-// those entries in store order. An entry is kept by the same test the cards
-// use (listEntriesVisible), so every entry answered has a card unless a
+// personalListSource is how visibleListPage reads one personal list: its
+// table for the single-query path, and the user store's own keyset read
+// for the fallback.
+type personalListSource[E any] struct {
+	list    catalog.PersonalList
+	store   userstore.UserStore
+	failure string
+	read    func(after *userstore.ListKey, n int) ([]E, error)
+	keyOf   func(E) userstore.ListKey
+	fromRow func(catalog.PersonalListRow) E
+}
+
+// visiblePersonalListReader answers a page of visible list entries in one
+// query. *catalog.ItemRepository implements it.
+type visiblePersonalListReader interface {
+	ListVisiblePersonalPage(ctx context.Context, list catalog.PersonalList, userID int, profileID string, filter catalog.AccessFilter, after *userstore.ListKey, limit int) ([]catalog.PersonalListRow, error)
+}
+
+// visibleListPage answers at most limit entries of a personal list that the
+// viewer may see, after the key, in store order. An entry is kept by the
+// rule the cards use (a catalog item the viewer may see, or an episode of a
+// series the viewer may see), so every entry answered has a card unless a
 // later filter (the watchlist's fully-watched series) drops it.
 //
 // The v2 listings build their next cursor from the last entry of a page and
@@ -493,53 +521,65 @@ const listScanBatchMax = 400
 // viewer may not see, and a page of hidden entries would come back empty
 // with has_more true. Skipping hidden entries here closes both.
 //
-// The first read asks for limit rows, so a list without hidden entries costs
-// one store query and one access query as before. Each further read is four
-// times larger, up to listScanBatchMax, so a long run of hidden entries
-// costs a few round trips rather than one per page; the total is bounded by
-// the list's length. An empty library allowlist admits nothing, so it reads
-// nothing. The store queries stay unfiltered because the user store may be
-// SQLite, which has no catalog to join, and recommendations read the same
-// lists without an access filter.
-func visibleListPage[E any](ctx context.Context, h *PersonalDataHandler, viewer PersonalListViewer, after *userstore.ListKey, limit int, listFailure string, read func(after *userstore.ListKey, n int) ([]E, error), keyOf func(E) userstore.ListKey) ([]E, error) {
+// With the PostgreSQL user store the lists sit beside the catalog, and one
+// query applies the access filter (ListVisiblePersonalPage), so a page is a
+// single index-ordered read however many hidden entries come before it.
+// A SQLite user store has no catalog to join, so there the store's keyset
+// pages are read and checked in batches: the first asks for limit rows,
+// each further one is four times larger up to listScanBatchMax, and the
+// total is bounded by the list's length. Either way an empty library
+// allowlist reads nothing. The store's own list queries stay unfiltered
+// because recommendations read the same lists without an access filter.
+func visibleListPage[E any](ctx context.Context, h *PersonalDataHandler, viewer PersonalListViewer, after *userstore.ListKey, limit int, src personalListSource[E]) ([]E, error) {
 	if h.itemRepo == nil {
 		// No catalog to check against: answer the store page as is.
-		rows, err := read(after, limit)
+		rows, err := src.read(after, limit)
 		if err != nil {
-			return nil, apiError(http.StatusInternalServerError, "internal_error", listFailure)
+			return nil, apiError(http.StatusInternalServerError, "internal_error", src.failure)
 		}
 		return rows, nil
 	}
 	if viewer.Access.AllowedLibraryIDs != nil && len(viewer.Access.AllowedLibraryIDs) == 0 {
 		return nil, nil
 	}
+	if reader, ok := h.itemRepo.(visiblePersonalListReader); ok && userstore.HasCatalogSQLState(src.store) {
+		rows, err := reader.ListVisiblePersonalPage(ctx, src.list, viewer.UserID, viewer.ProfileID, viewer.Access, after, limit)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", src.failure)
+		}
+		out := make([]E, len(rows))
+		for i, row := range rows {
+			out[i] = src.fromRow(row)
+		}
+		return out, nil
+	}
 	kept := make([]E, 0, limit)
 	batch := limit
 	for len(kept) < limit {
-		rows, err := read(after, batch)
+		rows, err := src.read(after, batch)
 		if err != nil {
-			return nil, apiError(http.StatusInternalServerError, "internal_error", listFailure)
+			return nil, apiError(http.StatusInternalServerError, "internal_error", src.failure)
 		}
 		if len(rows) == 0 {
 			break
 		}
 		ids := make([]string, len(rows))
 		for i, row := range rows {
-			ids[i] = keyOf(row).MediaItemID
+			ids[i] = src.keyOf(row).MediaItemID
 		}
 		visible, err := h.listEntriesVisible(ctx, ids, viewer.Access)
 		if err != nil {
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
 		}
 		for _, row := range rows {
-			if len(kept) < limit && visible[keyOf(row).MediaItemID] {
+			if len(kept) < limit && visible[src.keyOf(row).MediaItemID] {
 				kept = append(kept, row)
 			}
 		}
 		if len(rows) < batch {
 			break
 		}
-		last := keyOf(rows[len(rows)-1])
+		last := src.keyOf(rows[len(rows)-1])
 		after = &last
 		batch = min(max(batch*4, limit), max(limit, listScanBatchMax))
 	}

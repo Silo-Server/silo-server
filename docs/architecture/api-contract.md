@@ -1446,14 +1446,16 @@ added or removed between pages neither repeats nor skips a row and equal timesta
 the unique item id. PostgreSQL keeps full stored timestamp precision in the cursor and
 orders by the raw `added_at` column so the existing profile/time indexes can supply ordered
 rows; visible API instants remain UTC milliseconds. The v1 offset queries are untouched. The
-favorites, watchlist and Not interested page seams read past entries the catalog no longer has or
-the viewer may not see (an episode entry counts as visible when its series is, as its card does),
-in growing batches, until they have a full page of visible entries, so
-`has_more` comes from a visible probe entry and the cursor row is always an item the viewer may see:
-a cursor payload is signed, not encrypted, and must not name a hidden title. A watchlist series
-hidden because it is fully watched is still an entry without a card, since the viewer may see it.
-The store page queries stay unfiltered because the user store may be SQLite and recommendations
-read the same lists without an access filter. The v1 handlers call the same seams
+favorites, watchlist and Not interested page seams answer only entries the viewer may see (an episode
+entry counts as visible when its series is, as its card does), so `has_more` comes from a visible
+probe entry and the cursor row is always an item the viewer may see: a cursor payload is signed, not
+encrypted, and must not name a hidden title. With the PostgreSQL user store one page query applies
+the access filter (`ItemRepository.ListVisiblePersonalPage`, reading each list's profile index in page
+order); a SQLite user store has no catalog to join, so there the seams read the store's keyset pages
+in growing batches until a page is full. The user store's own list queries stay unfiltered because
+recommendations read the same lists without an access filter. A watchlist series hidden because it
+is fully watched is still an entry without a card, since the viewer may see it. The v1 handlers call
+the same seams
 (`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their
 watchlist twins, `RatingsHandler.ListRatings`/`GetRating`/`SetRating`/`DeleteRating`), so both
 surfaces read and write one store. Operation ids: `listFavorites`, `getFavorite`, `addFavorite`,
