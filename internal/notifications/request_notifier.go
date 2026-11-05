@@ -163,7 +163,11 @@ func (n *RequestFulfillmentNotifier) AnnounceFulfilled(ctx context.Context, req 
 	if n == nil || n.backend == nil {
 		return
 	}
-	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestFulfilled, requestEventInfoFor(req))
+	// The server-channel fulfilled post does not name the requester; only the
+	// plugin event carries req's requester name.
+	info := requestEventInfoFor(req)
+	info.RequesterName = ""
+	n.backend.PostServerChannelRequestEvent(ctx, ServerChannelEventRequestFulfilled, info)
 	n.backend.publishRequestEvent(ctx, ServerChannelEventRequestFulfilled, req)
 }
 

@@ -11,14 +11,17 @@ import (
 type fakeFulfillmentBackend struct {
 	disabled    map[string]bool
 	deliveries  []Delivery
-	channelPost int
+	channelInfo []RequestEventInfo
+	published   []requests.Request
 }
 
-func (f *fakeFulfillmentBackend) PostServerChannelRequestEvent(context.Context, string, RequestEventInfo) {
-	f.channelPost++
+func (f *fakeFulfillmentBackend) PostServerChannelRequestEvent(_ context.Context, _ string, info RequestEventInfo) {
+	f.channelInfo = append(f.channelInfo, info)
 }
 
-func (f *fakeFulfillmentBackend) publishRequestEvent(context.Context, string, requests.Request) {}
+func (f *fakeFulfillmentBackend) publishRequestEvent(_ context.Context, _ string, req requests.Request) {
+	f.published = append(f.published, req)
+}
 
 func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, _ int, profileID string) (bool, error) {
 	return !f.disabled[profileID], nil
@@ -67,12 +70,21 @@ func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
 	}
 	// The server-wide post waits for AnnounceFulfilled, which the caller runs
 	// once the request is stamped, so a retried delivery never repeats it.
-	if backend.channelPost != 0 {
-		t.Fatalf("channel posts after NotifyFulfilled = %d, want none", backend.channelPost)
+	if len(backend.channelInfo) != 0 {
+		t.Fatalf("channel posts after NotifyFulfilled = %d, want none", len(backend.channelInfo))
 	}
-	notifier.AnnounceFulfilled(context.Background(), fulfilledRequest())
-	if backend.channelPost != 1 {
-		t.Fatalf("channel posts after AnnounceFulfilled = %d, want 1", backend.channelPost)
+	announced := fulfilledRequest()
+	announced.RequesterUsername = "bob"
+	notifier.AnnounceFulfilled(context.Background(), announced)
+	if len(backend.channelInfo) != 1 {
+		t.Fatalf("channel posts after AnnounceFulfilled = %d, want 1", len(backend.channelInfo))
+	}
+	// The plugin event names the requester; the server-channel post does not.
+	if len(backend.published) != 1 || RequestEventPayload(backend.published[0]).RequesterName != "bob" {
+		t.Fatalf("published request events = %+v, want one naming bob", backend.published)
+	}
+	if name := backend.channelInfo[0].RequesterName; name != "" {
+		t.Fatalf("server-channel fulfilled post requester = %q, want none", name)
 	}
 }
 

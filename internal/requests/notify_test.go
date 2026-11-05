@@ -91,12 +91,15 @@ type fakeNotifier struct {
 	announced  []string
 	// announcedContent is the catalog item each announcement named.
 	announcedContent []string
-	err              error
+	// announcedRequester is the requester username each announcement carried.
+	announcedRequester []string
+	err                error
 }
 
 func (f *fakeNotifier) AnnounceFulfilled(_ context.Context, req Request) {
 	f.announced = append(f.announced, req.ID)
 	f.announcedContent = append(f.announcedContent, req.LibraryContentID)
+	f.announcedRequester = append(f.announcedRequester, req.RequesterUsername)
 }
 
 func (f *fakeNotifier) NotifyFulfilled(_ context.Context, req Request, contentID string) error {
