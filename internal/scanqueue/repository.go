@@ -650,11 +650,13 @@ func (r *Repository) GetByID(ctx context.Context, id string) (*models.ScanRun, e
 }
 
 // RequeueStaleRunning returns to the queue every worker run whose heartbeat is
-// older than staleAfter, measured on the database clock that stamped it.
+// older than staleAfter, measured on the database clock that stamped it. Like
+// Requeue, it drops the abandoned attempt's progress.
 func (r *Repository) RequeueStaleRunning(ctx context.Context, staleAfter time.Duration) (int, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE scan_runs
 		SET status = $2,
+			result_payload = '{}'::jsonb,
 			started_at = NULL,
 			heartbeat_at = NULL,
 			completed_at = NULL,

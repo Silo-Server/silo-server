@@ -721,6 +721,9 @@
 ./internal/scanqueue TestRunningScanStopsWhenItsClaimEndsElsewhereDB
 ./internal/scanqueue TestStaleWorkerLeavesALaterClaimRunningDB
 
+# A run requeued as stale drops the abandoned attempt's progress.
+./internal/scanqueue TestStaleRequeueClearsTheAbandonedProgressDB
+
 # Password sign-in spends one attempt budget per name on every surface.
 ./internal/auth TestSignInNameBudgetDB
 
