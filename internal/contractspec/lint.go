@@ -101,6 +101,7 @@ func Lint(doc []byte) []string {
 		}
 		lintFreeForm(fail, componentSchemas+name, d.Components.Schemas[name])
 		lintMemberShapes(fail, componentSchemas+name, d.Components.Schemas[name])
+		lintNullableEnums(fail, componentSchemas+name, d.Components.Schemas[name])
 	}
 	if _, ok := d.Components.SecuritySchemes[securityScheme]; !ok {
 		fail("components.securitySchemes.%s is missing", securityScheme)
@@ -356,13 +357,38 @@ func lintMemberShapes(fail func(string, ...any), where string, s *schema) {
 	if s == nil || s.Ref != "" {
 		return
 	}
-	lintNullableEnum(fail, where, s)
 	for _, name := range sortedKeys(s.Properties) {
 		member := s.Properties[name]
 		lintValueShape(fail, where+"."+name, name, "", member)
 		lintMemberShapes(fail, where+"."+name, member)
 	}
 	lintMemberShapes(fail, where+".items", s.Items)
+}
+
+// lintNullableEnums walks a schema tree through its members, array items,
+// typed map values, and oneOf, anyOf and allOf branches (every place the
+// generator adds null), and applies lintNullableEnum to each schema; a $ref
+// is checked as its own component.
+func lintNullableEnums(fail func(string, ...any), where string, s *schema) {
+	if s == nil || s.Ref != "" {
+		return
+	}
+	lintNullableEnum(fail, where, s)
+	for _, name := range sortedKeys(s.Properties) {
+		lintNullableEnums(fail, where+"."+name, s.Properties[name])
+	}
+	lintNullableEnums(fail, where+".items", s.Items)
+	if ap, ok := s.AdditionalProperties.(map[string]any); ok {
+		var value schema
+		if raw, err := json.Marshal(ap); err == nil && json.Unmarshal(raw, &value) == nil {
+			lintNullableEnums(fail, where+".additionalProperties", &value)
+		}
+	}
+	for keyword, branches := range map[string][]*schema{"oneOf": s.OneOf, "anyOf": s.AnyOf, "allOf": s.AllOf} {
+		for i, branch := range branches {
+			lintNullableEnums(fail, fmt.Sprintf("%s.%s[%d]", where, keyword, i), branch)
+		}
+	}
 }
 
 // lintNullableEnum requires a nullable schema with an enum to list null in
@@ -493,6 +519,9 @@ type schema struct {
 	Items                *schema            `json:"items"`
 	AdditionalProperties any                `json:"additionalProperties"`
 	Enum                 []any              `json:"enum"`
+	OneOf                []*schema          `json:"oneOf"`
+	AnyOf                []*schema          `json:"anyOf"`
+	AllOf                []*schema          `json:"allOf"`
 	// Nullable is set when the type list names "null"; Type keeps the
 	// other name.
 	Nullable   bool           `json:"-"`
