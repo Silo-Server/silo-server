@@ -455,11 +455,12 @@ func TestRunSheetsRejectsPrematureEOFWithRealFFmpeg(t *testing.T) {
 
 // TestRunSheetsAudioTailWithRealFFmpeg reads sheets from a two-second video
 // with audio, sampled at 1, 3, 5, and 7 s, through a window: MPEG-TS always
-// reads one, and Matroska does with ReadThrough. Samples after the video
-// ends but within an audio stream show the last frame and publish, whichever
-// audio stream runs on and however many programs list it, and a declared
-// audio stream without packets does not fail the copy. A file whose audio stops with its video, as a
-// truncated one does, still fails as empty.
+// reads one, and Matroska does with ReadThrough. The video is dark until a
+// light keyframe at 1.5 s. Samples after the video ends but within an audio
+// stream show that last frame and publish, whichever audio stream runs on
+// and however many programs list it, and a declared audio stream without
+// packets does not fail the copy. A file whose audio stops with its video,
+// as a truncated one does, still fails as empty.
 func TestRunSheetsAudioTailWithRealFFmpeg(t *testing.T) {
 	ffmpeg, _ := realFFmpeg(t)
 	tone := func(seconds int) []string {
@@ -486,11 +487,12 @@ func TestRunSheetsAudioTailWithRealFFmpeg(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			clip := filepath.Join(t.TempDir(), "clip."+tt.container)
-			args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x36:r=24:d=2"}
+			args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+				"color=c=0x303030:s=64x36:r=24:d=1.5[a];color=c=0xc0c0c0:s=64x36:r=24:d=0.5[b];[a][b]concat=n=2:v=1:a=0[out0]"}
 			for _, input := range tt.inputs {
 				args = append(args, input...)
 			}
-			args = append(args, "-map", "0:v", "-c:v", "libx264", "-threads", "1", "-g", "240", "-bf", "2")
+			args = append(args, "-map", "0:v", "-c:v", "libx264", "-threads", "1", "-g", "240", "-bf", "2", "-force_key_frames", "0,1.5")
 			args = append(append(args, tt.audio...), clip)
 			if output, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
 				t.Skipf("cannot generate the clip: %v: %s", err, output)
@@ -506,6 +508,8 @@ func TestRunSheetsAudioTailWithRealFFmpeg(t *testing.T) {
 				}
 			} else if err != nil || result.SheetFrames != (SheetFrames{Decoded: 4}) {
 				t.Fatalf("frames %+v error %v, want 4 decoded", result.SheetFrames, err)
+			} else if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{48, 192, 192, 192}) {
+				t.Fatalf("cells %v, want the dark first keyframe then the light last one", got)
 			}
 		})
 	}

@@ -408,8 +408,13 @@ must use the returned height and reject chunks whose geometry differs.
   runs on after its video ends has packets past the video's extent, while a
   truncated file's streams stop together, so samples after the video but
   within the audio show the last frame and count as decoded, as a gap in
-  the video does. A file's duration follows its longest track, so without
-  this the samples of such an audio tail failed every run.
+  the video does. A window counts a cell as filled when it has no frame
+  of its own or, after a dropped keyframe (below), shows an earlier
+  keyframe than its own; a tail sample's own frame is the video's last,
+  which a player also shows there. A file's duration follows
+  its longest track, so without this the samples of such an audio tail
+  failed every run; counting them as filled would still fail a short last
+  chunk made mostly of tail samples.
 - A packet without a PTS counts by its DTS only when the decoder runs in
   low delay (MPEG-4 Part 2, above). A DTS never runs ahead of its PTS, so
   the extent can only shrink, by the reorder delay. Without a PTS the decoder
