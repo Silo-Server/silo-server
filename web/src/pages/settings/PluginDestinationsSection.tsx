@@ -149,13 +149,16 @@ function DestinationFormDialog({
         )
       : settings;
 
-  // A stored secret the user didn't type is left out of an update, so
-  // neither a blank nor the field's form default replaces it.
-  const withoutUntypedSecrets = (values: Record<string, unknown>) =>
+  // An update merges over the stored settings. A stored secret the user
+  // didn't type is left out, so neither a blank nor the field's form default
+  // replaces it. Any other emptied field goes out as null, which removes it
+  // so the plugin falls back to its default; a "" would be checked against
+  // the field's constraints instead.
+  const updatedSettings = () =>
     Object.fromEntries(
-      Object.entries(values).filter(
-        ([key]) => !secretsSet.includes(key) || (settings[key] ?? "") !== "",
-      ),
+      Object.entries(settingsToSend({ explicitClears: true }))
+        .filter(([key]) => !secretsSet.includes(key) || (settings[key] ?? "") !== "")
+        .map(([key, value]) => [key, value === "" ? null : value]),
     );
 
   const submit = () => {
@@ -167,9 +170,7 @@ function DestinationFormDialog({
           id: destination.id,
           etag: destination.etag,
           name: name.trim(),
-          // An update merges over the stored settings, so an emptied field
-          // must be sent as an explicit clear.
-          settings: withoutUntypedSecrets(settingsToSend({ explicitClears: true })),
+          settings: updatedSettings(),
           ...reasons,
         },
         { onSuccess: () => onOpenChange(false), onError },
@@ -284,6 +285,9 @@ function DestinationCard({
   const remove = useDeleteNotificationPluginDestination();
   const test = useTestNotificationPluginDestination();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // The validator the user saw when they chose to delete; a refetch while
+  // the dialog is open must not swap in a newer one.
+  const [deleteIntent, setDeleteIntent] = useState<{ id: string; etag: string } | null>(null);
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
 
   const lastSuccess = formatRelativeTime(destination.last_success_at);
@@ -384,7 +388,10 @@ function DestinationCard({
           variant="outline"
           size="sm"
           className="text-destructive"
-          onClick={() => setConfirmDelete(true)}
+          onClick={() => {
+            setDeleteIntent({ id: destination.id, etag: destination.etag });
+            setConfirmDelete(true);
+          }}
         >
           <Trash2 className="mr-1.5 h-3.5 w-3.5" />
           Delete
@@ -399,12 +406,10 @@ function DestinationCard({
         confirmLabel="Delete"
         variant="destructive"
         isPending={remove.isPending}
-        onConfirm={() =>
-          remove.mutate(
-            { id: destination.id, etag: destination.etag },
-            { onSettled: () => setConfirmDelete(false) },
-          )
-        }
+        onConfirm={() => {
+          if (deleteIntent)
+            remove.mutate(deleteIntent, { onSettled: () => setConfirmDelete(false) });
+        }}
       />
     </div>
   );
