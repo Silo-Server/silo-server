@@ -221,6 +221,78 @@ func TestRemuxOnlyPublishedURLIsNotStatic(t *testing.T) {
 	}
 }
 
+// Jellyfin Android TV retries a failed play with direct play off, then with
+// direct stream off too. It plays the TranscodingUrl whenever DirectStream is
+// set, and in that mode restarts playback forever trying to select the HLS
+// audio track (#2645). As in Jellyfin 10.11, DirectStream comes with
+// DirectPlay, and a retry keeps the video a copy when that can help.
+func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
+	version := catalog.FileVersion{FileID: 7, Container: "mkv", CodecVideo: "h264", CodecAudio: "eac3", Resolution: "1080p", Bitrate: 10000,
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080}},
+		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}}}
+	// The relevant parts of the Jellyfin Android TV 0.19 default profile.
+	profile := DeviceProfile{
+		DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv,mp4,ts", VideoCodec: "h264,hevc", AudioCodec: "aac,ac3,eac3,flac"}},
+		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3"}},
+	}
+	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret"}
+	stereoAAC := version
+	stereoAAC.CodecAudio = "aac"
+	stereoAAC.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}}
+	flac := version
+	flac.CodecAudio = "flac"
+	flac.AudioTracks = []models.AudioTrack{{Codec: "flac", Channels: 2, Default: true}}
+	videoOnly := version
+	videoOnly.CodecAudio = ""
+	videoOnly.AudioTracks = nil
+	for _, tc := range []struct {
+		name                     string
+		version                  catalog.FileVersion
+		directPlay, directStream bool
+		noDirectPlayProfiles     bool
+		wantVideoCopy            bool
+		wantAudioEncode          bool
+	}{
+		{name: "direct play also reports direct stream", version: version, directPlay: true, directStream: true},
+		{name: "first retry copies video and audio", version: version, directStream: true, wantVideoCopy: true},
+		{name: "second retry copies video and encodes audio", version: version, wantVideoCopy: true, wantAudioEncode: true},
+		// Direct play accepts FLAC but HLS cannot carry it, so the audio is
+		// encoded rather than the video.
+		{name: "first retry encodes audio HLS cannot carry", version: flac, directStream: true, wantVideoCopy: true, wantAudioEncode: true},
+		// Encoding AAC stereo to AAC stereo would repeat the stream that failed.
+		{name: "second retry encodes video when the audio would not change", version: stereoAAC},
+		// Without direct play profiles no audio counts as supported, which
+		// must not turn an unchanged AAC track into a reason to copy.
+		{name: "profile without direct play still encodes video for unchanged audio", version: stereoAAC, noDirectPlayProfiles: true},
+		// A video-only source has no audio to change, so the copy would repeat
+		// the stream that failed.
+		{name: "second retry encodes video for a video-only source", version: videoOnly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := playbackInfoRequest{MaxStreamingBitrate: 100_000_000, EnableDirectPlay: new(tc.directPlay), EnableDirectStream: new(tc.directStream)}
+			profile := profile
+			if tc.noDirectPlayProfiles {
+				profile.DirectPlayProfiles = nil
+			}
+			source := h.buildPlaybackSource("item", "play", tc.version, profile, req, true)
+			if source.SupportsDirectPlay != tc.directPlay || source.SupportsDirectStream != tc.directPlay {
+				t.Fatalf("direct play=%v direct stream=%v, want both %v", source.SupportsDirectPlay, source.SupportsDirectStream, tc.directPlay)
+			}
+			if tc.directPlay {
+				return
+			}
+			if !source.SupportsTranscoding || compatHLSCopiesVideo(source) != tc.wantVideoCopy || source.TranscodeAudio != tc.wantAudioEncode {
+				t.Fatalf("transcoding=%v copies video=%v audio encode=%v, want copies video=%v audio encode=%v",
+					source.SupportsTranscoding, compatHLSCopiesVideo(source), source.TranscodeAudio, tc.wantVideoCopy, tc.wantAudioEncode)
+			}
+			dto := h.mediaSourceDTO("item", "play", "token", source)
+			if dto.DirectStreamURL != "" || dto.TranscodingURL == "" || len(tc.version.AudioTracks) > 0 && dto.DefaultAudioStreamIndex == nil {
+				t.Fatalf("DirectStreamUrl=%q TranscodingUrl=%q DefaultAudioStreamIndex=%v", dto.DirectStreamURL, dto.TranscodingURL, dto.DefaultAudioStreamIndex)
+			}
+		})
+	}
+}
+
 // Jellyfin Web hands any source whose TranscodingSubProtocol is hls to
 // hls.js, even when it plays the static direct URL, so only a source played
 // through its TranscodingUrl may say hls (#2879).

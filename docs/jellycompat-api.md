@@ -358,8 +358,25 @@ Season listings do not filter by studio.
 capabilities, including client bitrate ceilings, audio-channel limits, container
 conditions, and subtitle delivery profiles. The negotiated source records the
 selected output constraints so local and remote encoders use the same decision.
-Progressive remux evaluates container constraints against its MP4 output;
-direct play evaluates them against the original source container.
+As in Jellyfin 10.11, `SupportsDirectStream` accompanies `SupportsDirectPlay`,
+and a source that needs a remux is offered through its `TranscodingUrl` as an
+HLS video copy where the profile allows one: Jellyfin Android TV plays the
+`TranscodingUrl` whenever `SupportsDirectStream` is set, and in that mode
+cannot map the HLS audio track to a stream index, so it restarts playback
+endlessly to "switch" audio. A progressive remux (`SupportsDirectStream` without
+`SupportsDirectPlay`, `static=false`) is offered only when the source has no
+`TranscodingUrl`, for example with `EnableTranscoding=false` or when a
+tone map or subtitle burn-in the encode needs is unavailable, and only when the
+routing policy admits a progressive-remux transport. It evaluates container
+constraints against its MP4 output; direct play evaluates them against the
+original source container.
+
+`EnableDirectStream=false` rules out serving the source streams unchanged but
+not copying video, which only `AllowVideoStreamCopy=false` forbids: such a
+request gets a video copy with the audio encoded when the profile accepts it
+and the encode changes the audio. When the audio is already AAC within the
+channel target, or the source has no audio, the video is encoded instead.
+
 Unknown or excessive source bitrate prevents copying under a client ceiling.
 An automatic VideoToolbox bitrate must not override an explicit client cap.
 The server also applies the account's effective per-stream bitrate limit for
@@ -881,9 +898,8 @@ whose profile offers MPEG-TS HLS is therefore packaged as MPEG-TS on the
 keeps fMP4.
 
 Any other client that lists the source codecs for MPEG-TS HLS but not for fMP4
-also gets a video copy as MPEG-TS, unless it can take a progressive remux. This
-covers H.264 and HEVC with AAC, AC-3, E-AC-3, or MP3 audio; other audio converts
-to AAC when the profile accepts it.
+also gets a video copy as MPEG-TS. This covers H.264 and HEVC with AAC, AC-3,
+E-AC-3, or MP3 audio; other audio converts to AAC when the profile accepts it.
 
 The webOS rule: a video-copy HLS stream of a Dolby Vision profile 5 or 8 source
 is packaged as MPEG-TS on the same route when the client's user agent contains
