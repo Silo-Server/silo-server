@@ -19,7 +19,7 @@ type ratingsRepository interface {
 	Get(ctx context.Context, userID int, profileID, mediaItemID string) (*catalog.UserRating, error)
 	Delete(ctx context.Context, userID int, profileID, mediaItemID string) error
 	List(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalog.UserRating, error)
-	ListPage(ctx context.Context, userID int, profileID string, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error)
+	ListPage(ctx context.Context, userID int, profileID string, filter catalog.AccessFilter, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error)
 }
 
 // LocalRatingEventDispatcher sends a profile's rating changes to its watch
@@ -265,43 +265,20 @@ func (h *RatingsHandler) ListRatings(ctx context.Context, userID int, profileID 
 	return kept, nil
 }
 
-// ratingScanBatch is the smallest number of store rows ListRatingsPage reads
-// per query while it looks for visible ratings, so a profile with many
-// hidden ratings does not cost one query per row.
-const ratingScanBatch = 100
-
 // ListRatingsPage is the keyset form of ListRatings the v2 listing uses: at
 // most limit of the ratings the viewer may see, ordered by (rated_at DESC,
 // media_item_id DESC) strictly after the key (nil = from the most recently
-// rated row). It reads past hidden rows until it has limit visible ones or
-// the store runs out, so every row it answers, including the last one a
-// caller builds its cursor from, is an item the viewer may see. A cursor
-// payload is signed but not encrypted, so a cursor taken from a hidden row
-// would name that hidden title.
+// rated row). The store applies the access filter in the page query, so
+// every row it answers, including the last one a caller builds its cursor
+// from, is an item the viewer may see. A cursor payload is signed but not
+// encrypted, so a cursor taken from a hidden row would name that hidden
+// title.
 func (h *RatingsHandler) ListRatingsPage(ctx context.Context, userID int, profileID string, access catalog.AccessFilter, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error) {
-	batch := max(limit, ratingScanBatch)
-	page := make([]catalog.UserRating, 0, limit)
-	for len(page) < limit {
-		rows, err := h.ratingsRepo.ListPage(ctx, userID, profileID, after, batch)
-		if err != nil {
-			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list ratings")
-		}
-		visible, err := h.visibleRatings(ctx, rows, access)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range rows {
-			if visible[r.MediaItemID] && len(page) < limit {
-				page = append(page, r)
-			}
-		}
-		if len(rows) < batch {
-			break
-		}
-		last := rows[len(rows)-1]
-		after = &catalog.RatingKey{RatedAt: last.RatedAt, MediaItemID: last.MediaItemID}
+	ratings, err := h.ratingsRepo.ListPage(ctx, userID, profileID, access, after, limit)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list ratings")
 	}
-	return page, nil
+	return ratings, nil
 }
 
 // HandleListRatings handles GET /ratings/.

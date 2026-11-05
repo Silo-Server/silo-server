@@ -134,9 +134,10 @@ type ratingPosition struct {
 }
 
 // listRatings answers the profile's ratings of items the viewer may see,
-// paged by keyset; a limit+1 probe decides has_more. The seam reads past
-// hidden ratings, so the probe and the cursor row are always visible items
-// and a cursor never names a title the viewer may not see. The cursor is
+// paged by keyset; a limit+1 probe decides has_more. The store filters by
+// the viewer's access in the page query, so the probe and the cursor row are
+// always visible items and a cursor never names a title the viewer may not
+// see. The cursor is
 // bound to the viewer policy that filtered the page, as the favorites cursor
 // is.
 func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *RatingListInput) (*RatingCollectionOutput, error) {

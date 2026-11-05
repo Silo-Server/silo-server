@@ -34,8 +34,8 @@ func ratingKeyAfter(row catalogpkg.UserRating, after catalogpkg.RatingKey) bool 
 	return row.MediaItemID < after.MediaItemID
 }
 
-// ListRatingsPage answers the visible rows only, as the real seam does once
-// it has read past the hidden ones.
+// ListRatingsPage answers the visible rows only, as the real store query
+// does.
 func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID string, access catalogpkg.AccessFilter, after *catalogpkg.RatingKey, limit int) ([]catalogpkg.UserRating, error) {
 	f.limits = append(f.limits, limit)
 	f.access = append(f.access, access)

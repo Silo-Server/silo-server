@@ -34,15 +34,10 @@ func (m *memoryRatings) List(_ context.Context, _ int, _ string, limit, offset i
 	return append([]catalog.UserRating(nil), m.rows[min(offset, len(m.rows)):min(offset+limit, len(m.rows))]...), nil
 }
 
-func (m *memoryRatings) ListPage(_ context.Context, _ int, _ string, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error) {
-	start := 0
-	if after != nil {
-		for start < len(m.rows) && (m.rows[start].RatedAt.After(after.RatedAt) ||
-			(m.rows[start].RatedAt.Equal(after.RatedAt) && m.rows[start].MediaItemID >= after.MediaItemID)) {
-			start++
-		}
-	}
-	return append([]catalog.UserRating(nil), m.rows[start:min(start+limit, len(m.rows))]...), nil
+// ListPage is unused here: the access filter is applied in its SQL, which
+// the catalog database tests cover.
+func (m *memoryRatings) ListPage(context.Context, int, string, catalog.AccessFilter, *catalog.RatingKey, int) ([]catalog.UserRating, error) {
+	return nil, nil
 }
 
 // idsFailingItemRepo is a markItemRepo whose batch access check fails.
@@ -91,10 +86,6 @@ func TestRatingsFollowViewerAccess(t *testing.T) {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
 
-	page, err := h.ListRatingsPage(ctx, 1, "p1", access, nil, 50)
-	if err != nil || len(page) != 2 || page[0].MediaItemID != "movie:visible" || page[1].MediaItemID != "movie:also-visible" {
-		t.Fatalf("page = %+v, %v", page, err)
-	}
 	var listErr *APIError
 	if _, err := NewRatingsHandler(repo, idsFailingItemRepo{items}).ListRatings(ctx, 1, "p1", access, 50, 0); !errors.As(err, &listErr) || listErr.Status != http.StatusInternalServerError {
 		t.Fatalf("failed list access check = %v, want 500", err)
@@ -105,35 +96,5 @@ func TestRatingsFollowViewerAccess(t *testing.T) {
 	var apiErr *APIError
 	if _, _, err := failing.GetRating(ctx, 1, "p1", "movie:visible", access); !errors.As(err, &apiErr) || apiErr.Status != http.StatusInternalServerError {
 		t.Fatalf("failed access check = %v, want 500", err)
-	}
-}
-
-// The keyset page reads past runs of hidden ratings longer than one store
-// batch, so it answers only visible rows, a full page whenever enough remain,
-// and never a hidden row a caller could build its cursor from.
-func TestListRatingsPageReadsPastHiddenRows(t *testing.T) {
-	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	repo := &memoryRatings{}
-	items := markItemRepo{items: map[string]*models.MediaItem{}}
-	// Newest first: 2 visible, 250 hidden, then 3 visible.
-	for i := range 255 {
-		id := fmt.Sprintf("movie:%03d", i)
-		repo.rows = append(repo.rows, catalog.UserRating{UserID: 1, ProfileID: "p1", MediaItemID: id, Rating: 3, RatedAt: now.Add(-time.Duration(i) * time.Minute)})
-		if i < 2 || i >= 252 {
-			items.items[id] = &models.MediaItem{ContentID: id, Type: "movie"}
-		}
-	}
-	h := NewRatingsHandler(repo, items)
-	ctx := context.Background()
-	access := catalog.AccessFilter{UserID: 1, ProfileID: "p1"}
-
-	page, err := h.ListRatingsPage(ctx, 1, "p1", access, nil, 4)
-	if err != nil || len(page) != 4 || page[1].MediaItemID != "movie:001" || page[2].MediaItemID != "movie:252" || page[3].MediaItemID != "movie:253" {
-		t.Fatalf("page = %+v, %v", page, err)
-	}
-	last := page[3]
-	page, err = h.ListRatingsPage(ctx, 1, "p1", access, &catalog.RatingKey{RatedAt: last.RatedAt, MediaItemID: last.MediaItemID}, 4)
-	if err != nil || len(page) != 1 || page[0].MediaItemID != "movie:254" {
-		t.Fatalf("next page = %+v, %v", page, err)
 	}
 }

@@ -1064,8 +1064,8 @@ type PersonalListService interface {
 type RatingService interface {
 	// ListRatingsPage answers at most limit of the profile's ratings of items
 	// the access filter admits, ordered by (rated_at DESC, media_item_id
-	// DESC) strictly after the key (nil = from the most recently rated). It
-	// reads past hidden rows, so fewer than limit rows means no more follow.
+	// DESC) strictly after the key (nil = from the most recently rated). The
+	// store applies the filter, so fewer than limit rows means no more follow.
 	ListRatingsPage(ctx context.Context, userID int, profileID string, access mediacatalog.AccessFilter, after *mediacatalog.RatingKey, limit int) ([]mediacatalog.UserRating, error)
 	// GetRating answers the profile's rating of an item the access filter
 	// admits; found is false when the profile has not rated it, and an item
