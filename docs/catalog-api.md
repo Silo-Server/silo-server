@@ -564,7 +564,8 @@ answers `403` otherwise.
   `{"collection_id": ...}` allows the movies and series a personal collection
   holds now (for a smart collection, what its query matches for the acting
   profile), as individual allowances, and answers how many were new. One copy
-  allows at most 10,000 titles.
+  allows at most 10,000 titles; copying a stored collection again continues
+  with titles the profile is not yet allowed.
 
 An allowed title is visible and playable for the profile everywhere content is
 reached, Jellyfin clients included. A series allowance covers its seasons and

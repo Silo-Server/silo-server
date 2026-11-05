@@ -100,15 +100,19 @@ func (s *TitleAllowances) SetCollectionAllowance(ctx context.Context, m userstor
 		WHERE user_id = $1 AND profile_id = $2 AND collection_id = $3`, m.UserID, profileID, collectionID)
 }
 
-// CollectionItemIDs lists up to limit of the media items a personal
-// collection stores, in its order. Smart collections store none; their items
-// come from their query.
-func (s *TitleAllowances) CollectionItemIDs(ctx context.Context, userID int, collectionID string, limit int) ([]string, error) {
+// UnallowedCollectionTitles lists, in the collection's order, up to limit of
+// the movies and series a personal collection stores that the profile is not
+// yet allowed, so a repeated copy continues where the last one stopped. Smart
+// collections store none; their items come from their query.
+func (s *TitleAllowances) UnallowedCollectionTitles(ctx context.Context, userID int, profileID, collectionID string, limit int) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT media_item_id FROM user_personal_collection_items
-		WHERE user_id = $1 AND collection_id = $2
-		ORDER BY position, media_item_id
-		LIMIT $3`, userID, collectionID, limit)
+		SELECT ci.media_item_id FROM user_personal_collection_items ci
+		JOIN media_items mi ON mi.content_id = ci.media_item_id AND mi.type = ANY($4)
+		WHERE ci.user_id = $1 AND ci.collection_id = $2
+		  AND NOT EXISTS (SELECT 1 FROM profile_title_allowances ta
+		      WHERE ta.user_id = ci.user_id AND ta.profile_id = $3 AND ta.content_id = ci.media_item_id)
+		ORDER BY ci.position, ci.media_item_id
+		LIMIT $5`, userID, collectionID, profileID, userstore.AllowanceTitleTypes, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing collection items: %w", err)
 	}

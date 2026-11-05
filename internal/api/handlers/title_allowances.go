@@ -36,9 +36,10 @@ type titleAllowanceStore interface {
 	// SetCollectionAllowance adds or removes one collection allowance and
 	// reports whether a row changed.
 	SetCollectionAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, collectionID string, allowed bool) (bool, error)
-	// CollectionItemIDs lists up to limit of the media items a personal
-	// collection stores, in its order.
-	CollectionItemIDs(ctx context.Context, userID int, collectionID string, limit int) ([]string, error)
+	// UnallowedCollectionTitles lists, in the collection's order, up to limit
+	// of the movies and series a personal collection stores that the profile
+	// is not yet allowed.
+	UnallowedCollectionTitles(ctx context.Context, userID int, profileID, collectionID string, limit int) ([]string, error)
 	// AllowTitles adds a title allowance for every movie and series among
 	// contentIDs and returns how many were new.
 	AllowTitles(ctx context.Context, m userstore.AllowanceManager, profileID string, contentIDs []string) (int, error)
@@ -440,7 +441,7 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if catalog.IsLiveQueryType(collection.CollectionType) {
 		ids, err = h.smartCollectionTitles(ctx, actor, collection)
 	} else {
-		ids, err = h.storedCollectionTitles(ctx, actor, collectionID)
+		ids, err = h.storedCollectionTitles(ctx, actor, profileID, collectionID)
 	}
 	if err != nil {
 		return 0, err
@@ -457,10 +458,11 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 // with no item limit would otherwise read the whole matching catalog.
 const maxCopiedTitles = 10_000
 
-// storedCollectionTitles lists the stored items of a collection that the
-// actor may see, up to maxCopiedTitles.
-func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, actor AllowanceActor, collectionID string) ([]string, error) {
-	ids, err := h.allowances.CollectionItemIDs(ctx, actor.UserID, collectionID, maxCopiedTitles)
+// storedCollectionTitles lists the stored movies and series of a collection
+// that the profile is not yet allowed and the actor may see, from the first
+// maxCopiedTitles of them; a repeated copy continues with the rest.
+func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, actor AllowanceActor, profileID, collectionID string) ([]string, error) {
+	ids, err := h.allowances.UnallowedCollectionTitles(ctx, actor.UserID, profileID, collectionID, maxCopiedTitles)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list the collection's titles")
 	}
@@ -472,7 +474,8 @@ func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, acto
 }
 
 // smartCollectionTitles lists what a smart collection's query matches for the
-// actor, up to the collection's item limit and maxCopiedTitles.
+// actor, up to the collection's item limit and maxCopiedTitles: one copy
+// takes the first matches in the query's order.
 func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, actor AllowanceActor, collection *userstore.Collection) ([]string, error) {
 	if h.smart == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Catalog queries are unavailable")

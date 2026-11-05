@@ -53,7 +53,7 @@ func (s *memoryAllowances) SetCollectionAllowance(context.Context, userstore.All
 	return true, nil
 }
 
-func (s *memoryAllowances) CollectionItemIDs(context.Context, int, string, int) ([]string, error) {
+func (s *memoryAllowances) UnallowedCollectionTitles(context.Context, int, string, string, int) ([]string, error) {
 	return nil, nil
 }
 

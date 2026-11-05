@@ -208,21 +208,7 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 		}
 	})
 
-	t.Run("copying a collection's items allows its movies and series once", func(t *testing.T) {
-		ids, err := f.allow.CollectionItemIDs(ctx, f.userID, f.live, 10)
-		if err != nil || len(ids) != 2 {
-			t.Fatalf("CollectionItemIDs = %v, %v; want the movie and the audiobook", ids, err)
-		}
-		ids = append(ids, f.id("movie-smart"))
-		// movie-collection is allowed through the collection but not as a
-		// title, so it and movie-smart are new; the audiobook never is.
-		for pass, want := range []int{2, 0} {
-			added, err := f.allow.AllowTitles(ctx, f.manager(), "kid", ids)
-			if err != nil || added != want {
-				t.Fatalf("AllowTitles pass %d = %d, %v; want %d", pass, added, err, want)
-			}
-		}
-	})
+	t.Run("copying a collection allows its movies and series once and then continues", f.checkCollectionCopy)
 
 	t.Run("a write after the manager's PIN changed is refused", func(t *testing.T) {
 		if _, err := f.pool.Exec(ctx, `UPDATE user_profiles SET pin_revision = pin_revision + 1 WHERE user_id = $1 AND id = 'parent'`, f.userID); err != nil {
@@ -252,4 +238,29 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 			t.Fatalf("%d allowance rows outlived their profile", left)
 		}
 	})
+}
+
+// checkCollectionCopy copies the live collection's titles: only movies and
+// series not yet allowed are candidates, and allowed ones drop out so a
+// repeated copy continues where the last stopped.
+func (f allowanceFixture) checkCollectionCopy(t *testing.T) {
+	ctx := context.Background()
+	// movie-collection is allowed through the collection but not as a
+	// title; the audiobook is never a candidate.
+	ids, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, 10)
+	if err != nil || !slices.Equal(ids, []string{f.id("movie-collection")}) {
+		t.Fatalf("UnallowedCollectionTitles = %v, %v; want only the movie", ids, err)
+	}
+	ids = append(ids, f.id("movie-smart"))
+	for pass, want := range []int{2, 0} {
+		added, err := f.allow.AllowTitles(ctx, f.manager(), "kid", ids)
+		if err != nil || added != want {
+			t.Fatalf("AllowTitles pass %d = %d, %v; want %d", pass, added, err, want)
+		}
+	}
+	// Allowed titles drop out of the candidates, so a repeated copy of a
+	// collection longer than one copy's cap reaches the rest.
+	if left, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, 10); err != nil || len(left) != 0 {
+		t.Fatalf("UnallowedCollectionTitles after the copy = %v, %v; want none", left, err)
+	}
 }
