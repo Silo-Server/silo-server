@@ -724,7 +724,7 @@ jobs:
             fi
           fi
           key="$RUNNER_TEMP/pgdg.asc"
-          curl -fsSL --retry 3 -o "$key" https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          curl -fsSL --retry 3 -o "$key" https://apt.postgresql.org/pub/repos/apt/ACCC4CF8.asc
           # apt trusts every key in the file, so it must hold exactly one
           # primary key, PGDG's. A key's fpr record follows its pub or sub
           # record; only the pub ones are primary keys.
