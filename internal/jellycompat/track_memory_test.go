@@ -411,8 +411,7 @@ func TestRememberCompatTracksClaimsAgainstTheCurrentPlay(t *testing.T) {
 	}
 	stale.MediaSources = slices.Clone(stale.MediaSources)
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
-	off := compatIntValue(-1)
-	req := sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &off}
+	req := sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: compatIntValueOf(-1)}
 
 	handler.rememberCompatTracks(t.Context(), session, stale, req, false)
 	handler.rememberCompatTracks(t.Context(), session, stale, req, false)
@@ -451,9 +450,8 @@ func TestRememberCompatTracksLeavesTheLatestClaimWhenWritesInterleave(t *testing
 		if !ok {
 			t.Fatal("play-1 missing")
 		}
-		value := compatIntValue(index)
 		handler.rememberCompatTracks(t.Context(), session, current,
-			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value}, false)
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: compatIntValueOf(index)}, false)
 	}
 	prefs.beforeSubtitleWrite = func() { report(-1) }
 
@@ -485,8 +483,7 @@ func TestRememberCompatTracksJudgesAStopAgainstTheStoredPlay(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
-	forced := compatIntValue(trackMemoryForcedSubtitle)
-	req := sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &forced}
+	req := sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: compatIntValueOf(trackMemoryForcedSubtitle)}
 
 	handler.rememberCompatTracks(t.Context(), session, stale, req, false)
 	if prefs.attempts != 0 {
@@ -520,10 +517,9 @@ func TestClaimCompatTrackChangeRejectsATerminalStoredRow(t *testing.T) {
 	row.Terminal = true
 	handler.playbackStore = &terminalRowStore{CompatPlaybackStore: handler.playbackStore, row: row}
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
-	off := compatIntValue(-1)
 
 	handler.rememberCompatTracks(t.Context(), session, current,
-		sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &off}, true)
+		sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: compatIntValueOf(-1)}, true)
 
 	if prefs.attempts != 0 {
 		t.Fatalf("write attempts = %d for a play the stored row has finished, want 0", prefs.attempts)
@@ -569,9 +565,8 @@ func TestRememberCompatTracksLeavesTheLatestClaimAfterManyInterleavedWrites(t *t
 		if !ok {
 			t.Fatal("play-1 missing")
 		}
-		value := compatIntValue(index)
 		handler.rememberCompatTracks(t.Context(), session, current,
-			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value}, false)
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: compatIntValueOf(index)}, false)
 	}
 	// Each of the first report's writes is overtaken by a newer choice.
 	newer := []int{4, trackMemoryForcedSubtitle, trackMemorySDHSubtitle, -1}
@@ -625,9 +620,9 @@ type staleGetStore struct {
 }
 
 func (s *staleGetStore) Get(string) (*PlaybackSession, bool) {
-	copy := s.stale
-	copy.MediaSources = slices.Clone(s.stale.MediaSources)
-	return &copy, true
+	snapshot := s.stale
+	snapshot.MediaSources = slices.Clone(s.stale.MediaSources)
+	return &snapshot, true
 }
 
 // TestRememberCompatTracksReadsTheStoredClaimBack covers the read-back after
@@ -645,9 +640,8 @@ func TestRememberCompatTracksReadsTheStoredClaimBack(t *testing.T) {
 	session := &Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}
 	report := func(index int) {
 		current, _ := stored.Get("play-1")
-		value := compatIntValue(index)
 		handler.rememberCompatTracks(t.Context(), session, current,
-			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value}, false)
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: compatIntValueOf(index)}, false)
 	}
 	prefs.beforeSubtitleWrite = func() { report(-1) }
 
@@ -737,9 +731,8 @@ func TestRememberCompatTracksRepairsAfterAStopFinishesThePlay(t *testing.T) {
 		if !ok {
 			t.Fatal("play-1 missing")
 		}
-		value := compatIntValue(index)
 		handler.rememberCompatTracks(t.Context(), session, current,
-			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: &value}, stop)
+			sessionReportRequest{PlaySessionID: "play-1", MediaSourceID: sourceID, SubtitleStreamIndex: compatIntValueOf(index)}, stop)
 	}
 	prefs.beforeSubtitleWrite = func() {
 		report(-1, true)

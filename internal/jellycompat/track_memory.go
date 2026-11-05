@@ -74,18 +74,16 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), compatTrackMemoryTimeout)
 	defer cancel()
 	var audio, subtitle *int
-	if req.AudioStreamIndex != nil && h.AudioPreferences != nil {
-		if index := int(*req.AudioStreamIndex); (stop || compatAudioStreamChanged(*source, index)) && isValidCompatAudioStreamIndex(source.Version, index) {
+	if index, ok := req.AudioStreamIndex.get(); ok && h.AudioPreferences != nil {
+		if (stop || compatAudioStreamChanged(*source, index)) && isValidCompatAudioStreamIndex(source.Version, index) {
 			audio = &index
 		}
 	}
 	var subtitlePref userstore.SubtitlePreference
-	if req.SubtitleStreamIndex != nil && h.SubtitlePreferences != nil {
-		index := int(*req.SubtitleStreamIndex)
+	if index, ok := req.SubtitleStreamIndex.get(); ok && h.SubtitlePreferences != nil {
 		if index >= compatSubtitleOff && (stop || index != compatRememberedSubtitleStreamIndex(*source)) {
 			// An index that names no track is not recorded either, so it
 			// cannot become the play's baseline.
-			var ok bool
 			if subtitlePref, ok = h.compatSubtitlePreference(ctx, session, playSession.PreferenceKey, *source, index); ok {
 				subtitle = &index
 			}
@@ -126,42 +124,55 @@ func (h *PlaybackHandler) rememberCompatTracks(ctx context.Context, session *Ses
 	if err != nil || (audio == nil && subtitle == nil) {
 		return
 	}
-	key := playSession.PreferenceKey
-	// A later report can claim another track while this one writes, and its
-	// write can land first. After each write the play's latest claim is read
-	// back and written again until it matches, so whichever write lands last
-	// leaves the latest claimed track. Claims need new reports, so this ends;
-	// the report's deadline bounds it if writes stall.
 	if audio != nil {
-		for index := *audio; ctx.Err() == nil; {
-			pref := compatAudioPreference(session, key, *source, index)
-			if err := h.AudioPreferences.SetAudioPreference(ctx, session.StreamAppUserID, pref); err != nil {
-				slog.WarnContext(ctx, "jellycompat could not remember the audio track", "component", "jellycompat",
-					"series_id", key, "audio_track_index", pref.AudioTrackIndex, "error", err)
-				break
-			}
-			latest, ok := h.latestCompatTrackClaim(playSession, source.ID)
-			if !ok || latest.RememberedAudioStreamIndex == nil || *latest.RememberedAudioStreamIndex == index {
-				break
-			}
-			index = *latest.RememberedAudioStreamIndex
-		}
+		h.writeRememberedCompatAudio(ctx, session, playSession, source, *audio)
 	}
 	if subtitle != nil {
-		for index := *subtitle; ctx.Err() == nil; {
-			if err := h.SubtitlePreferences.SetSubtitlePreferenceCanonical(ctx, session.StreamAppUserID, subtitlePref); err != nil {
-				slog.WarnContext(ctx, "jellycompat could not remember the subtitle track", "component", "jellycompat",
-					"series_id", key, "subtitle_track_index", subtitlePref.SubtitleTrackIndex, "error", err)
-				break
-			}
-			latest, ok := h.latestCompatTrackClaim(playSession, source.ID)
-			if !ok || latest.RememberedSubtitleStreamIndex == nil || *latest.RememberedSubtitleStreamIndex == index {
-				break
-			}
-			index = *latest.RememberedSubtitleStreamIndex
-			if subtitlePref, ok = h.compatSubtitlePreference(ctx, session, key, *latest, index); !ok {
-				break
-			}
+		h.writeRememberedCompatSubtitle(ctx, session, playSession, source, *subtitle, subtitlePref)
+	}
+}
+
+// writeRememberedCompatAudio saves the audio track a report claimed. A later
+// report can claim another track while this one writes, and its write can land
+// first. After each write the play's latest claim is read back and written
+// again until it matches, so whichever write lands last leaves the latest
+// claimed track. Claims need new reports, so this ends; the report's deadline
+// bounds it if writes stall.
+func (h *PlaybackHandler) writeRememberedCompatAudio(ctx context.Context, session *Session, playSession *PlaybackSession, source *PlaybackMediaSource, index int) {
+	key := playSession.PreferenceKey
+	for ctx.Err() == nil {
+		pref := compatAudioPreference(session, key, *source, index)
+		if err := h.AudioPreferences.SetAudioPreference(ctx, session.StreamAppUserID, pref); err != nil {
+			slog.WarnContext(ctx, "jellycompat could not remember the audio track", "component", "jellycompat",
+				"series_id", key, "audio_track_index", pref.AudioTrackIndex, "error", err)
+			return
+		}
+		latest, ok := h.latestCompatTrackClaim(playSession, source.ID)
+		if !ok || latest.RememberedAudioStreamIndex == nil || *latest.RememberedAudioStreamIndex == index {
+			return
+		}
+		index = *latest.RememberedAudioStreamIndex
+	}
+}
+
+// writeRememberedCompatSubtitle saves the subtitle choice a report claimed,
+// reading the latest claim back after each write as writeRememberedCompatAudio
+// does.
+func (h *PlaybackHandler) writeRememberedCompatSubtitle(ctx context.Context, session *Session, playSession *PlaybackSession, source *PlaybackMediaSource, index int, pref userstore.SubtitlePreference) {
+	key := playSession.PreferenceKey
+	for ctx.Err() == nil {
+		if err := h.SubtitlePreferences.SetSubtitlePreferenceCanonical(ctx, session.StreamAppUserID, pref); err != nil {
+			slog.WarnContext(ctx, "jellycompat could not remember the subtitle track", "component", "jellycompat",
+				"series_id", key, "subtitle_track_index", pref.SubtitleTrackIndex, "error", err)
+			return
+		}
+		latest, ok := h.latestCompatTrackClaim(playSession, source.ID)
+		if !ok || latest.RememberedSubtitleStreamIndex == nil || *latest.RememberedSubtitleStreamIndex == index {
+			return
+		}
+		index = *latest.RememberedSubtitleStreamIndex
+		if pref, ok = h.compatSubtitlePreference(ctx, session, key, *latest, index); !ok {
+			return
 		}
 	}
 }

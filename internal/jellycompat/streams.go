@@ -3481,7 +3481,8 @@ func (h *PlaybackHandler) applyReportedAudioSelection(ctx context.Context, playS
 			"error", selectionErr,
 		)
 		return playSession, false
-	} else if updatedSource != nil {
+	}
+	if updatedSource != nil {
 		if resolvedAudioTrackIndex, ok := compatAudioTrackIndex(*updatedSource); ok {
 			audioTrackIndex = resolvedAudioTrackIndex
 		}
