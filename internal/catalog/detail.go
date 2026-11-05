@@ -1380,18 +1380,33 @@ func (s *DetailService) pendingPresentationLanguage(ctx context.Context, filter 
 	return language, err
 }
 
-func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentID string) error {
+// validatePresentationItemAccess checks that the presentation library holds
+// at least one of contentIDs.
+func (s *DetailService) validatePresentationItemAccess(ctx context.Context, filter AccessFilter, contentIDs ...string) error {
 	if filter.PresentationLibraryID == nil {
 		return nil
 	}
-	membership, err := s.itemRepo.GetItemsInLibrary(ctx, []string{contentID}, *filter.PresentationLibraryID)
+	membership, err := s.itemRepo.GetItemsInLibrary(ctx, contentIDs, *filter.PresentationLibraryID)
 	if err != nil {
 		return err
 	}
-	if !membership[contentID] {
-		return ErrItemNotFound
+	for _, contentID := range contentIDs {
+		if membership[contentID] {
+			return nil
+		}
 	}
-	return nil
+	return ErrItemNotFound
+}
+
+// validatePresentationEpisodeAccess accepts the series' library for opted-in
+// native reads, matching the series' episode lists. File access is checked
+// separately; this does not grant access to files in another library.
+func (s *DetailService) validatePresentationEpisodeAccess(ctx context.Context, filter AccessFilter, episode *models.Episode) error {
+	memberIDs := []string{episode.ContentID}
+	if filter.SeriesLibraryCoversEpisodes {
+		memberIDs = append(memberIDs, episode.SeriesID)
+	}
+	return s.validatePresentationItemAccess(ctx, filter, memberIDs...)
 }
 
 func sameMetadataLanguage(a, b string) bool {
@@ -1880,7 +1895,7 @@ func (s *DetailService) resolveDetailTarget(ctx context.Context, contentID strin
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
+	if err := s.validatePresentationEpisodeAccess(ctx, filter, episode); err != nil {
 		return nil, err
 	}
 	return &detailTarget{episode: episode}, nil
@@ -3733,7 +3748,7 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 	if err := s.itemRepo.EnsureAccessible(ctx, episode.SeriesID, filter); err != nil {
 		return nil, err
 	}
-	if err := s.validatePresentationItemAccess(ctx, filter, episode.ContentID); err != nil {
+	if err := s.validatePresentationEpisodeAccess(ctx, filter, episode); err != nil {
 		return nil, err
 	}
 	// Seasons and episodes inherit original_language from the parent series.

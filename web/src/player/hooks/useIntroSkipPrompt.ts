@@ -37,14 +37,22 @@ function promptStillActive(
   return current !== null && current.key === key && current.kind === kind;
 }
 
+interface IntroSkipPromptTimer {
+  durationMs: number;
+  deadlineMs: number | null;
+  remainingMs: number;
+}
+
 export interface IntroSkipPrompt {
   kind: "skip" | "undo";
   label: "Skip Intro" | "Watch Intro";
   /** Confirmation shown above the action for the `always` undo; absent for the `ask` offer. */
   caption?: "Intro skipped";
-  durationMs: number;
-  deadlineMs: number | null;
-  remainingMs: number;
+  /**
+   * The countdown, or null for an `ask` offer that already timed out and is
+   * back only because the controls are showing.
+   */
+  timer: IntroSkipPromptTimer | null;
 }
 
 interface ActivePrompt {
@@ -61,6 +69,12 @@ interface UseIntroSkipPromptOptions {
   currentTime: number;
   playing: boolean;
   enabled: boolean;
+  /**
+   * Whether the player controls are showing. An `ask` offer that timed out
+   * comes back, without a timer, while they are up and playback is still
+   * inside the intro, so a viewer who missed it can still skip.
+   */
+  controlsVisible: boolean;
   /**
    * Moves playback and reports whether the seek was accepted.
    *
@@ -85,10 +99,14 @@ export function useIntroSkipPrompt({
   currentTime,
   playing,
   enabled,
+  controlsVisible,
   onSeek,
 }: UseIntroSkipPromptOptions) {
   const [activePrompt, setActivePromptState] = useState<ActivePrompt | null>(null);
   const activePromptRef = useRef<ActivePrompt | null>(null);
+  /** The unresolved `ask` intro whose timed offer ran out while playback stayed inside. */
+  const [expiredKey, setExpiredKeyState] = useState<string | null>(null);
+  const expiredKeyRef = useRef<string | null>(null);
   const resolvedKeysRef = useRef(new Set<string>());
   const contextRef = useRef<string | null>(null);
   const wasInsideRef = useRef(false);
@@ -113,6 +131,12 @@ export function useIntroSkipPrompt({
   const replacePrompt = useCallback((next: ActivePrompt | null) => {
     activePromptRef.current = next;
     setActivePromptState(next);
+  }, []);
+
+  const setExpiredKey = useCallback((key: string | null) => {
+    if (expiredKeyRef.current === key) return;
+    expiredKeyRef.current = key;
+    setExpiredKeyState(key);
   }, []);
 
   const clearCountdownTimers = useCallback(() => {
@@ -164,7 +188,10 @@ export function useIntroSkipPrompt({
       resolvedKeysRef.current.add(current.key);
     }
     clearPrompt();
-  }, [clearPrompt]);
+    // Timing out does not resolve an `ask` intro: the offer waits for the
+    // controls instead of disappearing for the rest of the intro.
+    if (current.kind === "skip") setExpiredKey(current.key);
+  }, [clearPrompt, setExpiredKey]);
   useEffect(() => {
     expirePromptRef.current = expirePrompt;
   }, [expirePrompt]);
@@ -174,6 +201,7 @@ export function useIntroSkipPrompt({
       clearCountdownTimers();
       clearPauseGraceTimer();
       remainingAtEdgeRef.current = null;
+      setExpiredKey(null);
       const next = { key, kind, deadlineMs: null, remainingMs: INTRO_PROMPT_MS };
       replacePrompt(next);
       if (playingRef.current) {
@@ -186,7 +214,7 @@ export function useIntroSkipPrompt({
         deadlineRef.current = 0;
       }
     },
-    [clearCountdownTimers, clearPauseGraceTimer, replacePrompt, scheduleCountdown],
+    [clearCountdownTimers, clearPauseGraceTimer, replacePrompt, scheduleCountdown, setExpiredKey],
   );
 
   useEffect(() => {
@@ -246,6 +274,8 @@ export function useIntroSkipPrompt({
     scheduleCountdown,
   ]);
 
+  const insideIntro = intro !== null && currentTime >= intro.start && currentTime < intro.end;
+
   /* eslint-disable react-hooks/set-state-in-effect -- Playback position and mode changes are the
    * external events this hook translates into prompt state. The updates cannot be derived during
    * render because they also own timers, per-intro resolution, and one-shot seek effects. */
@@ -254,18 +284,21 @@ export function useIntroSkipPrompt({
     if (contextRef.current !== context) {
       contextRef.current = context;
       wasInsideRef.current = false;
+      setExpiredKey(null);
       clearPrompt();
     }
 
-    const inside = intro !== null && currentTime >= intro.start && currentTime < intro.end;
+    const inside = insideIntro;
     if (!enabled || mode === "never" || !intro || !introKey) {
       wasInsideRef.current = false;
+      setExpiredKey(null);
       clearPrompt();
       return;
     }
 
     if (!inside) {
       wasInsideRef.current = false;
+      setExpiredKey(null);
       const current = activePromptRef.current;
       // The undo prompt intentionally survives the automatic seek out of the
       // intro. The ask prompt does not survive a viewer seek out.
@@ -305,7 +338,7 @@ export function useIntroSkipPrompt({
       if (!promptStillActive(activePromptRef.current, introKey, "undo")) return;
       clearPrompt();
     });
-  }, [clearPrompt, currentTime, enabled, intro, introKey, mode, startPrompt]);
+  }, [clearPrompt, enabled, insideIntro, intro, introKey, mode, setExpiredKey, startPrompt]);
   /* eslint-enable react-hooks/set-state-in-effect -- ends the playback-position exception */
 
   useEffect(
@@ -316,6 +349,20 @@ export function useIntroSkipPrompt({
     [clearCountdownTimers, clearPauseGraceTimer],
   );
 
+  // Derived during render as well as kept in state, so a render that already
+  // left the intro, changed mode or lost the player shows nothing even before
+  // the effect above has cleared the expiry.
+  const reofferKey =
+    activePrompt === null &&
+    controlsVisible &&
+    enabled &&
+    mode === "ask" &&
+    insideIntro &&
+    expiredKey !== null &&
+    expiredKey === introKey
+      ? expiredKey
+      : null;
+
   /**
    * Acts on the visible prompt, reporting only whether there was one to act on.
    *
@@ -325,6 +372,14 @@ export function useIntroSkipPrompt({
    * the intro needs to be able to press it again.
    */
   const select = useCallback(() => {
+    if (reofferKey !== null && intro) {
+      settleSeek(onSeekRef.current(intro.end), (accepted) => {
+        if (!accepted) return;
+        resolvedKeysRef.current.add(reofferKey);
+        if (expiredKeyRef.current === reofferKey) setExpiredKey(null);
+      });
+      return true;
+    }
     const current = activePromptRef.current;
     if (!current || !intro) return false;
     settleSeek(onSeekRef.current(current.kind === "skip" ? intro.end : intro.start), (accepted) => {
@@ -334,7 +389,7 @@ export function useIntroSkipPrompt({
       clearPrompt();
     });
     return true;
-  }, [clearPrompt, intro]);
+  }, [clearPrompt, intro, reofferKey, setExpiredKey]);
 
   const dismiss = useCallback(() => {
     const current = activePromptRef.current;
@@ -349,11 +404,15 @@ export function useIntroSkipPrompt({
         kind: activePrompt.kind,
         label: activePrompt.kind === "skip" ? "Skip Intro" : "Watch Intro",
         caption: activePrompt.kind === "skip" ? undefined : "Intro skipped",
-        durationMs: INTRO_PROMPT_MS,
-        deadlineMs: activePrompt.deadlineMs,
-        remainingMs: activePrompt.remainingMs,
+        timer: {
+          durationMs: INTRO_PROMPT_MS,
+          deadlineMs: activePrompt.deadlineMs,
+          remainingMs: activePrompt.remainingMs,
+        },
       }
-    : null;
+    : reofferKey !== null
+      ? { kind: "skip", label: "Skip Intro", timer: null }
+      : null;
 
   return { prompt, select, dismiss };
 }

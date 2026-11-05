@@ -292,7 +292,7 @@ func registerWatch(reg *Registry) {
 	})
 }
 
-// getWatchState answers the same detail as v1 GET /watch/{id}. A series (not
+// getWatchState accepts an episode under its series' library. A series (not
 // directly playable) is a validation failure naming the path parameter.
 func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*WatchDetailOutput, error) {
 	if reg.deps.Watch == nil {
@@ -302,7 +302,10 @@ func (reg *Registry) getWatchState(ctx context.Context, in *WatchDetailInput) (*
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	opts := handlers.AccessFilterOptions{DeviceID: handlers.NewDeviceMetadata(in.DeviceID, "", "").DeviceID}
+	opts := handlers.AccessFilterOptions{
+		DeviceID:                    handlers.NewDeviceMetadata(in.DeviceID, "", "").DeviceID,
+		SeriesLibraryCoversEpisodes: true,
+	}
 	if in.FileID != "" {
 		n, err := intOfID(in.FileID)
 		if err != nil || n <= 0 {

@@ -70,6 +70,7 @@ function toHomeRow(section: PageSectionConfig): HomeRow {
     config: section.config ?? {},
     itemLimit: section.item_limit,
     hero: section.featured,
+    ...(section.web_only === undefined ? {} : { webOnly: section.web_only }),
     shown: section.enabled,
     own: false,
   };
@@ -82,6 +83,7 @@ function sameRow(a: PageSectionConfig, b: PageSectionConfig): boolean {
     a.section_type === b.section_type &&
     a.enabled === b.enabled &&
     a.featured === b.featured &&
+    a.web_only === b.web_only &&
     a.item_limit === b.item_limit &&
     stableJson(a.config) === stableJson(b.config)
   );
@@ -508,6 +510,7 @@ export function useAdminHomeRows(): AdminHomeRows {
     capabilities: {
       draftPreview: previewAvailable,
       libraryCopies: page.kind === "library",
+      webOnlyHero: Boolean(capabilities?.web_only),
     },
     create,
     copyToLibraries,

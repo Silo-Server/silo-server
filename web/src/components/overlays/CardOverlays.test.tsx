@@ -59,16 +59,32 @@ describe("CardOverlays", () => {
     expect(badgeTexts(container)).toEqual(["4K"]);
   });
 
-  it("suppresses standalone resolution and hdr when the combined badge is enabled", () => {
-    const prefs = buildDefaultPrefs();
-    prefs.items.resolution_hdr = { ...prefs.items.resolution_hdr, enabled: true };
-    const texts = badgeTexts(
-      render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container,
-    );
-    expect(texts).toContain("4K DV");
-    expect(texts).not.toContain("4K");
-    expect(texts).not.toContain("DV HDR10");
-  });
+  // The defaults enable resolution, hdr and audio; each combined badge hides
+  // the badges it repeats, and the wider one also hides the narrower.
+  it.each([
+    { on: ["resolution_hdr"], shown: ["4K DV", "Atmos"], hidden: ["4K", "DV HDR10"] },
+    {
+      on: ["resolution_hdr_audio"],
+      shown: ["4K DV Atmos"],
+      hidden: ["4K", "DV HDR10", "Atmos"],
+    },
+    {
+      on: ["resolution_hdr", "resolution_hdr_audio"],
+      shown: ["4K DV Atmos"],
+      hidden: ["4K", "DV HDR10", "Atmos", "4K DV"],
+    },
+  ] as { on: OverlayId[]; shown: string[]; hidden: string[] }[])(
+    "hides the badges $on already shows",
+    ({ on, shown, hidden }) => {
+      const prefs = buildDefaultPrefs();
+      for (const id of on) prefs.items[id] = { ...prefs.items[id], enabled: true };
+      const texts = badgeTexts(
+        render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container,
+      );
+      for (const text of shown) expect(texts).toContain(text);
+      for (const text of hidden) expect(texts).not.toContain(text);
+    },
+  );
 
   it("honors prefs.order within a corner", () => {
     const prefs = buildDefaultPrefs(); // resolution, hdr, audio all top-left

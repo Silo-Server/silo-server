@@ -426,6 +426,10 @@ POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
+POST /api/v2/admin/users/{id}/profiles	non-media
+DELETE /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
+PATCH /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
 DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
 GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
 PUT /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
@@ -1747,6 +1751,10 @@ POST /api/v2/admin/users/{id}/impersonate	non-media
 GET /api/v2/admin/users/{id}/ips	non-media
 POST /api/v2/admin/users/{id}/password-reset	non-media
 GET /api/v2/admin/users/{id}/profiles	non-media
+POST /api/v2/admin/users/{id}/profiles	non-media
+DELETE /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
+GET /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
+PATCH /api/v2/admin/users/{id}/profiles/{profile_id}	non-media
 DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
 GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media
 PUT /api/v2/admin/users/{id}/profiles/{profile_id}/sections	non-media

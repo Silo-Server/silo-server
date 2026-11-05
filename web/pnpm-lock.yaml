@@ -96,8 +96,8 @@ importers:
         specifier: ^0.576.0
         version: 0.576.0(react@19.2.4)
       mediabunny:
-        specifier: ^1.61.0
-        version: 1.61.0
+        specifier: ^1.62.1
+        version: 1.62.1
       node-unrar-js:
         specifier: ^2.0.2
         version: 2.0.2
@@ -2697,8 +2697,8 @@ packages:
   mdn-data@2.27.1:
     resolution: {integrity: sha512-9Yubnt3e8A0OKwxYSXyhLymGW4sCufcLG6VdiDdUGVkPhpqLxlvP5vl1983gQjJl3tqbrM731mjaZaP68AgosQ==}
 
-  mediabunny@1.61.0:
-    resolution: {integrity: sha512-WciPOYwKZwgYkoBKcEK6JzzIf+w5whypPzFdOihOylZ/5Qv19FmNfRnTcaprH+jD136YpEASU30Eb6VNCJiz3A==}
+  mediabunny@1.62.1:
+    resolution: {integrity: sha512-lYzeerDwo9QLhBCipqQDXOSV7InvaIFplllZQviPO5rPwH+IUr8M1uvumk1olIUgMRGkPiInRriv25WFErUgMw==}
 
   min-indent@1.0.1:
     resolution: {integrity: sha512-I9jwMn07Sy/IwOj3zVkVik2JTvgpaykDZEigL6Rx6N9LbMywwUSMtxET+7lVoDLLd3O3IXwJwvuuns8UB/HeAg==}
@@ -5733,7 +5733,7 @@ snapshots:
 
   mdn-data@2.27.1: {}
 
-  mediabunny@1.61.0:
+  mediabunny@1.62.1:
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.12
       '@types/dom-webcodecs': 0.1.13

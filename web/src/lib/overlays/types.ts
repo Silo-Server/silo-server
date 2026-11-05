@@ -22,6 +22,7 @@ export type OverlayId =
   | "resolution"
   | "hdr"
   | "resolution_hdr"
+  | "resolution_hdr_audio"
   | "audio"
   | "audio_channels"
   | "video_codec"

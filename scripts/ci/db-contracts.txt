@@ -4,6 +4,7 @@
 
 # Library visibility, rating ceilings, mixed catalogs, and section results.
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
+./internal/catalog TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
@@ -85,6 +86,10 @@
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB
 
+# Web-only hero rows: the web_only column keeps a page's hero banner off every
+# caller but the web on Home and library pages, and clears with the hero.
+./internal/api/handlers TestWebOnlyHeroRowsDB
+
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
@@ -141,6 +146,7 @@
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
 ./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
 ./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
+./internal/jellycompat TestPseudoUserOwnerAcrossReplicasPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
@@ -376,6 +382,7 @@
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult
 ./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
 ./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
 ./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves
@@ -406,6 +413,12 @@
 # Login sessions record the device that signed in.
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
+
+# A bound device sign-in is collected only with its secret, on this release
+# and, through the schema, on an older one; one TV signs in to two accounts.
+./internal/auth TestDeviceLoginSessionBindingDB
+./internal/auth TestDeviceLoginCopiedBindingDB
+./internal/auth TestDeviceLoginTwoAccountsOneDeviceDB
 
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsFinishedPlayback
@@ -571,7 +584,7 @@
 ./internal/recommendations TestTasteProfileSubjectsReadTheSQLiteStorePostgres
 ./internal/recommendations TestTasteProfileSubjectsSkipDeletedProfilesPostgres
 ./internal/recommendations TestTasteSeedCandidatesHonourAccessPostgres
-./internal/recommendations TestWatchedItemIDSetQueryMatchesStoreWalkPostgres
+./internal/recommendations TestProgressReadsMatchStoreWalkPostgres
 ./internal/sections TestRecommendationSectionsFillFromTheWholePoolPostgres
 ./internal/webhooksync TestWebhookEventsReportSignalChangesPostgres
 ./migrations TestPurgeOrphanedRecommendationRowsPostgres
@@ -714,6 +727,9 @@
 # again, and a stale worker never heartbeats or ends another worker's claim.
 ./internal/scanqueue TestRunningScanStopsWhenItsClaimEndsElsewhereDB
 ./internal/scanqueue TestStaleWorkerLeavesALaterClaimRunningDB
+
+# A run requeued as stale drops the abandoned attempt's progress.
+./internal/scanqueue TestStaleRequeueClearsTheAbandonedProgressDB
 
 # Password sign-in spends one attempt budget per name on every surface.
 ./internal/auth TestSignInNameBudgetDB

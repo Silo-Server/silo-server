@@ -237,6 +237,16 @@ func (f *fakeProfiles) ListProfiles(_ context.Context, _ int) (handlers.ProfileL
 	return handlers.ProfileListView{Profiles: []handlers.ProfileView{f.view}, AvatarUploadEnabled: f.avatarStore}, nil
 }
 
+func (f *fakeProfiles) GetProfile(_ context.Context, _ int, profileID string) (handlers.ProfileView, error) {
+	if f.err != nil {
+		return handlers.ProfileView{}, f.err
+	}
+	if profileID != f.view.ID {
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+	}
+	return f.view, nil
+}
+
 func (f *fakeProfiles) CreateProfile(_ context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error) {
 	f.lastCreate = &cmd
 	if f.err != nil {
@@ -1011,7 +1021,17 @@ type fakeDeviceRequest struct {
 	profileID  string
 	// opened marks a pending request an approver has looked up.
 	opened bool
+	// binding is the session binding it was started with; a poll must then
+	// carry fakeBindingSecret.
+	binding string
 }
+
+// fakeBindingSecret is the binding secret of fakeBinding: 32 zero bytes, and
+// base64url of their SHA-256, both unpadded.
+const (
+	fakeBindingSecret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	fakeBinding       = "Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU"
+)
 
 func (f fakeDevices) DeviceLoginConfigured() bool { return f.configured }
 
@@ -1057,20 +1077,24 @@ func (f fakeDevices) LookupDeviceLogin(_ context.Context, in auth.DeviceLoginLoo
 		return nil, err
 	}
 	info := &auth.DeviceLoginInfo{Status: r.Status, UserCode: "4821-7730", MatchCode: "warm pony", DeviceName: "Living room TV",
-		DevicePlatform: "tvos", IPAddressHint: "192.168.1.x", ExpiresAt: r.ExpiresAt, RequestedAt: fixedTime(), ClientPurpose: r.Purpose, Temporary: r.Temporary}
+		DevicePlatform: "tvos", IPAddressHint: "192.168.1.x", ExpiresAt: r.ExpiresAt, RequestedAt: fixedTime(), ClientPurpose: r.Purpose, Temporary: r.Temporary,
+		Binding: r.binding}
 	if r.Status == "expired" {
 		info.UserCode, info.MatchCode = "", ""
 	}
 	return info, nil
 }
 
-func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode string) (*handlers.DeviceLoginPollView, error) {
+func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode, bindingSecret string) (*handlers.DeviceLoginPollView, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
 	r := f.requests[deviceCode]
 	if r == nil {
 		return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+	}
+	if r.binding != "" && bindingSecret != fakeBindingSecret {
+		return nil, &handlers.APIError{Status: 403, Code: handlers.DeviceBindingMismatchCode, Message: "The binding secret does not match the binding this request was started with"}
 	}
 	view := &handlers.DeviceLoginPollView{Status: r.Status, PollAfter: 5, Opened: r.opened && r.Status == auth.DeviceLoginStatusPending}
 	if r.Status == auth.DeviceLoginStatusPending {
@@ -1160,11 +1184,14 @@ func fixtureDevices() fakeDevices {
 	remotePending := &fakeDeviceRequest{Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeRemote, Temporary: true, ExpiresAt: exp}
 	opened := &fakeDeviceRequest{Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp, opened: true}
 	canceled := &fakeDeviceRequest{Status: auth.DeviceLoginStatusCanceled, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp}
+	bound := &fakeDeviceRequest{Status: auth.DeviceLoginStatusApproved, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp, approvedBy: 1, binding: fakeBinding}
 	return fakeDevices{configured: true, requests: map[string]*fakeDeviceRequest{
 		"dev-pending": pending, "br-pending": pending, "4821-7730": pending, "48217730": pending,
 		"dev-opened":   opened,
 		"dev-canceled": canceled, "br-canceled": canceled,
 		"dev-approved": approved,
+		"dev-bound":    bound,
+		"1357-2468":    bound,
 		"dev-handoff":  handoff,
 		"br-remote":    remotePending,
 		"482177":       {Status: auth.DeviceLoginStatusPending, Purpose: auth.DeviceLoginPurposeQuickConnect, ExpiresAt: exp},

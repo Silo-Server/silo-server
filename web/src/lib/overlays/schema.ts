@@ -314,17 +314,26 @@ export function serializeOverlayPrefs(prefs: CardOverlayPrefs): string {
   return JSON.stringify(prefs);
 }
 
-// Whether `id` should be hidden because another enabled overlay already
-// displays the same information. The combined `resolution_hdr` badge
-// subsumes the standalone `resolution` and `hdr` badges — without this,
-// enabling the combined view on top of the defaults produces
-// "4K HDR 4K HDR" stacks. The user's stored prefs are left untouched so
-// toggling the combined badge off restores the standalones automatically.
-export function isOverlaySuppressed(id: OverlayId, prefs: CardOverlayPrefs): boolean {
-  if (id === "resolution" || id === "hdr") {
-    return prefs.items["resolution_hdr"]?.enabled === true;
+// Combined badges and the badges whose information each already shows,
+// widest first. Without this, enabling a combined badge on top of the
+// defaults produces "4K HDR 4K HDR" stacks.
+const COMBINED_BADGES: readonly (readonly [OverlayId, readonly OverlayId[]])[] = [
+  ["resolution_hdr_audio", ["resolution", "hdr", "audio", "resolution_hdr"]],
+  ["resolution_hdr", ["resolution", "hdr"]],
+];
+
+// The enabled combined badge that hides `id`, or null when `id` shows. The
+// user's stored prefs are left untouched so toggling the combined badge off
+// restores the badges it hid.
+export function overlaySuppressedBy(id: OverlayId, prefs: CardOverlayPrefs): OverlayId | null {
+  for (const [combined, covers] of COMBINED_BADGES) {
+    if (covers.includes(id) && prefs.items[combined]?.enabled === true) return combined;
   }
-  return false;
+  return null;
+}
+
+export function isOverlaySuppressed(id: OverlayId, prefs: CardOverlayPrefs): boolean {
+  return overlaySuppressedBy(id, prefs) !== null;
 }
 
 // Returns enabled overlays for a position, in the user's chosen order

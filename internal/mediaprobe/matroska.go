@@ -31,6 +31,10 @@ type MatroskaTrack struct {
 	Number  uint64
 	Type    uint64
 	CodecID string
+	// LanguageBCP47 is the entry's BCP 47 language tag, such as "pt-BR".
+	// Matroska makes it override the legacy ISO 639-2 Language element,
+	// which is all FFprobe reports, so a region or script is lost without it.
+	LanguageBCP47 string
 }
 
 const (
@@ -178,7 +182,7 @@ func readMatroskaTracksElement(r io.ReaderAt, off, size int64) ([]MatroskaTrack,
 			return
 		}
 		e := matroska.ParseTrackEntry(entry)
-		tracks = append(tracks, MatroskaTrack{Number: e.Number, Type: e.Type, CodecID: e.CodecID})
+		tracks = append(tracks, MatroskaTrack{Number: e.Number, Type: e.Type, CodecID: e.CodecID, LanguageBCP47: e.LanguageBCP47})
 	})
 	if len(tracks) > maxTrackEntries {
 		return nil, fmt.Errorf("mediaprobe: Matroska Tracks has more than %d entries", maxTrackEntries)
