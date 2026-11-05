@@ -180,14 +180,16 @@ func registerTitleAllowances(reg *Registry) {
 			return reg.setCollectionAllowance(ctx, in, false)
 		})
 	copyOp := humaOp(http.MethodPost, Prefix+"/profiles/{id}/allowed-titles/copy-collection", "allowCollectionTitles", "profiles",
-		"Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy; a stored collection's copy reads at most its first 100,000 entries not yet allowed. Only titles the acting profile can see are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Household managers only.")
+		"Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy; a stored collection's copy reads at most its first 100,000 entries not yet allowed. Only titles the acting profile can see are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Not retryable: a repeated copy of a stored collection with more titles than one copy takes continues with the next ones, so after an uncertain response read listAllowedTitles before copying again. Household managers only.")
 	Register(reg, Operation{
 		Operation:      copyOp,
 		Class:          ClassProfileScoped,
 		DemoRestricted: true,
-		RetrySafety:    RetrySafetyNaturalIdempotent,
-		ServiceBacked:  true,
-		Audited:        true,
+		// A repeated copy of a stored collection longer than one copy's cap
+		// continues with the next titles rather than converging.
+		RetrySafety:   RetrySafetyNonRetryable,
+		ServiceBacked: true,
+		Audited:       true,
 	}, reg.allowCollectionTitles)
 }
 

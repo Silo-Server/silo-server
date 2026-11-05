@@ -970,7 +970,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"disallowTitle":                            "V2-only removal of a title allowance (v1 is frozen). Removing an absent allowance deletes nothing, so a replay converges.",
 	"allowCollection":                          "V2-only live collection allowance for a limited profile (v1 is frozen). Allowing an allowed collection inserts no row, so a replay converges.",
 	"disallowCollection":                       "V2-only removal of a collection allowance (v1 is frozen). Removing an absent allowance deletes nothing, so a replay converges.",
-	"allowCollectionTitles":                    "V2-only copy of a collection's titles into title allowances (v1 is frozen). Titles already allowed insert no row, so a replay converges on the same allowances; only the reported added count differs.",
+	"allowCollectionTitles":                    "V2-only copy of a collection's titles into title allowances (v1 is frozen). Non-retryable: a repeated copy of a stored collection longer than one copy's cap continues with the next titles.",
 	"markNotInterested":                        "V2-only Not interested mark (v1 is frozen). Marking a marked title changes no row and sends no notice, so a replay converges on the same mark.",
 	"unmarkNotInterested":                      "V2-only clearing of a Not interested mark (v1 is frozen). Clearing an absent mark changes no row and sends no notice, so a replay converges.",
 	"translateLibraryMetadata":                 "V2-only library prewarm of AI metadata translation (v1 is frozen). It coalesces on the library's active prewarm for the language; a replay after it finished starts another prewarm that finds only what is still missing, so nothing is translated twice.",
