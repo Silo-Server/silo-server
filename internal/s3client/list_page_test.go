@@ -1,6 +1,7 @@
 package s3client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestListObjectInfosPagePreservesStorageBoundary(t *testing.T) {
@@ -87,6 +89,48 @@ func TestListRejectsOversizedResponses(t *testing.T) {
 			}
 			if got := calls.Load(); got != 1 {
 				t.Fatalf("list requests = %d, want 1 (an oversized reply is not retried)", got)
+			}
+		})
+	}
+}
+
+// An endpoint that never stops paging must not make a full listing grow
+// without bound: it stops at the entry cap, or at the page cap when the pages
+// are empty.
+func TestListObjectInfosStopsEndlessListing(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		keys     int
+		requests int32
+	}{
+		// 0, 3, 6, 9 entries are under the ceiling of 10; 12 stops it.
+		{"entries", 3, 4},
+		// Five empty pages reach the page ceiling of 5.
+		{"empty pages", 0, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prevEntries, prevPages := maxListEntries, maxListPages
+			maxListEntries, maxListPages = 10, 5
+			t.Cleanup(func() { maxListEntries, maxListPages = prevEntries, prevPages })
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				n := calls.Add(1)
+				_, _ = fmt.Fprintf(w, `<ListBucketResult><IsTruncated>true</IsTruncated><NextContinuationToken>t%d</NextContinuationToken>`, n)
+				for i := range tc.keys {
+					_, _ = fmt.Fprintf(w, `<Contents><Key>p/%d-%d</Key></Contents>`, n, i)
+				}
+				_, _ = fmt.Fprint(w, `</ListBucketResult>`)
+			}))
+			defer server.Close()
+			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", AccessKey: "test", SecretKey: "test", PathStyle: true})
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			_, err := client.ListObjectInfos(ctx, "silo", "p/")
+			if !errors.Is(err, ErrListingTooLarge) {
+				t.Fatalf("err = %v after %d requests, want ErrListingTooLarge", err, calls.Load())
+			}
+			if got := calls.Load(); got != tc.requests {
+				t.Fatalf("stopped after %d requests, want %d", got, tc.requests)
 			}
 		})
 	}
