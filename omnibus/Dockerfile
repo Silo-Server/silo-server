@@ -19,6 +19,9 @@ ARG S6_OVERLAY_NOARCH_SHA256=5379750ed30a84bbd2e2dd74847ba6b5bd29cd0b2e3ea2ec580
 ARG S6_OVERLAY_X86_64_SHA256=e6befcc96a437a3831386ecfc51808c5d3e939dc5fe3c02ae9284599e8aa2408
 ARG S6_OVERLAY_AARCH64_SHA256=b17f17a82e7a515c682a91edaf2ffdabb73f891981b6c1fd712115693a2f8b4c
 ARG PG_MAJOR=18
+# SHA-256 of the PGDG signing key file (primary key B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8).
+# The key comes from the same host as the packages, so pin it here.
+ARG PGDG_KEY_SHA256=0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76
 # Pinned: Meilisearch will not open data written by another version. See
 # "Two versions are load-bearing" in docs/architecture/omnibus-image.md.
 ARG MEILISEARCH_VERSION=v1.54.0
@@ -52,6 +55,7 @@ RUN apt-get update && \
     locale-gen && \
     install -d /etc/apt/keyrings && \
     curl -fsSL --retry 5 --retry-all-errors -o /etc/apt/keyrings/pgdg.asc https://apt.postgresql.org/pub/repos/apt/ACCC4CF8.asc && \
+    echo "${PGDG_KEY_SHA256}  /etc/apt/keyrings/pgdg.asc" | sha256sum -c - && \
     echo "deb [signed-by=/etc/apt/keyrings/pgdg.asc arch=${TARGETARCH}] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && \
