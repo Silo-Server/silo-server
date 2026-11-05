@@ -115,6 +115,9 @@ type itemImageEntry struct {
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Rating      float64 `json:"rating"`
+	// Fallback marks show artwork a season list offers after the season's own
+	// images. It is set only on season lists and is not serialised.
+	Fallback bool `json:"-"`
 }
 
 type getItemImagesResponse struct {
@@ -343,6 +346,7 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 			Width:       img.Width,
 			Height:      img.Height,
 			Rating:      img.Rating,
+			Fallback:    resolved.season != nil && img.SeasonNumber == nil,
 		})
 	}
 

@@ -100,9 +100,10 @@ func registerAdminCatalogImages(reg *Registry) {
 			choices = append(choices, choice{string(raw), row})
 		}
 		// Local sidecar artwork leads in discovery order, which puts the file a
-		// refresh would pick first. Provider choices follow, highest rated
-		// first; the stable identity breaks their ties without letting expiring
-		// display URLs affect pages.
+		// refresh would pick first. Provider choices follow: on a season list
+		// the season's own images come before the show fallbacks, and each group
+		// is highest rated first. The stable identity breaks ties without
+		// letting expiring display URLs affect pages.
 		slices.SortStableFunc(choices, func(a, b choice) int {
 			aLocal := a.row.ProviderID == metadata.LocalImageProviderID
 			bLocal := b.row.ProviderID == metadata.LocalImageProviderID
@@ -112,6 +113,12 @@ func registerAdminCatalogImages(reg *Registry) {
 			case aLocal:
 				return -1
 			case bLocal:
+				return 1
+			}
+			if a.row.Fallback != b.row.Fallback {
+				if b.row.Fallback {
+					return -1
+				}
 				return 1
 			}
 			if order := cmp.Compare(b.row.Rating, a.row.Rating); order != 0 {
@@ -131,7 +138,16 @@ func registerAdminCatalogImages(reg *Registry) {
 		end := min(pos.Offset+in.Limit, len(choices))
 		rows := make([]ItemImageEntry, 0, end-pos.Offset)
 		for _, c := range choices[pos.Offset:end] {
-			rows = append(rows, ItemImageEntry(c.row))
+			rows = append(rows, ItemImageEntry{
+				ProviderID:  c.row.ProviderID,
+				URL:         c.row.URL,
+				OriginalURL: c.row.OriginalURL,
+				Type:        c.row.Type,
+				Language:    c.row.Language,
+				Width:       c.row.Width,
+				Height:      c.row.Height,
+				Rating:      c.row.Rating,
+			})
 		}
 		next := ""
 		if end < len(choices) {

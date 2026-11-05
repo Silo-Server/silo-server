@@ -45,6 +45,7 @@ func TestAdminImageListLeadsWithLocalArtwork(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	deps.AdminCatalogImages = &fakeAdminImages{rows: []handlers.AdminImageEntryView{
 		{ProviderID: "tvdb", OriginalURL: "unrated", Type: "poster"},
+		{ProviderID: "tmdb", OriginalURL: "show fallback", Type: "backdrop", Rating: 10, Fallback: true},
 		{ProviderID: "tmdb", OriginalURL: "rated", Type: "poster", Rating: 9},
 		{ProviderID: metadata.LocalImageProviderID, OriginalURL: "file:///fanart.jpg", Type: "backdrop"},
 		{ProviderID: metadata.LocalImageProviderID, OriginalURL: "file:///backdrop1.jpg", Type: "backdrop"},
@@ -58,8 +59,9 @@ func TestAdminImageListLeadsWithLocalArtwork(t *testing.T) {
 	for _, row := range page.Items {
 		got = append(got, row.OriginalURL)
 	}
-	// Local choices keep discovery order rather than sorting by path.
-	if want := []string{"file:///fanart.jpg", "file:///backdrop1.jpg", "rated", "unrated"}; !slices.Equal(got, want) {
+	// Local choices keep discovery order rather than sorting by path, and a
+	// season's own images lead the show fallbacks whatever their rating.
+	if want := []string{"file:///fanart.jpg", "file:///backdrop1.jpg", "rated", "unrated", "show fallback"}; !slices.Equal(got, want) {
 		t.Fatalf("order %v, want %v", got, want)
 	}
 }

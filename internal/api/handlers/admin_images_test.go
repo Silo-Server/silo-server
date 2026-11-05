@@ -115,10 +115,16 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			const seriesID = "series-1"
+			season := tt.seasonNumber
 			imageSvc := &imageServiceFake{seasonImages: []metadata.RemoteImage{{
+				ProviderID:   "tmdb",
+				URL:          "tmdb://requested-season.jpg",
+				Type:         metadata.ImagePoster,
+				SeasonNumber: &season,
+			}, {
 				ProviderID: "tmdb",
-				URL:        "tmdb://requested-season.jpg",
-				Type:       metadata.ImagePoster,
+				URL:        "tmdb://show-backdrop.jpg",
+				Type:       metadata.ImageBackdrop,
 			}}}
 			handler := NewAdminImageHandler(
 				imageItemLookupFake{seriesID: {
@@ -172,8 +178,14 @@ func TestHandleGetItemImagesUsesSeasonSpecificFetch(t *testing.T) {
 			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 				t.Fatalf("decode response: %v", err)
 			}
-			if len(response.Images) != 1 || response.Images[0].OriginalURL != "tmdb://requested-season.jpg" {
+			if len(response.Images) != 2 || response.Images[0].OriginalURL != "tmdb://requested-season.jpg" || response.Images[1].OriginalURL != "tmdb://show-backdrop.jpg" {
 				t.Fatalf("images = %#v", response.Images)
+			}
+			// v2 orders by the tier, which the service marks by an exact
+			// season number.
+			view, err := handler.GetAdminItemImages(context.Background(), tt.contentID)
+			if err != nil || len(view.Images) != 2 || view.Images[0].Fallback || !view.Images[1].Fallback {
+				t.Fatalf("tiers = %#v, %v", view.Images, err)
 			}
 			if response.Current.PosterURL != tt.currentPoster {
 				t.Fatalf("current poster = %q, want season poster %q", response.Current.PosterURL, tt.currentPoster)
