@@ -10867,7 +10867,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Allow a profile every title in a personal collection, including titles added later. Only a manual collection the acting primary profile created can be allowed (422 collection_not_live); copy other collections' titles with allowCollectionTitles. A collection whose titles would take the profile past the 10,000 titles it may be allowed is refused (422 too_many_allowed_titles); titles past that bound added to the collection later stay hidden. Household managers only. */
+    /** Allow a profile every title in a personal collection, including titles added later. Only a manual collection the acting primary profile created can be allowed (422 collection_not_live); copy other collections' titles with allowCollectionTitles. A profile sees at most 10,000 of its allowed titles, from its own allowances and its live collections together; the rest stay hidden. Household managers only. */
     put: operations["allowCollection"];
     post?: never;
     /** Stop allowing a profile a personal collection. An absent allowance succeeds and changes nothing. Household managers only. */
@@ -10902,7 +10902,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Allow a profile a movie or series above its rating or advisory-age limit. A series allowance covers its seasons and episodes. The profile must have a limit (422 no_maturity_limits) and reach the title's library (422 no_library_access); episodes and seasons are refused with 422, and so is an allowance past the 10,000 titles a profile may be allowed (422 too_many_allowed_titles). Allowing an allowed title succeeds and changes nothing. Household managers only. */
+    /** Allow a profile a movie or series above its rating or advisory-age limit. A series allowance covers its seasons and episodes. The profile must have a limit (422 no_maturity_limits) and reach the title's library (422 no_library_access); episodes and seasons are refused with 422. A profile sees at most 10,000 of its allowed titles; the rest stay hidden. Allowing an allowed title succeeds and changes nothing. Household managers only. */
     put: operations["allowTitle"];
     post?: never;
     /** Remove a profile's allowance for a title. An absent allowance succeeds and changes nothing. A title an allowed collection holds stays allowed. Household managers only. */
@@ -10921,7 +10921,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy and up to the 10,000 titles a profile may be allowed in all; a stored collection's copy reads at most its first 100,000 entries not yet allowed. Only titles the acting profile can see, in libraries the target profile can reach, are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Not retryable: a repeated copy of a stored collection with more titles than one copy takes continues with the next ones, so after an uncertain response read listAllowedTitles before copying again. Household managers only. */
+    /** Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy; a stored collection's copy reads at most its first 100,000 entries not yet allowed. Only titles the acting profile can see, in libraries the target profile can reach, are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Not retryable: a repeated copy of a stored collection with more titles than one copy takes continues with the next ones, so after an uncertain response read listAllowedTitles before copying again. Household managers only. */
     post: operations["allowCollectionTitles"];
     delete?: never;
     options?: never;

@@ -142,21 +142,25 @@ var profileByIDQuery = `
 	       ARRAY(` + ProfileAllowedTitleIDsSQL("user_profiles.user_id", "user_profiles.id") + `)
 	FROM user_profiles WHERE user_id = $1 AND id = $2`
 
-// ProfileAllowedTitleIDsSQL renders the ordered, distinct content IDs a
-// profile is allowed above its maturity limits: its own title allowances plus
-// the titles of each live-allowed collection. A collection allows its titles
-// only while it is a manual collection created by the account's current
-// primary profile, so the household manager alone decides what it holds, and
-// only its movies and series, as a title allowance may name
-// (userstore.AllowanceTitleTypes). It reads at most
-// userstore.MaxAllowedTitles of them.
-// userIDExpr and profileIDExpr are SQL expressions for the profile's key.
+// ProfileAllowedTitleIDsSQL renders the content IDs a profile is allowed
+// above its maturity limits: its own title allowances plus the titles of each
+// live-allowed collection. A collection allows its titles only while it is a
+// manual collection created by the account's current primary profile, so the
+// household manager alone decides what it holds, and only its movies and
+// series, as a title allowance may name (userstore.AllowanceTitleTypes).
+//
+// Every request the profile makes reads this, so it reads at most
+// userstore.MaxAllowedTitles rows: UNION ALL with no ORDER BY lets PostgreSQL
+// stop as soon as it has them rather than reading every member of every live
+// collection. The rows may repeat and come in no order; profileFromRow sorts
+// and deduplicates them. Titles past the bound stay hidden, which fails
+// closed. userIDExpr and profileIDExpr are SQL expressions for the profile's
+// key.
 func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	return `
-	           SELECT content_id FROM (
 	           SELECT content_id FROM profile_title_allowances ta
 	           WHERE ta.user_id = ` + userIDExpr + ` AND ta.profile_id = ` + profileIDExpr + `
-	           UNION
+	           UNION ALL
 	           SELECT ci.media_item_id FROM profile_collection_allowances ca
 	           JOIN user_personal_collections c ON c.user_id = ca.user_id AND c.id = ca.collection_id
 	           JOIN user_profiles creator ON creator.user_id = c.user_id AND creator.id = c.creator_profile_id
@@ -165,8 +169,6 @@ func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	           WHERE ca.user_id = ` + userIDExpr + ` AND ca.profile_id = ` + profileIDExpr + `
 	             AND c.collection_type = 'manual' AND creator.is_primary
 	             AND mi.type IN ('movie', 'series')
-	           ) allowed
-	           ORDER BY 1
 	           LIMIT ` + strconv.Itoa(userstore.MaxAllowedTitles)
 }
 
@@ -186,7 +188,8 @@ func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 		p.AllowedLibraryIDs = libraryIDs
 	}
 	if len(allowedTitleIDs) > 0 {
-		p.AllowedTitleIDs = allowedTitleIDs
+		slices.Sort(allowedTitleIDs)
+		p.AllowedTitleIDs = slices.Compact(allowedTitleIDs)
 	}
 	return p, nil
 }

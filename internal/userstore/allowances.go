@@ -24,12 +24,11 @@ type CollectionAllowance struct {
 	CreatedAt    string
 }
 
-// MaxAllowedTitles bounds the titles one profile may be allowed above its
-// limits, directly and through live collections together. The list is read
-// with every request the profile makes, so it stays bounded: writes refuse to
-// grow it past this, and the read takes at most this many (in content ID
-// order), so a live collection grown past it hides the rest rather than
-// slowing every request.
+// MaxAllowedTitles bounds the allowed titles one profile's read takes,
+// directly and through live collections together. The list is read with
+// every request the profile makes, so a profile allowed more than this sees
+// only this many of them, and the rest stay hidden, rather than slowing every
+// request.
 const MaxAllowedTitles = 10_000
 
 // CollectionPosition is a stored collection entry's place in the

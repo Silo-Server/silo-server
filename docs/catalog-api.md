@@ -571,10 +571,8 @@ answers `403` otherwise.
   the operation is not retryable: after an uncertain response, read the
   allowed titles before copying again.
 
-A profile may be allowed at most 10,000 titles, directly and through live
-collections together. Allowing past that answers `422`
-(`too_many_allowed_titles`), a copy stops at it, and titles a live collection
-gains past it stay hidden.
+A profile sees at most 10,000 of its allowed titles, from its own allowances
+and its live collections together; past that, the rest stay hidden.
 
 An allowed title is visible and playable for the profile everywhere content is
 reached, Jellyfin clients included. A series allowance covers its seasons and

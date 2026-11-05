@@ -47,10 +47,13 @@ A code path that builds limits without the list is stricter than intended,
 never looser: it hides allowed titles and exposes nothing.
 
 The list is bounded by `userstore.MaxAllowedTitles` (10,000), because every
-request the profile makes reads it and passes it to the catalog SQL. Writes
-refuse to grow it past the bound, and the read takes at most that many in
-content ID order, so a live collection that grows past it hides the rest
-rather than slowing every request.
+request the profile makes reads it and passes it to the catalog SQL. The read
+is a `UNION ALL` with a `LIMIT` and no `ORDER BY`, so PostgreSQL stops once it
+has that many rows rather than reading every member of every live collection;
+`profileFromRow` sorts and deduplicates them. A profile allowed more than the
+bound sees only that many, and the rest stay hidden. Writes are not capped:
+checking a live collection's future size at write time would be imprecise and
+racy, and the read bound alone keeps each request's cost fixed.
 
 The list is the union of:
 

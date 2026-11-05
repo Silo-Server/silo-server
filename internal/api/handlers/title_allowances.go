@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 
@@ -157,17 +156,6 @@ func targetProfile(ctx context.Context, store userstore.UserStore, profileID str
 	return profile, nil
 }
 
-// requireAllowanceRoom refuses a write that would take the profile past
-// userstore.MaxAllowedTitles allowed titles. profile.AllowedTitleIDs is the
-// resolved list its read loaded, itself capped at that bound.
-func requireAllowanceRoom(profile *userstore.Profile, adding int) error {
-	if len(profile.AllowedTitleIDs)+adding <= userstore.MaxAllowedTitles {
-		return nil
-	}
-	return apiError(http.StatusUnprocessableEntity, "too_many_allowed_titles",
-		fmt.Sprintf("A profile can be allowed at most %d titles; remove some before allowing more", userstore.MaxAllowedTitles))
-}
-
 // requireMaturityLimits refuses a profile with no limit to make an exception
 // to.
 func requireMaturityLimits(p *userstore.Profile) error {
@@ -228,9 +216,6 @@ func (h *TitleAllowanceHandler) SetTitleAllowance(ctx context.Context, actor All
 // library the profile can reach.
 func (h *TitleAllowanceHandler) checkAllowanceFor(ctx context.Context, actor AllowanceActor, profile *userstore.Profile, itemID string) error {
 	if err := requireMaturityLimits(profile); err != nil {
-		return err
-	}
-	if err := requireAllowanceRoom(profile, 1); err != nil {
 		return err
 	}
 	if err := h.checkAllowableTitle(ctx, actor, itemID); err != nil {
@@ -426,7 +411,7 @@ func (h *TitleAllowanceHandler) SetCollectionAllowance(ctx context.Context, acto
 
 // checkLiveCollection requires what allowing a collection live needs: a
 // profile with maturity limits, a manual collection the acting primary
-// profile created, and room for its titles under userstore.MaxAllowedTitles.
+// profile created.
 func checkLiveCollection(ctx context.Context, store userstore.UserStore, actor AllowanceActor, profile *userstore.Profile, collectionID string) error {
 	if err := requireMaturityLimits(profile); err != nil {
 		return err
@@ -438,7 +423,7 @@ func checkLiveCollection(ctx context.Context, store userstore.UserStore, actor A
 	if collection.CollectionType != userstore.CollectionTypeManual || collection.CreatorProfileID != actor.ActiveProfileID {
 		return apiError(http.StatusUnprocessableEntity, "collection_not_live", "Only a manual collection the primary profile created can be allowed as it changes; copy its titles instead")
 	}
-	return requireAllowanceRoom(profile, collection.ItemCount)
+	return nil
 }
 
 // AllowCollectionTitles allows a profile every movie and series a personal
@@ -471,14 +456,9 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if err != nil {
 		return 0, err
 	}
-	if err := requireAllowanceRoom(profile, 1); err != nil {
-		return 0, err
-	}
 	if ids, err = h.reachableBy(ctx, actor.UserID, profileID, ids); err != nil {
 		return 0, err
 	}
-	// A copy takes what fits under the profile's bound.
-	ids = ids[:min(len(ids), userstore.MaxAllowedTitles-len(profile.AllowedTitleIDs))]
 	added, err := h.allowances.AllowTitles(ctx, manager, profileID, ids)
 	if err != nil {
 		return 0, allowanceWriteError(err, "Failed to allow the collection's titles")
