@@ -8,6 +8,7 @@ export type AdminBackup = AdminBackupList["items"][number];
 export type AdminBackupKind = AdminBackup["kind"];
 export type AdminBackupStatus = AdminBackup["status"];
 export type AdminBackupWarning = AdminBackupList["warnings"][number];
+export type AdminBackupOmitted = AdminBackup["restore_set_omitted"][number];
 export type AdminBackupActive = NonNullable<AdminBackupList["active"]>;
 export type AdminBackupLastRun = NonNullable<AdminBackupList["last_run"]>;
 export type AdminBackupDownloadLink =

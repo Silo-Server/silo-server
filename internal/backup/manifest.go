@@ -172,6 +172,9 @@ func (m *Manifest) checkMAC(key []byte, keyCheck string) (authenticated bool, er
 type RestoreSetSummary struct {
 	FormatVersion int            `json:"format_version"`
 	Sections      map[string]int `json:"sections"`
+	// Omitted lists items the restore set could not carry; the backup is
+	// complete with warnings.
+	Omitted []OmittedItem `json:"omitted,omitempty"`
 	// IndexSHA256 is the digest of the restore set's index, its first
 	// entry. With the manifest authenticated, a read checks the index
 	// against it before decoding it, and the archive against its object
@@ -211,7 +214,7 @@ type TableCount struct {
 
 // Status is complete, or complete with warnings when blobs were missing.
 func (m *Manifest) Status() Status {
-	if len(m.MissingBlobs) > 0 {
+	if len(m.MissingBlobs) > 0 || (m.RestoreSet != nil && len(m.RestoreSet.Omitted) > 0) {
 		return StatusCompleteWithWarnings
 	}
 	return StatusComplete

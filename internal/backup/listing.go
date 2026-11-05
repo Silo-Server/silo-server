@@ -67,7 +67,9 @@ type Summary struct {
 	MissingBlobs []MissingBlob `json:"missing_blobs"`
 	// MissingBlobsTotal counts every missing blob; MissingBlobs lists at
 	// most maxRecordedMissingBlobs of them.
-	MissingBlobsTotal int           `json:"missing_blobs_total"`
+	MissingBlobsTotal int `json:"missing_blobs_total"`
+	// RestoreSetOmitted lists restore-set items the backup could not carry.
+	RestoreSetOmitted []OmittedItem `json:"restore_set_omitted"`
 	BlobCount         int           `json:"blob_count"`
 	Objects           []ObjectEntry `json:"objects"`
 	// KeyCheck is the check value of the SECRET_KEY the backup was taken
@@ -176,7 +178,7 @@ func (s *Service) list(ctx context.Context) (Listing, error) {
 	}
 	unreadable := 0
 	for _, f := range folders {
-		summary := Summary{ID: f.id, Kind: f.kind, CreatedAt: f.at, SizeBytes: f.size, MissingBlobs: []MissingBlob{}, Objects: []ObjectEntry{},
+		summary := Summary{ID: f.id, Kind: f.kind, CreatedAt: f.at, SizeBytes: f.size, MissingBlobs: []MissingBlob{}, RestoreSetOmitted: []OmittedItem{}, Objects: []ObjectEntry{},
 			Location: t.Location(folderPrefix(serverID, f.id))}
 		summary.Clean = f.cleanCopy()
 		switch {
@@ -237,6 +239,9 @@ func (s *Service) fromManifest(summary *Summary, m *Manifest) {
 	summary.SizeBytes, summary.MissingBlobs, summary.Objects, summary.BlobCount = m.Size(), m.MissingBlobs, m.Objects, m.Blobs.Count
 	summary.MissingBlobsTotal = max(m.MissingBlobsTotal, len(m.MissingBlobs))
 	summary.KeyCheck, summary.KeyMatches = m.KeyCheck, m.KeyCheck != "" && m.KeyCheck == s.opts.KeyCheck
+	if m.RestoreSet != nil && m.RestoreSet.Omitted != nil {
+		summary.RestoreSetOmitted = m.RestoreSet.Omitted
+	}
 	if summary.MissingBlobs == nil {
 		summary.MissingBlobs = []MissingBlob{}
 	}

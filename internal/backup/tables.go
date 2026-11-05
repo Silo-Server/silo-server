@@ -102,5 +102,5 @@ var serverStateTables = strings.Fields(`
 	watch_provider_rating_items watch_provider_scrobble_sessions watch_provider_sync_runs
 	watch_together_room_creation_receipts watch_together_suggestion_receipts webhook_sync_event_logs
 	webhook_sync_item_state
-	backup_restore_followups
+	backup_restore_followups backup_restored_accounts backup_restored_profiles
 `)

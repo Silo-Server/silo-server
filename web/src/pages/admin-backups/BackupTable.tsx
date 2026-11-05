@@ -77,10 +77,11 @@ function BackupStatus({
       return <SettingFieldStatus tone="ok">{label}</SettingFieldStatus>;
     case "complete_with_warnings": {
       const missing = backup.missing_blobs.length;
+      const omitted = backup.restore_set_omitted.length;
       return (
         <div className="flex flex-col items-start gap-0.5 max-sm:items-end max-sm:text-right">
           <SettingFieldStatus tone="warn">{label}</SettingFieldStatus>
-          {missing > 0 ? (
+          {missing > 0 || omitted > 0 ? (
             <button
               type="button"
               onClick={onToggle}

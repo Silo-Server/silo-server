@@ -45,6 +45,7 @@ const SETTINGS_TITLES: Record<string, string> = {
   personalize: "Personalize",
   "watch-providers": "Watch Provider Settings",
   notifications: "Notification Settings",
+  "your-data": "Your Data",
 };
 
 const ADMIN_TITLES: Record<string, string> = {

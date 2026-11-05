@@ -14,6 +14,11 @@ export type RestoreReport = components["schemas"]["AdminBackupRestoreReport"];
 export type RestoreReportItem = RestoreReport["items"][number];
 export type RestoreReason = NonNullable<RestoreItem["reason"]>;
 export type RestoreErrorCode = NonNullable<RestoreReport["error_code"]>;
+export type RestoreAccount = components["schemas"]["AdminBackupRestoreAccount"];
+export type RestoreProfile = components["schemas"]["AdminBackupRestoreProfile"];
+export type RestorePolicyDifference = components["schemas"]["AdminBackupRestorePolicyDifference"];
+export type RestoreDataTypeId = components["schemas"]["AdminBackupRestoreDataType"]["id"];
+export type RestoreReportAccount = components["schemas"]["AdminBackupRestoreReportAccount"];
 
 /** The admin job kind of a selective restore. */
 const RESTORE_JOB_KIND = "backup_restore";

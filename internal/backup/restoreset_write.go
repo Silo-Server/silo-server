@@ -75,6 +75,8 @@ func buildRestoreSet(ctx context.Context, tx pgx.Tx, meta restoreSetMeta) (*rest
 			err = b.addLibraries(ctx, tx, spec)
 		case SectionPlugins:
 			err = b.addPlugins(ctx, tx, spec)
+		case SectionUsers:
+			err = b.addUsers(ctx, tx, spec)
 		case SectionCollections:
 			err = b.addCollections(ctx, tx, spec, settings)
 		case SectionHomeSections:
@@ -91,7 +93,7 @@ func buildRestoreSet(ctx context.Context, tx pgx.Tx, meta restoreSetMeta) (*rest
 
 // summary is the manifest's record of this restore set.
 func (b *restoreSetBuild) summary() *RestoreSetSummary {
-	out := &RestoreSetSummary{FormatVersion: restoreSetVersion, Sections: map[string]int{}, IndexSHA256: b.indexSHA256}
+	out := &RestoreSetSummary{FormatVersion: restoreSetVersion, Sections: map[string]int{}, Omitted: b.index.Omitted, IndexSHA256: b.indexSHA256}
 	for _, s := range b.index.Sections {
 		out.Sections[s.ID] = s.Count
 	}
