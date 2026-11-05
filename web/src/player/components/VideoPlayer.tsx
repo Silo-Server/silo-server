@@ -733,6 +733,13 @@ export function VideoPlayer({
   const [buffering, setBuffering] = useState(false);
   const bufferingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [awaitingFirstFrame, setAwaitingFirstFrame] = useState(true);
+  // The session whose video has been on screen. A transport a replan loads
+  // into it (a seek outside the buffer, a quality or track change) waits for
+  // its first frame behind the buffering spinner, with the controls usable;
+  // only a session's start waits behind the opaque loading cover.
+  const [framedSessionId, setFramedSessionId] = useState<string | null>(null);
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
   const [isLeaving, setIsLeaving] = useState(false);
   const leaveInProgressRef = useRef(false);
   const [notice, setNotice] = useState<PlaybackNoticeState | null>(null);
@@ -1049,6 +1056,8 @@ export function VideoPlayer({
   backendDurationRef.current = backendDuration;
   const effectiveInitialPosition = plan.timeline.player_start_seconds;
   const canSeekAnywhere = plan.timeline.can_seek_anywhere;
+  const canSeekAnywhereRef = useRef(canSeekAnywhere);
+  canSeekAnywhereRef.current = canSeekAnywhere;
   // The menu is the plan's. The session's preference decides whether Auto is
   // lit, since `auto` names no rung; otherwise the plan names the entry it
   // delivers.
@@ -2613,6 +2622,7 @@ export function VideoPlayer({
       startupGuardRef.current?.markPlaybackStarted();
       transportIdleSinceRef.current = Date.now();
       setAwaitingFirstFrame(false);
+      setFramedSessionId(sessionIdRef.current);
       setPlaying(false);
       pausedSourceLoading = true;
       endHoldOnceLoaded();
@@ -2699,7 +2709,14 @@ export function VideoPlayer({
     const attachNativeHLS = () => {
       video.src = effectiveStreamUrl;
       nativeHLSMetadataHandler = () => {
-        video.currentTime = effectiveInitialPosition;
+        // A seek the viewer made while the transport loaded wins over the
+        // start position; on a seek-anywhere plan it never replans. A room
+        // seek request the room has not run yet waits for the room's command.
+        const pendingSeconds = canSeekAnywhereRef.current ? pendingSeekTimeRef.current : null;
+        video.currentTime =
+          pendingSeconds === null || pendingSeconds === roomHeldSeekRef.current
+            ? effectiveInitialPosition
+            : toPlayerTime(pendingSeconds, timelineOffsetRef.current);
         attemptAutoplayWhenReady();
       };
       video.addEventListener("loadedmetadata", nativeHLSMetadataHandler, { once: true });
@@ -3137,6 +3154,7 @@ export function VideoPlayer({
       startupGuardRef.current?.markPlaybackStarted();
       streamPlayedRef.current = true;
       setAwaitingFirstFrame(false);
+      setFramedSessionId(sessionIdRef.current);
     };
     // `timeupdate` and `seeked` prove a frame is on screen only once the
     // loaded source has data for the current position. Tearing a transport
@@ -4706,6 +4724,13 @@ export function VideoPlayer({
   // An outage shows the buffering spinner too, and says so: the browser
   // decoder keeps sending timeupdate while it waits, which clears `buffering`.
   const stalled = buffering || bufferingQuality.outage;
+  const sessionFramed = framedSessionId === sessionId;
+  const startupCover = !isPlayerReady || (awaitingFirstFrame && !sessionFramed);
+  const transportReloading = awaitingFirstFrame && sessionFramed && isPlayerReady && !error;
+  // A room seek makes the room wait as well; its panel shows while the reload
+  // runs, in place of the buffering spinner.
+  const roomSyncShown =
+    roomSyncWaiting && isPlayerReady && (!awaitingFirstFrame || transportReloading);
   let stallLabel: string | null = null;
   if (watchTogetherSync.catchingUp) stallLabel = "Catching up to the party";
   else if (bufferingQuality.outage) stallLabel = "Reconnecting…";
@@ -5245,8 +5270,8 @@ export function VideoPlayer({
         </div>
       ) : null}
 
-      {/* Loading overlay — stays up until the first frame renders */}
-      {!isDetached && (awaitingFirstFrame || !isPlayerReady) && !error && (
+      {/* Loading overlay — stays up until the session's first frame renders */}
+      {!isDetached && startupCover && !error && (
         <div
           role="status"
           aria-label="Loading video"
@@ -5258,7 +5283,7 @@ export function VideoPlayer({
       )}
 
       {/* Room sync overlay */}
-      {!isDetached && roomSyncWaiting && !awaitingFirstFrame && isPlayerReady && (
+      {!isDetached && roomSyncShown && (
         <div
           role="status"
           aria-label="Syncing playback"
@@ -5279,23 +5304,26 @@ export function VideoPlayer({
         </div>
       )}
 
-      {/* Buffering spinner (mid-playback stalls and outages only) */}
-      {!isDetached && stalled && !roomSyncWaiting && !awaitingFirstFrame && isPlayerReady && (
-        <div
-          role="status"
-          aria-label={stallLabel ?? "Buffering"}
-          className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3"
-        >
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-          {stallLabel ? (
-            <span className="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white/85">
-              {stallLabel}
-            </span>
-          ) : (
-            <span className="sr-only">Buffering</span>
-          )}
-        </div>
-      )}
+      {/* Buffering spinner (mid-playback stalls, outages and replanned transports) */}
+      {!isDetached &&
+        ((stalled && !awaitingFirstFrame) || transportReloading) &&
+        !roomSyncWaiting &&
+        isPlayerReady && (
+          <div
+            role="status"
+            aria-label={stallLabel ?? "Buffering"}
+            className="pointer-events-none absolute inset-0 z-30 flex flex-col items-center justify-center gap-3"
+          >
+            <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+            {stallLabel ? (
+              <span className="rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white/85">
+                {stallLabel}
+              </span>
+            ) : (
+              <span className="sr-only">Buffering</span>
+            )}
+          </div>
+        )}
 
       {!isDetached && (notice || bufferingPill) ? (
         <PlaybackNoticeStack>
