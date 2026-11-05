@@ -51,7 +51,7 @@ RUN apt-get update && \
     sed -i 's/^# *\(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen && \
     locale-gen && \
     install -d /etc/apt/keyrings && \
-    curl -fsSL -o /etc/apt/keyrings/pgdg.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    curl -fsSL --retry 5 --retry-all-errors -o /etc/apt/keyrings/pgdg.asc https://apt.postgresql.org/pub/repos/apt/ACCC4CF8.asc && \
     echo "deb [signed-by=/etc/apt/keyrings/pgdg.asc arch=${TARGETARCH}] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && \
