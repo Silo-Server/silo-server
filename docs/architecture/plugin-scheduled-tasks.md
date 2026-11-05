@@ -48,7 +48,10 @@ scheduled task that both the old and the new manifest declare, and the task's
 binding has no runnable trigger, a saved schedule equal to the old default (the
 old manifest's `default_trigger`, else startup) becomes the new default. Equal
 means the same triggers in order, each with the same type and the fields that
-type reads. Any other saved schedule is an edit and stays.
+type reads. Any other saved schedule is an edit and stays. A task with no
+saved schedule yet gets the new default saved, as the task manager would seed
+it, so a server whose registry scan read the old manifest finds the new
+default instead of seeding the old one.
 `InstallationStore.Update` does this in the transaction that replaces the
 installation's capabilities, holding the installation row, which binding
 writes lock before they write, and locking the saved schedule. A task's first

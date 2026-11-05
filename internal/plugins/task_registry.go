@@ -487,9 +487,11 @@ func saveTaskBindingSchedule(ctx context.Context, tx pgx.Tx, previous, binding *
 // default_trigger, else startup) is replaced with the new one. Any other
 // saved schedule is an edit and stays; an edit identical to the old default
 // cannot be told apart from it and moves too. A task with no saved schedule
-// is left for the task manager to seed. The caller holds the installation
-// row, which binding writes lock before they write, so no binding lands
-// between the binding check and the schedule move.
+// gets the new default saved, which is what the task manager would seed, so
+// a server whose registry scan read the old manifest finds it instead of
+// seeding the old default. The caller holds the installation row, which
+// binding writes lock before they write, so no binding lands between the
+// binding check and the schedule move.
 func followManifestDefaultSchedules(ctx context.Context, tx pgx.Tx, installationID int, previous []*Capability, current []Capability) error {
 	before := make(map[string]*Capability, len(previous))
 	for _, capability := range previous {
@@ -519,7 +521,7 @@ func followManifestDefaultSchedules(ctx context.Context, tx pgx.Tx, installation
 		if err != nil {
 			return fmt.Errorf("reading plugin task %s schedule: %w", key, err)
 		}
-		if saved.Revision == 0 || !sameSchedule(saved.Triggers, oldDefault) {
+		if saved.Revision != 0 && !sameSchedule(saved.Triggers, oldDefault) {
 			continue
 		}
 		if err := taskrepository.ReplaceScheduleInTx(ctx, tx, key, newDefault); err != nil {

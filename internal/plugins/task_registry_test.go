@@ -414,10 +414,12 @@ func TestPluginUpdateMovesUneditedTaskScheduleDB(t *testing.T) {
 		name          string
 		before, after *pluginv1.ScheduledTaskTrigger
 		binding       map[string]any
+		unsaved       bool // the task has no saved schedule yet
 		edit          []taskmanager.TriggerConfig
 		want          []taskmanager.TriggerConfig
 	}{
 		{name: "startup moves to an added default", after: manifestHourly, want: hourly},
+		{name: "unsaved task gets the changed default", before: manifestDaily, after: manifestHourly, unsaved: true, want: hourly},
 		{name: "edited schedule stays", after: manifestHourly, edit: weekly, want: weekly},
 		// The binding's trigger is the old default, so only the binding check keeps it.
 		{name: "binding trigger stays", after: manifestHourly, binding: map[string]any{"type": "startup"}, want: startup},
@@ -447,8 +449,13 @@ func TestPluginUpdateMovesUneditedTaskScheduleDB(t *testing.T) {
 				}
 			}
 			// The task manager saves the default when the task first registers.
-			if _, err := triggerRepo.GetOrCreateTriggers(ctx, key, pluginTaskTriggers(binding, installed)); err != nil {
-				t.Fatal(err)
+			seed := func() {
+				if _, err := triggerRepo.GetOrCreateTriggers(ctx, key, pluginTaskTriggers(binding, installed)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !tc.unsaved {
+				seed()
 			}
 			if tc.edit != nil {
 				if err := triggerRepo.SetTriggers(ctx, key, tc.edit); err != nil {
@@ -457,6 +464,8 @@ func TestPluginUpdateMovesUneditedTaskScheduleDB(t *testing.T) {
 			}
 
 			release("2", tc.after)
+			// A server whose registry scan read the old manifest seeds its default late.
+			seed()
 			if got, err := triggerRepo.GetTriggers(ctx, key); err != nil || !slices.Equal(got, tc.want) {
 				t.Fatalf("saved schedule after the update = %+v (%v), want %+v", got, err, tc.want)
 			}

@@ -519,8 +519,9 @@
 ./internal/plugins TestTaskBindingScheduleAppliesOnceOnEveryServerDB
 
 # A plugin update moves a task whose saved schedule still equals the old
-# manifest default to the new one, and keeps an edited schedule and a binding's
-# own trigger, including a first binding written while the update runs.
+# manifest default to the new one, saves it for a task with no saved schedule so
+# a late seed of the old default loses, and keeps an edited schedule and a
+# binding's own trigger, including a first binding written while the update runs.
 ./internal/plugins TestPluginUpdateMovesUneditedTaskScheduleDB
 ./internal/plugins TestFirstTaskBindingWaitsForPluginUpdateDB
 
