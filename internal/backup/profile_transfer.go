@@ -17,6 +17,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/backup/jsonsize"
 	"github.com/Silo-Server/silo-server/internal/backup/userdata"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -503,7 +504,7 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 		Library:   func(id int) (int, bool) { return id, libraries[id] },
 		Untrusted: true,
 	}
-	target.Collections = transferCollections(tx, target, doc.Data[userdata.Collections])
+	target.Collections = transferCollections(tx, target, doc.Data[userdata.Collections], scope.AllowedLibraryIDs)
 	for _, dt := range userDataTypes {
 		raw, ok := doc.Data[dt.ID()]
 		if !ok {
@@ -530,30 +531,59 @@ func (t *ProfileTransfer) Import(ctx context.Context, scope ProfileImportScope, 
 
 // transferCollections maps the collection ids a profile export names: its
 // own personal collections as their import matches them, and an admin
-// collection only on the server that wrote it, while it is still there.
-func transferCollections(tx pgx.Tx, target userdata.Target, collections json.RawMessage) func(ctx context.Context, field string, ids []string) (map[string]string, error) {
+// collection only on the server that wrote it, while it is still there and
+// the profile may see it (catalog.CanAccessLibraryCollection, the check a
+// sort preference's save makes). A collection it may not see is treated as
+// one that is gone, so an import cannot probe which hidden ones exist.
+func transferCollections(tx pgx.Tx, target userdata.Target, collections json.RawMessage, allowedLibraries []int) func(ctx context.Context, field string, ids []string) (map[string]string, error) {
 	carried := usercollections.CarriedCollections(map[string]json.RawMessage{"": collections})
 	return func(ctx context.Context, field string, ids []string) (map[string]string, error) {
 		switch field {
 		case userdata.UserCollectionField:
 			return usercollections.MapCarriedEach(ctx, tx, target, carried, ids)
 		case userdata.LibraryCollectionField:
-			out := map[string]string{}
 			if !target.SameServer {
-				return out, nil
+				return map[string]string{}, nil
 			}
-			rows, err := tx.Query(ctx, `SELECT id FROM library_collections WHERE id = ANY($1)`, ids)
-			if err != nil {
-				return nil, err
-			}
-			found, err := pgx.CollectRows(rows, pgx.RowTo[string])
-			for _, id := range found {
-				out[id] = id
-			}
-			return out, err
+			return accessibleLibraryCollections(ctx, tx, ids, allowedLibraries)
 		}
 		return map[string]string{}, nil
 	}
+}
+
+// accessibleLibraryCollections maps each of ids that names an admin
+// collection the profile may see to itself.
+func accessibleLibraryCollections(ctx context.Context, tx pgx.Tx, ids []string, allowedLibraries []int) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT lc.id, lc.visibility, lc.library_id,
+			COALESCE(ARRAY_AGG(lcl.library_id) FILTER (WHERE lcl.library_id IS NOT NULL), ARRAY[]::integer[])
+		FROM library_collections lc
+		LEFT JOIN library_collection_libraries lcl ON lcl.collection_id = lc.id
+		WHERE lc.id = ANY($1)
+		GROUP BY lc.id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (models.LibraryCollection, error) {
+		var c models.LibraryCollection
+		var libraryIDs []int32
+		err := row.Scan(&c.ID, &c.Visibility, &c.LibraryID, &libraryIDs)
+		for _, id := range libraryIDs {
+			c.LibraryIDs = append(c.LibraryIDs, int(id))
+		}
+		if len(c.LibraryIDs) == 0 && c.LibraryID > 0 {
+			c.LibraryIDs = []int{c.LibraryID}
+		}
+		return c, err
+	})
+	out := map[string]string{}
+	access := catalog.AccessFilter{AllowedLibraryIDs: allowedLibraries}
+	for i := range found {
+		if catalog.CanAccessLibraryCollection(&found[i], access) {
+			out[found[i].ID] = found[i].ID
+		}
+	}
+	return out, err
 }
 
 // leftOutTitles merges title lists, sorted and without repeats.

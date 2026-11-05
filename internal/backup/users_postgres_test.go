@@ -820,6 +820,7 @@ func TestProfileTransferDB(t *testing.T) {
 		dbExec(t, pool, `INSERT INTO user_favorites (user_id, profile_id, media_item_id) VALUES ($1, $2, $3)`, user, src, item)
 	}
 	dbExec(t, pool, `INSERT INTO user_library_playback_preferences (user_id, profile_id, library_id, audio_language) VALUES ($1, $2, $3, 'de'), ($1, $2, $4, 'fr')`, user, src, lib1, lib2)
+	shown, elsewhere := seedCollectionSorts(t, pool, user, src, lib1, lib2, at, sfx)
 
 	transfer := NewProfileTransfer(pool, func(context.Context) (string, error) { return "pt-server-" + sfx, nil })
 	data, err := transfer.Export(ctx, ProfileImportScope{UserID: user, ProfileID: src})
@@ -883,15 +884,52 @@ func TestProfileTransferDB(t *testing.T) {
 		t.Fatal("a restricted profile lost an item it can see")
 	case countRows(t, pool, `SELECT count(*) FROM user_library_playback_preferences WHERE user_id = $1 AND profile_id = $2 AND library_id = $3`, user, kid, lib2) != 0:
 		t.Fatal("a restricted profile gained a preference for a library it cannot see")
+
 	// Hidden titles are listed with unmatched ones, never told apart.
 	case len(res.Hidden) != 0 || !slices.Contains(res.Unmatched, "Three "+sfx+" (2001)") || !slices.Contains(res.Unmatched, "Two "+sfx+" (2001)"):
 		t.Fatalf("unmatched = %v, hidden = %v", res.Unmatched, res.Hidden)
 	}
+	checkCollectionSorts(t, pool, user, map[string][]string{dst: {elsewhere, shown}, kid: {shown}})
 	if _, err := transfer.Import(ctx, ProfileImportScope{UserID: other, ProfileID: dst}, data); !errors.Is(err, ErrProfileNotFound) {
 		t.Fatalf("importing into another account's profile = %v, want not found", err)
 	}
 	checkRestrictedExport(t, transfer, ProfileImportScope{UserID: user, ProfileID: src, AllowedLibraryIDs: []int{lib1},
 		Maturity: access.MaturityLimits{MaxContentRating: "PG"}}, m1, []string{m2, "Two " + sfx, m3, "Three " + sfx})
+}
+
+// seedCollectionSorts gives profile sort preferences on three admin
+// collections: one a profile restricted to lib1 may see, one hidden from
+// everyone, and one in lib2. It returns the two visible ones.
+func seedCollectionSorts(t *testing.T, pool *pgxpool.Pool, user int, profile string, lib1, lib2 int, at time.Time, sfx string) (shown, elsewhere string) {
+	t.Helper()
+	shown, hidden, elsewhere := "ptc-shown-"+sfx, "ptc-hidden-"+sfx, "ptc-lib2-"+sfx
+	dbExec(t, pool, `INSERT INTO library_collections (id, library_id, slug, title, collection_type, visibility) VALUES
+		($1, $4, $1, $1, 'manual', 'visible'), ($2, $4, $2, $2, 'manual', 'hidden'), ($3, $5, $3, $3, 'manual', 'visible')`, shown, hidden, elsewhere, lib1, lib2)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = ANY($1)`, []string{shown, hidden, elsewhere})
+	})
+	for _, c := range []string{shown, hidden, elsewhere} {
+		dbExec(t, pool, `INSERT INTO user_collection_sort_preferences (user_id, profile_id, collection_kind, collection_id, sort_field, sort_order, updated_at)
+			VALUES ($1, $2, 'library', $3, 'title', 'asc', $4)`, user, profile, c, at)
+	}
+	return shown, elsewhere
+}
+
+// checkCollectionSorts: an import maps a library sort only to a collection
+// the importing profile may see; a hidden one, or one outside its
+// libraries, is left out like one that is gone.
+func checkCollectionSorts(t *testing.T, pool *pgxpool.Pool, user int, want map[string][]string) {
+	t.Helper()
+	for profile, ids := range want {
+		rows, err := pool.Query(t.Context(), `SELECT collection_id FROM user_collection_sort_preferences WHERE user_id = $1 AND profile_id = $2 AND collection_kind = 'library' ORDER BY 1`, user, profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil || !slices.Equal(got, ids) {
+			t.Fatalf("%s's library sort preferences = %v (%v), want %v", profile, got, err, ids)
+		}
+	}
 }
 
 // checkRestrictedExport: a profile exports its data as it may see it now,

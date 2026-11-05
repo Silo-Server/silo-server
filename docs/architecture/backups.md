@@ -1260,7 +1260,11 @@ order the sort editor stores it under
 sort under the one `personal` id whatever id the document names, so a
 document lists at most one per personal list; a library-kind sort under
 an admin collection the restore's collection mapping finds here, mapped
-for the whole list in one read. A document holds at most 10,000. Every
+for the whole list in one read. A profile's own import maps an admin
+collection only when the profile may see it
+(`catalog.CanAccessLibraryCollection`, the check the sort editor's save
+makes); one it may not see is left out exactly as one that is gone, so the
+import tells nothing about hidden collections. A document holds at most 10,000. Every
 list of every data type is written, and compared for a preview, in one
 set-based statement whatever its length (settings in one per scope);
 personal collections, at most 1,000 an import, are created or merged one
