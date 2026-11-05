@@ -13,6 +13,10 @@ const maxRedirects = 10
 
 var errTooManyRedirects = errors.New("s3: stopped after 10 redirects")
 
+// errInsecureRedirect stops a redirect from replaying a signed request and its
+// body over plain HTTP after it started over HTTPS.
+var errInsecureRedirect = errors.New("s3: refused redirect from https to a non-https URL")
+
 const (
 	// s3MaxConnsPerHost bounds concurrent connections per endpoint for the whole
 	// process. Matching the idle limit leaves room for a dial that loses the
@@ -45,6 +49,9 @@ var sharedHTTPClientValue = &http.Client{
 		}
 		if req.Response.StatusCode != http.StatusTemporaryRedirect && req.Response.StatusCode != http.StatusPermanentRedirect {
 			return http.ErrUseLastResponse
+		}
+		if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+			return errInsecureRedirect
 		}
 		if len(via) > 0 && via[len(via)-1].URL.Host != req.URL.Host {
 			req.Header.Del("X-Amz-Security-Token")

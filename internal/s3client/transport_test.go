@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -256,5 +257,42 @@ func TestBurstNeverClosesUnusedConnections(t *testing.T) {
 		if !cs.active {
 			t.Errorf("connection %v was dialed but never carried a request", conn.RemoteAddr())
 		}
+	}
+}
+
+func TestS3ClientRefusesHTTPSToHTTPRedirects(t *testing.T) {
+	var leaked atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer plain.Close()
+	for _, status := range []int{307, 308} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.Header().Set("Location", plain.URL+"/object")
+				w.WriteHeader(status)
+			}))
+			defer secure.Close()
+			// The test server's certificate needs its own transport; the redirect
+			// policy under test is the shared client's.
+			client := &http.Client{Transport: secure.Client().Transport, CheckRedirect: sharedHTTPClient().CheckRedirect}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, secure.URL+"/object", strings.NewReader("payload"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Authorization", "AWS4-HMAC-SHA256 signed")
+			resp, err := client.Do(req)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			if err == nil {
+				t.Error("upload followed a redirect from https to plain http")
+			}
+		})
+	}
+	if got := leaked.Load(); got != 0 {
+		t.Fatalf("plain HTTP server received %d requests", got)
 	}
 }
