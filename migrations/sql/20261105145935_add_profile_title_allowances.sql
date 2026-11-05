@@ -7,13 +7,13 @@
 CREATE TABLE public.profile_title_allowances (
     user_id integer NOT NULL,
     profile_id text NOT NULL,
-    content_id text NOT NULL,
+    content_id text COLLATE "C" NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT profile_title_allowances_pkey PRIMARY KEY (user_id, profile_id, content_id),
     CONSTRAINT profile_title_allowances_profile_fkey FOREIGN KEY (user_id, profile_id)
         REFERENCES public.user_profiles(user_id, id) ON DELETE CASCADE,
     CONSTRAINT profile_title_allowances_content_fkey FOREIGN KEY (content_id)
-        REFERENCES public.media_items(content_id) ON DELETE CASCADE
+        REFERENCES public.media_items(content_id) ON UPDATE CASCADE ON DELETE CASCADE
 );
 -- +goose StatementEnd
 
