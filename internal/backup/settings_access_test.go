@@ -37,16 +37,16 @@ func TestAccessSettingWider(t *testing.T) {
 		{markers.SettingMode, "both", "local", true},
 		{"ratelimit.auth.login.requests_per_minute", "1000", "20", true},
 		{"ratelimit.auth.login.requests_per_minute", "5", "", false},
-		{"metadata_ai.on_view", "auto", "off", true},
-		{"metadata_ai.on_view", "button", "", true}, // unset is off
-		{"metadata_ai.on_view", "off", "button", false},
+		{settingMetadataAIOnView, "auto", onViewOff, true},
+		{settingMetadataAIOnView, onViewButton, "", true}, // unset is off
+		{settingMetadataAIOnView, onViewOff, onViewButton, false},
 		{config.AIServiceTierSettingKey, "priority", "", true},
 		{config.AIServiceTierSettingKey, "", "ultrafast", false},
-		{"subtitle_ai.transcribe_quota_jobs", "0", "10", true}, // 0 is no limit
-		{"subtitle_ai.transcribe_quota_jobs", "20", "10", true},
-		{"subtitle_ai.transcribe_quota_jobs", "5", "0", false},
-		{"subtitle_ai.transcribe_quota_period", "day", "month", true},
-		{"subtitle_ai.transcribe_quota_period", "month", "", false},
+		{settingTranscribeQuotaJobs, "0", "10", true}, // 0 is no limit
+		{settingTranscribeQuotaJobs, "20", "10", true},
+		{settingTranscribeQuotaJobs, "5", "0", false},
+		{settingTranscribeQuotaPeriod, quotaPeriodDay, quotaPeriodMonth, true},
+		{settingTranscribeQuotaPeriod, quotaPeriodMonth, "", false},
 	} {
 		access, wider := AccessSettingWider(tc.key, tc.restored, tc.live)
 		if !access || wider != tc.wider {

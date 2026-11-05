@@ -79,10 +79,10 @@ var accessSettings = func() map[string]widerFunc {
 		// a viewer opens a title (off, on request, or on its own), the
 		// pricier service tiers, and how many transcription jobs a user may
 		// start (0 is no limit) over how short a window.
-		"metadata_ai.on_view":                         byRank(map[string]int64{"off": 0, "button": 1, "auto": 2}),
+		settingMetadataAIOnView:                       byRank(map[string]int64{onViewOff: 0, onViewButton: 1, "auto": 2}),
 		config.AIServiceTierSettingKey:                byRank(map[string]int64{"": 0, "priority": 1, "ultrafast": 1}),
-		"subtitle_ai.transcribe_quota_jobs":           moreJobs,
-		"subtitle_ai.transcribe_quota_period":         byRank(map[string]int64{"month": 0, "week": 1, "day": 2}),
+		settingTranscribeQuotaJobs:                    moreJobs,
+		settingTranscribeQuotaPeriod:                  byRank(map[string]int64{quotaPeriodMonth: 0, "week": 1, quotaPeriodDay: 2}),
 		"subtitle_ai.enabled":                         on,
 		"subtitle_ai.transcribe_enabled":              on,
 		"recommendations.enabled":                     on,
@@ -116,6 +116,12 @@ const (
 	settingSMTPPassword       = "email.smtp_password" //nolint:gosec // G101: a setting key, not a credential
 	settingAIBaseURL          = "ai.base_url"
 	settingAIKey              = "ai.api_key"
+
+	settingMetadataAIOnView          = "metadata_ai.on_view"
+	onViewOff, onViewButton          = "off", "button"
+	settingTranscribeQuotaJobs       = "subtitle_ai.transcribe_quota_jobs"
+	settingTranscribeQuotaPeriod     = "subtitle_ai.transcribe_quota_period"
+	quotaPeriodMonth, quotaPeriodDay = "month", "day"
 )
 
 // widerFunc reports whether restored grants more than live, both effective
