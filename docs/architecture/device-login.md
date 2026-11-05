@@ -148,6 +148,13 @@ changes after start. Approve, approve-handoff, deny and cancel ignore it.
 sends `binding` and `binding_secret` only to a server that reports it. The
 phone needs no flag: it acts on what the lookup returns.
 
+A TV uses one secret for every server in a pairing session, so each of those
+servers learns it from the TV's polls. A hostile server among the person's
+chosen targets, working with an attacker on the network path, could therefore
+start a bound request on another chosen server that the phone approves
+without a comparison. The project accepts that residual risk; see the client
+design for the alternatives.
+
 **Rolling deploys.** A node from an older release ignores `binding` on start
 and does not check `binding_secret` on poll. It cannot collect a bound request
 all the same: the schema refuses to mark a bound request consumed unless
