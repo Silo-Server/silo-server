@@ -139,14 +139,14 @@ fails with `ABORTED` and changes nothing. Without `expected_version` a write
 is unconditional. `WriteInstanceStateResponse.version` is the version just
 written. The version check is part of the write statement and runs under
 the scope's advisory lock, so two servers cannot both land at one version;
-a create-only write on a full scope fails with `RESOURCE_EXHAUSTED`, not
-`ABORTED`. The version is not part of the AAD. A database trigger, not the
-write statement, advances the version on every update, so a write from a
-server on an older release during a rolling deploy still moves it and a
-conditional write cannot land over it. An update that sets the version
-higher keeps that value, so a full restore, which carries the live server's
-rows with their versions, never moves a key back to a version a running
-plugin already read.
+a create-only write fails with `ABORTED` when the key exists, and with
+`RESOURCE_EXHAUSTED` when it does not and the scope is full. The version is
+not part of the AAD. A database trigger, not the write statement, advances
+the version on every update, so a write from a server on an older release
+during a rolling deploy still moves it and a conditional write cannot land
+over it. An update that sets the version higher keeps that value, so a full
+restore, which carries the live server's rows with their versions, never
+moves a key back to a version a running plugin already read.
 
 ## Proxy nodes
 
