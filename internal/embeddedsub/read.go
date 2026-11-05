@@ -133,7 +133,10 @@ type Result struct {
 
 const maxPacketReads = 8
 
-var errPacketReadBusy = errors.New("embeddedsub: packet read limit reached")
+// ErrReadBusy means ReadPackets refused the call at once: the process
+// already runs as many packet reads as it allows, or the same read of the
+// same file version. A caller that needs the packets can retry shortly.
+var ErrReadBusy = errors.New("embeddedsub: packet read limit reached")
 
 type packetReadKey struct {
 	source   cacheKey
@@ -158,7 +161,7 @@ func runPacketRead(ctx context.Context, key packetReadKey, read func() (*Result,
 	_, running := packetReads.running[key]
 	if running || len(packetReads.running) >= maxPacketReads {
 		packetReads.Unlock()
-		return nil, errPacketReadBusy
+		return nil, ErrReadBusy
 	}
 	packetReads.running[key] = struct{}{}
 	packetReads.Unlock()
@@ -211,7 +214,8 @@ func runPacketRead(ctx context.Context, key packetReadKey, read func() (*Result,
 // When ctx ends ReadPackets returns at once; reads already issued finish in
 // the background and keep their slot until every worker exits. At most eight
 // packet operations run process-wide, with one per file version/track/window;
-// a saturated limit or an already running window fails the new call promptly.
+// a saturated limit or an already running window fails the new call promptly
+// with ErrReadBusy.
 func ReadPackets(ctx context.Context, path string, idx *Index, number uint64, from, to time.Duration, opts ReadOptions) (*Result, error) {
 	if idx == nil {
 		return nil, errors.New("embeddedsub: nil index")

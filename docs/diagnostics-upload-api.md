@@ -48,7 +48,8 @@ must not replay automatically. `Retry-After` does not make an uncertain upload
 safe to repeat.
 
 The bridge and v2 chunk routes share sessions in process memory and temporary spool files,
-with a fifteen-minute lifetime, sixteen-session cap and one session per account.
+with a fifteen-minute idle timeout that each chunk renews, a sixteen-session cap and one
+session per account.
 They require affinity to the creating process. Another replica or a process
 restart may return `404`, requiring a fresh session; this is not durable
 cross-replica resumability. Both transports retain those constraints.

@@ -25,6 +25,8 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
+  type ProfileCreate,
+  type ProfileUpdate,
   useCreateProfile,
   useDeleteProfileAvatar,
   useUpdateProfile,
@@ -50,6 +52,16 @@ import {
 } from "@/lib/profile-management";
 import { cn } from "@/lib/utils";
 
+/**
+ * Where the editor saves instead of the signed-in household's own profile
+ * operations: the admin account page passes its account's.
+ */
+export interface ProfileEditorSave {
+  create: (body: ProfileCreate) => Promise<Profile>;
+  update: (id: string, body: ProfileUpdate) => Promise<Profile>;
+  pending: boolean;
+}
+
 interface ProfileEditorDialogProps {
   open: boolean;
   profile?: Profile | null;
@@ -64,6 +76,11 @@ interface ProfileEditorDialogProps {
    * active one, as Who's watching does for the verified primary profile.
    */
   profileContext?: ProfileRequestContextSnapshot;
+  /**
+   * Saves through these instead. They cannot upload an avatar, so the upload
+   * field is hidden; removing an existing upload is saved with the update.
+   */
+  save?: ProfileEditorSave;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess?: (
     profile: Profile,
@@ -95,6 +112,7 @@ export function ProfileEditorDialog({
   advisoryAgeSupported = false,
   requireAdvisoryAgeSupported = false,
   profileContext,
+  save,
   onOpenChange,
   onSaveSuccess,
 }: ProfileEditorDialogProps) {
@@ -123,6 +141,7 @@ export function ProfileEditorDialog({
             advisoryAgeSupported={advisoryAgeSupported}
             requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
             profileContext={profileContext}
+            save={save}
             onOpenChange={onOpenChange}
             onSaveSuccess={onSaveSuccess}
           />
@@ -140,6 +159,7 @@ function ProfileEditorForm({
   advisoryAgeSupported,
   requireAdvisoryAgeSupported,
   profileContext,
+  save,
   onOpenChange,
   onSaveSuccess,
 }: {
@@ -150,6 +170,7 @@ function ProfileEditorForm({
   advisoryAgeSupported: boolean;
   requireAdvisoryAgeSupported: boolean;
   profileContext?: ProfileRequestContextSnapshot;
+  save?: ProfileEditorSave;
   onOpenChange: (open: boolean) => void;
   onSaveSuccess?: (
     profile: Profile,
@@ -164,6 +185,7 @@ function ProfileEditorForm({
   const uploadAvatarMutation = useUploadProfileAvatar(profileContext);
   const deleteAvatarMutation = useDeleteProfileAvatar();
   const isPending =
+    save?.pending === true ||
     createMutation.isPending ||
     updateMutation.isPending ||
     uploadAvatarMutation.isPending ||
@@ -292,7 +314,10 @@ function ProfileEditorForm({
       !removeUploadedAvatar &&
       !avatarFile &&
       draft.avatarPreset === "";
+    // With save, the update removes the upload itself (avatar: null); the
+    // household's own editor deletes it through the avatar operation.
     const deleteExistingUpload =
+      !save &&
       mode === "edit" &&
       profile?.avatar_source === "upload" &&
       removeUploadedAvatar &&
@@ -309,14 +334,15 @@ function ProfileEditorForm({
         if (preserveExistingUpload || deleteExistingUpload) {
           delete body.avatar;
         }
-        savedProfile = await updateMutation.mutateAsync({ id: profile.id, body });
+        savedProfile = save
+          ? await save.update(profile.id, body)
+          : await updateMutation.mutateAsync({ id: profile.id, body });
       } else {
-        savedProfile = await createMutation.mutateAsync(
-          buildProfileRequestFromDraft(draft, {
-            advisoryAgeSupported,
-            requireAdvisoryAgeSupported,
-          }),
-        );
+        const body = buildProfileRequestFromDraft(draft, {
+          advisoryAgeSupported,
+          requireAdvisoryAgeSupported,
+        });
+        savedProfile = save ? await save.create(body) : await createMutation.mutateAsync(body);
       }
     } catch {
       return;
@@ -515,7 +541,7 @@ function ProfileEditorForm({
           </div>
         </div>
 
-        {avatarUploadEnabled ? (
+        {save ? null : avatarUploadEnabled ? (
           <ImageUploadField
             label="Custom upload"
             currentUrl={existingUploadedAvatarURL}

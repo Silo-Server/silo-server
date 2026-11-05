@@ -1,9 +1,12 @@
+import { Link } from "react-router";
+
 import type { AdminSession, AdminUser } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminUserProfileActivity } from "@/hooks/queries/admin/userActivity";
 
 import { formatLastSeen } from "../format";
+import { userDetailTabSearch } from "../userDetailTabs";
 import { DetailCard, InitialAvatar, ListRow } from "../ui";
 
 /** The account's profiles and when each was last used. */
@@ -25,6 +28,11 @@ export function ProfilesCard({
         count === undefined
           ? undefined
           : `${count} of ${user.effective_policy.max_profiles} allowed`
+      }
+      actions={
+        <Button asChild variant="ghost" size="sm">
+          <Link to={userDetailTabSearch("profiles")}>Manage</Link>
+        </Button>
       }
     >
       {profiles.isError ? (

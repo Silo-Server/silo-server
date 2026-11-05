@@ -25,6 +25,7 @@ func TestHEVCPlaybackURLsRejectOlderAPIRouters(t *testing.T) {
 	for _, channels := range []int{2, 6} {
 		source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
 		source.TargetVideoCodec = "hevc"
+		source.SupportsDirectPlay, source.SupportsDirectStream = false, false
 		for i := range source.Version.AudioTracks {
 			source.Version.AudioTracks[i].Channels = channels
 		}

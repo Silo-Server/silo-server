@@ -5,9 +5,9 @@ by [the native API contract](api-contract.md).**
 
 This file governs v1 **capability** scope: which user-facing capabilities Silo 1.0 ships. It no
 longer decides the API contract. Silo 1.0's stable native API is `/api/v2`; `/api/v1` is a frozen
-alpha contract carried through the pre-1.0 bridge window and then retired behind a `410 Gone`
-tombstone. The removals table below remains the authoritative record of the v1 removals taken
-during alpha.
+alpha contract carried through at least two published pre-1.0 bridge releases. Retiring it behind
+a `410 Gone` tombstone is a separate maintainer decision (#886). The removals table below remains
+the authoritative record of the v1 removals taken during alpha.
 
 Propose capabilities with the **v1 capability proposal** issue template; triage happens on the
 [Silo v1 project](https://github.com/orgs/Silo-Server/projects/5).
@@ -18,14 +18,15 @@ When the scope locks, this file becomes the source of truth and will contain:
 2. **API policy** — superseded by [the native API contract](api-contract.md). The additive-only
    rules (no field renames/removals, no type changes, no status-code repurposing; removals only
    via the Deprecation/Sunset header flow; capability endpoints for feature detection) bind
-   `/api/v2` at the 1.0 lock. `/api/v1` never locks: it is frozen and retired after the bridge
-   release. Contract tooling: #135.
+   `/api/v2` at the 1.0 lock. `/api/v1` never locks: it is frozen, carried through at least two
+   published bridge releases, and retired only by a separate maintainer decision (#886).
+   Contract tooling: #135.
 3. **Amendment rules** — after lock, this file changes only via PR with code-owner review.
    An amendment PR is the exception process: it must say what changes, why it cannot wait
    for v1.1, and what it displaces.
 
 Until lock: treat any capability not tracked as `Proposed`/`Locked` on the project as out of scope
-for feature PRs (see the scope gate in `CLAUDE.md`).
+for feature PRs.
 
 ## Library scope: Books deferred
 

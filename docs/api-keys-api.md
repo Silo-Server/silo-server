@@ -2,7 +2,7 @@
 
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
 > 1.0. The frozen alpha `/api/v1` key routes are summarized in
-> [Bridge note](#bridge-note) and are retired after the pre-1.0 bridge window. See
+> [Bridge note](#bridge-note) and are served through the pre-1.0 bridge window. See
 > [the native API contract](architecture/api-contract.md).
 
 API keys are long-lived credentials for scripts and integrations. A key is a
@@ -43,18 +43,20 @@ credential: provisioning and managing ordinary accounts is in scope.
 |------------------------------------------|--------|
 | `POST` with `role: "admin"` | `403 permission_denied` |
 | `PUT` with `role: "admin"` | `403 permission_denied` |
-| `PUT` with `password` or `role` when the target account is currently an admin | `403 permission_denied` |
+| `PUT` with `password`, `email`, `role` or `break_glass` when the target account is currently an admin | `403 permission_denied` |
 | `POST` with `password` and a non-admin `role` | allowed |
 | `PUT` with `password` when the target account is not an admin | allowed |
 
-Unscoped keys and JWT sessions are unaffected.
+The frozen v1 routes refuse the same writes with `403 insufficient_scope`; v1 has no
+`break_glass` member. Unscoped keys and JWT sessions are unaffected.
 
 Discover the scopes a server understands with the capability endpoint below
 rather than sniffing the server version.
 
 ## Admin key management
 
-Admin key management lives under `/api/v2/admin/api-keys`:
+Admin key management lives under `/api/v2/admin/api-keys`, plus one account's key list under
+`/api/v2/admin/users`:
 
 | Method | Path | Result |
 |---|---|---|
@@ -64,6 +66,7 @@ Admin key management lives under `/api/v2/admin/api-keys`:
 | POST | `/admin/api-keys` | `201` creation response containing the full key and canonical `Location` |
 | PUT | `/admin/api-keys/{id}/tier` | Conditional tier update returning canonical metadata and `ETag` |
 | DELETE | `/admin/api-keys/{id}` | Conditional deletion returning `204` without a body |
+| GET | `/admin/users/{id}/api-keys` | One account's keys, as a bounded metadata collection with cursor continuation |
 
 These operations require acting-admin authority. Mutations retain the demo
 restriction; reads do not. Scoped API keys
@@ -206,9 +209,12 @@ uses integer IDs, spells the tier field `tier` rather than `rate_tier`, has no
 cursor pagination, and does not use `ETag`/`If-Match` preconditions. V1 answers
 the admin-boundary refusals under [Scopes](#scopes) with `403 insufficient_scope`
 rather than `permission_denied`. Those routes are
-frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
-namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
-against `/api/v2`. Both `POST /api/v1/api-keys` and `POST /api/v2/api-keys` require
+frozen: no feature work lands on them. After the bridge window, and once a maintainer
+decides to retire it ([#886](https://github.com/Silo-Server/silo-server/issues/886)), the
+main API listener answers the `/api/v1` business routes with `410 Gone` and the
+`client_upgrade_required` problem code; `/api/v1/health` and `/api/v1/ready` keep
+answering. Build against `/api/v2`.
+Both `POST /api/v1/api-keys` and `POST /api/v2/api-keys` require
 an admin account acting through its primary profile, as described under
 [Personal key management](#personal-key-management); v1 refuses anyone else with
 `403 forbidden` before reading the body. Applying the primary-profile rule to v1 is a

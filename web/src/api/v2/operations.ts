@@ -43,6 +43,7 @@ export const v2Operations = {
   "DELETE /api/v2/admin/subtitles/{id}": "deleteAdminStoredSubtitle",
   "DELETE /api/v2/admin/users/{id}": "deleteAdminUser",
   "DELETE /api/v2/admin/users/{id}/identities/{identity_id}": "deleteAdminUserIdentity",
+  "DELETE /api/v2/admin/users/{id}/profiles/{profile_id}": "deleteAdminUserProfile",
   "DELETE /api/v2/admin/users/{id}/profiles/{profile_id}/sections":
     "resetAdminUserProfileSectionOverrides",
   "DELETE /api/v2/admin/users/{id}/settings/values/{key}": "deleteAdminUserSettingValue",
@@ -294,6 +295,7 @@ export const v2Operations = {
   "GET /api/v2/admin/users/{id}/identities": "listAdminUserIdentities",
   "GET /api/v2/admin/users/{id}/ips": "listAdminUserIPs",
   "GET /api/v2/admin/users/{id}/profiles": "listAdminUserProfiles",
+  "GET /api/v2/admin/users/{id}/profiles/{profile_id}": "getAdminUserProfile",
   "GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections":
     "listAdminUserProfileSectionOverrides",
   "GET /api/v2/admin/users/{id}/profiles/{profile_id}/sections/settings":
@@ -579,6 +581,7 @@ export const v2Operations = {
   "PATCH /api/v2/admin/rate-limits/config": "updateAdminRateLimitConfig",
   "PATCH /api/v2/admin/sections/{id}": "updateAdminSection",
   "PATCH /api/v2/admin/subtitles/{id}": "updateAdminSubtitleMetadata",
+  "PATCH /api/v2/admin/users/{id}/profiles/{profile_id}": "updateAdminUserProfile",
   "PATCH /api/v2/collections/groups/{id}": "updateCollectionGroup",
   "PATCH /api/v2/collections/{id}": "updateCollection",
   "PATCH /api/v2/devices/{device_id}": "updateDevice",
@@ -741,6 +744,7 @@ export const v2Operations = {
   "POST /api/v2/admin/users/{id}/identities": "createAdminUserIdentity",
   "POST /api/v2/admin/users/{id}/impersonate": "impersonateAdminUser",
   "POST /api/v2/admin/users/{id}/password-reset": "createAdminUserPasswordReset",
+  "POST /api/v2/admin/users/{id}/profiles": "createAdminUserProfile",
   "POST /api/v2/admin/users/{id}/transfer-ownership": "transferAdminUserOwnership",
   "POST /api/v2/api-keys": "createPersonalAPIKey",
   "POST /api/v2/auth/device/approve": "approveDeviceLogin",

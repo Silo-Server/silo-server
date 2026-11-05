@@ -174,20 +174,24 @@ rather than the whole suite; the full gate below is for pre-PR. In tests, wait o
 state — job status, health endpoints, channel receipts — not fixed sleeps.
 
 `make test-go` runs the whole Go suite. A Go test that cannot pass yet carries a `t.Skip` and the
-reason in its own source, not an entry in a Makefile variable. `make test-web` still skips the
-files in `WEBTEST_KNOWN_FAILURES`, which predate the CI gate; that list may only shrink — delete an
-entry together with its fix, and never add to it to make a new change pass.
+reason in its own source, not an entry in a Makefile variable. `make test-web` runs every web
+test file: `WEBTEST_KNOWN_FAILURES` in the Makefile is empty and must stay empty, so never add to
+it to make a new change pass.
 
 Before opening a pull request, run the full gate listed once in
 [CONTRIBUTING.md](CONTRIBUTING.md#validate-your-change). Note that `make lint` runs
-`golangci-lint` over the whole tree while CI runs it with `--new-from-merge-base`, so only the
-lines a branch touched have to be clean. The repo does not pass a full run today; expect local
-output to include findings that are not yours and that CI will not fail on. Do not add to them.
+`golangci-lint` over the whole tree while CI runs it through `scripts/lint-changed.sh` (the script
+behind `make lint-changed`) with `--new-from-patch`, so only the lines a branch touched have to be
+clean. The repo does not pass a full run today; expect local output to include findings that are
+not yours and that CI will not fail on. Do not add to them.
 
 Lint Go with `make lint-changed`, not `golangci-lint run ... ./...`: it reports the same
-changed-line findings as CI while analyzing only the packages the branch touched. A cold run over
-`./...` saturates every core for minutes, and parallel agents make that worse. Never pass
-`--allow-parallel-runners`; concurrent runs queue behind one another on purpose.
+changed-line findings as CI while usually analysing only the packages the branch touched. A cold
+run over `./...` saturates every core for minutes, and parallel agents make that worse.
+`make lint-changed` still analyses the whole tree for a branch that deletes or renames a file in a
+Go package, or touches shared Go inputs such as `go.mod`, `go.sum`, the `Makefile`, a workflow, or
+the lint config. Never pass `--allow-parallel-runners`; concurrent runs queue behind one another
+on purpose.
 
 Format Go files as touched with `gofmt`/`goimports`; the frontend follows `web/.prettierrc`.
 

@@ -362,6 +362,12 @@ type UpdateCollectionSyncStateInput struct {
 	// either way.
 	ScheduleAtStart   *string
 	NextSyncAtAtStart *time.Time
+	// RequireLastSyncAt writes nothing unless the stored last_sync_at still
+	// equals LastSyncAtAtStart (nil for never synced). A failed sync sets
+	// it, so it never overwrites a sync that started later and finished
+	// first.
+	RequireLastSyncAt bool
+	LastSyncAtAtStart *time.Time
 }
 
 type CollectionItemReplacement struct {

@@ -243,6 +243,54 @@ func TestPollDeviceLogin(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{}`, nil), TypeValidationFailed)
 }
 
+// TestDeviceLoginSessionBinding: start accepts only a well-formed binding,
+// the lookup shows a request's binding to the approver, and a bound request
+// is polled only with its secret; anything else is 403
+// device_binding_mismatch. The capability document advertises it.
+func TestDeviceLoginSessionBinding(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	if rec := do(t, h, http.MethodGet, "/api/v2/auth/device/capability", "", nil); rec.Code != 200 || !contains(rec.Body.String(), `"session_binding":true`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodPost, "/api/v2/auth/device/start", `{"binding":"`+fakeBinding+`"}`, nil); rec.Code != 201 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	// An empty binding is malformed like any other, not a way to say
+	// "unbound": only omitting the member starts an unbound request.
+	for _, binding := range []string{"", fakeBinding[:42], fakeBinding + "=", fakeBinding[:42] + "+", strings.Repeat("A", 44)} {
+		p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/start", `{"binding":"`+binding+`"}`, nil), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != "body.binding" {
+			t.Fatalf("binding %q: errors = %+v", binding, p.Errors)
+		}
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v2/auth/device?code=1357-2468", "", nil)
+	if rec.Code != 200 || !contains(rec.Body.String(), `"binding":"`+fakeBinding+`"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+
+	for _, body := range []string{`{"device_code":"dev-bound"}`, `{"device_code":"dev-bound","binding_secret":"` + fakeBinding + `"}`} {
+		p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/poll", body, nil), TypeDeviceBindingMismatch)
+		if p.Status != http.StatusForbidden {
+			t.Fatalf("%s: status = %d", body, p.Status)
+		}
+	}
+	// An oversized secret is refused before it is decoded or hashed.
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{"device_code":"dev-bound","binding_secret":"`+strings.Repeat("A", 65)+`"}`, nil), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.binding_secret" {
+		t.Fatalf("oversized secret: errors = %+v", p.Errors)
+	}
+	rec = do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{"device_code":"dev-bound","binding_secret":"`+fakeBindingSecret+`"}`, nil)
+	if rec.Code != 200 || !contains(rec.Body.String(), `"status":"approved"`) || !contains(rec.Body.String(), `"access_token":"acc"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	// A secret sent for an unbound request is ignored.
+	rec = do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{"device_code":"dev-pending","binding_secret":"`+fakeBindingSecret+`"}`, nil)
+	if rec.Code != 200 || !contains(rec.Body.String(), `"status":"pending"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestDecideDeviceLogin(t *testing.T) {
 	h := newTestHandler(t, pilotDeps(nil, nil))
 	rec := do(t, h, http.MethodPost, "/api/v2/auth/device/approve", `{"token":"br-pending"}`, bearer(memberToken))

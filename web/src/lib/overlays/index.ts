@@ -29,6 +29,7 @@ export {
   serializeOverlayPrefs,
   orderedOverlaysForPosition,
   isOverlaySuppressed,
+  overlaySuppressedBy,
   isOverlaySupportedBy,
   isOverlayImageRef,
   overlayPrefsForServer,

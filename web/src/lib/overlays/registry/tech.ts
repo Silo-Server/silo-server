@@ -78,6 +78,29 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
     getValueKey: (d) => (d.resolution ? [d.resolution, d.hdr].filter(Boolean).join(" ") : null),
   },
   {
+    id: "resolution_hdr_audio",
+    category: "tech",
+    label: "Resolution + HDR + Audio (combined)",
+    description:
+      'Single badge combining resolution, dynamic range and audio codec (e.g. "4K DV Atmos", "1080p TrueHD")',
+    defaultPosition: "top-left",
+    defaultEnabled: false,
+    iconCapable: true,
+    introducedInManifest: 26,
+    // The parts the file has, so a file without a known resolution still
+    // shows its audio codec while the standalone audio badge is hidden.
+    getValue: (d) =>
+      [prettyResolution(d.resolution), compactHdrSuffix(d.hdr), d.audio]
+        .filter(Boolean)
+        .join(" ") || null,
+    // Same rule as the Resolution + HDR badge: an Atmos or HDR10 wordmark
+    // would repeat words already in the label.
+    getIcon: (d) => (d.hdr?.includes("DV") ? "dolby-vision" : null),
+    // The API's resolution, dynamic range and audio values joined by a space:
+    // "2160p DV HDR10 Atmos", or only the parts the file has.
+    getValueKey: (d) => [d.resolution, d.hdr, d.audio].filter(Boolean).join(" ") || null,
+  },
+  {
     id: "audio",
     category: "tech",
     label: "Audio Codec",

@@ -297,6 +297,9 @@ func emptyQueryResult(startIndex int) queryResultDTO {
 // default path's ListSeasons yields an empty set and writes an empty page.
 func (h *ItemsHandler) handleItemParentChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	switch {
+	case itemTypesContain(query.itemTypes, "episode") && !query.allowsVideo():
+		// Episodes are video; MediaTypes=Audio and the like select none.
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 	case itemTypesContain(query.itemTypes, "episode"):
 		h.writeSeriesEpisodesResponse(w, r, session, query, query.parentItemID, "", true)
 	case !query.hasItemTypeFilter || itemTypesContain(query.itemTypes, "season"):
@@ -311,9 +314,10 @@ func (h *ItemsHandler) handleItemParentChildren(w http.ResponseWriter, r *http.R
 // shared episode-listing path (also used by /Shows/{id}/Episodes) can be reused.
 func (h *ItemsHandler) handleSeasonEpisodeChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	// A season's only children are its episodes; a type filter that excludes
-	// Episode (e.g. IncludeItemTypes=Movie) yields nothing, mirroring the
-	// series-parent path's handling of unsatisfiable type filters.
-	if query.hasItemTypeFilter && !itemTypesContain(query.itemTypes, "episode") {
+	// Episode (e.g. IncludeItemTypes=Movie) or a MediaTypes filter that
+	// excludes Video yields nothing, mirroring the series-parent path's
+	// handling of unsatisfiable filters.
+	if (query.hasItemTypeFilter && !itemTypesContain(query.itemTypes, "episode")) || !query.allowsVideo() {
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
@@ -4107,7 +4111,7 @@ func validatePseudoUser(w http.ResponseWriter, userID string, session *Session) 
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return false
 	}
-	if userID == "" || userID == session.PseudoUserID.String() {
+	if userID == "" || isPseudoUser(userID, session.PseudoUserID) {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "User not found")

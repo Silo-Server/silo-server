@@ -352,3 +352,33 @@ export class LinearResampler {
     return out.map((plane) => plane.subarray(0, written));
   }
 }
+
+/**
+ * An overlap up to this is timestamp rounding, the counterpart of the gap the
+ * audio worklet plays through (GAP_TOLERANCE_SECONDS in audio.worklet.ts).
+ */
+const TIMESTAMP_ROUNDING_SECONDS = 0.02;
+
+/** The previous decoded frame of a run: its container timestamp and where it ended. */
+export interface PreviousAudioFrame {
+  stamped: number;
+  end: number;
+}
+
+/**
+ * Where a decoded frame starts in its run. Container timestamps can be coarser
+ * than the audio: Matroska rounds them to the millisecond, and frames laced
+ * into a block whose duration the file leaves out (the last block of a
+ * cluster, on a track without a default duration) all carry the block's own
+ * timestamp. A frame that repeats the previous frame's timestamp, or overlaps
+ * it by no more than rounding, therefore continues the stream where the
+ * previous frame ended. Any other frame keeps its timestamp, so a real gap or
+ * a backward jump in the file stays one.
+ */
+export function continuousAudioStart(stamped: number, previous: PreviousAudioFrame | null): number {
+  if (!previous) return stamped;
+  const overlap = previous.end - stamped;
+  const continues =
+    overlap > 0 && (stamped === previous.stamped || overlap <= TIMESTAMP_ROUNDING_SECONDS);
+  return continues ? previous.end : stamped;
+}

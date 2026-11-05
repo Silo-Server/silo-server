@@ -1,5 +1,4 @@
 {
-  "$schema": "https://silo-server.dev/schemas/client-diagnostics/v1/attr-registry.schema.json",
   "schema_version": 1,
   "policy": "Attribute keys are registered per category. Debug builds and CI should fail unregistered keys; production clients drop unregistered keys before upload.",
   "categories": {

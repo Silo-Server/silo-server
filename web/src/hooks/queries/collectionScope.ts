@@ -211,8 +211,10 @@ export function useScopeSync<Raw extends WireCollection>(scope: CollectionScope<
       );
       void scope.invalidate(queryClient, id);
     },
-    onError: (error) => {
+    onError: (error, id) => {
       toast.error(error instanceof Error ? error.message : "Sync failed");
+      // The server records a failed sync on the collection; show it.
+      void scope.invalidate(queryClient, id);
     },
   });
 }
