@@ -463,7 +463,7 @@ function CatalogResults({
           </>
         ) : null}
         {/* Over the artwork the actions stay beside the title, not under it. */}
-        <div className={cn("space-y-3", collectionBackdrop && "relative min-w-0 flex-1")}>
+        <div className={cn("space-y-3", collectionBackdrop && "relative sm:min-w-0 sm:flex-1")}>
           <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
           <CollectionByline access={collectionAccess} />
           {collectionHeader.status === "pending" ? null : collectionHeader.description ? (
