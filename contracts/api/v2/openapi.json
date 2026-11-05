@@ -236224,6 +236224,10 @@
             "format": "int64",
             "type": "integer"
           },
+          "source_frame_rate": {
+            "format": "double",
+            "type": "number"
+          },
           "source_video_bit_depth": {
             "format": "int64",
             "type": "integer"

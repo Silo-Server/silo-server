@@ -115,21 +115,30 @@ func (w *prepareProgressWriter) line(line string) {
 			return
 		}
 		reading := w.current
-		if w.frameRate > 0 {
-			if position := float64(w.frames) / w.frameRate; position > reading.EncodedSeconds {
-				if reading.DurationSeconds > 0 {
-					position = min(position, reading.DurationSeconds)
-				}
-				reading.EncodedSeconds = position
-				if elapsed := w.now().Sub(w.started).Seconds(); elapsed > 0 {
-					reading.Speed = position / elapsed
-				}
-			}
-		}
+		w.applyFramePosition(&reading)
 		if strings.TrimSpace(value) == "end" && reading.DurationSeconds > 0 {
 			reading.EncodedSeconds = reading.DurationSeconds
 		}
 		w.sink.PrepareProgress(reading)
+	}
+}
+
+// applyFramePosition replaces out_time with the encoded video frame position
+// when that is further along, and derives speed from it.
+func (w *prepareProgressWriter) applyFramePosition(reading *PrepareProgress) {
+	if w.frameRate <= 0 {
+		return
+	}
+	position := float64(w.frames) / w.frameRate
+	if position <= reading.EncodedSeconds {
+		return
+	}
+	if reading.DurationSeconds > 0 {
+		position = min(position, reading.DurationSeconds)
+	}
+	reading.EncodedSeconds = position
+	if elapsed := w.now().Sub(w.started).Seconds(); elapsed > 0 {
+		reading.Speed = position / elapsed
 	}
 }
 
