@@ -37,6 +37,16 @@ func TestAccessSettingWider(t *testing.T) {
 		{markers.SettingMode, "both", "local", true},
 		{"ratelimit.auth.login.requests_per_minute", "1000", "20", true},
 		{"ratelimit.auth.login.requests_per_minute", "5", "", false},
+		{"metadata_ai.on_view", "auto", "off", true},
+		{"metadata_ai.on_view", "button", "", true}, // unset is off
+		{"metadata_ai.on_view", "off", "button", false},
+		{config.AIServiceTierSettingKey, "priority", "", true},
+		{config.AIServiceTierSettingKey, "", "ultrafast", false},
+		{"subtitle_ai.transcribe_quota_jobs", "0", "10", true}, // 0 is no limit
+		{"subtitle_ai.transcribe_quota_jobs", "20", "10", true},
+		{"subtitle_ai.transcribe_quota_jobs", "5", "0", false},
+		{"subtitle_ai.transcribe_quota_period", "day", "month", true},
+		{"subtitle_ai.transcribe_quota_period", "month", "", false},
 	} {
 		access, wider := AccessSettingWider(tc.key, tc.restored, tc.live)
 		if !access || wider != tc.wider {
@@ -52,9 +62,10 @@ func TestAccessSettingWider(t *testing.T) {
 // has, with a default, so an unset row compares as the server reads it.
 func TestAccessSettingsAreClassified(t *testing.T) {
 	for _, key := range AccessSettingKeys() {
-		// Sharing markers is off unless set; its comparison reads an unset
-		// value as the server does.
-		if settingDefault(key) == "" && key != markers.SettingShareByDefault {
+		// Sharing markers is off unless set, and the standard AI service
+		// tier is the empty value; their comparisons read an unset value as
+		// the server does.
+		if settingDefault(key) == "" && key != markers.SettingShareByDefault && key != config.AIServiceTierSettingKey {
 			t.Errorf("access setting %s has no default", key)
 		}
 	}

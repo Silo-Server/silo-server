@@ -72,9 +72,17 @@ var accessSettings = func() map[string]widerFunc {
 		// What leaves the server: downloads, library data sent to outside AI
 		// and embedding providers, markers shared online, and the server's
 		// advertisement on the local network.
-		"download.enabled":                            on,
-		"download.transcode_enabled":                  on,
-		"metadata_ai.enabled":                         on,
+		"download.enabled":           on,
+		"download.transcode_enabled": on,
+		"metadata_ai.enabled":        on,
+		// What spends on an outside AI provider: translating metadata when
+		// a viewer opens a title (off, on request, or on its own), the
+		// pricier service tiers, and how many transcription jobs a user may
+		// start (0 is no limit) over how short a window.
+		"metadata_ai.on_view":                         byRank(map[string]int64{"off": 0, "button": 1, "auto": 2}),
+		config.AIServiceTierSettingKey:                byRank(map[string]int64{"": 0, "priority": 1, "ultrafast": 1}),
+		"subtitle_ai.transcribe_quota_jobs":           moreJobs,
+		"subtitle_ai.transcribe_quota_period":         byRank(map[string]int64{"month": 0, "week": 1, "day": 2}),
 		"subtitle_ai.enabled":                         on,
 		"subtitle_ai.transcribe_enabled":              on,
 		"recommendations.enabled":                     on,
@@ -134,6 +142,20 @@ func higher(restored, live string) bool {
 	r, rerr := strconv.ParseFloat(restored, 64)
 	l, lerr := strconv.ParseFloat(live, 64)
 	return rerr != nil || lerr != nil || r <= 0 || l <= 0 || r > l
+}
+
+// moreJobs: a job quota that grants more when higher, or 0 for no limit.
+func moreJobs(restored, live string) bool {
+	r, rerr := strconv.Atoi(restored)
+	l, lerr := strconv.Atoi(live)
+	switch {
+	case rerr != nil || lerr != nil || r < 0 || l < 0:
+		return true
+	case l == 0:
+		return false
+	default:
+		return r == 0 || r > l
+	}
 }
 
 // byRank compares values by how much each grants.

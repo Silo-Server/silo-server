@@ -694,9 +694,14 @@ neither list.
   switches), so a channel an admin turned off stays off while its live
   destinations are carried, the release-event pause and in-app
   notifications, downloads, the AI, transcription, recommendation, and
-  semantic-search providers that receive library data, marker sharing and
-  online marker lookups, and LAN discovery. Every other switch setting is in
-  `restoredFlagSettings` with its reason (`TestEverySwitchSettingIsDecided`).
+  semantic-search providers that receive library data, what spends on an AI
+  provider (metadata translation when a viewer opens a title,
+  `metadata_ai.on_view`; the service tier; the per-user transcription quota
+  and its window), marker sharing and online marker lookups, and LAN
+  discovery. Every other switch setting is in `restoredFlagSettings` with
+  its reason (`TestEverySwitchSettingIsDecided`), which covers only
+  `true`/`false` settings: a mode or limit that enables spend or sends data
+  out has to be added to `accessSettings` by hand.
   The
   live row is copied as stored, so an encrypted value stays bound to its
   key name; values are compared decrypted, and one that does not decrypt
