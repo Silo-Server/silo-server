@@ -11,9 +11,13 @@ personal collection. The API is described in
 A title passes a profile's maturity limits when it is within them **or** it is
 allowed. In SQL, `catalog.ApplyMaturityLimits` renders
 `((limits) OR <key> = ANY(allowed))`, where `<key>` is the row's `content_id`.
-Rows keyed by their series (the `episode_catalog_entries` read model) go
-through `catalog.ApplyEpisodeMaturityLimits`, which keys on `series_id`, so a
-series allowance covers every season and episode. Extras have no rating of
+Episode rows key on their series instead, so a series allowance covers every
+season and episode: the `episode_catalog_entries` read model goes through
+`catalog.ApplyEpisodeMaturityLimits` (`series_id`), and the episode relation
+(`episodeCatalogBaseRelation`, used by episode-scope queries, facets and mixed
+search hydration) through `applyEpisodeRelationAccessFilter`
+(`episode_series_id`). A read over episode rows that keys on `content_id`
+would compare episode IDs with title IDs and hide allowed episodes. Extras have no rating of
 their own and follow their title.
 
 An allowance lifts only the profile's own maturity limits. Library access,

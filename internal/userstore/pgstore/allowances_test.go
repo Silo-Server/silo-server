@@ -12,12 +12,13 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // allowanceFixture is one account with a primary profile ("parent"), a
 // PG-limited profile ("kid") and an unlimited one ("teen"), six R-rated titles
-// in one library, an episode of the series, and three collections: a manual
+// in one library, an episode of each of the two series, and three collections: a manual
 // one the parent created (live), a smart one the parent created, and a manual
 // one the teen created.
 type allowanceFixture struct {
@@ -48,6 +49,7 @@ var allowanceFixtureTitles = map[string]string{
 	"movie-other":      "movie",
 	"movie-hidden":     "movie",
 	"series-allowed":   "series",
+	"series-hidden":    "series",
 	"audiobook-live":   "audiobook",
 }
 
@@ -72,6 +74,7 @@ func seedAllowanceFixture(t *testing.T) allowanceFixture {
 	t.Cleanup(func() {
 		cleanup := context.Background()
 		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id = $1`, f.userID)
+		_, _ = pool.Exec(cleanup, `DELETE FROM episode_libraries WHERE episode_id LIKE $1`, f.prefix+"%")
 		_, _ = pool.Exec(cleanup, `DELETE FROM episodes WHERE content_id LIKE $1`, f.prefix+"%")
 		_, _ = pool.Exec(cleanup, `DELETE FROM media_items WHERE content_id LIKE $1`, f.prefix+"%")
 		_, _ = pool.Exec(cleanup, `DELETE FROM media_folders WHERE id = $1`, f.library)
@@ -81,8 +84,10 @@ func seedAllowanceFixture(t *testing.T) allowanceFixture {
 			VALUES($1,$2,$1,'released','{}','R',18)`, f.id(suffix), kind)
 		mustExec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, f.id(suffix), f.library)
 	}
-	mustExec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number) VALUES($1,$2,1,1)`,
-		f.episode, f.id("series-allowed"))
+	for episode, series := range map[string]string{f.episode: f.id("series-allowed"), f.id("episode-hidden"): f.id("series-hidden")} {
+		mustExec(`INSERT INTO episodes(content_id,series_id,season_number,episode_number) VALUES($1,$2,1,1)`, episode, series)
+		mustExec(`INSERT INTO episode_libraries(episode_id,media_folder_id) VALUES($1,$2)`, episode, f.library)
+	}
 
 	f.store = newStore(pool, f.userID)
 	f.allow = NewTitleAllowances(pool)
@@ -210,6 +215,8 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 
 	t.Run("a title held several times is read once", func(t *testing.T) { f.checkReadOnce(t, want) })
 
+	t.Run("episode reads admit only an allowed series' episodes", func(t *testing.T) { f.checkEpisodeReads(t, kid) })
+
 	t.Run("copying a collection allows its movies and series once and then continues", f.checkCollectionCopy)
 
 	t.Run("a write after the manager's PIN changed is refused", func(t *testing.T) {
@@ -296,5 +303,39 @@ func (f allowanceFixture) checkReadOnce(t *testing.T, want []string) {
 	slices.Sort(raw)
 	if !slices.Equal(raw, want) {
 		t.Fatalf("allowed-title read = %v, want each of %v once", raw, want)
+	}
+}
+
+// checkEpisodeReads reads episodes through the episode relation, which keys
+// each row by the episode and rates it by its series: mixed search hydration
+// and an episode-scope query both admit the allowed series' episode and hide
+// the other R-rated series' one.
+func (f allowanceFixture) checkEpisodeReads(t *testing.T, kid *userstore.Profile) {
+	ctx := context.Background()
+	filter := catalog.AccessFilter{
+		AllowedLibraryIDs: []int{f.library},
+		MaturityLimits:    access.MaturityLimits{MaxContentRating: kid.MaxContentRating}.WithAllowedTitles(kid.AllowedTitleIDs),
+	}
+	want := []string{f.episode}
+	ids := func(items []*models.MediaItem) []string {
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			out = append(out, item.ContentID)
+		}
+		return out
+	}
+
+	candidates := []string{f.episode, f.id("episode-hidden")}
+	hydrated, err := catalog.NewItemRepository(f.pool).GetSearchItemsByIDsWithAccess(ctx, candidates, filter)
+	if err != nil || !slices.Equal(ids(hydrated), want) {
+		t.Errorf("search hydration = %v, %v; want %v", ids(hydrated), err, want)
+	}
+	// A source predicate keeps the query on the episode relation, as an
+	// episode-scope search does, rather than the episode_catalog_entries one.
+	queried, _, err := (&catalog.QueryExecutor{Pool: f.pool, Scope: "episode",
+		SourceWhere: "mi.content_id = ANY($1)", SourceArgs: []any{candidates}}).Preview(ctx,
+		catalog.QueryDefinition{MediaScope: "episode", LibraryIDs: []int{f.library}}, filter, 10)
+	if err != nil || !slices.Equal(ids(queried), want) {
+		t.Errorf("episode-scope query = %v, %v; want %v", ids(queried), err, want)
 	}
 }

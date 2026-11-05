@@ -48,7 +48,7 @@ func (r *ItemRepository) GetSearchItemsByIDsWithAccess(
 		&args,
 		&argIdx,
 	)
-	applyAccessFilter("mi", AccessFilter{
+	applyEpisodeRelationAccessFilter("mi", AccessFilter{
 		MaturityLimits:     filter.MaturityLimits,
 		ExcludedMediaTypes: filter.ExcludedMediaTypes,
 	}, &episodeConditions, &args, &argIdx)

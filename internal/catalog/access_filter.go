@@ -131,7 +131,19 @@ func CanAccessLibraryCollection(collection *models.LibraryCollection, filter Acc
 }
 
 func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
-	ApplyMaturityLimits(alias, filter, conditions, args, argIdx)
+	applyAccessFilterKeyed(alias, alias+".content_id", filter, conditions, args, argIdx)
+}
+
+// applyEpisodeRelationAccessFilter is applyAccessFilter for rows of
+// episodeCatalogBaseRelation, whose content_id is the episode's and whose
+// ratings are its series': an episode passes through its series' allowance
+// (episode_series_id).
+func applyEpisodeRelationAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	applyAccessFilterKeyed(alias, alias+".episode_series_id", filter, conditions, args, argIdx)
+}
+
+func applyAccessFilterKeyed(alias, allowedKey string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	applyMaturityLimits(alias, allowedKey, filter.MaturityLimits, conditions, args, argIdx)
 	if len(filter.ExcludedMediaTypes) > 0 {
 		*conditions = append(*conditions, fmt.Sprintf("NOT (%s.type = ANY($%d))", alias, *argIdx))
 		*args = append(*args, filter.ExcludedMediaTypes)
@@ -185,9 +197,10 @@ func advisoryAgeLimitSQL(alias string, hideUnadvised bool, argIdx int) string {
 // limits appends nothing.
 //
 // A title in AllowedTitleIDs passes the limits whatever its rating:
-// "(limits) OR alias.content_id = ANY(allowed)". Rows keyed by their series,
-// such as the episode_catalog_entries read model, use
-// ApplyEpisodeMaturityLimits instead.
+// "(limits) OR alias.content_id = ANY(allowed)". Episode rows pass through
+// their series' allowance instead: the episode_catalog_entries read model
+// uses ApplyEpisodeMaturityLimits, and episodeCatalogBaseRelation rows use
+// applyEpisodeRelationAccessFilter.
 func ApplyMaturityLimits(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
 	applyMaturityLimits(alias, alias+".content_id", filter.MaturityLimits, conditions, args, argIdx)
 }
