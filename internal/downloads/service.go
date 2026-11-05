@@ -416,6 +416,11 @@ type CreateRequest struct {
 	// resolved per episode. Native requests set it; the frozen v1 bridge keeps
 	// batches original-only.
 	BulkQuality bool
+	// VersionTemplateFileID names an episode file of the series whose version
+	// every episode of a season/series batch follows (see templatePreference).
+	// Only native requests set it; the v1 bridge's FileID stays ignored on
+	// batches.
+	VersionTemplateFileID int
 }
 
 // Create creates a download for a single item (movie or episode). When the
@@ -717,13 +722,23 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 	if err := s.itemAccess.EnsureAccessible(ctx, req.ContentID, filter); err != nil {
 		return nil, "", nil, err
 	}
+	var template *models.MediaFile
+	if req.VersionTemplateFileID > 0 {
+		template, err = s.resolveFile(ctx, userID, CreateRequest{FileID: req.VersionTemplateFileID}, filter)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		if template.ContentID != req.ContentID || template.EpisodeID == "" {
+			return nil, "", nil, catalog.ErrItemNotFound
+		}
+	}
 
 	episodes, err := listEpisodes(ctx)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("listing episodes: %w", err)
 	}
 
-	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, filter)
+	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, template, filter)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -806,11 +821,13 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 // preserves episode order. Shared by series/season downloads and subscription
 // backfill so file selection stays identical.
 func (s *Service) episodeItems(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, error) {
-	items, _, err := s.episodeItemsWithSkipped(ctx, userID, profileID, seriesID, episodes, filter)
+	items, _, err := s.episodeItemsWithSkipped(ctx, userID, profileID, seriesID, episodes, nil, filter)
 	return items, err
 }
 
-func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, []SkippedDownload, error) {
+// episodeItemsWithSkipped picks a file per episode: the version closest to
+// template when one is set, otherwise the profile's watch-history preference.
+func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, template *models.MediaFile, filter catalog.AccessFilter) ([]managedItem, []SkippedDownload, error) {
 	if len(episodes) == 0 {
 		return nil, nil, nil
 	}
@@ -823,10 +840,14 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 		return nil, nil, fmt.Errorf("resolving files for %d episodes: %w", len(episodes), err)
 	}
 	var pref versionPreference
-	for _, files := range filesByEpisode {
-		if len(files) > 1 {
-			pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, episodeIDs)
-			break
+	if template != nil {
+		pref = templatePreference(template)
+	} else {
+		for _, files := range filesByEpisode {
+			if len(files) > 1 {
+				pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, episodeIDs)
+				break
+			}
 		}
 	}
 	items := make([]managedItem, 0, len(episodes))

@@ -276,6 +276,7 @@ Response:
   "bounded_subscription_sync": true,
   "bulk_quality": true,
   "monitor_quality": true,
+  "batch_version": true,
   "preparation_progress": true,
   "direct_download_links": true,
   "prepare_again": true,
@@ -301,6 +302,7 @@ Response:
 | `preparation_progress`   | Listed preparing entries (§4.2) carry `preparation`: queue position or encode progress. |
 | `bulk_quality`           | Managed series and season batches (§4.1) accept any of `quality_presets`. Without it, or without a device header, send `original`. |
 | `monitor_quality`        | Monitors (§8) store a `quality`. Without it, monitors download originals and the field is absent. |
+| `batch_version`          | Series and season pages (§4.1) accept `media_file_id` as a version template: each episode gets its version closest to that file. Without it, omit `media_file_id` on a batch. |
 | `direct_download_links`  | `POST /api/v2/direct-download/links` (§4.10) mints profile-bound direct-download links. |
 | `prepare_again`          | The server cleans up prepared files after the device finishes; the file route answers `409 prepared_file_expired` for such an entry and `POST /api/v2/downloads/{id}/prepare` (§4.12) prepares it again. |
 | `revoked_removes_local`  | Administrators can revoke entries. A `revoked` entry means: delete the local copy, then delete the entry (§9.3). |
@@ -339,7 +341,7 @@ Request body:
 | --------------- | ------ | ---------------------------------------------------------------------------- |
 | `content_id`    | string | Required. Movie or series content id.                                        |
 | `episode_id`    | string | Episode content id for an episode download.                                  |
-| `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. Omitted: the server picks the version (see below). |
+| `media_file_id` | string | Optional explicit media-file/version id, as a canonical positive decimal string. Omitted: the server picks the version (see below). On a series or season page it is a version template (see below; needs `batch_version`). |
 | `quality`       | string | `original` by default, or one of `quality_presets`.                          |
 | `series`        | bool   | `true` means download every episode of `content_id` at `quality`.            |
 | `season_number` | int    | With `series: true`, restrict to one season. `0` is the Specials season; values outside 0 to 9999 are rejected with `422 validation_failed`. Dispatch is on field presence: omit the field entirely for a whole-series download. |
@@ -366,6 +368,18 @@ unless a `quality` preset brings the download under the ceiling.
 
 A client that shows a version to the user should send its `media_file_id`, so
 the download is the file the user saw.
+
+When the capability reports `batch_version`, a series or season page also
+accepts `media_file_id`: an episode file of the same series that serves as a
+version template. Each episode then gets its version closest to that file,
+matched on edition, then resolution, HDR and video codec, with the highest
+resolution breaking ties; watch history is not read. The template's own episode
+gets the template file. A file that is missing or belongs to another title is
+`404 not_found`. Access rules still narrow the candidates, and `quality` still
+applies on top of the chosen source. Like `quality`, the template applies to
+entries the page registers; existing managed entries keep their file unless an
+`expected_entries` guard names them. Without `batch_version`, a series page
+with `media_file_id` is `400 malformed_request`.
 
 Capabilities mirror streaming playback caps:
 
@@ -1458,8 +1472,10 @@ For a single movie or episode:
 
 For series or season download:
 
-1. `POST /api/v2/downloads` with `series: true`, optional `season_number`, and
-   the chosen `quality` (`original` unless the capability reports `bulk_quality`).
+1. `POST /api/v2/downloads` with `series: true`, optional `season_number`, the
+   chosen `quality` (`original` unless the capability reports `bulk_quality`),
+   and, when the capability reports `batch_version`, the `media_file_id` of the
+   version the user picked.
 2. Persist each returned row under the shared `batch_id`.
 3. Record `skipped` entries for user-visible diagnostics.
 4. Fetch `GET /api/v2/downloads/batches/{batch_id}/manifests` after rows are ready, or
@@ -2017,13 +2033,14 @@ ephemeral transfer flow and rejects managed revision guards.
 
 For a series or season, send `series:true`, a client-selected `batch_id`, and
 optional `season_number` (zero selects Specials). The `limit` query defaults to
-50 and is capped at 100 examined episodes. Keep batch, content, season, quality
-and device/profile identity unchanged while following `page.next_cursor` through
+50 and is capped at 100 examined episodes. Keep batch, content, season, quality,
+version template and device/profile identity unchanged while following `page.next_cursor` through
 the `cursor` query. Continue through empty `items` when `page.has_more` is true;
 `skipped` reports episodes with no file (`no_file`) and episodes the preset cannot
 reach (`quality_unavailable`). When `bulk_quality` is reported, a managed batch
 accepts any of `quality_presets`; a batch without a device header takes only
-`original`.
+`original`. When `batch_version` is reported, `media_file_id` on a batch names
+the version template described in §4.1.
 
 Batch pages preserve existing managed entries by default, including their chosen
 bytes, completion/terminal status, revision and previous batch membership. An
