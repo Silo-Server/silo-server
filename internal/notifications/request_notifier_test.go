@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"testing"
 
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/requests"
 )
 
@@ -85,6 +86,31 @@ func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
 	}
 	if name := backend.channelInfo[0].RequesterName; name != "" {
 		t.Fatalf("server-channel fulfilled post requester = %q, want none", name)
+	}
+}
+
+// One request's plugin events reach the hub in transition order before each
+// publish returns, so an auto-approved request's submission precedes its
+// approval.
+func TestPublishRequestEventKeepsTransitionOrder(t *testing.T) {
+	hub := evt.NewHub("node", nil)
+	envelopes, unsubscribe := hub.Subscribe()
+	defer unsubscribe()
+	system := &System{events: hub, logger: slog.Default()}
+	req := fulfilledRequest()
+
+	system.publishRequestEvent(t.Context(), ServerChannelEventRequestSubmitted, req)
+	system.publishRequestEvent(t.Context(), ServerChannelEventRequestApproved, req)
+
+	for _, want := range []string{ServerChannelEventRequestSubmitted, ServerChannelEventRequestApproved} {
+		select {
+		case env := <-envelopes:
+			if env.Channel != evt.ChannelPlugins || env.Event != want {
+				t.Fatalf("envelope = %s on %s, want %s on the plugin channel", env.Event, env.Channel, want)
+			}
+		default:
+			t.Fatalf("no %s envelope once publishRequestEvent returned", want)
+		}
 	}
 }
 

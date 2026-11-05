@@ -33,29 +33,32 @@ func RequestEventPayload(req requests.Request) publicevents.RequestEvent {
 	}
 }
 
-// requestEventPublishTimeout bounds one detached request event publish.
-const requestEventPublishTimeout = 30 * time.Second
+// requestEventPublishTimeout bounds the hub's Redis publish of one request
+// event. Plugins on this node already have the event by then.
+const requestEventPublishTimeout = 5 * time.Second
 
 // publishRequestEvent tells plugins about a request lifecycle event. It is
 // published on the plugin channel, which no websocket client receives. The
 // event ID is derived from the request and its last update, so a repeated
 // call for the same transition carries the same ID and a plugin can skip it.
-// Best-effort and detached, like the server-channel post beside it: the hub
-// also publishes to Redis, and a request transition never waits on that.
+//
+// It publishes inline, so one request's events reach plugins in transition
+// order and none is lost once the plugin dispatcher stops at shutdown. The
+// hub hands the event to local subscribers, the plugin dispatcher among them,
+// before its Redis publish, so only that bounded Redis call can delay the
+// caller. The transition has already committed, so the publish ignores the
+// caller's cancellation; a failure is logged.
 func (s *System) publishRequestEvent(ctx context.Context, event string, req requests.Request) {
 	if s == nil || s.events == nil {
 		return
 	}
-	payload := RequestEventPayload(req)
 	opts := evt.PublishOptions{
 		EventID:   fmt.Sprintf("%s:%s:%d", event, req.ID, req.UpdatedAt.UnixNano()),
 		AdminOnly: true,
 	}
 	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), requestEventPublishTimeout)
-	go func() {
-		defer cancel()
-		if err := s.events.PublishJSON(publishCtx, evt.ChannelPlugins, event, payload, opts); err != nil {
-			s.logger.WarnContext(publishCtx, "publish request event for plugins failed", "request_id", req.ID, "event", event, "error", err)
-		}
-	}()
+	defer cancel()
+	if err := s.events.PublishJSON(publishCtx, evt.ChannelPlugins, event, RequestEventPayload(req), opts); err != nil {
+		s.logger.WarnContext(ctx, "publish request event for plugins failed", "request_id", req.ID, "event", event, "error", err)
+	}
 }
