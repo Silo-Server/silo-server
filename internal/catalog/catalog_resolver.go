@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -485,6 +486,9 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 	if err != nil {
 		return nil, err
 	}
+	if _, err := validateQueryJSONStructure(section.Config); err != nil {
+		return nil, fmt.Errorf("%w: section definition: %w", ErrInvalidCatalogRequest, err)
+	}
 
 	switch section.SectionType {
 	case "collection":
@@ -786,6 +790,11 @@ func (r *CatalogResolver) resolveLibraryCollectionItems(
 	collection *models.LibraryCollection,
 	collectionRepo *LibraryCollectionRepository,
 ) (*CatalogResult, error) {
+	if IsLiveQueryType(collection.CollectionType) {
+		if err := ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition, req.Query); err != nil {
+			return nil, err
+		}
+	}
 	membership, err := catalogLibraryCollectionMembership(collection, access)
 	if err != nil {
 		return nil, err
@@ -806,6 +815,9 @@ func (r *CatalogResolver) resolveLibraryCollectionItems(
 }
 
 func (r *CatalogResolver) resolveLiveLibraryCollectionSource(ctx context.Context, req CatalogRequest, access AccessFilter, membership LibraryCollectionMembership) (*CatalogResult, error) {
+	if err := ValidateQueryStructure(membership.Query, req.Query); err != nil {
+		return nil, err
+	}
 	if membership.OutOfScope {
 		return &CatalogResult{Items: []*models.MediaItem{}, TotalExact: true}, nil
 	}
@@ -896,6 +908,13 @@ func (r *CatalogResolver) resolveUserCollectionItems(
 	store userstore.UserStore,
 	collection *userstore.Collection,
 ) (*CatalogResult, error) {
+	source := ""
+	if IsLiveQueryType(collection.CollectionType) {
+		source = collection.QueryDefinition
+	}
+	if err := validateCollectionQueryComposition(source, collection.DisplayQueryDefinition, req.Query); err != nil {
+		return nil, err
+	}
 	if IsLiveQueryType(collection.CollectionType) {
 		def, err := parseCatalogCollectionQueryDefinition([]byte(collection.QueryDefinition))
 		if err != nil {
@@ -2210,21 +2229,24 @@ func parseCatalogSectionQueryDefinition(config json.RawMessage) (QueryDefinition
 }
 
 func parseCatalogCollectionQueryDefinition(config json.RawMessage) (QueryDefinition, error) {
+	if _, err := validateQueryJSONStructure(config); err != nil {
+		return QueryDefinition{}, err
+	}
 	if len(bytesTrimSpace(config)) == 0 || string(bytesTrimSpace(config)) == "{}" || string(bytesTrimSpace(config)) == "null" {
 		return QueryDefinition{}.Normalize(), nil
 	}
 
-	var probe map[string]json.RawMessage
-	if err := json.Unmarshal(config, &probe); err != nil {
+	legacy := false
+	if err := walkQueryJSONObject(bytes.TrimSpace(config), func(key string, _ []byte) error {
+		switch {
+		case strings.EqualFold(key, "filter_type"), strings.EqualFold(key, "filter_library_id"), strings.EqualFold(key, queryLegacyLibraryIDsKey):
+			legacy = true
+		}
+		return nil
+	}); err != nil {
 		return QueryDefinition{}, err
 	}
-	if _, ok := probe["filter_type"]; ok {
-		return NormalizeLegacySectionFilter(config)
-	}
-	if _, ok := probe["filter_library_id"]; ok {
-		return NormalizeLegacySectionFilter(config)
-	}
-	if _, ok := probe["filter_library_ids"]; ok {
+	if legacy {
 		return NormalizeLegacySectionFilter(config)
 	}
 
@@ -2402,6 +2424,11 @@ func (r *CatalogResolver) loadCollectionSource(ctx context.Context, req CatalogR
 		if err != nil || collection.Visibility != LibraryCollectionVisibilityVisible {
 			return "", nil, ErrCatalogSourceNotFound
 		}
+		if IsLiveQueryType(collection.CollectionType) {
+			if err := ValidateLibraryCollectionQueryBudget(collection.LibraryID, collection.LibraryIDs, collection.QueryDefinition, req.Query); err != nil {
+				return "", nil, err
+			}
+		}
 		membership, err := catalogLibraryCollectionMembership(collection, access)
 		if err != nil {
 			return "", nil, err
@@ -2438,6 +2465,13 @@ func (r *CatalogResolver) loadCollectionSource(ctx context.Context, req CatalogR
 			return "", nil, err
 		}
 		var items []*models.MediaItem
+		source := ""
+		if IsLiveQueryType(collection.CollectionType) {
+			source = collection.QueryDefinition
+		}
+		if err := validateCollectionQueryComposition(source, collection.DisplayQueryDefinition, req.Query); err != nil {
+			return "", nil, err
+		}
 		if IsLiveQueryType(collection.CollectionType) {
 			def, err := parseCatalogCollectionQueryDefinition([]byte(collection.QueryDefinition))
 			if err != nil {

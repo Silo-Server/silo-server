@@ -79,6 +79,9 @@ func (r *SmartCountRefresher) RefreshOne(ctx context.Context, collectionID strin
 }
 
 func (r *SmartCountRefresher) refreshOne(ctx context.Context, id string, defJSON []byte) error {
+	if _, err := validateQueryJSONStructure(defJSON); err != nil {
+		return err
+	}
 	var def QueryDefinition
 	if err := json.Unmarshal(defJSON, &def); err != nil {
 		return fmt.Errorf("unmarshal query_definition: %w", err)

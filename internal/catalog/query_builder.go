@@ -149,6 +149,9 @@ func normalizeBuilderInput(input any) (QueryDefinition, error) {
 	if err != nil {
 		return QueryDefinition{}, err
 	}
+	if _, err := validateQueryJSONStructure(raw); err != nil {
+		return QueryDefinition{}, err
+	}
 	if err := json.Unmarshal(raw, &legacy); err != nil {
 		return QueryDefinition{}, err
 	}

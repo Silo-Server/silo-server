@@ -342,3 +342,16 @@
 # versus earliest first-seen times, every present file with one track's facts, and two
 # statements for a page with files, whatever else it holds.
 ./internal/catalog TestListAdminCatalogItemsDB
+
+# Count construction shares one request ledger across collection owners.
+./internal/api/handlers TestCollectionCountLedgerAcrossOwnersDB
+
+# Collection count construction, fixed workers, no retries, and connection cleanup admission.
+./internal/catalog TestCollectionCountConstructionAndWorkersDB
+./internal/catalog TestCollectionCountDuplicatesAndSingleConnectionDB
+./internal/catalog TestCollectionCountBatchFailureNoRetryDB
+./internal/catalog TestCollectionCountServerDeadlineAndSessionIsolationDB
+./internal/catalog TestCollectionCountNodeAndAccountLifetimeDB
+./internal/catalog TestCollectionCountCanceledConnectionKeepsLeaseDB
+./internal/catalog TestCollectionCountMaximumStructureDB
+./internal/catalog TestCollectionCountManualAndSmartShareLedgerDB

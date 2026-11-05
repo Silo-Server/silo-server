@@ -33,6 +33,7 @@ export function storedAdminCollection(
     last_sync_status: "",
     last_sync_message: "",
     item_count: 0,
+    item_count_status: "available",
     home_row_count: 0,
     row_count: 0,
     created_at: "2026-01-02T03:04:05.000Z",

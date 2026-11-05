@@ -50,6 +50,9 @@ func ResolveLibraryCollectionMembership(c *models.LibraryCollection, scope []int
 	if !IsLiveQueryType(c.CollectionType) {
 		return LibraryCollectionMembership{Sort: defaultSort}, nil
 	}
+	if err := ValidateLibraryCollectionQueryBudget(c.LibraryID, c.LibraryIDs, c.QueryDefinition); err != nil {
+		return LibraryCollectionMembership{}, err
+	}
 
 	def, err := parseCatalogCollectionQueryDefinition(c.QueryDefinition)
 	if err != nil {
