@@ -102,7 +102,7 @@ func TestDeviceApprovalInheritsSessionProviderChainDB(t *testing.T) {
 		if err := approve.run(auth.DeviceLoginLookupInput{UserCode: start.UserCode}); err != nil {
 			t.Fatalf("%s: approve: %v", name, err)
 		}
-		poll, err := devices.Poll(ctx, start.DeviceCode)
+		poll, err := devices.Poll(ctx, start.DeviceCode, "")
 		if err != nil || poll.TokenPair == nil {
 			t.Fatalf("%s: poll = %+v, %v", name, poll, err)
 		}

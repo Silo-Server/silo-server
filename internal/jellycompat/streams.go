@@ -542,6 +542,11 @@ func (h *PlaybackHandler) localAudioTransformationRegistry(ctx context.Context) 
 	return registry, err
 }
 
+// maxSessionReportBodyBytes caps a /Sessions/Playing report. Clients may send
+// the whole NowPlayingQueue, so it allows more than the 64 KiB other compat
+// bodies get.
+const maxSessionReportBodyBytes = 1 << 20
+
 type sessionReportRequest struct {
 	ItemID              string         `json:"ItemId"`
 	MediaSourceID       string         `json:"MediaSourceId"`
@@ -2379,7 +2384,7 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	}
 
 	var req sessionReportRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSessionReportBodyBytes)).Decode(&req); err != nil && err != io.EOF {
 		writeError(w, http.StatusBadRequest, "BadRequest", "Invalid session report")
 		return
 	}

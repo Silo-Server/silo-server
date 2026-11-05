@@ -22,6 +22,7 @@ import (
 	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/uploads"
@@ -47,6 +48,9 @@ type PluginHandler struct {
 	// authProvidersChanged rebuilds the sign-in provider registry on every
 	// node after an auth binding write; nil when sign-in is not wired.
 	authProvidersChanged func(context.Context)
+	// seedPlacement resolves a provider's chain placement; nil uses
+	// metadata.LookupSeedPlacementChecked. Tests replace it.
+	seedPlacement seedPlacementLookup
 }
 
 // SetAuthProvidersChanged registers the callback an auth binding write runs
@@ -698,6 +702,38 @@ func (h *PluginHandler) syncMetadataProviders(ctx context.Context, installation 
 	}
 }
 
+// addMetadataProvidersToChains is the restore's provider-chain sync: unlike
+// an admin upload's best-effort syncMetadataProviders, a placement lookup
+// that fails appends nothing and is returned, so the restore keeps its
+// follow-up and retries instead of saving a fallback placement.
+func (h *PluginHandler) addMetadataProvidersToChains(ctx context.Context, installation *plugins.Installation) error {
+	if h.chainRepo == nil {
+		return nil
+	}
+
+	caps, err := h.installations.ListCapabilities(ctx, installation.ID)
+	if err != nil {
+		return fmt.Errorf("listing capabilities for metadata provider sync: %w", err)
+	}
+
+	lookup := h.seedPlacement
+	if lookup == nil {
+		lookup = metadata.LookupSeedPlacementChecked
+	}
+	var errs []error
+	for _, cap := range caps {
+		if cap.Type != "metadata_provider.v1" {
+			continue
+		}
+		if err := h.chainRepo.AppendProviderToAllChainsChecked(ctx, installation.ID, cap.ID, func(level string) (metadata.SeedPlacement, error) {
+			return lookup(ctx, h.chainRepo.Pool(), installation.ID, cap.ID, level)
+		}); err != nil {
+			errs = append(errs, fmt.Errorf("appending provider %s to library chains: %w", cap.ID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func isZipUpload(data []byte) bool {
 	if len(data) < 4 {
 		return false
@@ -1175,6 +1211,13 @@ func (h *PluginHandler) ListUserPluginSettings(ctx context.Context) ([]PluginUse
 			slog.WarnContext(ctx, "skipping plugin with an invalid identity", "component", "api", "installation_id", installation.ID, "error", err)
 			continue
 		}
+		if errors.Is(err, os.ErrNotExist) {
+			// Its files are missing, for example because a damaged stored
+			// archive couldn't restore them. It has no settings to read and
+			// must not hide the other plugins either.
+			slog.WarnContext(ctx, "skipping plugin with no installed manifest", "component", "api", "installation_id", installation.ID, "error", err)
+			continue
+		}
 		if err != nil {
 			slog.ErrorContext(ctx, "loading plugin manifest", "component", "api", "installation_id", installation.ID, "error", err)
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load plugin settings")
@@ -1402,12 +1445,25 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 	taskBindings []*plugins.TaskBinding,
 	repositoriesByID map[int]*plugins.Repository,
 ) (PluginInstallationView, error) {
+	var unreadableArchive string
 	if manifest == nil {
 		var err error
 		manifest, err = h.loadInstallationManifest(ctx, installation)
-		// A row admitted before the identity check never loads; list it
-		// without its manifest so the admin can still uninstall it.
-		if err != nil && !errors.Is(err, plugins.ErrArchiveNotFound) && !errors.Is(err, plugins.ErrInvalidPluginIdentity) {
+		// A row admitted before the identity check, or one whose stored
+		// archive is damaged, never loads. List it without its manifest so
+		// one broken plugin doesn't fail the whole list and the admin can
+		// still turn it off or uninstall it.
+		// An archive whose own manifest has an invalid identity matches both
+		// sentinels, so check the archive first; a row with an invalid identity
+		// fails before its archive is read and matches only the second.
+		switch {
+		case errors.Is(err, plugins.ErrArchiveUnreadable):
+			// The message can quote the archive's own contents; mask any
+			// credential assignment before it is logged or returned.
+			unreadableArchive = logredact.SanitizeText(err.Error())
+			slog.WarnContext(ctx, "listing plugin without its manifest", "component", "api", "installation_id", installation.ID, "plugin_id", installation.PluginID, "error", unreadableArchive)
+		case err == nil, errors.Is(err, plugins.ErrArchiveNotFound), errors.Is(err, plugins.ErrInvalidPluginIdentity):
+		default:
 			return PluginInstallationView{}, err
 		}
 	}
@@ -1460,6 +1516,12 @@ func (h *PluginHandler) buildInstallationResponseWithBindings(
 					runtime.Resident = true
 				}
 			}
+		}
+		// A plugin that isn't running can't start from an archive that won't
+		// load, so show it as failed and say why.
+		if unreadableArchive != "" && state.State == plugins.ResidentStopped {
+			runtime.State = string(plugins.ResidentFailed)
+			runtime.LastError = unreadableArchive
 		}
 	}
 

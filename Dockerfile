@@ -68,6 +68,10 @@ ARG INTEL_IGC_VERSION=2.34.4
 ARG INTEL_IGC_BUILD=21428
 ARG INTEL_NEO_VERSION=26.18.38308.1
 ARG JELLYFIN_FFMPEG_VERSION=8.1.3-1
+# Backups run pg_dump and pg_restore on the API server (internal/backup), and
+# pg_dump must be at least the database server's major version, so the
+# PostgreSQL 18 client comes from the PostgreSQL apt repository, as the
+# omnibus image's server does.
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends ca-certificates curl gnupg && \
@@ -75,10 +79,21 @@ RUN apt-get update && \
       | gpg --dearmor -o /usr/share/keyrings/jellyfin.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/jellyfin.gpg arch=${TARGETARCH}] https://repo.jellyfin.org/debian trixie main" \
       > /etc/apt/sources.list.d/jellyfin.list && \
+    install -d /etc/apt/keyrings && \
+    curl -fsSL -o /etc/apt/keyrings/pgdg.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc && \
+    echo "deb [signed-by=/etc/apt/keyrings/pgdg.asc arch=${TARGETARCH}] https://apt.postgresql.org/pub/repos/apt trixie-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list && \
     apt-get update && \
-    apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk && \
+    apt-get install -y --no-install-recommends "jellyfin-ffmpeg8=${JELLYFIN_FFMPEG_VERSION}-trixie" git libvips42 fonts-noto-core fonts-noto-cjk \
+      postgresql-client-18 && \
     apt-get purge -y gnupg && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
+# Explicit modern-runtime image option for isolated Intel Flex/DG2 devices.
+# The default preserves Media SDK for older supported Intel graphics.
+ARG INTEL_QSV_RUNTIME=auto
+COPY scripts/configure-intel-qsv-runtime.sh /tmp/configure-intel-qsv-runtime.sh
+RUN sh /tmp/configure-intel-qsv-runtime.sh "${INTEL_QSV_RUNTIME}" "${TARGETARCH}" && \
+    rm /tmp/configure-intel-qsv-runtime.sh
 # Debian's Intel OpenCL runtime lags the media hardware supported by the
 # Jellyfin FFmpeg build. Match Jellyfin's container packaging on amd64 so QSV
 # tone mapping can use the quality-preserving OpenCL path. Other architectures
@@ -104,6 +119,7 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
 # ca-certificates updates do not reach. Use the system store instead, so a CA
 # that Debian removes stops being trusted by npm as well.
 ENV NODE_OPTIONS=--use-openssl-ca
+LABEL io.silo.intel-qsv-runtime="${INTEL_QSV_RUNTIME}"
 COPY --from=build /silo /usr/local/bin/silo
 EXPOSE 8080 8096 13378
 # Silo runs database migrations before its HTTP listener starts, and an

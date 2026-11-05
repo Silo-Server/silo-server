@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -66,6 +67,9 @@ type PluginProvider struct {
 	// look an item up by (lookup_provider_ids). GetMetadata runs when the item
 	// carries any of them, even without an ID of the provider's own.
 	lookupProviderIDs []string
+	// lookupImages opens GetImages to the same lookup keys (lookup_images), for
+	// an artwork source that has no IDs of its own.
+	lookupImages bool
 	// declaredRatingSources are the rating sources of its own the capability
 	// declared (rating_sources); GetMetadata keeps them alongside Silo's
 	// built-in sources.
@@ -125,12 +129,14 @@ func NewPluginProviderWithClientFactory(
 
 // NewPluginProviderFromCapability constructs a PluginProvider directly from
 // plugin capability data, without going through a settings map or registry.
-// lookupProviderIDs is the capability's declared lookup_provider_ids, or nil.
+// lookupProviderIDs is the capability's declared lookup_provider_ids, or nil;
+// lookupImages is its declared lookup_images.
 func NewPluginProviderFromCapability(
 	installationID int,
 	capabilityID string,
 	displayName string,
 	lookupProviderIDs []string,
+	lookupImages bool,
 	ratingSources []models.RatingSourceDefinition,
 	resolver pluginMetadataResolver,
 ) (*PluginProvider, error) {
@@ -152,6 +158,7 @@ func NewPluginProviderFromCapability(
 		capabilityID:          capabilityID,
 		displayName:           displayName,
 		lookupProviderIDs:     lookupProviderIDs,
+		lookupImages:          lookupImages,
 		declaredRatingSources: declared,
 		clientFactory:         resolver.MetadataProviderClient,
 	}, nil
@@ -320,6 +327,8 @@ func (p *PluginProvider) GetMetadata(ctx context.Context, req MetadataRequest) (
 		LastAirDate:          response.GetItem().GetLastAirDate(),
 		AirTime:              response.GetItem().GetAirTime(),
 		ReleaseDate:          response.GetItem().GetReleaseDate(),
+		DigitalReleaseDate:   movieDateFromPluginMetadata(req.ContentType, response.GetItem().GetMetadata(), "digital_release_date"),
+		PhysicalReleaseDate:  movieDateFromPluginMetadata(req.ContentType, response.GetItem().GetMetadata(), "physical_release_date"),
 	}, nil
 }
 
@@ -391,9 +400,13 @@ func (p *PluginProvider) GetPersonDetail(ctx context.Context, req PersonDetailRe
 	}, nil
 }
 
+// GetImages fetches the item's artwork from the plugin. Like GetMetadata it
+// runs on the provider's own ID, but declared lookup keys open it only when the
+// capability also declared lookup_images: an enrichment provider such as
+// MDBList has no artwork, so it is not asked.
 func (p *PluginProvider) GetImages(ctx context.Context, req ImageRequest) ([]RemoteImage, error) {
 	providerID := req.ProviderIDs[p.capabilityID]
-	if providerID == "" {
+	if providerID == "" && (!p.lookupImages || !p.hasLookupProviderID(req.ProviderIDs)) {
 		return nil, nil
 	}
 
@@ -783,6 +796,25 @@ func advisoryFromPluginMetadata(value *structpb.Struct) (int, string) {
 		return 0, ""
 	}
 	return age, source
+}
+
+// movieDateFromPluginMetadata reads a movie's home release date from the
+// plugin metadata key ("digital_release_date" or "physical_release_date").
+// Anything that is not a real YYYY-MM-DD date is dropped: the value picks the
+// day the calendar lists the movie on, and the column is a DATE.
+func movieDateFromPluginMetadata(contentType string, value *structpb.Struct, key string) string {
+	if contentType != "movie" || value == nil {
+		return ""
+	}
+	raw, ok := value.GetFields()[key].GetKind().(*structpb.Value_StringValue)
+	if !ok {
+		return ""
+	}
+	date := strings.TrimSpace(raw.StringValue)
+	if _, err := time.Parse(time.DateOnly, date); err != nil {
+		return ""
+	}
+	return date
 }
 
 func keywordsFromPluginMetadata(value *structpb.Struct) []string {

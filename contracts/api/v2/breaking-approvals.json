@@ -1,3 +1,11 @@
 {
-  "approvals": []
+  "approvals": [
+    {
+      "operation_id": "listAdminBackups",
+      "change_id": "response-property-enum-value-added",
+      "fingerprint": "596507a2c7f3676af9e4c15ccdb4a790e444a400c7a5bb23305c134ddd69cb85",
+      "reason": "Unreleased: the value is added within the pre-1.0 backups stack (#2313); the operation or field is new in this stack and only the web admin in this stack reads it.",
+      "approved_in": "#3400"
+    }
+  ]
 }

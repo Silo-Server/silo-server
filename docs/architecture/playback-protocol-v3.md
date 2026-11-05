@@ -560,13 +560,16 @@ populating them:
 | Field | Match |
 | --- | --- |
 | `profiles` | Case-insensitive profile identity against the source profile. H.264 ignores presentation separators, and a decoder reporting Baseline also accepts the narrower Constrained Baseline source profile; the reverse is not inferred |
-| `levels` | **At-least**: any listed level ≥ the source level passes |
+| `levels` | **At-least**: any listed level ≥ the source level passes. An `exact` hardware HEVC entry also passes a source tagged above its highest level when both levels share a picture-size family (4–4.1, 5–5.2, 6–6.2) and the source's luma sample rate and bitrate fit the entry's level, with bitrate held to the Main-tier limit and the sample rate taken at no less than 60 fps, since the stored frame rate is an average |
 | `bit_depths` | Exact integer equality |
 
 So a decoder that tops out at H.264 level 4.1 may report `[41]` and still
 validate a level-3.0 stream, while a decoder that handles 8- and 10-bit must
 list both — `[10]` alone rejects an 8-bit source. Levels use the integer form
-(4.1 → `41`).
+(4.1 → `41`), except HEVC, which uses `general_level_idc` (5.1 → `153`), the
+value FFmpeg probes. The HEVC family rule exists because encoders also choose
+the level from their declared buffer and peak bitrate: x265 tags a 4K24 encode
+with a 180 Mb/s VBV ceiling as 5.2, though a 5.1 decoder handles its pictures.
 
 **Every validated video route requires complete routing metadata.** Before any
 tier logic runs, the server requires video codec, bit depth, width, height,
@@ -1499,6 +1502,7 @@ HDR, 4K, or transcode-policy reason — deselecting the subtitle restores playba
 *Transport and session:* `internal_error`, `session_expired`,
 `subtitle_artifact_unavailable`, `capacity_unavailable`,
 `local_transcode_disabled`,
+`stream_limit_reached`, `transcode_limit_reached`,
 `audio_transcoding_disabled`,
 `transcode_start_failed`, `transcode_node_unavailable`,
 `transcode_node_capability_unavailable`, `track_unavailable`,
@@ -1507,6 +1511,12 @@ HDR, 4K, or transcode-policy reason — deselecting the subtitle restores playba
 `seek_reanchor_intent_mismatch`, `seek_failure_recovery_intent_mismatch`,
 `policy_denied`, `routing_policy_unsatisfied`, `route_capacity_unavailable`,
 `route_capability_unavailable`, `route_preparation_failed`.
+`stream_limit_reached` and `transcode_limit_reached` mean the account has used
+its `max_streams` or `max_transcodes` allowance, not that the server is short of
+capacity, which is `capacity_unavailable`. Both are retryable: a new attempt with
+a fresh `playback_attempt_id` succeeds once another of the account's sessions
+ends, while the same id replays the stored terminal. Their `message` tells the
+viewer what to do.
 `routing_policy_unsatisfied` and `route_capacity_unavailable` come from the node-routing resolver:
 `routing_policy_unsatisfied` means no route shape is legal under the configured
 execution and egress policy and is never retryable, while
@@ -2215,12 +2225,27 @@ A transformation is a named, versioned media operation with claims attached.
 | `video_to_hevc` | `server` | `1` | `sdr` output | `hevc_decode` |
 | `hdr_to_sdr_tonemap` | `server` | `1` | limited-range BT.709 `sdr` output with HDR metadata removed | `hdr_metadata_removed`, `sdr_bt709_output` |
 | `server_dv7_to_hdr10` | `server` | `2` | `hdr10` output | `dolby_vision_metadata_removed`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
+| `server_dv7_to_dv81` | `server` | `1` | `dolby_vision` Profile 8.1 output | `profile7_rpu_converted_to_profile81`, `hdr10_base_layer_preserved`, `enhancement_layer_discarded` |
 
 `server_dv7_to_hdr10` recipe version 2 removes a single-track Profile 7
 enhancement layer (NAL unit type 63) with `filter_units` as well as the Dolby
 Vision RPUs with `dovi_rpu`. An executor on recipe 1 is never offered a recipe 2
 plan, and a copy started under recipe 1 cannot be reopened on an upgraded
 executor, so that session replans.
+
+`server_dv7_to_dv81` carries a single-track Profile 7 source (its DOVI
+record lists RPUs, enhancement layer and base layer in the copied track) as
+Profile 8.1 over an fMP4 HLS copy remux, ranked after native playback and the
+client-side `client_dv7_to_dv81` and before `server_dv7_to_hdr10`. FFmpeg only
+removes the enhancement layer (`filter_units=remove_types=63`, `-strict
+unofficial` so the DOVI record is written); the session then rewrites each
+segment as it is first served: `init.mp4`'s Profile 7 `dvcC` becomes a Profile
+8.1 `dvvC` (compatibility id 1), and every RPU is converted as dovi_tool's mode
+2 does (a FEL's mapping is reset to identity). A filler-data NAL placed before
+each converted RPU takes up the bytes it saved, so no sample or box changes
+size; an RPU that cannot be converted becomes filler and that frame plays its
+HDR10 base layer. The output keeps the `hvc1` sample entry: some players (LG
+webOS) drop to HDR10 for `dvh1`. There is no MPEG-TS or progressive form.
 
 `video_to_hevc` encodes 8-bit SDR HEVC. The planner chooses it over
 `video_to_h264` only when `playback.allow_hevc_encoding` is on and the client's
@@ -2290,6 +2315,7 @@ tone-map smoke probe is lazy and cached by binary, backend, and device:
 | Transformation | Probe |
 | --- | --- |
 | `server_dv7_to_hdr10` | `ffmpeg -bsfs` contains `dovi_rpu` and `filter_units` |
+| `server_dv7_to_dv81` | `ffmpeg -bsfs` contains `filter_units` |
 | `audio_to_aac` | `ffmpeg -encoders` contains an `aac` encoder and bounded silent-frame smoke tests execute the exact timestamp-normalisation graph (stereo input) and stereo-downmix limiter graph (5.1 input) |
 | `video_to_h264` | `ffmpeg -encoders` contains any of `libx264`, `h264_qsv`, `h264_vaapi`, `h264_nvenc`, `h264_videotoolbox` |
 | `video_to_hevc` | `ffmpeg -encoders` contains `libx265` and a bounded one-frame `libx265` 8-bit SDR encode succeeds; the transcode backend probe validates a hardware HEVC encoder before that backend is selected |

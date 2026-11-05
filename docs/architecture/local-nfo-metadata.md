@@ -435,7 +435,17 @@ Caching and refresh:
   library root is opened as an `os.Root` before the path is resolved, and the
   file is opened through the handle that is the same directory as the resolved
   root, so a root or folder swapped for a symlink after that point cannot lead
-  the open out of the library. When
+  the open out of the library. A path whose folders lead out of every root
+  through a symlink, as a per-title folder linked into another tree does, is
+  read only when a folder it physically sits in, below the library root, also
+  holds a present `media_files` row of the same title (the series, for season
+  and episode images): the scanner reached that file through the same link.
+  That folder is opened as an `os.Root`, that file must be the same file
+  reached through it, and the image is read through it. Every cataloged
+  file under the folder is tried before it is refused. Anything else stays
+  the outside-roots failure, except that a storage error while checking, or
+  a failed listing, is a read failure retried as usual. The admin image
+  picker reads sidecars the same way. When
   the re-check or the read fails, the processor probes, through
   `internal/rootcheck`, the nearest folder that exists at or above the file's
   folder, searching no higher than the library root: unless it lists entries
@@ -706,13 +716,13 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
   its change published, under the content ID its media file names after the
   refresh.
 - **Re-apply.** Local files only, no remote provider call. The item's NFO
-  values merge with `ReplaceUnlocked` through `mergeAndPersist`
+  values merge with `MergeReplaceUnlocked` through `mergeAndPersist`
   (`localReapply`), so field locks win and lists the NFO supplies replace the
   stored ones; credits keep the provider IDs and photos the stored cast
   already has. Local artwork applies as on any refresh, so an image replaced
   under the same name gets a new `?v=` source and is cached again; identity,
   videos and refresh bookkeeping are left alone. Seasons and episodes merge their local
-  results with `ReplaceUnlocked` through `persistSeasonAndEpisodeRows`.
+  results with `MergeReplaceUnlocked` through `persistSeasonAndEpisodeRows`.
 - **Chain order.** A level's local provider always runs ahead of its remote
   ones (see Precedence), so wherever a level has one, its NFO text, artwork
   and identity are tracked and re-applied. A level without one records no
@@ -779,8 +789,11 @@ refresh (`internal/metadata/local_sidecar.go`, `local_reapply.go`).
 - Seasons have no banner, thumb or extra backdrops (`seasonNN-fanart`,
   `seasonNN-banner`, `seasonNN-landscape` and their season-folder forms are not
   read).
-- NFO `<thumb aspect="banner|landscape|clearart|discart">` and `<fanart>` URLs
-  are not read. A provider that offers banners, thumbs, clear art or disc art
+- In movie and series NFOs, `<thumb aspect="banner|landscape|thumb|clearart|discart|disc|keyart">`
+  references are parsed but fill no item-art slot (`nfoArtImageTypes`). Episode
+  NFOs are the exception: every non-empty episode `<thumb>` is read as the
+  episode's still, whatever its aspect (`episodeArtRefs`). A provider that
+  offers banners, thumbs, clear art or disc art
   returns `RemoteImage` entries of type `ImageBanner`, `ImageThumb`,
   `ImageClearArt` or `ImageDisc` (plugin image kinds `banner`, `thumb`,
   `clearart`, `disc`), and `applyBestImages` fills the slot when no sidecar

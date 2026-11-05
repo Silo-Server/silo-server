@@ -194,6 +194,25 @@ takes longer. A database that does not accept connections cannot be rebuilt,
 so it keeps its recorded version and logs a warning on each start. `init-postgres` rewrites `conf.d/00-omnibus.conf` and
 `pg_hba.conf` on every start and makes sure `postgresql.conf` includes
 `conf.d`; `POSTGRES_TUNE` writes `postgresql.auto.conf`, which loads after it.
+Silo tunes with `ALTER SYSTEM` once it is up, and PostgreSQL applies some of
+those settings, such as `shared_buffers`, only at start. So while
+`POSTGRES_TUNE` is on, `init-postgres` also writes
+`conf.d/02-omnibus-tune.conf` from `silo postgres-tune-conf`, which prints the
+restart-only settings Silo sizes from memory and CPUs, read from the same
+environment and `/config/silo/.env`. A new cluster then starts with them, and
+Silo's later `ALTER SYSTEM` writes the same values, so no restart is pending.
+`max_connections` and `io_method` stay out: the first is sized from
+`database.max_connections`, which lives in the database, and an `io_method`
+PostgreSQL rejects would drop the whole file (below). Both apply at the next
+restart. With tuning off, or when Silo cannot size the settings, the file is
+removed. A value outside a setting's range in a configuration file stops
+PostgreSQL from starting, where `ALTER SYSTEM` refuses it, so `init-postgres`
+also removes the file, with a warning, when `postgres -C` rejects the
+configuration with it in place (for example `POSTGRES_TUNE_MEMORY` below
+512kB). The check cannot catch shared memory the host cannot provide, from an
+overstated `POSTGRES_TUNE_MEMORY`: the first start fails then, as the restart
+after `ALTER SYSTEM` would. On an existing cluster
+`postgresql.auto.conf` still decides, and `10-local.conf` overrides the file.
 Rewriting `pg_hba.conf` matters for a data directory from the official
 PostgreSQL image, whose file trusts every local connection.
 

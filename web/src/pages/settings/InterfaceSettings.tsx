@@ -27,7 +27,7 @@ import {
 } from "@/lib/uiCustomization";
 
 import { CardOverlaySettings } from "./CardOverlaySettings";
-import { ChoiceButtons } from "./ChoiceButtons";
+import { ChoiceButtons } from "@/components/settings/ChoiceButtons";
 import { PosterCardPreview } from "./PosterCardPreview";
 import { ResetButton } from "./ResetButton";
 
@@ -89,10 +89,12 @@ export default function InterfaceSettings() {
         subtitle="Choose how posters look and which links sit in your menu. Changes save as you make them."
       />
       {/* The preview sits beside the poster controls once there is room, and
-          stays in view while they scroll. On narrow screens it leads. */}
-      <div className="grid gap-x-10 @5xl:grid-cols-[minmax(0,1fr)_19rem]">
+          stays in view while they scroll; at large poster sizes it can be
+          taller than the window, so it scrolls on its own. On narrow screens
+          it leads. */}
+      <div className="grid gap-x-10 @5xl:grid-cols-[minmax(0,1fr)_auto]">
         <aside className="pb-2 @5xl:order-last @5xl:pb-0">
-          <div className="@5xl:sticky @5xl:top-6 @5xl:pt-6">
+          <div className="@5xl:sticky @5xl:top-6 @5xl:max-h-[calc(100dvh-1.5rem)] @5xl:overflow-y-auto @5xl:pt-6">
             <PosterCardPreview revealShortcuts={revealShortcuts} />
           </div>
         </aside>

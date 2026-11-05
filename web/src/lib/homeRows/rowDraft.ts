@@ -23,6 +23,11 @@ export interface RowDraft {
   config: Record<string, unknown>;
   itemLimit: number;
   hero: boolean;
+  /**
+   * The hero banner is kept off the apps. Set only where the form offers the
+   * choice; while absent a save sends nothing and the server keeps its value.
+   */
+  webOnly?: boolean;
   /** Add row on a library page: the other library pages that get their own copy. */
   extraLibraryIds?: number[];
 }
@@ -104,6 +109,7 @@ export function draftFromRow(row: HomeRow, catalog: RecipeCatalogResponse | unde
     config: { ...row.config },
     itemLimit: row.itemLimit,
     hero: row.hero,
+    ...(row.webOnly === undefined ? {} : { webOnly: row.webOnly }),
   };
 }
 
@@ -207,7 +213,8 @@ function fieldValue(draft: RowDraft, field: DraftField): string {
     case "itemLimit":
       return String(draft.itemLimit);
     case "hero":
-      return String(draft.hero);
+      // Where the hero shows goes with the hero banner itself.
+      return `${draft.hero}:${draft.webOnly ?? false}`;
   }
 }
 
@@ -224,7 +231,7 @@ function copyField(target: RowDraft, source: RowDraft, field: DraftField): RowDr
     case "itemLimit":
       return { ...target, itemLimit: source.itemLimit };
     case "hero":
-      return { ...target, hero: source.hero };
+      return { ...target, hero: source.hero, webOnly: source.webOnly };
   }
 }
 

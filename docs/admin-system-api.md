@@ -11,7 +11,8 @@ query stream workers. In a cluster, successive requests can describe different A
 hosts. An absent sampler or an unsupported host reports `available: false`; clients
 must not interpret this as zero utilization. A present `sampled_at` identifies the
 age of the sample. Missing GPU measurements remain omitted, while a measured zero
-remains zero. GPU and disk collections are arrays, including when empty.
+remains zero. `gpu` and `system.disks` are arrays, including when empty;
+`attribution.disks` is omitted when there are none.
 
 Both operations require an acting administrator. Resource disk paths are available
 only behind this gate. Responses use the native API's default no-store policy.

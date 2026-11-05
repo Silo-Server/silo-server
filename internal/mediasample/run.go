@@ -264,6 +264,7 @@ func (a attemptRun) samples(req Request) (Result, *AttemptError) {
 		if req.Sheets != nil {
 			req.skipFrame = keyframeSkipFor(header.info.VideoCodec)
 			req.lowDelay = keyframeLowDelayFor(header.info.VideoCodec)
+			req.timingAudio = header.info.AudioStreams
 		}
 		if req.Sheets != nil && req.Sheets.UseInputAspect {
 			out := req.Sheets.forDisplayAspect(header.info.displayAspect())

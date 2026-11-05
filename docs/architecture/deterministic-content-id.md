@@ -1,6 +1,6 @@
 # Deterministic, Cross-Server `content_id`
 
-**Status:** Implemented (branch `feat/deterministic-content-id`)
+**Status:** Implemented
 **Scope:** catalog / scanner / metadata
 **Key code:** `internal/contentid`, `internal/metadata/service.go`,
 `internal/catalog/history_source.go`,
@@ -45,7 +45,7 @@ stored as **`text COLLATE "C"`**:
 | Series | `series-tvdb-296762` |
 | Season | `season-tvdb-296762-1` |
 | Episode | `episode-tvdb-296762-1-5` |
-| Unmatched / local | `local-<128-bit path hash, hex>` |
+| Unmatched / local | `local-<112-bit path hash, hex>` |
 
 Why this shape:
 
@@ -164,6 +164,10 @@ tags mint the same id with no provider API call. This is the primary target
 (Radarr/Sonarr/Plex-tagged libraries). Untagged new items get a path-derived
 `local-` id keyed on the **file path** (not the folder), so distinct pre-merge
 skeletons in a shared folder stay separate while being stable across rescans.
+A flat series (episode files directly in a series library root, in one resolved
+scanner group) instead hashes `group:<folder id>:<group key version>:<group key>`
+into its `local-` id, so episodes matched on different nodes converge on one
+series item.
 
 Same-server convergence is preserved by the existing dedup
 (`findExistingByProviderIDs`) plus `UpsertTx`'s

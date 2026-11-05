@@ -109,7 +109,11 @@ type Request struct {
 	// and therefore cannot return the matching execution fingerprint.
 	TrackRecipeVersion string                   `json:"track_recipe_version,omitempty"`
 	PreparedTracks     *playback.PreparedTracks `json:"prepared_tracks,omitempty"`
-	TotalDuration      float64                  `json:"total_duration,omitempty"`
+	// AudioOnly leaves an audiobook's or podcast's cover art out of the
+	// prepared file, which maps no video for it. Older nodes ignore it and
+	// therefore cannot return the matching execution fingerprint.
+	AudioOnly     bool    `json:"audio_only,omitempty"`
+	TotalDuration float64 `json:"total_duration,omitempty"`
 	// LogSessionID labels the node's FFmpeg log lines with the durable job's
 	// key (playback.DownloadPrepareLogSessionID), so every attempt of one
 	// artifact reads as one stream. It never affects bytes, so the execution
@@ -288,6 +292,7 @@ func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 		TargetResolution:           opts.TargetResolution,
 		TargetBitrateKbps:          opts.TargetBitrateKbps,
 		AudioTrackIndex:            opts.AudioTrackIndex,
+		AudioOnly:                  opts.AudioOnly,
 		TotalDuration:              opts.TotalDuration,
 		LogSessionID:               opts.SessionID,
 	}
@@ -329,6 +334,7 @@ func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playba
 		TargetBitrateKbps:          r.TargetBitrateKbps,
 		AudioTrackIndex:            r.AudioTrackIndex,
 		SourceAudioChannels:        r.SourceAudioChannels,
+		AudioOnly:                  r.AudioOnly,
 		SubtitleTrackIndex:         -1,
 		PreparedTracks:             r.PreparedTracks,
 		FFmpegPath:                 ffmpegPath,

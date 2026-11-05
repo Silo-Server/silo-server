@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -64,6 +65,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
@@ -110,10 +112,10 @@ var _ apiv2.AdminRequestUsageService = (*mediarequests.Service)(nil)
 
 // Dependencies holds all shared dependencies that handlers need.
 // ArtworkDelivery describes how clients read artwork. External is true only
-// when reads go through a separately configured public or token endpoint that
-// can lag behind a storage write; that is the one case the delivery verifier
-// and the per-response published-variant lookup exist for. Scope changes when
-// the delivery configuration does, invalidating earlier verification.
+// when reads go through a separately configured public or token endpoint, the
+// one case seek-preview sheets confirm before clients read them there (see
+// internal/trickplay). Scope changes when the delivery configuration does,
+// invalidating earlier confirmations.
 type ArtworkDelivery struct {
 	Scope    string
 	External bool
@@ -157,6 +159,7 @@ type Dependencies struct {
 	}
 	S3Private         *s3client.Client              // private internal bucket client (may be nil)
 	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
+	OverlayImages     *overlays.ImageLibrary        // card overlay image library (nil when DB unavailable)
 	EmailBrand        *mail.BrandLoader             // server branding for outgoing email (nil sends Silo's default)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
@@ -302,7 +305,13 @@ type Dependencies struct {
 	AdminDefaults        *config.AdminDefaults
 	RequestServerRestart func(ctx context.Context) error
 	StorageTransition    *storagetransition.Service
-	ServerRestartStatus  *handlers.ServerRestartStatusTracker
+	// Backups owns the Backups page: listing, back up now, delete, and
+	// downloads. Nil when no database is wired.
+	Backups             *backup.Service
+	ServerRestartStatus *handlers.ServerRestartStatusTracker
+	// ProfileTransfer exports and imports a profile's own data; nil on the
+	// SQLite user store.
+	ProfileTransfer *backup.ProfileTransfer
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// MDBList) — the user-facing counterpart of CollectionService.
@@ -350,6 +359,13 @@ type Dependencies struct {
 	// its own port (internal/lantls), published in the connections document.
 	// Empty when the listener does not answer TLS (tests).
 	LocalTLSPin string
+
+	// PlaybackControlRedisClient records playback control lane ownership. Its
+	// sockets honor context deadlines (cache.NewDeadlineRedisClientForRole),
+	// so a stalled Redis cannot hold an administrator request or the
+	// ownership worker past the relay's one-second bound. Without it there is
+	// no control relay (may be nil).
+	PlaybackControlRedisClient *redis.Client
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -728,7 +744,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
 		if deps.UserStoreProvider != nil {
 			if deps.PolicySystem != nil {
-				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
+				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults).WithSharedTables(deps.DB)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
@@ -776,6 +792,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				nil,
 				checkPrimaryProfile,
 				householdRequiresProfile,
+				accessGroupStore,
 			).RequireMarkerEdit
 		}
 	}
@@ -1644,6 +1661,30 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
+		// Administrator commands run on the replica holding the session's
+		// control lane; the relay forwards them there over Redis.
+		if relay := playback.NewControlRelay(realtimeHub, deps.PlaybackControlRedisClient); relay != nil && deps.EventBus != nil {
+			publish := func(ctx context.Context, payload string) error {
+				// The relay's own client, so a stalled Redis cannot hold the
+				// publish past the reply timeout.
+				return cache.PublishEvent(ctx, deps.PlaybackControlRedisClient, cache.ChannelPlaybackControl, cache.Event{Type: cache.EventPlaybackControlRelay, Payload: payload})
+			}
+			subscribe := func(ctx context.Context, handler func(string)) error {
+				return deps.EventBus.Subscribe(ctx, cache.ChannelPlaybackControl, func(event cache.Event) {
+					if event.Type == cache.EventPlaybackControlRelay {
+						handler(event.Payload)
+					}
+				})
+			}
+			relayCtx := deps.AppContext
+			if relayCtx == nil {
+				relayCtx = context.Background()
+			}
+			adminPlaybackControlHandler.UseControlRelay(relay)
+			if err := relay.Start(relayCtx, publish, subscribe); err != nil {
+				slog.Warn("playback control relay unavailable; retrying subscription; administrator commands reach only sessions on this replica", "component", "api", "error", err)
+			}
+		}
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
 			roomTokenService := watchtogether.NewRoomTokenService(deps.Config.Auth.JWTSecret, 24*time.Hour)
@@ -2657,6 +2698,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService
 	}
+	if deps.OverlayImages != nil {
+		v2deps.OverlayImages = deps.OverlayImages
+	}
 
 	if inviteCodeRepo != nil {
 		v2deps.AdminInviteCodes = inviteCodeRepo
@@ -2867,6 +2911,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AndroidPushRetirement = deps.Notifications.PushDevices
 		v2deps.OrderedApplePush = handlers.NewOrderedApplePushV2(deps.Notifications.PushDevices, jwtService, sessionRepo, userRepo, viewerResolver, actingAdmin)
 		v2deps.ApplePushRetirement = deps.Notifications.PushDevices
+		v2deps.ApplePushReset = deps.Notifications.PushDevices
 		v2deps.AdminNotificationPush = deps.Notifications
 		v2deps.AdminNotificationDiscord = deps.Notifications
 		v2deps.NotificationChannels = deps.Notifications
@@ -2926,6 +2971,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.StorageTransition != nil {
 		v2deps.AdminStorageTransition = deps.StorageTransition
+	}
+	if deps.ProfileTransfer != nil {
+		deps.ProfileTransfer.SetItemsChanged(importedChanges(deps.Notifications, deps.RecWorker))
+		v2deps.ProfileTransfer = deps.ProfileTransfer
+	}
+	if deps.Backups != nil {
+		v2deps.AdminBackups = deps.Backups
+		// Presigning destinations hand out storage URLs; the signer covers the
+		// ones that cannot, and expires links on the same schedule.
+		if deps.Config != nil {
+			v2deps.AdminBackupSigner = artworkurl.NewBackupObjectSigner(deps.CurrentConfig().Auth.JWTSecret, adminJobArtifactURLTTL)
+		}
 	}
 	if catalogSeedHandler != nil {
 		v2deps.AdminCatalogSources = catalogSeedHandler
@@ -3041,6 +3098,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminPluginLifecycle = v2PluginHandler
 		v2deps.AdminPluginUploads = v2PluginHandler
 		externalSignInPlugins = v2PluginHandler
+	}
+	if deps.Backups != nil && deps.DB != nil {
+		wireBackupRestore(deps, adminHandler, libraryHandler, adminImageHandler, externalSignInPlugins, libraryCollectionHandler, sectionHandler, rateLimitHandler)
 	}
 	if deps.DB != nil && authService != nil && userRepo != nil {
 		v2deps.ExternalSignIn = handlers.NewExternalSignInHandler(auth.NewIdentityService(deps.DB), authService, userRepo, externalSignInPlugins)

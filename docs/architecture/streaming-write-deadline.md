@@ -96,8 +96,10 @@ whether to encode, so its writer implements `Unwrap`/`Flush`/`Hijack`/`Push` but
 known: even an identity response can need `Vary`. A non-compressible content type
 therefore gets a sendfile-killing wrapper too.
 
-It is bypassed on exact bulk-media routes via `httpstream.CompressExcept`, matching only
-the registered GET/HEAD methods with exact segment counts and exact casing. A *blanket*
+It is bypassed on exact bulk-media routes via `httpstream.CompressExcept` (jellycompat and
+ABS) or `httpstream.CompressWithExclusions` (the main API, which also leaves `/api/v2`
+responses that carry an `ETag` uncompressed), matching only the registered GET/HEAD
+methods with exact segment counts and exact casing. A *blanket*
 bypass would be wrong: subtitle font bundles are JSON served under the same global
 compressor, and bypassing them would drop `Content-Encoding`/`Vary` and change the wire
 contract.

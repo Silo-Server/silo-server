@@ -51,7 +51,7 @@ export default function MovieBoxSetRow({
               />
               {isCurrent ? (
                 <>
-                  <div className="ring-foreground/80 pointer-events-none absolute inset-x-0 top-0 aspect-[2/3] rounded-lg ring-2" />
+                  <div className="ring-foreground/80 pointer-events-none absolute inset-x-0 top-0 aspect-[2/3] rounded-xl ring-2 ring-inset" />
                   <span className="bg-background/85 text-foreground pointer-events-none absolute top-0 left-1/2 mt-[calc(150%-2rem)] -translate-x-1/2 rounded-full px-2.5 py-0.5 text-[0.625rem] font-semibold tracking-[0.14em] whitespace-nowrap uppercase">
                     This film
                   </span>

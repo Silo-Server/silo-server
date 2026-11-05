@@ -78,6 +78,8 @@ type AdminTaskJob struct {
 	CatalogResult           *AdminTaskJobCatalogResult           `json:"catalog_result,omitempty"`
 	ItemResult              *AdminTaskJobItemResult              `json:"item_result,omitempty"`
 	StorageTransitionResult *AdminTaskJobStorageTransitionResult `json:"storage_transition_result,omitempty"`
+	BackupRestoreSource     *AdminBackupRestoreSource            `json:"backup_restore_source,omitempty" doc:"The backup a backup_restore job restores from, present from the moment it is queued"`
+	BackupRestoreResult     *AdminBackupRestoreReport            `json:"backup_restore_result,omitempty" doc:"A backup_restore job's report: each chosen item restored, unchanged, left out (with a reason), or failed (with an error). Kept when the job is canceled or interrupted."`
 	ArtifactSizeBytes       int64                                `json:"artifact_size_bytes"`
 	DownloadURL             string                               `json:"download_url,omitempty" format:"uri-reference"`
 	DownloadExpiresAt       *Instant                             `json:"download_expires_at,omitempty"`
@@ -180,6 +182,10 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 	}
 	if transitionResult != nil {
 		out.StorageTransitionResult = transitionResult
+	}
+	if job.JobType == adminjob.JobTypeBackupRestore {
+		out.BackupRestoreSource = backupRestoreSourceOf(job)
+		out.BackupRestoreResult = backupRestoreReportOf(job)
 	}
 	if job.JobType == adminjob.JobTypeLibraryRefresh || job.JobType == adminjob.JobTypeDeleteLibrary || job.JobType == adminjob.JobTypeImageCacheCleanup {
 		var request struct {

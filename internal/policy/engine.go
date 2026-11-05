@@ -47,8 +47,10 @@ type SkippedSource struct {
 
 // Engine owns compiled Rego queries and evaluates named decisions.
 type Engine struct {
-	mu       sync.RWMutex
-	queries  map[DecisionName]rego.PreparedEvalQuery
+	mu      sync.RWMutex
+	queries map[DecisionName]rego.PreparedEvalQuery
+	// memo belongs to the bundle in queries and is replaced with it.
+	memo     *decisionMemo
 	timeout  time.Duration
 	revision int64
 	skipped  []SkippedSource
@@ -194,15 +196,31 @@ func (e *Engine) SetEvalTimeout(timeout time.Duration) {
 	e.mu.Unlock()
 }
 
-// Evaluate evaluates a prepared decision and decodes the result into out.
+// Evaluate evaluates a prepared decision and decodes the result into out. An
+// input the loaded bundle already decided is answered from its memo; Meta's
+// EvalTimeNS then covers the lookup only.
 func (e *Engine) Evaluate(ctx context.Context, name DecisionName, input any, out any) (Meta, error) {
 	e.mu.RLock()
 	query, ok := e.queries[name]
+	memo := e.memo
 	timeout := e.timeout
 	revision := e.revision
 	e.mu.RUnlock()
 	if !ok {
 		return Meta{}, fmt.Errorf("%w: %s", ErrUnknownDecision, name)
+	}
+
+	key, keyed := memo.key(name, input)
+	if keyed {
+		start := time.Now()
+		if raw, ok := memo.get(key); ok {
+			meta := Meta{
+				DecisionName: name,
+				EvalTimeNS:   time.Since(start).Nanoseconds(),
+				Revision:     revision,
+			}
+			return meta, decodeDecision(name, raw, out)
+		}
 	}
 
 	evalCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -237,10 +255,17 @@ func (e *Engine) Evaluate(ctx context.Context, name DecisionName, input any, out
 	if err != nil {
 		return meta, fmt.Errorf("%w: encoding result for %s: %w", ErrPolicyEvalFailed, name, err)
 	}
-	if err := json.Unmarshal(raw, out); err != nil {
-		return meta, fmt.Errorf("%w: decoding result for %s: %w", ErrPolicyEvalFailed, name, err)
+	if keyed {
+		memo.put(key, raw)
 	}
-	return meta, nil
+	return meta, decodeDecision(name, raw, out)
+}
+
+func decodeDecision(name DecisionName, raw []byte, out any) error {
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("%w: decoding result for %s: %w", ErrPolicyEvalFailed, name, err)
+	}
+	return nil
 }
 
 func (e *Engine) swap(ctx context.Context, modules []ModuleSource, decisions map[DecisionName]string, revision int64) error {
@@ -261,9 +286,15 @@ func (e *Engine) swap(ctx context.Context, modules []ModuleSource, decisions map
 		}
 		queries[name] = prepared
 	}
+	memo := newDecisionMemo(decisionMemoEntries, unreadRequestFieldsOf(modules))
 
 	e.mu.Lock()
 	e.queries = queries
+	// A fresh memo even when the generation is unchanged: results remembered
+	// for the old bundle must never answer for this one, and the fields its
+	// key leaves out are worked out from this bundle. An evaluation still
+	// running on the old bundle stores into the old memo.
+	e.memo = memo
 	e.revision = revision
 	e.mu.Unlock()
 	return nil

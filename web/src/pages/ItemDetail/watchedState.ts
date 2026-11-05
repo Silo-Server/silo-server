@@ -98,6 +98,16 @@ export function getWatchedInvalidationKeys(item: WatchedStateItem) {
   return keys;
 }
 
+// cachedListsInEveryLibrary returns a cached list for each library it was read
+// in. The key's last segment is the library, and a series page opened from a
+// library caches its season and episode lists under that library's ID.
+function cachedListsInEveryLibrary<T>(queryClient: QueryClient, key: readonly unknown[]): T[] {
+  return queryClient
+    .getQueriesData<T>({ queryKey: key.slice(0, -1) })
+    .filter(([queryKey]) => queryKey.length === key.length)
+    .flatMap(([, data]) => (data ? [data] : []));
+}
+
 export function getCachedWatchedInvalidationKeys(queryClient: QueryClient, item: WatchedStateItem) {
   const keys = [...getWatchedInvalidationKeys(item)];
 
@@ -105,11 +115,12 @@ export function getCachedWatchedInvalidationKeys(queryClient: QueryClient, item:
     return keys;
   }
 
-  const seasonsData = queryClient.getQueryData<SeasonsResponse>(
+  const seasons = cachedListsInEveryLibrary<SeasonsResponse>(
+    queryClient,
     catalogKeys.seriesSeasons(item.content_id),
-  );
+  ).flatMap((data) => data.seasons ?? []);
 
-  for (const season of seasonsData?.seasons ?? []) {
+  for (const season of seasons) {
     appendUniqueKey(keys, catalogKeys.itemDetail(season.content_id));
     appendUniqueKey(keys, itemKeys.detail(season.content_id));
     appendUniqueKey(keys, catalogKeys.itemEpisodes(season.content_id));
@@ -119,13 +130,18 @@ export function getCachedWatchedInvalidationKeys(queryClient: QueryClient, item:
     appendUniqueKey(keys, episodeKeys.seasonDetail(item.content_id, season.season_number));
     appendUniqueKey(keys, episodeKeys.bySeason(item.content_id, season.season_number));
 
-    const episodesData =
-      queryClient.getQueryData<EpisodesResponse>(catalogKeys.itemEpisodes(season.content_id)) ??
-      queryClient.getQueryData<EpisodesResponse>(
+    const episodeLists = [
+      ...cachedListsInEveryLibrary<EpisodesResponse>(
+        queryClient,
+        catalogKeys.itemEpisodes(season.content_id),
+      ),
+      ...cachedListsInEveryLibrary<EpisodesResponse>(
+        queryClient,
         catalogKeys.seasonEpisodes(item.content_id, season.season_number),
-      );
+      ),
+    ];
 
-    for (const episode of episodesData?.episodes ?? []) {
+    for (const episode of episodeLists.flatMap((data) => data.episodes ?? [])) {
       appendUniqueKey(keys, catalogKeys.itemDetail(episode.content_id));
       appendUniqueKey(keys, itemKeys.detail(episode.content_id));
     }

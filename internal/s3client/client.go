@@ -49,7 +49,8 @@ const (
 // S3-compatible backends require parts of at least 5 MiB (except the last).
 const streamUploadPartSize = 8 * 1024 * 1024
 
-// publicDeliveryProbeTimeout bounds background artwork delivery verification.
+// publicDeliveryProbeTimeout bounds one ObjectAvailable probe of the
+// client-facing read URL.
 const publicDeliveryProbeTimeout = 5 * time.Second
 
 const mutationFenceWeight int64 = 1 << 30
@@ -254,6 +255,60 @@ func (c *Client) PutObject(ctx context.Context, bucket, key string, data []byte)
 	}
 
 	return nil
+}
+
+// ErrObjectExists reports a conditional create that found an object at its
+// key. Nothing was written.
+var ErrObjectExists = errors.New("s3: object already exists")
+
+// ErrConditionalWriteUnsupported reports a backend that refused the
+// If-None-Match header of a conditional create.
+var ErrConditionalWriteUnsupported = errors.New("s3: conditional writes are not supported by this backend")
+
+// PutObjectIfAbsent uploads data only when no object exists at key, with
+// If-None-Match: *, so a concurrent writer is never overwritten. It returns
+// ErrObjectExists when one does (412, or 409 for a conflicting concurrent
+// conditional write), and ErrConditionalWriteUnsupported when the backend
+// rejects the header (501, or a 400 naming it).
+func (c *Client) PutObjectIfAbsent(ctx context.Context, bucket, key string, data []byte) error {
+	if err := c.mutations.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer c.mutations.Release(1)
+	input := &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(c.prefixedKey(key)),
+		Body:        newBytesReadSeeker(data),
+		IfNoneMatch: aws.String("*"),
+		Metadata:    map[string]string{"silo-sha256": objectSHA256(data)},
+	}
+	if ct := contentTypeFromKey(key); ct != "" {
+		input.ContentType = aws.String(ct)
+	}
+	_, err := c.s3Client.PutObject(ctx, input)
+	switch {
+	case err == nil:
+		return nil
+	case httpStatusCode(err) == http.StatusPreconditionFailed, httpStatusCode(err) == http.StatusConflict:
+		return ErrObjectExists
+	case httpStatusCode(err) == http.StatusNotImplemented, conditionalHeaderRejected(err):
+		return ErrConditionalWriteUnsupported
+	}
+	return fmt.Errorf("s3 PutObject if absent %s/%s: %w", bucket, key, err)
+}
+
+// conditionalHeaderRejected recognizes a 400 that names the If-None-Match
+// header or reports it as not implemented, as some S3-compatible backends
+// answer instead of 501.
+func conditionalHeaderRejected(err error) bool {
+	if httpStatusCode(err) != http.StatusBadRequest {
+		return false
+	}
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok &&
+		(apiErr.ErrorCode() == "NotImplemented" || strings.Contains(apiErr.ErrorMessage(), "If-None-Match")) {
+		return true
+	}
+	return strings.Contains(err.Error(), "If-None-Match")
 }
 
 // PutObjectStream uploads a streaming body to the given key. When contentType is
@@ -561,9 +616,10 @@ func (c *Client) HeadObject(ctx context.Context, bucket, key string) (ObjectInfo
 	return ObjectInfo{Key: key, SizeBytes: aws.ToInt64(result.ContentLength), LastModified: result.LastModified, ETag: aws.ToString(result.ETag)}, nil
 }
 
-// ArtworkDeliveryScope invalidates verification when storage or delivery
-// endpoint or URL policy changes. Credentials are excluded from this persisted
-// digest. Rotated credentials sign fresh URLs and use normal background checks.
+// ArtworkDeliveryScope names the storage, delivery endpoint, and URL policy, so
+// a confirmation recorded under one (see internal/trickplay) lapses when any
+// of them changes. Credentials are excluded from this persisted digest:
+// rotated credentials sign fresh URLs for the same objects.
 func (c *Client) ArtworkDeliveryScope() string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		c.endpoint, c.bucket, c.keyPrefix, c.publicEndpoint, c.urlAuth,

@@ -44,7 +44,7 @@ func TestDeviceLoginApprovalRevalidatesSessionDB(t *testing.T) {
 				if err := approveRevocationDevice(WithClaims(ctx, claims), devices, start, env.user.ID, profileID); !errors.Is(err, ErrSessionRevoked) {
 					t.Fatalf("approval from %s session = %v, want ErrSessionRevoked", state, err)
 				}
-				poll, err := devices.Poll(ctx, start.DeviceCode)
+				poll, err := devices.Poll(ctx, start.DeviceCode, "")
 				if err != nil || poll.Status != DeviceLoginStatusPending || poll.TokenPair != nil {
 					t.Fatalf("refused approval changed the device request: %+v, %v", poll, err)
 				}
@@ -93,12 +93,12 @@ func TestDeviceLoginRevocationWithdrawsCommittedApprovalDB(t *testing.T) {
 				if _, err := env.svc.Refresh(ctx, refresh); !errors.Is(err, ErrSessionRevoked) {
 					t.Fatalf("provider refusal = %v", err)
 				}
-				poll, err := devices.Poll(ctx, start.DeviceCode)
+				poll, err := devices.Poll(ctx, start.DeviceCode, "")
 				if err != nil || poll.Status != DeviceLoginStatusDenied || poll.TokenPair != nil {
 					t.Fatalf("revocation did not withdraw approval: %+v, %v", poll, err)
 				}
 				if breakGlass {
-					localPoll, err := localDevices.Poll(ctx, localStart.DeviceCode)
+					localPoll, err := localDevices.Poll(ctx, localStart.DeviceCode, "")
 					if err != nil || localPoll.Status != DeviceLoginStatusApproved || localPoll.TokenPair == nil {
 						t.Fatalf("provider refusal withdrew a local approval: %+v, %v", localPoll, err)
 					}
@@ -136,7 +136,7 @@ func TestDeviceLoginPollSerializesWithRevocationDB(t *testing.T) {
 	}
 	collected := make(chan result, 1)
 	go func() {
-		poll, err := devices.Poll(ctx, start.DeviceCode)
+		poll, err := devices.Poll(ctx, start.DeviceCode, "")
 		collected <- result{poll, err}
 	}()
 	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

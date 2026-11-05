@@ -317,7 +317,7 @@ func TestDownloadedSubtitleAlwaysBurnTransportConstraints(t *testing.T) {
 		status     int
 	}{
 		{"direct original remains available", `{"SubtitleStreamIndex":5,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 200},
-		{"progressive video copy remains available", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 200},
+		{"video copy remains available", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AlwaysBurnInSubtitleWhenTranscoding":true}`, 200},
 		{"bitrate ceiling cannot retain direct stream", `{"SubtitleStreamIndex":5,"MaxStreamingBitrate":4000000,"AlwaysBurnInSubtitleWhenTranscoding":true}`, noRoute},
 		{"TS-only client takes the copy and needs no burn", `{"SubtitleStreamIndex":5,"AlwaysBurnInSubtitleWhenTranscoding":true,"DeviceProfile":{"DirectPlayProfiles":[{"Type":"Video","VideoCodec":"hevc","AudioCodec":"aac"}],"TranscodingProfiles":[{"Type":"Video","Protocol":"hls","Container":"ts","VideoCodec":"h264","AudioCodec":"aac"}]}}`, 200},
 		{"external text during ordinary full encode", `{"SubtitleStreamIndex":5,"EnableDirectPlay":false,"AllowVideoStreamCopy":false}`, 200},
@@ -348,10 +348,10 @@ func TestDownloadedSubtitleAlwaysBurnTransportConstraints(t *testing.T) {
 				t.Fatal(err)
 			}
 			source := response.MediaSources[0]
-			if tc.name == "progressive video copy remains available" {
+			if tc.name == "video copy remains available" {
 				session, ok := h.playbackStore.Get(response.PlaySessionID)
-				if !ok || session.MediaSources[0].HLSRemux || !source.SupportsDirectStream || source.SupportsTranscoding || !strings.Contains(source.DirectStreamURL, "static=false") {
-					t.Fatalf("progressive copy: %+v", source)
+				if !ok || !session.MediaSources[0].HLSRemux || source.SupportsDirectStream || !source.SupportsTranscoding {
+					t.Fatalf("video copy: %+v", source)
 				}
 			}
 			if source.DirectStreamURL == "" && source.TranscodingURL == "" {
@@ -460,7 +460,7 @@ func TestMediaSourceDTOLegacyExternalSubtitleSelectionSurvivesSessionPersistence
 	}
 	// Older sessions stored delivery only for the selected track.
 	recovered.SubtitleDeliveries = nil
-	dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", recovered)
+	dto := (&PlaybackHandler{}).mediaSourceDTO("item", "play", recovered)
 	for _, stream := range dto.MediaStreams {
 		if stream.Type != "Subtitle" || stream.IsExternal {
 			continue
@@ -509,7 +509,7 @@ func TestPlaybackInfoNegotiatesUnselectedTextSubtitles(t *testing.T) {
 			if err := json.Unmarshal(encoded, &recovered); err != nil {
 				t.Fatal(err)
 			}
-			reconstructed := h.mediaSourceDTO(item, recovered.ID, recovered.CompatToken, recovered.MediaSources[0])
+			reconstructed := h.mediaSourceDTO(item, recovered.ID, recovered.MediaSources[0])
 			for _, dto := range []mediaSourceDTO{response.MediaSources[0], reconstructed} {
 				if !dto.SupportsDirectPlay || (selected < 0 && dto.DefaultSubtitleStreamIndex != nil) ||
 					(selected >= 0 && (dto.DefaultSubtitleStreamIndex == nil || *dto.DefaultSubtitleStreamIndex != selected)) {
@@ -546,7 +546,7 @@ func TestSelectedSubtitleEmbedCapabilitySurvivesPersistence(t *testing.T) {
 		t.Run(fmt.Sprint(selected), func(t *testing.T) {
 			source := PlaybackMediaSource{ID: "source", Version: subtitleSelectionVersion(), SupportsDirectPlay: true, SelectedSubtitleStreamIndex: new(selected)}
 			applyCompatSubtitleDelivery(&source, DeviceProfile{SubtitleProfiles: []SubtitleProfile{{Format: "srt", Method: "Embed"}, {Format: "vtt", Method: "External"}}}, false)
-			before := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", source)
+			before := (&PlaybackHandler{}).mediaSourceDTO("item", "play", source)
 			encoded, err := json.Marshal(source)
 			if err != nil {
 				t.Fatal(err)
@@ -555,7 +555,7 @@ func TestSelectedSubtitleEmbedCapabilitySurvivesPersistence(t *testing.T) {
 			if err := json.Unmarshal(encoded, &recovered); err != nil {
 				t.Fatal(err)
 			}
-			after := (&PlaybackHandler{}).mediaSourceDTO("item", "play", "token", recovered)
+			after := (&PlaybackHandler{}).mediaSourceDTO("item", "play", recovered)
 			for _, dto := range []mediaSourceDTO{before, after} {
 				for _, stream := range dto.MediaStreams {
 					if stream.Type == "Subtitle" && stream.Index == 2 && (stream.DeliveryMethod != "Embed" || !strings.Contains(stream.DeliveryURL, "/stream.vtt?")) {

@@ -7,11 +7,12 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Prerequisites
 
 - Git, Make, and OpenSSL
-- Docker Engine or Docker Desktop with Docker Compose 2.24+ (local services and testcontainers)
+- Docker Engine or Docker Desktop with Docker Compose 2.24+ (local services and `make verify-prometheus-rules`)
 - Go 1.26.4+
 - Node.js 24+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
   `silo compat-web install`, or the admin settings) also needs Node.js 24+ for Jellyfin Web 12.x.
-- PostgreSQL 18 with pgvector
+- PostgreSQL 18 with pgvector, and the PostgreSQL 18 client tools (`pg_dump`, `pg_restore`)
+  for backups
 - Redis
 - FFmpeg (transcoding). On macOS, install Homebrew's keg-only full build so
   text-subtitle burn-in and the complete filter set are available alongside
@@ -174,7 +175,7 @@ that can hold millions of rows. Keep locks on existing tables short:
 While iterating:
 
 ```sh
-go test ./internal/<package>/...                 # needs Docker for testcontainers
+go test ./internal/<package>/...                 # DB-backed tests skip without a test database URL
 cd web && pnpm exec vitest run path/to/test.tsx
 ```
 
@@ -190,7 +191,7 @@ internal/
   api/               HTTP router, handlers, middleware
   auth/              JWT authentication and sessions
   catalog/           Media item, episode, season repositories
-  config/            YAML + env var configuration
+  config/            .env and env var bootstrap, database-backed server settings
   jellycompat/       Jellyfin/Emby protocol compatibility
   metadata/          Plugin-driven metadata matching and enrichment
   playback/          Direct play, remux, transcode session management

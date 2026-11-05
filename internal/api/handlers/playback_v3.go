@@ -7654,10 +7654,21 @@ func subtitleVariantIndexV3(file *models.MediaFile, language, title string, forc
 	return match
 }
 
+// sessionStartErrorV3 maps an admission refusal onto a client-visible terminal.
+//
+// The per-account caps do not share capacity_unavailable with the node-capacity
+// refusals: the server has room, this account has used its allowance, and the
+// viewer has to act rather than wait. Native clients show the message as
+// written, so it must make sense to a viewer who has never heard of a
+// transcode. Paused sessions count toward both caps, so the message names them.
+// Both stay retryable: once the other session ends, a fresh playback attempt
+// succeeds. The same playback_attempt_id replays this stored terminal.
 func sessionStartErrorV3(err error) *transportErrorV3 {
 	switch {
-	case errors.Is(err, playback.ErrTooManyStreams), errors.Is(err, playback.ErrTooManyTranscodes):
-		return &transportErrorV3{reason: "capacity_unavailable", message: "Playback capacity is currently unavailable.", retryable: true}
+	case errors.Is(err, playback.ErrTooManyStreams):
+		return &transportErrorV3{reason: "stream_limit_reached", message: "Your account is already playing as many videos at once as it's allowed to. Stop anything else playing or paused on your account, then try again.", retryable: true}
+	case errors.Is(err, playback.ErrTooManyTranscodes):
+		return &transportErrorV3{reason: "transcode_limit_reached", message: "This video needs to be converted to play on this device, but your account is already converting as many videos as it's allowed to. Stop anything else playing or paused on your account, then try again. Videos that don't need converting will still play.", retryable: true}
 	case errors.Is(err, playback.ErrAudioTranscodingDisabled):
 		return &transportErrorV3{reason: "audio_transcoding_disabled", message: "The selected audio adaptation is disabled."}
 	case errors.Is(err, playback.ErrTranscodingDisabled):
@@ -7923,8 +7934,9 @@ func remuxDVModeForPlanV3(plan *playback.PlanV3) playback.RemuxDVMode {
 	if plan.Source.DVProfile == 7 {
 		// Without the strip transformation a P7 remux would drop the
 		// enhancement layer and leave dangling RPUs. A P7 plan claiming Dolby
-		// Vision is a client-side transform of the original bytes, so any
-		// remux attempt against this session must still be rejected.
+		// Vision is a client-side transform of the original bytes or the
+		// server's HLS-only 8.1 conversion, so any progressive remux attempt
+		// against this session must still be rejected.
 		return playback.RemuxDVRejectP7V3
 	}
 	if plan.Claims.Video.DolbyVision {
@@ -7945,6 +7957,9 @@ func videoBitstreamFilterForPlanV3(plan *playback.PlanV3) string {
 	for _, transformation := range plan.Transformations {
 		if transformation.Executor == playback.ExecutorServerV3 && transformation.Name == playback.TransformationServerDV7HDR10V3 {
 			return playback.DV7ToHDR10BitstreamFilter
+		}
+		if transformation.Executor == playback.ExecutorServerV3 && transformation.Name == playback.TransformationServerDV7DV81V3 {
+			return playback.DV7ToDV81BitstreamFilter
 		}
 	}
 	return ""
@@ -7970,7 +7985,7 @@ func videoSampleEntryForPlanV3(plan *playback.PlanV3) string {
 		return plan.EffectiveRecipe.VideoSampleEntry
 	}
 	for _, transformation := range plan.Transformations {
-		if transformation.Name == playback.TransformationServerDV7HDR10V3 {
+		if transformation.Name == playback.TransformationServerDV7HDR10V3 || transformation.Name == playback.TransformationServerDV7DV81V3 {
 			return playback.VideoSampleEntryHVC1
 		}
 	}

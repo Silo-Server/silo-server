@@ -15,20 +15,21 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// scanProfile scans a profile row, converting TIMESTAMPTZ to string.
+// scanProfile scans a profile row, converting TIMESTAMPTZ to string. extra
+// receives any columns the query selects after the profile's own.
 func scanProfile(scanner interface {
 	Scan(dest ...any) error
-}) (*userstore.Profile, error) {
+}, extra ...any) (*userstore.Profile, error) {
 	var p userstore.Profile
 	var createdAt, updatedAt time.Time
-	err := scanner.Scan(
+	err := scanner.Scan(append([]any{
 		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
 		&p.RequireAdvisoryAge,
 		&p.QualityPreference, &p.Language, &p.PreferredMetadataLanguage, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview,
 		&p.LibraryRestrictionsEnabled,
 		&p.ShowForcedSubtitles, &p.MaxPlaybackQuality, &p.PINRevision, &createdAt, &updatedAt,
-	)
+	}, extra...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -110,24 +111,48 @@ func ProfileInTransaction(ctx context.Context, tx pgx.Tx, userID int, id string)
 	return getProfile(ctx, tx, userID, id)
 }
 func getProfile(ctx context.Context, db preferenceSettingsExecutor, userID int, id string) (*userstore.Profile, error) {
-	row := db.QueryRow(ctx, `
-		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
-		       require_advisory_age,
-		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
-		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
-		       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at
-		FROM user_profiles WHERE user_id = $1 AND id = $2`, userID, id)
+	return profileFromRow(db.QueryRow(ctx, profileByIDQuery, userID, id), id)
+}
 
-	p, err := scanProfile(row)
+// QueueProfile queues GetProfile's read for the account's profile id on
+// batch. The returned function reads the result from the sent batch, in the
+// order the batch's reads were queued, with GetProfile's answer: nil, nil when
+// the account has no such profile.
+func QueueProfile(batch *pgx.Batch, userID int, id string) func(pgx.BatchResults) (*userstore.Profile, error) {
+	batch.Queue(profileByIDQuery, userID, id)
+	return func(results pgx.BatchResults) (*userstore.Profile, error) {
+		return profileFromRow(results.QueryRow(), id)
+	}
+}
+
+// profileByIDQuery reads one profile together with its allowed libraries in
+// ascending id order, so a profile costs one statement.
+const profileByIDQuery = `
+	SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
+	       require_advisory_age,
+	       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
+	       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
+	       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at,
+	       ARRAY(
+	           SELECT library_id FROM user_profile_allowed_libraries l
+	           WHERE l.user_id = user_profiles.user_id AND l.profile_id = user_profiles.id
+	           ORDER BY library_id ASC
+	       )
+	FROM user_profiles WHERE user_id = $1 AND id = $2`
+
+func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
+	var libraryIDs []int
+	p, err := scanProfile(row, &libraryIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("querying profile %s: %w", id, err)
 	}
-	p.AllowedLibraryIDs, err = listProfileAllowedLibraries(ctx, db, userID, p.ID)
-	if err != nil {
-		return nil, err
+	// A profile without allowed libraries keeps a nil list, as ListProfiles
+	// reports it.
+	if len(libraryIDs) > 0 {
+		p.AllowedLibraryIDs = libraryIDs
 	}
 	return p, nil
 }
@@ -381,6 +406,12 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 		return fmt.Errorf("beginning transaction for profile delete: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	// The account locks before any row, in the order imports take them
+	// (LockAccountForImport), so a deletion and an import of the same
+	// account wait on each other's locks rather than on each other's rows.
+	if err := LockAccountForImport(ctx, tx, s.userID); err != nil {
+		return err
+	}
 
 	// Deleting the account locks it before its cascade reaches the profile
 	// and its collections, so the audit row's account keys come first.
@@ -519,4 +550,64 @@ func deleteProfileSectionOverrides(ctx context.Context, tx pgx.Tx, userID int, p
 		}
 	}
 	return nil
+}
+
+// RestoredProfile is a profile a backup restore creates: its name, avatar,
+// primary flag, PIN hash, and every access field, with allowed libraries
+// already mapped to this server's.
+type RestoredProfile struct {
+	// ID is the new profile's id; NewProfileID makes one, so blobs keyed by
+	// it can be written before the row.
+	ID                         string
+	Name                       string
+	Avatar                     string
+	IsPrimary                  bool
+	PINHash                    string
+	IsChild                    bool
+	MaxContentRating           string
+	MaxAdvisoryAge             int
+	RequireAdvisoryAge         bool
+	LibraryRestrictionsEnabled bool
+	AllowedLibraryIDs          []int
+	MaxPlaybackQuality         string
+}
+
+// NewProfileID returns an id for a new profile.
+func NewProfileID() string { return generateUUID() }
+
+// LockProfilesInTx takes, in the caller's transaction, the account lock
+// ordinary profile creation counts and creates under, and returns how many
+// profiles the account has. Counting and creating under it means two
+// creations cannot both take the account's last place.
+func LockProfilesInTx(ctx context.Context, tx pgx.Tx, userID int) (int, error) {
+	if err := lockPreferenceSettings(ctx, tx, userID); err != nil {
+		return 0, err
+	}
+	ids, err := (&preferenceSettingsTx{exec: tx, userID: userID}).ListProfileIDs(ctx)
+	return len(ids), err
+}
+
+// CreateRestoredProfileInTx inserts a restored profile in the caller's
+// transaction; the caller holds LockProfilesInTx and checked the account's
+// limit. Its preferences take the column
+// defaults; a restore that carries them writes them separately. A primary
+// profile becomes primary only when the account has none, so the account's
+// household parent never changes.
+func CreateRestoredProfileInTx(ctx context.Context, tx pgx.Tx, userID int, p RestoredProfile) error {
+	if p.ID == "" {
+		return errors.New("a restored profile needs an id")
+	}
+	var hasPrimary bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = $1 AND is_primary)`, userID).Scan(&hasPrimary); err != nil {
+		return fmt.Errorf("checking the primary profile of user %d: %w", userID, err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_profiles (id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
+			require_advisory_age, library_restrictions_enabled, max_playback_quality)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12)`,
+		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary && !hasPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
+		p.RequireAdvisoryAge, p.LibraryRestrictionsEnabled, p.MaxPlaybackQuality); err != nil {
+		return fmt.Errorf("inserting restored profile: %w", err)
+	}
+	return replaceProfileAllowedLibraries(ctx, tx, userID, p.ID, p.AllowedLibraryIDs)
 }

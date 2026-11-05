@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -60,7 +60,11 @@ vi.mock("./DetailHero", () => ({
   default: ({ actions }: { actions?: ReactNode }) => <div>{actions}</div>,
 }));
 vi.mock("./SeasonCarousel", () => ({ default: () => <div /> }));
-vi.mock("./components/SeasonEpisodeGrid", () => ({ default: () => <div /> }));
+vi.mock("./components/SeasonEpisodeGrid", () => ({
+  default: ({ libraryId }: { libraryId?: number }) => (
+    <div data-testid="episode-grid" data-library-id={libraryId} />
+  ),
+}));
 
 import ItemDetailPage from "./index";
 
@@ -206,11 +210,11 @@ function requestLog(): string[] {
   });
 }
 
-async function openSeriesPage() {
+async function openSeriesPage(url = `/item/${SERIES_ID}`) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[`/item/${SERIES_ID}`]}>
+      <MemoryRouter initialEntries={[url]}>
         <Routes>
           <Route path="/item/:id" element={<ItemDetailPage />} />
         </Routes>
@@ -361,6 +365,31 @@ describe("series page request budget and play target", () => {
       `GET /api/v2/recommendations/similar/{item_id} ${SERIES_ID}`,
       "GET /api/v2/catalog/items/{id}/episodes season-1",
     ]);
+  });
+
+  it("keeps the library it was opened from on every catalog read and the episode grid", async () => {
+    installServer({
+      seasons: { 1: ["watched", "in_progress", "unwatched"] },
+      seriesPlayContentId: "s1e2",
+      progressPage: [],
+    });
+
+    await openSeriesPage(`/item/${SERIES_ID}?libraryId=4`);
+
+    const catalogReads = mocks.v2.mock.calls
+      .filter(([operation]) => String(operation).startsWith("GET /api/v2/catalog/"))
+      .map(([operation, init]) => [
+        operation,
+        (init as { query?: { library_id?: string } } | undefined)?.query?.library_id,
+      ]);
+    expect(catalogReads).toEqual([
+      ["GET /api/v2/catalog/items/{id}", "4"],
+      ["GET /api/v2/catalog/series/{id}/seasons", "4"],
+      ["GET /api/v2/catalog/items/{id}/episodes", "4"],
+    ]);
+    expect(screen.getByTestId("episode-grid")).toHaveAttribute("data-library-id", "4");
+    // Playback always sees every version, so Play carries no library.
+    expect(playButton()).toEqual({ href: "/watch/s1e2", label: "Resume" });
   });
 
   it("offers to request seasons without loading the request detail", async () => {
