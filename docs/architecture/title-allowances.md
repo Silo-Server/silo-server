@@ -46,6 +46,12 @@ the same fingerprint and cache keys as before.
 A code path that builds limits without the list is stricter than intended,
 never looser: it hides allowed titles and exposes nothing.
 
+The list is bounded by `userstore.MaxAllowedTitles` (10,000), because every
+request the profile makes reads it and passes it to the catalog SQL. Writes
+refuse to grow it past the bound, and the read takes at most that many in
+content ID order, so a live collection that grows past it hides the rest
+rather than slowing every request.
+
 The list is the union of:
 
 - `profile_title_allowances`: one row per allowed movie or series.

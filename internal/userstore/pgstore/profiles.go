@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -147,10 +148,12 @@ var profileByIDQuery = `
 // only while it is a manual collection created by the account's current
 // primary profile, so the household manager alone decides what it holds, and
 // only its movies and series, as a title allowance may name
-// (userstore.AllowanceTitleTypes).
+// (userstore.AllowanceTitleTypes). It reads at most
+// userstore.MaxAllowedTitles of them.
 // userIDExpr and profileIDExpr are SQL expressions for the profile's key.
 func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	return `
+	           SELECT content_id FROM (
 	           SELECT content_id FROM profile_title_allowances ta
 	           WHERE ta.user_id = ` + userIDExpr + ` AND ta.profile_id = ` + profileIDExpr + `
 	           UNION
@@ -162,7 +165,9 @@ func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	           WHERE ca.user_id = ` + userIDExpr + ` AND ca.profile_id = ` + profileIDExpr + `
 	             AND c.collection_type = 'manual' AND creator.is_primary
 	             AND mi.type IN ('movie', 'series')
-	           ORDER BY 1`
+	           ) allowed
+	           ORDER BY 1
+	           LIMIT ` + strconv.Itoa(userstore.MaxAllowedTitles)
 }
 
 func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
