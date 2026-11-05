@@ -2,6 +2,7 @@ package branding
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
@@ -148,4 +149,29 @@ func contentTypeForExt(ext string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// AssetSettingKeys lists the server_settings keys that hold a branding
+// asset's content ref, sorted. Backups read them to find the asset objects.
+func AssetSettingKeys() []string {
+	keys := make([]string, 0, len(assetSpecs))
+	for _, spec := range assetSpecs {
+		keys = append(keys, spec.settingKey)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// AssetObjectKey is the blob key of the asset whose ref is stored under
+// settingKey, or "" when the key holds no asset or the ref is empty.
+func AssetObjectKey(settingKey, ref string) string {
+	if ref == "" {
+		return ""
+	}
+	for _, spec := range assetSpecs {
+		if spec.settingKey == settingKey {
+			return spec.s3Prefix + "/" + ref
+		}
+	}
+	return ""
 }
