@@ -366,6 +366,18 @@ update and existing invalidation events.
 A follow-up detail-read failure can occur after persistence; it does not roll
 back the metadata change.
 
+`locked_fields` holds the `MetadataField` numbers a refresh, library scan or
+seed import must keep. A season accepts the name, overview and release-date
+locks, which cover its title, overview and air date; an episode also accepts the
+runtime lock. Any other number on those targets is dropped without an error:
+their artwork locks on the parent series, and their numbers can't lock because
+refreshes find the rows by them. Each row's locks are its own, so clearing a
+series' locks leaves its seasons' and episodes' in place. A correction that
+replaces the show, by an Identify or a corrected NFO, clears the season and
+episode locks and resets the values they held; an Identify that confirms the same
+show keeps them. A locked title or overview
+shows in every language unless a manual or AI translation of the overview exists.
+
 Both operations preserve item-scoped `metadata_curation` authorization and are
 non-retryable. Web actions disable both mutation retries and authentication
 replay. No additional optimistic concurrency or request replay receipt is

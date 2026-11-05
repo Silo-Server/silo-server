@@ -81,6 +81,34 @@ const FIELD_LOCK_MAP: Record<string, number> = {
   last_air_date: FIELD_RELEASE_DATES,
 };
 
+// A season or episode row locks only what it stores and a refresh writes. Its
+// artwork lock lives on the parent series, and its numbers can't lock.
+const SEASON_FIELD_LOCK_MAP: Record<string, number> = {
+  title: FIELD_NAME,
+  overview: FIELD_OVERVIEW,
+  air_date: FIELD_RELEASE_DATES,
+};
+const EPISODE_FIELD_LOCK_MAP: Record<string, number> = {
+  ...SEASON_FIELD_LOCK_MAP,
+  runtime: FIELD_RUNTIME,
+};
+
+const RESET_DESCRIPTIONS: Partial<Record<ItemDetail["type"], string>> = {
+  series:
+    "This will unlock all fields on this series and refresh metadata from your providers. Any manual edits to the series will be overwritten. Locked seasons and episodes keep their edits.",
+  season:
+    "This will unlock this season's title, overview and air date and refresh metadata from your providers. Any manual edits to them will be overwritten. Artwork you picked stays locked on the series; reset the series to replace it.",
+  episode:
+    "This will unlock this episode's title, overview, runtime and air date and refresh metadata from your providers. Any manual edits to them will be overwritten.",
+};
+
+const FIELD_LOCK_MAPS: Partial<Record<ItemDetail["type"], Record<string, number>>> = {
+  movie: FIELD_LOCK_MAP,
+  series: FIELD_LOCK_MAP,
+  season: SEASON_FIELD_LOCK_MAP,
+  episode: EPISODE_FIELD_LOCK_MAP,
+};
+
 interface EditMetadataDialogProps {
   item: ItemDetail;
   open: boolean;
@@ -131,7 +159,8 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const updateMutation = useUpdateItemMetadata(item.content_id);
   const refreshMutation = useRefreshItemMetadata();
 
-  const isLockable = item.type === "movie" || item.type === "series";
+  const ownsImageLock = item.type === "movie" || item.type === "series";
+  const fieldLockMap = FIELD_LOCK_MAPS[item.type];
   const canEditImages = useIsActingAdmin();
   const visibleSections = SECTIONS.filter(
     (s) => s.types.includes(item.type) && (s.key !== "images" || canEditImages),
@@ -153,12 +182,12 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   const setField = useCallback(
     (field: string, value: unknown) => {
       setForm((prev) => ({ ...prev, [field]: value }));
-      if (isLockable && field in FIELD_LOCK_MAP) {
-        const lockField = FIELD_LOCK_MAP[field] as number;
+      const lockField = fieldLockMap?.[field];
+      if (lockField !== undefined) {
         setLockOverrides((prev) => new Map(prev).set(lockField, true));
       }
     },
-    [isLockable],
+    [fieldLockMap],
   );
 
   const toggleLock = useCallback(
@@ -171,10 +200,10 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   );
 
   const handleImageApplied = useCallback(() => {
-    if (isLockable) {
+    if (ownsImageLock) {
       setLockOverrides((prev) => new Map(prev).set(FIELD_IMAGES, true));
     }
-  }, [isLockable]);
+  }, [ownsImageLock]);
 
   const lockedCount = lockedFields.size;
 
@@ -222,7 +251,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     if (form.episode_number !== originalForm.episode_number)
       data.episode_number = form.episode_number;
 
-    if (isLockable && lockOverrides.size > 0) {
+    if (fieldLockMap && lockOverrides.size > 0) {
       const originalLocked = new Set(item.locked_fields ?? []);
       const currentLocked = Array.from(lockedFields).sort();
       const originalSorted = Array.from(originalLocked).sort();
@@ -246,7 +275,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
     // A refresh skips locked fields, so the locks must go first or the reset
     // would keep every manual edit. If unlocking fails, the dialog stays open
     // with the unsaved edits.
-    if (isLockable && (item.locked_fields?.length ?? 0) > 0) {
+    if (fieldLockMap && (item.locked_fields?.length ?? 0) > 0) {
       try {
         await updateMutation.mutateAsync({ locked_fields: [] });
       } catch {
@@ -258,8 +287,8 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
   }
 
   function renderLockIcon(fieldName: string) {
-    if (!isLockable || !(fieldName in FIELD_LOCK_MAP)) return null;
-    const metadataField = FIELD_LOCK_MAP[fieldName] as number;
+    const metadataField = fieldLockMap?.[fieldName];
+    if (metadataField === undefined) return null;
     const isLocked = lockedFields.has(metadataField);
     return (
       <button
@@ -303,7 +332,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                 {typeLabel}
               </span>
             </div>
-            {isLockable && lockedCount > 0 && (
+            {fieldLockMap && lockedCount > 0 && (
               <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
                 <Lock className="size-3" />
                 {lockedCount} locked
@@ -513,7 +542,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
                   )}
 
                   {(item.type === "season" || item.type === "episode") && (
-                    <FieldRow label="Air Date">
+                    <FieldRow label="Air Date" lockIcon={renderLockIcon("air_date")}>
                       <Input
                         type="date"
                         value={form.air_date}
@@ -680,7 +709,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
           {/* Footer */}
           <div className="border-border/10 flex shrink-0 flex-col-reverse gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 sm:py-3.5">
             <div>
-              {isLockable && (
+              {fieldLockMap && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -720,7 +749,10 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
         open={showResetConfirm}
         onOpenChange={setShowResetConfirm}
         title="Reset to Provider"
-        description="This will unlock all fields and refresh metadata from your providers. Any manual edits will be overwritten on the next refresh."
+        description={
+          RESET_DESCRIPTIONS[item.type] ??
+          "This will unlock all fields and refresh metadata from your providers. Any manual edits will be overwritten on the next refresh."
+        }
         confirmLabel="Reset & Refresh"
         variant="destructive"
         onConfirm={handleReset}

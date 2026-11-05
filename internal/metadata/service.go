@@ -2781,6 +2781,7 @@ func (s *MetadataService) mergeAndPersist(
 	if req.Mode == ModeIdentify && !isNew && contentID != "" && existingItem == nil {
 		return nil, fmt.Errorf("identify target %q: %w", contentID, catalog.ErrItemNotFound)
 	}
+	contentIDBeforeMoves := contentID
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.writesFieldsOnly() && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2838,7 +2839,7 @@ func (s *MetadataService) mergeAndPersist(
 		accumulator.rejectedIdentityProviderIDs, req.recordedStaleProviderIDs, accumulator.sameRunStaleProviderIDs)
 	if shouldReanchorProviderContentID(contentID, isNew, req.Mode, anchorRejected) {
 		reanchored, err := s.reanchorContentID(
-			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
+			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify, anchorRejected)
 		if err != nil {
 			return nil, fmt.Errorf("reanchor provider content id: %w", err)
 		}
@@ -2853,6 +2854,16 @@ func (s *MetadataService) mergeAndPersist(
 			if err != nil {
 				return nil, err
 			}
+		}
+	}
+	// A correction can replace the show without moving the id, such as over a
+	// dead anchor nothing can claim. A move already handled the old show's edits.
+	// Any stored ID that is still part of the identity shows the same show.
+	if req.identityCorrection && contentID == contentIDBeforeMoves &&
+		!sharesProviderID(accumulator.ProviderIDs, storedIdentityProviderIDs(existingItem), req.durableProviderIDs) &&
+		normalizeItemTypeForContentID(contentType) == matchContentTypeSeries {
+		if err := s.clearSeriesChildEdits(ctx, contentID); err != nil {
+			return nil, err
 		}
 	}
 
@@ -10470,6 +10481,20 @@ func rejectIdentityProviderIDs(rejected providerIDValueSet, chosen map[string]st
 			}
 		}
 	}
+}
+
+// sharesProviderID reports whether ids holds a trusted identity value from any
+// of the stored sources.
+func sharesProviderID(ids map[string]string, sources ...map[string]string) bool {
+	for _, source := range sources {
+		for _, key := range trustedSearchIDKeys {
+			stored := normalizeProviderIDComparisonValue(key, source[key])
+			if stored != "" && stored == normalizeProviderIDComparisonValue(key, ids[key]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func mediaItemWithProviderIDs(item *models.MediaItem, providerIDs map[string]string) *models.MediaItem {
