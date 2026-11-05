@@ -804,33 +804,33 @@ func GenerateOpenAPI() ([]byte, error) {
 }
 
 // admitNullInNullableEnums adds null to the enum of every nullable schema in
-// the components. JSON Schema applies type and enum separately, so ["string", "null"] with an enum of
-// strings alone still refuses null. The pass runs on the document only:
-// Huma's request validator accepts null on a nullable schema before it
-// checks the enum, and leaving the registered enum alone keeps null out of
-// its 422 message.
+// the components. JSON Schema applies type and enum separately, so
+// ["string", "null"] with an enum of strings alone still refuses null. The
+// pass runs on the document only: Huma's request validator accepts null on
+// a nullable schema before it checks the enum, and leaving the registered
+// enum alone keeps null out of its 422 message.
 func admitNullInNullableEnums(components map[string]*huma.Schema) {
-	var walk func(where string, s *huma.Schema)
-	walk = func(where string, s *huma.Schema) {
+	var walk func(s *huma.Schema)
+	walk = func(s *huma.Schema) {
 		if s == nil {
 			return
 		}
 		if s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil) {
 			s.Enum = append(slices.Clip(s.Enum), nil)
 		}
-		for name, property := range s.Properties {
-			walk(where+"."+name, property)
+		for _, property := range s.Properties {
+			walk(property)
 		}
-		walk(where+".items", s.Items)
+		walk(s.Items)
 		if value, ok := s.AdditionalProperties.(*huma.Schema); ok {
-			walk(where+".additionalProperties", value)
+			walk(value)
 		}
 		for _, sub := range slices.Concat(s.OneOf, s.AnyOf, s.AllOf) {
-			walk(where, sub)
+			walk(sub)
 		}
 	}
-	for name, s := range components {
-		walk(name, s)
+	for _, s := range components {
+		walk(s)
 	}
 }
 
