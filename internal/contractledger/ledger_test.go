@@ -1066,6 +1066,9 @@ var mutationWithoutLegacyRow = map[string]string{
 
 	"replaceAdminUserProfileSectionOverrides": "V2-only administrator edit of one profile's page layout: v1 could only change the caller's own profile. It runs the same full-replacement write as replaceProfileSectionOverrides, which is non-retryable because a save can start a trending refresh.",
 	"resetAdminUserProfileSectionOverrides":   "V2-only administrator reset of one profile's page layout: v1 reset only the caller's own profile or every profile at once. It runs the same delete as resetProfileSectionOverrides and is non-retryable like it.",
+	"createAdminUserProfile":                  "V2-only administrator creation of a profile on any account: v1 created profiles only on the caller's own household. It runs the same create as createProfile, which is non-retryable because a retry after a lost response makes a second profile or answers 409.",
+	"updateAdminUserProfile":                  "V2-only administrator edit of any account's profile, including setting or removing its PIN: v1 edited profiles only on the caller's own household. It runs the same write as updateProfile and is non-retryable like it: a retried PIN advances the profile's PIN revision again.",
+	"deleteAdminUserProfile":                  "V2-only administrator deletion of any account's profile: v1 deleted profiles only on the caller's own household. It runs the same delete as deleteProfile and is non-retryable like the other admin profile writes; a repeat answers 404.",
 }
 
 // retrySafetyMismatches compares every operation the v2 registry declares

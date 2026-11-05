@@ -237,6 +237,16 @@ func (f *fakeProfiles) ListProfiles(_ context.Context, _ int) (handlers.ProfileL
 	return handlers.ProfileListView{Profiles: []handlers.ProfileView{f.view}, AvatarUploadEnabled: f.avatarStore}, nil
 }
 
+func (f *fakeProfiles) GetProfile(_ context.Context, _ int, profileID string) (handlers.ProfileView, error) {
+	if f.err != nil {
+		return handlers.ProfileView{}, f.err
+	}
+	if profileID != f.view.ID {
+		return handlers.ProfileView{}, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Profile not found"}
+	}
+	return f.view, nil
+}
+
 func (f *fakeProfiles) CreateProfile(_ context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error) {
 	f.lastCreate = &cmd
 	if f.err != nil {
