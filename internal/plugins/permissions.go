@@ -11,7 +11,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"google.golang.org/protobuf/encoding/protojson"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 	publicevents "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/events"
 
@@ -160,9 +162,13 @@ func ensurePermissionGrant(ctx context.Context, q pgExecer, installationID int, 
 // EnsurePermissionGrants gives every installation without a grant one that
 // approves the event access its capabilities ask for now. Installations from
 // before grants existed keep the events they already received. The server
-// runs it at boot, before the catalog auto-update can replace a plugin, so an
-// update never reaches an installation that has no grant to hold it back.
-// The reserved builtin row is skipped. It returns how many grants it wrote.
+// that installed them didn't record host_api_scopes, so a grant written here
+// also records the scopes the stored manifest asks for, unapproved: the
+// installation stays pending until an administrator approves them. The
+// server runs it at boot, before the catalog auto-update can replace a
+// plugin, so an update never reaches an installation that has no grant to
+// hold it back. The reserved builtin row is skipped. It returns how many
+// grants it wrote.
 func (s *InstallationStore) EnsurePermissionGrants(ctx context.Context) (int, error) {
 	rows, err := s.pool.Query(ctx, `SELECT i.id FROM plugin_installations i
 		WHERE i.kind <> $1 AND NOT EXISTS (
@@ -181,15 +187,62 @@ func (s *InstallationStore) EnsurePermissionGrants(ctx context.Context) (int, er
 		if err != nil {
 			return written, err
 		}
-		tag, err := s.pool.Exec(ctx, `INSERT INTO plugin_permission_grants (plugin_installation_id, approved_event_access)
-			SELECT id, $2 FROM plugin_installations WHERE id = $1
-			ON CONFLICT (plugin_installation_id) DO NOTHING`, id, requiredEventAccess(capabilities))
+		wrote, err := s.recordFirstGrant(ctx, id, requiredEventAccess(capabilities), s.storedHostAPIScopes(ctx, id))
 		if err != nil {
-			return written, fmt.Errorf("recording plugin permission grant: %w", err)
+			return written, err
 		}
-		written += int(tag.RowsAffected())
+		if wrote {
+			written++
+		}
 	}
 	return written, nil
+}
+
+// recordFirstGrant writes the installation's grant unless it has one, and
+// with it records scopes as what the installation asks for when nothing is
+// recorded yet. A grant written meanwhile by an install or replacement, which
+// records the scopes itself, leaves both alone.
+func (s *InstallationStore) recordFirstGrant(ctx context.Context, id int, eventAccess, scopes []string) (bool, error) {
+	wrote := false
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `INSERT INTO plugin_permission_grants (plugin_installation_id, approved_event_access)
+			SELECT id, $2 FROM plugin_installations WHERE id = $1
+			ON CONFLICT (plugin_installation_id) DO NOTHING`, id, eventAccess)
+		if err != nil {
+			return fmt.Errorf("recording plugin permission grant: %w", err)
+		}
+		wrote = tag.RowsAffected() > 0
+		if !wrote || len(scopes) == 0 {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `UPDATE plugin_installations SET host_api_scopes = $2
+			WHERE id = $1 AND cardinality(host_api_scopes) = 0`, id, scopes); err != nil {
+			return fmt.Errorf("recording plugin host API scopes: %w", err)
+		}
+		return nil
+	})
+	return wrote, err
+}
+
+// storedHostAPIScopes returns the host_api_scopes of the installation's
+// stored manifest. A manifest that is missing or doesn't decode asks for
+// none; the next install or replacement records the scopes.
+func (s *InstallationStore) storedHostAPIScopes(ctx context.Context, id int) []string {
+	var data []byte
+	err := s.pool.QueryRow(ctx, `SELECT manifest_json FROM plugin_archives WHERE plugin_installation_id = $1`, id).Scan(&data)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	var manifest pluginv1.PluginManifest
+	if err == nil {
+		err = protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(data, &manifest)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "reading the host API scopes of a stored plugin manifest", "component", "plugins",
+			"installation_id", id, "error", err)
+		return nil
+	}
+	return manifest.GetHostApiScopes()
 }
 
 // permissionGrantSelect reads grants with their key's owner and scopes. The

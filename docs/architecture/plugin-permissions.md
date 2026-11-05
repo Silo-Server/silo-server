@@ -49,7 +49,10 @@ Grants are written in three places:
 2. At boot, before the catalog auto-update can run,
    `InstallationStore.EnsurePermissionGrants` does the same for every
    installation without a grant, so installations from before grants existed
-   keep the events they received.
+   keep the events they received. The server that installed them didn't
+   record `host_api_scopes`, so the pass also records the scopes the stored
+   manifest (`plugin_archives.manifest_json`) asks for, unapproved; the
+   installation is pending until an administrator approves them.
 3. `PermissionService.Approve`, behind
    `PUT /api/v2/admin/plugins/installations/{id}/permissions/approval`,
    approves the full current requirement as the acting administrator.

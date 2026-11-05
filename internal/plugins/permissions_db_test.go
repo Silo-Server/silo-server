@@ -37,7 +37,8 @@ func subscriber(events ...string) plugins.Capability {
 // TestPluginPermissionGrantsPostgres covers the plugin permission grant and
 // its host API key against Postgres: installing approves the events the
 // plugin subscribes to and a replacement never widens that; the boot pass
-// carries existing installations over; an approval mints a key acting as the
+// carries existing installations over and records the scopes their stored
+// manifest asks for, unapproved; an approval mints a key acting as the
 // approving admin, keeps it on a repeat, rotates it when the scopes change
 // (create, save, then revoke) and revokes it when none are asked for; a key
 // revoked on the API keys page, one that no longer opens, or one whose owner
@@ -224,6 +225,23 @@ func (f *permissionsFixture) bootPassCarriesOverInstallations(t *testing.T) {
 	got := f.read(t, installation.ID)
 	if got.Pending || !slices.Equal(got.Grant.ApprovedEventAccess, []string{"admin", "user_data"}) {
 		t.Fatalf("after the boot pass: pending=%v grant=%+v", got.Pending, got.Grant)
+	}
+
+	// A server from before host_api_scopes stored the manifest asking for
+	// scopes but recorded none; the boot pass records them, unapproved.
+	scoped := f.install(t, "boot-scopes", nil)
+	f.exec(t, `DELETE FROM plugin_permission_grants WHERE plugin_installation_id = $1`, scoped.ID)
+	manifest := fmt.Appendf(nil, `{"id": %q, "host_api_scopes": [%q]}`, scoped.PluginID, auth.ScopeAdminMonitorRead)
+	if err := f.store.SaveArchive(t.Context(), scoped.ID, manifest, "checksum", []byte("archive")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.EnsurePermissionGrants(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got = f.read(t, scoped.ID)
+	if !got.Pending || !slices.Equal(got.Required.RequestedScopes, []string{auth.ScopeAdminMonitorRead}) ||
+		len(got.Grant.EffectiveHostAPIScopes()) != 0 {
+		t.Fatalf("after the boot pass over a stored manifest with scopes: pending=%v required=%+v grant=%+v", got.Pending, got.Required, got.Grant)
 	}
 	f.exec(t, `UPDATE plugin_permission_grants SET approved_event_access = '{}' WHERE plugin_installation_id = $1`, installation.ID)
 	if _, err := f.store.EnsurePermissionGrants(t.Context()); err != nil {
