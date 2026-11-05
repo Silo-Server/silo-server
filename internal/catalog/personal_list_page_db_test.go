@@ -103,7 +103,7 @@ func TestPersonalListPageFollowsAccessDB(t *testing.T) {
 // assertPersonalListPagePlans checks that each list's profile index, not a
 // full sort, supplies the page order of the visible page query. Sequential
 // scans are disabled only in this transaction because the isolated test
-// rows may be too few to favour an index naturally.
+// rows may be too few to favor an index naturally.
 func assertPersonalListPagePlans(t *testing.T, pool *pgxpool.Pool, lists []PersonalList, userID int, filters []AccessFilter, after *userstore.ListKey) {
 	t.Helper()
 	ctx := context.Background()

@@ -1449,7 +1449,7 @@ rows; visible API instants remain UTC milliseconds. The v1 offset queries are un
 favorites, watchlist and Not interested page seams answer only entries the viewer may see (an episode
 entry counts as visible when its series is, as its card does), so `has_more` comes from a visible
 probe entry and the cursor row is always an item the viewer may see: a cursor payload is signed, not
-encrypted, and must not name a hidden title. With the PostgreSQL user store one page query applies
+encrypted, and must not name a hidden title. With the PostgreSQL user store a single query per page applies
 the access filter (`ItemRepository.ListVisiblePersonalPage`, reading each list's profile index in page
 order); a SQLite user store has no catalog to join, so there the seams read the store's keyset pages
 in growing batches until a page is full. The user store's own list queries stay unfiltered because
