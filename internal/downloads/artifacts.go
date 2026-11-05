@@ -1245,10 +1245,18 @@ func (m *ArtifactManager) buildOpts(file *models.MediaFile, a *Artifact) playbac
 		HWAccel:                    cfg.Playback.HWAccel,
 		HWDevice:                   cfg.Playback.HWDevice,
 		TotalDuration:              float64(file.Duration),
+		SourceFrameRate:            preparedSourceFrameRate(file),
 		NodeType:                   "integrated",
 		ExecutionMode:              "download_prepare",
 		FFmpegLogSink:              ffmpegLogs,
 	}
+}
+
+func preparedSourceFrameRate(file *models.MediaFile) float64 {
+	if file == nil || len(file.VideoTracks) == 0 {
+		return 0
+	}
+	return playback.ParseFrameRate(file.VideoTracks[0].FrameRate)
 }
 
 func preparedSourceAudioChannels(file *models.MediaFile, audioTrackIndex int, targetAudioCodec string) int {

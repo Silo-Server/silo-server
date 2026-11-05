@@ -114,6 +114,10 @@ type Request struct {
 	// therefore cannot return the matching execution fingerprint.
 	AudioOnly     bool    `json:"audio_only,omitempty"`
 	TotalDuration float64 `json:"total_duration,omitempty"`
+	// SourceFrameRate lets the node measure progress by encoded video frames,
+	// which sparse subtitle tracks cannot stall. It never affects bytes, so the
+	// execution fingerprint excludes it; older nodes ignore it.
+	SourceFrameRate float64 `json:"source_frame_rate,omitempty"`
 	// LogSessionID labels the node's FFmpeg log lines with the durable job's
 	// key (playback.DownloadPrepareLogSessionID), so every attempt of one
 	// artifact reads as one stream. It never affects bytes, so the execution
@@ -257,6 +261,7 @@ func (r Request) ValidToneMapAttestation() bool {
 func (r Request) ExecutionFingerprint() string {
 	r.ArtifactID = ""
 	r.LogSessionID = ""
+	r.SourceFrameRate = 0
 	data, err := json.Marshal(r)
 	if err != nil {
 		return ""
@@ -294,6 +299,7 @@ func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		AudioOnly:                  opts.AudioOnly,
 		TotalDuration:              opts.TotalDuration,
+		SourceFrameRate:            opts.SourceFrameRate,
 		LogSessionID:               opts.SessionID,
 	}
 	if opts.PreparedTracks != nil {
@@ -341,6 +347,7 @@ func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playba
 		HWAccel:                    hwAccel,
 		HWDevice:                   hwDevice,
 		TotalDuration:              r.TotalDuration,
+		SourceFrameRate:            r.SourceFrameRate,
 		NodeType:                   "transcode",
 		ExecutionMode:              "download_prepare",
 		FFmpegLogSink:              sink,

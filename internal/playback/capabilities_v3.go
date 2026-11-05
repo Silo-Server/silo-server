@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -584,6 +585,17 @@ func audioEligibilityV3(source SourceDescriptorV3, request StartRequestV3) (copy
 // normalizeDynamicRangeV3 returns the protocol dynamic-range label for a track.
 func normalizeDynamicRangeV3(track models.VideoTrack) string {
 	return tonemap.DynamicRangeForVideoTrack(track)
+}
+
+// ParseFrameRate reads a probed frame rate ("24000/1001" or "23.976") as
+// frames per second; zero when absent, unreadable, or not a finite positive
+// rate, so callers can serialize it.
+func ParseFrameRate(value string) float64 {
+	rate := parseFrameRateV3(value)
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return 0
+	}
+	return rate
 }
 
 func parseFrameRateV3(value string) float64 {

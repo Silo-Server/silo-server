@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // PrepareProgress is one reading of a prepared-download encode, taken from
@@ -41,18 +42,34 @@ func DownloadPrepareLogSessionID(artifactID string) string {
 
 // prepareProgressWriter parses FFmpeg's key=value -progress stream. Each block
 // ends with a progress= line, which is when a reading is emitted.
+//
+// FFmpeg's out_time is the trailing timestamp across every output stream, so
+// a sparse stream (a forced-subtitle track with a cue every half hour) holds
+// it, and the speed FFmpeg derives from it, still while video encodes. When
+// the source frame rate is known, the encoded video frame count measures the
+// timeline instead, and speed is that position over the wall-clock time since
+// the encode started.
 type prepareProgressWriter struct {
-	sink     PrepareProgressSink
-	duration float64
-	pending  []byte
-	current  PrepareProgress
+	sink      PrepareProgressSink
+	duration  float64
+	frameRate float64
+	started   time.Time
+	now       func() time.Time
+	pending   []byte
+	current   PrepareProgress
+	frames    int64
 }
 
-func newPrepareProgressWriter(sink PrepareProgressSink, duration float64) *prepareProgressWriter {
+func newPrepareProgressWriter(sink PrepareProgressSink, duration, frameRate float64) *prepareProgressWriter {
 	if duration < 0 || math.IsNaN(duration) || math.IsInf(duration, 0) {
 		duration = 0
 	}
-	return &prepareProgressWriter{sink: sink, duration: duration, current: PrepareProgress{DurationSeconds: duration}}
+	if frameRate <= 0 || math.IsNaN(frameRate) || math.IsInf(frameRate, 0) {
+		frameRate = 0
+	}
+	w := &prepareProgressWriter{sink: sink, duration: duration, frameRate: frameRate, now: time.Now, current: PrepareProgress{DurationSeconds: duration}}
+	w.started = w.now()
+	return w
 }
 
 func (w *prepareProgressWriter) Write(p []byte) (int, error) {
@@ -79,6 +96,10 @@ func (w *prepareProgressWriter) line(line string) {
 		return
 	}
 	switch strings.TrimSpace(key) {
+	case "frame":
+		if frames, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && frames >= 0 {
+			w.frames = frames
+		}
 	case "out_time_us", "out_time_ms":
 		// Both keys carry microseconds; out_time_ms is a historical misnomer.
 		if micros, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && micros >= 0 {
@@ -94,10 +115,30 @@ func (w *prepareProgressWriter) line(line string) {
 			return
 		}
 		reading := w.current
+		w.applyFramePosition(&reading)
 		if strings.TrimSpace(value) == "end" && reading.DurationSeconds > 0 {
 			reading.EncodedSeconds = reading.DurationSeconds
 		}
 		w.sink.PrepareProgress(reading)
+	}
+}
+
+// applyFramePosition replaces out_time with the encoded video frame position
+// when that is further along, and derives speed from it.
+func (w *prepareProgressWriter) applyFramePosition(reading *PrepareProgress) {
+	if w.frameRate <= 0 {
+		return
+	}
+	position := float64(w.frames) / w.frameRate
+	if position <= reading.EncodedSeconds {
+		return
+	}
+	if reading.DurationSeconds > 0 {
+		position = min(position, reading.DurationSeconds)
+	}
+	reading.EncodedSeconds = position
+	if elapsed := w.now().Sub(w.started).Seconds(); elapsed > 0 {
+		reading.Speed = position / elapsed
 	}
 }
 
