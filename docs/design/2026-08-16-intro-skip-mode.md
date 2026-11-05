@@ -113,6 +113,8 @@ Terminology:
 - **pill** — the single on-screen prompt. It has a **timer**, always
   wall-clock, always the same length across platforms
   (`INTRO_PROMPT_SECONDS = 5`; contract-visible so a future setting can drive it).
+  One exception: in `ask`, after the timer has run out, the pill returns
+  **without a timer** while the controls overlay shows (see the `ask` table).
 - **resolved** — the viewer has made a decision for this intro in this
   playback session. A resolved intro never shows a pill again, including if
   the viewer scrubs back into it.
@@ -131,7 +133,7 @@ on the timeline where the client already does so.
 | --- | --- |
 | Enter intro (not resolved) | Show pill **"Skip Intro"** with timer running. Pill takes focus on appear on focus-driven platforms (TV, keyboard). |
 | Timer runs out | Pill hides. Intro keeps playing. Intro is **not** resolved — scrubbing back into it re-offers. |
-| Controls overlay shows after the timer ran out, still inside | Pill **"Skip Intro"** returns without a timer and hides again with the controls. It does not take focus or claim Select/Back from elsewhere; activating it acts as Select. |
+| Controls overlay shows after the timer ran out, still inside | Pill **"Skip Intro"** returns without a timer and hides again with the controls. It does not take focus, does not keep focus the timed pill had, and does not claim Select/Back from elsewhere; activating it acts as Select. |
 | Select | Seek to `end`. Intro resolved. Pill hides. On TV, focus lands on the timeline/transport, never nowhere. |
 | Back | Pill hides. Intro keeps playing. Intro resolved. Press is consumed (does not exit playback / close overlay); a second Back behaves normally. |
 | D-pad / arrow / pointer move away | Focus moves as normal. **Timer keeps running.** Pill stays until timer ends. |

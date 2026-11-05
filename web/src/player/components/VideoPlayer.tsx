@@ -5477,8 +5477,12 @@ export function VideoPlayer({
       )}
 
       {/* Intro skip / undo prompt */}
+      {/* Keyed by timed vs untimed so an expiring pill unmounts as it always
+          did: a focused pill releases focus instead of the returning offer
+          keeping it and turning the next Space into a skip. */}
       {!isDetached && activeIntroPrompt && (
         <IntroSkipButton
+          key={introPromptTimed ? "timed" : "reoffer"}
           onSkip={selectIntroPrompt}
           label={activeIntroPrompt.label}
           caption={activeIntroPrompt.caption}

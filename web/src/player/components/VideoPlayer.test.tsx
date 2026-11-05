@@ -3890,6 +3890,34 @@ describe("VideoPlayer intro skip prompt", () => {
     }
   });
 
+  // The timed pill takes focus for keyboard viewers. When it runs out with the
+  // controls up, the offer that replaces it must not inherit that focus, or
+  // the next Space skips the intro instead of pausing.
+  it("does not hand the expired pill's focus to the returning offer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const rendered = await enterIntro("ask");
+      const video = rendered.container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      fireEvent.play(video);
+      screen.getByRole("button", { name: "Skip Intro" }).focus();
+
+      fireEvent.mouseMove(rendered.container.firstElementChild ?? rendered.container);
+      act(() => vi.advanceTimersByTime(INTRO_PROMPT_SECONDS * 1_000));
+      fireEvent.mouseMove(rendered.container.firstElementChild ?? rendered.container);
+      const offer = screen.getByRole("button", { name: "Skip Intro" });
+      expect(offer).not.toHaveFocus();
+
+      const focused = document.activeElement ?? document.body;
+      fireEvent.keyDown(focused, { key: " " });
+      await act(async () => Promise.resolve());
+      expect(video.currentTime).toBe(12);
+      expect(offer).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("acts on Select while the pill itself is focused", async () => {
     await enterIntro("ask");
     const prompt = await screen.findByRole("button", { name: "Skip Intro" });
