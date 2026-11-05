@@ -171,15 +171,6 @@ func TestPersonalListLookupFailureIsServerError(t *testing.T) {
 	}
 }
 
-// idsFailingItemRepo is a markItemRepo whose batch access check fails.
-type idsFailingItemRepo struct {
-	markItemRepo
-}
-
-func (idsFailingItemRepo) EnsureAccessibleIDs(context.Context, []string, catalog.AccessFilter) (map[string]bool, error) {
-	return nil, context.DeadlineExceeded
-}
-
 // A personal list page answers only entries the viewer may see, reading past
 // runs of hidden entries longer than one store batch. The v2 listings build
 // their cursor from the last entry of a page and their has_more from a probe
