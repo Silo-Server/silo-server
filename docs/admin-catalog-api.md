@@ -75,13 +75,17 @@ A movie or series also carries its stored metadata, so a tool can match rules
 across a library without reading each item as a profile: `genres`,
 `content_rating`, `studios`, `networks` (a series' broadcasters), and the four
 stored ratings `rating_imdb`, `rating_tmdb` (both 0–10), `rating_rt_critic` and
-`rating_rt_audience` (percentages). These are the stored values, not translated
+`rating_rt_audience` (percentages), and its dates as `YYYY-MM-DD`:
+`release_date` (a series may store its first air date here too), and on a
+series `first_air_date` and `last_air_date`, the latter as the metadata provider
+reports it. These are the stored values, not translated
 into any profile's language and not narrowed by any profile's access. Like the
 metadata editor, the listing serves every stored rating, whether or not title
 pages show that source (see "Ratings on title pages" in
 [catalog-api.md](catalog-api.md)). Each field is absent when empty or unknown.
-Episodes carry none of them; read them from the series row named by
-`series_id`.
+Episodes carry none of them, only their own `air_date`; read the rest from the
+series row named by `series_id`. A season's last air date is the latest
+`air_date` among the episode rows with that `season_number`.
 
 `include_people=true` also returns `cast` (actors and guest stars, in credit
 order) and `crew` (every other credit, with its `job`) on movies and series, in

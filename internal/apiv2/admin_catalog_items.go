@@ -58,6 +58,10 @@ type AdminCatalogItem struct {
 	RatingTMDB       *float64                  `json:"rating_tmdb,omitempty" doc:"Stored TMDB rating of a movie or series on TMDB's 0-10 scale"`
 	RatingRTCritic   *int                      `json:"rating_rt_critic,omitempty" doc:"Stored Rotten Tomatoes critic score of a movie or series, a percentage, whether or not title pages show it"`
 	RatingRTAudience *int                      `json:"rating_rt_audience,omitempty" doc:"Stored Rotten Tomatoes audience score of a movie or series, a percentage, whether or not title pages show it"`
+	ReleaseDate      *string                   `json:"release_date,omitempty" format:"date" doc:"Release date of a movie or series (a series may store its first air date here), YYYY-MM-DD; absent when unknown and for an episode"`
+	FirstAirDate     *string                   `json:"first_air_date,omitempty" format:"date" doc:"First air date of a series, YYYY-MM-DD; absent when unknown and for a movie or episode"`
+	LastAirDate      *string                   `json:"last_air_date,omitempty" format:"date" doc:"Last air date of a series as its metadata provider reports it, YYYY-MM-DD; absent when unknown and for a movie or episode"`
+	AirDate          *string                   `json:"air_date,omitempty" format:"date" doc:"Air date of an episode, YYYY-MM-DD; absent when unknown and for a movie or series"`
 	Cast             []catalogpkg.CastCredit   `json:"cast,omitempty" doc:"Actors and guest stars of a movie or series in credit order, only with include_people; absent when there are none. No photos"`
 	Crew             []catalogpkg.CrewCredit   `json:"crew,omitempty" doc:"Other credits of a movie or series, only with include_people; absent when there are none. No photos"`
 }
@@ -95,7 +99,7 @@ type AdminCatalogCapabilities struct {
 	ItemListing           bool `json:"item_listing" doc:"listAdminCatalogItems is served"`
 	ItemListingContentIDs int  `json:"item_listing_max_content_ids" doc:"Most content_ids one listAdminCatalogItems request accepts"`
 	ItemChangeEvents      bool `json:"item_change_events" doc:"catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators"`
-	ItemMetadata          bool `json:"item_metadata" doc:"listAdminCatalogItems returns genres, content_rating, studios, networks and ratings on movies and series, and accepts include_people"`
+	ItemMetadata          bool `json:"item_metadata" doc:"listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people"`
 }
 type AdminCatalogCapabilitiesOutput struct {
 	Status       int
@@ -178,6 +182,8 @@ func registerAdminCatalogItems(reg *Registry) {
 				Versions: make([]AdminCatalogItemVersion, 0, len(row.Versions)),
 				Genres:   row.Genres, ContentRating: row.ContentRating, Studios: row.Studios, Networks: row.Networks,
 				RatingIMDB: row.RatingIMDB, RatingTMDB: row.RatingTMDB, RatingRTCritic: row.RatingRTCritic, RatingRTAudience: row.RatingRTAudience,
+				ReleaseDate: calendarDatePtr(row.ReleaseDate), FirstAirDate: calendarDatePtr(row.FirstAirDate),
+				LastAirDate: calendarDatePtr(row.LastAirDate), AirDate: calendarDatePtr(row.AirDate),
 				Cast: row.Cast, Crew: row.Crew,
 			}
 			for _, id := range row.LibraryIDs {

@@ -15392,7 +15392,7 @@ export interface components {
        * @description Most content_ids one listAdminCatalogItems request accepts
        */
       item_listing_max_content_ids: number;
-      /** @description listAdminCatalogItems returns genres, content_rating, studios, networks and ratings on movies and series, and accepts include_people */
+      /** @description listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people */
       item_metadata: boolean;
       /** @description Opaque revision of this document */
       revision: string;
@@ -15421,6 +15421,11 @@ export interface components {
        * @description When Silo first saw the item: the earliest first-seen time across its libraries, or its first-seen time in library_id when that filter is set. Not a change cursor; metadata and file changes do not move it
        */
       added_at: string;
+      /**
+       * Format: date
+       * @description Air date of an episode, YYYY-MM-DD; absent when unknown and for a movie or series
+       */
+      air_date?: string;
       /** @description Actors and guest stars of a movie or series in credit order, only with include_people; absent when there are none. No photos */
       cast?: components["schemas"]["CastCredit"][];
       /** @example movie-tmdb-949 */
@@ -15437,9 +15442,19 @@ export interface components {
        * @description An episode's number in its season; absent otherwise
        */
       episode_number?: number;
+      /**
+       * Format: date
+       * @description First air date of a series, YYYY-MM-DD; absent when unknown and for a movie or episode
+       */
+      first_air_date?: string;
       /** @description Stored genres of a movie or series, not localized; absent when there are none and for an episode */
       genres?: string[];
       imdb_id?: string;
+      /**
+       * Format: date
+       * @description Last air date of a series as its metadata provider reports it, YYYY-MM-DD; absent when unknown and for a movie or episode
+       */
+      last_air_date?: string;
       /** @description Every enabled library the item is present in, whatever library_id filters */
       library_ids: string[];
       /** @description Networks a series aired on; absent when there are none and for a movie or episode */
@@ -15464,6 +15479,11 @@ export interface components {
        * @description Stored TMDB rating of a movie or series on TMDB's 0-10 scale
        */
       rating_tmdb?: number;
+      /**
+       * Format: date
+       * @description Release date of a movie or series (a series may store its first air date here), YYYY-MM-DD; absent when unknown and for an episode
+       */
+      release_date?: string;
       /**
        * Format: int64
        * @description An episode's season; absent otherwise

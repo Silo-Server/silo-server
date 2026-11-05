@@ -66,6 +66,12 @@ type AdminCatalogItem struct {
 	RatingTMDB       *float64
 	RatingRTCritic   *int
 	RatingRTAudience *int
+	// Calendar dates as stored: ReleaseDate, FirstAirDate and LastAirDate on
+	// a movie or series, AirDate on an episode.
+	ReleaseDate  *string
+	FirstAirDate *string
+	LastAirDate  *string
+	AirDate      *string
 	// Cast and Crew of a movie or series, loaded only with filter.People.
 	Cast []CastCredit
 	Crew []CrewCredit
@@ -128,6 +134,7 @@ func (r *ItemRepository) ListAdminCatalogItems(ctx context.Context, filter Admin
 			&item.ImdbID, &item.TmdbID, &item.TvdbID, &item.SeriesID, &item.SeriesTitle,
 			&item.SeasonNumber, &item.EpisodeNumber, &item.Genres, &item.ContentRating, &item.Studios, &item.Networks,
 			&item.RatingIMDB, &item.RatingTMDB, &item.RatingRTCritic, &item.RatingRTAudience,
+			&item.ReleaseDate, &item.FirstAirDate, &item.LastAirDate, &item.AirDate,
 			&item.AddedAt, &item.LibraryIDs); err != nil {
 			rows.Close()
 			return page, fmt.Errorf("scanning admin catalog item: %w", err)
@@ -223,7 +230,8 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 				p.imdb_id, p.tmdb_id, p.tvdb_id, ''::text AS series_id, ''::text AS series_title,
 				NULL::int AS season_number, NULL::int AS episode_number,
 				p.genres, coalesce(p.content_rating, ''), p.studios, p.networks,
-				p.rating_imdb, p.rating_tmdb, p.rating_rt_critic, p.rating_rt_audience`,
+				p.rating_imdb, p.rating_tmdb, p.rating_rt_critic, p.rating_rt_audience,
+				to_char(p.release_date, 'YYYY-MM-DD'), p.first_air_date, p.last_air_date, NULL::text`,
 			"media_items", "media_item_libraries", "content_id", "p.type = ANY("+bind(itemTypes)+"::text[])"))
 	}
 	if filter.Type == "" || filter.Type == AdminCatalogTypeEpisode {
@@ -233,7 +241,8 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 				(SELECT s.title FROM media_items s WHERE s.content_id = p.series_id),
 				p.season_number, p.episode_number,
 				NULL::text[], ''::text, NULL::text[], NULL::text[],
-				NULL::double precision, NULL::double precision, NULL::int, NULL::int`,
+				NULL::double precision, NULL::double precision, NULL::int, NULL::int,
+				NULL::text, NULL::text, NULL::text, to_char(p.air_date, 'YYYY-MM-DD')`,
 			"episodes", "episode_libraries", "episode_id",
 			"EXISTS (SELECT 1 FROM media_items s WHERE s.content_id = p.series_id AND s.type = 'series')"))
 	}

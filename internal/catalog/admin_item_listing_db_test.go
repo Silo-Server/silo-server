@@ -72,7 +72,8 @@ func seedAdminListing(t *testing.T, pool *pgxpool.Pool) adminListingFixture {
 		($1,'movie','Movie A',1999,'matched','tt1','11'), ($2,'movie','Hidden',2000,'matched','',''),
 		($3,'movie','Unlisted',2001,'matched','',''), ($4,'series','Show',2010,'matched','','')`, movieA, movieHidden, movieUnlisted, series)
 	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'podcast','Cast'), ($2,'audiobook','Book')`, podcast, book)
-	exec(`UPDATE media_items SET genres='{Crime,Drama}', content_rating='R', rating_imdb=8.5, rating_rt_critic=0 WHERE content_id=$1`, movieA)
+	exec(`UPDATE media_items SET genres='{Crime,Drama}', content_rating='R', rating_imdb=8.5, rating_rt_critic=0, release_date='1999-07-02' WHERE content_id=$1`, movieA)
+	exec(`UPDATE media_items SET first_air_date='2010-05-02', last_air_date='2012-01-08' WHERE content_id=$1`, series)
 	person := time.Now().UnixNano() % 1_000_000_000_000
 	exec(`INSERT INTO people (id,name,tmdb_id) VALUES ($1,$2,'1158'), ($1+1,$3,'')`, person, p+"-actor", p+"-director")
 	exec(`INSERT INTO item_people (id,content_id,person_id,kind,character,sort_order) VALUES
@@ -219,10 +220,14 @@ func checkAdminListingItems(t *testing.T, fx adminListingFixture, ep, movie, sho
 	}
 	// A zero score is a score, and credits load only on request.
 	if !slices.Equal(movie.Genres, []string{"Crime", "Drama"}) || movie.ContentRating != "R" || movie.RatingIMDB == nil || *movie.RatingIMDB != 8.5 ||
-		movie.RatingRTCritic == nil || *movie.RatingRTCritic != 0 || movie.RatingTMDB != nil || movie.Cast != nil || movie.Crew != nil {
+		movie.RatingRTCritic == nil || *movie.RatingRTCritic != 0 || movie.RatingTMDB != nil || movie.Cast != nil || movie.Crew != nil ||
+		movie.ReleaseDate == nil || *movie.ReleaseDate != "1999-07-02" || movie.AirDate != nil {
 		t.Fatalf("movie metadata = %+v", movie)
 	}
-	if ep.Genres != nil || ep.ContentRating != "" || ep.RatingIMDB != nil {
+	if show.FirstAirDate == nil || *show.FirstAirDate != "2010-05-02" || show.LastAirDate == nil || *show.LastAirDate != "2012-01-08" {
+		t.Fatalf("series dates = %+v", show)
+	}
+	if ep.Genres != nil || ep.ContentRating != "" || ep.RatingIMDB != nil || ep.ReleaseDate != nil || ep.AirDate == nil || *ep.AirDate != "2010-05-02" {
 		t.Fatalf("episode metadata = %+v", ep)
 	}
 	want := []AdminCatalogVersion{
