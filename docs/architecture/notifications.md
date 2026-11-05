@@ -358,7 +358,14 @@ to the plugin service, so neither package imports the other.
   are one `enc:v1:` envelope bound to the row id
   (`notification_plugin_destination:<id>:config`). Secret fields, classified
   by `plugins.ConfigSchemaFieldSets` as for plugin configuration, are never
-  returned; a write that leaves one blank keeps the stored value.
+  returned; a write that leaves one blank keeps the stored value. Only fields
+  the current schema classifies as public are returned, so a stored field a
+  plugin upgrade stopped declaring stays hidden.
+- **Edits.** The plugin's `ValidateDestination` can take 10 seconds, so an
+  update runs it before opening the write transaction, against the revision
+  it read. The write then locks the row and applies only while the revision
+  is unchanged; otherwise it answers `412` and writes nothing. No row lock is
+  held across a plugin call.
 - **Enqueue.** Like webhooks, attempts are enqueued in the fanout
   transaction, filtered by the destination's reason flags and a per-profile
   limit of 30 a minute, and in `DispatchOperational` when

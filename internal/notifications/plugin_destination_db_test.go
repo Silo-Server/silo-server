@@ -24,6 +24,8 @@ type scriptedChannelHost struct {
 	sent     []*pluginv1.SendNotificationRequest
 	// during runs inside the next send, before it answers.
 	during func()
+	// validating runs inside the next settings check, before it answers.
+	validating func()
 	// unavailable makes sends fail as if the plugin were turned off.
 	unavailable bool
 }
@@ -36,11 +38,19 @@ func (h *scriptedChannelHost) Channels(context.Context) ([]PluginChannel, error)
 			JsonSchema: `{"type":"object","properties":{"topic":{"type":"string"},"token":{"type":"string"}}}`,
 			AdminForm:  &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{Key: "topic"}, {Key: "token", Secret: true}}},
 		},
+		PublicFields: []string{"topic"},
 		SecretFields: []string{"token"},
 	}}, nil
 }
 
 func (h *scriptedChannelHost) ValidateDestination(context.Context, PluginChannelRef, *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error) {
+	h.mu.Lock()
+	validating := h.validating
+	h.validating = nil
+	h.mu.Unlock()
+	if validating != nil {
+		validating()
+	}
 	return &pluginv1.ValidateNotificationDestinationResponse{Valid: true}, nil
 }
 
@@ -347,5 +357,50 @@ func TestPluginDestinationStaleSendsDontWinDB(t *testing.T) {
 	sender.processAttempt(ctx, claimed[0])
 	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || got.DisabledReason != nil || notices != 0 {
 		t.Fatalf("after a stale failure: destination %+v, %d notices; want the repaired destination enabled and no notice", got, notices)
+	}
+}
+
+// A plugin can take seconds to check new settings, so it checks them without
+// the row lock. A write that lands meanwhile stands, and the checked settings
+// are refused as a stale If-Match would be, with nothing written.
+func TestPluginDestinationValidationHoldsNoRowLockDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	host := &scriptedChannelHost{}
+	service, sender := newTestPluginDestinationService(t, pool, host)
+	name := "Phone"
+	d, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
+		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
+		Settings: map[string]any{"topic": "alerts", "token": "old"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	renamed := "Laptop"
+	host.validating = func() {
+		// Under a row lock this rename would wait out the whole check.
+		renameCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if _, err := service.UpdateGuarded(renameCtx, accountA, sharedID, d.ID, PluginDestinationInput{Name: &renamed}, anyRevision); err != nil {
+			t.Errorf("rename during the settings check: %v", err)
+		}
+	}
+	_, err = service.UpdateGuarded(ctx, accountA, sharedID, d.ID, PluginDestinationInput{Settings: map[string]any{"topic": "news"}}, anyRevision)
+	conflict, ok := errors.AsType[*PluginDestinationConflictError](err)
+	if !ok {
+		t.Fatalf("settings update after a concurrent rename = %v, want PluginDestinationConflictError", err)
+	}
+	got, err := service.repo.GetByID(ctx, accountA, sharedID, d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := sender.decryptConfig(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != renamed || conflict.Revision != got.Revision || stored["topic"] != "alerts" {
+		t.Fatalf("after the conflict: name %q, revision %d (conflict names %d), topic %v; want the rename kept and the settings unchanged",
+			got.Name, got.Revision, conflict.Revision, stored["topic"])
 	}
 }

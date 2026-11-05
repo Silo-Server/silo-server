@@ -141,22 +141,48 @@ func (s *PluginDestinationService) Create(ctx context.Context, userID int, profi
 // UpdateGuarded applies in after check accepts the stored revision, under
 // the row lock. Changed settings are checked by the plugin again, and like a
 // changed webhook URL they clear the failure streak and the disable reason.
+//
+// The plugin can take seconds to answer, so it checks the settings before
+// the row is locked, against the revision read then. The write applies only
+// while the row is still at that revision; otherwise it fails with
+// PluginDestinationConflictError and writes nothing.
 func (s *PluginDestinationService) UpdateGuarded(ctx context.Context, userID int, profileID, id string, in PluginDestinationInput, check func(int64) error) (*PluginDestination, error) {
+	var name string
+	if in.Name != nil {
+		validName, err := validateChannelName(*in.Name, ErrPluginDestinationInvalid)
+		if err != nil {
+			return nil, err
+		}
+		name = validName
+	}
+	var validated *PluginDestination
+	if in.Settings != nil || len(in.ClearSecrets) > 0 {
+		current, err := s.repo.GetByID(ctx, userID, profileID, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := check(current.Revision); err != nil {
+			return nil, err
+		}
+		if current.ConfigCiphertext, err = s.validatedSettings(ctx, current, in); err != nil {
+			return nil, err
+		}
+		validated = current
+	}
 	return s.repo.UpdateGuarded(ctx, userID, profileID, id, func(d *PluginDestination) error {
 		if err := check(d.Revision); err != nil {
 			return err
 		}
 		if in.Name != nil {
-			name, err := validateChannelName(*in.Name, ErrPluginDestinationInvalid)
-			if err != nil {
-				return err
-			}
 			d.Name = name
 		}
-		if in.Settings != nil || len(in.ClearSecrets) > 0 {
-			if err := s.replaceSettings(ctx, d, in); err != nil {
-				return err
+		if validated != nil {
+			if d.Revision != validated.Revision {
+				return &PluginDestinationConflictError{Revision: d.Revision}
 			}
+			d.ConfigCiphertext = validated.ConfigCiphertext
+			d.ConsecutiveFailures = 0
+			d.DisabledReason = nil
 		}
 		if in.Enabled != nil {
 			d.Enabled = *in.Enabled
@@ -174,12 +200,12 @@ func (s *PluginDestinationService) UpdateGuarded(ctx context.Context, userID int
 	})
 }
 
-// replaceSettings merges a settings write into d, has the plugin check the
-// result, and stores it encrypted.
-func (s *PluginDestinationService) replaceSettings(ctx context.Context, d *PluginDestination, in PluginDestinationInput) error {
+// validatedSettings merges a settings write over d's stored settings, has
+// the plugin check the result, and returns it encrypted.
+func (s *PluginDestinationService) validatedSettings(ctx context.Context, d *PluginDestination, in PluginDestinationInput) (string, error) {
 	channel, err := s.channel(ctx, d.Ref())
 	if err != nil {
-		return err
+		return "", err
 	}
 	stored, err := s.sender.decryptConfig(d)
 	if err != nil {
@@ -188,17 +214,12 @@ func (s *PluginDestinationService) replaceSettings(ctx context.Context, d *Plugi
 	}
 	settings, err := mergePluginSettings(*channel, stored, in.Settings, in.ClearSecrets)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if err := s.validate(ctx, *channel, settings); err != nil {
-		return err
+		return "", err
 	}
-	if d.ConfigCiphertext, err = s.sender.encryptConfig(d.ID, settings); err != nil {
-		return err
-	}
-	d.ConsecutiveFailures = 0
-	d.DisabledReason = nil
-	return nil
+	return s.sender.encryptConfig(d.ID, settings)
 }
 
 func setIfPresent(field *bool, value *bool) {
@@ -342,18 +363,20 @@ func mergePluginSettings(channel PluginChannel, stored, write map[string]any, cl
 	return merged, nil
 }
 
-// publicPluginSettings splits stored settings into what the owner may read
-// and the names of the secret fields that hold a value.
+// publicPluginSettings returns the stored settings the owner may read (the
+// fields the current schema declares public) and the names of the secret
+// fields that hold a value. A stored field the schema no longer declares is
+// neither returned nor named.
 func publicPluginSettings(channel PluginChannel, stored map[string]any) (map[string]any, []string) {
-	secrets := channel.SecretFields
 	public := make(map[string]any, len(stored))
 	var set []string
 	for key, value := range stored {
-		if slices.Contains(secrets, key) {
+		switch {
+		case slices.Contains(channel.PublicFields, key):
+			public[key] = value
+		case slices.Contains(channel.SecretFields, key):
 			set = append(set, key)
-			continue
 		}
-		public[key] = value
 	}
 	slices.Sort(set)
 	return public, set

@@ -28372,7 +28372,7 @@ export interface components {
       plugin_id: string;
       /** @description Secret settings that have a stored value */
       secret_settings_set: string[];
-      /** @description Stored settings without secret fields; empty while the kind is unavailable */
+      /** @description Stored settings the kind's current schema declares and does not mark secret; empty while the kind is unavailable */
       settings: {
         [key: string]: unknown;
       };

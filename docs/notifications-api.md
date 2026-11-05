@@ -581,8 +581,11 @@ nested ones included, as for plugin configuration.
 is cursor-paginated in creation order. Each item carries its `etag`, the
 reason flags, the delivery bookkeeping webhooks carry (`consecutive_failures`,
 `disabled_reason`, `last_success_at`, `last_failure_at`,
-`last_failure_message`), `settings` without secret fields, and
-`secret_settings_set`, the secret fields that have a stored value. `available`
+`last_failure_message`), `settings`, and `secret_settings_set`, the secret
+fields that have a stored value. `settings` holds only the fields the kind's
+current schema declares and doesn't mark secret: a stored field the schema no
+longer declares, such as a secret a plugin upgrade renamed, is never returned.
+`available`
 is false, `channel_name` empty and `settings` empty while no enabled plugin
 provides the destination's kind; nothing is sent then.
 
@@ -608,7 +611,10 @@ non-secret field sent as `null` is removed, a secret field sent blank or left
 out keeps its stored value, and `clear_secrets` removes named secrets.
 Changed settings are checked by the plugin again and, like a changed webhook
 URL, clear the failure streak and the disable reason; so does re-enabling.
-Missing preconditions answer `428`, stale validators `412`.
+Missing preconditions answer `428`, stale validators `412`. The plugin checks
+changed settings before the destination is locked for the write; if the
+destination changes meanwhile, the update answers `412` with the current
+`ETag` and writes nothing, even under `If-Match: *`.
 
 ### Delete and test
 

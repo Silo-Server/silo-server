@@ -65,7 +65,7 @@ type NotificationPluginDestination struct {
 	NotifyContinueWatching bool            `json:"notify_continue_watching"`
 	NotifyNextUp           bool            `json:"notify_next_up"`
 	NotifyRequests         bool            `json:"notify_requests"`
-	Settings               PluginJSONValue `json:"settings" doc:"Stored settings without secret fields; empty while the kind is unavailable"`
+	Settings               PluginJSONValue `json:"settings" doc:"Stored settings the kind's current schema declares and does not mark secret; empty while the kind is unavailable"`
 	SecretSettingsSet      []string        `json:"secret_settings_set" doc:"Secret settings that have a stored value"`
 	ConsecutiveFailures    int             `json:"consecutive_failures"`
 	DisabledReason         *string         `json:"disabled_reason"`
@@ -324,6 +324,9 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 			}
 			return nil
 		})
+		if conflict, ok := errors.AsType[*notifications.PluginDestinationConflictError](err); ok {
+			return nil, StaleVersionProblem(notificationPluginDestinationTag(profile, in.ID, conflict.Revision))
+		}
 		if err != nil {
 			return nil, notificationPluginDestinationProblem(err)
 		}

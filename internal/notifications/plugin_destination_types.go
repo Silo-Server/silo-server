@@ -27,11 +27,14 @@ type PluginChannel struct {
 	Description string
 	// Schema is the destination settings form the plugin declares.
 	Schema *pluginv1.ConfigSchema
-	// SecretFields lists the top-level settings that are write-only, never
-	// returned by the API. The host classifies them by the plugin runtime's
-	// rules for config schemas: a secret or password form control, or a
-	// writeOnly or password-format JSON Schema property, nested ones
-	// included.
+	// PublicFields and SecretFields split the top-level settings the schema
+	// declares. The host classifies them by the plugin runtime's rules for
+	// config schemas: a secret or password form control, or a writeOnly or
+	// password-format JSON Schema property, nested ones included, makes a
+	// field secret. Only public fields are ever returned by the API; secret
+	// fields and stored fields the schema no longer declares, such as a
+	// secret a plugin upgrade renamed, are write-only.
+	PublicFields []string
 	SecretFields []string
 }
 
@@ -141,4 +144,15 @@ func (e *PluginDestinationRejectedError) Error() string {
 
 func (e *PluginDestinationRejectedError) Is(target error) bool {
 	return target == ErrPluginDestinationInvalid
+}
+
+// PluginDestinationConflictError means the destination changed while the
+// plugin checked new settings, so they weren't saved. Revision is the
+// destination's current revision.
+type PluginDestinationConflictError struct {
+	Revision int64
+}
+
+func (e *PluginDestinationConflictError) Error() string {
+	return "plugin destination changed while its settings were checked"
 }

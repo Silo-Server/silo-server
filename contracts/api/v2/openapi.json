@@ -39112,7 +39112,7 @@
           },
           "settings": {
             "additionalProperties": true,
-            "description": "Stored settings without secret fields; empty while the kind is unavailable",
+            "description": "Stored settings the kind's current schema declares and does not mark secret; empty while the kind is unavailable",
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
           }

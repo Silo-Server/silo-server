@@ -125,14 +125,15 @@ function DestinationFormDialog({
     notify_requests: destination?.notify_requests ?? true,
   });
   const pending = create.isPending || update.isPending;
+  // The server names every secret with a stored value here, however the
+  // schema marks it. Left blank, such a secret stays as saved, so it isn't a
+  // missing required field.
   const secretsSet = destination?.secret_settings_set ?? [];
-  // A secret with a stored value stays as saved when left blank, so it isn't
-  // a missing required field.
   const declared = channel?.settings_form.admin_form;
   const form = declared && {
     ...declared,
     fields: declared.fields.map((field) =>
-      field.secret && secretsSet.includes(field.key) ? { ...field, required: false } : field,
+      secretsSet.includes(field.key) ? { ...field, required: false } : field,
     ),
   };
 
@@ -148,6 +149,15 @@ function DestinationFormDialog({
         )
       : settings;
 
+  // A stored secret the user didn't type is left out of an update, so
+  // neither a blank nor the field's form default replaces it.
+  const withoutUntypedSecrets = (values: Record<string, unknown>) =>
+    Object.fromEntries(
+      Object.entries(values).filter(
+        ([key]) => !secretsSet.includes(key) || (settings[key] ?? "") !== "",
+      ),
+    );
+
   const submit = () => {
     const onError = (error: unknown) =>
       toast.error(pluginDestinationErrorMessage(error, "The destination couldn't be saved"));
@@ -159,7 +169,7 @@ function DestinationFormDialog({
           name: name.trim(),
           // An update merges over the stored settings, so an emptied field
           // must be sent as an explicit clear.
-          settings: settingsToSend({ explicitClears: true }),
+          settings: withoutUntypedSecrets(settingsToSend({ explicitClears: true })),
           ...reasons,
         },
         { onSuccess: () => onOpenChange(false), onError },

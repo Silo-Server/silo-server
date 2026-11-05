@@ -338,6 +338,7 @@
 ./internal/notifications TestPluginDestinationsStayOnTheirAccountDB
 ./internal/notifications TestPluginDestinationDeliveryOutcomesDB
 ./internal/notifications TestPluginDestinationStaleSendsDontWinDB
+./internal/notifications TestPluginDestinationValidationHoldsNoRowLockDB
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
 ./internal/notifications TestNotifyFulfilledSkipsRecipientWithoutAccess

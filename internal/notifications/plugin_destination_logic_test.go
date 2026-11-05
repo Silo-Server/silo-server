@@ -49,7 +49,7 @@ func TestMergePluginSettings(t *testing.T) {
 		AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{
 			{Key: "topic"}, {Key: "token", Secret: true}, {Key: "priority"},
 		}},
-	}, SecretFields: []string{"token"}}
+	}, PublicFields: []string{"priority", "topic"}, SecretFields: []string{"token"}}
 	stored := map[string]any{"topic": "alerts", "token": "s3cret", "priority": float64(3)}
 	for _, tc := range []struct {
 		name    string
@@ -88,9 +88,11 @@ func TestMergePluginSettings(t *testing.T) {
 		})
 	}
 
-	public, set := publicPluginSettings(channel, stored)
-	if _, leaked := public["token"]; leaked || !reflect.DeepEqual(set, []string{"token"}) || public["topic"] != "alerts" {
-		t.Fatalf("publicPluginSettings() = %v, %v; want the secret withheld and named", public, set)
+	// "api_key" was a secret before a plugin upgrade renamed it; the current
+	// schema doesn't declare it, so it stays as hidden as it was.
+	public, set := publicPluginSettings(channel, map[string]any{"topic": "alerts", "token": "s3cret", "api_key": "old"})
+	if !reflect.DeepEqual(public, map[string]any{"topic": "alerts"}) || !reflect.DeepEqual(set, []string{"token"}) {
+		t.Fatalf("publicPluginSettings() = %v, %v; want only the declared public field, and the secret named", public, set)
 	}
 }
 
