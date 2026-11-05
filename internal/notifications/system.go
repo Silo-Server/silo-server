@@ -313,12 +313,7 @@ func NewSystem(
 		sender.operational = system.DispatchOperational
 		sender.posterURL = system.discordPosterURL
 	}
-	if pluginDestinationSenderInst != nil {
-		pluginDestinationSenderInst.operational = system.DispatchOperational
-		pluginDestinationSenderInst.posterURL = system.discordPosterURL
-		pluginDestinationSenderInst.linkBase = system.emailLinkBase
-		pluginDestinationSenderInst.payload = system.PayloadForRow
-	}
+	system.wirePluginDestinationSender()
 	discordChannelInst.posterURL = system.discordPosterURL
 	if serverChannelSweep != nil {
 		serverChannelSweep.posterURL = system.discordPosterURL
@@ -328,15 +323,6 @@ func NewSystem(
 		webPushSenderInst.payload = system.PayloadForRow
 	}
 	return system
-}
-
-// SetPluginChannelHost wires the plugin runtime into plugin destinations.
-// Until it is called they list no kinds, queue nothing and send nothing.
-func (s *System) SetPluginChannelHost(host PluginChannelHost) {
-	if s == nil || s.pluginDestinationSender == nil || host == nil {
-		return
-	}
-	s.pluginDestinationSender.hostBox.Store(&pluginChannelHostBox{host: host})
 }
 
 // SetImageResolver wires presigned poster URLs into notification payloads.
