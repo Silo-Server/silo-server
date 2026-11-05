@@ -3,10 +3,14 @@ package historyimport
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 )
 
 func assertJellyfinAuthorization(t *testing.T, r *http.Request, token string) {
@@ -243,4 +247,47 @@ func newUnthrottledJellyfinClient() *JellyfinClient {
 	client := NewJellyfinClient()
 	client.limiter = nil
 	return client
+}
+
+// slowJellyfinTransport answers every request with body after delay, or
+// gives up when the request is canceled first.
+func slowJellyfinTransport(delay time.Duration, body string) http.RoundTripper {
+	return plexTestRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		select {
+		case <-time.After(delay):
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+}
+
+// On a large library Jellyfin can take longer than 30 seconds to answer one
+// page of played items. That page must not fail the import, while sign-in and
+// user lookups still give up after 30 seconds.
+func TestJellyfinFetchItems_SlowPageDoesNotFailImport(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const delay = 45 * time.Second
+		client := newUnthrottledJellyfinClient()
+		client.httpClient.Transport = slowJellyfinTransport(delay, `[{"Id":"user-1","Name":"Alice"}]`)
+		client.listingClient.Transport = slowJellyfinTransport(delay, `{"Items":[{"Id":"movie-1","Type":"Movie"}],"TotalRecordCount":1}`)
+		auth := jellyfinLocalAuth{BaseURL: "http://jellyfin.test", UserID: "user-1", AccessToken: "token-1"}
+
+		items, err := client.FetchItems(context.Background(), auth, "IsPlayed", jellyfinPlayableItemTypes)
+		if err != nil {
+			t.Fatalf("FetchItems returned error: %v", err)
+		}
+		if len(items) != 1 || items[0].ID != "movie-1" {
+			t.Fatalf("items = %+v, want movie-1", items)
+		}
+
+		if _, err := client.ListUsers(context.Background(), auth.BaseURL, "admin-token"); err == nil {
+			t.Fatal("ListUsers succeeded after 45 seconds, want a timeout")
+		}
+	})
 }

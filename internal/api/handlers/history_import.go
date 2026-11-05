@@ -412,6 +412,7 @@ func historyImportAPIError(err error) *APIError {
 		errors.Is(err, historyimport.ErrNoAdminToken):
 		return &APIError{Status: http.StatusBadRequest, Code: policyErrorBadRequest, Message: err.Error(), cause: err}
 	case errors.Is(err, historyimport.ErrActiveRunExists),
+		errors.Is(err, historyimport.ErrPersonalRunActive),
 		errors.Is(err, historyimport.ErrMappingDuplicate):
 		return &APIError{Status: http.StatusConflict, Code: policyErrorConflict, Message: err.Error(), cause: err}
 	default:
