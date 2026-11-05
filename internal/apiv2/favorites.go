@@ -157,9 +157,9 @@ func decodeListKey(cursors *Cursors, scope CursorScope, cursor string) (*usersto
 }
 
 // listFavorites answers from the same listing v1 GET /favorites uses, paged
-// by keyset. A limit+1 probe decides has_more from the raw rows, so an entry
-// the catalog no longer has or the viewer may not see never hides the rows
-// behind it.
+// by keyset; a limit+1 probe decides has_more. The seam answers only entries
+// the viewer may see, so the probe and the cursor row are visible items and a
+// cursor never names a hidden title.
 func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *FavoriteListInput) (*FavoriteCollectionOutput, error) {
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("favorites")

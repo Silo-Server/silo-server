@@ -1445,14 +1445,20 @@ in `(added_at DESC, item_id DESC)` order through dedicated `ListFavoritesPage`/`
 added or removed between pages neither repeats nor skips a row and equal timestamps are ordered by
 the unique item id. PostgreSQL keeps full stored timestamp precision in the cursor and
 orders by the raw `added_at` column so the existing profile/time indexes can supply ordered
-rows; visible API instants remain UTC milliseconds. The v1 offset queries are untouched. `has_more` is
-decided from the raw store rows, so an entry the catalog no longer has or the viewer may not
-see never hides the rows behind it. Ratings follow the same access rule as the two lists: the
-lists omit items the viewer may not see, `getRating` and v1 `GET /ratings/{item_id}` answer `404`
+rows; visible API instants remain UTC milliseconds. The v1 offset queries are untouched. The
+favorites, watchlist and Not interested page seams answer only entries the viewer may see (an episode
+entry counts as visible when its series is, as its card does), so `has_more` comes from a visible
+probe entry and the cursor row is always an item the viewer may see: a cursor payload is signed, not
+encrypted, and must not name a hidden title. With the PostgreSQL user store a single query per page applies
+the access filter (`ItemRepository.ListVisiblePersonalPage`, reading each list's profile index in page
+order); a SQLite user store has no catalog to join, so there the seams read the store's keyset pages
+in growing batches until a page is full. The user store's own list queries stay unfiltered because
+recommendations read the same lists without an access filter. A watchlist series hidden because it
+is fully watched is still an entry without a card, since the viewer may see it. Ratings follow the
+same access rule as the lists: the lists omit items the viewer may not see, `getRating` and v1 `GET /ratings/{item_id}` answer `404`
 for such an item whether or not it was rated, and the stored rating is kept, so it shows again
 once the restriction is lifted. `RatingsRepo.ListPage` applies the viewer's access filter in the page
-query, so the probe row and the cursor row of `listRatings` are always items the viewer may see: a
-cursor payload is signed, not encrypted, and must not name a hidden title. Removing a favorite, watchlist entry or rating runs no access
+query, so the probe row and the cursor row of `listRatings` are always items the viewer may see. Removing a favorite, watchlist entry or rating runs no access
 check, so a profile can drop an entry for an item that has since left its scope; the answer is
 the same `204` whether or not the entry existed. The v1 handlers call the same seams
 (`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their

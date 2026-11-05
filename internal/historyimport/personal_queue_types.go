@@ -6,6 +6,11 @@ var (
 	ErrPersonalCredentialsUnavailable = errors.New("personal import credentials are unavailable")
 	ErrPersonalSessionChanged         = errors.New("personal import login session changed; authenticate again")
 	ErrPersonalAdmissionUncertain     = errors.New("personal import acceptance could not be confirmed; check imports before submitting again")
+	// ErrPersonalRunActive refuses a second personal import while the
+	// account already has one queued or running. A personal import can name
+	// any server, and the import slots are shared by every account, so one
+	// account may hold at most one of them.
+	ErrPersonalRunActive = errors.New("an import is already queued or running for this account; wait for it to finish before starting another")
 )
 
 // Version 2 is reserved for personal intent. Older admin workers only claim
