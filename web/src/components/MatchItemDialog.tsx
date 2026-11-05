@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, type ChangeEvent } from "react";
 import { Copy, Folder, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,6 +13,7 @@ import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
 import {
   useApplyItemMatch,
   useItemFiles,
+  useItemMatchHints,
   useSearchItemMatchCandidates,
 } from "@/hooks/queries/items";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
@@ -115,6 +116,37 @@ export default function MatchItemDialog({
   // Also blocks Apply: a candidate found in a library the item has since left
   // would otherwise apply unscoped, which the server refuses.
   const searchBlocked = libraryLookupLoading || (needsLibraryPick && currentPick === undefined);
+
+  // The item's own title and year come from its current match, which is the
+  // one an admin usually opens this dialog to correct. Suggest what the
+  // scanner read from the folder and file names instead, once per answer and
+  // only until the admin edits a field. Search waits for it, so a quick click
+  // cannot search the stale year.
+  const { data: hints, isLoading: hintsLoading } = useItemMatchHints(
+    open && !searchBlocked ? item.content_id : undefined,
+    libraryId,
+  );
+  const [seededHints, setSeededHints] = useState<typeof hints>();
+  const [fieldsEdited, setFieldsEdited] = useState(false);
+  if (hints && hints !== seededHints) {
+    setSeededHints(hints);
+    // An answer without a parsed title (another library's, say) falls back to
+    // the item's own title and year rather than keeping the last suggestion.
+    if (!fieldsEdited) {
+      const suggestedYear = hints.title ? hints.year : item.year;
+      setTitle(hints.title || item.title);
+      setYear(suggestedYear ? String(suggestedYear) : "");
+      if (showVideoExternalIds) {
+        setImdbId(hints.provider_ids.imdb ?? "");
+        setTmdbId(hints.provider_ids.tmdb ?? "");
+        setTvdbId(hints.provider_ids.tvdb ?? "");
+      }
+    }
+  }
+  const editField = (set: (value: string) => void) => (e: ChangeEvent<HTMLInputElement>) => {
+    setFieldsEdited(true);
+    set(e.target.value);
+  };
   // The library a search resolves to, including the one an unscoped search of
   // a single-library item lands in.
   const searchScope = libraryId ?? (itemLibraryIds.length === 1 ? itemLibraryIds[0] : undefined);
@@ -276,7 +308,7 @@ export default function MatchItemDialog({
               <Input
                 id="match-title"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={editField(setTitle)}
                 placeholder="Title"
               />
             </div>
@@ -285,7 +317,7 @@ export default function MatchItemDialog({
               <Input
                 id="match-year"
                 value={year}
-                onChange={(e) => setYear(e.target.value)}
+                onChange={editField(setYear)}
                 placeholder="Year"
                 type="number"
               />
@@ -297,7 +329,7 @@ export default function MatchItemDialog({
                   <Input
                     id="match-imdb"
                     value={imdbId}
-                    onChange={(e) => setImdbId(e.target.value)}
+                    onChange={editField(setImdbId)}
                     placeholder="tt1234567"
                   />
                 </div>
@@ -306,7 +338,7 @@ export default function MatchItemDialog({
                   <Input
                     id="match-tmdb"
                     value={tmdbId}
-                    onChange={(e) => setTmdbId(e.target.value)}
+                    onChange={editField(setTmdbId)}
                     placeholder="12345"
                   />
                 </div>
@@ -315,7 +347,7 @@ export default function MatchItemDialog({
                   <Input
                     id="match-tvdb"
                     value={tvdbId}
-                    onChange={(e) => setTvdbId(e.target.value)}
+                    onChange={editField(setTvdbId)}
                     placeholder="12345"
                   />
                 </div>
@@ -381,7 +413,7 @@ export default function MatchItemDialog({
 
           <Button
             onClick={handleSearch}
-            disabled={searchMutation.isPending || searchBlocked}
+            disabled={searchMutation.isPending || searchBlocked || hintsLoading}
             className="w-full shrink-0 gap-2"
           >
             <Search className={cn("h-4 w-4", searchMutation.isPending && "animate-spin")} />

@@ -104,8 +104,9 @@ with `content_ids`, and drop any the listing no longer returns. Fetch on
 `metadata_updated` too: titles, years and provider ids change through it.
 
 `GET /api/v2/admin/catalog/capabilities` reports `item_listing`,
-`item_listing_max_content_ids`, and `item_change_events`, true when the socket
-carries those changes. The listing and the events have no Apple, Android, or
+`item_listing_max_content_ids`, `item_change_events`, true when the socket
+carries those changes, and `item_match_hints`, true when
+`GET /api/v2/admin/items/{id}/match/hints` is served. The listing and the events have no Apple, Android, or
 Jellyfin compatibility callers; Jellyfin clients read the catalog through their
 own item queries.
 
@@ -583,10 +584,22 @@ guarantee. Detached split identification retains the originating curation author
 
 ### Match repair
 
-`POST /api/v2/admin/items/{id}/match/search` and `/match/apply` require the
-item-scoped `metadata_curation` permission, including the existing item access
-check. Library IDs are strings. Search preserves the existing provider-ID
-normalization, title/year fallback, library selection and provider ranking.
+`POST /api/v2/admin/items/{id}/match/search`, `/match/apply` and
+`GET /api/v2/admin/items/{id}/match/hints` require the item-scoped
+`metadata_curation` permission, including the existing item access check.
+Library IDs are strings. Search preserves the existing provider-ID
+normalization, library selection and provider ranking. An empty `title` falls
+back to the item's title; an absent `year` searches without a year, because the
+stored year belongs to the current match, which is usually the one being
+corrected. The frozen v1 route keeps its fallback to the stored year.
+
+Hints return the `title`, `year` and `provider_ids` (`tmdb`, `imdb`, `tvdb`)
+the scanner read from the folder and file names of the content group holding
+the item's files in the selected library (`library_id`, required for an item in
+several libraries, as for search). When those files span several groups, the
+one holding most of them wins. Empty values mean the scanner found nothing; the web
+then suggests the item's own title and year. The web fills the Match Item
+fields from the hints and waits for them before it allows a search.
 Its optional `limit` defaults to 100 and accepts 1–500. The response contains
 `candidates` (never null) and `truncated`; refine the search when truncated.
 This bounds the response, not the provider fetch or normalization work, and

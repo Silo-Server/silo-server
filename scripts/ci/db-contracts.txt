@@ -29,6 +29,7 @@
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
+./internal/scanner TestScannedGroupForItemDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
