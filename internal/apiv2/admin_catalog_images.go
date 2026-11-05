@@ -63,6 +63,9 @@ type adminImagePosition struct {
 	Digest string `json:"digest"`
 }
 
+// registerAdminCatalogImages registers the admin item image operations: the
+// paged list of image choices, applying a provider or local choice, and
+// uploading an image.
 func registerAdminCatalogImages(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	op := Operation{Operation: humaOp("GET", Prefix+"/admin/items/{id}/images", "listAdminItemImages", "admin-catalog", "Browse bounded image choices; refetches providers and rejects continuation when choices change."), Class: ClassActingAdmin, ServiceBacked: true}

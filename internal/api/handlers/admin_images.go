@@ -236,6 +236,10 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 	return h.listItemImages(ctx, contentID, true)
 }
 
+// listItemImages fetches the image choices for a movie, series, season or
+// episode, with display URLs resolved. A season list marks show artwork as a
+// fallback. includeLocal adds sidecar artwork for a movie or series and the
+// uploaded images the item shows.
 func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string, includeLocal bool) (AdminItemImagesView, error) {
 	resolved, err := h.resolveContentID(ctx, contentID)
 	if err != nil {
