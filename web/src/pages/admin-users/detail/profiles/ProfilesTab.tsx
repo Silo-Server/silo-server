@@ -40,7 +40,7 @@ import {
   useAdminUserLiveSessions,
   useAdminUserProfileActivity,
 } from "@/hooks/queries/admin/userActivity";
-import { useAdminUserCapabilities } from "@/hooks/queries/admin/users";
+import { useAdminUserCapabilities, useAdminUsers } from "@/hooks/queries/admin/users";
 import { useProfiles } from "@/hooks/queries/profiles";
 
 import { formatLastSeen } from "../format";
@@ -59,10 +59,15 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
   const capabilities = useAdminUserCapabilities().data;
   const supported = capabilities?.profile_management === true;
   const manage = manageable && supported;
+  // manageable reads the viewer's Owner standing from the account list; until
+  // that list loads, a false is not yet a refusal, so no reason is given.
+  const ownerKnown = useAdminUsers().isSuccess;
   let readOnlyReason: string | null = null;
-  if (!manageable) readOnlyReason = "Only the server owner can change this account's profiles.";
-  else if (capabilities && !supported)
+  if (!manageable) {
+    if (ownerKnown) readOnlyReason = "Only the server owner can change this account's profiles.";
+  } else if (capabilities && !supported) {
     readOnlyReason = "This server can't change profiles from the admin page.";
+  }
   const profiles = useAdminUserProfileActivity(user.id);
   const liveQuery = useAdminUserLiveSessions(user.id);
   const watching = new Set((liveQuery.data ?? []).map((session) => session.profile_id));
@@ -276,21 +281,38 @@ function ProfileEditor({
   }, [failed, onClose]);
 
   const open = editing?.mode === "create" || (editId !== null && full.data?.id === editId);
+  const loading = editId !== null && !open && !failed;
   return (
-    <ProfileEditorDialog
-      open={open}
-      profile={editId !== null ? full.data : null}
-      libraries={libraries}
-      advisoryAgeSupported={server.maxAdvisoryAgeSupported}
-      requireAdvisoryAgeSupported={server.requireAdvisoryAgeSupported}
-      save={save}
-      onOpenChange={(next) => {
-        if (!next) onClose();
-      }}
-      onSaveSuccess={(_, { mode }) => {
-        if (mode === "edit") toast.success("Profile updated");
-      }}
-    />
+    <>
+      <Dialog open={loading} onOpenChange={(next) => (next ? undefined : onClose())}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit profile</DialogTitle>
+            <DialogDescription>Loading the profile…</DialogDescription>
+          </DialogHeader>
+          <Skeleton className="h-8 w-full" />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ProfileEditorDialog
+        open={open}
+        profile={editId !== null ? full.data : null}
+        libraries={libraries}
+        advisoryAgeSupported={server.maxAdvisoryAgeSupported}
+        requireAdvisoryAgeSupported={server.requireAdvisoryAgeSupported}
+        save={save}
+        onOpenChange={(next) => {
+          if (!next) onClose();
+        }}
+        onSaveSuccess={(_, { mode }) => {
+          if (mode === "edit") toast.success("Profile updated");
+        }}
+      />
+    </>
   );
 }
 
