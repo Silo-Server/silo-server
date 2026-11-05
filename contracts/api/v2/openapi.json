@@ -32690,6 +32690,9 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "batch_version": {
+            "type": "boolean"
+          },
           "bounded_creation": {
             "type": "boolean"
           },
@@ -32803,6 +32806,7 @@
           "monitoring_modes",
           "bulk_quality",
           "monitor_quality",
+          "batch_version",
           "preparation_progress",
           "direct_download_links",
           "prepare_again",
@@ -32858,7 +32862,7 @@
             "type": "integer"
           },
           "media_file_id": {
-            "description": "Opaque identifier",
+            "description": "The file to download. On a series or season page (with batch_version), a version template: each episode the page registers gets its version closest to this file; existing managed entries keep their file unless expected_entries names them.",
             "examples": [
               "1"
             ],

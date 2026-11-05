@@ -26011,6 +26011,7 @@ export interface components {
     DownloadCapability: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      batch_version: boolean;
       bounded_creation: boolean;
       bounded_manifests: boolean;
       bounded_subscription_sync: boolean;
@@ -26066,7 +26067,7 @@ export interface components {
        */
       expected_revision?: number;
       /**
-       * @description Opaque identifier
+       * @description The file to download. On a series or season page (with batch_version), a version template: each episode the page registers gets its version closest to this file; existing managed entries keep their file unless expected_entries names them.
        * @example 1
        */
       media_file_id?: string;

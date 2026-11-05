@@ -75,6 +75,17 @@ func TestDownloadCreateTransport(t *testing.T) {
 	if rec.Code != 202 || svc.req.Quality != "5mbps" || !svc.req.BulkQuality {
 		t.Fatalf("batch quality %d %s %+v", rec.Code, rec.Body.String(), svc.req)
 	}
+	// On a series page media_file_id is the version template, never the
+	// single-file selection, and it binds the cursor.
+	templated := `{"content_id":"series","series":true,"season_number":0,"batch_id":"intent","media_file_id":"42"}`
+	rec = do(t, h, "POST", path+"?limit=1", templated, device)
+	if rec.Code != 202 || svc.req.VersionTemplateFileID != 42 || svc.req.FileID != 0 {
+		t.Fatalf("version template %d %s %+v", rec.Code, rec.Body.String(), svc.req)
+	}
+	rec = do(t, h, "POST", path+"?cursor="+page.Page.NextCursor, templated, device)
+	if rec.Code != 400 {
+		t.Fatalf("template cursor scope %d", rec.Code)
+	}
 	rec = do(t, h, "POST", path+"?cursor="+page.Page.NextCursor, `{"content_id":"other","series":true,"batch_id":"intent"}`, device)
 	if rec.Code != 400 {
 		t.Fatalf("scope %d", rec.Code)
