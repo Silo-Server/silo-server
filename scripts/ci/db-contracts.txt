@@ -55,6 +55,9 @@
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
 
+# A corrected match empties an item's localized text, keeping locks and manual translations.
+./internal/catalog TestClearMatchTextDB
+
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
 

@@ -9,10 +9,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// A provider refresh with no translated text keeps stored translations, but
-// clears a provider value that is only a copy of the base item's text, so the
-// field falls back to the base and AI translation can fill it.
-func TestProviderUpsertClearsCopiedBaseTextOnly(t *testing.T) {
+// localizationTestPool opens one connection, so the temp tables a test creates
+// are the ones its repository sees.
+func localizationTestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -27,6 +27,14 @@ func TestProviderUpsertClearsCopiedBaseTextOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	return pool
+}
+
+// A provider refresh with no translated text keeps stored translations, but
+// clears a provider value that is only a copy of the base item's text, so the
+// field falls back to the base and AI translation can fill it.
+func TestProviderUpsertClearsCopiedBaseTextOnly(t *testing.T) {
+	pool := localizationTestPool(t)
 	if _, err := pool.Exec(t.Context(), `
 		CREATE TEMP TABLE media_items (content_id text PRIMARY KEY, overview text, tagline text);
 		CREATE TEMP TABLE media_item_localizations (LIKE public.media_item_localizations INCLUDING DEFAULTS INCLUDING INDEXES);
@@ -76,5 +84,51 @@ func TestProviderUpsertClearsCopiedBaseTextOnly(t *testing.T) {
 	}
 	if got.Overview != "Un résumé." || got.Tagline != "Accroche" || got.OverviewSource != "provider" {
 		t.Errorf("copy after provider text = %+v", got)
+	}
+}
+
+// A correction empties provider and AI text in every language of the corrected
+// item only. A manual translation and a locked field stay, and a cleared AI
+// field goes back to provider provenance, open to the next provider text.
+func TestClearMatchTextDB(t *testing.T) {
+	pool := localizationTestPool(t)
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TEMP TABLE media_item_localizations (LIKE public.media_item_localizations INCLUDING DEFAULTS INCLUDING INDEXES);
+		INSERT INTO media_item_localizations (content_id, language, title, sort_title, overview, tagline, poster_path, poster_thumbhash,
+			backdrop_path, backdrop_thumbhash, logo_path, overview_source, tagline_source)
+		VALUES ('fixed', 'fr', 'Mauvais', 'mauvais', 'Résumé', 'Accroche', 'poster.jpg', '', '', '', '', 'provider', 'ai'),
+		       ('fixed', 'de', 'Falsch', 'falsch', 'Manuell', 'Maschine', 'poster.jpg', '', '', '', '', 'manual', 'ai'),
+		       ('locked', 'fr', 'Mauvais', 'mauvais', 'Résumé', 'Accroche', 'poster.jpg', '', '', '', '', 'provider', 'ai'),
+		       ('other', 'fr', 'Autre', 'autre', 'Résumé', 'Accroche', 'poster.jpg', '', '', '', '', 'provider', 'provider');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewMediaItemLocalizationRepository(pool)
+	if err := repo.ClearMatchText(t.Context(), "fixed", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ClearMatchText(t.Context(), "locked", true, true); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		id, language string
+		want         [6]string
+	}{
+		{"fixed", "fr", [6]string{"", "", "", "provider", "", "provider"}},
+		{"fixed", "de", [6]string{"", "", "Manuell", "manual", "", "provider"}},
+		{"locked", "fr", [6]string{"Mauvais", "mauvais", "Résumé", "provider", "Accroche", "ai"}},
+		{"other", "fr", [6]string{"Autre", "autre", "Résumé", "provider", "Accroche", "provider"}},
+	} {
+		got, err := repo.Get(t.Context(), tc.id, tc.language)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if g := [6]string{got.Title, got.SortTitle, got.Overview, got.OverviewSource, got.Tagline, got.TaglineSource}; g != tc.want {
+			t.Errorf("%s/%s: title/sort/overview/source/tagline/source = %q, want %q", tc.id, tc.language, g, tc.want)
+		}
+		if got.PosterPath != "poster.jpg" {
+			t.Errorf("%s/%s: poster = %q, want it untouched", tc.id, tc.language, got.PosterPath)
+		}
 	}
 }
