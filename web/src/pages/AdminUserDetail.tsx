@@ -232,7 +232,7 @@ function AdminUserDetailPage() {
             <OverviewTab user={account} />
           </TabsContent>
           <TabsContent value="profiles" className="min-w-0">
-            <ProfilesTab user={account} />
+            <ProfilesTab user={account} manageable={manageable} />
           </TabsContent>
           <TabsContent value="access" className="min-w-0">
             <AccessTab

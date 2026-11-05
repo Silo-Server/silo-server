@@ -30,7 +30,11 @@ func TestAdminProfilesRequireAnAdministrator(t *testing.T) {
 // administrator rather than as a household member, so the household-manager
 // check is the one it skips.
 func TestAdminProfilesActOnTheAddressedAccount(t *testing.T) {
-	profiles := &fakeProfiles{view: fixtureProfileView()}
+	// A non-primary profile, so deleting it is allowed; the fake answers
+	// p-primary with the primary-profile 409.
+	view := fixtureProfileView()
+	view.IsPrimary = false
+	profiles := &fakeProfiles{view: view}
 	deps := requestDeps(fixtureRequests())
 	deps.AdminAccounts = fixtureAdminAccounts()
 	deps.Profiles = profiles
@@ -62,6 +66,7 @@ func TestAdminProfilesActOnTheAddressedAccount(t *testing.T) {
 	if c := profiles.lastDelete; c.UserID != 7 || c.ProfileID != "p-owner" || !c.AccountAdmin {
 		t.Fatalf("delete command = %+v", c)
 	}
+	requireProblem(t, do(t, h, http.MethodDelete, adminProfilesBase+"/p-primary", "", actingRequestAdmin), TypeConflict)
 
 	requireProblem(t, do(t, h, http.MethodGet, adminProfilesBase+"/p-elsewhere", "", actingRequestAdmin), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/users/0/profiles/p-owner", "", actingRequestAdmin), TypeValidationFailed)

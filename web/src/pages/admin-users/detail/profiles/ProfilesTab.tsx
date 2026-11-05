@@ -51,11 +51,18 @@ type Editing = { mode: "create" } | { mode: "edit"; id: string };
 /**
  * The account's household profiles, managed by the administrator: add,
  * edit, and delete profiles, and set or remove a profile's PIN (how a
- * forgotten PIN, the primary profile's included, is reset).
+ * forgotten PIN, the primary profile's included, is reset). `manageable` is
+ * the Owner rule the server applies to these writes: only the Owner changes
+ * the Owner's or another admin's profiles; anyone else sees them read-only.
  */
-export function ProfilesTab({ user }: { user: AdminUser }) {
+export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable: boolean }) {
   const capabilities = useAdminUserCapabilities().data;
-  const manage = capabilities?.profile_management === true;
+  const supported = capabilities?.profile_management === true;
+  const manage = manageable && supported;
+  let readOnlyReason: string | null = null;
+  if (!manageable) readOnlyReason = "Only the server owner can change this account's profiles.";
+  else if (capabilities && !supported)
+    readOnlyReason = "This server can't change profiles from the admin page.";
   const profiles = useAdminUserProfileActivity(user.id);
   const liveQuery = useAdminUserLiveSessions(user.id);
   const watching = new Set((liveQuery.data ?? []).map((session) => session.profile_id));
@@ -125,9 +132,9 @@ export function ProfilesTab({ user }: { user: AdminUser }) {
             />
           ))
         )}
-        {capabilities && !manage ? (
+        {readOnlyReason ? (
           <p className="text-muted-foreground border-border/50 border-t px-4 py-3 text-xs sm:px-5">
-            This server can&apos;t change profiles from the admin page.
+            {readOnlyReason}
           </p>
         ) : null}
       </DetailCard>

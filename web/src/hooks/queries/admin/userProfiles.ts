@@ -39,6 +39,9 @@ export function useAdminUserProfile(userId: number, profileId: string | null) {
     },
     enabled: context !== null && Boolean(profileId),
     retry: false,
+    // The editor seeds its form once from this read, so a closed editor
+    // drops it rather than reopening on a cached, possibly stale, profile.
+    gcTime: 0,
   });
 }
 
