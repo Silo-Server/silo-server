@@ -206,6 +206,12 @@ type Dependencies struct {
 	AdminDiagnosticDownloads      AdminDiagnosticDownloadService
 	AdminJobArtifacts             AdminJobArtifactService
 	AdminJobArtifactSigner        *artworkurl.Signer
+	AdminBackups                  AdminBackupService
+	// AdminBackupSigner signs backup object links for destinations that
+	// cannot presign.
+	AdminBackupSigner *artworkurl.Signer
+	// ProfileTransfer exports and imports the acting profile's own data.
+	ProfileTransfer               ProfileTransferService
 	AdminDiagnosticReads          AdminDiagnosticReadsService
 	AdminDashboardInsights        AdminDashboardInsightsService
 	AdminAPIClients               AdminAPIClientsService
@@ -491,6 +497,9 @@ type Dependencies struct {
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
 	bodyReadTimeout time.Duration
+	// uploadPartReadTimeout overrides the backup upload part's read
+	// deadline, for the same reason.
+	uploadPartReadTimeout time.Duration
 	// testRegister registers probe operations; tests only.
 	testRegister func(*Registry)
 }
@@ -1062,13 +1071,15 @@ type PersonalListService interface {
 // RatingService is the slice of *handlers.RatingsHandler the ratings
 // operations use.
 type RatingService interface {
-	// ListRatingsPage answers at most limit of the profile's ratings ordered
-	// by (rated_at DESC, media_item_id DESC) strictly after the key (nil =
-	// from the most recently rated).
-	ListRatingsPage(ctx context.Context, userID int, profileID string, after *mediacatalog.RatingKey, limit int) ([]mediacatalog.UserRating, error)
-	// GetRating answers the profile's rating of the item; found is false
-	// when the profile has not rated it.
-	GetRating(ctx context.Context, userID int, profileID, itemID string) (rating mediacatalog.UserRating, found bool, err error)
+	// ListRatingsPage answers at most limit of the profile's ratings of items
+	// the access filter admits, ordered by (rated_at DESC, media_item_id
+	// DESC) strictly after the key (nil = from the most recently rated). The
+	// store applies the filter, so fewer than limit rows means no more follow.
+	ListRatingsPage(ctx context.Context, userID int, profileID string, access mediacatalog.AccessFilter, after *mediacatalog.RatingKey, limit int) ([]mediacatalog.UserRating, error)
+	// GetRating answers the profile's rating of an item the access filter
+	// admits; found is false when the profile has not rated it, and an item
+	// outside the filter is a 404 error.
+	GetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter) (rating mediacatalog.UserRating, found bool, err error)
 	// SetRating records a validated rating of an item the access filter
 	// admits; an item outside it is a 404 error.
 	SetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter, rating int) error

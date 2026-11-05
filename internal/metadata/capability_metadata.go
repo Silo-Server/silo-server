@@ -8,10 +8,13 @@ package metadata
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -50,6 +53,14 @@ func providerEligibleForFallback(metadataJSON []byte, contentLevel string) bool 
 // lookupCapabilityMetadata returns the raw plugin_capabilities.metadata JSON for
 // a provider's exact metadata_provider.v1 capability, or nil if absent.
 func lookupCapabilityMetadata(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID string) []byte {
+	metadataJSON, _ := lookupCapabilityMetadataChecked(ctx, pool, pluginInstallationID, capabilityID)
+	return metadataJSON
+}
+
+// lookupCapabilityMetadataChecked is lookupCapabilityMetadata that tells a
+// capability with no metadata row (nil, nil: the fallback placement applies)
+// from a query that failed (an error: no placement is known).
+func lookupCapabilityMetadataChecked(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID string) ([]byte, error) {
 	var metadataJSON []byte
 	err := pool.QueryRow(ctx,
 		`SELECT metadata FROM plugin_capabilities
@@ -59,10 +70,13 @@ func lookupCapabilityMetadata(ctx context.Context, pool *pgxpool.Pool, pluginIns
 		pluginInstallationID,
 		capabilityID,
 	).Scan(&metadataJSON)
-	if err != nil {
-		return nil
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
 	}
-	return metadataJSON
+	if err != nil {
+		return nil, fmt.Errorf("reading capability metadata (install=%d, cap=%s): %w", pluginInstallationID, capabilityID, err)
+	}
+	return metadataJSON, nil
 }
 
 // LookupDefaultPriority queries plugin_capabilities for a provider's declared
@@ -289,7 +303,22 @@ type SeedPlacement struct {
 // that enumerates levels is eligible only for the ones it lists; a provider that
 // declares none stays eligible everywhere.
 func LookupSeedPlacement(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID, contentLevel string) SeedPlacement {
-	md := lookupCapabilityMetadata(ctx, pool, pluginInstallationID, capabilityID)
+	return seedPlacementFrom(lookupCapabilityMetadata(ctx, pool, pluginInstallationID, capabilityID), contentLevel)
+}
+
+// LookupSeedPlacementChecked is LookupSeedPlacement that returns a failed
+// metadata query instead of the fallback placement, so a caller never
+// persists a chain computed from a lookup that did not happen. A capability
+// without metadata still gets the fallback.
+func LookupSeedPlacementChecked(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID, contentLevel string) (SeedPlacement, error) {
+	md, err := lookupCapabilityMetadataChecked(ctx, pool, pluginInstallationID, capabilityID)
+	if err != nil {
+		return SeedPlacement{}, err
+	}
+	return seedPlacementFrom(md, contentLevel), nil
+}
+
+func seedPlacementFrom(md []byte, contentLevel string) SeedPlacement {
 	return SeedPlacement{
 		SupportsLevel:   providerSupportsLevel(md, contentLevel),
 		DefaultPriority: extractDefaultPriority(md, contentLevel),

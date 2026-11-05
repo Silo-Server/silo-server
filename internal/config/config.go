@@ -558,6 +558,10 @@ const defaultJellyfinCompatPlaybackSessionTTL = "24h"
 
 // parseDuration parses a duration string that supports Go's time.ParseDuration
 // formats plus a custom "Nd" format for days.
+// ParseDuration reads a duration setting as the server does: a Go duration,
+// or a whole number of days ("30d").
+func ParseDuration(s string) (time.Duration, error) { return parseDuration(s) }
+
 func parseDuration(s string) (time.Duration, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty duration string")

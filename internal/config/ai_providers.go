@@ -47,6 +47,9 @@ const (
 // aiAuthModeChatGPT is the ai.auth_mode that serves text from a ChatGPT plan.
 const aiAuthModeChatGPT = "chatgpt"
 
+// AIAuthModeSettingKey says how this server signs in to its text AI provider.
+const AIAuthModeSettingKey = "ai.auth_mode"
+
 // aiProvidersVersion is the newest legacy conversion PlanAIProviderConversion
 // knows. Version 1 moved the text and speech endpoints into the registry;
 // version 2 moved the recommendation embedding endpoint.
@@ -245,7 +248,7 @@ func ResolveAIEndpoint(values map[string]string, bindingKey string, capability A
 // provider. Keeping the setting when switching providers must not send it to
 // another provider or consume a ChatGPT plan at an API billing tier.
 func ResolveAIServiceTier(values map[string]string) string {
-	if values["ai.auth_mode"] == aiAuthModeChatGPT {
+	if values[AIAuthModeSettingKey] == aiAuthModeChatGPT {
 		return ""
 	}
 	registry, err := ParseAIProviderRegistry(values[AIProvidersSettingKey])
@@ -379,6 +382,17 @@ func (j AIJob) Label() string {
 	return string(j)
 }
 
+// AIConnectionSettingKeys lists every setting that says which AI services
+// this server reaches and how it signs in: the provider registry with its
+// keys, the jobs' bindings, the sign-in mode, and the legacy endpoint
+// settings a conversion (PlanAIProviderConversion) still reads.
+func AIConnectionSettingKeys() []string {
+	keys := append([]string{AIProvidersSettingKey, AIAuthModeSettingKey}, AIProviderBindingKeys()...)
+	return append(keys, legacyAITextURLSetting, legacyAITextKeySetting, legacyAISpeechURLSetting, legacyAISpeechKeySetting,
+		legacySubtitleURLSetting, legacySubtitleKeySetting, legacyEmbeddingURLSetting, legacyEmbeddingTokenSetting,
+		legacyEmbeddingModelSetting, legacyOpenAIEmbeddingModel, legacyOpenAIEmbeddingToken, legacyEmbeddingProviderSetting)
+}
+
 // AIProviderBindingKeys lists the settings that select a provider by id.
 func AIProviderBindingKeys() []string {
 	keys := make([]string, len(aiProviderBindings))
@@ -419,7 +433,7 @@ func AIProviderUsers(values map[string]string, id string) []AIJob {
 		if id == "" || strings.TrimSpace(values[binding.key]) != id {
 			continue
 		}
-		if binding.job == AIJobText && strings.TrimSpace(values["ai.auth_mode"]) == aiAuthModeChatGPT {
+		if binding.job == AIJobText && strings.TrimSpace(values[AIAuthModeSettingKey]) == aiAuthModeChatGPT {
 			continue
 		}
 		users = append(users, binding.job)

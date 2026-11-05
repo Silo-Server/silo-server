@@ -12,6 +12,7 @@
 ./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
+./internal/catalog TestRatingsPageFollowsAccessDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
@@ -140,6 +141,8 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
+./internal/auth TestSignupPolicySerializationDB
+./internal/apiv2 TestSignupCommitPolicyErrorsDB
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
@@ -312,6 +315,7 @@
 ./internal/markers TestProviderConfigEnsureDefaultSharingDB
 ./internal/markers TestProviderConfigPatchKeepsConcurrentOptOutDB
 ./cmd/silo TestStopDefaultMarkerSharingInTxDB
+./cmd/silo TestBackupCommandsReadS3DB
 ./internal/markers TestContributionStoreAmendResubmitsChangedMarkers
 ./internal/markers TestContributionStoreAmendSendsAnUnsentManualCorrection
 ./internal/markers TestContributionStoreAmendSendsManualClears
@@ -825,3 +829,123 @@
 # in_watchlist after the batch read the watchlist first.
 ./internal/userstore/pgstore TestQueueItemViewerStateMatchesSingleReads
 ./internal/api/handlers TestItemDetailViewerStateBatchDB
+
+# Watch-sync admission commits one manual reservation across repository instances.
+./internal/watchsync TestSyncRunAdmissionDB
+
+# Backups: the full restore round trip (needs the PostgreSQL 18 client), the
+# manifest written last and the sweep, the cluster-wide subsystem lock, the
+# published status of the operation holding it, and every table classified
+# for backup and restore. Selective restore: the
+# restore round trip with re-run after interruption, idempotency and digest
+# refusal; plugins never installed from a backup, only reconfigured; restore job fencing;
+# a restored library whose setup partly failed, or whose provider placement
+# could not be read, reports it so it is retried without a fallback chain.
+./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestEncryptedS3RoundTripDB
+./internal/backup TestFullRestoresAreSerializedDB
+./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB
+./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
+./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
+./internal/backup TestBackupWritesManifestLastDB
+./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
+./internal/backup TestLostLockSessionCancelsWorkDB
+./internal/backup TestListReportsThePublishedOperationDB
+./internal/backup TestStatusBelongsToTheOperationHoldingTheLockDB
+./internal/backup TestStatusRecordsTheLastSuccessDB
+./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
+./internal/backup TestEveryTableIsClassifiedDB
+./internal/backup TestSelectiveRestoreDB
+./internal/backup TestRestoreRechecksAccessSettingsUnderTheLockDB
+./internal/backup TestRestoreNeverSendsLiveSecretsToARestoredAddressDB
+./internal/backup TestTemplateCollectionsAndHomeSectionsDB
+./internal/backup TestRestoredLibrarySectionsWaitForTheRestoreDB
+./internal/backup TestManagedSectionPointedElsewhereIsRestoredDB
+./internal/backup TestSelectiveRestoreOnOneConnectionDB
+./internal/backup TestUnverifiedRestoreLeavesCostlyWorkOffDB
+./internal/backup TestRestoreItemWritesDoNotGrowDB
+./internal/backup TestUnverifiedSectionCollectionHasNoScheduleDB
+./internal/backup TestRestoreRefusesCollectionSourcesTheEditorWouldDB
+./internal/backup TestManagedCollectionKeysMapLibrariesDB
+./internal/api/handlers TestRestoredRateLimitsUseTheirWritePathDB
+./internal/backup TestIdentityTwinsRestoreOneToOneDB
+./internal/backup TestLayoutCollectionsMapAcrossServersDB
+./internal/plugins TestRestoreInstallationDB
+./internal/plugins TestRestoreInstallationOnOneConnectionDB
+./internal/adminjob TestBackupRestoreFencingDB
+./internal/adminjob TestRestoreOutcomeRowsLastUntilTheFinalReportDB
+./internal/catalog TestGroupingWaitsForTheEditorDB
+./internal/api/handlers TestLibraryRestoredReportsFailedSetupDB
+./internal/api/handlers TestRestoredLibraryChainNeedsItsProviderLookupDB
+./internal/api/handlers TestRestoredPluginJoinsChainsOnlyFromItsManifestDB
+
+# Users restore: accounts and profiles restored on another server with every
+# data type, access never loosening, existing accounts unchanged, merge rules,
+# target revalidation, and an idempotent re-run; matching with exactly one
+# candidate and the policy comparison per group branch; every per-user table
+# claimed or excluded; profile export and import scoped to the profile and
+# its libraries and maturity limits; an account the restore set cannot carry
+# is reported; history hides keep -infinity and merge each cutoff; a
+# heartbeat during a progress merge wins; collection rules are remapped and
+# never widened; both import entrypoints take account locks before history
+# locks, as profile deletion does, and create and lock every watchlist title
+# before any watchlist row; provider-id matching reads in the importing
+# transaction, so it finishes on a one-connection pool; an expired upload is
+# swept only under the backup lock and kept while a queued restore names it.
+./internal/backup TestUserRestoreDB
+./internal/backup TestUserRestoreSameServerDB
+./internal/backup TestUserMatchingDB
+./internal/backup TestUserTablesCoveredDB
+./internal/backup TestProfileTransferDB
+./internal/backup TestOmittedAccountIsReportedDB
+./internal/backup TestEmailLessAccountRestoreDB
+./internal/backup TestItemMatchingInATransactionWithOnePoolConnectionDB
+./internal/backup TestPluginInstallationMapDB
+./internal/backup TestMatchedAccountPendingDB
+./internal/backup TestFreshBackupComparesSameDB
+./internal/backup TestProfileImportLockOrderDB
+./internal/backup TestRestoreLockOrderDB
+./internal/backup TestProfileImportAndDeleteLockOrderDB
+./internal/backup TestUploadSessionsDB
+./internal/backup TestUploadEncryptedOnABucketDB
+./internal/backup TestUploadLimitAndSweepDB
+./internal/backup TestUploadRejectsHostileArchivesDB
+./internal/backup TestRestoreFromUploadDB
+./internal/backup TestUploadReservesSpaceDB
+./internal/backup TestUploadPartAttemptsDB
+./internal/backup TestUploadCompletionClosesPartsDB
+./internal/backup TestUploadCompletionDeadlineDB
+./internal/backup TestUploadPartWriteDeadlineDB
+./internal/watchlist TestPrepareCreatesAndLocksTitlesDB
+./internal/watchlist TestExportLeavesOutTitlesAboveTheCeilingDB
+./internal/watchstate TestHistoryHideMergeDB
+./internal/watchstate TestProgressMergeKeepsHeartbeatDB
+./internal/watchstate TestPluginSourcedPlaysDB
+./internal/usercollections TestCollectionImportRemapsLibrariesDB
+./internal/usercollections TestCarriedCollectionsMapToTheImportingProfileDB
+
+# Accounts and profile imports: one connection, and statements that do not grow with a document.
+./internal/backup TestAccountsAndImportOnOneConnectionDB
+./internal/backup TestImportsReadInBatchesDB
+./internal/historyimport TestMatchAllAgreesWithMatchDB
+./internal/backup TestCollectionImportKeepsTheProfileQuotaDB
+./internal/backup TestNewAccountNeedsItsPrimaryProfileDB
+
+# Startup migrations: the legacy bootstrap runs before the pending check, a
+# new database migrates with no backup, a failing backup stops startup with
+# nothing migrated, servers queue on the wrapper lock and then find nothing
+# pending, and a lost wrapper or backup lock session cancels the work. The
+# backup before migrations, through the server's wiring, reads a schema from
+# before plugins and every backup table with default settings and a minted
+# identity, holds the database alone, restores, and keeps the backup lock
+# through goose Up. It fails closed, also on a setting it cannot read, and
+# skips only for the listed reasons; waits behind a nightly backup up to its
+# limit; and writes an encrypted dump to a confirmed S3 bucket.
+./internal/database TestStartupMigrationSequenceDB
+./internal/database TestStartupMigrationsSerializeServersDB
+./internal/database TestStartupMigrationsStopWhenALockSessionEndsDB
+./cmd/silo TestBeforeMigrateBackupOnAnOldSchemaDB
+./internal/backup TestBeforeUpgradeFailsClosedOrSkipsDB
+./internal/backup TestBeforeUpgradeWaitsForANightlyBackupDB
+./internal/backup TestBeforeUpgradeDestinationsDB
+./internal/backup TestBeforeUpgradeRetriesDB

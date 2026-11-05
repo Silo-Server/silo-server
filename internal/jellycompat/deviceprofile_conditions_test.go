@@ -401,11 +401,13 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 				HDR10Plus:      true,
 				VideoRangeType: "HDR10Plus",
 			}, "2160p"),
-			codecProfiles:      []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus|HDR10Plus")},
-			wantDirectPlay:     false,
+			codecProfiles:  []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus|HDR10Plus")},
+			wantDirectPlay: false,
+			// An HLS copy still accepts the HDR10 base (hlsRemuxHDR10PlusConditionMatches),
+			// so the video is copied and only the TrueHD audio is encoded.
 			wantDirectStream:   false,
 			wantTranscoding:    true,
-			wantTranscodeAudio: false,
+			wantTranscodeAudio: true,
 		},
 		{
 			name: "audio channel limit preserves video copy and transcodes audio",

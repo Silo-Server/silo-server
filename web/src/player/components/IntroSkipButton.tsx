@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { markerProvenanceLabel } from "@/lib/markerProvenance";
 import type { PlayerMarkerProvenance } from "../types";
@@ -13,6 +13,8 @@ interface IntroSkipButtonProps {
    */
   caption?: string;
   timer?: { durationMs: number; deadlineMs: number | null; remainingMs: number };
+  /** Marks the pill as the intro prompt the player's root key handler acts on. */
+  introPrompt?: boolean;
   controlsVisible?: boolean;
   focusOnMount?: boolean;
   /**
@@ -35,6 +37,7 @@ export function IntroSkipButton({
   label = "Skip Intro",
   caption,
   timer,
+  introPrompt = false,
   controlsVisible = true,
   focusOnMount = false,
   provenance,
@@ -47,6 +50,19 @@ export function IntroSkipButton({
   useEffect(() => {
     if (focusOnMount) buttonRef.current?.focus({ preventScroll: true });
   }, [focusOnMount]);
+
+  // A timed pill that runs out can stay on screen as the untimed offer. It
+  // gives up the focus it held, as it did when it unmounted, so the next Space
+  // reaches play/pause instead of skipping the intro.
+  const timed = timer !== undefined;
+  const wasTimedRef = useRef(timed);
+  useLayoutEffect(() => {
+    const button = buttonRef.current;
+    if (wasTimedRef.current && !timed && button !== null && document.activeElement === button) {
+      button.blur();
+    }
+    wasTimedRef.current = timed;
+  }, [timed]);
 
   useEffect(() => {
     if (timer?.deadlineMs == null) return;
@@ -76,7 +92,7 @@ export function IntroSkipButton({
       ref={buttonRef}
       onClick={onSkip}
       type="button"
-      data-intro-skip-prompt={timer === undefined ? undefined : "true"}
+      data-intro-skip-prompt={introPrompt ? "true" : undefined}
       className="relative min-h-11 overflow-hidden rounded-full border border-white/20 bg-black/75 px-5 py-2.5 text-sm font-semibold text-white shadow-2xl backdrop-blur-md hover:border-white/35 hover:bg-black/85 focus-visible:border-white/55 focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:outline-none active:bg-white/25"
     >
       {progress !== null ? (

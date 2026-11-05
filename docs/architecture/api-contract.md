@@ -1447,7 +1447,14 @@ the unique item id. PostgreSQL keeps full stored timestamp precision in the curs
 orders by the raw `added_at` column so the existing profile/time indexes can supply ordered
 rows; visible API instants remain UTC milliseconds. The v1 offset queries are untouched. `has_more` is
 decided from the raw store rows, so an entry the catalog no longer has or the viewer may not
-see never hides the rows behind it. The v1 handlers call the same seams
+see never hides the rows behind it. Ratings follow the same access rule as the two lists: the
+lists omit items the viewer may not see, `getRating` and v1 `GET /ratings/{item_id}` answer `404`
+for such an item whether or not it was rated, and the stored rating is kept, so it shows again
+once the restriction is lifted. `RatingsRepo.ListPage` applies the viewer's access filter in the page
+query, so the probe row and the cursor row of `listRatings` are always items the viewer may see: a
+cursor payload is signed, not encrypted, and must not name a hidden title. Removing a favorite, watchlist entry or rating runs no access
+check, so a profile can drop an entry for an item that has since left its scope; the answer is
+the same `204` whether or not the entry existed. The v1 handlers call the same seams
 (`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their
 watchlist twins, `RatingsHandler.ListRatings`/`GetRating`/`SetRating`/`DeleteRating`), so both
 surfaces read and write one store. Operation ids: `listFavorites`, `getFavorite`, `addFavorite`,
@@ -2190,9 +2197,12 @@ to 50 entries, default 10, without continuation. Connection and run identifiers 
 strings, and timestamps use the standard UTC instant representation.
 
 Mutation retries remain disabled: device authorization does not claim an exchange
-across API nodes, and manual sync's active-run/cooldown checks and run creation are
-separate calls. A process dispatches the run after creation; this is not a durable
-job-dispatch mechanism. Cooldown problems retain their Retry-After header and the
+across API nodes. Manual sync coalescing, cooldown and reservation now commit under
+the connection row lock, shared with scheduled insertion and terminal updates.
+Scheduled admission skips a live manual reservation within the existing manual
+timeout; scheduled overlap remains unchanged. A process dispatches the run after
+creation, without durable replay. Atomic admission does not guarantee exactly-once
+provider effects, and all API nodes must use the boundary for it to hold. Cooldown problems retain their Retry-After header and the
 web settings page displays the delay. No watch-provider consumers were found in
 the Apple and Android source inventory.
 
