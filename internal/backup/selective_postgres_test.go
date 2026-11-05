@@ -846,7 +846,8 @@ type pagesSeed struct {
 	customized, plain, gone string
 	// featured shows customized on the home page, recent is a library page
 	// section, managed is a home section with the collection it manages,
-	// and layout is another home section.
+	// and layout is another home section. layout and recent are their
+	// page's web-only hero rows.
 	featured, recent, managed, layout string
 	managedCollection                 string
 	items                             []string
@@ -947,6 +948,7 @@ func seedPages(t *testing.T, f *selectiveFixture) pagesSeed {
 	s.recent = page("library", &s.library, "recently_added", "Recent "+s.suffix, `{}`)
 	s.managed = page("home", nil, "collection", "Managed "+s.suffix, `{"library_collection_id":"`+managed.ID+`"}`)
 	s.layout = page("home", nil, "recently_added", "Layout "+s.suffix, `{}`)
+	dbExec(t, pool, `UPDATE page_sections SET featured = true, web_only = true WHERE id = ANY($1)`, []string{s.layout, s.recent})
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM page_sections WHERE title LIKE $1`, "%"+s.suffix)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM library_collections WHERE library_id = $1`, s.library)
@@ -956,7 +958,8 @@ func seedPages(t *testing.T, f *selectiveFixture) pagesSeed {
 
 // losePages deletes the customized template collection with the section
 // that shows it, the managed section with its collection, and the layout
-// section; renames the library page section; and changes
+// section; renames the library page section and turns its web_only off;
+// and changes
 // the plain template collection after the backup: its title (not a change
 // the backup made, so a restore keeps it) and its description back to the
 // template's.
@@ -966,7 +969,7 @@ func (f *selectiveFixture) losePages(t *testing.T, s pagesSeed) {
 		dbExec(t, f.pool, `DELETE FROM page_sections WHERE id = $1`, id)
 	}
 	dbExec(t, f.pool, `DELETE FROM library_collections WHERE id = ANY($1)`, []string{s.customized, s.managedCollection})
-	dbExec(t, f.pool, `UPDATE page_sections SET title = 'Renamed', section_type = 'recently_released' WHERE id = $1`, s.recent)
+	dbExec(t, f.pool, `UPDATE page_sections SET title = 'Renamed', section_type = 'recently_released', web_only = false WHERE id = $1`, s.recent)
 	dbExec(t, f.pool, `UPDATE library_collections SET title = 'Renamed later', description = '' WHERE id = $1`, s.plain)
 	dbExec(t, f.pool, `DELETE FROM library_collection_libraries WHERE collection_id = $1 AND library_id = $2`, s.plain, s.library2)
 }
@@ -986,7 +989,9 @@ func (f *selectiveFixture) losePages(t *testing.T, s pagesSeed) {
 //   - a deleted home section is created with its id and its collection
 //     reference mapped to the recreated collection; a renamed and retyped
 //     library page section is replaced; a managed section comes back with
-//     its collection and items;
+//     its collection and items; a web-only hero row comes back web-only,
+//     whether it was deleted or had web_only turned off (which the preview
+//     lists);
 //   - restoring again changes nothing.
 func TestTemplateCollectionsAndHomeSectionsDB(t *testing.T) {
 	f := newSelectiveFixture(t)
@@ -1404,7 +1409,7 @@ func checkPagesPreview(t *testing.T, p *RestorePreview, s pagesSeed) map[string]
 		!slices.Equal(got.Requires, []string{SectionCollections + ":" + templateCollectionItemID(s.customized)}) {
 		t.Fatalf("section of a lost collection = %+v", got)
 	}
-	if got := previewItem(t, p, SectionHomeSections, homeSectionItemID(s.recent)); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"type", "title"}) {
+	if got := previewItem(t, p, SectionHomeSections, homeSectionItemID(s.recent)); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"type", "title", "web only"}) {
 		t.Fatalf("renamed and retyped library section = %+v %+v", got, got.HomeSection)
 	}
 	return map[string][]string{
@@ -1451,8 +1456,11 @@ func (f *selectiveFixture) checkRestoredPages(t *testing.T, s pagesSeed) string 
 	if err := pool.QueryRow(ctx, `SELECT config::text FROM page_sections WHERE id = $1`, s.featured).Scan(&config); err != nil || sectionCollectionID(json.RawMessage(config)) != id {
 		t.Fatalf("recreated home section config %s (%v), want collection %s", config, err, id)
 	}
-	if n := countRows(t, pool, `SELECT count(*) FROM page_sections WHERE id = $1 AND title = $2 AND section_type = 'recently_added'`, s.recent, "Recent "+s.suffix); n != 1 {
-		t.Fatal("the renamed library section was not replaced")
+	if n := countRows(t, pool, `SELECT count(*) FROM page_sections WHERE id = $1 AND title = $2 AND section_type = 'recently_added' AND featured AND web_only`, s.recent, "Recent "+s.suffix); n != 1 {
+		t.Fatal("the renamed library section was not replaced with its web-only hero row")
+	}
+	if n := countRows(t, pool, `SELECT count(*) FROM page_sections WHERE id = $1 AND featured AND web_only`, s.layout); n != 1 {
+		t.Fatal("the deleted web-only hero row was not created web-only")
 	}
 	var managed string
 	if err := pool.QueryRow(ctx, `SELECT config->>'library_collection_id' FROM page_sections WHERE id = $1`, s.managed).Scan(&managed); err != nil ||

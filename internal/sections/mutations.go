@@ -409,9 +409,9 @@ func insertSectionInTx(ctx context.Context, tx pgx.Tx, s *PageSection) error {
 		}
 		s.ID = id
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO page_sections (id, scope, library_id, position, section_type, title, featured, item_limit, config, enabled, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW(),NOW())`,
-		s.ID, s.Scope, s.LibraryID, s.Position, s.SectionType, s.Title, s.Featured, s.ItemLimit, s.Config, s.Enabled); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO page_sections (id, scope, library_id, position, section_type, title, featured, item_limit, config, enabled, web_only, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW())`,
+		s.ID, s.Scope, s.LibraryID, s.Position, s.SectionType, s.Title, s.Featured, s.ItemLimit, s.Config, s.Enabled, s.WebOnly); err != nil {
 		return fmt.Errorf("creating section: %w", err)
 	}
 	return nil

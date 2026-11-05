@@ -383,6 +383,9 @@ func (p *restoreSetParser) validateHomeSections() error {
 	seen := map[string]bool{}
 	kept := d.Sections[:0]
 	for _, e := range d.Sections {
+		if e.WebOnly && p.index.Version < 4 {
+			return errors.New("a web-only section is not part of this format version")
+		}
 		if validItemSegment(e.ID) && seen[e.ID] {
 			return fmt.Errorf("section %q is listed twice", e.ID)
 		}

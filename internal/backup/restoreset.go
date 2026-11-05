@@ -22,12 +22,13 @@ import (
 //
 // Readers accept every format version up to restoreSetVersion and refuse a
 // newer one with ErrRestoreSetTooNew. Version 3 added the home_sections
-// section and template-bundle collections in collections.json. A reader
+// section and template-bundle collections in collections.json; version 4
+// added a home section's web_only. A reader
 // refuses an unknown section and an unknown field, so any of those is a new
 // version, and an older set never holds them.
 const (
 	restoreSetFormat  = "silo-restore-set"
-	restoreSetVersion = 3
+	restoreSetVersion = 4
 
 	restoreSetIndexName = "restore-set.json"
 	restoreSetBlobDir   = "blobs/"
@@ -315,6 +316,10 @@ type HomeSectionEntry struct {
 	ItemLimit   int             `json:"item_limit"`
 	Config      json.RawMessage `json:"config"`
 	Enabled     bool            `json:"enabled"`
+	// WebOnly keeps the featured row on the web app alone (version 4 and
+	// later); a set of an earlier version has it false, the column's
+	// default.
+	WebOnly bool `json:"web_only,omitempty"`
 	// Collection is the section-managed collection, with its items; nil
 	// for any other section.
 	Collection *SectionCollectionEntry `json:"collection,omitempty"`

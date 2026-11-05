@@ -244,7 +244,8 @@ Kind-specific details:
   type and title, which is `ambiguous` when two of the backup's sections
   share that page, type, and title), and `changes`, what a restore replaces
   in it (`title`, `position`, `featured`, `item limit`, `enabled`,
-  `configuration`, and `N collection items` of the collection it manages). A
+  `web only`, `configuration`, and `N collection items` of the collection it
+  manages). A
   chosen section replaces the configuration of the one here or is created; a
   section that manages a collection brings it.
 

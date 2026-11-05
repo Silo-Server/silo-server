@@ -58,7 +58,7 @@ func testRestoreSet() (RestoreSetIndex, []testEntry) {
 	library := 3
 	homeSections := mustJSON(HomeSectionsDocument{Sections: []HomeSectionEntry{
 		// An untitled section, as bulk section creation stores one.
-		{ID: "s1", Scope: "home", SectionType: "collection", Title: "", ItemLimit: 20, Config: json.RawMessage(`{"library_collection_id":"c1"}`), Enabled: true},
+		{ID: "s1", Scope: "home", SectionType: "collection", Title: "", Featured: true, ItemLimit: 20, Config: json.RawMessage(`{"library_collection_id":"c1"}`), Enabled: true, WebOnly: true},
 		{ID: "s2", Scope: "library", LibraryID: &library, SectionType: "collection", Title: "Picks", ItemLimit: 20, Config: json.RawMessage(`{"library_collection_id":"m1"}`), Enabled: true,
 			Collection: &SectionCollectionEntry{CollectionEntry: CollectionEntry{ID: "m1", LibraryID: 3, Libraries: []CollectionLib{{LibraryID: 3}}, Title: "Picks", Items: []string{"m1"}}, ManagementKey: "s2"}},
 	}})
@@ -727,7 +727,7 @@ func TestReadRestoreSetRefusesANewerFormat(t *testing.T) {
 }
 
 // TestReadRestoreSetReadsEveryFormatVersion: this server reads sets of
-// format 1 to 3. An older set holds none of what a later version added, and
+// format 1 to 4. An older set holds none of what a later version added, and
 // one that claims an older version while holding it is refused, as an older
 // server would refuse it.
 func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
@@ -764,6 +764,20 @@ func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
 		}
 		resyncDigests(index, *entries)
 	}
+	webOnly := func(on bool) func(*RestoreSetIndex, *[]testEntry) {
+		return func(index *RestoreSetIndex, entries *[]testEntry) {
+			for _, e := range *entries {
+				if e.name == homeSectionsDocumentName {
+					var doc HomeSectionsDocument
+					_ = json.Unmarshal(e.data, &doc)
+					for i := range doc.Sections {
+						doc.Sections[i].WebOnly = on
+					}
+					setDocument(index, *entries, homeSectionsDocumentName, mustJSON(doc), len(doc.Sections))
+				}
+			}
+		}
+	}
 	read := func(index RestoreSetIndex, entries []testEntry) error {
 		_, err := ReadRestoreSet(context.Background(), bytes.NewReader(buildTar(t, index, entries)), ReadOptions{})
 		return err
@@ -782,6 +796,8 @@ func TestReadRestoreSetReadsEveryFormatVersion(t *testing.T) {
 			dropSection(i, e, SectionHomeSections)
 			dropTemplates(i, e)
 		}, true},
+		{"version 3 without web-only sections", 3, webOnly(false), true},
+		{"version 3 with a web-only section", 3, webOnly(true), false},
 		{"version 2 with home sections", 2, func(i *RestoreSetIndex, e *[]testEntry) { dropTemplates(i, e) }, false},
 		{"version 2 with template collections", 2, func(i *RestoreSetIndex, e *[]testEntry) { dropSection(i, e, SectionHomeSections) }, false},
 	} {

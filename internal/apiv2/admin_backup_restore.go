@@ -56,7 +56,7 @@ type AdminBackupRestoreHomeSection struct {
 	LibraryID   *ID      `json:"library_id,omitempty" doc:"The library here whose page holds the section"`
 	SectionType string   `json:"section_type"`
 	LocalID     string   `json:"local_id,omitempty" doc:"The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title"`
-	Changes     []string `json:"changes,omitempty" doc:"What a restore replaces in the section here: title, position, featured, item limit, enabled, configuration, and N collection items"`
+	Changes     []string `json:"changes,omitempty" doc:"What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items"`
 }
 
 type AdminBackupRestoreItem struct {

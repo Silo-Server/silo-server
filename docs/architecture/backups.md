@@ -414,9 +414,9 @@ home-sections.json                version 3 and later
 blobs/<object key>
 ```
 
-`restore-set.json` has `format: "silo-restore-set"`, `version` (3: version 3
+`restore-set.json` has `format: "silo-restore-set"`, `version` (4: version 3
 added the home sections section and template collections in
-`collections.json`), the source
+`collections.json`, and version 4 a home section's `web_only`), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -436,8 +436,9 @@ section, and a document field, it does not know, so adding either is a new
 format version: an older reader refuses a newer set as "from a newer Silo"
 instead of failing on what it does not know, and a set that claims an older
 version while holding something added later (`home_sections` or template
-collections before version 3) is refused. Readers
-accept versions 1 to 3; version 3 is always written.
+collections before version 3, a `web_only` section before version 4) is
+refused. A set without `web_only` reads it as false, the column's default.
+Readers accept versions 1 to 4; version 4 is always written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
@@ -778,9 +779,11 @@ id or that another item of the same restore wrote; more than one candidate
 is ambiguous, and so is any candidate when two of the backup's sections
 share that page, type, and title, since the title then identifies neither.
 So two such sections restore as two, and a re-run finds each by its id. A matched section that differs lists what a restore replaces
-(title, position, featured, item limit, enabled, configuration, and missing
-items of its managed collection), and a restore replaces its configuration
-as an admin save would. Only a collection the section manages stands for the
+(title, position, featured, item limit, enabled, web only, configuration,
+and missing items of its managed collection), and a restore replaces its
+configuration as an admin save would. A restore writes `web_only` as the
+backup has it on a featured row, whether it creates or replaces the
+section, so a web-only hero row never comes back on the apps. Only a collection the section manages stands for the
 carried one: a managed section pointed at an ordinary collection since the
 backup lists "collection replaced", whatever that collection holds, and the
 restore points it back at its managed collection (the one still here with

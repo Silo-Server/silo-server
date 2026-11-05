@@ -212,7 +212,7 @@ func (p *planner) planHomeSection(ctx context.Context, e HomeSectionEntry, libMa
 }
 
 func readSection(ctx context.Context, q queryer, where string, args ...any) ([]*sections.PageSection, error) {
-	rows, err := q.Query(ctx, `SELECT id, scope, library_id, position, section_type, title, featured, item_limit, config::text, enabled
+	rows, err := q.Query(ctx, `SELECT id, scope, library_id, position, section_type, title, featured, item_limit, config::text, enabled, web_only
 		FROM page_sections WHERE `+where+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("reading page sections: %w", err)
@@ -223,7 +223,7 @@ func readSection(ctx context.Context, q queryer, where string, args ...any) ([]*
 		var s sections.PageSection
 		var library *int64
 		var config string
-		if err := rows.Scan(&s.ID, &s.Scope, &library, &s.Position, &s.SectionType, &s.Title, &s.Featured, &s.ItemLimit, &config, &s.Enabled); err != nil {
+		if err := rows.Scan(&s.ID, &s.Scope, &library, &s.Position, &s.SectionType, &s.Title, &s.Featured, &s.ItemLimit, &config, &s.Enabled, &s.WebOnly); err != nil {
 			return nil, err
 		}
 		if library != nil {
@@ -257,6 +257,9 @@ func (p *planner) sectionChanges(ctx context.Context, plan sectionPlan, libMap m
 	}
 	if e.Enabled != local.Enabled {
 		changes = append(changes, "enabled")
+	}
+	if e.restoredWebOnly() != local.WebOnly {
+		changes = append(changes, "web only")
 	}
 	collection := sectionCollectionID(local.Config)
 	if e.Collection == nil && sectionCollectionID(e.Config) != "" {
@@ -410,7 +413,7 @@ func (a *applier) writeHomeSection(ctx context.Context, tx pgx.Tx, id string) (a
 		item.Notes = append(item.Notes, note)
 	}
 	section := &sections.PageSection{Scope: e.Scope, LibraryID: plan.library, Position: e.Position, SectionType: sections.SectionType(e.SectionType),
-		Title: e.Title, Featured: e.Featured, ItemLimit: e.ItemLimit, Enabled: enabled}
+		Title: e.Title, Featured: e.Featured, ItemLimit: e.ItemLimit, Enabled: enabled, WebOnly: e.restoredWebOnly()}
 	create := plan.local == nil
 	if create {
 		if section.ID, err = freeSectionID(ctx, tx, e.ID); err != nil {
@@ -465,6 +468,10 @@ func (a *applier) writeHomeSection(ctx context.Context, tx pgx.Tx, id string) (a
 	}
 	return out, nil
 }
+
+// restoredWebOnly is the section's web_only as a restore writes it: only a
+// featured row is web-only, as the section editor keeps it.
+func (e HomeSectionEntry) restoredWebOnly() bool { return e.Featured && e.WebOnly }
 
 // freeSectionID keeps the backup's section id when no section here has it.
 func freeSectionID(ctx context.Context, tx pgx.Tx, id string) (string, error) {

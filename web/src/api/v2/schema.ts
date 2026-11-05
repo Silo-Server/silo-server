@@ -14494,7 +14494,7 @@ export interface components {
       unchanged: number;
     };
     AdminBackupRestoreHomeSection: {
-      /** @description What a restore replaces in the section here: title, position, featured, item limit, enabled, configuration, and N collection items */
+      /** @description What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items */
       changes?: string[];
       /**
        * @description The library here whose page holds the section
