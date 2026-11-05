@@ -106,7 +106,7 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 	rows, err := tx.Query(ctx, `
 		SELECT p.id, coalesce(p.pin_hash, '') <> '', p.is_primary, p.is_child, coalesce(p.max_content_rating, ''), p.max_advisory_age::int,
 			p.require_advisory_age, p.library_restrictions_enabled,
-			coalesce((SELECT array_agg(a.library_id ORDER BY a.library_id) FROM user_profile_allowed_libraries a WHERE a.profile_id = p.id), '{}'),
+			coalesce((SELECT array_agg(a.library_id ORDER BY a.library_id) FROM user_profile_allowed_libraries a WHERE a.user_id = p.user_id AND a.profile_id = p.id), '{}'),
 			coalesce(p.max_playback_quality, '')
 		FROM user_profiles p WHERE p.user_id = $1`, userID)
 	if err != nil {

@@ -122,7 +122,9 @@ export default function AdminBackups() {
   // Before capabilities load, assume the server has its own storage.
   const location: BackupLocation =
     destinations && !destinations.includes("default") ? "none" : "local";
-  const commandBackup = items.find(isFinished);
+  // The command restores without --accept-lost-credentials, so it names the
+  // newest backup this server verified, never an unverified one.
+  const commandBackup = items.find((b) => isFinished(b) && b.status !== "unverified");
   const command = restoreCommand(commandBackup?.location);
   const commandSource: FullRestoreSource = commandBackup ? "folder" : "download";
 
