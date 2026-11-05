@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -95,7 +97,16 @@ func TestPersonalListPageFollowsAccessDB(t *testing.T) {
 			}
 		}
 	}
+	assertPersonalListPagePlans(t, pool, lists, userID, []AccessFilter{{}, {AllowedLibraryIDs: []int{movies}}}, keyOf(movie1))
+}
 
+// assertPersonalListPagePlans checks that each list's profile index, not a
+// full sort, supplies the page order of the visible page query. Sequential
+// scans are disabled only in this transaction because the isolated test
+// rows may be too few to favour an index naturally.
+func assertPersonalListPagePlans(t *testing.T, pool *pgxpool.Pool, lists []PersonalList, userID int, filters []AccessFilter, after *userstore.ListKey) {
+	t.Helper()
+	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -105,8 +116,8 @@ func TestPersonalListPageFollowsAccessDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, list := range lists {
-		for _, filter := range []AccessFilter{{}, {AllowedLibraryIDs: []int{movies}}} {
-			query, args, err := personalListPageSQL(list, userID, "p1", filter, keyOf(movie1), 50)
+		for _, filter := range filters {
+			query, args, err := personalListPageSQL(list, userID, "p1", filter, after, 50)
 			if err != nil {
 				t.Fatal(err)
 			}

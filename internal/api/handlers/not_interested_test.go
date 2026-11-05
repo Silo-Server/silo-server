@@ -307,76 +307,16 @@ func TestPersonalListPagesKeepVisibleEpisodesDB(t *testing.T) {
 
 	prefix := fmt.Sprintf("list-episodes-%d", time.Now().UnixNano())
 	series, episode, movie := prefix+"-series", prefix+"-s1e1", prefix+"-movie"
-	var tv, movies int
-	for _, lib := range []struct {
-		kind string
-		id   *int
-	}{{"series", &tv}, {"movies", &movies}} {
-		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ($1, $2, true) RETURNING id`, lib.kind, prefix+"-"+lib.kind).Scan(lib.id); err != nil {
-			t.Fatalf("seed %s folder: %v", lib.kind, err)
-		}
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM episodes WHERE content_id = $1`, episode)
-		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{series, movie})
-		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{tv, movies})
-	})
-	for _, q := range []struct {
-		sql  string
-		args []any
-	}{
-		{`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'Series'), ($2, 'movie', 'Movie')`, []any{series, movie}},
-		{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2), ($3, $4)`, []any{series, tv, movie, movies}},
-		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, 1, 'Pilot')`, []any{episode, series}},
-	} {
-		if _, err := pool.Exec(ctx, q.sql, q.args...); err != nil {
-			t.Fatalf("seed catalog: %v", err)
-		}
-	}
-
-	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	entries := []string{episode, movie, series} // newest first
-
-	// SQLite user store: the lists are read and checked in batches.
-	db, err := userdb.NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
-	if err != nil {
-		t.Fatalf("open user database: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	for _, table := range []string{"favorites", "watchlist"} {
-		for i, id := range entries {
-			if _, err := db.DB.Exec(`INSERT INTO `+table+` (profile_id, media_item_id, added_at) VALUES ('p1', ?, ?)`,
-				id, start.Add(-time.Duration(i)*time.Minute).Format(time.RFC3339)); err != nil {
-				t.Fatalf("seed %s: %v", table, err)
-			}
-		}
-	}
-
-	// PostgreSQL user store: one query applies the access filter.
-	var pgUser int
-	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, prefix).Scan(&pgUser); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, pgUser) })
-	for _, table := range []string{"user_favorites", "user_watchlist"} {
-		for i, id := range entries {
-			if _, err := pool.Exec(ctx, `INSERT INTO `+table+` (user_id, profile_id, media_item_id, added_at) VALUES ($1, 'p1', $2, $3)`,
-				pgUser, id, start.Add(-time.Duration(i)*time.Minute)); err != nil {
-				t.Fatalf("seed %s: %v", table, err)
-			}
-		}
-	}
-	pgStore, err := pgstore.NewPostgresProvider(pool).ForUser(ctx, pgUser)
-	if err != nil {
-		t.Fatalf("open postgres user store: %v", err)
-	}
+	tv, movies := seedListEpisodeCatalog(t, pool, series, episode, movie)
+	// Newest first, on Favorites and the watchlist of both user stores.
+	sqliteStore, pgUser, pgStore := seedListEntries(t, pool, prefix, []string{episode, movie, series})
 
 	for _, backend := range []struct {
 		name   string
 		userID int
 		store  userstore.UserStore
 	}{
-		{"sqlite", 1, userdb.NewSQLiteUserStore(db.DB)},
+		{"sqlite", 1, sqliteStore},
 		{"postgres", pgUser, pgStore},
 	} {
 		h := NewPersonalDataHandler(testUserStoreProvider{store: backend.store}, catalog.NewItemRepository(pool))
@@ -413,4 +353,79 @@ func TestPersonalListPagesKeepVisibleEpisodesDB(t *testing.T) {
 			}
 		}
 	}
+}
+
+// seedListEpisodeCatalog adds a TV library holding a series with one
+// episode, and a movie library holding a movie, and answers the two library
+// IDs.
+func seedListEpisodeCatalog(t *testing.T, pool *pgxpool.Pool, series, episode, movie string) (tv, movies int) {
+	t.Helper()
+	ctx := context.Background()
+	for _, lib := range []struct {
+		kind string
+		id   *int
+	}{{"series", &tv}, {"movies", &movies}} {
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders (type, name, enabled) VALUES ($1, $2, true) RETURNING id`, lib.kind, series+"-"+lib.kind).Scan(lib.id); err != nil {
+			t.Fatalf("seed %s folder: %v", lib.kind, err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM episodes WHERE content_id = $1`, episode)
+		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{series, movie})
+		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, []int{tv, movies})
+	})
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO media_items (content_id, type, title) VALUES ($1, 'series', 'Series'), ($2, 'movie', 'Movie')`, []any{series, movie}},
+		{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2), ($3, $4)`, []any{series, tv, movie, movies}},
+		{`INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, 1, 1, 'Pilot')`, []any{episode, series}},
+	} {
+		if _, err := pool.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("seed catalog: %v", err)
+		}
+	}
+	return tv, movies
+}
+
+// seedListEntries puts the items, newest first, on profile p1's Favorites
+// and watchlist in a SQLite user store and in the PostgreSQL user store of
+// a new account, and answers both stores and that account's ID.
+func seedListEntries(t *testing.T, pool *pgxpool.Pool, username string, ids []string) (sqliteStore userstore.UserStore, pgUser int, pgStore userstore.UserStore) {
+	t.Helper()
+	ctx := context.Background()
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	db, err := userdb.NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
+	if err != nil {
+		t.Fatalf("open user database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	for _, table := range []string{"favorites", "watchlist"} {
+		for i, id := range ids {
+			if _, err := db.DB.Exec(`INSERT INTO `+table+` (profile_id, media_item_id, added_at) VALUES ('p1', ?, ?)`,
+				id, start.Add(-time.Duration(i)*time.Minute).Format(time.RFC3339)); err != nil {
+				t.Fatalf("seed %s: %v", table, err)
+			}
+		}
+	}
+
+	if err := pool.QueryRow(ctx, `INSERT INTO users (username, role) VALUES ($1, 'user') RETURNING id`, username).Scan(&pgUser); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, pgUser) })
+	for _, table := range []string{"user_favorites", "user_watchlist"} {
+		for i, id := range ids {
+			if _, err := pool.Exec(ctx, `INSERT INTO `+table+` (user_id, profile_id, media_item_id, added_at) VALUES ($1, 'p1', $2, $3)`,
+				pgUser, id, start.Add(-time.Duration(i)*time.Minute)); err != nil {
+				t.Fatalf("seed %s: %v", table, err)
+			}
+		}
+	}
+	pgStore, err = pgstore.NewPostgresProvider(pool).ForUser(ctx, pgUser)
+	if err != nil {
+		t.Fatalf("open postgres user store: %v", err)
+	}
+	return userdb.NewSQLiteUserStore(db.DB), pgUser, pgStore
 }
