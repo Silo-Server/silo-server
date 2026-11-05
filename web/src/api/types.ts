@@ -797,6 +797,12 @@ export interface MediaItemUserState {
   in_watchlist: boolean;
   /** The profile marked the movie or series Not interested. */
   not_interested?: boolean;
+  /**
+   * Episodes watched and episodes left, on a series or season the profile
+   * has not finished. Absent on everything else.
+   */
+  watched_count?: number;
+  unplayed_count?: number;
 }
 
 export interface BrowseItemSortMetrics {
@@ -834,7 +840,7 @@ export interface BoxSetSummary {
 export interface BrowseItem {
   content_id: string;
   play_content_id?: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "box_set";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
   title: string;
   series_id?: string;
   series_title?: string;
@@ -875,8 +881,6 @@ export interface BrowseItem {
   // distinct volumes ("12 Volumes · 3 Chapters").
   manga_chapter_count?: number;
   manga_volume_count?: number;
-  /** Set on a box set card (type box_set) of a group=box_set browse. */
-  box_set?: BoxSetSummary;
 }
 
 export interface BrowseResponse {
@@ -3469,7 +3473,7 @@ export interface Library {
   trickplay_enabled?: boolean;
   /** The server can generate seek-bar previews (public asset storage is configured). Absent from servers without seek previews. */
   trickplay_supported?: boolean;
-  /** Browse movies of one TMDB collection as a box set. Absent from servers without box sets. */
+  /** Gather movies of one TMDB collection into a box set for movie pages and search. Absent from servers without box sets. */
   box_sets_enabled?: boolean;
   /** The fewest of a collection's movies that form a box set. */
   box_set_min_movies?: number;
@@ -3531,6 +3535,10 @@ export interface LibraryMetadataMatchFailureDetail {
     outcome: string;
     candidate_count: number;
     threshold: number;
+    /** The rule behind a candidate_rejected outcome, such as "lone_candidate". */
+    rejection?: string;
+    /** The score that rule required, when the rule is a score bar. */
+    required_score?: number;
     top_candidates?: Array<{
       title: string;
       matched_title?: string;
@@ -4486,7 +4494,7 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
-  /** The library browses a TMDB collection's movies as one box set; browse it with group=box_set. */
+  /** The library gathers a TMDB collection's movies into a box set for movie pages and search. */
   box_sets_enabled?: boolean;
 }
 
@@ -4626,6 +4634,8 @@ export interface PageSectionConfig {
   item_limit: number;
   config: Record<string, unknown>;
   enabled: boolean;
+  /** The hero banner is kept off the apps. Absent from a server that predates it. */
+  web_only?: boolean;
   created_at: string;
   updated_at: string;
 }

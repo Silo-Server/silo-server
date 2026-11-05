@@ -188,6 +188,59 @@ func TestPluginProviderGetMetadata_MapsReleaseDate(t *testing.T) {
 	}
 }
 
+// The home release dates ride the plugin's metadata Struct and decide the day
+// the calendar lists a movie on, so only a real movie date is kept.
+func TestPluginProviderGetMetadata_MapsHomeReleaseDates(t *testing.T) {
+	tests := []struct {
+		name         string
+		contentType  string
+		value        any
+		wantDigital  string
+		wantPhysical string
+	}{
+		{"movie dates", "movie", "2024-03-12", "2024-03-12", "2024-03-12"},
+		{"timestamp is not a date", "movie", "2024-03-12T00:00:00.000Z", "", ""},
+		{"number", "movie", 20240312, "", ""},
+		{"series ignore them", "series", "2024-03-12", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metadata, err := structpb.NewStruct(map[string]any{
+				"digital_release_date":  tt.value,
+				"physical_release_date": tt.value,
+			})
+			if err != nil {
+				t.Fatalf("structpb.NewStruct() error = %v", err)
+			}
+			provider, err := NewPluginProviderWithClientFactory(map[string]string{
+				"plugin_installation_id": "1",
+				"capability_id":          "tmdb",
+			}, func(context.Context, int, string) (pluginMetadataClient, error) {
+				return &fakePluginMetadataClient{
+					response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
+						ItemType: tt.contentType, Title: "Example", Metadata: metadata,
+					}},
+				}, nil
+			})
+			if err != nil {
+				t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+			}
+
+			result, err := provider.GetMetadata(context.Background(), MetadataRequest{
+				ProviderIDs: map[string]string{"tmdb": "123"},
+				ContentType: tt.contentType,
+			})
+			if err != nil || result == nil {
+				t.Fatalf("GetMetadata() = %v, %v", result, err)
+			}
+			if result.DigitalReleaseDate != tt.wantDigital || result.PhysicalReleaseDate != tt.wantPhysical {
+				t.Fatalf("home release dates = (%q, %q), want (%q, %q)",
+					result.DigitalReleaseDate, result.PhysicalReleaseDate, tt.wantDigital, tt.wantPhysical)
+			}
+		})
+	}
+}
+
 func TestPluginProviderGetMetadata_MapsKeywordsFromMetadata(t *testing.T) {
 	metadata, err := structpb.NewStruct(map[string]any{
 		"keywords": []any{"time loop", "heist", "time loop", "", 42},
@@ -523,8 +576,9 @@ func TestPluginProviderGetMetadata_LookupProviderIDsGate(t *testing.T) {
 }
 
 // TestPluginProviderGetImages_IgnoresLookupProviderIDs pins that declared
-// lookup keys open GetMetadata only. Image, season and episode calls address
-// the provider's own catalog and stay gated on its own ID.
+// lookup keys alone open GetMetadata only. Without lookup_images, image,
+// season and episode calls address the provider's own catalog and stay gated
+// on its own ID.
 func TestPluginProviderGetImages_IgnoresLookupProviderIDs(t *testing.T) {
 	client := &fakePluginMetadataClient{imagesResponse: &pluginv1.GetImagesResponse{}}
 	provider, err := NewPluginProviderWithClientFactory(map[string]string{
@@ -547,6 +601,61 @@ func TestPluginProviderGetImages_IgnoresLookupProviderIDs(t *testing.T) {
 	}
 	if images != nil || client.getImagesReq != nil {
 		t.Fatalf("expected no image call, got request %v", client.getImagesReq)
+	}
+}
+
+// TestPluginProviderGetImages_LookupImagesGate covers an artwork source that
+// declared lookup_images: its declared lookup keys open GetImages, as they open
+// GetMetadata.
+func TestPluginProviderGetImages_LookupImagesGate(t *testing.T) {
+	cases := []struct {
+		name           string
+		providerIDs    map[string]string
+		wantCalled     bool
+		wantProviderID string
+	}{
+		{"declared lookup key opens images", map[string]string{"tmdb": "550"}, true, ""},
+		{"own id still wins", map[string]string{"fanarttv": "f-1", "tmdb": "550"}, true, "f-1"},
+		{"declared keys absent", map[string]string{"tvdb": "81189"}, false, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakePluginMetadataClient{imagesResponse: &pluginv1.GetImagesResponse{
+				Images: []*pluginv1.ImageRecord{{Kind: "logo", Url: "https://assets.example.com/logo.png"}},
+			}}
+			provider, err := NewPluginProviderWithClientFactory(map[string]string{
+				pluginInstallationIDSetting: "1",
+				capabilityIDSetting:         "fanarttv",
+			}, func(context.Context, int, string) (pluginMetadataClient, error) {
+				return client, nil
+			})
+			if err != nil {
+				t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+			}
+			provider.lookupProviderIDs = []string{"tmdb", "imdb"}
+			provider.lookupImages = true
+
+			images, err := provider.GetImages(context.Background(), ImageRequest{
+				ProviderIDs: tc.providerIDs,
+				ContentType: "movie",
+			})
+			if err != nil {
+				t.Fatalf("GetImages() error = %v", err)
+			}
+			if !tc.wantCalled {
+				if images != nil || client.getImagesReq != nil {
+					t.Fatalf("expected no image call, got request %v", client.getImagesReq)
+				}
+				return
+			}
+			if client.getImagesReq == nil || len(images) != 1 {
+				t.Fatalf("expected the plugin's image, got request %v and images %+v", client.getImagesReq, images)
+			}
+			if got := client.getImagesReq.GetProviderId(); got != tc.wantProviderID {
+				t.Fatalf("ProviderId = %q, want %q", got, tc.wantProviderID)
+			}
+		})
 	}
 }
 

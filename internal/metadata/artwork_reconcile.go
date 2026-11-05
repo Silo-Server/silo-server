@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
@@ -116,6 +117,9 @@ type ArtworkReconcileStats struct {
 	// re-checked by the sweep — so callers deciding whether the reconcile
 	// fully covered the catalog must look here, not at Errors.
 	SweepErrors int `json:"sweep_errors"`
+	// Unrecovered counts rows kept with a published size missing and no
+	// provider source to make it again: an upload, sidecar, or generated image.
+	Unrecovered int `json:"unrecovered"`
 }
 
 // Artwork reconcile modes are serialized in task result data and checkpoints.
@@ -770,6 +774,73 @@ type headVerdict struct {
 	err     error
 }
 
+// rowVerdict is the storage check of one swept row: missing means its stored
+// key is gone, variantMissing that the key is intact but another size its
+// revision published is not.
+type rowVerdict struct {
+	missing        bool
+	variantMissing bool
+	err            error
+}
+
+// checkRows checks each row's stored key and every other size its revision
+// published. A size deleted outside Silo while the stored key survives is
+// otherwise never found: catalog reads trust the publication manifest.
+func (r *ArtworkCacheReconciler) checkRows(ctx context.Context, batch []sweptRow) ([]rowVerdict, error) {
+	originals := make([]string, len(batch))
+	for i, row := range batch {
+		originals[i] = artworkkey.OriginalOf(row.path)
+	}
+	published := map[string][]string{}
+	rows, err := r.pool.Query(ctx, `SELECT original_path, published_keys FROM artwork_revision_gc_candidates
+        WHERE original_path = ANY($1) AND deleted_at IS NULL AND published_keys IS NOT NULL`, originals)
+	if err != nil {
+		return nil, fmt.Errorf("artwork reconcile: reading publication manifests: %w", err)
+	}
+	for rows.Next() {
+		var original string
+		var keys []string
+		if err := rows.Scan(&original, &keys); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("artwork reconcile: scanning publication manifest: %w", err)
+		}
+		published[original] = keys
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("artwork reconcile: reading publication manifests: %w", err)
+	}
+
+	// Each key is checked once and its verdict goes to the row it belongs to.
+	type probe struct {
+		row    int
+		stored bool
+	}
+	var keys []string
+	var probes []probe
+	for i, row := range batch {
+		keys, probes = append(keys, row.path), append(probes, probe{row: i, stored: true})
+		for _, key := range published[originals[i]] {
+			if key != row.path {
+				keys, probes = append(keys, key), append(probes, probe{row: i})
+			}
+		}
+	}
+	verdicts := make([]rowVerdict, len(batch))
+	for k, head := range r.headKeys(ctx, keys) {
+		v := &verdicts[probes[k].row]
+		switch {
+		case head.err != nil:
+			v.err = head.err
+		case head.missing && probes[k].stored:
+			v.missing = true
+		case head.missing:
+			v.variantMissing = true
+		}
+	}
+	return verdicts, nil
+}
+
 // headKeys HEADs every key with bounded concurrency, preserving order.
 func (r *ArtworkCacheReconciler) headKeys(ctx context.Context, keys []string) []headVerdict {
 	verdicts := make([]headVerdict, len(keys))
@@ -1038,11 +1109,10 @@ func buildSweepBatchQuery(s artworkSweepSurface, cursor []string) (string, []any
 }
 
 func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSweepSurface, batch []sweptRow, stats *ArtworkReconcileStats) error {
-	keys := make([]string, len(batch))
-	for i, row := range batch {
-		keys[i] = row.path
+	verdicts, err := r.checkRows(ctx, batch)
+	if err != nil {
+		return err
 	}
-	verdicts := r.headKeys(ctx, keys)
 
 	pkPredicate := keyEqualityPredicate(s.keyCols)
 	var pgBatch pgx.Batch
@@ -1055,7 +1125,9 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 			stats.SweepErrors++
 			slog.Warn("artwork reconcile: object check failed; leaving row untouched",
 				"surface", s.name, "key", batch[i].path, "error", v.err)
-		case v.missing:
+		case v.missing, v.variantMissing && batch[i].remoteSource:
+			// A provider source can make every size again, so a missing size
+			// resets the row as a missing stored key does.
 			row := batch[i]
 			args := make([]any, 0, len(row.keys)+1)
 			parsedKeys, err := s.parseKeys(row.keys)
@@ -1075,6 +1147,13 @@ func (r *ArtworkCacheReconciler) verifyAndReset(ctx context.Context, s artworkSw
 			pgBatch.Queue(fmt.Sprintf(`UPDATE %s SET %s WHERE %s AND %s = $%d`,
 				s.table, set, pkPredicate, s.pathCol, len(args)), args...)
 			remoteByQueued = append(remoteByQueued, row.remoteSource)
+		case v.variantMissing:
+			// The stored key is intact. Clearing it could lose artwork for
+			// good: an upload has no other copy, and a locked sidecar or
+			// generated image is not made again by a refresh.
+			slog.WarnContext(ctx, "artwork reconcile: cached size missing with no provider source; left in place",
+				"surface", s.name, "key", batch[i].path, "row", strings.Join(batch[i].keys, "/"))
+			stats.Unrecovered++
 		default:
 			stats.Verified++
 		}

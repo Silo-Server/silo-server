@@ -29,17 +29,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
-// ignoredDirNames is the set of directory names skipped during scanning.
+// ignoredDirNames holds the NAS and OS housekeeping directory names skipped
+// during scanning, lower case. Hidden directories are skipped by their dot
+// prefix (SkippedDirName), so none are listed here.
 var ignoredDirNames = map[string]bool{
-	".recyclebin":  true,
 	"@recycle":     true,
 	"@eadir":       true,
-	".trash":       true,
 	"#recycle":     true,
 	"$recycle.bin": true,
-	".deleted":     true,
-	".inbound":     true,
-	".downloads":   true,
 }
 
 // ignoredMovieSupplementalDirNames holds movie-library directory names whose
@@ -499,8 +496,12 @@ func canonicalWalkPath(path string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
-func isIgnoredDirectoryPath(path string) bool {
-	return ignoredDirNames[strings.ToLower(filepath.Base(path))]
+// SkippedDirName reports whether scans skip a directory with this name below
+// a library root, together with everything under it: a hidden (dot-prefixed)
+// directory, as in Jellyfin, or a NAS or OS housekeeping folder. A configured
+// library root is walked whatever its name.
+func SkippedDirName(name string) bool {
+	return strings.HasPrefix(name, ".") || ignoredDirNames[strings.ToLower(name)]
 }
 
 // recordWalkFailure counts an entry the walk could not read or resolve.
@@ -617,9 +618,6 @@ func walkLogicalTree(
 	}
 	visitedPhysicalDirs[canonicalDir] = struct{}{}
 
-	if isIgnoredDirectoryPath(logicalPath) {
-		return nil
-	}
 	if mode == walkModeMovie && shouldSkipMovieSupplementalDir(logicalPath) {
 		return nil
 	}
@@ -669,7 +667,7 @@ func walkLogicalTree(
 			}
 			if targetInfo.IsDir() {
 				// Directory-only patterns apply once the link resolves to a directory.
-				if ignoreRulesMatch(childRules, logicalChild, true) {
+				if SkippedDirName(entry.Name()) || ignoreRulesMatch(childRules, logicalChild, true) {
 					continue
 				}
 				if err := walkLogicalTree(ctx, logicalChild, resolved, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
@@ -685,6 +683,9 @@ func walkLogicalTree(
 		}
 
 		if entry.IsDir() {
+			if SkippedDirName(entry.Name()) {
+				continue
+			}
 			if err := walkLogicalTree(ctx, logicalChild, physicalChild, mode, visitedPhysicalDirs, childRules, filePaths, walkFailures, sidecars, readDir); err != nil {
 				return err
 			}

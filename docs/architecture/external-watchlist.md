@@ -177,7 +177,7 @@ A failure is logged and the read continues; the next read retries.
 | `GET /api/v2/watchlist` and v1 `GET /watchlist` (`PersonalDataHandler.ListWatchlistPage` / `ListWatchlist`) | `PromoteProfile` on the first page only (no cursor, offset 0) |
 | Catalog query with `source: "watchlist"` (`CatalogResolver.resolvePersonalSource`) | `PromoteProfile` |
 | Watchlist section in `internal/sections/fetcher.go` (home rows and the recommendations fetcher) | `PromoteProfile` |
-| Item detail `user_state.in_watchlist` (`CatalogResourceHandler.enrichViewerState`, movies and series) and `GET /api/v2/watchlist/{item_id}` | `PromoteItem` |
+| Item detail `user_state.in_watchlist` (`CatalogResourceHandler.enrichViewerState`, movies and series) and `GET /api/v2/watchlist/{item_id}` | `PromoteItem`. With the PostgreSQL user store, item detail reads its viewer state in one batch (`batchedViewerState`) that also asks whether the profile has any entry (`QueuePromotable`); it calls `PromoteItem` and reads `in_watchlist` again only when there is one. |
 
 Other catalog reads (item lists through `ItemsHandler`, people, jellycompat) do
 not promote. Calling promotion from v1 changes no v1 contract: the arrived item

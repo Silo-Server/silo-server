@@ -143,6 +143,102 @@ it("allocates above the latest sequence another administrator applied", async ()
   expect(fetch).toHaveBeenCalledTimes(2);
 });
 
+it("repeats a command whose outcome is unknown with the same identity, and only that command", async () => {
+  const noReply = {
+    type: "https://siloserver.org/docs/api/v2/problems/dependency_unavailable",
+    title: "Service Unavailable",
+    status: 503,
+    detail: "The server holding this playback session did not answer in time.",
+  };
+  // 503: the replica holding the lane did not answer; 200/202: a receipt.
+  const statuses = [503, 200, 503, 202, 503, 202, 503, 202];
+  const bodies: Array<{ command_id: string; sequence: number }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof globalThis.fetch>().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      const status = statuses.shift()!;
+      return status === 503 ? response(noReply, 503) : response({ ...receipt, ...body }, status);
+    }),
+  );
+  const pause = { sessionId: "s-retry", action: "pause" } as const;
+  const send = (request: Parameters<typeof sendAdminPlaybackCommand>[0]) =>
+    sendAdminPlaybackCommand(request).catch((error: unknown) => error);
+
+  // The owner did not answer: the repeat carries the same identity.
+  await send(pause);
+  await send(pause);
+  expect(bodies[1]).toEqual(bodies[0]);
+
+  // That answer settled it; the next pause is a new command.
+  await send(pause);
+  expect(bodies[2]!.command_id).not.toBe(bodies[0]!.command_id);
+  expect(bodies[2]!.sequence).toBeGreaterThan(bodies[0]!.sequence);
+
+  // A different command for the session is not a repeat of the unknown one.
+  await send({ ...pause, action: "resume" });
+  expect(bodies[3]!.command_id).not.toBe(bodies[2]!.command_id);
+
+  // Nor is the same command under another profile.
+  await send(pause);
+  setProfileId("someone-else");
+  await send(pause);
+  expect(bodies[5]!.command_id).not.toBe(bodies[4]!.command_id);
+
+  // Switching away and back installs the profile's proof again: also a change.
+  await send(pause);
+  setProfileId("owner");
+  setProfileToken(null);
+  setProfileId("someone-else");
+  setProfileToken(null);
+  await send(pause);
+  expect(bodies[7]!.command_id).not.toBe(bodies[6]!.command_id);
+});
+
+it("does not reopen a command that another request already settled", async () => {
+  const noReply = {
+    type: "https://siloserver.org/docs/api/v2/problems/dependency_unavailable",
+    title: "Service Unavailable",
+    status: 503,
+  };
+  const bodies: Array<{ command_id: string; sequence: number }> = [];
+  let answerLate!: () => void;
+  const late = new Promise<void>((resolve) => (answerLate = resolve));
+  const plan = [
+    async () => response(noReply, 503),
+    // Two pages repeat the unknown pause at once: one is answered, then the
+    // other's 503 arrives late.
+    async () => {
+      await late;
+      return response(noReply, 503);
+    },
+    async (body: object) => response({ ...receipt, ...body }, 200),
+    async (body: object) => response({ ...receipt, ...body }, 202),
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof globalThis.fetch>().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body);
+      return plan.shift()!(body);
+    }),
+  );
+  const pause = { sessionId: "s-late", action: "pause" } as const;
+  const send = () => sendAdminPlaybackCommand(pause).catch((error: unknown) => error);
+
+  await send();
+  const lateRepeat = send();
+  await send();
+  answerLate();
+  await lateRepeat;
+  expect(bodies[1]).toEqual(bodies[0]);
+  expect(bodies[2]).toEqual(bodies[0]);
+
+  await send();
+  expect(bodies[3]!.command_id).not.toBe(bodies[0]!.command_id);
+});
+
 it("refuses a superseded authority before and after the request", async () => {
   const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => {
     setProfileId("someone-else");

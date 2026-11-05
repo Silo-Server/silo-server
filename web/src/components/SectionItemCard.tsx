@@ -7,6 +7,7 @@ import MediaCardArtwork, {
 } from "@/components/MediaCardArtwork";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
+import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { overlayDataFromSectionItem, type CardOverlayPrefs } from "@/lib/overlays";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
@@ -74,6 +75,9 @@ export default memo(function SectionItemCard({
             )}
             {item.status === "matched" && overlayPrefs && (
               <CardOverlays data={overlayDataFromSectionItem(item)} prefs={overlayPrefs} />
+            )}
+            {item.status === "matched" && !upcomingEvent && (
+              <CardWatchStatus userState={item.user_state} />
             )}
             {upcomingEvent && upcomingEvent.badges.length > 0 && (
               <div className="absolute top-2.5 left-2.5 flex max-w-[calc(100%-2.5rem)] flex-wrap gap-1">

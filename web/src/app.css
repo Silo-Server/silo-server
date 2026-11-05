@@ -435,7 +435,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .sidebar-surface,
   .sidebar-inner,
   .sidebar-fade,
-  .sidebar-row-shift,
   .sidebar-main-stage,
   .impersonation-banner {
     transition: none;
@@ -1018,14 +1017,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      used to animate `max-width` now just fade; the frame does the hiding. */
   .sidebar-fade {
     transition: opacity var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
-  }
-  .sidebar-row-shift {
-    transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
-  }
-  .sidebar-surface[data-collapsed="true"] .sidebar-row-shift {
-    /* Slides the library rows left by their reserved chevron slot so their
-       icons line up with the rest of the rail's icon column. */
-    transform: translateX(var(--sidebar-row-shift, 0px));
   }
 
   /* ── Sidebar Scrollbar ────────────────────────────────────── */

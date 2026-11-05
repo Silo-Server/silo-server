@@ -85,7 +85,8 @@ func storedArtworkReleaseTestPool(t *testing.T) *pgxpool.Pool {
 		lease_expires_at TIMESTAMPTZ, last_attempt_at TIMESTAMPTZ, last_success_at TIMESTAMPTZ,
 		attempt_count INTEGER NOT NULL DEFAULT 0, last_error TEXT NOT NULL DEFAULT '',
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (target_type, content_id)
-	)`); err != nil {
+	);
+	CREATE TABLE artwork_revision_gc_candidates (LIKE public.artwork_revision_gc_candidates INCLUDING ALL)`); err != nil {
 		t.Fatal(err)
 	}
 	return pool

@@ -445,6 +445,92 @@
       "body_file": "admin_account_ips.json"
     },
     {
+      "name": "admin_account_profile_clear_pin",
+      "operation_id": "updateAdminUserProfile",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/admin/users/7/profiles/p-owner",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"pin\":null}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Profile",
+      "body_file": "admin_account_profile_clear_pin.json"
+    },
+    {
+      "name": "admin_account_profile_create",
+      "operation_id": "createAdminUserProfile",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/users/7/profiles",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"name\":\"Guest\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Profile",
+      "body_file": "admin_account_profile_create.json"
+    },
+    {
+      "name": "admin_account_profile_get",
+      "operation_id": "getAdminUserProfile",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-owner",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Profile",
+      "body_file": "admin_account_profile_get.json"
+    },
+    {
+      "name": "admin_account_profile_not_found",
+      "operation_id": "getAdminUserProfile",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-elsewhere",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_account_profile_not_found.json"
+    },
+    {
       "name": "admin_account_profile_section_settings",
       "operation_id": "getAdminUserProfileSectionSettings",
       "scenario": "Administrator account and group management with synthetic records.",
@@ -6884,6 +6970,23 @@
       "body_file": "get_current_user_ok.json"
     },
     {
+      "name": "get_device_login_bound",
+      "operation_id": "getDeviceLogin",
+      "scenario": "The lookup of a request started with a session binding carries the binding, which a sender compares with the binding of the request whose code the person compared.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/device?code=1357-2468"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLogin",
+      "body_file": "get_device_login_bound.json"
+    },
+    {
       "name": "get_device_login_capability_ok",
       "operation_id": "getDeviceLoginCapability",
       "scenario": "Device pairing support before login.",
@@ -13241,6 +13344,24 @@
       "body_file": "playback_stop_replayed.json"
     },
     {
+      "name": "poll_device_login_binding_mismatch",
+      "operation_id": "pollDeviceLogin",
+      "scenario": "A poll of a bound request without the secret its binding was made from: 403 under the domain's own type, and the request is left as it was.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/poll",
+        "body": "{\"device_code\":\"dev-bound\"}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "poll_device_login_binding_mismatch.json"
+    },
+    {
       "name": "poll_device_login_device_code_required",
       "operation_id": "pollDeviceLogin",
       "scenario": "A poll without its device code is a validation failure naming the member.",
@@ -13915,6 +14036,26 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "rematch_stale_id_permission_denied.json"
+    },
+    {
+      "name": "remove_failed_request_ok",
+      "operation_id": "removeFailedRequest",
+      "scenario": "Profile-scoped lifecycle response with synthetic provider state.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/requests/r-1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
     },
     {
       "name": "remove_history_entries_not_found",

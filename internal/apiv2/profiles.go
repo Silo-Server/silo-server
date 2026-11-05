@@ -697,17 +697,9 @@ func (reg *Registry) createProfile(ctx context.Context, in *ProfileCreateInput) 
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
-		return nil, p
-	}
-	req, p := in.Body.toRequest()
+	req, p := reg.profileCreateRequest(ctx, in.RawBody, in.Body)
 	if p != nil {
 		return nil, p
-	}
-	if len(req.AllowedLibraryIDs) > 0 {
-		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
-			return nil, p
-		}
 	}
 	view, err := reg.deps.Profiles.CreateProfile(ctx, handlers.ProfileCreateCommand{
 		UserID:          claims.UserID,
@@ -723,6 +715,24 @@ func (reg *Registry) createProfile(ctx context.Context, in *ProfileCreateInput) 
 		return nil, p
 	}
 	return &ProfileCreatedOutput{Location: Prefix + "/profiles/" + string(profile.ID), Body: profile}, nil
+}
+
+// profileCreateRequest validates a createProfile body and lowers it onto the
+// service request; createProfile and createAdminUserProfile share it.
+func (reg *Registry) profileCreateRequest(ctx context.Context, raw []byte, body ProfileCreate) (handlers.ProfileCreateRequest, *Problem) {
+	if p := rejectNonNullableNulls(raw, nil); p != nil {
+		return handlers.ProfileCreateRequest{}, p
+	}
+	req, p := body.toRequest()
+	if p != nil {
+		return req, p
+	}
+	if len(req.AllowedLibraryIDs) > 0 {
+		if p := reg.rejectUnknownLibraries(ctx, &req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
+			return req, p
+		}
+	}
+	return req, nil
 }
 
 // toRequest lowers the create body onto the v1 request, where an omitted
@@ -787,14 +797,8 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
 	}
-	if p := rejectNonNullableNulls(in.RawBody, profileUpdateNullable); p != nil {
-		return nil, p
-	}
-	req, p := in.Body.toRequest()
+	req, p := reg.profileUpdateRequest(ctx, in.RawBody, in.Body)
 	if p != nil {
-		return nil, p
-	}
-	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
 		return nil, p
 	}
 	view, err := reg.deps.Profiles.UpdateProfile(ctx, handlers.ProfileUpdateCommand{
@@ -812,6 +816,22 @@ func (reg *Registry) updateProfile(ctx context.Context, in *ProfileUpdateInput) 
 		return nil, p
 	}
 	return &ProfileOutput{Body: profile}, nil
+}
+
+// profileUpdateRequest validates an updateProfile body and lowers it onto the
+// service request; updateProfile and updateAdminUserProfile share it.
+func (reg *Registry) profileUpdateRequest(ctx context.Context, raw []byte, body ProfileUpdate) (handlers.ProfileUpdateRequest, *Problem) {
+	if p := rejectNonNullableNulls(raw, profileUpdateNullable); p != nil {
+		return handlers.ProfileUpdateRequest{}, p
+	}
+	req, p := body.toRequest()
+	if p != nil {
+		return req, p
+	}
+	if p := reg.rejectUnknownLibraries(ctx, req.AllowedLibraryIDs, locationAllowedLibraryIDs); p != nil {
+		return req, p
+	}
+	return req, nil
 }
 
 // rejectUnknownLibraries refuses a library list naming a library that does not

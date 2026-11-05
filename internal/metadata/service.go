@@ -1860,7 +1860,8 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		// rather than fetched and kept, and the providers re-supply the right
 		// ones. A choice that confirms or extends the match keeps them.
 		chosen := canonicalIdentityProviderIDs(req.callerProviderIDs)
-		if stored := storedItemIdentity(existing, req.durableProviderIDs); identityChoiceCorrects(chosen, stored) {
+		req.identityCorrection = identityChoiceCorrects(chosen, storedItemIdentity(existing, req.durableProviderIDs))
+		if req.identityCorrection {
 			for _, key := range trustedSearchIDKeys {
 				if chosen[key] == "" {
 					delete(accumulatedIDs, key)
@@ -1946,6 +1947,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 		wonHints := applyLocalIdentityHints(ctx, localHints, accumulatedIDs, protectedKeys)
 		hinted := canonicalIdentityProviderIDs(wonHints)
 		if req.Mode == ModeManualRefresh && identityChoiceCorrects(hinted, stored) {
+			req.identityCorrection = true
 			// The stored IDs came from the match the corrected NFO overrides,
 			// so any the NFO doesn't restate are dropped, not re-fetched.
 			for _, key := range trustedSearchIDKeys {
@@ -2183,8 +2185,15 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			) {
 				continue
 			}
-			slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
-				"provider", p.Slug(), "error", err)
+			// Only a lookup-key call is enrichment; an outage behind the
+			// provider's own ID still warns.
+			if accumulatedIDs[p.Slug()] == "" && isRoutineEnrichmentError(p, err) {
+				slog.DebugContext(ctx, "metadata: enrichment provider cannot answer now", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			} else {
+				slog.WarnContext(ctx, "metadata: image provider error", "component", "metadata",
+					"provider", p.Slug(), "error", err)
+			}
 			continue
 		}
 		if isIdentityHinter {
@@ -2448,6 +2457,14 @@ func buildMatchDecision(hints *MatchHints, candidates []MatchCandidate, winner *
 		decision.Outcome = MatchOutcomeTrustedIDConflict
 	default:
 		decision.Outcome = MatchOutcomeCandidateRejected
+		// The caller passes the hints and candidates of the attempt it kept,
+		// and the fallbacks after selection (episode or title-alias validation)
+		// only accept, so selecting again names the rule that rejected them.
+		// Outcomes a caller reclassifies afterwards drop the rule when bounded.
+		if _, ok, rejection := selectInitialMatch(hints, candidates, nil); !ok {
+			decision.Rejection = rejection.rule
+			decision.RequiredScore = rejection.requiredScore
+		}
 	}
 
 	scored := make([]MatchCandidate, len(candidates))
@@ -2841,6 +2858,9 @@ func (s *MetadataService) mergeAndPersist(
 
 	suppressProviderIDValues(durableIDs, accumulator.recordedStaleProviderIDs)
 	suppressProviderIDValues(durableIDs, accumulator.sameRunStaleProviderIDs)
+	// The identity the item being written holds, before a correction's
+	// rejected IDs leave it: they are what shows the item is the wrong match.
+	writtenIdentity := storedItemIdentity(existingItem, durableIDs)
 	suppressProviderIDValues(durableIDs, accumulator.rejectedIdentityProviderIDs)
 	if len(durableIDs) > 0 {
 		if accumulator.ProviderIDs == nil {
@@ -2934,6 +2954,15 @@ func (s *MetadataService) mergeAndPersist(
 			MergeMetadata(accumulator, existingResult, mergeLocked, mergeMode)
 		} else {
 			MergeGlobalMetadata(accumulator, existingResult, mergeLocked, mergeMode)
+		}
+		if !req.enrichmentOnly {
+			// One enrichment provider's dates only fill empty ones (above);
+			// the provider chain's current dates are a refresh's to apply. A
+			// correction that merged onto an item already holding the new
+			// identity keeps that item's own dates.
+			corrected := req.identityCorrection && identityChoiceCorrects(
+				canonicalIdentityProviderIDs(accumulator.ProviderIDs), writtenIdentity)
+			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, corrected)
 		}
 		for key := range accumulator.quarantinedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
@@ -9282,6 +9311,12 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 	if item.ReleaseDate != nil {
 		result.ReleaseDate = *item.ReleaseDate
 	}
+	if item.DigitalReleaseDate != nil {
+		result.DigitalReleaseDate = *item.DigitalReleaseDate
+	}
+	if item.PhysicalReleaseDate != nil {
+		result.PhysicalReleaseDate = *item.PhysicalReleaseDate
+	}
 	if item.SeasonCount != nil {
 		result.SeasonCount = *item.SeasonCount
 	}
@@ -9354,6 +9389,12 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	}
 	if r.ReleaseDate != "" {
 		item.ReleaseDate = &r.ReleaseDate
+	}
+	if r.DigitalReleaseDate != "" {
+		item.DigitalReleaseDate = &r.DigitalReleaseDate
+	}
+	if r.PhysicalReleaseDate != "" {
+		item.PhysicalReleaseDate = &r.PhysicalReleaseDate
 	}
 	if r.SeasonCount > 0 {
 		item.SeasonCount = &r.SeasonCount

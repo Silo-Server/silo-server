@@ -1681,6 +1681,10 @@
             "description": "Whether access groups and account policy overrides take max_profiles, the household profile limit; null on an account inherits its group's limit",
             "type": "boolean"
           },
+          "profile_management": {
+            "description": "Whether getAdminUserProfile, createAdminUserProfile, updateAdminUserProfile and deleteAdminUserProfile can read and change an account's profiles, including setting or removing a profile's PIN, and whether listAdminUserProfiles reports has_pin, is_primary and is_child",
+            "type": "boolean"
+          },
           "profile_sections": {
             "description": "Whether listAdminUserProfileSectionOverrides, getAdminUserProfileSectionSettings, replaceAdminUserProfileSectionOverrides and resetAdminUserProfileSectionOverrides can read and change one profile's page layout",
             "type": "boolean"
@@ -1726,6 +1730,7 @@
           "policy_defaults",
           "profile_avatars",
           "profile_sections",
+          "profile_management",
           "revision",
           "state",
           "allowed"
@@ -1936,6 +1941,10 @@
             "format": "uri-reference",
             "type": "string"
           },
+          "has_pin": {
+            "description": "Whether the profile is locked with a PIN",
+            "type": "boolean"
+          },
           "id": {
             "description": "Opaque identifier",
             "examples": [
@@ -1943,6 +1952,13 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "is_child": {
+            "type": "boolean"
+          },
+          "is_primary": {
+            "description": "The household parent (not the server admin role)",
+            "type": "boolean"
           },
           "last_seen_at": {
             "description": "Latest time any device reported this profile; null when no device has",
@@ -1961,6 +1977,9 @@
         "required": [
           "id",
           "name",
+          "has_pin",
+          "is_primary",
+          "is_child",
           "last_seen_at",
           "avatar",
           "avatar_source"
@@ -12674,6 +12693,26 @@
         ],
         "type": "object"
       },
+      "AdminOverlayImageForm": {
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "contentEncoding": "binary",
+            "contentMediaType": "application/octet-stream",
+            "description": "The image: PNG, JPEG or WebP, at most 4 MiB. Silo stores it as WebP no larger than 600x300, keeping transparency.",
+            "format": "binary",
+            "type": "string"
+          },
+          "name": {
+            "description": "Label administrators see when they assign the image to a badge: 1 to 64 characters after trimming. Required.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "type": "object"
+      },
       "AdminPasswordReset": {
         "additionalProperties": false,
         "properties": {
@@ -18125,6 +18164,10 @@
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
+          },
+          "web_only": {
+            "description": "Keeps the section off every client but the web app while it is its page's first featured section, the one the web shows as the banner: a viewer section read then answers it only to a caller whose X-Silo-Client-Family is web. Once another featured section comes first, every client gets it as a regular row. Always false on a section that is not featured.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -18138,6 +18181,7 @@
           "item_limit",
           "config",
           "enabled",
+          "web_only",
           "created_at",
           "updated_at"
         ],
@@ -18244,12 +18288,17 @@
               "unsupported"
             ],
             "type": "string"
+          },
+          "web_only": {
+            "description": "Admin sections accept and answer web_only, and viewer section reads honor it",
+            "type": "boolean"
           }
         },
         "required": [
           "available",
           "reset_profiles",
           "preview",
+          "web_only",
           "revision",
           "state",
           "allowed"
@@ -18306,6 +18355,10 @@
           "title": {
             "maxLength": 500,
             "type": "string"
+          },
+          "web_only": {
+            "description": "Keep the featured section off every client but the web app; ignored unless featured is true. Send it only when getAdminSectionCapabilities reports web_only",
+            "type": "boolean"
           }
         },
         "required": [
@@ -18494,6 +18547,10 @@
             "maxLength": 500,
             "minLength": 1,
             "type": "string"
+          },
+          "web_only": {
+            "description": "Keep the featured section off every client but the web app. Absent keeps the saved value, except that an update making the section featured saves false; a section that is not featured after the update always saves false. Send it only when getAdminSectionCapabilities reports web_only",
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -23896,7 +23953,7 @@
             "type": "string"
           },
           "badges": {
-            "description": "series_premiere, season_premiere, finale; empty, never null",
+            "description": "series_premiere, season_premiere, finale; on a movie, digital or physical: the home release it is listed on. Empty, never null",
             "items": {
               "type": "string"
             },
@@ -24539,10 +24596,6 @@
             },
             "type": "array"
           },
-          "box_set": {
-            "$ref": "#/components/schemas/CatalogBoxSet",
-            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
-          },
           "content_id": {
             "description": "Deterministic catalog identifier",
             "examples": [
@@ -24763,7 +24816,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
             "examples": [
               "movie"
             ],
@@ -24915,10 +24968,6 @@
             "description": "Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork",
             "format": "uri-reference",
             "type": "string"
-          },
-          "box_set": {
-            "$ref": "#/components/schemas/CatalogBoxSet",
-            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
           },
           "cast": {
             "description": "Empty, never null",
@@ -25315,7 +25364,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
             "examples": [
               "movie"
             ],
@@ -25510,7 +25559,7 @@
             "type": "string"
           },
           "badges": {
-            "description": "Empty, never null",
+            "description": "The calendar event's badges: series_premiere, season_premiere, finale; on a movie, digital or physical. Empty, never null",
             "items": {
               "type": "string"
             },
@@ -25569,6 +25618,22 @@
               false
             ],
             "type": "boolean"
+          },
+          "unplayed_count": {
+            "description": "Available episodes the profile has not watched; present on a series or season the profile has not finished",
+            "examples": [
+              6
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "watched_count": {
+            "description": "Episodes the profile has watched; present on a series or season the profile has not finished",
+            "examples": [
+              4
+            ],
+            "format": "int64",
+            "type": "integer"
           }
         },
         "required": [
@@ -25674,13 +25739,6 @@
       "CatalogLettersQuery": {
         "additionalProperties": false,
         "properties": {
-          "group": {
-            "description": "Count the list a group=box_set browse pages, with each box set counted once under its first title",
-            "enum": [
-              "box_set"
-            ],
-            "type": "string"
-          },
           "groups": {
             "description": "Rule groups, as on queryCatalogItems; empty matches everything",
             "items": {
@@ -25732,10 +25790,8 @@
             "type": "string"
           },
           "group": {
-            "description": "As the listCatalogItems group parameter",
             "enum": [
-              "work",
-              "box_set"
+              "work"
             ],
             "type": "string"
           },
@@ -25970,7 +26026,7 @@
             "type": "boolean"
           },
           "box_sets": {
-            "description": "listCatalogItems, queryCatalogItems, and queryCatalogLetters accept group=box_set, and searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on",
+            "description": "searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on",
             "type": "boolean"
           },
           "extended_query_rules": {
@@ -29155,6 +29211,13 @@
       "DeviceLogin": {
         "additionalProperties": false,
         "properties": {
+          "binding": {
+            "description": "The session binding the device started the request with; absent for an unbound request. An approver that compared one request's code can approve later requests carrying the same binding without comparing again",
+            "examples": [
+              "Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU"
+            ],
+            "type": "string"
+          },
           "client_purpose": {
             "description": "Purpose the request was opened with: device_login, remote_playback, or jellyfin_quick_connect for a Jellyfin app signing in with Quick Connect, which is approved for a profile through approve-handoff",
             "examples": [
@@ -29342,6 +29405,13 @@
             "description": "Opaque revision of this document",
             "type": "string"
           },
+          "session_binding": {
+            "description": "Whether startDeviceLogin accepts binding, getDeviceLogin reports it, and pollDeviceLogin requires the matching binding_secret for a bound request",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -29359,6 +29429,7 @@
           "protocol_versions",
           "cancel",
           "opened_signal",
+          "session_binding",
           "revision",
           "state"
         ],
@@ -32721,6 +32792,10 @@
           "rating_restrictions_enforced": {
             "type": "boolean"
           },
+          "remove_failed_supported": {
+            "description": "Whether removeFailedRequest is available: a requester can delete their own failed request that delivered nothing.",
+            "type": "boolean"
+          },
           "requests_enabled": {
             "type": "boolean"
           },
@@ -32760,6 +32835,7 @@
           "watchlist_titles_supported",
           "watchlist_requests",
           "discover_rows_supported",
+          "remove_failed_supported",
           "revision",
           "state",
           "allowed"
@@ -33134,10 +33210,6 @@
             },
             "type": "array"
           },
-          "box_set": {
-            "$ref": "#/components/schemas/CatalogBoxSet",
-            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
-          },
           "content_id": {
             "description": "Deterministic catalog identifier",
             "examples": [
@@ -33358,7 +33430,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
             "examples": [
               "movie"
             ],
@@ -34727,7 +34799,7 @@
             "type": "integer"
           },
           "box_sets_enabled": {
-            "description": "Browse the movies TMDB lists in one collection (a franchise such as Harry Potter) as one box set; movie and mixed libraries only",
+            "description": "Gather the movies TMDB lists in one collection (a franchise such as Harry Potter) into a box set, shown on movie pages and, when box_sets_in_search is true, in search; library browse still lists each movie. Movie and mixed libraries only",
             "examples": [
               false
             ],
@@ -34908,7 +34980,7 @@
             "type": "boolean"
           },
           "box_sets": {
-            "description": "This build supports the per-library box set settings (box_sets_enabled, box_set_min_movies, box_sets_in_search), group=box_set on the catalog, and the box set reads",
+            "description": "This build supports the per-library box set settings (box_sets_enabled, box_set_min_movies, box_sets_in_search) and the box set reads",
             "examples": [
               true
             ],
@@ -40220,6 +40292,20 @@
             ],
             "type": "boolean"
           },
+          "image_uploads_available": {
+            "description": "Whether this server has the asset storage uploadAdminOverlayImage needs",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "images": {
+            "description": "Images administrators uploaded for badges, in upload order; card overlay documents name them by ref",
+            "items": {
+              "$ref": "#/components/schemas/OverlayImage"
+            },
+            "type": "array"
+          },
           "quick_actions_default": {
             "description": "Default quick-action mode; one of the ui.card_quick_actions values in the settings contract",
             "examples": [
@@ -40238,7 +40324,60 @@
         "required": [
           "enabled",
           "quick_actions_enabled",
-          "quick_actions_default"
+          "quick_actions_default",
+          "images",
+          "image_uploads_available"
+        ],
+        "type": "object"
+      },
+      "OverlayImage": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "description": "Stored height in pixels",
+            "examples": [
+              120
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "description": "Administrator's label for the image",
+            "examples": [
+              "4K Dolby Vision"
+            ],
+            "type": "string"
+          },
+          "ref": {
+            "description": "Content reference card overlay documents use; it changes exactly when the stored bytes change",
+            "examples": [
+              "9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "description": "Public, immutable path of the image bytes",
+            "examples": [
+              "/api/v2/overlay-images/9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp"
+            ],
+            "format": "uri-reference",
+            "type": "string"
+          },
+          "width": {
+            "description": "Stored width in pixels",
+            "examples": [
+              300
+            ],
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ref",
+          "name",
+          "url",
+          "width",
+          "height"
         ],
         "type": "object"
       },
@@ -43831,6 +43970,14 @@
       "PollDeviceLoginInputBody": {
         "additionalProperties": false,
         "properties": {
+          "binding_secret": {
+            "description": "For a request started with binding: the secret, as base64url without padding, whose SHA-256 is the binding. Required on every poll of a bound request; ignored otherwise",
+            "examples": [
+              "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          },
           "device_code": {
             "description": "The device code from startDeviceLogin",
             "examples": [
@@ -48433,6 +48580,13 @@
               true
             ],
             "type": "boolean"
+          },
+          "supports_overlay_images": {
+            "description": "Whether this server keeps a card overlay image library: getOverlayConfig lists it and card overlay documents may name its images",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
@@ -48446,6 +48600,7 @@
           "supports_idempotent_writes",
           "supports_atomic_shortcuts",
           "supports_device_rename",
+          "supports_overlay_images",
           "revision",
           "state",
           "allowed"
@@ -49038,6 +49193,14 @@
       "StartDeviceLoginInputBody": {
         "additionalProperties": false,
         "properties": {
+          "binding": {
+            "description": "Session binding: base64url without padding of SHA-256 of a 32-byte secret the device keeps. getDeviceLogin shows it to the approver, and every poll of the request must send the secret as binding_secret. Omit for an unbound request; an empty string is malformed like any other value",
+            "examples": [
+              "Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU"
+            ],
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
           "client_purpose": {
             "description": "Pairing purpose; defaults to device_login. remote_playback requires temporary=true and is approved through approve-handoff",
             "enum": [
@@ -51656,7 +51819,7 @@
         "additionalProperties": false,
         "properties": {
           "box_sets_enabled": {
-            "description": "The library browses movies of one TMDB collection as a box set; request group=box_set when browsing it",
+            "description": "The library gathers movies of one TMDB collection into a box set, which movie pages and, when box_sets_in_search is true, search show; browsing lists each movie",
             "examples": [
               false
             ],
@@ -54299,10 +54462,6 @@
             },
             "type": "array"
           },
-          "box_set": {
-            "$ref": "#/components/schemas/CatalogBoxSet",
-            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
-          },
           "cast": {
             "description": "Up to four cast members; empty, never null",
             "items": {
@@ -54530,7 +54689,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
             "examples": [
               "movie"
             ],
@@ -54702,10 +54861,6 @@
               "type": "string"
             },
             "type": "array"
-          },
-          "box_set": {
-            "$ref": "#/components/schemas/CatalogBoxSet",
-            "description": "The box set a box_set card stands for; open it with getCatalogBoxSet"
           },
           "content_id": {
             "description": "Deterministic catalog identifier",
@@ -54927,7 +55082,7 @@
             "type": "string"
           },
           "type": {
-            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode, or box_set for a box set card of a group=box_set browse",
+            "description": "movie, series, season, episode, audiobook, ebook, podcast, podcast_episode",
             "examples": [
               "movie"
             ],
@@ -93677,7 +93832,7 @@
             }
           },
           {
-            "description": "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin.",
+            "description": "An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket.",
             "in": "header",
             "name": "Origin",
             "schema": {
@@ -100104,6 +100259,366 @@
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/overlay-images": {
+      "post": {
+        "operationId": "uploadAdminOverlayImage",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "encoding": {
+                "file": {
+                  "contentType": "image/png,image/jpeg,image/webp"
+                },
+                "name": {
+                  "contentType": "text/plain"
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/AdminOverlayImageForm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverlayImage"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Add an image to the card overlay image library. The image is re-encoded and addressed by its content: uploading the same image again keeps one entry and renames it. No automatic retry: a delayed retry can restore an image deleted in between.",
+        "tags": [
+          "admin-settings"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/overlay-images/{ref}": {
+      "delete": {
+        "operationId": "deleteAdminOverlayImage",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Content reference of the image",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "Content reference of the image",
+              "examples": [
+                "9f2c4e7a1b3d5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f7.webp"
+              ],
+              "pattern": "^[0-9a-f]{64}\\.webp$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove an image from the card overlay image library and delete its bytes. Badges that name it fall back to their own rendering.",
+        "tags": [
+          "admin-settings"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
     },
@@ -109143,7 +109658,7 @@
     },
     "/api/v2/admin/recommendations/embeddings/reset": {
       "post": {
-        "description": "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while saved embedding settings wait for a server restart. Run the embedding job afterwards to build the new embedding space.",
+        "description": "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while a saved embedding model or base URL waits for a server restart. Run the embedding job afterwards to build the new embedding space.",
         "operationId": "resetAdminRecommendationEmbeddings",
         "parameters": [
           {
@@ -132513,6 +133028,790 @@
         ],
         "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
+      },
+      "post": {
+        "description": "Takes the createProfile body. A household already at the account's profile limit, or a name another profile on the account uses, is 409 conflict. The first profile on an account becomes its primary profile. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise): a primary profile's PIN guards that account's admin access.",
+        "operationId": "createAdminUserProfile",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The account",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The account",
+              "examples": [
+                "7"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "description": "The created profile's resource path",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a profile on an account.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/users/{id}/profiles/{profile_id}": {
+      "delete": {
+        "description": "Removes the profile and its per-profile data, as deleteProfile does. The primary profile cannot be deleted (409 conflict); delete the account instead. 404 not_found when the profile does not belong to the account. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise): a primary profile's PIN guards that account's admin access.",
+        "operationId": "deleteAdminUserProfile",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The account",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The account",
+              "examples": [
+                "7"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "A profile of the account",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "description": "A profile of the account",
+              "examples": [
+                "p-owner"
+              ],
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete one profile of an account.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      },
+      "get": {
+        "description": "The profile as listProfiles reports it to its own household. 404 not_found when the profile does not belong to the account.",
+        "operationId": "getAdminUserProfile",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The account",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The account",
+              "examples": [
+                "7"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "A profile of the account",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "description": "A profile of the account",
+              "examples": [
+                "p-owner"
+              ],
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get one profile of an account.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      },
+      "patch": {
+        "description": "Takes the updateProfile body, every member included. \"pin\": null removes the profile's PIN and a new value replaces it; either ends the profile tokens issued for the old PIN and clears its wrong-attempt lockout. A name another profile on the account uses is 409 conflict. 404 not_found when the profile does not belong to the account. Only the server Owner may change the Owner's or another admin account's profiles (403 permission_denied otherwise): a primary profile's PIN guards that account's admin access.",
+        "operationId": "updateAdminUserProfile",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The account",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "The account",
+              "examples": [
+                "7"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "A profile of the account",
+            "in": "path",
+            "name": "profile_id",
+            "required": true,
+            "schema": {
+              "description": "A profile of the account",
+              "examples": [
+                "p-owner"
+              ],
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update one profile of an account; omitted members are unchanged.",
+        "tags": [
+          "admin-users"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
       }
     },
     "/api/v2/admin/users/{id}/profiles/{profile_id}/sections": {
@@ -137077,7 +138376,47 @@
     },
     "/api/v2/auth/device/poll": {
       "post": {
+        "description": "A request started with binding is polled only with its binding_secret: a poll without it, or with another secret, is 403 device_binding_mismatch and leaves the request unchanged.",
         "operationId": "pollDeviceLogin",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -137108,6 +138447,16 @@
               }
             },
             "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {
@@ -137581,6 +138930,45 @@
     "/api/v2/auth/login": {
       "post": {
         "operationId": "login",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -137839,6 +139227,43 @@
         "description": "For a network provider (mode network in listAuthProviders), such as the Tailscale network access plugin: the provider's network already knows who owns the device a request came from, so there is no password and no browser. Only a request that arrived through that provider's own network address can sign in; listAuthProviders lists the provider, with the owner's name, only to such a request. The provider's plugin is asked who the device belongs to, and the answer goes through the same account resolution as other providers: a linked account signs in, an unknown person gets a new account while the binding's account creation is on, and the provider may set the account's role. The session is re-checked with the provider like other provider sessions. Send an empty JSON object as the body. Refusals, by problem type: 403 network_identity_required (the request did not come through that provider's network); 403 not_permitted (the provider refuses this device, for example a tagged device or one its policy leaves out, or the account's OIDC or LDAP provider refuses the account); 403 account_required; 403 permission_denied (the account is disabled); 409 email_in_use or identity_linked_elsewhere; 404 not_found (not an enabled network provider); 429 rate_limited; 503 provider_unavailable. Spends the login rate-limit budget.",
         "operationId": "signInWithNetworkIdentity",
         "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
           {
             "description": "The network provider's plugin installation, as listAuthProviders shows it",
             "in": "path",
@@ -138144,6 +139569,43 @@
         "description": "A code is valid for 60 seconds and redeems once. The login session opens at redemption, so a code that is never redeemed leaves no session. Redeeming a used code again revokes the session its redemption opened. A native code needs the code_verifier of its S256 challenge. A web code takes none and redeems only in the browser the callback answered, which holds the silo_oauth_complete cookie, so a code passed to another browser cannot sign that browser in.",
         "operationId": "completeOAuthLogin",
         "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
           {
             "description": "Completion cookie the callback set in the browser it sent to the web completion page (HttpOnly, path-scoped to this operation, two minutes). The browser sends it by itself; a web code redeemed without it, or with another browser's, is 400 invalid_grant and stays redeemable. Native codes ignore it",
             "in": "cookie",
@@ -139573,6 +141035,45 @@
     "/api/v2/auth/setup": {
       "post": {
         "operationId": "setupServer",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -139778,6 +141279,45 @@
       },
       "post": {
         "operationId": "signup",
+        "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -142512,15 +144052,14 @@
             }
           },
           {
-            "description": "group=work collapses editions of one book into one card. group=box_set, on a source=query browse of one library with box sets on and no search text, collapses the movies of each TMDB collection into one box_set card; elsewhere it returns the ordinary list",
+            "description": "group=work collapses editions of one book into one card",
             "explode": false,
             "in": "query",
             "name": "group",
             "schema": {
-              "description": "group=work collapses editions of one book into one card. group=box_set, on a source=query browse of one library with box sets on and no search text, collapses the movies of each TMDB collection into one box_set card; elsewhere it returns the ordinary list",
+              "description": "group=work collapses editions of one book into one card",
               "enum": [
-                "work",
-                "box_set"
+                "work"
               ],
               "type": "string"
             }
@@ -167974,7 +169513,7 @@
             }
           },
           {
-            "description": "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin.",
+            "description": "An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket.",
             "in": "header",
             "name": "Origin",
             "schema": {
@@ -171688,6 +173227,18 @@
               "minimum": 1,
               "type": "integer"
             }
+          },
+          {
+            "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+            "in": "header",
+            "name": "X-Silo-Client-Family",
+            "schema": {
+              "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+              "examples": [
+                "tv"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -171945,6 +173496,18 @@
               "maximum": 7680,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+            "in": "header",
+            "name": "X-Silo-Client-Family",
+            "schema": {
+              "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+              "examples": [
+                "tv"
+              ],
+              "type": "string"
             }
           }
         ],
@@ -172217,6 +173780,18 @@
               "maximum": 7680,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+            "in": "header",
+            "name": "X-Silo-Client-Family",
+            "schema": {
+              "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+              "examples": [
+                "tv"
+              ],
+              "type": "string"
             }
           }
         ],
@@ -172806,6 +174381,43 @@
       "post": {
         "operationId": "acceptInvitation",
         "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "token",
@@ -179152,6 +180764,18 @@
               "minLength": 1,
               "type": "string"
             }
+          },
+          {
+            "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+            "in": "header",
+            "name": "X-Silo-Client-Family",
+            "schema": {
+              "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+              "examples": [
+                "tv"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -179424,6 +181048,18 @@
               "minimum": 1,
               "type": "integer"
             }
+          },
+          {
+            "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+            "in": "header",
+            "name": "X-Silo-Client-Family",
+            "schema": {
+              "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+              "examples": [
+                "tv"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -179693,6 +181329,18 @@
               "maximum": 7680,
               "minimum": 1,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+            "in": "header",
+            "name": "X-Silo-Client-Family",
+            "schema": {
+              "description": "The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404",
+              "examples": [
+                "tv"
+              ],
+              "type": "string"
             }
           }
         ],
@@ -189390,6 +191038,217 @@
         "x-silo-class": "public"
       }
     },
+    "/api/v2/overlay-images/{ref}": {
+      "get": {
+        "operationId": "getOverlayImage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}\\.webp$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/webp": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Image bytes (no body for HEAD)",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Image unchanged",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted image"
+          },
+          "500": {
+            "description": "Image could not be read"
+          },
+          "503": {
+            "description": "Overlay images are not available on this server"
+          }
+        },
+        "summary": "Read a card overlay image. The ref addresses the content, so a response never changes.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "overlay-image",
+        "x-silo-raw-reason": "Image bytes and HEAD/conditional HTTP semantics bypass JSON encoding.",
+        "x-silo-service-backed": true
+      },
+      "head": {
+        "operationId": "headOverlayImage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "pattern": "^[0-9a-f]{64}\\.webp$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Image bytes (no body for HEAD)",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Image unchanged",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Length": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Security-Policy": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Content-Type-Options": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or deleted image"
+          },
+          "500": {
+            "description": "Image could not be read"
+          },
+          "503": {
+            "description": "Overlay images are not available on this server"
+          }
+        },
+        "summary": "Read a card overlay image. The ref addresses the content, so a response never changes.",
+        "tags": [
+          "settings"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "overlay-image",
+        "x-silo-raw-reason": "Image bytes and HEAD/conditional HTTP semantics bypass JSON encoding.",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/password-resets": {
       "post": {
         "operationId": "requestPasswordReset",
@@ -189626,6 +191485,43 @@
       "post": {
         "operationId": "completePasswordReset",
         "parameters": [
+          {
+            "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+            "in": "header",
+            "name": "X-Silo-Device-Id",
+            "schema": {
+              "description": "The client's stable device identifier, recorded on the login session this sign-in opens",
+              "examples": [
+                "8d2f6a4e-3c1b-4e5f-9a7d-0b1c2d3e4f50"
+              ],
+              "maxLength": 128,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional device name recorded on the login session (first 120 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Name",
+            "schema": {
+              "description": "Optional device name recorded on the login session (first 120 characters)",
+              "examples": [
+                "Living Room Apple TV"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional platform recorded on the login session (first 40 characters)",
+            "in": "header",
+            "name": "X-Silo-Device-Platform",
+            "schema": {
+              "description": "Optional platform recorded on the login session (first 40 characters)",
+              "examples": [
+                "tvOS"
+              ],
+              "type": "string"
+            }
+          },
           {
             "in": "path",
             "name": "token",
@@ -191135,7 +193031,7 @@
             }
           },
           {
-            "description": "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin.",
+            "description": "An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket.",
             "in": "header",
             "name": "Origin",
             "schema": {
@@ -203756,6 +205652,166 @@
       }
     },
     "/api/v2/requests/{id}": {
+      "delete": {
+        "operationId": "removeFailedRequest",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete an accessible failed request that delivered nothing. Answers 409 when the request is no longer failed (an admin retried it, or the library completed it) or delivered a copy before failing.",
+        "tags": [
+          "requests"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      },
       "get": {
         "operationId": "getRequest",
         "parameters": [
@@ -223664,7 +225720,7 @@
             }
           },
           {
-            "description": "Browser origin must match the configured public origin, the request origin, or a connected network access overlay origin.",
+            "description": "An http or https origin must match the configured public origin, the request origin, or a connected network access overlay origin. An absent, opaque (null), or non-web scheme origin, as packaged apps send, is accepted; the ticket still authorizes the socket.",
             "in": "header",
             "name": "Origin",
             "schema": {
@@ -234141,6 +236197,9 @@
           "artifact_id": {
             "pattern": "^[A-Za-z0-9_-]{1,128}$",
             "type": "string"
+          },
+          "audio_only": {
+            "type": "boolean"
           },
           "audio_recipe_version": {
             "type": "string"

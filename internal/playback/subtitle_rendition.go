@@ -917,7 +917,7 @@ func CopyHLSVideoRange(transfer, videoBitstreamFilter, videoSampleEntry string) 
 	case tonemap.ColorTransferHLG:
 		return HLSVideoRangeHLG
 	case "", ffprobeUnknownTransfer, "unspecified", "reserved":
-		if videoBitstreamFilter == DV7ToHDR10BitstreamFilter || videoSampleEntry == VideoSampleEntryDVH1 {
+		if videoBitstreamFilter == DV7ToHDR10BitstreamFilter || videoBitstreamFilter == DV7ToDV81BitstreamFilter || videoSampleEntry == VideoSampleEntryDVH1 {
 			return HLSVideoRangePQ
 		}
 	}

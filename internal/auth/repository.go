@@ -282,8 +282,20 @@ func UserInTransaction(ctx context.Context, tx pgx.Tx, id int) (*models.User, er
 func userByID(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, id int) (*models.User, error) {
-	return scanUser(db.QueryRow(ctx, `SELECT `+allColumns+` FROM users WHERE id=$1`, id))
+	return scanUser(db.QueryRow(ctx, userByIDQuery, id))
 }
+
+// QueueUser queues GetByID's read on batch. The returned function reads the
+// result from the sent batch, in the order the batch's reads were queued, with
+// GetByID's answer: ErrNotFound for a missing account.
+func QueueUser(batch *pgx.Batch, id int) func(pgx.BatchResults) (*models.User, error) {
+	batch.Queue(userByIDQuery, id)
+	return func(results pgx.BatchResults) (*models.User, error) {
+		return scanUser(results.QueryRow())
+	}
+}
+
+const userByIDQuery = `SELECT ` + allColumns + ` FROM users WHERE id=$1`
 
 // GetByUsername retrieves a user by their username (case-insensitive).
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*models.User, error) {

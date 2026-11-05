@@ -13,6 +13,17 @@ the top level or inside the SDK's `metadata` envelope; the top level wins.
   `["imdb", "tmdb"]`. The host calls `GetMetadata` when the item carries any of
   them, even without an ID of the provider's own. In that case `provider_id` is
   empty and the plugin reads `provider_ids`.
+- `lookup_images` is `true` for an artwork source, such as fanart.tv, that has
+  no IDs of its own. It needs `lookup_provider_ids`: the host then also calls
+  `GetImages` by those keys, for an item's artwork and for a season's gallery
+  in the season image picker. Refreshes still take season posters from
+  `GetSeasons`, which, like `GetEpisodes`, runs only on the provider's own ID.
+  Without `lookup_images`, `GetImages` runs only on the provider's own ID too,
+  so a ratings source such as MDBList is never asked for artwork. The provider
+  is still called for `GetMetadata` and should answer with no item rather than
+  an error. Its images compete like any provider's: within each language tier
+  the first provider in chain order wins, so ranked below the primary provider
+  it still fills slots and languages the primary has no image for.
 - `bulk_lookup_limit` is a positive integer: how many concurrent `GetMetadata`
   calls the provider combines into one upstream request. Declaring it opts the
   provider into the bulk enrichment pass below. Values above 200 are capped at
@@ -36,8 +47,11 @@ During matches and refreshes the host treats a provider error as a warning and
 continues with the other providers. From an enrichment-only provider, the
 provider-wide statuses above (`RESOURCE_EXHAUSTED`, `UNAVAILABLE`,
 `FAILED_PRECONDITION`, `UNAUTHENTICATED`, `PERMISSION_DENIED`) are logged at
-debug level instead. A small daily quota runs out routinely, so the plugin
-should log when it stops answering, and the host does not log once per item.
+debug level instead, from `GetMetadata` and, for a `lookup_images` provider,
+from a refresh's `GetImages` by lookup key. An image error behind the
+provider's own ID still warns. A small daily quota runs out routinely, so the
+plugin should log when it stops answering, and the host does not log once per
+item.
 
 ## Bulk enrichment pass
 

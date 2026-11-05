@@ -58,6 +58,7 @@ type InvitationTokenInput struct {
 	Token string `path:"token" minLength:"1" maxLength:"128"`
 }
 type InvitationAcceptInput struct {
+	SignInDeviceHeaders
 	Token     string `path:"token" minLength:"1" maxLength:"128"`
 	UserAgent string `header:"User-Agent"`
 	Body      struct {

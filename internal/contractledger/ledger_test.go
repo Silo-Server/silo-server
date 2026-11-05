@@ -977,6 +977,8 @@ var mutationWithoutLegacyRow = map[string]string{
 	"resetApplePushInstallation":               "V2-only owner reset of an Apple push installation (v1 is frozen). A retry is safe: the caller sends its current installation key, and an installation already bound to that key is left alone.",
 	"retireApplePushInstallation":              "V2-only session-less Apple push retirement (v1 is frozen). It is ordered by the installation generation: an exact replay of the newest retirement answers removed without writing, and an older one conflicts.",
 	"updateDevice":                             "V2-only rename of a profile's device entry (v1 is frozen): it sets or clears custom_name on one registry row, so a replay converges on the same name.",
+	"uploadAdminOverlayImage":                  "V2-only upload into the card overlay image library (v1 is frozen). The image is addressed by its content, so a replay keeps one entry, but a delayed retry restores an image deleted in between and renames it back, so clients never retry it automatically.",
+	"deleteAdminOverlayImage":                  "V2-only removal of a card overlay image (v1 is frozen). The ref names the content, so a replay converges on the image being absent and answers 404.",
 	"startAdminChatGPTLogin":                   "V2-only administrator ChatGPT sign-in: each request supersedes the pending attempt and creates fresh PKCE, state and nonce values, so an uncertain result must not be replayed automatically.",
 	"completeAdminChatGPTLogin":                "V2-only administrator ChatGPT sign-in completion: it consumes a single-use authorization code and pending attempt, so a replay is refused without exchanging the code twice.",
 	"selectAdminChatGPTAccount":                "V2-only administrator ChatGPT account selection: it changes the active account and cancels a pending sign-in, so replaying it after intervening account activity must not happen automatically.",
@@ -1022,6 +1024,7 @@ var mutationWithoutLegacyRow = map[string]string{
 	"queryCatalogLetters":                      "V2-only read-only letter index for an alphabetical jump bar (POST for the rule-group body, like queryCatalogItems). It counts titles and writes nothing, so a replay returns the same answer.",
 	"followRequestMedia":                       "V2-only title follow (Requests acceptance AC1/AC5): v1 had no way to follow a title someone else requested. The follow row is keyed by title and profile, so a replay converges on the same follow.",
 	"unfollowRequestMedia":                     "V2-only title unfollow, the inverse of followRequestMedia. Deleting an absent follow is a no-op, so a replay converges on no follow.",
+	"removeFailedRequest":                      "V2-only removal of the requester's own failed request (issue #3427): v1 cancel refuses failed requests. A replay finds the row gone and answers 404, so it is non-retryable.",
 	"clearResumePosition":                      "V2-only resume position reset (issue #2134; v1 is frozen). It sets the position to 0 and keeps watched state and history, so a delayed replay would also clear a position recorded after the first request; it is non-retryable like unmark.",
 	"addWatchlistTitle":                        "V2-only watchlist entry for a title the library doesn't have: v1 had no such entries. The entry is keyed by title and profile, but the add can also create or follow a request, so it is non-retryable.",
 	"deleteWatchlistTitle":                     "V2-only removal of a watchlist title entry, the inverse of addWatchlistTitle. An absent entry succeeds, but the removal can cancel a watchlist-made request, so it is non-retryable.",
@@ -1063,6 +1066,9 @@ var mutationWithoutLegacyRow = map[string]string{
 
 	"replaceAdminUserProfileSectionOverrides": "V2-only administrator edit of one profile's page layout: v1 could only change the caller's own profile. It runs the same full-replacement write as replaceProfileSectionOverrides, which is non-retryable because a save can start a trending refresh.",
 	"resetAdminUserProfileSectionOverrides":   "V2-only administrator reset of one profile's page layout: v1 reset only the caller's own profile or every profile at once. It runs the same delete as resetProfileSectionOverrides and is non-retryable like it.",
+	"createAdminUserProfile":                  "V2-only administrator creation of a profile on any account: v1 created profiles only on the caller's own household. It runs the same create as createProfile, which is non-retryable because a retry after a lost response makes a second profile or answers 409.",
+	"updateAdminUserProfile":                  "V2-only administrator edit of any account's profile, including setting or removing its PIN: v1 edited profiles only on the caller's own household. It runs the same write as updateProfile and is non-retryable like it: a retried PIN advances the profile's PIN revision again.",
+	"deleteAdminUserProfile":                  "V2-only administrator deletion of any account's profile: v1 deleted profiles only on the caller's own household. It runs the same delete as deleteProfile and is non-retryable like the other admin profile writes; a repeat answers 404.",
 }
 
 // retrySafetyMismatches compares every operation the v2 registry declares

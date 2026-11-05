@@ -47,7 +47,6 @@
 # Movie box sets: grouping by viewer access and the minimum, grouped browse
 # and letters, search, sync bookkeeping, and collection artwork.
 ./internal/catalog TestBoxSetGroupsDB
-./internal/catalog TestBoxSetGroupedBrowseDB
 ./internal/catalog TestBoxSetSearchAndSyncDB
 ./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
 ./internal/catalog TestMovieBoxSetDB
@@ -58,6 +57,9 @@
 
 # A finished regular episode does not push a half-watched special off Continue Watching.
 ./internal/catalog TestSupersededSpecialsNeedALaterSpecialPostgres
+
+# A failed play-target read returns its error and the pool reuses its connection.
+./internal/catalog TestPlayableTargetQueryFailureKeepsConnection
 
 # Series air-date sort keys advance when a known episode airs. The latest
 # available episode air date counts only episodes with a file in a library:
@@ -83,6 +85,10 @@
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB
+
+# Web-only hero rows: the web_only column keeps a page's hero banner off every
+# caller but the web on Home and library pages, and clears with the hero.
+./internal/api/handlers TestWebOnlyHeroRowsDB
 
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
@@ -253,6 +259,7 @@
 # A storage reconcile's bulk reset keeps an uploaded image whose object
 # survived; nothing could fetch it again.
 ./internal/metadata TestArtworkReconcileBulkResetVerifiesUploadsDB
+./internal/metadata TestArtworkReconcileFindsMissingPublishedSizeDB
 
 # The artwork ladder backfill finds cached artwork that predates the current
 # ladder, on every surface its image type is cached for.
@@ -277,8 +284,8 @@
 ./internal/catalog TestRefreshKeepsArtworkOnARowCreatedAndPublishedMeanwhileDB
 
 # Artwork publication, deletion locks and corrected metadata identity.
-./internal/metadata TestArtworkDeliveryPublicationAndReconciliation
-./internal/metadata TestArtworkPublicationSelectsPublishedRungWithoutExternalDelivery
+./internal/metadata TestArtworkPublicationSelectsWidestPublishedRungDB
+./internal/metadata TestArtworkPublicationLifecycleDB
 ./internal/metadata TestArtworkRevisionGCSerializesDeletionWithRetracking
 ./internal/metadata TestArtworkRevisionGCExpandsTriggerManifestFromImageType
 ./internal/metadata TestArtworkRevisionGCBatchRechecksClaimedState
@@ -352,6 +359,7 @@
 
 # Request cleanup, prepared downloads and user-store transactions.
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
+./internal/requests TestDeleteFailedRequestDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
@@ -373,6 +381,7 @@
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult
 ./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
 ./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
 ./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves
@@ -386,6 +395,7 @@
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
+./internal/userstore/pgstore TestPostgresItemUserFlagsMatchesPerTableReads
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
@@ -402,6 +412,12 @@
 # Login sessions record the device that signed in.
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
+
+# A bound device sign-in is collected only with its secret, on this release
+# and, through the schema, on an older one; one TV signs in to two accounts.
+./internal/auth TestDeviceLoginSessionBindingDB
+./internal/auth TestDeviceLoginCopiedBindingDB
+./internal/auth TestDeviceLoginTwoAccountsOneDeviceDB
 
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsFinishedPlayback
@@ -452,6 +468,9 @@
 
 # The Postgres auto-tuning restart warning lists only settings a restart would change.
 ./internal/database TestPostgresSettingsPendingRestartPostgres
+
+# The omnibus image's startup tuning file holds exactly the restart-only settings it can size.
+./internal/database TestPostgresStartupSettingsMatchServerPostgres
 
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
@@ -564,7 +583,7 @@
 ./internal/recommendations TestTasteProfileSubjectsReadTheSQLiteStorePostgres
 ./internal/recommendations TestTasteProfileSubjectsSkipDeletedProfilesPostgres
 ./internal/recommendations TestTasteSeedCandidatesHonourAccessPostgres
-./internal/recommendations TestWatchedItemIDSetQueryMatchesStoreWalkPostgres
+./internal/recommendations TestProgressReadsMatchStoreWalkPostgres
 ./internal/sections TestRecommendationSectionsFillFromTheWholePoolPostgres
 ./internal/webhooksync TestWebhookEventsReportSignalChangesPostgres
 ./migrations TestPurgeOrphanedRecommendationRowsPostgres
@@ -592,6 +611,7 @@
 ./internal/recommendations TestRelevanceRubricLeakagePostgres
 ./internal/recommendations TestRelevanceRubricNewProfileGetsRowsPostgres
 ./internal/recommendations TestRelevanceRubricProfilesOnOneAccountDifferPostgres
+./internal/recommendations TestSimilarItemsValidateEveryCandidatePostgres
 ./internal/recommendations TestTasteProfileSummaryGenresComeFromTheClustersPostgres
 ./internal/recommendations TestTasteSeedPickerInterleavesGenresPostgres
 ./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres
@@ -688,6 +708,11 @@
 # The household profile limit holds under concurrent creates (issue #2423).
 ./internal/api/handlers TestCreateProfileLimitConcurrentDB
 
+# A scan request for a scope with an active run joins that run without a
+# duplicate-key ERROR, and queues a new run if that one finished meanwhile
+# (issue #3441).
+./internal/scanqueue TestCreateOnClaimedScopeJoinsTheActiveRunDB
+
 # A scan cut short by shutdown goes back to the queue with its owed follow-up;
 # an admin cancel still ends it cancelled, and a late requeue never takes back
 # another worker's claim.
@@ -701,6 +726,9 @@
 # again, and a stale worker never heartbeats or ends another worker's claim.
 ./internal/scanqueue TestRunningScanStopsWhenItsClaimEndsElsewhereDB
 ./internal/scanqueue TestStaleWorkerLeavesALaterClaimRunningDB
+
+# A run requeued as stale drops the abandoned attempt's progress.
+./internal/scanqueue TestStaleRequeueClearsTheAbandonedProgressDB
 
 # Password sign-in spends one attempt budget per name on every surface.
 ./internal/auth TestSignInNameBudgetDB
@@ -771,6 +799,20 @@
 # collection posters alone: neither checks them against storage nor clears them.
 ./internal/metadata TestArtworkReconcileSkipsBundledPostersDB
 
+# The calendar lists a movie once, on its earliest digital or physical release
+# and never on its theatrical date, and the item round-trips both dates.
+./internal/catalog TestCalendarMovieHomeReleaseDB
+
 # Local artwork in a title folder linked out of the library is vouched for by
 # present cataloged files of the same title under that folder.
 ./internal/catalog TestCatalogedFilesUnderListsPresentFilesOfTheTitleDB
+
+# Theme lookup reads only the folders that hold themes, and an item whose
+# versions span folders still finds the themes of the one that has them.
+./internal/themesongs TestResolveFindsThemesInOneOfAnItemsFoldersDB
+
+# Item detail reads the viewer's per-item state in one batch: each part equals
+# its single-item read, and a promotable watchlist title still reports
+# in_watchlist after the batch read the watchlist first.
+./internal/userstore/pgstore TestQueueItemViewerStateMatchesSingleReads
+./internal/api/handlers TestItemDetailViewerStateBatchDB

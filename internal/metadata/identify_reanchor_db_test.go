@@ -11,7 +11,9 @@ import (
 )
 
 // Corrected NFO matches preserve a surviving destination's own IDs while
-// removing rejected source IDs after a merge or rename.
+// removing rejected source IDs after a merge or rename. Home release dates
+// follow the same rule: a merge keeps the destination's own, and a rename
+// drops the wrong match's when the corrected movie has none.
 func TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
@@ -46,11 +48,12 @@ func TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs(t *testing.T) {
 			t.Cleanup(func() {
 				_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, []string{from, to})
 			})
-			seed := func(id, tmdb, imdb string, durableOnly bool) {
+			seed := func(id, tmdb, imdb string, durableOnly bool, homeRelease string) {
 				t.Helper()
 				item := &models.MediaItem{
 					ContentID: id, Type: "movie", Title: "Rematch fixture", Status: "matched",
 					TmdbID: tmdb, ImdbID: imdb, DefaultMetadataLanguage: "en",
+					DigitalReleaseDate: &homeRelease, PhysicalReleaseDate: &homeRelease,
 					Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
 				}
 				if durableOnly {
@@ -67,7 +70,7 @@ func TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			seed(from, wrongTMDB, wrongIMDb, tc.sourceDurableOnly)
+			seed(from, wrongTMDB, wrongIMDb, tc.sourceDurableOnly, "2001-01-01")
 			if tc.sourceIMDbDiffers {
 				if err := providerIDs.ReplaceByContentID(ctx, from, map[string]string{
 					"tmdb": wrongTMDB, "imdb": fmt.Sprintf("tt6%08d", nonce),
@@ -79,8 +82,11 @@ func TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs(t *testing.T) {
 			if tc.targetHasIMDb {
 				wantIMDb = rightIMDb
 			}
+			var wantHomeRelease *string
 			if tc.targetExists {
-				seed(to, rightTMDB, wantIMDb, tc.durableOnlyIMDb)
+				destinationRelease := "2002-02-02"
+				seed(to, rightTMDB, wantIMDb, tc.durableOnlyIMDb, destinationRelease)
+				wantHomeRelease = &destinationRelease
 			}
 			nfo := &localHintStubProvider{
 				hints:    map[string]string{"tmdb": rightTMDB},
@@ -104,6 +110,17 @@ func TestManualRefresh_CorrectedNFOReanchorKeepsDestinationIDs(t *testing.T) {
 			}
 			if item.TmdbID != rightTMDB || item.ImdbID != wantIMDb {
 				t.Errorf("destination columns = tmdb:%q imdb:%q, want %q and %q", item.TmdbID, item.ImdbID, rightTMDB, wantIMDb)
+			}
+			dateOrNone := func(date *string) string {
+				if date == nil {
+					return "none"
+				}
+				return *date
+			}
+			for name, got := range map[string]*string{"digital": item.DigitalReleaseDate, "physical": item.PhysicalReleaseDate} {
+				if dateOrNone(got) != dateOrNone(wantHomeRelease) {
+					t.Errorf("destination %s release = %s, want %s", name, dateOrNone(got), dateOrNone(wantHomeRelease))
+				}
 			}
 			rows, err := providerIDs.GetByContentID(ctx, to)
 			if err != nil {

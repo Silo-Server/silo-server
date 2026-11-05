@@ -46,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type {
@@ -475,7 +476,7 @@ export default function WebhookSyncSettings() {
 
   async function copyText(text: string) {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       toast.success("Copied to clipboard");
     } catch {
       toast.error("Failed to copy to clipboard");

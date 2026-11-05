@@ -64,6 +64,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/overlays"
 	"github.com/Silo-Server/silo-server/internal/passwordreset"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/playback/connectionstore"
@@ -110,10 +111,10 @@ var _ apiv2.AdminRequestUsageService = (*mediarequests.Service)(nil)
 
 // Dependencies holds all shared dependencies that handlers need.
 // ArtworkDelivery describes how clients read artwork. External is true only
-// when reads go through a separately configured public or token endpoint that
-// can lag behind a storage write; that is the one case the delivery verifier
-// and the per-response published-variant lookup exist for. Scope changes when
-// the delivery configuration does, invalidating earlier verification.
+// when reads go through a separately configured public or token endpoint, the
+// one case seek-preview sheets confirm before clients read them there (see
+// internal/trickplay). Scope changes when the delivery configuration does,
+// invalidating earlier confirmations.
 type ArtworkDelivery struct {
 	Scope    string
 	External bool
@@ -157,6 +158,7 @@ type Dependencies struct {
 	}
 	S3Private         *s3client.Client              // private internal bucket client (may be nil)
 	BrandingService   *branding.Service             // white-label branding (nil when DB unavailable)
+	OverlayImages     *overlays.ImageLibrary        // card overlay image library (nil when DB unavailable)
 	EmailBrand        *mail.BrandLoader             // server branding for outgoing email (nil sends Silo's default)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
@@ -350,6 +352,13 @@ type Dependencies struct {
 	// its own port (internal/lantls), published in the connections document.
 	// Empty when the listener does not answer TLS (tests).
 	LocalTLSPin string
+
+	// PlaybackControlRedisClient records playback control lane ownership. Its
+	// sockets honor context deadlines (cache.NewDeadlineRedisClientForRole),
+	// so a stalled Redis cannot hold an administrator request or the
+	// ownership worker past the relay's one-second bound. Without it there is
+	// no control relay (may be nil).
+	PlaybackControlRedisClient *redis.Client
 }
 
 // absHandler is the narrow interface the router needs from the ABS handler.
@@ -728,7 +737,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		authMiddleware = apimw.NewAuthMiddleware(jwtService, sessionRepo, apiKeyRepo, userRepo)
 		if deps.UserStoreProvider != nil {
 			if deps.PolicySystem != nil {
-				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
+				viewerResolver = policy.NewViewerResolver(userRepo, deps.UserStoreProvider, profileTokenService, deps.PolicySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults).WithSharedTables(deps.DB)
 			} else {
 				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
 				viewerResolver = access.NewResolver(userRepo, deps.UserStoreProvider, profileTokenService, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
@@ -1645,6 +1654,30 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
+		// Administrator commands run on the replica holding the session's
+		// control lane; the relay forwards them there over Redis.
+		if relay := playback.NewControlRelay(realtimeHub, deps.PlaybackControlRedisClient); relay != nil && deps.EventBus != nil {
+			publish := func(ctx context.Context, payload string) error {
+				// The relay's own client, so a stalled Redis cannot hold the
+				// publish past the reply timeout.
+				return cache.PublishEvent(ctx, deps.PlaybackControlRedisClient, cache.ChannelPlaybackControl, cache.Event{Type: cache.EventPlaybackControlRelay, Payload: payload})
+			}
+			subscribe := func(ctx context.Context, handler func(string)) error {
+				return deps.EventBus.Subscribe(ctx, cache.ChannelPlaybackControl, func(event cache.Event) {
+					if event.Type == cache.EventPlaybackControlRelay {
+						handler(event.Payload)
+					}
+				})
+			}
+			relayCtx := deps.AppContext
+			if relayCtx == nil {
+				relayCtx = context.Background()
+			}
+			adminPlaybackControlHandler.UseControlRelay(relay)
+			if err := relay.Start(relayCtx, publish, subscribe); err != nil {
+				slog.Warn("playback control relay unavailable; retrying subscription; administrator commands reach only sessions on this replica", "component", "api", "error", err)
+			}
+		}
 
 		if deps.DB != nil && deps.FileRepo != nil && viewerResolver != nil && deps.Config != nil && detailSvc != nil {
 			roomTokenService := watchtogether.NewRoomTokenService(deps.Config.Auth.JWTSecret, 24*time.Hour)
@@ -2657,6 +2690,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.BrandingService != nil {
 		v2deps.Branding = deps.BrandingService
+	}
+	if deps.OverlayImages != nil {
+		v2deps.OverlayImages = deps.OverlayImages
 	}
 
 	if inviteCodeRepo != nil {
