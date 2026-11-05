@@ -140,6 +140,8 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
+./internal/auth TestSignupPolicySerializationDB
+./internal/apiv2 TestSignupCommitPolicyErrorsDB
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
