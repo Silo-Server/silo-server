@@ -13,18 +13,25 @@ import (
 // search, item detail, playback and the profile's own lists are unchanged.
 // Only the v2 API serves it.
 
-// ListNotInterestedPage answers at most limit of the profile's marks ordered
-// by (added_at DESC, media_item_id DESC) strictly after the key (nil = from
-// the newest), and the cards of the marked titles the viewer may see, in the
-// same order.
+// ListNotInterestedPage answers at most limit of the profile's marks on
+// titles the viewer may see, ordered by (added_at DESC, media_item_id DESC)
+// strictly after the key (nil = from the newest), and their cards in the
+// same order. See visibleListPage for why hidden marks are skipped rather
+// than returned.
 func (h *PersonalDataHandler) ListNotInterestedPage(ctx context.Context, viewer PersonalListViewer, after *userstore.ListKey, limit int) ([]userstore.NotInterestedEntry, []CollectionItemView, error) {
 	store, err := h.storeProvider.ForUser(ctx, viewer.UserID)
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to access user store")
 	}
-	entries, err := store.ListNotInterestedPage(ctx, viewer.ProfileID, after, limit)
+	entries, err := visibleListPage(ctx, h, viewer, after, limit, "Failed to list Not interested titles",
+		func(after *userstore.ListKey, n int) ([]userstore.NotInterestedEntry, error) {
+			return store.ListNotInterestedPage(ctx, viewer.ProfileID, after, n)
+		},
+		func(e userstore.NotInterestedEntry) userstore.ListKey {
+			return userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID}
+		})
 	if err != nil {
-		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list Not interested titles")
+		return nil, nil, err
 	}
 	items, err := resolveItems(h, ctx, viewer, entries, func(e userstore.NotInterestedEntry) string { return e.MediaItemID })
 	if err != nil {

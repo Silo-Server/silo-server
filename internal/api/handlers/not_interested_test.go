@@ -5,10 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userdb"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // markItemRepo answers the items it holds; anything else is not found.
@@ -159,5 +164,121 @@ func TestPersonalListLookupFailureIsServerError(t *testing.T) {
 				t.Fatalf("err = %v, want status %d", err, tc.want)
 			}
 		})
+	}
+}
+
+// idsFailingItemRepo is a markItemRepo whose batch access check fails.
+type idsFailingItemRepo struct {
+	markItemRepo
+}
+
+func (idsFailingItemRepo) EnsureAccessibleIDs(context.Context, []string, catalog.AccessFilter) (map[string]bool, error) {
+	return nil, context.DeadlineExceeded
+}
+
+// A personal list page answers only entries the viewer may see, reading past
+// runs of hidden entries longer than one store batch. The v2 listings build
+// their cursor from the last entry of a page and their has_more from a probe
+// entry, so neither can name a hidden title, and hidden entries never show
+// up as an empty page.
+func TestPersonalListPagesSkipHiddenEntries(t *testing.T) {
+	db, err := userdb.NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
+	if err != nil {
+		t.Fatalf("open user database: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := userdb.NewSQLiteUserStore(db.DB)
+
+	// Newest first: one visible entry, 60 hidden, one visible, 3 hidden, one
+	// visible. Only the visible items are in the item repository.
+	items := markItemRepo{items: map[string]*models.MediaItem{}}
+	var ids []string
+	add := func(id string, visible bool) {
+		ids = append(ids, id)
+		if visible {
+			items.items[id] = &models.MediaItem{ContentID: id, Type: "movie"}
+		}
+	}
+	add("movie:visible-1", true)
+	for i := range 60 {
+		add(fmt.Sprintf("movie:hidden-a%02d", i), false)
+	}
+	add("movie:visible-2", true)
+	for i := range 3 {
+		add(fmt.Sprintf("movie:hidden-b%d", i), false)
+	}
+	add("movie:visible-3", true)
+	start := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	for _, table := range []string{"favorites", "watchlist", "not_interested"} {
+		for i, id := range ids {
+			if _, err := db.DB.Exec(`INSERT INTO `+table+` (profile_id, media_item_id, added_at) VALUES ('p1', ?, ?)`,
+				id, start.Add(-time.Duration(i)*time.Minute).Format(time.RFC3339)); err != nil {
+				t.Fatalf("seed %s: %v", table, err)
+			}
+		}
+	}
+
+	viewer := PersonalListViewer{UserID: 1, ProfileID: "p1"}
+	ctx := context.Background()
+	type page struct {
+		entries []userstore.ListKey
+		cards   int
+	}
+	lists := map[string]func(h *PersonalDataHandler, after *userstore.ListKey, limit int) (page, error){
+		"favorites": func(h *PersonalDataHandler, after *userstore.ListKey, limit int) (page, error) {
+			entries, cards, err := h.ListFavoritesPage(ctx, viewer, after, limit)
+			out := page{cards: len(cards)}
+			for _, e := range entries {
+				out.entries = append(out.entries, userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID})
+			}
+			return out, err
+		},
+		"watchlist": func(h *PersonalDataHandler, after *userstore.ListKey, limit int) (page, error) {
+			entries, cards, err := h.ListWatchlistPage(ctx, viewer, after, limit)
+			out := page{cards: len(cards)}
+			for _, e := range entries {
+				out.entries = append(out.entries, userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID})
+			}
+			return out, err
+		},
+		"not interested": func(h *PersonalDataHandler, after *userstore.ListKey, limit int) (page, error) {
+			entries, cards, err := h.ListNotInterestedPage(ctx, viewer, after, limit)
+			out := page{cards: len(cards)}
+			for _, e := range entries {
+				out.entries = append(out.entries, userstore.ListKey{AddedAt: e.AddedAt, MediaItemID: e.MediaItemID})
+			}
+			return out, err
+		},
+	}
+	h := NewPersonalDataHandler(testUserStoreProvider{store: store}, items)
+	for name, list := range lists {
+		var got []string
+		var after *userstore.ListKey
+		for range 5 {
+			p, err := list(h, after, 2)
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if p.cards != len(p.entries) {
+				t.Fatalf("%s: %d entries but %d cards", name, len(p.entries), p.cards)
+			}
+			for _, e := range p.entries {
+				got = append(got, e.MediaItemID)
+			}
+			if len(p.entries) < 2 {
+				break
+			}
+			last := p.entries[len(p.entries)-1]
+			after = &last
+		}
+		if strings.Join(got, ",") != "movie:visible-1,movie:visible-2,movie:visible-3" {
+			t.Errorf("%s: pages answered %v", name, got)
+		}
+
+		// A failed access check is a server error, not an empty page.
+		var apiErr *APIError
+		if _, err := list(NewPersonalDataHandler(testUserStoreProvider{store: store}, idsFailingItemRepo{items}), nil, 2); !errors.As(err, &apiErr) || apiErr.Status != http.StatusInternalServerError {
+			t.Errorf("%s: failed access check = %v, want 500", name, err)
+		}
 	}
 }
