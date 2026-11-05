@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -38,17 +37,12 @@ type PluginChannel struct {
 	SecretFields []string
 }
 
-// declaredFields returns the settings a write may name: the public and
-// secret fields the host classified, which follow allOf, $ref,
-// dependentSchemas and the admin form, not just the root properties. It
-// returns false when any field is allowed: the schema's root allows keys it
-// doesn't name, through patternProperties or an additionalProperties other
-// than false, or the schema declares no fields. The plugin's
-// ValidateDestination then decides.
-func (c PluginChannel) declaredFields() (map[string]struct{}, bool) {
-	if c.allowsUndeclaredFields() || len(c.PublicFields)+len(c.SecretFields) == 0 {
-		return nil, false
-	}
+// declaredFields returns the only settings a destination may store: the
+// public and secret fields the host classified, which follow allOf, $ref,
+// dependentSchemas and the admin form. A key a schema allows only through
+// patternProperties or additionalProperties is refused: the settings API
+// could neither return it nor keep it secret, and the form can't show it.
+func (c PluginChannel) declaredFields() map[string]struct{} {
 	out := make(map[string]struct{}, len(c.PublicFields)+len(c.SecretFields))
 	for _, key := range c.PublicFields {
 		out[key] = struct{}{}
@@ -56,21 +50,7 @@ func (c PluginChannel) declaredFields() (map[string]struct{}, bool) {
 	for _, key := range c.SecretFields {
 		out[key] = struct{}{}
 	}
-	return out, true
-}
-
-// allowsUndeclaredFields reports whether the settings JSON schema's root
-// explicitly allows keys it doesn't name.
-func (c PluginChannel) allowsUndeclaredFields() bool {
-	var root struct {
-		PatternProperties    any `json:"patternProperties"`
-		AdditionalProperties any `json:"additionalProperties"`
-	}
-	if err := json.Unmarshal([]byte(c.Schema.GetJsonSchema()), &root); err != nil {
-		return false
-	}
-	return root.PatternProperties != nil ||
-		(root.AdditionalProperties != nil && root.AdditionalProperties != false)
+	return out
 }
 
 // PluginChannelHost reaches the plugins that provide notification channels.

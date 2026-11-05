@@ -595,8 +595,9 @@ provides the destination's kind; nothing is sent then.
 takes `plugin_id`, `capability_id`, `name` (1 to 64 characters, unique per
 account profile), `settings`, and optional reason flags (default on). The
 server accepts only top-level settings the schema or its form declares,
-unless the schema's root allows other keys through `patternProperties` or an
-`additionalProperties` other than `false`. It then calls the plugin's
+including ones reached through `allOf`, `$ref` or `dependentSchemas`. It refuses
+keys a schema allows only through `patternProperties` or `additionalProperties`,
+which it could neither return nor keep secret. It then calls the plugin's
 `ValidateDestination`. A refusal answers `422` with the plugin's
 message in the problem's error detail at `body.settings`. An unknown or
 unreachable kind answers `503 dependency_unavailable` with `Retry-After`; ten

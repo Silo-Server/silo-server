@@ -84,10 +84,11 @@ func TestMergePluginSettings(t *testing.T) {
 		// "region" comes from an allOf branch, so only the host's field sets know it.
 		{name: "field declared outside the root properties", write: map[string]any{"region": "eu"}, want: map[string]any{"region": "eu"}},
 		{name: "clearing a plain field", stored: stored, clear: []string{"topic"}, wantErr: true},
-		{name: "patternProperties allow undeclared keys", channel: formOnly(`{"type":"object","patternProperties":{"^x-":{"type":"string"}}}`),
-			write: map[string]any{"x-team": "ops"}, want: map[string]any{"x-team": "ops"}},
-		{name: "additionalProperties allow undeclared keys", channel: formOnly(`{"type":"object","additionalProperties":{"type":"string"}}`),
-			write: map[string]any{"label": "ops"}, want: map[string]any{"label": "ops"}},
+		// Keys a schema allows only by pattern can't be returned or kept secret, so they're refused.
+		{name: "patternProperties keys are refused", channel: formOnly(`{"type":"object","patternProperties":{"^x-":{"type":"string"}}}`),
+			write: map[string]any{"x-team": "ops"}, wantErr: true},
+		{name: "additionalProperties keys are refused", channel: formOnly(`{"type":"object","additionalProperties":{"type":"string"}}`),
+			write: map[string]any{"label": "ops"}, wantErr: true},
 		{name: "additionalProperties false keeps the form allowlist", channel: formOnly(`{"type":"object","additionalProperties":false}`),
 			write: map[string]any{"server_url": "http://10.0.0.1"}, wantErr: true},
 	} {

@@ -334,13 +334,13 @@ func (s *PluginDestinationService) validate(ctx context.Context, channel PluginC
 // refused.
 func mergePluginSettings(channel PluginChannel, stored, write map[string]any, clearSecrets []string) (map[string]any, error) {
 	secrets := channel.SecretFields
-	declared, restricted := channel.declaredFields()
+	declared := channel.declaredFields()
 	merged := make(map[string]any, len(stored)+len(write))
 	for key, value := range stored {
 		merged[key] = value
 	}
 	for key, value := range write {
-		if _, ok := declared[key]; restricted && !ok {
+		if _, ok := declared[key]; !ok {
 			return nil, fmt.Errorf("%w: %q is not a setting of this destination", ErrPluginDestinationInvalid, key)
 		}
 		if slices.Contains(secrets, key) {
