@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
-	"github.com/Silo-Server/silo-server/internal/apiv2"
 )
 
 // TestCommittedArtifactPassesLint is the spec-lint gate over the committed
@@ -29,12 +28,6 @@ func TestCommittedArtifactPassesLint(t *testing.T) {
 		name, member, _ := strings.Cut(strings.TrimPrefix(where, "components.schemas."), ".")
 		if s := doc.Components.Schemas[name]; s == nil || s.Properties[member] == nil {
 			t.Errorf("%s: shapePending entry names no member", where)
-		}
-	}
-	for where := range apiv2.NullEnumWithheld {
-		name, member, _ := strings.Cut(where, ".")
-		if s := doc.Components.Schemas[name]; s == nil || s.Properties[member] == nil {
-			t.Errorf("%s: apiv2.NullEnumWithheld entry names no member", where)
 		}
 	}
 }
@@ -278,13 +271,6 @@ func TestLintSeededFailures(t *testing.T) {
 				props["mode"] = map[string]any{"type": []any{"string", "null"}, "enum": []any{"a", "b"}}
 			},
 			want: "components.schemas.SystemInfo.mode: nullable enum does not list null",
-		},
-		"withheld member that lists null": {
-			seed: func(doc map[string]any) {
-				schemas(doc)["DownloadSubscriptionPatchBody"] = map[string]any{"type": "object", "additionalProperties": false,
-					"properties": map[string]any{"quality": map[string]any{"type": []any{"string", "null"}, "enum": []any{"original", nil}}}}
-			},
-			want: "components.schemas.DownloadSubscriptionPatchBody.quality: no longer a nullable enum without null; delete its apiv2.NullEnumWithheld entry",
 		},
 		"missing security scheme": {
 			seed: func(doc map[string]any) { delete(doc["components"].(map[string]any), "securitySchemes") },

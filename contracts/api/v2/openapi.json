@@ -31150,29 +31150,17 @@
         "additionalProperties": false,
         "properties": {
           "active": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean"
           },
           "delete_watched": {
-            "type": [
-              "boolean",
-              "null"
-            ]
+            "type": "boolean"
           },
           "max_storage_bytes": {
             "format": "int64",
-            "type": [
-              "integer",
-              "null"
-            ]
+            "type": "integer"
           },
           "mode": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "quality": {
             "description": "Quality preset for episodes registered from now on; already-registered downloads keep theirs.",
@@ -31184,20 +31172,14 @@
               "2mbps",
               "1mbps"
             ],
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "season_numbers": {
             "items": {
               "format": "int64",
               "type": "integer"
             },
-            "type": [
-              "array",
-              "null"
-            ]
+            "type": "array"
           }
         },
         "type": "object"
