@@ -497,6 +497,59 @@ describe("VideoPlayer room catch-up", () => {
     expect(screen.getByRole("status", { name: "Syncing playback" })).toBeInTheDocument();
   });
 
+  it("leaves a held room seek to the room while a native HLS transport reloads", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime === "application/vnd.apple.mpegurl" ? "probably" : "",
+    );
+    const connection = roomConnection();
+    const host = {
+      ...connection,
+      room: { ...connection.room!, self_can_manage_room: true, self_can_control_transport: true },
+    };
+    const plan = fixturePlanV3({
+      delivery: "server_remux_hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: {
+        source_start_seconds: 0,
+        player_start_seconds: 100,
+        stream_origin_seconds: 0,
+        timeline_offset_seconds: 0,
+        can_seek_anywhere: true,
+        seek_restoration: "player_position",
+      },
+    });
+    const { container, rerenderPlayer } = renderPlayer({
+      plan,
+      shouldAutoPlay: false,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: host,
+    });
+    const video = container.querySelector("video")!;
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.loadedMetadata(video);
+    fireFrameTimeUpdate(video);
+    markReady(video);
+
+    // A quality change reloads the transport, and the host seeks the room
+    // before the new transport's metadata arrives.
+    rerenderPlayer({ planRevision: 2, streamUrl: "/api/v1/stream/session-1?revision=2" });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(video.src).toContain("revision=2");
+    act(() => {
+      controls.current!.onSeek(300);
+    });
+    expect(controls.current!.currentTime).toBe(300);
+    fireEvent.loadedMetadata(video);
+
+    // The element waits for the room's seek command.
+    expect(video.currentTime).toBe(100);
+  });
+
   it("pauses displaced playback and offers an explicit room rejoin", async () => {
     const { connection, video, rerenderPlayer } = setup(100);
     vi.mocked(video.pause).mockClear();

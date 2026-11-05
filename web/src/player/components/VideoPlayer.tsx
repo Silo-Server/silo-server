@@ -2705,10 +2705,11 @@ export function VideoPlayer({
       video.src = effectiveStreamUrl;
       nativeHLSMetadataHandler = () => {
         // A seek the viewer made while the transport loaded wins over the
-        // start position; on a seek-anywhere plan it never replans.
+        // start position; on a seek-anywhere plan it never replans. A room
+        // seek request the room has not run yet waits for the room's command.
         const pendingSeconds = canSeekAnywhereRef.current ? pendingSeekTimeRef.current : null;
         video.currentTime =
-          pendingSeconds === null
+          pendingSeconds === null || pendingSeconds === roomHeldSeekRef.current
             ? effectiveInitialPosition
             : toPlayerTime(pendingSeconds, timelineOffsetRef.current);
         attemptAutoplayWhenReady();
