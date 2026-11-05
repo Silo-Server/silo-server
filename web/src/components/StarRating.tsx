@@ -11,15 +11,25 @@ interface StarRatingProps {
 
 const STAR_COUNT = 5;
 
+/**
+ * A five-star rating radio group. Clicking a star sets that rating; clicking
+ * the star that is already set clears it (onChange(null)). Arrow keys step the
+ * rating. Hovering previews a value in CSS only (see `.star-rating` in
+ * app.css), so moving across the stars does not render.
+ */
 function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarRatingProps) {
-  // The hover preview is CSS only and fills up to the hovered star whatever the
-  // stored value is, so after a click it would keep drawing the old rating
-  // under a pointer that has not moved. Suppress it until the pointer leaves
-  // the star it clicked. Keyboard activation fires a click with detail 0 and
-  // has no pointer to leave, so it never sets the flag.
   const [suppressPreview, setSuppressPreview] = useState(false);
   const clearSuppressPreview = useCallback(() => setSuppressPreview(false), []);
 
+  /**
+   * Sets the clicked star, or clears the rating when it is the current one.
+   *
+   * The CSS hover preview fills up to the hovered star whatever the stored
+   * value is, so after a click it would keep drawing the old rating under a
+   * pointer that has not moved. A pointer click therefore suppresses the
+   * preview until the pointer leaves that star. Keyboard activation fires a
+   * click with detail 0 and has no pointer to leave, so it never sets the flag.
+   */
   function handleClick(event: React.MouseEvent, star: number) {
     if (event.detail !== 0) setSuppressPreview(true);
     if (star === value) {
