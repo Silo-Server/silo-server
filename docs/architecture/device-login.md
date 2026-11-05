@@ -149,10 +149,13 @@ sends `binding` and `binding_secret` only to a server that reports it. The
 phone needs no flag: it acts on what the lookup returns.
 
 **Rolling deploys.** A node from an older release ignores `binding` on start
-and does not check `binding_secret` on poll. While one still serves polls, a
-bound request can be collected through it without the secret. The window
-closes when every node runs this release. Rolling the migration back refuses
-every live bound request before it drops the column.
+and does not check `binding_secret` on poll. It cannot collect a bound request
+all the same: the schema refuses to mark a bound request consumed unless
+`binding_checked` is set, and only this release sets it, after checking the
+secret. An older node's collection of a bound request fails as a server error
+and rolls back the session it inserted, so the request stays approved for the
+TV to collect through an updated node. Rolling the migration back refuses
+every live bound request before it drops the columns.
 
 ## Remote-playback handoff
 

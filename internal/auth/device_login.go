@@ -1110,12 +1110,16 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode, bindingSecret
 		}
 	}
 
+	// binding_checked records that this release checked any binding before
+	// collecting; the schema refuses to consume a bound request without it,
+	// so a node from an older release cannot collect one.
 	if _, err := tx.Exec(ctx, `
 		UPDATE device_login_requests
 		SET status = $2,
 			auth_session_id = $3,
 			consumed_at = $4,
-			updated_at = $4
+			updated_at = $4,
+			binding_checked = TRUE
 		WHERE id = $1
 	`,
 		record.ID,

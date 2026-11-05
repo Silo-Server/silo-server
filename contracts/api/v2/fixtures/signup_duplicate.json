@@ -3,5 +3,5 @@
   "title": "Conflict",
   "status": 409,
   "detail": "Username or email already taken.",
-  "instance": "urn:silo:request:0000000000000000000001a8"
+  "instance": "urn:silo:request:0000000000000000000001a6"
 }

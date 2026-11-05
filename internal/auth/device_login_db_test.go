@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -486,6 +487,14 @@ func TestDeviceLoginCopiedBindingDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireBindingMismatch(t, svc, "copied", copied.DeviceCode, "", otherSecret)
+	// A node from an older release collects with this statement and never
+	// checks the secret; the schema refuses it.
+	_, err = pool.Exec(ctx, `UPDATE device_login_requests
+		SET status = 'consumed', consumed_at = NOW(), updated_at = NOW()
+		WHERE device_name = $1`, name("copied"))
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != "23514" {
+		t.Fatalf("older-release collection error = %v", err)
+	}
 	if st := readDeviceLoginRow(t, pool, name("copied")); st.status != DeviceLoginStatusApproved || st.consumed || st.session {
 		t.Fatalf("copied request = %+v", st)
 	}

@@ -3,5 +3,5 @@
   "title": "Not acceptable",
   "status": 406,
   "detail": "No acceptable representation is available for this operation.",
-  "instance": "urn:silo:request:0000000000000000000001de"
+  "instance": "urn:silo:request:0000000000000000000001dc"
 }
