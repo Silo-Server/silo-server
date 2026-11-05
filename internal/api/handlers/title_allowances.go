@@ -36,10 +36,10 @@ type titleAllowanceStore interface {
 	// SetCollectionAllowance adds or removes one collection allowance and
 	// reports whether a row changed.
 	SetCollectionAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, collectionID string, allowed bool) (bool, error)
-	// UnallowedCollectionTitles lists, in the collection's order, up to limit
-	// of the movies and series a personal collection stores that the profile
-	// is not yet allowed.
-	UnallowedCollectionTitles(ctx context.Context, userID int, profileID, collectionID string, limit int) ([]string, error)
+	// UnallowedCollectionTitles lists one page, in the collection's order, of
+	// the movies and series a personal collection stores that the profile is
+	// not yet allowed.
+	UnallowedCollectionTitles(ctx context.Context, userID int, profileID, collectionID string, offset, limit int) ([]string, error)
 	// AllowTitles adds a title allowance for every movie and series among
 	// contentIDs and returns how many were new.
 	AllowTitles(ctx context.Context, m userstore.AllowanceManager, profileID string, contentIDs []string) (int, error)
@@ -458,19 +458,39 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 // with no item limit would otherwise read the whole matching catalog.
 const maxCopiedTitles = 10_000
 
-// storedCollectionTitles lists the stored movies and series of a collection
-// that the profile is not yet allowed and the actor may see, from the first
-// maxCopiedTitles of them; a repeated copy continues with the rest.
+// Stored collection copies read candidates in pages, and scan at most
+// maxScannedCopyEntries of them in one copy.
+const (
+	copyPageSize          = 1_000
+	maxScannedCopyEntries = 100_000
+)
+
+// storedCollectionTitles lists, in the collection's order, up to
+// maxCopiedTitles of the stored movies and series of a collection that the
+// profile is not yet allowed and the actor may see. Titles the actor cannot
+// see are never allowed, so they stay candidates on every copy; reading page
+// by page past them is what lets a repeated copy reach the rest.
 func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, actor AllowanceActor, profileID, collectionID string) ([]string, error) {
-	ids, err := h.allowances.UnallowedCollectionTitles(ctx, actor.UserID, profileID, collectionID, maxCopiedTitles)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list the collection's titles")
+	var out []string
+	for offset := 0; offset < maxScannedCopyEntries && len(out) < maxCopiedTitles; offset += copyPageSize {
+		page, err := h.allowances.UnallowedCollectionTitles(ctx, actor.UserID, profileID, collectionID, offset, copyPageSize)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list the collection's titles")
+		}
+		visible, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, page, actor.Viewer.Access)
+		if err != nil {
+			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check the collection's titles")
+		}
+		for _, id := range page {
+			if visible[id] && len(out) < maxCopiedTitles {
+				out = append(out, id)
+			}
+		}
+		if len(page) < copyPageSize {
+			break
+		}
 	}
-	visible, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, ids, actor.Viewer.Access)
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check the collection's titles")
-	}
-	return slices.DeleteFunc(ids, func(id string) bool { return !visible[id] }), nil
+	return out, nil
 }
 
 // smartCollectionTitles lists what a smart collection's query matches for the

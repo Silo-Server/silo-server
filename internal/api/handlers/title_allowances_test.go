@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -19,7 +20,9 @@ var _ titleAllowanceStore = (*pgstore.TitleAllowances)(nil)
 
 // memoryAllowances is an in-memory titleAllowanceStore for one account.
 type memoryAllowances struct {
-	titles map[string]bool // profileID + "/" + contentID
+	titles     map[string]bool // profileID + "/" + contentID
+	candidates []string        // what UnallowedCollectionTitles pages through
+	copied     []string        // what AllowTitles was asked to allow
 }
 
 func (s *memoryAllowances) ListTitleAllowances(_ context.Context, _ int, profileID string) ([]userstore.TitleAllowance, error) {
@@ -53,12 +56,16 @@ func (s *memoryAllowances) SetCollectionAllowance(context.Context, userstore.All
 	return true, nil
 }
 
-func (s *memoryAllowances) UnallowedCollectionTitles(context.Context, int, string, string, int) ([]string, error) {
-	return nil, nil
+func (s *memoryAllowances) UnallowedCollectionTitles(_ context.Context, _ int, _, _ string, offset, limit int) ([]string, error) {
+	if offset >= len(s.candidates) {
+		return nil, nil
+	}
+	return s.candidates[offset:min(offset+limit, len(s.candidates))], nil
 }
 
-func (s *memoryAllowances) AllowTitles(context.Context, userstore.AllowanceManager, string, []string) (int, error) {
-	return 0, nil
+func (s *memoryAllowances) AllowTitles(_ context.Context, _ userstore.AllowanceManager, _ string, ids []string) (int, error) {
+	s.copied = append(s.copied, ids...)
+	return len(ids), nil
 }
 
 // libraryScopes resolves every profile to one library, and the kid to a PG
@@ -194,5 +201,42 @@ func TestTitleAllowanceAuthority(t *testing.T) {
 		if _, ok := states[item]["parent"]; ok {
 			t.Errorf("%s lists the acting profile", item)
 		}
+	}
+}
+
+// A stored collection's copy reads its candidates page by page, so titles the
+// household manager cannot see, which are never allowed and so stay
+// candidates on every copy, cannot keep a copy from reaching the visible
+// titles after them.
+func TestAllowCollectionTitlesPagesPastHiddenTitles(t *testing.T) {
+	ctx := context.Background()
+	base := newHouseholdTestStore(t)
+	for _, p := range []userstore.Profile{{ID: "parent", Name: "Parent"}, {ID: "kid", Name: "Kid", MaxContentRating: "PG"}} {
+		if err := base.CreateProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	collection, err := base.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "parent", Name: "Big list", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := map[string]*models.MediaItem{}
+	store := &memoryAllowances{titles: map[string]bool{}}
+	for i := range maxCopiedTitles {
+		store.candidates = append(store.candidates, fmt.Sprintf("movie:hidden-%d", i))
+	}
+	for i := range 3 {
+		id := fmt.Sprintf("movie:visible-%d", i)
+		visible[id] = &models.MediaItem{ContentID: id, Type: "movie"}
+		store.candidates = append(store.candidates, id)
+	}
+	h := NewTitleAllowanceHandler(
+		NewPersonalDataHandler(testUserStoreProvider{store: base}, markItemRepo{items: visible}),
+		libraryScopes{}, store,
+	)
+	actor := AllowanceActor{UserID: 1, ActiveProfileID: "parent", VerifyProfile: func(*userstore.Profile) error { return nil }}
+	added, err := h.AllowCollectionTitles(ctx, actor, "kid", collection.ID)
+	if err != nil || added != 3 || len(store.copied) != 3 {
+		t.Fatalf("AllowCollectionTitles = %d, %v; copied %v; want the 3 visible titles past the hidden ones", added, err, store.copied)
 	}
 }

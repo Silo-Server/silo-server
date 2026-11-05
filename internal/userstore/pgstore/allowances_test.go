@@ -247,7 +247,7 @@ func (f allowanceFixture) checkCollectionCopy(t *testing.T) {
 	ctx := context.Background()
 	// movie-collection is allowed through the collection but not as a
 	// title; the audiobook is never a candidate.
-	ids, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, 10)
+	ids, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, 0, 10)
 	if err != nil || !slices.Equal(ids, []string{f.id("movie-collection")}) {
 		t.Fatalf("UnallowedCollectionTitles = %v, %v; want only the movie", ids, err)
 	}
@@ -260,7 +260,7 @@ func (f allowanceFixture) checkCollectionCopy(t *testing.T) {
 	}
 	// Allowed titles drop out of the candidates, so a repeated copy of a
 	// collection longer than one copy's cap reaches the rest.
-	if left, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, 10); err != nil || len(left) != 0 {
+	if left, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, 0, 10); err != nil || len(left) != 0 {
 		t.Fatalf("UnallowedCollectionTitles after the copy = %v, %v; want none", left, err)
 	}
 }
