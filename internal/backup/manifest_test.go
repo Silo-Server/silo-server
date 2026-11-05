@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -117,6 +119,29 @@ func TestManifestMAC(t *testing.T) {
 	}
 	if ok, err := signed().checkMAC(key, "1111-2222-3333-4444"); ok || err != nil {
 		t.Fatalf("another key's manifest = %v, %v; want not authenticated, no error", ok, err)
+	}
+}
+
+// TestManifestsOfEarlierBuildsStillVerify: a manifest is authenticated by
+// a MAC over its JSON encoding, so a field added since a build wrote one
+// must encode to nothing at its zero value, or every backup that build
+// took would read as tampered. The files are manifests signed by builds
+// from before encryption (with and without a restore set), and by one that
+// wrote "encrypted":false, byte for byte.
+func TestManifestsOfEarlierBuildsStillVerify(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	for _, name := range []string{"manifest-before-encryption.json", "manifest-restore-set-before-encryption.json", "manifest-encrypted-false.json"} {
+		data, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := ParseManifest(data)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if ok, err := m.checkMAC(key, "aaaa-bbbb-cccc-dddd"); !ok || err != nil {
+			t.Errorf("%s = %v, %v; want authenticated", name, ok, err)
+		}
 	}
 }
 

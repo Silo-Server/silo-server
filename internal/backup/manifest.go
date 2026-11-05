@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 )
 
@@ -79,7 +81,11 @@ type Manifest struct {
 	// Encrypted is false for every object at the default destination. The
 	// S3 destination encrypts every object but the manifest with age, under
 	// the passphrase secret.BackupPassphrase derives from SECRET_KEY.
-	Encrypted bool `json:"encrypted"`
+	// omitempty keeps an unencrypted manifest's encoding, and so its MAC,
+	// what builds from before this field wrote: every field added to the
+	// manifest after it first shipped must encode to nothing at its zero
+	// value (TestManifestsOfEarlierBuildsStillVerify).
+	Encrypted bool `json:"encrypted,omitempty"`
 	// KeyCheck is the SECRET_KEY check value (secret.KeyCheckValue). A restore
 	// with another key cannot read encrypted settings and credentials.
 	KeyCheck string `json:"key_check"`
@@ -124,6 +130,19 @@ func (m *Manifest) macInput() ([]byte, error) {
 	return json.Marshal(&c)
 }
 
+// withEncryptedFalse is macInput's encoding of an unencrypted manifest as
+// builds wrote it while `encrypted` had no omitempty: "encrypted":false
+// right before "key_check", which follows it in Manifest. Inside a string
+// the encoder escapes the quote, so the first match is that field's.
+func withEncryptedFalse(data []byte) []byte {
+	const next = `,"key_check":`
+	i := bytes.Index(data, []byte(next))
+	if i < 0 {
+		return data
+	}
+	return slices.Concat(data[:i], []byte(`,"encrypted":false`), data[i:])
+}
+
 // sign sets m.MAC under key; a nil key leaves m unsigned.
 func (m *Manifest) sign(key []byte) error {
 	if key == nil {
@@ -164,9 +183,12 @@ func (m *Manifest) checkMAC(key []byte, keyCheck string) (authenticated bool, er
 	if err != nil {
 		return false, err
 	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(data)
-	if !hmac.Equal(mac.Sum(nil), want) {
+	verifies := func(data []byte) bool {
+		mac := hmac.New(sha256.New, key)
+		mac.Write(data)
+		return hmac.Equal(mac.Sum(nil), want)
+	}
+	if !verifies(data) && (m.Encrypted || !verifies(withEncryptedFalse(data))) {
 		return false, ErrManifestTampered
 	}
 	return true, nil

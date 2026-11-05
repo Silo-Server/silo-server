@@ -136,7 +136,15 @@ showing either key.
 derived from `SECRET_KEY` (HKDF-SHA256, info `silo/backup-manifest/v1`,
 `secret.BackupManifestKey`) of the manifest encoded with `mac` empty, in hex.
 It covers the id, kind, server id, times, every object's name, size, and
-checksum, and every other field. Anyone who can write the destination can
+checksum, and every other field. Because the MAC is over the encoding, a
+field added to the manifest after a build first wrote it must encode to
+nothing at its zero value (`omitempty`, as `encrypted` and `restore_set`
+do), or every backup an earlier build took would read as tampered;
+`TestManifestsOfEarlierBuildsStillVerify` checks manifests signed by
+earlier builds, byte for byte. Builds that wrote `encrypted` without
+`omitempty` signed `"encrypted":false` into an unencrypted manifest; for
+one that does not verify as encoded, the check also tries that encoding.
+Anyone who can write the destination can
 change an object and its checksum together; only a server with the key can
 write a `mac` that verifies. Every read checks it before trusting anything
 else in the manifest: the listing, downloads and download links, a
