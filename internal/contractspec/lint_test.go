@@ -279,6 +279,20 @@ func TestLintSeededFailures(t *testing.T) {
 			},
 			want: "components.schemas.SystemInfo.mode: nullable enum does not list null",
 		},
+		"nullable enum without null in a oneOf branch": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["mode"] = map[string]any{"oneOf": []any{map[string]any{"type": "integer"}, map[string]any{"type": []any{"string", "null"}, "enum": []any{"a"}}}}
+			},
+			want: "components.schemas.SystemInfo.mode.oneOf[1]: nullable enum does not list null",
+		},
+		"nullable enum without null in a typed map value": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["modes"] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": []any{"string", "null"}, "enum": []any{"a"}}}
+			},
+			want: "components.schemas.SystemInfo.modes.additionalProperties: nullable enum does not list null",
+		},
 		"withheld member that lists null": {
 			seed: func(doc map[string]any) {
 				schemas(doc)["DownloadSubscriptionPatchBody"] = map[string]any{"type": "object", "additionalProperties": false,
