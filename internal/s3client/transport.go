@@ -13,6 +13,22 @@ const maxRedirects = 10
 
 var errTooManyRedirects = errors.New("s3: stopped after 10 redirects")
 
+// errInsecureRedirect stops a redirect from replaying a signed request, or a
+// delivery URL's token, over plain HTTP after it started over HTTPS.
+var errInsecureRedirect = errors.New("s3: refused redirect from https to a non-https URL")
+
+// checkRedirectBase is the policy both shared clients keep: net/http's hop
+// limit, which a custom CheckRedirect replaces, and no HTTPS downgrade.
+func checkRedirectBase(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return errTooManyRedirects
+	}
+	if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return errInsecureRedirect
+	}
+	return nil
+}
+
 const (
 	// s3MaxConnsPerHost bounds concurrent connections per endpoint for the whole
 	// process. Matching the idle limit leaves room for a dial that loses the
@@ -39,9 +55,8 @@ var sharedTransportValue = awshttp.NewBuildableClient().WithTransportOptions(fun
 var sharedHTTPClientValue = &http.Client{
 	Transport: sharedTransportValue,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		// Setting CheckRedirect replaces net/http's default, so keep its hop limit.
-		if len(via) >= maxRedirects {
-			return errTooManyRedirects
+		if err := checkRedirectBase(req, via); err != nil {
+			return err
 		}
 		if req.Response.StatusCode != http.StatusTemporaryRedirect && req.Response.StatusCode != http.StatusPermanentRedirect {
 			return http.ErrUseLastResponse
@@ -53,9 +68,10 @@ var sharedHTTPClientValue = &http.Client{
 	},
 }
 
-// Delivery URLs retain normal browser redirect behavior while sharing the
-// storage connection pool. S3 uploads must never become GETs after a redirect.
-var sharedDeliveryHTTPClient = &http.Client{Transport: sharedTransportValue}
+// Delivery URLs retain normal browser redirect behavior, apart from HTTPS
+// downgrades, while sharing the storage connection pool. S3 uploads must never
+// become GETs after a redirect.
+var sharedDeliveryHTTPClient = &http.Client{Transport: sharedTransportValue, CheckRedirect: checkRedirectBase}
 
 func sharedHTTPClient() *http.Client { return sharedHTTPClientValue }
 
