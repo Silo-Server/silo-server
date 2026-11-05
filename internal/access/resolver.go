@@ -134,9 +134,6 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	}
 
 	scope.PreferencesDegraded = preferences.Degraded
-	if profile != nil {
-		scope.MaturityLimits = scope.WithAllowedTitles(profile.AllowedTitleIDs)
-	}
 
 	// Apply the profile's disabled library IDs setting.
 	disabled := preferences.DisabledLibraryIDs
@@ -261,14 +258,14 @@ func subtractInts(src, exclude []int) []int {
 }
 
 // ProfileMaturity is the profile's maturity limits under the server's
-// unrated-content decision, as Resolve applies them.
+// unrated-content decision, with its allowed titles, as Resolve applies them.
 func ProfileMaturity(profile *userstore.Profile, allowUnrated bool) MaturityLimits {
 	return MaturityLimits{
 		MaxContentRating:    profile.MaxContentRating,
 		AllowUnratedContent: allowUnrated,
 		MaxAdvisoryAge:      profile.MaxAdvisoryAge,
 		RequireAdvisoryAge:  profile.RequireAdvisoryAge && profile.MaxAdvisoryAge > 0,
-	}
+	}.WithAllowedTitles(profile.AllowedTitleIDs)
 }
 
 // ProfileLibraries is the libraries a profile may see under its account's
