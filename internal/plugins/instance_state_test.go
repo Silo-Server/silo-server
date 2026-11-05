@@ -189,4 +189,20 @@ func TestInstanceStateVersionAdvancesOnAnyUpdatePostgres(t *testing.T) {
 	if err != nil || string(got) != "a" || gotVersion != version+1 {
 		t.Fatalf("read = %q@%d, %v; want %q@%d", got, gotVersion, err, "a", version+1)
 	}
+	// An update that sets the column keeps a higher version (a restore
+	// carrying the live row's) and still advances past a lower one.
+	for _, tc := range []struct{ set, want int64 }{
+		{set: version + 10, want: version + 10},
+		{set: 1, want: version + 11},
+	} {
+		if _, err := pool.Exec(ctx, `
+			UPDATE plugin_instance_state SET version = $3
+			WHERE plugin_installation_id = $1 AND host_scope = $2 AND state_key = 'k'
+		`, id, HostScopeAPI, tc.set); err != nil {
+			t.Fatal(err)
+		}
+		if _, gotVersion, err := store.Read(ctx, id, HostScopeAPI, "k"); err != nil || gotVersion != tc.want {
+			t.Fatalf("version after setting it to %d = %d, %v; want %d", tc.set, gotVersion, err, tc.want)
+		}
+	}
 }

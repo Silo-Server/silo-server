@@ -13,12 +13,15 @@ ALTER TABLE plugin_instance_state
 -- does: this release, a server from an older release during a rolling deploy
 -- (whose upsert knows nothing of the column), and manual SQL. Otherwise a
 -- conditional write could land on a version an older server already wrote
--- past and silently discard that write.
+-- past and silently discard that write. An update that sets the column to
+-- a higher version keeps it: a full restore carries the live server's rows
+-- over the restored ones with their versions, and a carried row must not
+-- drop back to a version a plugin process that outlives the swap read.
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION advance_plugin_instance_state_version() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-    NEW.version := OLD.version + 1;
+    NEW.version := GREATEST(OLD.version + 1, NEW.version);
     RETURN NEW;
 END;
 $$;

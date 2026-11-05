@@ -143,7 +143,10 @@ a create-only write on a full scope fails with `RESOURCE_EXHAUSTED`, not
 `ABORTED`. The version is not part of the AAD. A database trigger, not the
 write statement, advances the version on every update, so a write from a
 server on an older release during a rolling deploy still moves it and a
-conditional write cannot land over it.
+conditional write cannot land over it. An update that sets the version
+higher keeps that value, so a full restore, which carries the live server's
+rows with their versions, never moves a key back to a version a running
+plugin already read.
 
 ## Proxy nodes
 
