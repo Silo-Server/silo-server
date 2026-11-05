@@ -141,7 +141,7 @@ on the timeline where the client already does so.
 | Seek out of the intro | Pill hides, timer stops. Not resolved. |
 | Seek back into the intro | Same as Enter (unless resolved). Timer restarts from full. |
 | Playback stall / rebuffer < 1.5 s | Ignored: timer keeps running (see *Timing*). |
-| Controls overlay hides/shows | Pill stays; it may reposition (e.g. drop toward the corner when transport hides). Never hidden by the overlay timeout. |
+| Controls overlay hides/shows | The timed pill stays; it may reposition (e.g. drop toward the corner when transport hides). It is never hidden by the overlay timeout. The untimed `ask` offer that returns after the timer runs out shows and hides with the controls. |
 
 ### `always`
 
