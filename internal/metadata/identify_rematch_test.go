@@ -577,33 +577,47 @@ func TestCorrectedNFOKeepsTheNewMatchsOriginalLanguageText(t *testing.T) {
 	}
 }
 
-// A correction that can't clear localized text fails before it stores the new
-// identity, so retrying is still a correction and clears the text.
-func TestCorrectionFailingToClearLocalizedTextCanBeRetried(t *testing.T) {
+// A correction that can't clear what the new match lacks fails before it stores
+// the new identity, so retrying is still a correction and clears it.
+func TestCorrectionFailingToClearCanBeRetried(t *testing.T) {
 	const contentID = "146000000000000100"
-	h := newTestHarness()
-	seedDescribedWrongMatch(t, h, contentID)
-	locs := newFakeItemLocalizationRepo()
-	h.service.itemLocalizationRepo = locs
-	locs.rows[contentID+"/fr"] = &models.MediaItemLocalization{ContentID: contentID, Language: "fr", Tagline: "Mauvaise accroche."}
-	locs.clearErr = errors.New("connection lost")
-	provider := &capturingMetadataProvider{response: &MetadataResult{
-		HasMetadata: true, Title: "A Film", ProviderIDs: map[string]string{"tmdb": "200"},
-	}}
-	request := ProcessRequest{ContentID: contentID, ProviderIDs: map[string]string{"tmdb": "200"}, Language: "en", Mode: ModeIdentify}
+	cleared := errors.New("connection lost")
+	for _, tc := range []struct {
+		name string
+		fail func(*testHarness, *fakeItemLocalizationRepo, error)
+	}{
+		{"localized text", func(_ *testHarness, locs *fakeItemLocalizationRepo, err error) { locs.clearErr = err }},
+		{"credits", func(h *testHarness, _ *fakeItemLocalizationRepo, err error) { h.itemRepo.replacePeopleErr = err }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTestHarness()
+			seedDescribedWrongMatch(t, h, contentID)
+			locs := newFakeItemLocalizationRepo()
+			h.service.itemLocalizationRepo = locs
+			locs.rows[contentID+"/fr"] = &models.MediaItemLocalization{ContentID: contentID, Language: "fr", Tagline: "Mauvaise accroche."}
+			provider := &capturingMetadataProvider{response: &MetadataResult{
+				HasMetadata: true, Title: "A Film", ProviderIDs: map[string]string{"tmdb": "200"},
+			}}
+			request := ProcessRequest{ContentID: contentID, ProviderIDs: map[string]string{"tmdb": "200"}, Language: "en", Mode: ModeIdentify}
 
-	if _, err := h.service.ProcessWithProviders(t.Context(), request, []Provider{provider}); err == nil {
-		t.Fatal("ProcessWithProviders succeeded, want the clear's error")
-	}
-	if got := h.itemRepo.items[contentID].TmdbID; got != "100" {
-		t.Fatalf("stored tmdb id = %q, want the old match until the clear succeeds", got)
-	}
+			tc.fail(h, locs, cleared)
+			if _, err := h.service.ProcessWithProviders(t.Context(), request, []Provider{provider}); !errors.Is(err, cleared) {
+				t.Fatalf("ProcessWithProviders = %v, want the clear's error", err)
+			}
+			if got := h.itemRepo.items[contentID].TmdbID; got != "100" {
+				t.Fatalf("stored tmdb id = %q, want the old match until the clear succeeds", got)
+			}
 
-	locs.clearErr = nil
-	if _, err := h.service.ProcessWithProviders(t.Context(), request, []Provider{provider}); err != nil {
-		t.Fatalf("retry: %v", err)
-	}
-	if got := locs.rows[contentID+"/fr"].Tagline; got != "" {
-		t.Errorf("fr tagline after the retry = %q, want it cleared", got)
+			tc.fail(h, locs, nil)
+			if _, err := h.service.ProcessWithProviders(t.Context(), request, []Provider{provider}); err != nil {
+				t.Fatalf("retry: %v", err)
+			}
+			if got := locs.rows[contentID+"/fr"].Tagline; got != "" {
+				t.Errorf("fr tagline after the retry = %q, want it cleared", got)
+			}
+			if _, replaced := h.itemRepo.replacedPeople[contentID]; !replaced {
+				t.Error("retry did not clear the credits")
+			}
+		})
 	}
 }

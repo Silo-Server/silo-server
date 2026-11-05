@@ -99,6 +99,8 @@ func TestClearMatchTextDB(t *testing.T) {
 		VALUES ('fixed', 'fr', 'Mauvais', 'mauvais', 'Résumé', 'Accroche', 'poster.jpg', '', '', '', '', 'provider', 'ai'),
 		       ('fixed', 'de', 'Falsch', 'falsch', 'Manuell', 'Maschine', 'poster.jpg', '', '', '', '', 'manual', 'ai'),
 		       ('locked', 'fr', 'Mauvais', 'mauvais', 'Résumé', 'Accroche', 'poster.jpg', '', '', '', '', 'provider', 'ai'),
+		       ('titlelock', 'fr', 'Mauvais', 'mauvais', 'Résumé', 'Accroche', 'poster.jpg', '', '', '', '', 'provider', 'ai'),
+		       ('textlock', 'fr', 'Mauvais', 'mauvais', 'Résumé', 'Accroche', 'poster.jpg', '', '', '', '', 'provider', 'ai'),
 		       ('other', 'fr', 'Autre', 'autre', 'Résumé', 'Accroche', 'poster.jpg', '', '', '', '', 'provider', 'provider');
 	`); err != nil {
 		t.Fatal(err)
@@ -110,6 +112,12 @@ func TestClearMatchTextDB(t *testing.T) {
 	if err := repo.ClearMatchText(t.Context(), "locked", true, true); err != nil {
 		t.Fatal(err)
 	}
+	if err := repo.ClearMatchText(t.Context(), "titlelock", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.ClearMatchText(t.Context(), "textlock", false, true); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tc := range []struct {
 		id, language string
@@ -118,6 +126,8 @@ func TestClearMatchTextDB(t *testing.T) {
 		{"fixed", "fr", [6]string{"", "", "", "provider", "", "provider"}},
 		{"fixed", "de", [6]string{"", "", "Manuell", "manual", "", "provider"}},
 		{"locked", "fr", [6]string{"Mauvais", "mauvais", "Résumé", "provider", "Accroche", "ai"}},
+		{"titlelock", "fr", [6]string{"Mauvais", "mauvais", "", "provider", "", "provider"}},
+		{"textlock", "fr", [6]string{"", "", "Résumé", "provider", "Accroche", "ai"}},
 		{"other", "fr", [6]string{"Autre", "autre", "Résumé", "provider", "Accroche", "provider"}},
 	} {
 		got, err := repo.Get(t.Context(), tc.id, tc.language)

@@ -3084,10 +3084,8 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 	item.ContentID = contentID
-	// Before the new identity is stored: afterwards a retry is no correction,
-	// and nothing would clear the text.
-	if corrected && s.itemLocalizationRepo != nil {
-		if err := s.itemLocalizationRepo.ClearMatchText(ctx, contentID, isFieldLocked(locked, FieldName), isFieldLocked(locked, FieldOverview)); err != nil {
+	if corrected {
+		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
 			return nil, err
 		}
 	}
@@ -3147,13 +3145,42 @@ func (s *MetadataService) mergeAndPersist(
 	// so an enrichment write, which hears from one provider, leaves it alone.
 	// A local re-apply whose files list no people (artwork only, or an NFO
 	// without credits) leaves the stored cast as it is.
-	// A correction to a title with no listed credits drops the previous match's,
-	// so an empty set counts there, unless the locks hold every stored credit.
-	replacesPeople := len(item.People) > 0 ||
-		(corrected && (!isFieldLocked(mergeLocked, FieldCast) || !isFieldLocked(mergeLocked, FieldCrew)))
-	if !req.enrichmentOnly && (!req.localReapply || providersListPeople) && replacesPeople && s.personRepo != nil {
-		if err := s.replaceItemPeople(ctx, req, contentID, item.People); err != nil {
-			return nil, err
+	if !req.enrichmentOnly && (!req.localReapply || providersListPeople) && len(item.People) > 0 && s.personRepo != nil {
+		persons := make([]models.Person, len(item.People))
+		for i := range item.People {
+			persons[i] = item.People[i].Person
+		}
+		personIDs, err := s.personRepo.BatchFindOrCreate(ctx, persons)
+		if err != nil {
+			if req.localReapply {
+				// A failed local re-apply is retried by the next check.
+				return nil, fmt.Errorf("finding people: %w", err)
+			}
+			// Keep the stored cast: no credit got an ID, so replacing it now
+			// would store only the credits that already had one, often none.
+			slog.WarnContext(ctx, "metadata: batch find/create people failed; keeping stored people", "component", "metadata", "content_id", contentID, "error", err)
+		} else {
+			for i := range item.People {
+				item.People[i].Person.ID = personIDs[i]
+			}
+			// Filter out entries where FindOrCreate failed (Person.ID stayed 0).
+			valid := item.People[:0]
+			for _, p := range item.People {
+				if p.ID != 0 {
+					valid = append(valid, p)
+				}
+			}
+			if req.localReapply && len(valid) != len(item.People) {
+				// A partial cast would replace the stored one.
+				return nil, fmt.Errorf("resolving people: %d of %d unresolved", len(item.People)-len(valid), len(item.People))
+			}
+			if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
+				if req.localReapply {
+					return nil, fmt.Errorf("replacing people: %w", err)
+				}
+				slog.WarnContext(ctx, "metadata: failed to replace people", "component", "metadata", "content_id", contentID, "error", err)
+			}
+			s.applyLocalPersonPhotos(ctx, contentID, valid)
 		}
 	}
 
@@ -3243,46 +3270,22 @@ func (s *MetadataService) mergeAndPersist(
 	}, nil
 }
 
-// replaceItemPeople resolves people to person rows and replaces the item's
-// credits with them. A failure stops only a local re-apply, which the next check
-// retries; any other write logs it and keeps what is stored.
-func (s *MetadataService) replaceItemPeople(ctx context.Context, req ProcessRequest, contentID string, people []models.ItemPerson) error {
-	persons := make([]models.Person, len(people))
-	for i := range people {
-		persons[i] = people[i].Person
-	}
-	personIDs, err := s.personRepo.BatchFindOrCreate(ctx, persons)
-	if err != nil {
-		if req.localReapply {
-			// A failed local re-apply is retried by the next check.
-			return fmt.Errorf("finding people: %w", err)
+// clearPreviousMatchRows empties what a correction keeps outside the item row:
+// localized text and, when the new match lists none, credits. It runs before the
+// new identity is stored: afterwards a retry is no correction, and nothing would
+// clear them. Credits the new match does list replace the stored ones later on.
+func (s *MetadataService) clearPreviousMatchRows(ctx context.Context, contentID string, item *models.MediaItem, locked, creditLocks []MetadataField) error {
+	if s.itemLocalizationRepo != nil {
+		if err := s.itemLocalizationRepo.ClearMatchText(ctx, contentID, isFieldLocked(locked, FieldName), isFieldLocked(locked, FieldOverview)); err != nil {
+			return err
 		}
-		// Keep the stored cast: no credit got an ID, so replacing it now
-		// would store only the credits that already had one, often none.
-		slog.WarnContext(ctx, "metadata: batch find/create people failed; keeping stored people", "component", "metadata", "content_id", contentID, "error", err)
+	}
+	if len(item.People) > 0 || (isFieldLocked(creditLocks, FieldCast) && isFieldLocked(creditLocks, FieldCrew)) {
 		return nil
 	}
-	for i := range people {
-		people[i].ID = personIDs[i]
+	if err := s.itemRepo.ReplacePeople(ctx, contentID, nil); err != nil {
+		return fmt.Errorf("clearing the previous match's people: %w", err)
 	}
-	// Filter out entries where FindOrCreate failed (Person.ID stayed 0).
-	valid := people[:0]
-	for _, p := range people {
-		if p.ID != 0 {
-			valid = append(valid, p)
-		}
-	}
-	if req.localReapply && len(valid) != len(people) {
-		// A partial cast would replace the stored one.
-		return fmt.Errorf("resolving people: %d of %d unresolved", len(people)-len(valid), len(people))
-	}
-	if err := s.itemRepo.ReplacePeople(ctx, contentID, valid); err != nil {
-		if req.localReapply {
-			return fmt.Errorf("replacing people: %w", err)
-		}
-		slog.WarnContext(ctx, "metadata: failed to replace people", "component", "metadata", "content_id", contentID, "error", err)
-	}
-	s.applyLocalPersonPhotos(ctx, contentID, valid)
 	return nil
 }
 
