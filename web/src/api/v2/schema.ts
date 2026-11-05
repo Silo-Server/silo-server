@@ -10867,7 +10867,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Allow a profile every title in a personal collection, including titles added later. Only a manual collection the acting primary profile created can be allowed (422 collection_not_live); copy other collections' titles with allowCollectionTitles. A profile sees at most 10,000 of its allowed titles, from its own allowances and its live collections together; the rest stay hidden. Household managers only. */
+    /** Allow a profile every title in a personal collection, including titles added later. Only a manual collection the acting primary profile created can be allowed (422 collection_not_live); copy other collections' titles with allowCollectionTitles. A profile sees at most 10,000 of its allowed titles, from its own allowances and its live collections together, and at most 50,000 entries of its live collections together are read; the rest stay hidden. Household managers only. */
     put: operations["allowCollection"];
     post?: never;
     /** Stop allowing a profile a personal collection. An absent allowance succeeds and changes nothing. Household managers only. */

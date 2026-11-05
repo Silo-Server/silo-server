@@ -51,22 +51,19 @@ A code path that builds limits without the list is stricter than intended,
 never looser: it hides allowed titles and exposes nothing.
 
 The list is bounded, because every request the profile makes reads it and
-passes it to the catalog SQL. The read is a `UNION ALL` with a `LIMIT` and no
-`ORDER BY`, so PostgreSQL stops once it has `userstore.MaxAllowedTitles`
-(10,000) rows rather than reading every member of every live collection. Each
-title comes back once, so the bound counts distinct titles: the collection
-branch leaves out a title the profile is allowed directly or an earlier live
-collection (by id) holds, and reads only whole-title entries
-(`sub_item_id = ''`), as collection membership does elsewhere. Below the bound
-the list is exact. A profile allowed more sees at most 10,000, which ones is
+passes it to the catalog SQL. Both what the read returns and what it scans
+are bounded. It returns at most `userstore.MaxAllowedTitles` (10,000) distinct
+titles: a `UNION ALL` with a `LIMIT` and no `ORDER BY`, so PostgreSQL stops
+once it has them. Its collection branch reads at most 50,000 whole-title
+entries (`sub_item_id = ''`, as collection membership counts elsewhere) of
+the live collections, five times the title bound, and deduplicates within
+them, leaving out titles the profile is allowed directly. So collections that
+overlap up to five times over still yield every distinct title. Within both
+bounds the list is exact. Past either, which titles the profile sees is
 unspecified and can change between reads, and the rest stay hidden, so the
-bound fails closed. The bound caps the rows the read returns, not the
-entries it scans: an entry left out as a repeat is still read, so a profile
-whose live collections overlap heavily can scan up to their total membership
-before it has 10,000 titles. Those are manual collections the primary
-profile fills by hand, and each scanned entry costs index probes. Writes are
-not capped: checking a live collection's future size at write time would be
-imprecise and racy.
+bounds fail closed rather than costing every request more. Writes are not
+capped: checking a live collection's future size at write time would be
+imprecise and racy, since the collection can grow without an allowance write.
 
 The list is the union of:
 

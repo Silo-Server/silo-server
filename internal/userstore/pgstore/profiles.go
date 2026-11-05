@@ -149,12 +149,14 @@ var profileByIDQuery = `
 // household manager alone decides what it holds, and only its movies and
 // series, as a title allowance may name (userstore.AllowanceTitleTypes).
 //
-// Every request the profile makes reads this, so it reads at most
-// userstore.MaxAllowedTitles rows: UNION ALL with no ORDER BY lets PostgreSQL
-// stop as soon as it has them rather than reading every member of every live
-// collection. Each title appears once, so the bound counts distinct titles: a
-// collection title is left out when the profile is allowed it directly or an
-// earlier live collection (by id) holds it. userIDExpr and profileIDExpr are
+// Every request the profile makes reads this, so both its result and its
+// work are bounded. It returns at most userstore.MaxAllowedTitles distinct
+// IDs: UNION ALL with no ORDER BY lets PostgreSQL stop once it has them. It
+// reads at most liveEntryScanLimit whole-title entries (an empty sub_item_id) of
+// the live collections, and deduplicates within them, leaving out titles
+// the profile is allowed directly. Past that many entries the rest stay
+// hidden, so heavily overlapping or very large live collections fail closed
+// rather than costing every request more. userIDExpr and profileIDExpr are
 // SQL expressions for the profile's key.
 func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	return `
@@ -168,18 +170,22 @@ func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	           SELECT content_id FROM profile_title_allowances ta
 	           WHERE ta.user_id = ` + userIDExpr + ` AND ta.profile_id = ` + profileIDExpr + `
 	           UNION ALL
-	           SELECT ci.media_item_id FROM live
-	           JOIN user_personal_collection_items ci ON ci.user_id = ` + userIDExpr + ` AND ci.collection_id = live.id AND ci.sub_item_id = ''
-	           JOIN media_items mi ON mi.content_id = ci.media_item_id
+	           SELECT DISTINCT entry.media_item_id FROM (
+	               SELECT ci.media_item_id FROM live
+	               JOIN user_personal_collection_items ci ON ci.user_id = ` + userIDExpr + ` AND ci.collection_id = live.id AND ci.sub_item_id = ''
+	               LIMIT ` + strconv.Itoa(liveEntryScanLimit) + `
+	           ) entry
+	           JOIN media_items mi ON mi.content_id = entry.media_item_id
 	           WHERE mi.type IN ('movie', 'series')
 	             AND NOT EXISTS (SELECT 1 FROM profile_title_allowances dup
-	                 WHERE dup.user_id = ` + userIDExpr + ` AND dup.profile_id = ` + profileIDExpr + ` AND dup.content_id = ci.media_item_id)
-	             AND NOT EXISTS (SELECT 1 FROM live earlier
-	                 JOIN user_personal_collection_items held ON held.user_id = ci.user_id AND held.collection_id = earlier.id
-	                     AND held.media_item_id = ci.media_item_id AND held.sub_item_id = ''
-	                 WHERE earlier.id < live.id)
+	                 WHERE dup.user_id = ` + userIDExpr + ` AND dup.profile_id = ` + profileIDExpr + ` AND dup.content_id = entry.media_item_id)
 	           LIMIT ` + strconv.Itoa(userstore.MaxAllowedTitles)
 }
+
+// liveEntryScanLimit bounds the live-collection entries one profile read
+// takes: five times the titles it keeps, so collections that overlap up to
+// five times over still yield every distinct title.
+const liveEntryScanLimit = 5 * userstore.MaxAllowedTitles
 
 func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	var libraryIDs []int
