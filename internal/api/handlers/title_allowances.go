@@ -24,9 +24,13 @@ import (
 // (*pgstore.TitleAllowances). It exists only where the user store is
 // PostgreSQL; under another store no allowance can apply.
 type titleAllowanceStore interface {
-	// ListTitleAllowances lists the profile's own title allowances, newest
-	// first, leaving out titles allowed only through a collection.
-	ListTitleAllowances(ctx context.Context, userID int, profileID string) ([]userstore.TitleAllowance, error)
+	// ListTitleAllowances lists one page of the profile's own title
+	// allowances, newest first and after the given keyset position, leaving
+	// out titles allowed only through a collection.
+	ListTitleAllowances(ctx context.Context, userID int, profileID string, after *userstore.ListKey, limit int) ([]userstore.TitleAllowance, error)
+	// HasTitleAllowance reports whether the profile has its own allowance for
+	// contentID.
+	HasTitleAllowance(ctx context.Context, userID int, profileID, contentID string) (bool, error)
 	// SetTitleAllowance adds or removes one title allowance and reports
 	// whether a row changed.
 	SetTitleAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, contentID string, allowed bool) (bool, error)
@@ -177,9 +181,10 @@ func requireMaturityLimits(p *userstore.Profile) error {
 	return apiError(http.StatusUnprocessableEntity, "no_maturity_limits", "The profile has no rating or advisory-age limit to make an exception to")
 }
 
-// ListAllowedTitles lists a profile's own title allowances, newest first, and
-// the cards of the allowed titles the actor may see, in the same order.
-func (h *TitleAllowanceHandler) ListAllowedTitles(ctx context.Context, actor AllowanceActor, profileID string) ([]userstore.TitleAllowance, []CollectionItemView, error) {
+// ListAllowedTitles lists one page of a profile's own title allowances,
+// newest first and after the given keyset position (nil for the first page),
+// and the cards of the allowed titles the actor may see, in the same order.
+func (h *TitleAllowanceHandler) ListAllowedTitles(ctx context.Context, actor AllowanceActor, profileID string, after *userstore.ListKey, limit int) ([]userstore.TitleAllowance, []CollectionItemView, error) {
 	store, _, err := h.manage(ctx, actor)
 	if err != nil {
 		return nil, nil, err
@@ -187,7 +192,7 @@ func (h *TitleAllowanceHandler) ListAllowedTitles(ctx context.Context, actor All
 	if _, err := targetProfile(ctx, store, profileID); err != nil {
 		return nil, nil, err
 	}
-	entries, err := h.allowances.ListTitleAllowances(ctx, actor.UserID, profileID)
+	entries, err := h.allowances.ListTitleAllowances(ctx, actor.UserID, profileID, after, limit)
 	if err != nil {
 		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list allowed titles")
 	}
@@ -377,11 +382,11 @@ func (h *TitleAllowanceHandler) stateFor(ctx context.Context, userID int, profil
 	if ok, err := visible(filter); err != nil || ok {
 		return AllowanceStateWithinLimits, err
 	}
-	own, err := h.allowances.ListTitleAllowances(ctx, userID, profileID)
+	own, err := h.allowances.HasTitleAllowance(ctx, userID, profileID, itemID)
 	if err != nil {
-		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to list allowed titles")
+		return "", apiError(http.StatusInternalServerError, "internal_error", "Failed to check the allowed title")
 	}
-	if slices.ContainsFunc(own, func(a userstore.TitleAllowance) bool { return a.ContentID == itemID }) {
+	if own {
 		return AllowanceStateAllowed, nil
 	}
 	if slices.Contains(scope.AllowedTitleIDs, itemID) {

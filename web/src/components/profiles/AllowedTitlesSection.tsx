@@ -52,7 +52,10 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
   const collections = useAllowedCollections(profileId, true);
   const setTitle = useSetTitleAllowance();
   const setCollection = useSetCollectionAllowance();
-  const allowedIds = new Set((titles.data ?? []).map((item) => item.content_id));
+  const allowedTitles = titles.data?.pages.flatMap((page) => page.items);
+  // Marks the search results already allowed; titles on pages not loaded yet
+  // show "Allow", and allowing one again changes nothing.
+  const allowedIds = new Set((allowedTitles ?? []).map((item) => item.content_id));
 
   return (
     <section className="border-border space-y-4 rounded-md border p-4">
@@ -77,11 +80,11 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
       ) : null}
       {titles.isLoading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : titles.isError && !titles.data ? null : (titles.data ?? []).length === 0 ? (
+      ) : titles.isError && !allowedTitles ? null : (allowedTitles ?? []).length === 0 ? (
         <p className="text-muted-foreground text-sm">No titles allowed yet.</p>
       ) : (
         <ul aria-label="Allowed titles" className="grid gap-2 sm:grid-cols-2">
-          {(titles.data ?? []).map((item) => (
+          {(allowedTitles ?? []).map((item) => (
             <li
               key={item.content_id}
               className="border-border flex items-center gap-3 rounded-md border px-2 py-2"
@@ -113,6 +116,17 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
           ))}
         </ul>
       )}
+      {titles.hasNextPage ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={titles.isFetchingNextPage}
+          onClick={() => void titles.fetchNextPage()}
+        >
+          {titles.isFetchingNextPage ? "Loading…" : "Show more"}
+        </Button>
+      ) : null}
 
       {collections.isError ? (
         <LoadError

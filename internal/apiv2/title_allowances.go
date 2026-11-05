@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -24,7 +25,7 @@ import (
 // failure.
 type TitleAllowanceService interface {
 	Supported(ctx context.Context, userID int) bool
-	ListAllowedTitles(ctx context.Context, actor handlers.AllowanceActor, profileID string) ([]userstore.TitleAllowance, []handlers.CollectionItemView, error)
+	ListAllowedTitles(ctx context.Context, actor handlers.AllowanceActor, profileID string, after *userstore.ListKey, limit int) ([]userstore.TitleAllowance, []handlers.CollectionItemView, error)
 	SetTitleAllowance(ctx context.Context, actor handlers.AllowanceActor, profileID, itemID string, allowed bool) error
 	TitleAllowanceStates(ctx context.Context, actor handlers.AllowanceActor, itemID string) ([]handlers.ProfileAllowanceState, error)
 	ListAllowedCollections(ctx context.Context, actor handlers.AllowanceActor, profileID string) ([]userstore.CollectionAllowance, error)
@@ -49,7 +50,9 @@ type TitleAllowanceCapabilityOutput struct {
 // AllowedTitlesInput names a profile and the artwork the cards use.
 type AllowedTitlesInput struct {
 	ArtworkQuery
-	ProfileID ID `path:"id" doc:"Profile identifier" example:"1"`
+	LimitParam
+	ProfileID ID     `path:"id" doc:"Profile identifier" example:"1"`
+	Cursor    string `query:"cursor" doc:"Opaque cursor from page.next_cursor" example:"eyJvIjo1MH0"`
 }
 
 // AllowedTitleCollection is the profile's allowed titles as catalog cards,
@@ -145,13 +148,18 @@ type AllowCollectionTitlesOutput struct {
 	Body AllowCollectionTitlesResult
 }
 
+const opListAllowedTitles = "listAllowedTitles"
+
 func registerTitleAllowances(reg *Registry) {
+	cursors := NewCursors(reg.deps.CursorSecret)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/capabilities/title-allowances", "getTitleAllowanceCapability", "profiles",
 		"Whether the household's primary profile can allow limited profiles specific titles above their rating limits.")), reg.getTitleAllowanceCapability)
 
-	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/profiles/{id}/allowed-titles", "listAllowedTitles", "profiles",
-		"List the movies and series allowed for a profile above its limits, as catalog cards, newest first. Titles allowed only through a collection are not listed. Household managers only.")),
-		reg.listAllowedTitles)
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/profiles/{id}/allowed-titles", opListAllowedTitles, "profiles",
+		"List the movies and series allowed for a profile above its limits, as catalog cards, newest first, paged by cursor. Titles allowed only through a collection are not listed, and titles the acting profile may not see are omitted, so a page can hold fewer cards than its limit. Household managers only.")),
+		func(ctx context.Context, in *AllowedTitlesInput) (*AllowedTitleCollectionOutput, error) {
+			return reg.listAllowedTitles(ctx, cursors, in)
+		})
 	Register(reg, allowanceMutation(humaOp(http.MethodPut, Prefix+"/profiles/{id}/allowed-titles/{item_id}", "allowTitle", "profiles",
 		"Allow a profile a movie or series above its rating or advisory-age limit. A series allowance covers its seasons and episodes. The profile must have a limit (422 no_maturity_limits) and reach the title's library (422 no_library_access); episodes and seasons are refused with 422. A profile sees at most 10,000 of its allowed titles; the rest stay hidden. Allowing an allowed title succeeds and changes nothing. Household managers only.")),
 		func(ctx context.Context, in *AllowedTitleInput) (*struct{}, error) {
@@ -225,7 +233,11 @@ func (reg *Registry) getTitleAllowanceCapability(ctx context.Context, _ *Capabil
 	return &TitleAllowanceCapabilityOutput{CacheControl: cacheControlPrivateNoCache, Body: TitleAllowanceCapability{Capability: Capability{State: state}}}, nil
 }
 
-func (reg *Registry) listAllowedTitles(ctx context.Context, in *AllowedTitlesInput) (*AllowedTitleCollectionOutput, error) {
+// listAllowedTitles pages the target profile's own allowances by keyset
+// (created_at, content_id), newest first; a limit+1 probe decides has_more.
+// The cursor is bound to the account, the acting and target profiles, and
+// the viewer policy that filters the cards.
+func (reg *Registry) listAllowedTitles(ctx context.Context, cursors *Cursors, in *AllowedTitlesInput) (*AllowedTitleCollectionOutput, error) {
 	if reg.deps.TitleAllowances == nil {
 		return nil, unavailable("title allowances")
 	}
@@ -233,16 +245,27 @@ func (reg *Registry) listAllowedTitles(ctx context.Context, in *AllowedTitlesInp
 	if p != nil {
 		return nil, p
 	}
-	_, cards, err := reg.deps.TitleAllowances.ListAllowedTitles(ctx, actor, string(in.ProfileID))
+	scope := CursorScope{
+		OperationID: opListAllowedTitles,
+		Security:    strconv.Itoa(actor.UserID) + "/" + actor.ActiveProfileID + "/" + string(in.ProfileID) + "/" + viewerScopeDigest(ctx),
+		Sort:        "-created_at,-item_id",
+		Tiebreaker:  tiebreakerItemID,
+	}
+	after, p := decodeListKey(cursors, scope, in.Cursor)
+	if p != nil {
+		return nil, p
+	}
+	entries, cards, err := reg.deps.TitleAllowances.ListAllowedTitles(ctx, actor, string(in.ProfileID), after, in.Limit+1)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	sel := reg.ratingSelection(ctx)
-	items := make([]CatalogItem, 0, len(cards))
-	for _, card := range cards {
-		items = append(items, catalogItemOfListing(card, sel))
+	items, next, p := personalListPage(cursors, scope, in.Limit, entries, cards, reg.ratingSelection(ctx), func(e userstore.TitleAllowance) userstore.ListKey {
+		return userstore.ListKey{AddedAt: e.CreatedAt, MediaItemID: e.ContentID}
+	})
+	if p != nil {
+		return nil, p
 	}
-	return &AllowedTitleCollectionOutput{Body: AllowedTitleCollection{Collection: NewCollection(items)}}, nil
+	return &AllowedTitleCollectionOutput{Body: AllowedTitleCollection{Collection: Paginated(items, next)}}, nil
 }
 
 func (reg *Registry) setTitleAllowance(ctx context.Context, in *AllowedTitleInput, allowed bool) (*struct{}, error) {

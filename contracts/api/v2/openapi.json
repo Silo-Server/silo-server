@@ -204515,6 +204515,23 @@
             }
           },
           {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
             "description": "Profile identifier",
             "in": "path",
             "name": "id",
@@ -204525,6 +204542,19 @@
                 "1"
               ],
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque cursor from page.next_cursor",
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "description": "Opaque cursor from page.next_cursor",
+              "examples": [
+                "eyJvIjo1MH0"
+              ],
               "type": "string"
             }
           }
@@ -204636,7 +204666,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List the movies and series allowed for a profile above its limits, as catalog cards, newest first. Titles allowed only through a collection are not listed. Household managers only.",
+        "summary": "List the movies and series allowed for a profile above its limits, as catalog cards, newest first, paged by cursor. Titles allowed only through a collection are not listed, and titles the acting profile may not see are omitted, so a page can hold fewer cards than its limit. Household managers only.",
         "tags": [
           "profiles"
         ],

@@ -22,6 +22,12 @@ CREATE INDEX idx_profile_title_allowances_content_id
     ON public.profile_title_allowances (content_id);
 -- +goose StatementEnd
 
+-- The household manager pages a profile's allowances newest first.
+-- +goose StatementBegin
+CREATE INDEX idx_profile_title_allowances_profile_created
+    ON public.profile_title_allowances (user_id, profile_id, created_at DESC, content_id DESC);
+-- +goose StatementEnd
+
 -- Personal collections allowed live for a limited profile: every title in the
 -- collection is allowed while it stays a manual collection created by the
 -- account's primary profile. Readers check those two conditions, so a

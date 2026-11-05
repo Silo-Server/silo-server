@@ -26,14 +26,18 @@ type memoryAllowances struct {
 	copied     []string        // what AllowTitles was asked to allow
 }
 
-func (s *memoryAllowances) ListTitleAllowances(_ context.Context, _ int, profileID string) ([]userstore.TitleAllowance, error) {
+func (s *memoryAllowances) ListTitleAllowances(_ context.Context, _ int, profileID string, _ *userstore.ListKey, limit int) ([]userstore.TitleAllowance, error) {
 	var out []userstore.TitleAllowance
 	for key := range s.titles {
-		if id, ok := strings.CutPrefix(key, profileID+"/"); ok {
+		if id, ok := strings.CutPrefix(key, profileID+"/"); ok && len(out) < limit {
 			out = append(out, userstore.TitleAllowance{ContentID: id})
 		}
 	}
 	return out, nil
+}
+
+func (s *memoryAllowances) HasTitleAllowance(_ context.Context, _ int, profileID, contentID string) (bool, error) {
+	return s.titles[profileID+"/"+contentID], nil
 }
 
 func (s *memoryAllowances) SetTitleAllowance(_ context.Context, _ userstore.AllowanceManager, profileID, contentID string, allowed bool) (bool, error) {

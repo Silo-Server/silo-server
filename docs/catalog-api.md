@@ -553,7 +553,9 @@ answers `403` otherwise.
   for an episode or season (allow the series), for a profile with no limit
   (`no_maturity_limits`), and for a title in a library the profile cannot see
   (`no_library_access`). `GET /api/v2/profiles/{id}/allowed-titles` lists the
-  profile's own allowances as catalog cards, newest first.
+  profile's own allowances as catalog cards, newest first, paged with `limit`
+  and `cursor`. Cards for titles the acting profile cannot see are left out, so
+  a page can hold fewer cards than its limit while `page.has_more` is true.
 - `PUT` and `DELETE /api/v2/profiles/{id}/allowed-collections/{collection_id}`
   allow a personal collection as it changes: titles added to it later are
   allowed too. Only a manual collection the acting primary profile created can

@@ -10884,7 +10884,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the movies and series allowed for a profile above its limits, as catalog cards, newest first. Titles allowed only through a collection are not listed. Household managers only. */
+    /** List the movies and series allowed for a profile above its limits, as catalog cards, newest first, paged by cursor. Titles allowed only through a collection are not listed, and titles the acting profile may not see are omitted, so a page can hold fewer cards than its limit. Household managers only. */
     get: operations["listAllowedTitles"];
     put?: never;
     post?: never;
@@ -133198,8 +133198,12 @@ export interface operations {
       query?: {
         /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
         backdrop_width?: number;
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
         /** @description Artwork size for every image in the response; absent picks each surface's default */
         image_size?: "small" | "medium" | "large" | "original";
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
         /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
         logo_width?: number;
         /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */

@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { BrowseItem, Profile } from "@/api/types";
+import type { Profile } from "@/api/types";
 import { catalogItemFromV2 } from "@/api/v2/catalog";
 import { v2, type V2Result } from "@/api/v2/request";
 import { useProfiles } from "@/hooks/queries/profiles";
@@ -118,17 +118,29 @@ export function useTitleAllowanceProfiles(itemId: string, enabled: boolean) {
   });
 }
 
-/** A profile's own allowed titles as cards, newest first. */
+/** Allowed titles read per page; the server's default page size. */
+const ALLOWED_TITLES_PAGE_SIZE = 50;
+
+/**
+ * A profile's own allowed titles as cards, newest first, a page at a time.
+ * `data.pages` holds each page's cards; `fetchNextPage` reads the next one.
+ */
 export function useAllowedTitles(profileId: string, enabled: boolean) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: titleAllowanceKeys.titles(profileId),
-    queryFn: async ({ signal }): Promise<BrowseItem[]> => {
+    queryFn: async ({ pageParam, signal }: { pageParam: string; signal: AbortSignal }) => {
       const result = await v2("GET /api/v2/profiles/{id}/allowed-titles", {
         path: { id: profileId },
+        query: { limit: ALLOWED_TITLES_PAGE_SIZE, cursor: pageParam || undefined },
         signal,
       });
-      return result.items.map(catalogItemFromV2);
+      return {
+        items: result.items.map(catalogItemFromV2),
+        next: result.page?.has_more ? result.page.next_cursor : undefined,
+      };
     },
+    initialPageParam: "",
+    getNextPageParam: (lastPage) => lastPage.next || undefined,
     enabled: enabled && profileId !== "",
   });
 }

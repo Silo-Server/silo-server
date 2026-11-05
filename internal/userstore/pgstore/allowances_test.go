@@ -213,6 +213,8 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 		}
 	})
 
+	t.Run("the profile's own allowances page newest first", f.checkTitlePages)
+
 	t.Run("a title held several times is read once", func(t *testing.T) { f.checkReadOnce(t, want) })
 
 	t.Run("episode reads admit only an allowed series' episodes", func(t *testing.T) { f.checkEpisodeReads(t, kid) })
@@ -337,5 +339,33 @@ func (f allowanceFixture) checkEpisodeReads(t *testing.T, kid *userstore.Profile
 		catalog.QueryDefinition{MediaScope: "episode", LibraryIDs: []int{f.library}}, filter, 10)
 	if err != nil || !slices.Equal(ids(queried), want) {
 		t.Errorf("episode-scope query = %v, %v; want %v", ids(queried), err, want)
+	}
+}
+
+// checkTitlePages pages the kid's two direct allowances one at a time:
+// newest first, each once, then an empty page; and the point lookup sees
+// a direct allowance but not a title allowed only through a collection.
+func (f allowanceFixture) checkTitlePages(t *testing.T) {
+	ctx := context.Background()
+	var got []string
+	var after *userstore.ListKey
+	for range 3 {
+		page, err := f.allow.ListTitleAllowances(ctx, f.userID, "kid", after, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		got = append(got, page[0].ContentID)
+		after = &userstore.ListKey{AddedAt: page[0].CreatedAt, MediaItemID: page[0].ContentID}
+	}
+	if want := []string{f.id("series-allowed"), f.id("movie-allowed")}; !slices.Equal(got, want) {
+		t.Fatalf("paged allowances = %v, want %v (newest first, each once)", got, want)
+	}
+	for id, want := range map[string]bool{f.id("movie-allowed"): true, f.id("movie-collection"): false} {
+		if has, err := f.allow.HasTitleAllowance(ctx, f.userID, "kid", id); err != nil || has != want {
+			t.Errorf("HasTitleAllowance(%s) = %v, %v; want %v", id, has, err, want)
+		}
 	}
 }

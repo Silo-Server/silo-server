@@ -31,11 +31,29 @@ func NewTitleAllowances(pool *pgxpool.Pool) *TitleAllowances {
 	return &TitleAllowances{pool: pool}
 }
 
-func (s *TitleAllowances) ListTitleAllowances(ctx context.Context, userID int, profileID string) ([]userstore.TitleAllowance, error) {
-	rows, err := s.pool.Query(ctx, `
+// ListTitleAllowances lists one page of the profile's own title allowances,
+// newest first: at most limit rows after the given keyset position, or from
+// the newest when after is nil. CreatedAt carries full precision so it can
+// resume a page.
+func (s *TitleAllowances) ListTitleAllowances(ctx context.Context, userID int, profileID string, after *userstore.ListKey, limit int) ([]userstore.TitleAllowance, error) {
+	args := []any{userID, profileID}
+	query := `
 		SELECT content_id, created_at FROM profile_title_allowances
-		WHERE user_id = $1 AND profile_id = $2
-		ORDER BY created_at DESC, content_id DESC`, userID, profileID)
+		WHERE user_id = $1 AND profile_id = $2`
+	if after != nil {
+		createdAt, err := time.Parse(time.RFC3339Nano, after.AddedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parsing allowance list key: %w", err)
+		}
+		args = append(args, createdAt, after.MediaItemID)
+		query += `
+		  AND (created_at, content_id) < ($3::timestamptz, $4)`
+	}
+	args = append(args, limit)
+	query += fmt.Sprintf(`
+		ORDER BY created_at DESC, content_id DESC
+		LIMIT $%d`, len(args))
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("listing title allowances: %w", err)
 	}
@@ -45,9 +63,22 @@ func (s *TitleAllowances) ListTitleAllowances(ctx context.Context, userID int, p
 		if err := row.Scan(&a.ContentID, &createdAt); err != nil {
 			return a, err
 		}
-		a.CreatedAt = timeToString(createdAt)
+		a.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		return a, nil
 	})
+}
+
+// HasTitleAllowance reports whether the profile has its own allowance for
+// contentID.
+func (s *TitleAllowances) HasTitleAllowance(ctx context.Context, userID int, profileID, contentID string) (bool, error) {
+	var found bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM profile_title_allowances
+		WHERE user_id = $1 AND profile_id = $2 AND content_id = $3)`, userID, profileID, contentID).Scan(&found)
+	if err != nil {
+		return false, fmt.Errorf("checking title allowance: %w", err)
+	}
+	return found, nil
 }
 
 func (s *TitleAllowances) SetTitleAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, contentID string, allowed bool) (bool, error) {
