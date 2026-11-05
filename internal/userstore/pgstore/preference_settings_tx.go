@@ -30,6 +30,29 @@ type preferenceSettingsTx struct {
 
 var _ userstore.PreferenceSettingsTransactioner = (*PostgresUserStore)(nil)
 
+// LockAccountForImport takes, in tx, the account-level locks every import
+// takes before touching data (userdata.Preparer): the preference-settings
+// lock (profile creation, setting mutations), then the section-override lock
+// (section override writes, profile deletion). Profile deletion takes the
+// section-override lock before deleting a profile's rows, so an import that
+// holds it first can never wait on deletion while holding rows it needs.
+func LockAccountForImport(ctx context.Context, tx pgx.Tx, userID int) error {
+	if err := lockPreferenceSettings(ctx, tx, userID); err != nil {
+		return err
+	}
+	return lockSectionOverrides(ctx, tx, userID)
+}
+
+// lockPreferenceSettings takes, in tx, the account lock
+// WithPreferenceSettingsTransaction takes. The id is cast in SQL, which is
+// the same key as the int32 the other callers pass.
+func lockPreferenceSettings(ctx context.Context, tx pgx.Tx, userID int) error {
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1, $2::integer)", preferenceSettingsAdvisoryClass, userID); err != nil {
+		return fmt.Errorf("locking the account's preference settings: %w", err)
+	}
+	return nil
+}
+
 func (s *PostgresUserStore) WithPreferenceSettingsTransaction(
 	ctx context.Context,
 	fn func(userstore.PreferenceSettingsWriter) error,

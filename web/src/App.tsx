@@ -92,6 +92,7 @@ const Notifications = lazy(() => import("@/pages/Notifications"));
 const DeviceSettings = lazy(() => import("@/pages/settings/DeviceSettings"));
 const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"));
 const NotificationsSettings = lazy(() => import("@/pages/settings/NotificationsSettings"));
+const YourDataSettings = lazy(() => import("@/pages/settings/YourDataSettings"));
 const Requests = lazy(() => import("@/pages/Requests"));
 const RequestBrowse = lazy(() => import("@/pages/RequestBrowse"));
 const RequestDiscoverSection = lazy(() => import("@/pages/RequestDiscoverSection"));
@@ -496,6 +497,10 @@ function AppRoutes() {
                   <Route path="maintenance" element={<AdminMaintenance />} />
                   <Route path="backups" element={<AdminBackups />} />
                   <Route path="backups/:id/restore" element={<AdminBackupRestore />} />
+                  <Route
+                    path="backups/uploads/:uploadId/restore"
+                    element={<AdminBackupRestore />}
+                  />
                   <Route path="collections" element={<AdminCollections />} />
                   {/* One page from /new to /:id/edit, so Create keeps the editor mounted. */}
                   <Route element={<CollectionEditorPage scope="server" />}>
@@ -606,6 +611,7 @@ function AppRoutes() {
                   <Route path="requests" element={<RequestsSettings />} />
                   <Route path="devices" element={<DeviceSettings />} />
                   <Route path="notifications" element={<NotificationsSettings />} />
+                  <Route path="your-data" element={<YourDataSettings />} />
                   <Route path="connect-apps" element={<ConnectAppsSettings />} />
                   <Route path="*" element={<Navigate to="/settings/playback" replace />} />
                 </Route>

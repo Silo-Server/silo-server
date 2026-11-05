@@ -110,7 +110,7 @@ func NewClient(cfg BucketConfig) *Client {
 
 	role := telemetry.Role(cfg.Role)
 	s3Client := s3.New(s3.Options{
-		APIOptions:   []func(*middleware.Stack) error{observeS3(role), markThrottled},
+		APIOptions:   []func(*middleware.Stack) error{observeS3(role), markThrottled, boundListResponses},
 		HTTPClient:   observedHTTPClient{inner: sharedHTTPClient(), role: role},
 		Region:       region,
 		BaseEndpoint: aws.String(cfg.Endpoint),
@@ -318,6 +318,18 @@ func conditionalHeaderRejected(err error) bool {
 // known Content-Length, which backends like Cloudflare R2 require (a plain
 // PutObject with an unsized stream is rejected with 411 MissingContentLength).
 func (c *Client) PutObjectStream(ctx context.Context, bucket, key string, r io.Reader, contentType string) error {
+	return c.PutObjectStreamParts(ctx, bucket, key, r, contentType, streamUploadPartSize)
+}
+
+// MaxUploadParts is the most parts one multipart upload may have.
+const MaxUploadParts = 10_000
+
+// PutObjectStreamParts is PutObjectStream with partSize-byte parts, for
+// objects that may be larger than 10,000 default parts: the multipart upload
+// holds one part in memory at a time, and an object can be at most
+// MaxUploadParts parts. A partSize below the default uses the default.
+func (c *Client) PutObjectStreamParts(ctx context.Context, bucket, key string, r io.Reader, contentType string, partSize int64) error {
+	partSize = max(partSize, streamUploadPartSize)
 	if err := c.mutations.Acquire(ctx, 1); err != nil {
 		return err
 	}
@@ -336,7 +348,7 @@ func (c *Client) PutObjectStream(ctx context.Context, bucket, key string, r io.R
 	}
 
 	uploader := manager.NewUploader(c.s3Client, func(u *manager.Uploader) {
-		u.PartSize = streamUploadPartSize
+		u.PartSize = partSize
 		u.Concurrency = 1
 	})
 	if _, err := uploader.Upload(ctx, input); err != nil {
@@ -858,6 +870,20 @@ func (c *Client) deleteObjects(ctx context.Context, bucket string, keys []string
 	return deleted, nil
 }
 
+// ErrorCode returns the backend's error code for err, such as "AccessDenied"
+// or "NoSuchBucket", or "" when err carries none (a network failure). The
+// backend's free-form message is never returned.
+func ErrorCode(err error) string {
+	if apiErr, ok := errors.AsType[smithy.APIError](err); ok {
+		return safeErrorCode(apiErr.ErrorCode())
+	}
+	return ""
+}
+
+// HTTPStatus returns the HTTP status of the response behind err, or 0 when
+// no response arrived.
+func HTTPStatus(err error) int { return httpStatusCode(err) }
+
 // s3ErrorCode returns the backend error code for err without its free-form
 // message, which may echo credentials or signed URLs.
 func s3ErrorCode(err error) string {
@@ -937,7 +963,24 @@ func (c *Client) ListObjects(ctx context.Context, bucket, prefix string) ([]stri
 	return keys, nil
 }
 
-// ListObjectInfos lists objects with the given prefix and returns summary metadata.
+// ErrListingTooLarge reports a full listing that passed maxListEntries or
+// maxListPages. Callers that need every key of a larger prefix page through it
+// with ListObjectInfosAfter or ListObjectInfosPage.
+var ErrListingTooLarge = errors.New("s3 listing exceeds the full-listing limit")
+
+// Full-listing ceilings. Real callers list one item's images, one backup
+// upload's parts (a terabyte at the 1 MiB minimum part size), catalog seeds, or
+// diagnostic reports, all well under a million keys. The ceilings stop an endpoint that keeps returning truncated pages with
+// fresh continuation tokens from growing the result, or the request count,
+// without bound. Variables so tests can lower them.
+var (
+	maxListEntries = 1_000_000
+	maxListPages   = 10_000
+)
+
+// ListObjectInfos lists objects with the given prefix and returns summary
+// metadata. It returns ErrListingTooLarge past maxListEntries entries or
+// maxListPages pages.
 func (c *Client) ListObjectInfos(ctx context.Context, bucket, prefix string) ([]ObjectInfo, error) {
 	var objects []ObjectInfo
 	prefixedPrefix := c.prefixedKey(prefix)
@@ -947,7 +990,10 @@ func (c *Client) ListObjectInfos(ctx context.Context, bucket, prefix string) ([]
 		Prefix: aws.String(prefixedPrefix),
 	})
 
-	for paginator.HasMorePages() {
+	for pages := 0; paginator.HasMorePages(); pages++ {
+		if pages == maxListPages || len(objects) >= maxListEntries {
+			return nil, fmt.Errorf("s3 ListObjectsV2 %s prefix=%s: %w (%d pages, %d entries)", bucket, prefix, ErrListingTooLarge, pages, len(objects))
+		}
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("s3 ListObjectsV2 %s prefix=%s: %w", bucket, prefix, err)

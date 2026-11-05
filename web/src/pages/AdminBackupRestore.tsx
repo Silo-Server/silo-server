@@ -4,18 +4,24 @@ import { Link, Navigate, useParams, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { jobIdFromLocation, type RestoreJob } from "@/api/v2/adminBackupRestore";
+import {
+  jobIdFromLocation,
+  type RestoreDataTypeId,
+  type RestoreJob,
+} from "@/api/v2/adminBackupRestore";
 import { V2ProblemError } from "@/api/v2/request";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminBackupCapabilities, useAdminBackups } from "@/hooks/queries/admin/backups";
+import { useAdminBackupUploads } from "@/hooks/queries/admin/backupUploads";
 import {
   useCancelRestore,
   useRestoreJob,
   useRestoreJobs,
   useRestoreSet,
   useStartRestore,
+  type RestoreSource,
 } from "@/hooks/queries/admin/backupRestore";
 import { adminKeys } from "@/hooks/queries/keys";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
@@ -31,6 +37,7 @@ import {
   sourceServerName,
 } from "@/pages/admin-backups/backupPresentation";
 import {
+  DEFAULT_DATA_TYPES,
   entrySelectable,
   indexItems,
   selectionRequest,
@@ -83,15 +90,20 @@ const takenDate = (taken: Date) =>
     day: "numeric",
   });
 
-/** The page heading: the backup's date, and where it was taken in the subtitle. */
+/**
+ * The page heading. A backup of this server is named by its date; an upload
+ * by the server it came from, and its subtitle says it was uploaded.
+ */
 function restoreHeading({
   taken,
   version,
   set,
+  fromUpload,
 }: {
   taken: Date | null;
   version: string | undefined;
   set: { same_server: boolean; server_name: string; server_id: string } | undefined;
+  fromUpload: boolean;
 }): { title: string; subtitle: string | undefined } {
   if (!taken) return { title: "Restore from a backup", subtitle: undefined };
   const known = knownSiloVersion(version);
@@ -105,6 +117,13 @@ function restoreHeading({
   };
   const time = `taken at ${formatTime(taken)}`;
   const withVersion = known ? `with Silo ${known}` : null;
+  if (fromUpload) {
+    const origin = set?.same_server ? "uploaded from this server" : "uploaded from another server";
+    return {
+      title: `Restore from ${name ?? (set?.same_server ? "this server" : "another server")}'s backup of ${takenDate(taken)}`,
+      subtitle: sentence([origin, time, withVersion, idDetail]),
+    };
+  }
   let where: string | null = null;
   if (set) where = set.same_server ? "on this server" : `from ${name ?? "another server"}`;
   return {
@@ -125,24 +144,32 @@ function refusalOf(error: unknown): RestoreRefusal {
 }
 
 /**
- * `/admin/backups/:id/restore`: choose, review, and run a selective restore
- * from a backup of this server.
+ * `/admin/backups/:id/restore` and `/admin/backups/uploads/:uploadId/restore`:
+ * choose, review, and run a selective restore from a backup of this server or
+ * from an uploaded restore set.
  */
 export default function AdminBackupRestore() {
-  const { id = "" } = useParams();
+  const { id: backupId = "", uploadId = "" } = useParams();
+  const source: RestoreSource = uploadId
+    ? { kind: "upload", id: uploadId }
+    : { kind: "backup", id: backupId };
+  const id = source.id;
+  const fromUpload = source.kind === "upload";
   const [params, setParams] = useSearchParams();
   const jobId = params.get("job");
   const queryClient = useQueryClient();
   const capabilities = useAdminBackupCapabilities();
   const backups = useAdminBackups();
+  const uploads = useAdminBackupUploads(fromUpload);
   const jobs = useRestoreJobs();
   const [openUnverified, setOpenUnverified] = useState(false);
-  const preview = useRestoreSet(jobId ? null : id, openUnverified);
+  const preview = useRestoreSet(jobId ? null : source, openUnverified);
   const job = useRestoreJob(jobId);
-  const start = useStartRestore(id);
+  const start = useStartRestore(source);
   const cancel = useCancelRestore();
   const [reviewing, setReviewing] = useState(false);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
+  const [dataTypes, setDataTypes] = useState<ReadonlySet<RestoreDataTypeId>>(DEFAULT_DATA_TYPES);
   const [refusal, setRefusal] = useState<RestoreRefusal | null>(null);
   const [acceptUnauthenticated, setAcceptUnauthenticated] = useState(false);
 
@@ -156,7 +183,8 @@ export default function AdminBackupRestore() {
   );
 
   const list = backups.data;
-  const backup = list?.items.find((item) => item.id === id);
+  const backup = fromUpload ? undefined : list?.items.find((item) => item.id === id);
+  const upload = fromUpload ? uploads.data?.find((item) => item.id === id) : undefined;
   const active = list?.active;
   const terminal = job.data?.terminal ?? false;
 
@@ -170,7 +198,7 @@ export default function AdminBackupRestore() {
   // address (a reload, another admin) is shown instead of the chooser.
   const forThisBackup = (candidate: RestoreJob) => {
     const named = candidate.backup_restore_source ?? candidate.backup_restore_result;
-    return named?.backup_id === id;
+    return (fromUpload ? named?.upload_id : named?.backup_id) === id;
   };
   const runningJob = jobId
     ? undefined
@@ -178,10 +206,17 @@ export default function AdminBackupRestore() {
   if (runningJob) return <Navigate to={`?job=${encodeURIComponent(runningJob.id)}`} replace />;
   const lastJob = jobs.data?.find(forThisBackup);
 
-  const takenAt = backup?.created_at ?? set?.created_at;
+  // The report step reads no preview; an upload's own record names its source then.
+  const uploadSource = upload?.source;
+  const origin =
+    set ??
+    (uploadSource
+      ? { ...uploadSource, same_server: uploadSource.server_id === list?.server_id }
+      : undefined);
+  const takenAt = backup?.created_at ?? origin?.created_at;
   const taken = takenAt ? new Date(takenAt) : null;
-  const version = set?.silo_version ?? backup?.silo_version;
-  const { title, subtitle } = restoreHeading({ taken, version, set });
+  const version = set?.silo_version ?? backup?.silo_version ?? uploadSource?.silo_version;
+  const { title, subtitle } = restoreHeading({ taken, version, set: origin, fromUpload });
 
   const step = jobId ? 2 : reviewing ? 1 : 0;
 
@@ -191,7 +226,7 @@ export default function AdminBackupRestore() {
     start.mutate(
       {
         digest: set.digest,
-        selection: selectionRequest(set, selection),
+        selection: selectionRequest(set, selection, dataTypes),
         acceptUnauthenticated: !set.authenticated && acceptUnauthenticated,
       },
       {
@@ -263,9 +298,10 @@ export default function AdminBackupRestore() {
       <div role="alert" className="surface-panel space-y-3 rounded-2xl p-6">
         <p className="font-medium">This server can&apos;t verify this backup.</p>
         <p className="text-muted-foreground text-sm">
-          It was written under a different SECRET_KEY, or by a version of Silo that didn&apos;t
-          record what checking it needs. Anyone who could write to where backups are kept could have
-          changed it. Open it only if you trust where it came from.
+          It was uploaded, or written under a different SECRET_KEY, or by a version of Silo that
+          didn&apos;t record what checking it needs. Anyone who could change the file could have
+          changed what it restores. Open it only if you trust where it came from. Settings that
+          connect to outside services and plugin settings are never restored from it.
         </p>
         <Button
           variant="outline"
@@ -282,7 +318,10 @@ export default function AdminBackupRestore() {
   } else if (preview.isError || !set) {
     body = (
       <div role="alert" className="surface-panel space-y-3 rounded-2xl p-6">
-        <p>Couldn&apos;t open this backup for restoring. {backupErrorMessage(preview.error)}</p>
+        <p>
+          Couldn&apos;t open this {fromUpload ? "uploaded backup" : "backup"} for restoring.{" "}
+          {backupErrorMessage(preview.error)}
+        </p>
         <Button variant="outline" size="sm" onClick={() => void preview.refetch()}>
           Try again
         </Button>
@@ -293,6 +332,7 @@ export default function AdminBackupRestore() {
       <RestoreReview
         set={set}
         selection={selection}
+        dataTypes={dataTypes}
         onBack={leaveReview}
         onRestore={restore}
         acceptUnauthenticated={acceptUnauthenticated}
@@ -311,7 +351,7 @@ export default function AdminBackupRestore() {
       <div className="space-y-5">
         {lastJob ? (
           <p className="text-muted-foreground text-sm">
-            A restore from this backup ran{" "}
+            A restore from this {fromUpload ? "upload" : "backup"} ran{" "}
             {lastJob.finished_at ? backupDateTime(lastJob.finished_at) : "earlier"}.{" "}
             <Link
               to={`?job=${encodeURIComponent(lastJob.id)}`}
@@ -325,6 +365,8 @@ export default function AdminBackupRestore() {
           set={set}
           selection={selection}
           onSelectionChange={setChosen}
+          dataTypes={dataTypes}
+          onDataTypesChange={setDataTypes}
           onReview={() => setReviewing(true)}
         />
       </div>

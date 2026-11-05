@@ -4,7 +4,10 @@
 the blobs that cannot be fetched again, and a restore set of versioned
 sections for selective restore. It lists, rotates, and deletes them; the
 `silo backup` command restores one in full, and the admin API restores chosen
-parts of one (see [Selective restore](#selective-restore)). The endpoints are in [backups-api.md](../backups-api.md).
+parts of one, or of a restore set uploaded from another server (see
+[Selective restore](#selective-restore) and [Uploads](#uploads)). A profile can
+also export and import its own data (see [Profile export](#profile-export)).
+The endpoints are in [backups-api.md](../backups-api.md).
 
 A backup is a recovery point for this server's own data. It does not include
 media files (Silo never manages them, see [non-goals](../non-goals.md)),
@@ -23,19 +26,24 @@ Each backup is one folder at the destination:
 
 ```
 backups/<server-id>/<UTC time>-<kind>/
-  db.dump          pg_dump custom format, zstd level 3
-  restore-set.tar  sections for selective restore
-  blobs.tar        assets/<key> and operational/<key> entries
-  manifest.json    written last
+  db.dump[.age]          pg_dump custom format, zstd level 3
+  restore-set.tar[.age]  sections for selective restore; not in before-upgrade backups
+  blobs.tar[.age]        assets/<key> and operational/<key> entries; not in before-upgrade backups
+  manifest.json          written last; never encrypted
 ```
+
+Objects end in `.age` when they are encrypted, which every backup in an
+S3 bucket is: the `s3` destination, and the `default` destination when it is
+the private bucket ([Destinations](#destinations), [Encryption](#encryption)).
 
 - `server-id` is `server.identity_id` (`internal/serveridentity`). Every server
   writes and rotates only its own prefix; other prefixes at the destination
-  are listed by id and otherwise left alone.
+  are listed by id and otherwise left alone. `backups/uploads/` holds
+  [uploaded restore sets](#uploads) and is never a server id.
 - The folder name is the backup id: `20261031T040000.123Z-nightly`. The time
   is the start of the run in UTC, to the millisecond; ids written to the
   second (`20261031T040000Z-nightly`) still parse. Kinds are `nightly`,
-  `manual`, and `before-restore`. Names that do not parse,
+  `manual`, `before-restore`, and `before-upgrade`. Names that do not parse,
   such as a full restore's `<time>-overwritten-blobs`, are never treated as
   backups.
 - **A folder is never reused.** A backup reserves its id under the subsystem
@@ -49,15 +57,33 @@ backups/<server-id>/<UTC time>-<kind>/
   object written, so its presence is the commit point. Listing shows an
   incomplete folder as `in_progress` only while the published active
   operation (see [Status](#status)) is that backup, and `incomplete`
-  otherwise. The sweep deletes incomplete folders whose name and newest
-  object are both older than 24 hours, and only a folder a complete,
-  error-free listing showed without a manifest object (`folder.noManifest`):
-  deleting a complete backup is the one mistake it must not make. A folder
-  whose manifest is listed but could not be read (a timeout, a destination
-  error) is `unreadable`: listed with that status and the
-  `backup_unreadable` warning, never rotated, not counted toward
-  `backup.keep`, and never swept. A failed listing skips rotation and the
-  sweep for that run.
+  otherwise. So is a folder whose manifest lists an object that is not
+  there, or not at its recorded size, in a complete listing of the folder:
+  it keeps its manifest, so the sweep leaves it for the admin. The sweep
+  deletes incomplete folders whose name and newest object are both older
+  than 24 hours, and only a folder a complete, error-free listing showed
+  without a manifest object (`folder.noManifest`): deleting a complete
+  backup is the one mistake it must not make. A folder whose manifest is
+  listed but could not be read (a timeout, a destination error), or that
+  holds more objects than a listing reads of it (below), is `unreadable`:
+  listed with that status and the `backup_unreadable` warning, never
+  rotated, not counted toward `backup.keep`, and never swept. A failed or
+  capped listing skips rotation and the sweep for that run.
+- **Listings are bounded.** Anyone who can write a bucket, or answer for its
+  endpoint, could otherwise hold enough keys, or page without end, to
+  exhaust the server's memory on every scheduled backup. Every listing pages
+  through `Destination.ListPage` (at most 1,000 objects a request) and stops
+  at a cap (`listing_bounded.go`): one server's backup folders are read in
+  key order, at most 2,000 folders and 1,000 requests (past either the
+  listing fails, so nothing is rotated or swept), and a child that is not a
+  backup folder (a full restore's overwritten files) is skipped by listing
+  after it, as a delimiter would. A folder with more than 32 objects, which
+  no backup writes, is read only that far and is `unreadable`: its contents
+  are unknown. One listing reads at most 256 MiB of manifests
+  (`maxListedManifestBytes`, judged by their listed sizes before any is
+  read); past it the remaining folders are `unreadable` and kept. Other
+  servers' folders are named one request each, at most 100, and the
+  upload sweep reads at most 100,000 objects.
 - **The listing reads a manifest once.** A manifest is not rewritten after
   its backup completes, so the Backups listing (which the page polls every
   few seconds while a backup runs) keeps each manifest it read and checked,
@@ -77,11 +103,16 @@ highest applied `goose_db_version`), `applied_migrations` (every applied
 goose version, ascending, without goose's version 0; it must end at the goose
 version), PostgreSQL server version, `pg_dump`
 version, the tables whose data was excluded, each object's size and the
-SHA-256 of its stored bytes, the `SECRET_KEY` check value, how the table of contents was checked, the blob count and bytes,
+SHA-256 of its stored bytes, whether objects are encrypted, the `SECRET_KEY`
+check value, how the table of contents was checked, the blob count and bytes,
 `missing_blobs`, the core table inventory, and, when the backup has a restore
 set, `restore_set`: its format version and the item count of each section.
 The objects are exactly `db.dump` and `blobs.tar`, plus `restore-set.tar`
-when `restore_set` is present.
+when `restore_set` is present, each named with `.age` when `encrypted` is
+true; a manifest whose names disagree with `encrypted` is refused. A
+`before-upgrade` manifest lists `db.dump` alone, with no restore set and no
+blob counts, and records the upgrade it precedes in `upgrade.pending`, the
+migrations pending when it was taken (see [Before upgrades](#before-upgrades)).
 A manifest is at most 16 MiB, the most a reader reads: `missing_blobs` lists
 at most 10,000 entries, with `missing_blobs_total` counting them all when
 there are more, and a manifest that would still be larger is not written.
@@ -111,7 +142,15 @@ showing either key.
 derived from `SECRET_KEY` (HKDF-SHA256, info `silo/backup-manifest/v1`,
 `secret.BackupManifestKey`) of the manifest encoded with `mac` empty, in hex.
 It covers the id, kind, server id, times, every object's name, size, and
-checksum, and every other field. Anyone who can write the destination can
+checksum, and every other field. Because the MAC is over the encoding, a
+field added to the manifest after a build first wrote it must encode to
+nothing at its zero value (`omitempty`, as `encrypted` and `restore_set`
+do), or every backup an earlier build took would read as tampered;
+`TestManifestsOfEarlierBuildsStillVerify` checks manifests signed by
+earlier builds, byte for byte. Builds that wrote `encrypted` without
+`omitempty` signed `"encrypted":false` into an unencrypted manifest; for
+one that does not verify as encoded, the check also tries that encoding.
+Anyone who can write the destination can
 change an object and its checksum together; only a server with the key can
 write a `mac` that verifies. Every read checks it before trusting anything
 else in the manifest: the listing, downloads and download links, a
@@ -144,14 +183,17 @@ path (every Silo that writes manifests signs them):
 
 ## Taking a backup
 
-1. Preflight: the user store is PostgreSQL, the destination exists, its id
-   is reserved, `pg_dump` and `pg_restore` are installed, and the destination
-   has free space of at least 1.5 times the previous
+1. Preflight: the user store is PostgreSQL, the destination `backup.destination`
+   names exists (and, for a bucket, where backups are encrypted, the confirmed
+   key check value is this server's; see [Encryption](#encryption)), its id
+   is reserved, `pg_dump` and `pg_restore` are installed,
+   and a local destination has free space of at least 1.5 times the previous
    backup plus 1 GB. The default destination shares a disk with the database,
    and filling it would take PostgreSQL down.
 2. Open a `REPEATABLE READ`, read-only transaction and call
    `pg_export_snapshot()`. In the same transaction read the server and schema
-   versions, the table inventory, and the referenced blob keys.
+   versions, the table inventory, and, except for `before-upgrade`, the
+   referenced blob keys.
 3. Run `pg_dump --format=custom --compress=zstd:3 --snapshot=<id>` with
    `--exclude-table-data-and-children` for `activity_log`, `operational_logs`,
    `policy_decisions`, `catalog_search_index_events`, the short-lived
@@ -159,7 +201,9 @@ path (every Silo that writes manifests signs them):
    tokens, Jellyfin and Audiobookshelf sessions, device-code, OIDC,
    account-link, password-reset, email-verification, Discord-link,
    watch-provider, and history-import sign-in flows, Watch Together rooms),
-   `backup_status` (its row describes the backup being taken), and, unless
+   `backup_status` (its row describes the backup being taken),
+   `backup_uploads`, `backup_upload_parts`, and `backup_upload_attempts`
+   (their parts are not in the backup), and, unless
    `backup.include_intro_fingerprints`, `media_intro_fingerprints`. The schema
    is always dumped. Leaving sign-in state out means a restore never brings
    back a session or token revoked after the backup: after a full restore
@@ -172,17 +216,18 @@ path (every Silo that writes manifests signs them):
    named by `PGSERVICEFILE` and removed when the command exits. pgx's
    `sslinline`, which puts key material in the URL, is refused.
 4. Stream `pg_dump`'s stdout straight into the destination with no local
-   spool, hashing the stored bytes. `pg_restore --list` reads a tee of the
-   stream. `pg_restore` reads a custom-format archive's table of contents
+   spool, encrypting it for a bucket and hashing the stored
+   (encrypted) bytes. `pg_restore --list` reads a tee of the plaintext
+   stream, before encryption. `pg_restore` reads a custom-format archive's table of contents
    from a pipe and exits without reading the data; the tee then drops its copy
    and the upload continues. If the piped check fails, the check reads the
    stored object back. The manifest records which happened (`pipe` or
    `read_back`).
-5. Write `restore-set.tar` (see
+5. Every kind except `before-upgrade` writes `restore-set.tar` (see
    [Restore set](#restore-set)): its documents and plugin archives come from
    the same snapshot transaction, then the snapshot closes and the section
    blobs are copied, as blobs.tar's are.
-6. Copy the blobs into `blobs.tar`.
+6. Except for `before-upgrade`, copy the blobs into `blobs.tar`.
 7. Write the manifest, then rotate and sweep. A failure in any earlier step
    leaves an incomplete folder and deletes nothing.
 
@@ -238,10 +283,33 @@ valid recovery point. Any other read error fails the backup.
 
 `backup.Destination` is the seam for every destination: put a stream, open,
 list, delete a folder, probe, report local free space, and presign a
-download. The one destination, `default`, is the operational store from
-`blobstore.Open` on local artwork storage, the local root. On an S3 artwork
-backend there is no local operational store, so there is nowhere to write
-backups; the Backups page says so and links to Storage settings.
+download. `backup.destination` picks one, read when each operation starts, so
+every API server follows a change without a restart:
+
+- `default`: the operational store from `blobstore.Open` (the local root, or
+  the private bucket when one is configured). Backups there are encrypted when
+  it is the private bucket, exactly as at `s3`, and plaintext on the local
+  filesystem (`Destination.Encrypted`). On an S3 artwork backend with no
+  private bucket there is no operational store; the Backups page says to set
+  up an S3 bucket for backups.
+- `s3`: a bucket used only for backups (`backup.s3.*`), reached with its own
+  credentials through `s3client`, even when artwork storage is local. Every
+  object written there is encrypted ([Encryption](#encryption)).
+
+One destination is current at a time. Switching leaves the copies at the
+previous destination where they are: listing, rotation, deletion, previews,
+and downloads see only the current one, and the Backups page says so. Uploads
+always use the operational store, whatever the destination.
+
+An upload to either bucket is a multipart upload holding one part in memory.
+A backup sizes its parts from the previous complete backup at the
+destination: 8 MiB, or larger when that backup's largest object could need
+more than 9,000 of them at twice its size (S3 allows 10,000). With no
+complete earlier backup there (the first one, or the first after a
+destination change) parts are 64 MiB, about 640 GiB per object, which is
+then the most an upload holds in memory. Locations read
+`s3://<bucket>/<key prefix>/backups/<server-id>/<id>/`, the address
+`silo backup restore --from` takes.
 
 A storage transition never copies `backups/` (see
 [blob-storage.md](blob-storage.md#managed-transitions)). Local backups stay
@@ -260,11 +328,59 @@ The local destination writes them readable by the server's account only:
 `backups/` and every folder under it are 0700, each object 0600, where the
 store's own modes are 0755 and 0644. `backups/` is made private before an
 object is written, so a file is never readable by another account while it
-is written. Downloads are
-short-lived and scoped to one object: a presigned URL where the store can
-presign, or a link to `GET /api/v2/admin/backups/{id}/objects/{name}` signed
-under its own capability domain (`artworkurl.NewBackupObjectSigner`) where it
-cannot. A full backup downloads its objects as stored.
+is written. Backups in any bucket are encrypted. Downloads are short-lived and scoped to one object: a presigned URL
+where the store can presign, or a link to
+`GET /api/v2/admin/backups/{id}/objects/{name}` signed under its own
+capability domain (`artworkurl.NewBackupObjectSigner`) where it cannot. A full
+backup downloads its objects as stored, encrypted for an S3 backup. The
+restore set of an encrypted backup is never presigned: it is served through
+that signed route, decrypted by the server, so it can be uploaded to another
+server. The server first decrypts it into an unlinked temporary file while
+hashing the stored bytes, and releases it only when they match the
+manifest's size and SHA-256, so an object replaced under the same key is
+refused, not downloaded.
+
+### Encryption
+
+Every object of a backup in an S3 bucket (the `s3` destination, or the
+`default` one on the private bucket) but `manifest.json` is an
+[age](https://age-encryption.org) file with a single scrypt recipient. The
+passphrase is the standard base64 of HKDF-SHA256 over `SECRET_KEY` with info
+`silo/backup-encryption/v1`, 32 bytes (`secret.BackupPassphrase`, beside the
+data key and check value derivations in `internal/secret/cipher.go`). There
+is no separate backup key, and the UI never shows or offers `SECRET_KEY`.
+
+- The passphrase already has full entropy, so scrypt's stretching adds
+  nothing: backups use work factor 2^10 (about 1 MiB and 1 ms per object;
+  age's default 2^18 needs 256 MiB). Decrypting accepts at most 2^15 (about
+  32 MiB), because an uploaded file names its own work factor.
+- The manifest records `encrypted: true` and the key check value. Object
+  sizes and SHA-256 are of the stored, encrypted bytes; every reader hashes
+  the ciphertext while it decrypts and compares once it has read through.
+- `silo backup decrypt` writes the plaintext of one object; `age -d` with
+  the passphrase does the same.
+
+**Confirmation.** Encrypted backups start only after an admin confirms keeping a
+copy of `SECRET_KEY` off the server: `POST /admin/backups/s3/acknowledge-key`
+records this server's check value in `backup.s3.key_acknowledged`, a row only
+that endpoint writes. A settings save that switches `backup.destination` to
+`s3` is refused (409, `backup_key_not_confirmed`) unless that row holds the
+current check value, and needs an endpoint and a bucket. The `default`
+destination on the private bucket needs no setting change: its backups wait,
+paused, until the key is confirmed. When `SECRET_KEY` changes, or was never
+confirmed, the recorded value does not match: encrypted backups pause (a run
+fails with the reason, and the backup before migrations is skipped with a
+warning) and the Backups page warns (`key_not_confirmed`, with `encrypted`
+true) until the admin confirms the key. The
+destination settings stay editable meanwhile.
+
+**Reading.** A preview, a restore, and a restore-set download decrypt on the
+fly with this server's key. An encrypted backup whose check value differs is
+refused before anything is read, with both check values in the message:
+selective restore cannot read it at all, unlike an unencrypted backup taken
+with another key, where only encrypted values are lost. An uploaded restore
+set encrypted with this server's key is decrypted and read; its digest is of
+the uploaded bytes.
 
 ## Tools
 
@@ -285,8 +401,8 @@ application pool's settings but outside the pool. Work under the lock takes
 pool connections (the snapshot transaction, settings reads), so a lock held
 on a pool connection would deadlock a pool of one. Every
 operation that writes or deletes backups, or restores from one, holds it: the
-nightly and manual backup, rotation, deletion, the sweep, and the restore
-job.
+nightly and manual backup, rotation, deletion, the sweep, upload completion,
+the deletion of a complete upload, and the restore job.
 
 - Rotation and the sweep run inside the backup that holds the lock.
 - "Back up now" takes the lock in the request and hands it to the task run it
@@ -307,7 +423,7 @@ job.
   copy. A failed nightly records no slot; manual and
   before-upgrade backups neither record nor check one.
 - A held lock's session is checked every 10 seconds. If it ends, the work
-  holding the lock is canceled (`pg_dump`, a restore), and the
+  holding the lock is canceled (`pg_dump`, uploads, a restore), and the
   incomplete folder it leaves is the sweep's.
 - Whether the lock is held is read from `pg_locks`, never by taking it: a read
   that took the lock even briefly could make a nightly run skip.
@@ -316,8 +432,8 @@ job.
 
 The lock holder publishes what it is doing in the one-row `backup_status`
 table, so any API server can report a run another server started: the active
-operation (`backup`, `delete`, or `restore`, whose backup id is its source),
-its backup id, start time, progress and message, and, when a backup run ends, its id, kind, outcome, and error, and
+operation (`backup`, `delete`, `restore`, whose backup or upload id is its source, or `upload`, the check of a completed upload), its backup or upload id, start time, progress and
+message, and, when a backup run ends, its id, kind, outcome, and error, and
 for a run that succeeded its finish time as `last_success_at`, which a
 failed run after it leaves alone. Lock occupancy alone says nothing about
 which operation holds it.
@@ -340,7 +456,14 @@ which operation holds it.
   the row as the latest run, `interrupted`, with its id, kind, and start
   time, in the same statement.
 
-A restore holds the subsystem lock for its
+Lock order, for every caller:
+
+1. the before-upgrade wrapper lock, taken only around startup migrations;
+2. the subsystem lock;
+3. goose's own migration lock.
+
+Ordinary operations never take the wrapper, and nothing takes the wrapper
+while holding the subsystem lock. A restore holds the subsystem lock for its
 whole run and takes its before-restore backup by calling the backup function
 directly, never by acquiring the lock again.
 
@@ -360,13 +483,20 @@ status, size, duration, missing blobs, and what rotation removed.
 | `backup.keep` | `7` | 1–60 |
 | `backup.include_intro_fingerprints` | `false` | boolean |
 | `backup.include_subtitles` | `true` | boolean |
+| `backup.destination` | `default` | `default` or `s3`; `s3` needs the confirmed key ([Encryption](#encryption)) |
+| `backup.s3.endpoint` | empty | `http` or `https` URL |
+| `backup.s3.region`, `.bucket`, `.key_prefix`, `.access_key` | empty | the key prefix is the bucket folder; backups go under `<key_prefix>/backups/` |
+| `backup.s3.path_style` | `false` | boolean |
+| `backup.s3.secret_key` | empty | sensitive: encrypted at rest, never returned |
+| `backup.s3.key_acknowledged` | empty | the confirmed check value; written only by the acknowledge-key endpoint |
 
 Every `backup.*` key is server-specific: selective restore never offers one.
 
 An absent or invalid value takes its default, but a setting that cannot be
 read fails the backup or the listing, and skips rotation with a warning. It
-never falls back to the default: a failed read of `backup.keep` could rotate
-away copies the admin meant to keep.
+never falls back to the default: a failed read of `backup.destination` would write an
+unencrypted copy to this server instead of the S3 bucket, and one of
+`backup.s3.key_acknowledged` would read as unconfirmed.
 
 ## Rotation
 
@@ -382,9 +512,17 @@ away copies the admin meant to keep.
   one this server can restore without extra flags. An unverified copy never
   stands in for it. The listing sends `clean` per backup, and the page
   predicts rotation from that instead of deciding it again.
-- `before-restore` copies are deleted after 7 days and do not count toward
-  `backup.keep`.
-- Rotation manages only the current server id's prefix, and never deletes a backup that is the source of a queued or
+- `before-restore` copies are deleted after 7 days; `before-upgrade` copies
+  keep the 2 newest, and always the 2 newest whose manifests this server
+  authenticated, so unverified copies at the destination cannot rotate its
+  own away. A `before-upgrade` copy whose upgrade has not completed (some of
+  its `upgrade.pending` migrations are not applied in the database rotation
+  runs against) is never deleted: it is the way back from what failed
+  migrations, or a restore that undid them, left. When the applied
+  migrations cannot be read, every copy that records its upgrade is kept.
+  Neither kind counts toward `backup.keep`.
+- Rotation manages only the current destination and the current server id's
+  prefix, and never deletes a backup that is the source of a queued or
   running restore. A running restore holds the subsystem lock for its whole
   run, so no other rotation, sweep, or delete runs, and the rotation of its
   own before-restore backup is told to keep the source. A queued restore is
@@ -395,7 +533,151 @@ away copies the admin meant to keep.
   be read, rotation deletes nothing and warns.
 - Deleting a backup takes the same lock and refuses (409) while a queued or
   running restore reads it.
-- A delete that fails leaves a warning in the task result.
+- A destination that refuses a delete (object lock, or a policy that denies
+  deletes) leaves a warning in the task result, and retention to the bucket's
+  lifecycle rules. A folder is deleted manifest first at every destination
+  (`deleteBackupFolder`), so a refused delete leaves the backup whole, and
+  one that stops partway leaves an incomplete folder for the sweep, never a
+  manifest listing objects that are gone.
+
+## Before upgrades
+
+Every API server runs migrations at startup, and so does `silo --migrate-only`.
+Both run `database.MigrateAtStartup`, which takes a database backup first
+whenever migrations are pending:
+
+1. Take the wrapper lock (`SILOMIGR`, a session advisory lock on a connection
+   of its own, outside the pool), waiting while another server holds it.
+2. Run the legacy `schema_versions` bootstrap under goose's lock, so the
+   pending check sees the versions a legacy install applied. goose's
+   `HasPending` takes no lock and would not run it.
+3. Ask goose whether migrations are pending, with the provider that runs them.
+   Nothing pending ends the sequence.
+4. On a database with a schema (any applied version), take the subsystem lock,
+   waiting for a running backup or restore, and take a `before-upgrade` backup.
+   A new database has nothing to back up.
+5. Run goose `Up` with the same provider, still holding the subsystem lock, so
+   a nightly run or a restore on another server never reads a schema being
+   migrated. goose's own lock is then uncontended.
+6. Release the subsystem lock, then the wrapper, then build the audit-detail
+   indexes.
+
+Other servers block on the wrapper and, once they get it, find nothing
+pending. If the session of the wrapper or of the subsystem lock ends at any
+point, the backup or migration in flight is canceled and startup fails.
+goose runs each migration in a transaction unless it is marked
+`-- +goose NO TRANSACTION`, so a canceled transactional migration rolls
+back. A `NO TRANSACTION` migration (a concurrent index build, a backfill
+that commits in batches) can stop with its earlier statements committed:
+the next start runs it again, and the `before-upgrade` backup is the way
+back to the database as it was before any of them ran.
+
+A start after failed migrations does not back up the database those
+migrations left. It keeps the earlier attempt's backup, logging its id, when
+that backup is this server's newest at the destination, complete and
+verified, taken less than 6 hours ago, and records the same pending
+migrations over the same applied ones as the database has now. Otherwise it
+takes another backup, and rotation keeps both, since neither upgrade has
+completed (see rotation above). The 6-hour bound covers the one way the
+database can change between attempts: a server running the previous release
+on it, whose writes a kept backup would lack. A failed migration retried any
+number of times within the window leaves one backup; once all its migrations
+are applied, the next rotation treats it like any other `before-upgrade`
+copy. A destination that cannot be listed takes a backup, which then fails
+with the reason.
+
+The backup runs before this release's schema exists, against whatever the
+previous release left:
+
+- It is `db.dump` and the manifest only: no restore set, no `blobs.tar`, and
+  no blob queries. Migrations do not touch blobs, so a restore from it leaves
+  the files in storage as they are. It cannot bring back a file changed or
+  deleted after it was taken: artwork, avatars, or branding replaced or
+  removed since stay as they are now, and a restored row may name a file
+  that is gone.
+- It reads only `server_settings` rows, with defaults for keys the old
+  release never wrote: the first upgrade to a release with backups finds no
+  `backup.*` rows and backs up to the default destination. Blob storage comes
+  from the stored settings, as at startup, opened without recording anything.
+- The core inventory checks each table with `to_regclass`, so tables the old
+  schema lacks are recorded as absent. `pg_dump` excludes the same table data
+  as every backup; an exclusion that matches no table is ignored.
+- It publishes nothing to `backup_status` and skips the upload sweep: neither
+  table may exist yet. Rotation of backup folders runs as after any backup.
+  It takes the subsystem lock itself, not through the nightly task, so the
+  nightly slot (`backup_status.last_nightly_slot`) neither skips it nor
+  changes with it, and it writes no restore journal.
+- Its manifest is signed with `SECRET_KEY` like every backup's, so restoring
+  it needs no `--accept-lost-credentials`.
+
+It fails closed: if the backup fails, startup stops with the reason and
+nothing is migrated. It is skipped, with the reason logged and the subsystem
+lock still held through `Up`, when:
+
+- `SILO_SKIP_BACKUP_BEFORE_MIGRATE=true` is set. It applies to the process it
+  is set on; remove it after that start. A value that is not a boolean does
+  not skip;
+- `backup.enabled` is `false`;
+- the user store is SQLite (backups refuse there, and the upgrade that imports
+  it must not be blocked; the warning tells the admin to back up the database
+  and the SQLite file themselves);
+- there is no destination: no operational store, or `backup.destination=s3`
+  without a bucket and endpoint;
+- the destination is a bucket, where backups are encrypted, and this
+  server's `SECRET_KEY` is not confirmed.
+
+Only settings that were read can skip it. Anything else, including a missing
+or too old `pg_dump`, an unreachable destination, or a setting that cannot be
+read, fails startup. The error names
+`SILO_SKIP_BACKUP_BEFORE_MIGRATE` as the way to start once without the backup.
+
+### Timing and readiness
+
+| Variable | Default | Bounds |
+|---|---|---|
+| `SILO_MIGRATION_WAIT` | `60m` | the wait for the wrapper while another server runs the sequence, and the wait for the subsystem lock while a backup or restore holds it; `0` waits indefinitely |
+| `SILO_MIGRATE_TIMEOUT` | `20m` | goose `Up` and the index step ([schema integrity](schema-integrity.md)); `0` disables it |
+
+The backup itself has no deadline; it ends when it finishes, fails, or loses
+its lock. A server waiting for the wrapper logs that it is waiting, then a
+heartbeat every 20 seconds; one waiting for the subsystem lock behind a running
+backup or restore does the same every 30 seconds; and the backup logs each step
+and a heartbeat every 30 seconds.
+
+The API listener opens only after migrations, so while a server waits, backs
+up, or migrates, its readiness and health endpoints do not answer, which every
+probe reads as not ready: a deployment's start budget has to cover the wait,
+the backup, and the migrations. The image's `HEALTHCHECK` allows a 20-minute
+start period. How to size probes for a deployment belongs in the user manual.
+
+### Restoring one
+
+A `before-upgrade` backup is a full-restore recovery point; the Backups page
+offers no selective restore for it. `silo backup restore` and `silo backup
+verify` read it as a database-only backup: they fetch and verify `db.dump`
+alone and leave files in storage untouched. Swap mode needs no
+`--database-only`. In separate mode the command still requires
+`--database-only` or `--blobs-into`, since it checks its flags before it
+reads the backup, and writes nothing to the latter; `RestoreSeparate`
+itself requires a files target only for a backup that has files. The
+backup holds the previous release's schema, and every later release
+carries that release's migrations, so the new release's binary can restore
+it; a release started on the restored database migrates it again and takes
+another `before-upgrade` backup.
+
+The steps after the load (new signing keys, clearing unreadable settings,
+the credential and setting carries, ending unfinished work, the account
+rollback report) run against the backup's schema, not the binary's. When
+the backup's applied migrations are fewer than the binary's, a step that
+meets a table, column, or type that schema lacks (SQLSTATE 42P01, 42703, or
+42704) is skipped with a printed line naming it, and the restore goes on.
+Each step changes the restored database in one transaction or statement, so
+a skipped step changed nothing. A backup of the binary's own schema skips
+nothing: there the same error fails the restore. The credential carry is
+narrower, so an older schema does not leave the backup's credentials in
+place: it skips only the carried tables the schema does not have (printing
+them; the live rows of those tables are not carried) and writes only the
+columns it has.
 
 ## Restore set
 
@@ -411,12 +693,14 @@ plugins/<plugin-id>/archive.bin
 settings.json
 collections.json
 home-sections.json                version 3 and later
+users/<account id>.json           version 2 and later
 blobs/<object key>
 ```
 
-`restore-set.json` has `format: "silo-restore-set"`, `version` (4: version 3
-added the home sections section and template collections in
-`collections.json`, and version 4 a home section's `web_only`), the source
+`restore-set.json` has `format: "silo-restore-set"`, `version` (4: version 2
+added the users section; version 3 the home sections section, template
+collections in `collections.json`, and an omitted item's `cause` and
+`error`; version 4 a home section's `web_only`), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive
@@ -428,23 +712,26 @@ restore request must carry.
 
 Sections are registered in one table in `internal/backup/restoreset.go`, in
 the order a restore applies them: libraries, plugins, settings, collections,
-home sections. Collections come before the home sections that name them.
-Each names its document (or per-item
+home sections, users. Collections come before the home sections that name
+them, and users last, so a profile's page layout resolves against the
+sections the same restore wrote. Each names its document (or per-item
 files) and the blob prefixes it may carry, which are disjoint across
 sections, and the first format version that may hold it. A reader refuses a
 section, and a document field, it does not know, so adding either is a new
 format version: an older reader refuses a newer set as "from a newer Silo"
 instead of failing on what it does not know, and a set that claims an older
-version while holding something added later (`home_sections` or template
-collections before version 3, a `web_only` section before version 4) is
-refused. A set without `web_only` reads it as false, the column's default.
-Readers accept versions 1 to 4; version 4 is always written.
+version while holding something added later (`users` in version 1,
+`home_sections` or template collections in version 2, a `web_only` section
+in version 3) is refused. A set without `web_only` reads it as false, the
+column's default. Readers accept versions 1 to 4; version 4 is always
+written.
 
 | Section | Holds | Blob prefixes |
 |---|---|---|
 | `libraries` | `media_folders` rows with their paths and per-library options, and the poster key | `library-posters/` |
 | `plugins` | per installation: plugin id, version, enabled state, installation id, the stored archive (`plugin_archives`, a record only: never installed), and `plugin_runtime_configs` rows as stored | none |
 | `settings` | `server_settings` rows the restore table offers, as stored | none |
+| `users` | one document per account: the account's fields, its profiles with their fields and data by data type, and the items that data names (see [Users](#users)) | `profile-avatars/` (operational store), `user-collection-images/` |
 | `collections` | manually managed admin collections with their library scope, group, and items; template-bundle collections (see below); uploaded item and season artwork (`upload://` sources); branding assets | `collection-images/`, `local/`, `branding/` |
 | `home_sections` | every admin `page_sections` row of the home page and each library page as it is now, and the collection a section manages | none |
 
@@ -477,8 +764,8 @@ What a restore set leaves out on purpose:
   gets the default chain, as a library created in the editor does.
 - Builtin plugin rows and `plugin_instance_state` are never included.
 
-**Restore sets are untrusted input**: something other than this server can
-write to the destination. The reader (`ReadRestoreSet`) checks the whole archive
+**Restore sets are untrusted input**, whether read from the destination or
+uploaded. The reader (`ReadRestoreSet`) checks the whole archive
 before anything is applied: regular files only (links, directories, and
 devices are refused); canonical relative paths with no empty, `.`, or `..`
 segment, backslash, or NUL; no duplicate paths, sections, or item ids;
@@ -487,7 +774,8 @@ and digest, and every listed file present; blobs only under their section's
 prefixes and only keys the section references, or variants stored beside a
 referenced artwork original (in its directory and of its revision, or, for
 the legacy names the writer used, `original.<ext>` and `w<width>.<ext>`,
-both without one; at most 16 per original); documents that decode strictly
+both without one; at most 16 per original); avatars a user document names
+listed for the section; documents that decode strictly
 (unknown fields and trailing data refused) and match the index counts; and
 limits on entries (200,000), document size (64 MiB for the collections and
 account documents, 32 MiB for the index, 8 MiB for `libraries.json` and
@@ -535,7 +823,13 @@ digest and discarded, never installed ([Plugins](#plugins)). Readers accept
 every format version up to theirs and refuse a newer one with "This backup is
 from a newer Silo. Upgrade this server first."
 
-**Nothing inside a restore set is decoded before it is verified.** The
+**Nothing inside a restore set is decoded before it is verified,** with
+one exception: an uploaded restore set sent without a SHA-256. One sent
+with a SHA-256 is hashed whole when it completes and decoded only when the
+digest matches; one sent without is decoded unverified, under the reader's
+bounds alone (the tar guard, the entry and size caps, `jsonsize` before
+each document, `DecodeStrict` with `CheckBounds`), and is restorable only
+with the admin's confirmation that it is unauthenticated. The
 manifest records the restore set's digest and the digest of its index
 (`restore_set.index_sha256`), both covered by the manifest's `mac`. For an
 authenticated manifest the reader checks the index against its digest
@@ -565,7 +859,11 @@ section carrying a collection its configuration does not name, item artwork
 that does not say what it is, a plugin whose configuration keys repeat or
 whose values are not JSON, and a branding entry that is not for a branding
 asset setting (`branding.AssetSettingKeys`) or whose reference is not one
-file name naming its own blob (a branding entry is written as a setting).
+file name naming its own blob (a branding entry is written as a setting), and
+a user document that names another account than its file, or whose account
+or profiles fail their checks (a known role, bounded fields, unique profile
+ids, avatars only under `profile-avatars/`, and data only of registered data
+types, each passing its owner's strict checks); that account is left out.
 The preview lists each as an unchoosable item with reason `unreadable`; an
 id listed twice still refuses the set.
 
@@ -793,8 +1091,8 @@ its management key, or a new one). The key's section id and each
 `library:<id>` it names are this server's (`remapManagementKey`), and a
 collection here with that key is reused only when its libraries are the
 mapped ones (`collectionScopeIs`); otherwise a new one is created under a
-key of its own. A missing one is created, with its backup id when
-no section here has it. The
+key of its own. A missing one is created, with its backup id when no
+section here has it, so a profile override naming it by id resolves. The
 section editor's checks (`SectionHandler.CheckRestoredSection`: type,
 scope, configuration, recipe) run first, the write locks the collections it
 names as every section writer does (`sections.WriteSectionInTx`), and a
@@ -809,9 +1107,10 @@ one.
 the selection and the preview's digest; one restore can be queued or running
 at a time (a partial unique index). The request takes the subsystem lock
 (409 while another backup or restore holds it), checks the source and its
-digest again, creates the job, and releases the lock. Backup deletion and
-rotation check the queued restore's source under the same lock, so either
-they see the job or the job's check sees the source gone; a source can never disappear between the check and the queue.
+digest again, creates the job, and releases the lock. Backup deletion,
+rotation, and upload deletion and expiry check the queued restore's source
+under the same lock, so either they see the job or the job's check sees the
+source gone; a source can never disappear between the check and the queue.
 Whichever API server claims it:
 
 1. takes the subsystem lock and holds it for the whole run;
@@ -957,17 +1256,515 @@ merges and never deletes, so restoring that copy selectively cannot remove
 what a restore added. Going back means restoring it in full with
 `silo backup restore`.
 
+### Users
+
+The users section carries each account (`users/<account id>.json`) read from
+the backup's snapshot, from the PostgreSQL user store; backups refuse to run
+on the SQLite store, and on a server using it the section's accounts cannot
+be chosen (`user_store_unsupported`). Each account is read under a savepoint
+of the snapshot transaction. An account the restore set cannot carry, because
+its document would exceed the 64 MiB document limit or reading it failed, is
+left out and recorded in the index's and the manifest's `omitted` list
+(`too_large` or `export_failed`); the backup is complete with warnings, and
+the backup list and the preview name it. The dump still holds it. A failed
+read also records `cause`, the part that failed and the step its error
+names (`notifications: reading notification preferences`), stable across
+backups so a client can group them, and `error`, the underlying error
+without ids.
+
+**Account fields:** username, email, password hash,
+`local_password_login_enabled`, `password_change_required`, `enabled`, role,
+permissions, and every policy override `internal/access/groups.go` resolves
+(`library_ids`, with NULL kept distinct from an empty list,
+`max_playback_quality`, `max_streams`, `max_transcodes`, both stream bitrate
+caps, `transcode_allowed`, `audio_transcode_allowed`, `max_profiles`,
+`download_allowed`, `download_transcode_allowed`, `requests_allowed`); the
+access group's name and policy; and the account's effective policy in the
+backup. `is_owner` and `break_glass` are never carried.
+
+**Profile fields:** name, avatar, `is_primary`, PIN hash, and every field the
+access resolver (`internal/access/resolver.go`) reads to decide access:
+`is_child`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`,
+`library_restrictions_enabled`, the allowed libraries
+(`user_profile_allowed_libraries`), and `max_playback_quality`. The PIN
+revision is not carried; a restored profile starts its own.
+
+**Data types**, each owned by the package that owns its tables and
+implemented against the small interface in `internal/backup/userdata`
+(registered in `internal/backup/users_registry.go`). Every import runs in the
+caller's transaction, merges, and never deletes; running it again changes
+nothing.
+
+| Data type | Owner | Tables | Merge rule |
+|---|---|---|---|
+| `watch_history` | `watchstate` | `user_watch_progress`, `user_watch_history`, `user_history_hidden_items` | progress: one upsert takes the backup's row only when it is newer (`updated_at`) than the row as committed, so a playback heartbeat landing meanwhile wins; plays: added unless the profile has a play of the item at the same second, whatever its source; a play's source is a fixed one (`playback`, `import`, …) or a watch-sync plugin's, `plugin:<installation id>:<capability id>` (`userstore.ParsePluginWatchSource`; the capability id a lowercase slug of at most 128 characters), which stays on the server that wrote it, elsewhere names the one installation here of the same plugin (from the restore set's plugins section) with that capability, and otherwise becomes `import`, as does any source the reader would refuse when it is exported; history hides: `hidden_before` and `removed_before` each keep the later cutoff, independently (a legacy NULL `removed_before` reads as its `hidden_before`), and `-infinity`/`infinity` cutoffs round-trip as those strings. Plays and hides merge under the profile's history lock (`userstore.LockImportedHistory`) |
+| `ratings` | `catalog` | `user_ratings` | only where the profile has no rating |
+| `favorites` | `watchlist` | `user_favorites`, `user_watchlist`, `user_watchlist_titles` | added where missing; restored watchlist entries sort as local additions; a watchlisted title outside the library travels by its TMDB, IMDb, and TVDB ids and display snapshot and is attached as the watchlist adds one (`watchlist.AddSnapshotInTx`): to the title here holding its TMDB id, current or former, or a new title the watchlist's TMDB checks then refresh |
+| `collections` | `usercollections` | `user_personal_collections`, `user_personal_collection_items`, `user_personal_collection_profiles`, `user_collection_groups` | by name among the profile's own collections: none creates it (new id, uploaded poster copied under it, in its shelf group, found by slug or label or created), one gains missing items, sharing, and its group when ungrouped here, several leave it out. The smart query, display filter, and sync source are all remapped to this server's libraries (`userdata.RemapQueryLibraries`); a definition that would lose its whole library scope leaves the collection out, never widened to every library |
+| `dismissals` | `userstore/pgstore` | `user_home_item_dismissals`, `user_not_interested`, `user_dropped_series` | added where missing |
+| `preferences` | `userstore/pgstore` | `user_setting_values` (profile, client-family, library, and series scopes), `user_audio_preferences`, `user_subtitle_preferences`, `user_library_playback_preferences`, `user_series_playback_preferences`, `user_collection_sort_preferences`, the home and library page layout (`user_settings` section overrides), and the preference columns of `user_profiles` | each differing value overwritten, under the account's preference-settings lock; setting keys, scopes, and values checked against this server's settings contract, others left out. A page layout replaces the profile's overrides of that page: the library is mapped, an admin section found by id (on another server only one of the same type, as a restore creates a section with its backup id) or else by type and title with one candidate, and library ids in section configuration remapped, and so are the collections it names (`library_collection_id`, `user_collection_id`, in `config` and `user_config`) through `Target.Collection`: an admin collection as the restore's collections and sections match it (a carried or template collection, a section-managed one through its section, and on the server that wrote the backup any collection still here by its id), a personal one as the account's personal collection import matches it (on the same server the account's collection by its id, else the one native collection with its name of its creator's profile here); an override with no counterpart is left out and counted, never written with a dangling id. Overrides are JSON no schema constrains, so an export leaves out one the reader would refuse, and one naming a section or collection that is gone, rather than make the document unreadable; a comparison leaves the same ones out of the layout here |
+| `notifications` | `notifications` | `notification_preferences`, `profile_series_notification_mutes` | preferences overwritten; mutes added |
+
+Never carried: login sessions, API keys, push and device registrations,
+device-scoped settings, watch-provider and history-import credentials,
+external sign-in links (OAuth, plugin identities, Discord), email delivery
+addresses (they must be verified here), webhooks, downloads, logs, derived
+state (aggregates, recommendation caches, collages, series interest),
+onboarding tours, and beta Books data. **`TestUserTablesCoveredDB` fails for any table with a
+`user_id` or `profile_id` column that no data type or account field set
+claims and `excludedUserTables` does not list with a reason**, so a new
+per-user table must be classified. No user-scoped value carried today is
+encrypted.
+
+**Lock order.** Both import entrypoints, a selective restore's account item
+and a profile import, take their locks in one order before writing any data
+row (`userdata.Preparer`, `internal/backup/users_locks.go`):
+
+1. the account locks (`pgstore.LockAccountForImport`): the account's
+   preference-settings lock, which profile creation and setting mutations
+   take, then its section-override lock, which section override writes take;
+   profile deletion takes both, in this order, right after it begins and
+   before it locks or deletes any row;
+2. each data type's own locks over every profile of the import: the
+   profiles' history locks in profile id order (`watch_history`), then every
+   watchlist title the import names, in media type and TMDB id order, created
+   when this server lacks it (`watchlist.EnsureTitlesInTx`, `favorites`). A
+   profile's own export (`userdata.Target.Untrusted`) creates no title and
+   writes none of its snapshot to one other accounts read: it only locks and
+   links titles this server already has (`watchlist.LockTitlesInTx`,
+   `LinkExistingTitleInTx`), and reports the rest as left out;
+3. the data rows.
+
+Ordinary writers take a subset of these in the same order (checked: profile
+creation and setting mutations, device-setting resets, and section override
+writes take their account lock first), so an import
+never waits on a lock a writer holds while that writer waits on a row the
+import wrote. Locking watchlist titles before any watchlist row matters
+because watchlist promotion holds a title's lock while another connection
+writes the library watchlist entry, a cycle across connections Postgres would
+not detect; holding every title, including ones created for the import,
+before the first row means a title another writer creates mid-restore waits
+for the import rather than the reverse. A restore creates a missing account before taking its locks;
+nothing else can hold the locks of an id its transaction has not committed.
+
+**Items** are named by content id; each document lists every item its data
+names with its kind, title, year, and IMDb, TMDB, and TVDB ids (an episode
+with its series' ids and numbers). A content id this catalog holds is the same
+item. Every other one the document lists is matched up front, before any
+data type reads it, by the history import matcher's rules
+(`historyimport.MatchAllOn`): its provider-id lookups are collected for all
+items and read in batches, one query per lookup and provider column for up
+to 20,000 values, and a lookup that finds nothing is remembered, so a
+document's unknown items cost a few reads, not one each. The reads run in
+the restore's or import's own transaction: the transaction already holds a
+connection, and a match that waited on the pool for another would wait
+forever on a pool of one. The matched items' visibility is checked in the
+same one read as the present ones'. A profile export names at most 100,000
+items, its items list and every id its data names together, once each,
+checked before the import opens its transaction and mirrored by export. An item still unmatched is left out and listed in the report by
+title. Items the target profile may not see here are left out
+too and listed as hidden: each profile's data is merged through the canonical
+catalog visibility filter (`catalog.FilterAccessibleContentIDsInTransaction`)
+with its libraries under the account's policy (`access.ProfileLibraries`) and
+its content-rating and advisory limits (`access.ProfileMaturity`, with the
+server's `access.unrated_content`). File ids and external subtitle paths are
+restored only on the server that wrote them.
+
+**Matching.** The preview returns a mapping per account, and a restore
+request sends back the target it showed (`new` or the local account id), per
+profile too:
+
+- An account an earlier restore of this backup's server created
+  (`backup_restored_accounts`) maps to it, so running a restore again never
+  creates an account twice.
+- Otherwise, on the server that took the backup, the account id.
+- Otherwise by username and by email, case-insensitively, each checked
+  against both columns because they share one sign-in namespace. The match
+  needs exactly one candidate: either lookup finding several accounts, or the
+  two finding different ones, makes the account ambiguous and unselectable.
+  On the same server, a missing account whose sign-in another account now
+  holds is unselectable (`login_taken`).
+- Profiles match within the mapped account only: a profile an earlier
+  restore created (`backup_restored_profiles`), the profile id on the same
+  server, or else the name with exactly one candidate. Two backup profiles
+  matching one profile by name are both ambiguous.
+
+The job matches each account and profile again in the item's transaction and
+leaves out one whose target changed (`changed_since_preview`); a target of
+`new` that an earlier run of the restore has since created counts as
+unchanged.
+
+**New accounts.** The preview resolves the account's policy here with
+`access.ApplyGroupPolicy` (the backup's overrides, library ids mapped) and
+compares it field by field with its effective policy in the backup (library
+ids mapped) using `access.WiderThan`, where unrestricted libraries, no quality
+ceiling, and 0 caps are the open values. Any field this server would grant
+more of makes the account unselectable (`policy_wider`) and is listed. An
+administrator resolves against `AdminPolicy` on both sides and is marked
+`admin` in the preview. An account with no group in the backup is created
+with no group, compared against the no-group policy, and never given the
+default group. An account with a group joins the group of that name here, if
+there is one and it grants nothing more (`group_not_on_this_server`
+otherwise); groups themselves are never restored. A new account keeps its
+password hash, so it signs in with its old password. A password or PIN hash
+in a format or cost this server does not accept is replaced, and the report
+notes that a new one must be set.
+
+After an account's item or a profile import commits, the restore tells the
+notification system which items each profile's data now names
+(`ItemsChanged`, the interest recompute the user store's own writes
+trigger), so new-episode notifications follow the restored favorites,
+watchlist, and progress without waiting for the nightly repair.
+
+**Access never loosens.** A library id with no library here is dropped from
+an account's library list and from a profile's allowed libraries; a list
+never becomes NULL, and restriction flags stay as in the backup. A restricted
+profile left with no allowed library is restored with no library access, and
+the report says so. Hidden-library and library-order preferences are mapped
+the same way; navigation preferences that name libraries, sections, and
+collections are restored only on the same server.
+
+**Existing accounts and profiles** are never changed: not the password, role,
+permissions, group, login or owner flags, PIN, avatar, name, or access
+fields. A restore adds missing profiles and merges the chosen data types. A
+profile is created only within the account's profile limit here, counted
+under the same account lock ordinary profile creation counts under
+(`pgstore.LockProfilesInTx`), so a restore and a concurrent creation cannot
+both take the last place. A restored profile is primary only when the
+account here has no primary profile, and a restore never makes another
+profile primary; so an account with none here (a new one, always) that
+restores any profile must restore the backup's primary profile with it,
+or it is left out (`needs_primary_profile`): without one, nothing could
+manage the household. The primary profile is created first, so it takes
+the first free place under the account's profile limit; an account here
+with no primary and no free place is left out in the preview. The admin page selects the primary profile, locked,
+with any other profile of a new account.
+
+**What a matched account would change.** A preview counts, for each data
+type of each matched profile, what a restore would add or change, by the
+same merge rules, without writing or locking: every data type implements
+`userdata.Type.Pending` beside `Import` (plays whose item and second are not
+here, progress newer than here, hides that would advance a cutoff, missing
+ratings, favorites, watchlist entries and titles, dismissals, and mutes,
+settings and preferences that differ, page layouts whose overrides differ,
+personal collections missing here or lacking items, shares, or their group,
+notification preferences that differ). The counts run in one read-only
+repeatable-read transaction over the whole users section, on the one
+connection the preview already uses. Each data type compares a profile's
+document with its rows in set-based queries (watch history's three in one
+round trip, a profile's settings read at once), by content id, and only the
+entries that would change are resolved through the profile's visibility
+(`userdata.SettleChanged`), so a comparison that finds nothing to change
+asks the catalog about nothing. Items resolve by content id and visibility
+only, without the provider-id fallback an import has, so on another server
+an item only that fallback finds counts as not here. A setting here is
+compared as the settings contract normalizes it, as the backup's value is
+(a stored `"eng"` and a normalized `"en"` are the same value, and the import
+does not rewrite it either), and a page layout here is compared without the
+overrides a backup cannot carry (an override of a section that is gone, or
+one the reader would refuse); an import leaves such a page as it is. A
+library id list here (`ui.disabled_library_ids`, `ui.library_order`) is
+compared without the ids of libraries deleted since, which the backup's list
+no longer names; the import then leaves it as it is too. The comparisons
+pass whole documents as arrays, from a few entries to tens of thousands, so
+the transaction sets `plan_cache_mode = force_custom_plan`: the connection
+caches the statements, and Postgres would otherwise reuse a generic plan
+that assumes ten array entries (an index probe and heap fetch per entry)
+instead of the hash or merge join a plan for the real arrays picks. Watch
+history documents, the large ones, are decoded ahead on a bounded number of
+goroutines (`PreparePending`, a split of `Pending` into decoding and
+comparing) while the comparison queries the connection, and the per-type
+counts come from the restore-set reader's validation rather than a second
+decode. On a local seed shaped like shared dev (184 accounts, 245 profiles,
+about 445,000 plays with one account at 105,000, 350,000 progress rows, and
+29,000 hides) the comparison takes about 1.6 seconds; one INFO line
+("compared the backup's accounts with this server") records its time per
+phase and data type, and a DEBUG line names the preference columns, setting
+keys, and kinds of preference that differ per profile (never values).
+
+A matched profile with nothing pending is `on_this_server` (`same`, not
+selectable), and so is a matched account whose profiles all are and that
+lacks none the restore could add; anything pending makes it `differs`. The
+counts depend on this server's current state, so they are never kept in the
+restore-set cache. The restore itself does not use them:
+it merges again by the rules and reports what it did.
+
+**Apply.** Each chosen account is one fenced item: the account, its new
+profiles, and their chosen data commit together. Avatars and personal
+collection posters are written under keys for the new ids
+(`profile-avatars/<account>/<profile>/`, `user-collection-images/<id>/`)
+with the exclusive create of [Blobs a restore writes](#blobs-a-restore-writes)
+before the rows that reference them. The report lists each account with
+`created`, its local id, the titles that did not match, and per profile the
+outcome and what each data type added, updated, left unchanged, and left out.
+A restore publishes no per-item realtime events for user data; clients read
+the merged data on their next request.
+
+### Profile export
+
+A signed-in profile downloads and imports its own data as a
+`silo-profile-export` document, version 1 (`internal/backup/profile_transfer.go`):
+`format`, `version`, `server_id`, `exported_at`, `profile_name`, `data` (each
+data type's document, as in a user document), and `items`. It never holds
+account fields, password or PIN hashes, access fields, or allowed libraries.
+Personal collection posters are not carried. The export holds what the
+profile may see now, as every other read of its data does: rows about titles
+outside its libraries or above its content-rating or advisory limits are left
+out, and so are those titles' item references (`userdata.Keep`, checked once
+in the export's snapshot). Watchlisted titles outside the library are kept
+by the watchlist's own rule: their stored certification under the profile's
+rating ceiling (`access.RatingAllowed`), so a title without one is left out
+under a ceiling. A title the catalog no longer holds stays, since
+no read can show it. A server backup's user documents are not filtered.
+The export reads the data once to learn which items it names, keeping no
+row, and once to write it, and refuses (413) a document larger than an
+import accepts.
+
+Exports and imports share one admission (`ProfileTransfer.admit`): one per
+account and two per server at a time, refused (409) rather than queued, and
+taken before either opens a transaction. An import's slot is taken before
+its body is read (an operation middleware on `importProfile`), so a busy
+server buffers nothing; the import parses the document once into its
+top-level members, once strictly, and runs each data type's checks once.
+
+Every imported document, and every account document of a restore set,
+passes one bounds check after it decodes (`userdata.CheckBounds`): a
+string is at most 1 KiB, a map 64 entries, a list `userdata.MaxEntries`,
+and raw JSON 64 KiB and valid, unless a field's `bound` tag sets its
+editor's limit (a collection's description 8 KiB, source URL 2 KiB, and
+rules 1 MiB; a subtitle path 4 KiB; a section override's configuration
+64 KiB). Track signatures are decoded into their types and stored as the
+playback writer encodes them. `TestEveryImportedFieldIsBounded` makes
+each field of every importer's document, and of an account document,
+too large in turn and requires the check to refuse it. A carried
+collection reference maps to the importing profile's own copy (the one
+its import created or merged into), and on the same server to an
+uncarried collection only one that profile can see.
+
+A collection sort preference is stored under the identity, field, and
+order the sort editor stores it under
+(`catalog.NormalizeCollectionSortPreference`): a watchlist or favorites
+sort under the one `personal` id whatever id the document names, so a
+document lists at most one per personal list; a library-kind sort under
+an admin collection the restore's collection mapping finds here, mapped
+for the whole list in one read. A profile's own import maps an admin
+collection only when the profile may see it
+(`catalog.CanAccessLibraryCollection`, the check the sort editor's save
+makes); one it may not see is left out exactly as one that is gone, so the
+import tells nothing about hidden collections. A document holds at most 10,000. Every
+list of every data type is written, and compared for a preview, in one
+set-based statement whatever its length (settings in one per scope);
+personal collections, at most 1,000 an import, are created or merged one
+at a time. An import or restore never leaves a profile with more than
+1,000 personal collections, or 50 with a sync schedule, or 16 MB of
+collection rules, display filters, sorts, and sync sources together,
+counting the ones it has (read under the account's import lock): past
+these, a collection is left out or created without its schedule, and the
+result says so. An imported collection's sort and sync source are decoded
+into their types, refusing members they lack, and stored as the editors
+encode them; each list URL its sync fetches goes through its editor's
+canonicalizer (`collectionutil.CanonicalCollectionSource`), and a document
+with any other is refused. The
+collection editor has no such limit. From a backup this server cannot
+verify, personal collections get no sync schedule either
+(`userdata.Target.Unverified`). Once an import or restore commits, a
+profile's notification interest is rebuilt once
+(`InterestUpdater.QueueProfileRebuild`, coalesced, at most 1,000 queued)
+rather than recomputed per item, and its recommendations refreshed once. `TestImportsReadInBatchesDB` drives each list and each sort
+kind with 100,000 and 1,000 distinct entries, every reference mapping,
+and requires a bounded number of statements.
+
+An import writes only the profile of the session, never one the document
+names, in one transaction, with the merge rules above. It refuses a document
+that carries an account or access field (at the top level or among the
+profile preferences), unknown fields or data types, a newer version, nesting
+deeper than 32, more than 64 MiB, or one that would decode to more than 8
+times its size plus 64 KiB (`jsonsize`, checked before it is decoded); each
+data type then applies its own strict checks, and `userdata.DecodeStrict`
+bounds each type's document the same way, in restore sets too. Items the profile may not see are left out and listed: outside
+its allowed libraries (libraries it hid itself still count as visible), or
+above its content-rating or advisory limits, through the same canonical
+filter; so are preferences of libraries it cannot see. They are listed with
+the items this catalog does not hold, in one list (`unmatched`, with `hidden`
+always empty), so an import cannot tell a restricted profile which titles its
+hidden libraries hold. Library references survive only on the server
+that wrote the export. A page layout's reference to a personal collection maps
+to the collection the export's collections import matches; one to an admin
+collection survives only on the server that wrote the export, while that
+collection is there, and is otherwise left out. A PIN-protected profile reached without its PIN (an
+API key is exempt from the gate's PIN check) cannot import. The import runs
+synchronously: a profile's data is small, the size cap bounds it, and a single
+transaction keeps it all-or-nothing without job bookkeeping.
+
+## Uploads
+
+An admin restores from another server's backup by uploading its restore
+set: the bare `restore-set.tar` that a backup's download gives. Every
+downloaded object saves under its stored name, so a folder of downloads is
+a backup folder `silo backup restore --from` reads. The upload's file name
+does not matter; the reader decides what the file is. An upload is then previewed and restored as a
+backup is (`/admin/backups/uploads/{id}/restore-set` and `.../restore`),
+and every selective-restore rule applies unchanged, the before-restore
+backup included. A restore request names one source, `backup_id` or
+`upload_id`, and the job's report and the published active operation carry
+it.
+
+`internal/uploads` keeps chunks on one server's disk, and requests are not
+routed back to the server that holds them. A restore-set upload instead
+writes every part straight to the destination, and keeps the session in
+PostgreSQL, so any API server takes any part and any server completes it:
+
+```
+backups/uploads/<upload id>/<part>.<nonce>[.age]
+```
+
+**Parts are encrypted on a bucket.** Uploads go to the operational store,
+which is the private bucket when one is configured. There every part is
+stored encrypted with the archive key ([Encryption](#encryption)) and named
+`.age`, since an uploaded restore set holds password hashes, and creating an
+upload or sending a part needs the confirmed `SECRET_KEY`, as a backup there
+does (409, the same `key_not_confirmed` problem otherwise). On the local
+filesystem parts are stored as sent. Each part is its own age file, so the
+parts read back in order, decrypted, are exactly the bytes the client sent.
+A part encrypted with a `SECRET_KEY` the server no longer has cannot be read:
+completing or restoring from that upload fails, and the upload is deleted
+and sent again.
+
+- `backup_uploads` holds each session: its size, part size, optional
+  declared SHA-256, status (`uploading`, `checking`, `complete`,
+  `rejected`), and once complete the frozen digest and what the set says
+  about itself (source server id and name, Silo version, creation time,
+  format version). `backup_upload_parts` names, for each received part, the
+  object that counts.
+- Before a byte of a part is stored, the send records an attempt
+  (`backup_upload_attempts`) under the session row lock: one per part and at
+  most four per upload. A second send of a part being written answers 409
+  without writing anything, so concurrent sends cannot multiply the objects
+  an upload holds. A part's storage write (its body read included) has a
+  5-minute deadline, and cancellation stops it: an S3 request is canceled,
+  and a local write's temporary file is closed, so its next write fails, and
+  removed. An attempt is abandoned only after 10 minutes, once its writer has
+  certainly stopped: another send may then replace it, and it can no longer
+  record its object.
+- Every part sent is a new object. Its row moves to it in a transaction that
+  locks the session row, requires it to be `uploading`, and consumes the
+  send's own recent attempt; the replaced object is deleted after commit, and
+  a write the transaction refuses deletes its own object. A part sent again
+  therefore replaces the first copy, a failed or abandoned attempt can only
+  delete what it wrote, and once completion moved the session to `checking`
+  no late write changes the parts it reads.
+- Parts are 1–16 MiB (4 MiB by default), and every part but the last is
+  exactly the part size. Parts may arrive in any order. A part's request sets
+  its own connection read deadline of 2 minutes (the listener's 30-second
+  read timeout would otherwise cut a slow part off) and answers 408 when the
+  part does not arrive in time.
+
+Limits: an upload is at most 2 GiB, and a server keeps three uploads
+`uploading` or `checking` at once. On a local destination every open upload
+reserves what it has not written yet plus four parts, and creation (under a
+transaction advisory lock, so it holds across API servers) requires the
+reservations of every open upload, the new one's included, plus the 1 GB
+margin backups keep to be free. Every part checks the margin again before
+it is written, since other writers share the disk.
+
+**Completion freezes the digest.** It takes the subsystem lock (a busy lock
+answers 409, and the parts stay for another try), moves the session to
+`checking`, publishes the `upload` operation, and, with a 20-minute deadline
+that closes the part being read when it passes (so a stalled read cannot
+keep the lock), reads the parts in order
+through `ReadRestoreSet`, the same checks a backup's restore set gets. The
+SHA-256 of the bytes read becomes the upload's digest. These are the bytes
+the client sent (the file as uploaded, still encrypted if the admin
+uploaded a `.age` file), never the parts as stored, so the digest is what a
+client computes, what a declared SHA-256 is compared with, and the same
+whether the parts are encrypted at rest: a preview returns it,
+a restore request must carry it, and the restore job reads the parts again
+and refuses bytes with another digest. A set that fails the reader is
+`rejected` and its parts are deleted at once:
+
+| Reason | When |
+|---|---|
+| `encrypted` | The file is an age file (binary or armored header) this server's key cannot open: "This file is encrypted with another server's SECRET_KEY. On a computer with that server's SECRET_KEY in the environment, run `silo backup decrypt restore-set.tar.age -o restore-set.tar`, then upload restore-set.tar." One encrypted with this server's key is decrypted and read. |
+| `newer_silo` | A newer format version |
+| `not_a_restore_set` | Anything else the reader refuses, with its error |
+| `checksum_mismatch` | Other bytes than the SHA-256 declared at creation |
+
+The web admin reads a chosen file's first 512 bytes before it creates an
+upload and refuses only a file that is neither a tar starting with
+`restore-set.json` nor an age file; its picker offers `.tar` and `.age`. An
+age file is uploaded for the server to decide, with the line "Encrypted:
+this server can read it only if it was made with this server's SECRET_KEY."
+shown while it uploads: an age header names no key (a scrypt stanza carries
+a salt and a work factor), so only the server, trying its key, can tell.
+
+A failure to read the destination rejects nothing: the session returns to
+`uploading`, and completing again checks it again. A check does not stop
+when its request's client disconnects. Every outcome (`complete`, `rejected`,
+back to `uploading`) is written on the lock's own session, so a check whose
+lock was lost writes nothing: another server may hold the lock and be
+checking the same session. A session left `checking` by a server that
+stopped, or by a check that lost the lock, is checked again by the next
+completion, which holds the lock, so no other check can be running. The
+validated set enters the preview cache under its digest, so the first
+preview does not read it again.
+
+A complete upload is kept 7 days after its last use (completion, a preview,
+or a restore request), and never while a queued or running restore names it.
+Deleting an unfinished
+or rejected upload, which no restore can name, needs no lock; deleting a
+complete one takes the subsystem lock (a running restore holds it) and
+refuses while the queued restore job names the upload. Restores are queued
+under the same lock, so none is queued between that check and the delete.
+
+The sweep deletes, with their parts, sessions `uploading` or `rejected` for
+24 hours, sessions left `checking` for 24 hours, and complete uploads unused
+for 7 days. It deletes a `checking` or complete session only under the
+subsystem lock: in a backup's rotation it already holds it; otherwise, when
+such a session is due, it takes the lock without waiting and leaves them
+all when it is busy, releasing it before deleting parts. Under the lock no
+completion is reading the session, no restore is running from it or being
+queued, and the one the queued restore names is kept. Deleting a session row is atomic against
+a completion, which moves it to `checking` first, and a part write, which
+requires the row.
+
+The full sweep also lists the upload folders and deletes objects older than
+an hour that no part row or attempt names: a replaced part a crash kept
+from being deleted, a folder whose delete the store refused, or uploads a
+full restore's database no longer knows. The objects are listed before the
+rows are read, and a send can record its object only within 10 minutes of
+its attempt, so an object found unnamed and an hour old can never be named
+later. The quick sweep runs on every upload create and list; the full sweep
+runs in every backup's rotation and, at most every 10 minutes per server, on
+create and list, so it does not depend on nightly backups running.
+
 ## Full restore
 
 Full restore is the offline `silo backup restore` command, never an API
-operation. `SECRET_KEY` and `DATABASE_URL` come from the environment (or
-`-env`); nothing comes from the database being replaced. `--from` is a backup
-folder on this computer (the folder at the destination, or a downloaded copy
-of its objects), read in place. `pg_restore` reads it, and nothing changes
-until every check passed.
+operation. `SECRET_KEY`, `DATABASE_URL`, and bucket credentials come from the
+environment (or `-env`); nothing comes from the database being replaced.
+`--from` is a local backup folder (the folder at a local destination, or a
+downloaded copy), or a bucket folder,
+`s3://<bucket>/<key prefix>/backups/<server-id>/<id>`, reached with
+`SILO_BACKUP_S3_ENDPOINT`, `SILO_BACKUP_S3_REGION`,
+`SILO_BACKUP_S3_ACCESS_KEY`, `SILO_BACKUP_S3_SECRET_KEY`, and
+`SILO_BACKUP_S3_PATH_STYLE`.
+
+A local unencrypted folder is read in place. A bucket folder or an encrypted
+one is fetched first: the manifest is read and an encrypted backup with
+another key check value is refused, then `db.dump` and `blobs.tar` (only
+`db.dump` with `--database-only` or from a `before-upgrade` backup) are copied into a working folder in the
+current directory as plaintext, decrypted as they stream, each checked
+against the manifest's size and SHA-256 of the stored bytes. The manifest's
+MAC is checked before anything downloads (validation checks it again), so
+a changed manifest fetches nothing. Before anything downloads, the folder's filesystem must have room for the objects' stored
+sizes (a plaintext is never larger) plus 256 MiB, and an object that writes
+more than its stored size is stopped. The folder is mode 0700, its files
+0600, and it is removed when the command ends. `pg_restore` then reads the
+local copy, and nothing changes until every check passed.
 
 The first SIGINT or SIGTERM cancels a `silo backup` command, which stops
-and cleans up before exiting, a swap's rollback included. A second signal exits at once. Once a swap's
+and cleans up before exiting: the working folder, a decrypt's `.partial`
+file, and a swap's rollback. A second signal exits at once. Once a swap's
 journal exists, the first interrupt says that a second may leave the
 databases closed and prints `silo backup restore --recover <time>` with the
 swap's time.
@@ -978,8 +1775,16 @@ cleanup, so a statement that never returns cannot keep the databases closed
 forever. When it passes, the command stops with the databases closed and
 prints the journal and the `--recover` command.
 
+`silo backup decrypt <file | s3://bucket/key> [-o <file | ->]` writes the
+plaintext of one encrypted object (to `<name>` without `.age` beside a local
+file, or in the current directory for an object). With `manifest.json` in
+the same folder it refuses a key with another check value, and a manifest
+whose MAC does not verify under this key, before reading, and checks the
+stored bytes against the manifest. The plaintext lands in
+`<output>.partial` and is renamed only after every check passed.
+
 Every mode first validates: the manifest is present and complete (exactly
-`db.dump` and `blobs.tar`, and
+`db.dump` and `blobs.tar`, `db.dump` alone for `before-upgrade`, and
 `restore-set.tar` when it lists a restore set,
 each with a size and SHA-256; exactly the core
 inventory tables, each present with a count or absent; a kind matching the
@@ -1005,8 +1810,9 @@ a version below the binary's newest that the binary does not have, such as
 one from another branch's build; the newest-version check alone would let it
 through. A manifest written before `applied_migrations` existed is checked
 by its goose version alone, and the restored database's applied versions are
-checked against the binary in the verification step instead. A backup taken
-with another key needs `--accept-lost-credentials`: its encrypted settings and credentials cannot be
+checked against the binary in the verification step instead. An encrypted
+backup needs the key it was taken with. An unencrypted backup taken with
+another key needs `--accept-lost-credentials`: its encrypted settings and credentials cannot be
 read with this key. Silo refuses to start on a setting it cannot decrypt, so
 after verification such a restore deletes, in the restored database, every
 encrypted `server_settings` row this key cannot open and prints their key
@@ -1310,14 +2116,15 @@ neither list.
 
 ### Separate mode
 
-`silo backup restore --from <backup> --into <database URL> --blobs-into <dir>`
+`silo backup restore --from <backup> --into <database URL> --blobs-into <dir | s3://bucket/prefix>`
 restores into a pre-created empty database and a separate directory laid out
-as a local store root, changing nothing in the live deployment. Before
+as a local store root, or a bucket under a key prefix (with the
+`SILO_BACKUP_S3_*` credentials), changing nothing in the live deployment. Before
 anything is written it refuses a target that would overwrite something,
 since a copy keeps nothing it replaces: `--into` must not be the live
 database (`DATABASE_URL`, compared by host, port, and database as pgx
-resolves them), and `--blobs-into` must be missing or an empty directory
-and not the live server's local file storage (read from its settings when
+resolves them), and `--blobs-into` must be missing or an empty directory, or a key prefix
+that holds nothing, and not the live server's local file storage (read from its settings when
 `DATABASE_URL` is set; symbolic links resolved). It needs no
 `CREATEDB` or rename privilege. After `pg_restore --exit-on-error
 --no-owner --no-privileges`, it verifies the schema version, the applied
@@ -1325,7 +2132,11 @@ migrations, and the table inventory against the manifest. It then deletes
 the recorded storage identities (`artwork.storage_identity`,
 `storage.operational_identity`) from the target: they name the backed-up
 server's stores, so a server started on the copy would refuse the stores it
-is configured with. That server records its own on its first start or write. The copy
+is configured with. That server records its own on its first start or write.
+It deletes the backup destination settings too (`backup.destination` and
+`backup.s3.*`): the copy keeps the backed-up server's id, so backing up to
+that bucket would rotate away the original's backups. The copy backs up to
+its own storage until an admin names a destination. The copy
 gets none of the backup's long-lived credentials
 ([Credentials](#credentials)).
 The target stays open for the operator to point `DATABASE_URL` and the
@@ -1489,23 +2300,30 @@ EXTENSION vector`, which only a superuser may create): a dump loaded there
 can then reach nothing else on the server. `pg_restore` loads the dump's
 table of contents less the comments on extensions (`--use-list`), which only
 an extension's owner may write and nothing reads, so such a role can load
-it (`TestBackupRestoreRoundTripDB` verifies as one).
+it (`TestBackupRestoreRoundTripDB` verifies as one). An encrypted backup
+needs its key.
 CI runs the same round trip against PostgreSQL
 (`TestBackupRestoreRoundTripDB`): a seeded database with blobs and an
 encrypted setting is backed up, restored in separate mode, and compared
 table by table, blob by blob, and by the decrypted value.
+`TestEncryptedS3RoundTripDB` does it through an encrypted S3 destination (a
+fake bucket), and `TestBackupCommandsReadS3DB` runs `verify`, `restore`, and
+`decrypt` from `s3://` addresses, with the right key and another.
 
 ## Health
 
 There is no server-side dashboard warning registry; the dashboard derives its
 notices on the client. `GET /api/v2/admin/backups` therefore returns the
 conditions the dashboard shows as `warnings`: backups turned off, no
-successful backup in the last 48 hours (`no_recent_backup`): the later of
-the status row's `last_success_at` and the newest complete backup at the
-destination whose manifest this server authenticated (anyone who can write
-the destination could set an unverified one's completion time in the
-future), which also covers a status row a full restore left empty; the
-destination missing or unreachable, the SQLite user store, and `pg_dump`
-missing or older than the server. It also carries this server's key check
-value. It also returns the active operation and the latest run from
+successful backup in the last 48 hours (`no_recent_backup`), at any
+destination: the later of the status row's `last_success_at` and the newest
+complete backup at the current destination whose manifest this server
+authenticated (anyone who can write the destination could set an unverified
+one's completion time in the future), which also covers a status row a
+full restore left empty; no authenticated backup at the current destination although one
+completed before (`no_backups_at_destination`, after switching
+destinations), the destination missing or unreachable, the SQLite user store, `pg_dump` missing or older than the
+server, and encrypted backups (any bucket) paused for an unconfirmed
+`SECRET_KEY` (`key_not_confirmed`). It also carries this server's key check value, whether
+it is confirmed, and whether new backups are encrypted. It also returns the active operation and the latest run from
 [the status row](#status).

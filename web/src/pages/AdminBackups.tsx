@@ -1,10 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { DatabaseBackup, LoaderCircle } from "lucide-react";
+import { DatabaseBackup, LoaderCircle, Upload } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
-import type { AdminBackupActive } from "@/api/v2/adminBackups";
+import type { AdminBackupActive, AdminBackupDestination } from "@/api/v2/adminBackups";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SaveBar } from "@/components/SaveBar";
 import { Button } from "@/components/ui/button";
@@ -17,11 +17,13 @@ import {
   useAdminBackups,
   useStartAdminBackup,
 } from "@/hooks/queries/admin/backups";
+import { useAdminBackupUploads } from "@/hooks/queries/admin/backupUploads";
 import { useTask } from "@/hooks/queries/admin/tasks";
 import { adminKeys } from "@/hooks/queries/keys";
 import { formatTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { ConfirmKeyDialog, S3SetupDialog } from "@/pages/admin-backups/BackupS3Dialogs";
 import {
   BackupLocationGroup,
   BackupScheduleSettings,
@@ -29,7 +31,10 @@ import {
   type FullRestoreSource,
 } from "@/pages/admin-backups/BackupSettings";
 import { BackupTable } from "@/pages/admin-backups/BackupTable";
+import { UploadBackupDialog } from "@/pages/admin-backups/UploadBackupDialog";
+import { UploadedBackups } from "@/pages/admin-backups/UploadedBackups";
 import {
+  BACKUP_DESTINATION_KEY,
   BACKUP_ENABLED_KEY,
   BACKUP_KEEP_KEY,
   BACKUP_ROWS_SHOWN,
@@ -38,7 +43,10 @@ import {
   backUpNowBlocker,
   backupErrorMessage,
   backupSchedulePhrases,
+  defaultBackupLocation,
+  isBucketLocation,
   isFinished,
+  keyConfirmationNeeded,
   lastRunProblem,
   lockBlocker,
   nextBackupRun,
@@ -47,8 +55,10 @@ import {
   retentionNote,
   retentionPlan,
   visibleWarnings,
-  type BackupLocation,
+  warningText,
+  warningTone,
 } from "@/pages/admin-backups/backupPresentation";
+import { BACKUP_S3_KEYS, s3FieldsFromSettings } from "@/pages/admin-backups/s3SetupModel";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 // The settings layout loads these field styles for its pages; this page is not one of them.
 import "@/styles/admin-settings.css";
@@ -61,6 +71,10 @@ function useMinuteClock() {
     return () => window.clearInterval(timer);
   }, []);
   return now;
+}
+
+function asDestination(value: string): AdminBackupDestination {
+  return value === "s3" ? "s3" : "default";
 }
 
 /** What the operation holding the backup lock is doing. */
@@ -81,8 +95,10 @@ function ActiveOperation({ active }: { active: AdminBackupActive }) {
         </>
       );
     }
+    case "upload":
+      return "Checking an uploaded backup.";
     default:
-      return "Deleting a backup.";
+      return active.upload_id ? "Deleting an uploaded backup." : "Deleting a backup.";
   }
 }
 
@@ -125,7 +141,25 @@ export default function AdminBackups() {
   const sqliteUserStore = warnings.some((warning) => warning.code === "sqlite_user_store");
   const configured = capabilities.data ? capabilities.data.state === "available" : true;
   const selectiveRestore = capabilities.data?.selective_restore === true;
+  const uploadAvailable = capabilities.data?.upload === true;
+  const uploads = useAdminBackupUploads(uploadAvailable);
+  const [uploading, setUploading] = useState(false);
+  const [settingUpS3, setSettingUpS3] = useState(false);
+  const [confirmingKey, setConfirmingKey] = useState(false);
   const destinations = capabilities.data?.destinations;
+  const s3Offered = destinations?.includes("s3") ?? false;
+  const savedDestination =
+    list?.destination ?? asDestination(form.getPersistedValue(BACKUP_DESTINATION_KEY));
+  // Unstaged, the choice is whatever the server uses now. The S3 dialog saves
+  // on its own, so reading the form's local copy would show the old choice.
+  const draftDestination = form.isDirty(BACKUP_DESTINATION_KEY)
+    ? asDestination(form.getValue(BACKUP_DESTINATION_KEY))
+    : savedDestination;
+  const s3Configured = Boolean(
+    form.getPersistedValue(BACKUP_S3_KEYS.endpoint).trim() &&
+    form.getPersistedValue(BACKUP_S3_KEYS.bucket).trim(),
+  );
+  const needsKey = keyConfirmationNeeded(list);
 
   // The status line and the strip describe what is saved, not a draft.
   const keep = list?.keep ?? (Number(form.getPersistedValue(BACKUP_KEEP_KEY)) || 7);
@@ -148,16 +182,21 @@ export default function AdminBackups() {
   });
   const lastRunWarning = lastRunProblem(list?.last_run, now);
 
-  // Before capabilities load, assume the server has its own storage.
-  const location: BackupLocation =
-    destinations && !destinations.includes("default") ? "none" : "local";
+  const location = defaultBackupLocation({
+    // Before capabilities load, assume the server has its own storage.
+    hasDefault: destinations ? destinations.includes("default") : true,
+    destination: list?.destination,
+    items,
+    privateBucket: form.getPersistedValue("s3.private_bucket"),
+  });
   // The command restores without --accept-lost-credentials, so it names a
   // backup this server verified: the selected one, else the newest.
   const verified = (b: (typeof items)[number]) => isFinished(b) && b.status !== "unverified";
   const commandBackup =
     items.find((item) => item.id === selectedId && verified(item)) ?? items.find(verified);
   const command = restoreCommand(commandBackup?.location);
-  const commandSource: FullRestoreSource = commandBackup ? "folder" : "download";
+  let commandSource: FullRestoreSource = "download";
+  if (commandBackup) commandSource = isBucketLocation(commandBackup.location) ? "bucket" : "folder";
 
   const lock = lockBlocker(list?.busy ?? false, active);
   const blocker = startBackup.isPending
@@ -232,7 +271,15 @@ export default function AdminBackups() {
           className="mb-4"
           actions={
             <div className="flex flex-col items-end gap-1">
-              <div className="flex flex-wrap justify-end gap-2">{backUpNowButton}</div>
+              <div className="flex flex-wrap justify-end gap-2">
+                {uploadAvailable ? (
+                  <Button variant="outline" onClick={() => setUploading(true)}>
+                    <Upload data-icon="inline-start" aria-hidden="true" />
+                    Upload a backup
+                  </Button>
+                ) : null}
+                {backUpNowButton}
+              </div>
               {blocker ? (
                 <p id={blockerId} className="text-muted-foreground max-w-72 text-right text-xs">
                   {blocker}
@@ -285,8 +332,15 @@ export default function AdminBackups() {
               </div>
             ) : null}
             {shownWarnings.map((warning) => (
-              <div key={warning.code}>
-                <SettingFieldStatus tone="warn">{warning.message}</SettingFieldStatus>
+              <div key={warning.code} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <SettingFieldStatus tone={warningTone(warning)}>
+                  {warningText(warning)}
+                </SettingFieldStatus>
+                {warning.code === "key_not_confirmed" && needsKey ? (
+                  <Button variant="outline" size="sm" onClick={() => setConfirmingKey(true)}>
+                    Confirm the key
+                  </Button>
+                ) : null}
               </div>
             ))}
           </div>
@@ -330,6 +384,11 @@ export default function AdminBackups() {
               <p className="text-muted-foreground text-[13px]">
                 {retentionNote({ keep, plan, next, running, now })}
               </p>
+              {list?.encrypted ? (
+                <p className="text-muted-foreground text-[13px]">
+                  Backups in this bucket are encrypted with this server&apos;s SECRET_KEY.
+                </p>
+              ) : null}
             </div>
             <BackupTable
               items={items}
@@ -348,6 +407,8 @@ export default function AdminBackups() {
         </section>
       )}
 
+      {uploads.data ? <UploadedBackups uploads={uploads.data} /> : null}
+
       {form.isLoading ? (
         <div className="space-y-4" role="status" aria-label="Loading settings">
           <Skeleton className="h-10 w-full" />
@@ -363,10 +424,57 @@ export default function AdminBackups() {
       ) : (
         <div className="max-w-[70rem] space-y-5">
           <BackupScheduleSettings form={form} />
-          <BackupLocationGroup location={location} />
-          {configured ? <RestoreCommandGroup command={command} source={commandSource} /> : null}
+          <BackupLocationGroup
+            location={location}
+            s3Offered={s3Offered}
+            destination={draftDestination}
+            savedDestination={savedDestination}
+            dirty={form.isDirty(BACKUP_DESTINATION_KEY)}
+            s3Configured={s3Configured}
+            onDestinationChange={(destination) =>
+              destination === savedDestination
+                ? form.resetValue(BACKUP_DESTINATION_KEY)
+                : form.setValue(BACKUP_DESTINATION_KEY, destination)
+            }
+            onSetUpS3={() => setSettingUpS3(true)}
+            onConfirmKey={needsKey ? () => setConfirmingKey(true) : undefined}
+          />
+          {configured ? (
+            <RestoreCommandGroup
+              command={command}
+              source={commandSource}
+              encrypted={commandBackup?.encrypted ?? false}
+            />
+          ) : null}
         </div>
       )}
+
+      {uploadAvailable && capabilities.data ? (
+        <UploadBackupDialog
+          open={uploading}
+          onOpenChange={setUploading}
+          maxBytes={capabilities.data.max_upload_bytes}
+        />
+      ) : null}
+
+      {list && s3Offered ? (
+        <S3SetupDialog
+          open={settingUpS3}
+          onOpenChange={setSettingUpS3}
+          // The dialog saved the destination itself; drop a staged choice.
+          onSaved={() => form.resetValue(BACKUP_DESTINATION_KEY)}
+          initial={s3FieldsFromSettings(form.getPersistedValue)}
+          secretConfigured={form.sensitiveConfigured.includes(BACKUP_S3_KEYS.secretKey)}
+          keyCheck={list.key_check}
+        />
+      ) : null}
+      {list && needsKey ? (
+        <ConfirmKeyDialog
+          open={confirmingKey}
+          onOpenChange={setConfirmingKey}
+          keyCheck={list.key_check}
+        />
+      ) : null}
 
       <SaveBar
         dirtyCount={form.dirtyCount}

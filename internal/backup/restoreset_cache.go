@@ -109,6 +109,13 @@ func (c *restoreSetCache) touch(digest string) {
 	c.order = append(c.order, digest)
 }
 
+// store is storeLocked, taking the lock.
+func (c *restoreSetCache) store(digest string, rs *RestoreSet) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.storeLocked(digest, rs)
+}
+
 // storeLocked keeps rs unless it alone exceeds the byte bound, evicting the
 // least recently used sets beyond the count and byte bounds. c.mu is held.
 func (c *restoreSetCache) storeLocked(digest string, rs *RestoreSet) {

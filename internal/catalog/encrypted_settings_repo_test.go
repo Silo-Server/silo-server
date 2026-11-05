@@ -248,6 +248,7 @@ func TestSensitiveSettingKeys_Audited(t *testing.T) {
 		"ai.chatgpt.credentials",
 		"audiobooks.abs.jwt_secret",
 		"s3.public_secret_key",
+		"backup.s3.secret_key",
 		"s3.operational_secret_key", // legacy alias still read as a fallback
 		"redis.sentinel_password",   // was missing from the old redaction map
 		"recommendations.openai_api_key",

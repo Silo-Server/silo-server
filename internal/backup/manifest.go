@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"time"
 )
 
@@ -74,7 +76,16 @@ type Manifest struct {
 	PgDumpVersion     string   `json:"pg_dump_version"`
 	ExcludedTableData []string `json:"excluded_table_data"`
 
+	// Objects are named as stored: db.dump.age and so on when Encrypted.
 	Objects []ObjectEntry `json:"objects"`
+	// Encrypted is false for every object at the default destination. The
+	// S3 destination encrypts every object but the manifest with age, under
+	// the passphrase secret.BackupPassphrase derives from SECRET_KEY.
+	// omitempty keeps an unencrypted manifest's encoding, and so its MAC,
+	// what builds from before this field wrote: every field added to the
+	// manifest after it first shipped must encode to nothing at its zero
+	// value (TestManifestsOfEarlierBuildsStillVerify).
+	Encrypted bool `json:"encrypted,omitempty"`
 	// KeyCheck is the SECRET_KEY check value (secret.KeyCheckValue). A restore
 	// with another key cannot read encrypted settings and credentials.
 	KeyCheck string `json:"key_check"`
@@ -92,14 +103,40 @@ type Manifest struct {
 	// restore compares the restored database with it, presence and counts.
 	Tables []TableCount `json:"tables"`
 	// RestoreSet describes restore-set.tar, the sections selective restore
-	// reads. Absent when the backup has none.
+	// reads. Absent when the backup has none (before-upgrade backups).
 	RestoreSet *RestoreSetSummary `json:"restore_set,omitempty"`
+	// Upgrade is, on a before-upgrade backup, the upgrade it is the way back
+	// from. Absent on other kinds and on before-upgrade backups of builds
+	// that did not record it.
+	Upgrade *UpgradeRecord `json:"upgrade,omitempty"`
 	// MAC authenticates every other field: HMAC-SHA256, under the key
 	// secret.BackupManifestKey derives from SECRET_KEY, of the manifest
 	// encoded with MAC empty, in hex. Anyone who can write the destination
 	// can change objects and their checksums together; only a server with
 	// SECRET_KEY can write a MAC that verifies (checkMAC).
 	MAC string `json:"mac,omitempty"`
+}
+
+// UpgradeRecord is the upgrade a before-upgrade backup was taken for.
+type UpgradeRecord struct {
+	// Pending lists the migrations that were pending, ascending: the
+	// upgrade is complete once the database has applied all of them.
+	Pending []int64 `json:"pending"`
+}
+
+// upgradeUnfinished reports whether m is a before-upgrade backup whose
+// upgrade the database, with applied (ascending), has not completed: it is
+// the copy from before migrations that failed, or that a restore undid.
+func (m *Manifest) upgradeUnfinished(applied []int64) bool {
+	if m.Upgrade == nil {
+		return false
+	}
+	for _, v := range m.Upgrade.Pending {
+		if _, found := slices.BinarySearch(applied, v); !found {
+			return true
+		}
+	}
+	return false
 }
 
 // Errors of a manifest's MAC.
@@ -117,6 +154,19 @@ func (m *Manifest) macInput() ([]byte, error) {
 	c := *m
 	c.MAC = ""
 	return json.Marshal(&c)
+}
+
+// withEncryptedFalse is macInput's encoding of an unencrypted manifest as
+// builds wrote it while `encrypted` had no omitempty: "encrypted":false
+// right before "key_check", which follows it in Manifest. Inside a string
+// the encoder escapes the quote, so the first match is that field's.
+func withEncryptedFalse(data []byte) []byte {
+	const next = `,"key_check":`
+	i := bytes.Index(data, []byte(next))
+	if i < 0 {
+		return data
+	}
+	return slices.Concat(data[:i], []byte(`,"encrypted":false`), data[i:])
 }
 
 // sign sets m.MAC under key; a nil key leaves m unsigned.
@@ -159,9 +209,12 @@ func (m *Manifest) checkMAC(key []byte, keyCheck string) (authenticated bool, er
 	if err != nil {
 		return false, err
 	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write(data)
-	if !hmac.Equal(mac.Sum(nil), want) {
+	verifies := func(data []byte) bool {
+		mac := hmac.New(sha256.New, key)
+		mac.Write(data)
+		return hmac.Equal(mac.Sum(nil), want)
+	}
+	if !verifies(data) && (m.Encrypted || !verifies(withEncryptedFalse(data))) {
 		return false, ErrManifestTampered
 	}
 	return true, nil
@@ -172,6 +225,9 @@ func (m *Manifest) checkMAC(key []byte, keyCheck string) (authenticated bool, er
 type RestoreSetSummary struct {
 	FormatVersion int            `json:"format_version"`
 	Sections      map[string]int `json:"sections"`
+	// Omitted lists items the restore set could not carry; the backup is
+	// complete with warnings.
+	Omitted []OmittedItem `json:"omitted,omitempty"`
 	// IndexSHA256 is the digest of the restore set's index, its first
 	// entry. With the manifest authenticated, a read checks the index
 	// against it before decoding it, and the archive against its object
@@ -211,11 +267,16 @@ type TableCount struct {
 
 // Status is complete, or complete with warnings when blobs were missing.
 func (m *Manifest) Status() Status {
-	if len(m.MissingBlobs) > 0 {
+	if len(m.MissingBlobs) > 0 || (m.RestoreSet != nil && len(m.RestoreSet.Omitted) > 0) {
 		return StatusCompleteWithWarnings
 	}
 	return StatusComplete
 }
+
+// HasBlobs reports whether the backup has blobs.tar. A before-upgrade
+// backup is the database only: migrations do not touch blobs, so a full
+// restore from it leaves the files in place.
+func (m *Manifest) HasBlobs() bool { return !m.Kind.databaseOnly() }
 
 // Size is the sum of the stored objects, manifest excluded.
 func (m *Manifest) Size() int64 {
@@ -226,8 +287,10 @@ func (m *Manifest) Size() int64 {
 	return total
 }
 
-// object finds the object named name (db.dump, blobs.tar, restore-set.tar).
-func (m *Manifest) object(name string) (ObjectEntry, bool) {
+// object finds the object of base (db.dump, blobs.tar, restore-set.tar)
+// under its stored name.
+func (m *Manifest) object(base string) (ObjectEntry, bool) {
+	name := storedName(base, m.Encrypted)
 	for _, o := range m.Objects {
 		if o.Name == name {
 			return o, true
@@ -284,7 +347,10 @@ func (m *Manifest) validate() error {
 	if err := validateApplied(m.AppliedMigrations, m.GooseVersion); err != nil {
 		return err
 	}
-	if err := validateObjects(m.Objects, m.RestoreSet != nil); err != nil {
+	if !m.HasBlobs() && (m.RestoreSet != nil || m.Blobs.Count != 0 || len(m.MissingBlobs) != 0) {
+		return fmt.Errorf("a %s backup holds the database only", m.Kind)
+	}
+	if err := validateObjects(m.Objects, m.HasBlobs(), m.RestoreSet != nil, m.Encrypted); err != nil {
 		return err
 	}
 	if err := m.RestoreSet.validate(); err != nil {
@@ -301,12 +367,16 @@ func (m *Manifest) validate() error {
 	return validateInventory(m.Tables)
 }
 
-// validateObjects requires exactly db.dump, blobs.tar, and restore-set.tar
-// when the manifest describes one, each once, with a size and a SHA-256.
-func validateObjects(objects []ObjectEntry, restoreSet bool) error {
-	want := map[string]bool{DumpName: false, BlobsName: false}
+// validateObjects requires exactly db.dump, blobs.tar unless the backup is
+// database-only, and restore-set.tar when the manifest describes one, each
+// once, with a size and a SHA-256; each named .age when encrypted.
+func validateObjects(objects []ObjectEntry, blobs, restoreSet, encrypted bool) error {
+	want := map[string]bool{storedName(DumpName, encrypted): false}
+	if blobs {
+		want[storedName(BlobsName, encrypted)] = false
+	}
 	if restoreSet {
-		want[RestoreSetName] = false
+		want[storedName(RestoreSetName, encrypted)] = false
 	}
 	for _, o := range objects {
 		seen, known := want[o.Name]

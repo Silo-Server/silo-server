@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/database/pglock"
 )
 
 // SubsystemLockKey spells "SILOBKUP". See the package comment for the lock
@@ -52,6 +54,10 @@ func lockWithin(ctx context.Context, locker Locker, wait time.Duration) (Held, e
 type Locker interface {
 	// TryLock takes the lock without waiting, or returns ErrBusy.
 	TryLock(ctx context.Context) (Held, error)
+	// Lock takes the lock, waiting up to wait (indefinitely when zero or
+	// less) for its holder to release it; ErrBusy when the wait runs out.
+	// Only the sequence before startup migrations waits.
+	Lock(ctx context.Context, wait time.Duration) (Held, error)
 	// Holder reports the session that holds the lock, without taking it: a
 	// read that took the lock, even briefly, could make a nightly run skip.
 	Holder(ctx context.Context) (session LockSession, held bool, err error)
@@ -112,6 +118,16 @@ func (l PostgresLocker) TryLock(ctx context.Context) (Held, error) {
 		var acquired bool
 		err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, SubsystemLockKey).Scan(&acquired)
 		return acquired, err
+	})
+}
+
+func (l PostgresLocker) Lock(ctx context.Context, wait time.Duration) (Held, error) {
+	return l.acquire(ctx, func(conn *pgx.Conn) (bool, error) {
+		if wait > 0 {
+			return pglock.LockWithin(ctx, conn, SubsystemLockKey, wait)
+		}
+		_, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, SubsystemLockKey)
+		return err == nil, err
 	})
 }
 

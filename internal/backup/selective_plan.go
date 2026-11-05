@@ -40,6 +40,7 @@ type PreviewItem struct {
 	Plugin          *PreviewPlugin      `json:"plugin,omitempty"`
 	Library         *PreviewLibrary     `json:"library,omitempty"`
 	Collection      *PreviewCollected   `json:"collection,omitempty"`
+	Account         *PreviewAccount     `json:"account,omitempty"`
 	HomeSection     *PreviewHomeSection `json:"home_section,omitempty"`
 }
 
@@ -732,6 +733,7 @@ type LibraryMapping struct {
 // RestorePreview is a backup's restore set compared with this server.
 type RestorePreview struct {
 	BackupID      string    `json:"backup_id"`
+	UploadID      string    `json:"upload_id,omitempty"`
 	Digest        string    `json:"digest"`
 	FormatVersion int       `json:"format_version"`
 	ServerID      string    `json:"server_id"`
@@ -745,6 +747,8 @@ type RestorePreview struct {
 	// confirmation (RestoreRequest.AcceptUnauthenticated).
 	Authenticated bool     `json:"authenticated"`
 	MissingBlobs  []string `json:"missing_blobs"`
+	// Omitted lists items the backup could not carry.
+	Omitted []OmittedItem `json:"omitted"`
 	// NeverRestoredSettings are the server-specific keys and prefixes.
 	NeverRestoredSettings []string         `json:"never_restored_settings"`
 	Libraries             []LibraryMapping `json:"library_map"`
@@ -759,6 +763,13 @@ func (s *Service) Preview(ctx context.Context, id string, acceptUnauthenticated 
 	return s.preview(ctx, restoreSource{backupID: id}, acceptUnauthenticated)
 }
 
+// PreviewUpload is Preview for an uploaded restore set, bound to the digest
+// its completion froze. An upload cannot be authenticated, so it is read
+// only when acceptUnauthenticated confirms it.
+func (s *Service) PreviewUpload(ctx context.Context, id string, acceptUnauthenticated bool) (*RestorePreview, error) {
+	return s.preview(ctx, restoreSource{uploadID: id}, acceptUnauthenticated)
+}
+
 func (s *Service) preview(ctx context.Context, src restoreSource, acceptUnauthenticated bool) (*RestorePreview, error) {
 	rs, authenticated, err := s.previewSet(ctx, src, acceptUnauthenticated)
 	if err != nil {
@@ -767,9 +778,10 @@ func (s *Service) preview(ctx context.Context, src restoreSource, acceptUnauthen
 	serverID, _ := s.serverID(ctx)
 	p := s.newPlanner(rs, s.opts.Pool)
 	p.authenticated = authenticated
-	out := &RestorePreview{BackupID: src.backupID, Digest: rs.Digest, FormatVersion: rs.Index.Version, ServerID: rs.Index.ServerID,
+	out := &RestorePreview{BackupID: src.backupID, UploadID: src.uploadID, Digest: rs.Digest, FormatVersion: rs.Index.Version, ServerID: rs.Index.ServerID,
 		ServerName: rs.Index.ServerName, SiloVersion: rs.Index.SiloVersion, CreatedAt: rs.Index.CreatedAt,
 		SameServer: rs.Index.ServerID == serverID, KeyMatches: p.keyMatches, Authenticated: authenticated, MissingBlobs: append([]string{}, rs.MissingBlobs...),
+		Omitted:               append([]OmittedItem{}, rs.Index.Omitted...),
 		NeverRestoredSettings: ServerSpecificSettings(),
 		Libraries:             []LibraryMapping{}, Sections: []PreviewSection{}}
 	libraries, err := p.planLibraries(ctx)
@@ -812,6 +824,14 @@ func (s *Service) preview(ctx context.Context, src restoreSource, acceptUnauthen
 				return nil, err
 			}
 			section.Items = append(section.Items, settingsPageItems(plans)...)
+		case SectionUsers:
+			plans, err := s.previewUsers(ctx, rs, serverID, libMap)
+			if err != nil {
+				return nil, err
+			}
+			for _, plan := range plans {
+				section.Items = append(section.Items, plan.item)
+			}
 		case SectionCollections:
 			items, err := p.planCollectionsSection(ctx, libMap, restorable)
 			if err != nil {

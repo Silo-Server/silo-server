@@ -92,6 +92,13 @@ const BLOCKED_PHRASES: Record<RestoreReason, string> = {
   file_missing: "the image was missing from the backup",
   not_in_backup: "the backup doesn't have them",
   changed_since_preview: "this server changed after the preview",
+  ambiguous_account: "more than one account here matches",
+  ambiguous_profile: "more than one profile here has the name",
+  policy_wider: "this server would give them more access than the backup did",
+  group_not_on_this_server: "their access group isn't on this server",
+  login_taken: "another account here signs in with the username or email",
+  profile_limit: "the account here has no room for another profile",
+  user_store_unsupported: "accounts need the PostgreSQL user store",
   template_not_available: "this server's starter packs don't have the template",
   collection_not_mapped: "the collection they show isn't here or in the backup",
   unreadable: "the backup's copy of them can't be read",
@@ -100,6 +107,7 @@ const BLOCKED_PHRASES: Record<RestoreReason, string> = {
   kept_stricter: "they would widen access, so this server keeps its stricter values",
   unverified_backup: "they connect to outside services and this server can't verify the backup",
   over_restore_budget: "this restore already wrote as much collection detail as one restore may",
+  needs_primary_profile: "their primary profile has to be restored with them",
 };
 
 /** For an item the server gave a status but no reason. */
@@ -232,14 +240,22 @@ export function groupsByLibrary(section: RestoreSection["id"]): boolean {
 /** Sections with more items than this show a filter. */
 export const FILTER_THRESHOLD = 20;
 
-/** Whether an item matches a filter: its label or its library. */
+/**
+ * Whether an item matches a filter: its label, its library, an account's
+ * username, email, or local name, or one of its profiles' names.
+ */
 export function matchesFilter(item: RestoreItem, query: string, names: LibraryNames): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
+  const account = item.account;
   const haystack = [
     item.label,
     item.collection || item.home_section ? itemLibrary(item, names).name : null,
     item.library?.local_id ? names.local.get(item.library.local_id) : null,
+    account?.username,
+    account?.email,
+    account?.local_username,
+    ...(account?.profiles.map((profile) => profile.name) ?? []),
   ];
   return haystack.some((value) => value?.toLowerCase().includes(needle));
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // pluginReleaseColumns are what the launcher reads of an installation
@@ -162,4 +163,20 @@ func carryPluginReleases(ctx context.Context, loader DatabaseLoader, dbURL, live
 		_, _ = fmt.Fprintf(out, "Turned off %d plugins whose release this server does not have; reinstall or enable them after Silo starts: %s.\n", len(off), strings.Join(off, ", "))
 	}
 	return nil
+}
+
+// DisablePlugins turns off every enabled plugin installation in dbURL,
+// using only columns every schema with the table has. A schema without
+// the table has no plugins to turn off.
+func (l PGLoader) DisablePlugins(ctx context.Context, dbURL string) ([]string, error) {
+	conn, err := pgx.Connect(ctx, dbURL)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	off, err := collectStrings(ctx, conn, `UPDATE plugin_installations SET enabled = false WHERE enabled RETURNING plugin_id`)
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "42P01" {
+		return nil, nil
+	}
+	return off, err
 }

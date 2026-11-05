@@ -30,8 +30,8 @@ import (
 // ExecuteRestore runs one backup_restore job:
 //
 //  1. take the subsystem lock and hold it for the whole run;
-//  2. read the source backup's restore set and refuse it when its digest
-//     is not the one the preview returned;
+//  2. read the source's restore set (a backup's, or an upload's) and
+//     refuse it when its digest is not the one the preview returned;
 //  3. take a before-restore backup by calling Backup under the same lock,
 //     keeping the source out of its rotation, and record its id; if it
 //     fails nothing is restored;
@@ -54,7 +54,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	if err := json.Unmarshal(run.Payload, &req); err != nil {
 		return fail(fmt.Errorf("reading the restore request: %w", err))
 	}
-	report.BackupID, report.Digest = req.BackupID, req.Digest
+	report.BackupID, report.UploadID, report.Digest = req.BackupID, req.UploadID, req.Digest
 	if s.opts.Locker == nil {
 		return fail(errors.New("backups are not available on this server"))
 	}
@@ -73,7 +73,9 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	defer cancelWork()
 
 	rs, located, err := s.readSelected(ctx, work, req, func(planned *RestoreSet) map[string]bool {
-		return selectedBlobs(planned, req.Selection)
+		wanted := selectedBlobs(planned, req.Selection)
+		maps.Copy(wanted, selectedUserBlobs(planned, req.Users))
+		return wanted
 	})
 	if err != nil {
 		return fail(err)
@@ -81,28 +83,25 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	rs.unverified = !located.authenticated
 	defer rs.Cleanup()
 
-	// Items write files inside their transactions; a store recording its
-	// identity on that first write would need a second pool connection.
-	for _, store := range s.stores {
-		if err := blobstore.RecordIdentity(work, store); err != nil {
-			return fail(fmt.Errorf("recording the storage: %w", err))
-		}
+	if err := s.recordStoreIdentities(work); err != nil {
+		return fail(err)
 	}
-	a := &applier{s: s, rs: rs, run: run, report: report, total: 1, staged: map[string]error{}, filesWritten: map[string]bool{},
-		runID: cmp.Or(run.JobID, uuid.NewString())}
+	a := newApplier(s, rs, run, report, req)
 	// The report the job keeps lists every item's outcome once the run
 	// ends, however it ends: until then each item's is a row of its own.
 	defer a.collectItems(context.WithoutCancel(ctx))
-	for _, ids := range req.Selection {
-		a.total += len(ids)
-	}
-	if len(req.Selection[SectionHomeSections]) > 0 {
+	if len(req.Users) > 0 || len(req.Selection[SectionHomeSections]) > 0 {
 		if a.serverID, err = s.serverID(work); err != nil {
 			return fail(err)
 		}
 	}
-	pinned := map[string]bool{req.BackupID: true}
-	result, err := s.backupWith(work, held, KindBeforeRestore, "", nil, pinned)
+	// An uploaded source is not a backup of this server: rotation never
+	// sees it, and its delete waits for the lock this restore holds.
+	pinned := map[string]bool{}
+	if req.BackupID != "" {
+		pinned[req.BackupID] = true
+	}
+	result, err := s.backupWith(work, held, KindBeforeRestore, "", nil, pinned, nil)
 	if err != nil {
 		return fail(fmt.Errorf("%w: %w", errBeforeRestoreBackup, err))
 	}
@@ -118,11 +117,11 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	if err := a.commit(work, next, "Backed up before restoring", nil); err != nil {
 		return fail(err)
 	}
-	op := s.beginOperation(work, held, ActiveOperation{Operation: OperationRestore, BackupID: req.BackupID, StartedAt: s.opts.Now()})
+	op := s.beginOperation(work, held, ActiveOperation{Operation: OperationRestore, BackupID: req.BackupID, UploadID: req.UploadID, StartedAt: s.opts.Now()})
 	defer op.end(work, nil)
 
 	for _, spec := range restoreSections {
-		for _, id := range req.Selection[spec.id] {
+		for _, id := range req.selectedIDs(spec.id) {
 			if err := ctx.Err(); err != nil {
 				return report, err
 			}
@@ -143,6 +142,45 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	finished := s.opts.Now().UTC()
 	report.FinishedAt = &finished
 	return report, nil
+}
+
+// newApplier is the applier of req, counting its items and the backup
+// taken before them.
+func newApplier(s *Service, rs *RestoreSet, run RestoreRun, report *SelectiveReport, req RestoreRequest) *applier {
+	a := &applier{s: s, rs: rs, run: run, report: report, total: 1, users: map[string]UserSelection{}, staged: map[string]error{}, filesWritten: map[string]bool{},
+		runID: cmp.Or(run.JobID, uuid.NewString())}
+	for _, spec := range restoreSections {
+		a.total += len(req.selectedIDs(spec.id))
+	}
+	for _, u := range req.Users {
+		a.users[u.Account] = u
+	}
+	return a
+}
+
+// recordStoreIdentities records each store's identity before any item
+// runs: items write files inside their transactions, and a store recording
+// its identity on that first write would need a second pool connection.
+func (s *Service) recordStoreIdentities(ctx context.Context) error {
+	for _, store := range s.stores {
+		if err := blobstore.RecordIdentity(ctx, store); err != nil {
+			return fmt.Errorf("recording the storage: %w", err)
+		}
+	}
+	return nil
+}
+
+// selectedIDs lists the items of section the request selects: for
+// accounts, the ones its Users name.
+func (req RestoreRequest) selectedIDs(section string) []string {
+	if section != SectionUsers {
+		return req.Selection[section]
+	}
+	ids := make([]string, 0, len(req.Users))
+	for _, u := range req.Users {
+		ids = append(ids, u.Account)
+	}
+	return ids
 }
 
 // readSelected reads the restore set req names, extracting only the files
@@ -190,17 +228,26 @@ type applier struct {
 	// seasonal counts the seasonal sections this restore wrote
 	// (maxRestoredSeasonal).
 	seasonal int
-	// serverID is this server's identity; home sections match by id only
-	// when the backup is this server's.
+	// serverID is this server's identity; users and home sections match by
+	// id only when the backup is this server's.
 	serverID string
-	run      RestoreRun
-	report   *SelectiveReport
+	// users are the chosen accounts by backup account id.
+	users  map[string]UserSelection
+	run    RestoreRun
+	report *SelectiveReport
 	// current and total count items for the job's progress; the
 	// before-restore backup is the first.
 	current, total int
 	// claimed maps "kind:local id" to the item that wrote it, so two items
 	// never write the same section or collection here.
 	claimed map[string]string
+	// adminCollections caches how the accounts' data maps admin collection
+	// ids (collectionMap).
+	adminCollections map[string]string
+	// allowUnrated is access.unrated_content, read before each account's
+	// transaction: the policy reader takes a pool connection of its own,
+	// which the transaction may hold the last of.
+	allowUnrated bool
 	// staged holds, per artwork item, nil once stageArtwork wrote its
 	// objects, or why it could not; an item it did not write is absent,
 	// and applyArtwork never publishes one.
@@ -308,7 +355,10 @@ func (a *applier) commit(ctx context.Context, next *SelectiveReport, message str
 // transaction; the restore continues with the next item.
 func (a *applier) apply(ctx context.Context, section, id string) error {
 	a.current++
-	if section == SectionCollections && strings.HasPrefix(id, "artwork:") {
+	switch {
+	case section == SectionUsers:
+		a.allowUnrated = a.s.opts.AllowUnratedContent != nil && a.s.opts.AllowUnratedContent(ctx)
+	case section == SectionCollections && strings.HasPrefix(id, "artwork:"):
 		a.stageArtwork(ctx, id)
 	}
 	if section == SectionPlugins {
@@ -398,6 +448,8 @@ func (a *applier) applyItem(ctx context.Context, tx pgx.Tx, section, id string) 
 		return a.applyPlugin(ctx, tx, id)
 	case SectionSettings:
 		return a.applySettingsPage(ctx, tx, id)
+	case SectionUsers:
+		return a.applyAccount(ctx, tx, a.users[id])
 	case SectionCollections:
 		switch {
 		case strings.HasPrefix(id, "collection:"):

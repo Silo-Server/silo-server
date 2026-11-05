@@ -33,7 +33,9 @@ var liveTables = []string{"policy_documents", "policy_document_versions"}
 // loggedTables are the logs and queues whose rows the dump leaves out:
 // large, rebuildable, or disposable. media_intro_fingerprints is left out
 // unless backup.include_intro_fingerprints (excludedTableData).
-var loggedTables = []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", tableIntroFingerprints}
+var loggedTables = []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", tableIntroFingerprints,
+	// Upload sessions: their parts live outside the backup.
+	"backup_uploads", "backup_upload_parts", "backup_upload_attempts"}
 
 const tableIntroFingerprints = "media_intro_fingerprints"
 
@@ -102,5 +104,5 @@ var serverStateTables = strings.Fields(`
 	watch_provider_rating_items watch_provider_scrobble_sessions watch_provider_sync_runs
 	watch_together_room_creation_receipts watch_together_suggestion_receipts webhook_sync_event_logs
 	webhook_sync_item_state
-	backup_restore_followups
+	backup_restore_followups backup_restored_accounts backup_restored_profiles
 `)

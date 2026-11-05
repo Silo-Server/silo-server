@@ -23,3 +23,20 @@ func await[T any](t testing.TB, ch <-chan T, what string) T {
 		return zero
 	}
 }
+
+// awaitBefore receives from ch while a goroutine runs, failing the test
+// with what the goroutine returned when it returns first (it failed before
+// the point ch marks), and after awaitTimeout.
+func awaitBefore[T, R any](t testing.TB, ch <-chan T, returned <-chan R, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case r := <-returned:
+		t.Fatalf("returned %v before %s", r, what)
+	case <-time.After(awaitTimeout):
+		t.Fatalf("waited %s for %s", awaitTimeout, what)
+	}
+	var zero T
+	return zero
+}

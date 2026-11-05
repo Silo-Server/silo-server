@@ -973,11 +973,51 @@ type mediaLookupRow struct {
 	Year      int
 }
 
+// catalogLookup runs the matcher's catalog reads on q: the pool, or a
+// caller's transaction.
+type catalogLookup struct{ q lookupQuerier }
+
+// lookupQuerier is what the matcher's reads need: a pool, a connection, or a
+// transaction.
+type lookupQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// NewMatcherOn returns a Matcher whose catalog reads run on q. A caller
+// inside a transaction passes it, so matching never waits on the pool for a
+// second connection while the caller holds one: with a pool of one
+// connection that wait would never end, and concurrent callers could
+// exhaust a larger pool.
+func NewMatcherOn(q lookupQuerier) *Matcher {
+	return NewMatcher(catalogLookup{q: q})
+}
+
 func (r *Repository) MatchMediaByExternalID(ctx context.Context, kind, column, value string) ([]mediaLookupRow, error) {
+	return catalogLookup{q: r.pool}.MatchMediaByExternalID(ctx, kind, column, value)
+}
+
+func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error) {
+	return catalogLookup{q: r.pool}.MatchEpisodeByExternalID(ctx, column, value)
+}
+
+func (r *Repository) MatchEpisodeBySeriesExternalID(ctx context.Context, column, value string, seasonNumber, episodeNumber int) ([]mediaLookupRow, error) {
+	return catalogLookup{q: r.pool}.MatchEpisodeBySeriesExternalID(ctx, column, value, seasonNumber, episodeNumber)
+}
+
+func (r *Repository) MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error) {
+	return catalogLookup{q: r.pool}.MatchEpisodeBySeries(ctx, seriesID, seasonNumber, episodeNumber)
+}
+
+func (r *Repository) MatchEpisodesBySeries(ctx context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time) ([]Match, error) {
+	return catalogLookup{q: r.pool}.MatchEpisodesBySeries(ctx, seriesID, seasonNumber, watchedAt)
+}
+
+func (l catalogLookup) MatchMediaByExternalID(ctx context.Context, kind, column, value string) ([]mediaLookupRow, error) {
 	if value == "" {
 		return nil, nil
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := l.q.Query(ctx, `
 		SELECT content_id, title, COALESCE(year, 0)
 		FROM media_items
 		WHERE type = $1 AND status = 'matched' AND `+column+` = $2
@@ -1002,11 +1042,11 @@ func (r *Repository) MatchMediaByExternalID(ctx context.Context, kind, column, v
 	return matches, nil
 }
 
-func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error) {
+func (l catalogLookup) MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error) {
 	if value == "" {
 		return nil, nil
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := l.q.Query(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		LEFT JOIN media_items series ON series.content_id = e.series_id
@@ -1033,7 +1073,7 @@ func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value
 	return matches, nil
 }
 
-func (r *Repository) MatchEpisodeBySeriesExternalID(
+func (l catalogLookup) MatchEpisodeBySeriesExternalID(
 	ctx context.Context,
 	column, value string,
 	seasonNumber, episodeNumber int,
@@ -1041,7 +1081,7 @@ func (r *Repository) MatchEpisodeBySeriesExternalID(
 	if value == "" {
 		return nil, nil
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := l.q.Query(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		JOIN media_items series ON series.content_id = e.series_id
@@ -1072,8 +1112,8 @@ func (r *Repository) MatchEpisodeBySeriesExternalID(
 	return matches, nil
 }
 
-func (r *Repository) MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error) {
-	row := r.pool.QueryRow(ctx, `
+func (l catalogLookup) MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error) {
+	row := l.q.QueryRow(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		LEFT JOIN media_items series ON series.content_id = e.series_id
@@ -1090,13 +1130,13 @@ func (r *Repository) MatchEpisodeBySeries(ctx context.Context, seriesID string, 
 	return &match, nil
 }
 
-func (r *Repository) MatchEpisodesBySeries(
+func (l catalogLookup) MatchEpisodesBySeries(
 	ctx context.Context,
 	seriesID string,
 	seasonNumber *int,
 	watchedAt *time.Time,
 ) ([]Match, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := l.q.Query(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		LEFT JOIN media_items series ON series.content_id = e.series_id

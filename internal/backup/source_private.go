@@ -12,9 +12,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// consumedObjects are the objects a full restore or a verify reads after
-// it validates them.
-var consumedObjects = []string{DumpName, BlobsName}
+// consumedObjects are the objects a full restore or a verify of src reads
+// after it validates them: blobs.tar only when the backup has one (a
+// before-upgrade backup is the database alone).
+func (src *Source) consumedObjects() []string {
+	if !src.Manifest.HasBlobs() {
+		return []string{DumpName}
+	}
+	return []string{DumpName, BlobsName}
+}
 
 // privatize copies the objects a restore consumes into a new directory only
 // this process can write (0700, each file 0600), hashing each copy as it is
@@ -32,7 +38,7 @@ func (src *Source) privatize(dir string) (err error) {
 		dir = os.TempDir()
 	}
 	var need uint64
-	for _, name := range consumedObjects {
+	for _, name := range src.consumedObjects() {
 		entry, ok := src.Manifest.object(name)
 		if !ok {
 			return fmt.Errorf("the manifest lists no %s", name)
@@ -51,7 +57,7 @@ func (src *Source) privatize(dir string) (err error) {
 			_ = os.RemoveAll(private)
 		}
 	}()
-	for _, name := range consumedObjects {
+	for _, name := range src.consumedObjects() {
 		entry, _ := src.Manifest.object(name)
 		if err := copyChecked(filepath.Join(src.Dir, name), filepath.Join(private, name), entry); err != nil {
 			return err

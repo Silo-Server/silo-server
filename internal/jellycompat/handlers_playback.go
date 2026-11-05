@@ -2396,7 +2396,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				var policyErr error
 				toneMapPolicy, policyErr = h.toneMapPolicyResult(r.Context())
 				if policyErr != nil {
-					if !source.SupportsDirectPlay && !source.SupportsDirectStream {
+					if !source.SupportsDirectPlay && !source.SupportsDirectStream && !source.progressiveRemuxFallback {
 						writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Tone-map policy is temporarily unavailable")
 						return
 					}
@@ -2414,7 +2414,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				metadata := tonemap.MetadataForFile(&models.MediaFile{HDR: version.HDR, VideoTracks: version.VideoTracks})
 				resolution := tonemap.ResolveSource(metadata)
 				if resolution.Kind != "" && toneMapCapabilities.PreferredMode(toneMapPolicy, resolution.Kind) == "" &&
-					!source.SupportsDirectPlay && !source.SupportsDirectStream {
+					!source.SupportsDirectPlay && !source.SupportsDirectStream && !source.progressiveRemuxFallback {
 					writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Tone-map capability discovery is temporarily unavailable")
 					return
 				}
@@ -2431,6 +2431,11 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			source.TargetBitrateKbps, source.TargetResolution = source.h264TargetBitrateKbps, source.h264TargetResolution
 			source.encodeCeilingKbps = source.h264EncodeCeilingKbps
 			source.SupportsTranscoding = profile.supportsTranscodingOutput(version, source.TargetAudioChannels, source.TargetBitrateKbps, source.TargetResolution)
+		}
+		// With the TranscodingUrl gone, the progressive remux cannot set off
+		// the Jellyfin Android TV loop (#2645) and is the only route left.
+		if !source.SupportsTranscoding && source.progressiveRemuxFallback {
+			source.SupportsDirectStream = true
 		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
@@ -2693,11 +2698,9 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		targetAudioChannels = 1
 	}
 	// A copy is packaged as fMP4, or as MPEG-TS for a client that accepts the
-	// same codecs only there and has no progressive remux to take instead.
-	progressiveRemuxOK := enableDirectStream && allowVideoCopy && videoSupported && allowAudioCopy && audioSupported &&
-		compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "")
+	// same codecs only there.
 	remuxAudioCopyFMP4 := profile.SupportsHLSRemuxForAudioStream(version, selectedAudioIndex)
-	remuxAudioCopyTS := !remuxAudioCopyFMP4 && !progressiveRemuxOK && playback.HLSCopyFitsMPEGTS(version.CodecVideo, compatAudioCodec(version, selectedAudioIndex)) &&
+	remuxAudioCopyTS := !remuxAudioCopyFMP4 && playback.HLSCopyFitsMPEGTS(version.CodecVideo, compatAudioCodec(version, selectedAudioIndex)) &&
 		profile.supportsHLSRemuxIn(version, selectedAudioIndex, compatContainerTS)
 	hlsAudioCopy := !bitrateRequiresEncode && !channelsRequireEncode && enableTranscoding &&
 		enableDirectStream &&
@@ -2708,14 +2711,22 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	remuxAudioEncodeFMP4 := profile.supportsHLSRemuxWithAudioTranscodeForAudioStream(version, selectedAudioIndex, targetAudioChannels)
 	remuxAudioEncodeTS := !remuxAudioEncodeFMP4 && playback.HLSCopyFitsMPEGTS(version.CodecVideo, "") &&
 		profile.supportsHLSRemuxWithAudioTranscodeIn(version, selectedAudioIndex, targetAudioChannels, compatContainerTS)
+	// EnableDirectStream=false rules out serving the source's streams as they
+	// are, not copying video: as in Jellyfin, AllowVideoStreamCopy governs
+	// that. Jellyfin Android TV sends it on its second retry after a failed
+	// play, so the audio is encoded and the video stays a copy. When the
+	// encode would leave the audio as it was (AAC within the channel target),
+	// the copy would repeat the stream that failed, so the video is encoded.
+	selectedAudio := compatAudioTrack(version, selectedAudioIndex)
+	audioEncodeChangesAudio := !compatHasNoAudio(version) &&
+		(!strings.EqualFold(selectedAudio.Codec, "aac") || selectedAudio.Channels > targetAudioChannels)
 	hlsAudioTranscode := req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&
 		!supportsDirectPlay &&
-		(!allowAudioCopy || !audioSupported) &&
 		(remuxAudioEncodeFMP4 || remuxAudioEncodeTS)
 	transcodeAudio := !hlsAudioCopy &&
-		enableDirectStream &&
 		allowVideoCopy &&
+		(enableDirectStream || audioEncodeChangesAudio) &&
 		hlsAudioTranscode
 	hlsRemux := hlsAudioCopy || transcodeAudio
 	hlsRemuxInTS := hlsAudioCopy && remuxAudioCopyTS || transcodeAudio && remuxAudioEncodeTS
@@ -2726,19 +2737,6 @@ func (h *PlaybackHandler) buildPlaybackSource(
 			container = compatContainerTS
 		}
 		hlsRemuxAudioStreamIndexes = supportedHLSRemuxAudioStreamIndexes(version, profile, selectedAudioIndex, container)
-	}
-	supportsDirectStream := !hlsRemux &&
-		enableDirectStream &&
-		allowVideoCopy &&
-		videoSupported &&
-		allowAudioCopy &&
-		audioSupported
-	// DirectStream means progressive remux when direct play is unavailable.
-	// Do not advertise a transport the routing policy structurally forbids;
-	// clients can then select the independently negotiated HLS route instead.
-	if supportsDirectStream && !supportsDirectPlay &&
-		!compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "") {
-		supportsDirectStream = false
 	}
 	// Copy and audio-transcode remuxes must match the fMP4 output profile;
 	// full video encodes independently match the MPEG-TS output profile.
@@ -2772,6 +2770,19 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	if maxBitrate > 0 && targetBitrateKbps < compatMinEncodeKbps {
 		supportsTranscoding = false
 	}
+	// Like Jellyfin 10.11, DirectStream accompanies DirectPlay, and a source
+	// that needs a remux is offered through its TranscodingUrl. Jellyfin
+	// Android TV plays the TranscodingUrl whenever DirectStream is set, and
+	// in that mode cannot map an HLS audio track to a stream index, so it
+	// restarts playback to "switch" audio forever (#2645). A progressive
+	// remux is offered only when there is no TranscodingUrl at all, and only
+	// over a transport the routing policy admits. PlaybackInfo can still drop
+	// the TranscodingUrl later, so it keeps the fallback until the route is final.
+	progressiveRemuxFallback := enableDirectStream && allowVideoCopy && allowAudioCopy &&
+		!supportsDirectPlay && videoSupported && audioSupported &&
+		compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "")
+	supportsDirectStream := enableDirectStream && allowVideoCopy && allowAudioCopy && supportsDirectPlay ||
+		!supportsTranscoding && progressiveRemuxFallback
 	return PlaybackMediaSource{
 		ServerBitrateCapKbps:       req.serverBitrateCapKbps,
 		StreamLocation:             req.streamLocation,
@@ -2785,6 +2796,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		encodeCeilingKbps:          max(ceilingKbps, 0),
 		h264EncodeCeilingKbps:      max(h264CeilingKbps, 0),
 		hlsRemuxInTS:               hlsRemuxInTS,
+		progressiveRemuxFallback:   progressiveRemuxFallback,
 		ID:                         sourceID,
 		FileID:                     version.FileID,
 		Version:                    version,
@@ -4090,6 +4102,7 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 		}
 		if !text || !external || alwaysBurn {
 			source.SupportsDirectStream = false
+			source.progressiveRemuxFallback = false
 			source.SupportsTranscoding = source.CanBurnSubtitle && !track.External && !track.IndexOnly
 			// A burn-in is a full encode. TranscodeAudio also marks a video-copy
 			// remux (compatHLSCopiesVideo), so it is cleared with HLSRemux.
@@ -4139,6 +4152,7 @@ func applyCompatDownloadedSubtitleDelivery(source *PlaybackMediaSource, profile 
 
 	source.SupportsDirectPlay = false
 	source.SupportsDirectStream = false
+	source.progressiveRemuxFallback = false
 	source.SupportsTranscoding = false
 }
 

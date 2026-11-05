@@ -234,3 +234,13 @@ func TestKeyCheckValueIsStable(t *testing.T) {
 		t.Fatalf("KeyCheckValue = %q, want 85eb-9109-3131-4a60", got)
 	}
 }
+
+// TestBackupPassphraseIsStable pins the archive key the same way: every
+// encrypted backup needs this exact passphrase from its SECRET_KEY on every
+// later release. The expected value was computed independently from RFC 5869.
+func TestBackupPassphraseIsStable(t *testing.T) {
+	got, err := BackupPassphrase([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil || got != "5hi+B0KQQSydYwmhvO2RSG868Bnfk6aSsvr2kO5Ico0=" {
+		t.Fatalf("BackupPassphrase = %q, %v", got, err)
+	}
+}

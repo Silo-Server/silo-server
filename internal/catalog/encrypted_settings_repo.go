@@ -62,6 +62,8 @@ var SensitiveSettingKeys = map[string]bool{
 	"s3.operational_access_key":   true,
 	"s3.operational_secret_key":   true,
 	"s3.operational_token_secret": true,
+	// The dedicated backup bucket (internal/backup reads it decrypted).
+	"backup.s3.secret_key": true,
 	// A staged storage transition contains a complete target credential bundle.
 	// It is machine-managed and cleared when the transition commits.
 	"storage.transition.target": true,

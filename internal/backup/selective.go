@@ -172,6 +172,9 @@ type RestoreTargets struct {
 	// entry they refuse.
 	CheckLibrary    func(catalog.CreateFolderInput) error
 	CheckCollection func(catalog.CreateLibraryCollectionInput) error
+	// ItemsChanged hears, after an account's item commits, which items each
+	// restored profile's data names (ProfileTransfer.SetItemsChanged).
+	ItemsChanged ItemsChanged
 	// SmartCollectionCreated refreshes a committed smart collection's item
 	// count, as the editor does after creating one.
 	SmartCollectionCreated func(ctx context.Context, collectionID string) error
@@ -202,13 +205,18 @@ type PluginRestorer interface {
 // SetRestoreTargets wires selective restore.
 func (s *Service) SetRestoreTargets(t RestoreTargets) { s.targets = t }
 
-// RestoreRequest is a restore job's payload: the source backup of this
-// server, the digest its preview returned, and the chosen item ids by
-// section.
+// RestoreRequest is a restore job's payload: the source (a backup of this
+// server, or an uploaded restore set), the digest its preview returned, and
+// the chosen item ids by section.
 type RestoreRequest struct {
-	BackupID  string              `json:"backup_id"`
+	BackupID string `json:"backup_id"`
+	// UploadID names an uploaded restore set instead of a backup.
+	UploadID  string              `json:"upload_id,omitempty"`
 	Digest    string              `json:"digest"`
 	Selection map[string][]string `json:"selection"`
+	// Users are the chosen accounts of the users section, with their
+	// targets, profiles, and data types.
+	Users []UserSelection `json:"users,omitempty"`
 	// AcceptUnauthenticated is the admin's confirmation to restore from a
 	// backup whose manifest this server cannot authenticate
 	// (RestorePreview.Authenticated false).
@@ -240,17 +248,19 @@ type RestoreRun struct {
 	Published func(ctx context.Context)
 }
 
-// restoreSource names a restore set: a backup of this server.
-type restoreSource struct{ backupID string }
+// restoreSource names a restore set: a backup of this server, or an
+// uploaded restore set.
+type restoreSource struct{ backupID, uploadID string }
 
 func (r RestoreRequest) source() restoreSource {
-	return restoreSource{backupID: r.BackupID}
+	return restoreSource{backupID: r.BackupID, uploadID: r.UploadID}
 }
 
 // locatedSource is a restore set as its manifest records it.
 type locatedSource struct {
-	// digest is of the stored bytes, frozen in the manifest; the opened
-	// reader hashes them as it reads.
+	// digest is of the stored bytes, encrypted or not, frozen in the
+	// manifest or at upload completion; the opened reader hashes them as
+	// it reads.
 	digest string
 	// indexSHA256 is the index's digest the manifest records.
 	indexSHA256 string
@@ -259,12 +269,29 @@ type locatedSource struct {
 	// then checks every byte against it before decoding any. A manifest of
 	// another key cannot verify.
 	authenticated bool
-	open          func(context.Context) (*storedReader, error)
+	// uploaded marks an uploaded restore set, whose digest was taken when
+	// the upload completed.
+	uploaded bool
+	// open opens the set's plaintext, decrypting an encrypted one.
+	open func(context.Context) (*storedReader, error)
 }
 
 // locate reads a source's manifest, which completeBackup refuses when it
-// was changed after the backup wrote it, and returns its restore set.
+// was changed after the backup wrote it, and returns its restore set. An
+// encrypted backup this server's key cannot open is refused here, before
+// anything is read.
 func (s *Service) locate(ctx context.Context, src restoreSource) (locatedSource, error) {
+	if src.uploadID != "" {
+		digest, keys, err := s.completedUpload(ctx, src.uploadID)
+		if err != nil {
+			return locatedSource{}, err
+		}
+		// An upload has no manifest this server wrote: nothing in it can be
+		// authenticated, so it reads only with the admin's confirmation.
+		return locatedSource{digest: digest, uploaded: true, open: func(ctx context.Context) (*storedReader, error) {
+			return s.openUploaded(s.openParts(ctx, keys))
+		}}, nil
+	}
 	b, err := s.completeBackup(ctx, src.backupID)
 	if err != nil {
 		return locatedSource{}, err
@@ -272,6 +299,9 @@ func (s *Service) locate(ctx context.Context, src restoreSource) (locatedSource,
 	entry, ok := b.manifest.object(RestoreSetName)
 	if b.manifest.RestoreSet == nil || !ok {
 		return locatedSource{}, ErrNoRestoreSet
+	}
+	if err := s.readable(b.manifest); err != nil {
+		return locatedSource{}, err
 	}
 	index := b.manifest.RestoreSet.IndexSHA256
 	return locatedSource{digest: entry.SHA256, indexSHA256: index, authenticated: b.manifest.authenticated && index != "", open: func(ctx context.Context) (*storedReader, error) {
@@ -288,7 +318,7 @@ var ErrUnauthenticated = &SelectionError{Message: "this server cannot authentica
 // of the stored bytes it read, which is what manifests and uploads freeze.
 // A non-empty digest is the one the stored bytes must have: the read checks
 // it once the whole archive is read and before it decodes any document.
-func readStoredRestoreSet(ctx context.Context, body *storedReader, opts ReadOptions, digest string) (*RestoreSet, error) {
+func readStoredRestoreSet(ctx context.Context, body *storedReader, opts ReadOptions, digest, mismatch string) (*RestoreSet, error) {
 	if digest != "" {
 		opts.Verify = func() error {
 			stored, err := body.storedEntry(RestoreSetName)
@@ -296,7 +326,7 @@ func readStoredRestoreSet(ctx context.Context, body *storedReader, opts ReadOpti
 				return err
 			}
 			if stored.SHA256 != digest {
-				return fmt.Errorf("%s does not match the checksum in its manifest", RestoreSetName)
+				return errors.New(mismatch)
 			}
 			return nil
 		}
@@ -332,7 +362,11 @@ func (s *Service) openRestoreSet(ctx context.Context, located locatedSource, ext
 	if located.authenticated {
 		opts.IndexSHA256 = located.indexSHA256
 	}
-	rs, err := readStoredRestoreSet(ctx, body, opts, located.digest)
+	mismatch := RestoreSetName + " does not match the checksum in its manifest"
+	if located.uploaded {
+		mismatch = "the uploaded restore set no longer matches the checksum taken when it was uploaded"
+	}
+	rs, err := readStoredRestoreSet(ctx, body, opts, located.digest, mismatch)
 	if err != nil {
 		if errors.Is(err, ErrRestoreSetTooNew) || ctx.Err() != nil {
 			return nil, err
@@ -384,20 +418,23 @@ func (s *Service) cachedSet(ctx context.Context, located locatedSource) (*Restor
 // beyond the manifest: the job reads the restore set, under the lock.
 //
 // The source is checked again and the job created under the subsystem lock,
-// which backup deletion and rotation hold while they check the queued
-// restore's source: either they see the job, or the job's check sees the
-// source gone. The lock is released once the job is queued; its worker
-// takes it again.
+// which backup deletion, rotation, and upload deletion and expiry hold
+// while they check the queued restore's source: either they see the job, or
+// the job's check sees the source gone. The lock is released once the job
+// is queued; its worker takes it again.
 func (s *Service) StartRestore(ctx context.Context, userID int, req RestoreRequest) (*models.AdminJob, error) {
 	if s.targets.CreateJob == nil || s.opts.Locker == nil {
 		return nil, errors.New("selective restore is not available on this server")
 	}
-	if req.BackupID == "" {
-		return nil, &SelectionError{Message: "a restore names a backup"}
+	if (req.BackupID == "") == (req.UploadID == "") {
+		return nil, &SelectionError{Message: "a restore names one backup or one upload"}
 	}
-	total := 0
+	total := len(req.Users)
+	if err := validateUserSelection(req.Users); err != nil {
+		return nil, err
+	}
 	for section, ids := range req.Selection {
-		if _, known := sectionByID(section); !known {
+		if _, known := sectionByID(section); !known || section == SectionUsers {
 			return nil, &SelectionError{Message: fmt.Sprintf("section %q is not one a restore applies", section)}
 		}
 		seen := map[string]bool{}
@@ -510,6 +547,7 @@ func (e *SelectionError) Error() string { return e.Message }
 // what committed, even after an interruption.
 type SelectiveReport struct {
 	BackupID              string `json:"backup_id"`
+	UploadID              string `json:"upload_id,omitempty"`
 	Digest                string `json:"digest"`
 	BeforeRestoreBackupID string `json:"before_restore_backup_id,omitempty"`
 	// LibraryMap maps each backup library id to the library it is on this
@@ -566,4 +604,6 @@ type ReportItem struct {
 	RestartKeys     []string `json:"restart_keys,omitempty"`
 	Notes           []string `json:"notes,omitempty"`
 	MissingBlobs    []string `json:"missing_blobs,omitempty"`
+	// Account is a users item's outcome per profile.
+	Account *ReportAccount `json:"account,omitempty"`
 }

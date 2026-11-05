@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { AlertTriangle, ExternalLink, Library, X } from "lucide-react";
 import type { MediaRequest } from "@/api/types";
+import LibraryItemLink from "@/components/LibraryItemLink";
 import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import { Button } from "@/components/ui/button";
 import {
@@ -178,13 +179,13 @@ function RequestDetail({
               <Term label="TMDB ID">{request.tmdb_id}</Term>
               {request.library_content_id ? (
                 <Term label="Library">
-                  <Link
-                    to={`/item/${encodeURIComponent(request.library_content_id)}`}
+                  <LibraryItemLink
+                    contentId={request.library_content_id}
                     className="inline-flex items-center gap-1 hover:underline"
                   >
                     <Library className="h-3.5 w-3.5" aria-hidden="true" />
                     Open in the library
-                  </Link>
+                  </LibraryItemLink>
                 </Term>
               ) : null}
             </dl>

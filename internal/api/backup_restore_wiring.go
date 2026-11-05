@@ -17,6 +17,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 )
 
 // wireBackupRestore gives selective restore the write paths it applies
@@ -77,7 +79,23 @@ func wireBackupRestore(deps Dependencies, admin *handlers.AdminHandler, librarie
 	if pageSections != nil {
 		targets.CheckSection = pageSections.CheckRestoredSection
 	}
+	targets.ItemsChanged = importedChanges(deps.Notifications, deps.RecWorker)
 	deps.Backups.SetRestoreTargets(targets)
+}
+
+// importedChanges is what a profile's restored or imported data sets off
+// after it commits: one rebuild of the profile's notification interest,
+// coalesced with any already queued (notifications.InterestUpdater
+// .QueueProfileRebuild), rather than a recompute per item it names, and one
+// recommendations refresh, since its ratings, favorites, and history are
+// taste signals. Neither grows with the data imported.
+func importedChanges(system *notifications.System, rec *recommendations.Worker) backup.ItemsChanged {
+	return func(userID int, profileID string, _ []string) {
+		if system != nil && system.Interest != nil {
+			system.Interest.QueueProfileRebuild(userID, profileID)
+		}
+		rec.NotifySignalsChanged(context.Background(), userID, profileID)
+	}
 }
 
 // applyRestoredSettings writes restored settings in tx, each family through
