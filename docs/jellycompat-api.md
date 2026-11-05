@@ -336,7 +336,8 @@ HLS video copy where the profile allows one: Jellyfin Android TV plays the
 cannot map the HLS audio track to a stream index, so it restarts playback
 endlessly to "switch" audio. A progressive remux (`SupportsDirectStream` without
 `SupportsDirectPlay`, `static=false`) is offered only when the source has no
-`TranscodingUrl`, for example with `EnableTranscoding=false`, and only when the
+`TranscodingUrl`, for example with `EnableTranscoding=false` or when a
+tone map or subtitle burn-in the encode needs is unavailable, and only when the
 routing policy admits a progressive-remux transport. It evaluates container
 constraints against its MP4 output; direct play evaluates them against the
 original source container.
@@ -345,7 +346,7 @@ original source container.
 not copying video, which only `AllowVideoStreamCopy=false` forbids: such a
 request gets a video copy with the audio encoded when the profile accepts it
 and the encode changes the audio. When the audio is already AAC within the
-channel target, the video is encoded instead.
+channel target, or the source has no audio, the video is encoded instead.
 
 Unknown or excessive source bitrate prevents copying under a client ceiling.
 An automatic VideoToolbox bitrate must not override an explicit client cap.

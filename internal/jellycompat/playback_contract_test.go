@@ -239,6 +239,9 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 	stereoAAC := version
 	stereoAAC.CodecAudio = "aac"
 	stereoAAC.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}}
+	videoOnly := version
+	videoOnly.CodecAudio = ""
+	videoOnly.AudioTracks = nil
 	for _, tc := range []struct {
 		name                     string
 		version                  catalog.FileVersion
@@ -255,6 +258,9 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 		// Without direct play profiles no audio counts as supported, which
 		// must not turn an unchanged AAC track into a reason to copy.
 		{name: "profile without direct play still encodes video for unchanged audio", version: stereoAAC, noDirectPlayProfiles: true},
+		// A video-only source has no audio to change, so the copy would repeat
+		// the stream that failed.
+		{name: "second retry encodes video for a video-only source", version: videoOnly},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := playbackInfoRequest{MaxStreamingBitrate: 100_000_000, EnableDirectPlay: new(tc.directPlay), EnableDirectStream: new(tc.directStream)}
@@ -274,7 +280,7 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 					source.SupportsTranscoding, compatHLSCopiesVideo(source), source.TranscodeAudio, tc.wantVideoCopy, tc.wantAudioEncode)
 			}
 			dto := h.mediaSourceDTO("item", "play", "token", source)
-			if dto.DirectStreamURL != "" || dto.TranscodingURL == "" || dto.DefaultAudioStreamIndex == nil {
+			if dto.DirectStreamURL != "" || dto.TranscodingURL == "" || len(tc.version.AudioTracks) > 0 && dto.DefaultAudioStreamIndex == nil {
 				t.Fatalf("DirectStreamUrl=%q TranscodingUrl=%q DefaultAudioStreamIndex=%v", dto.DirectStreamURL, dto.TranscodingURL, dto.DefaultAudioStreamIndex)
 			}
 		})

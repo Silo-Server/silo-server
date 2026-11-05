@@ -2396,7 +2396,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				var policyErr error
 				toneMapPolicy, policyErr = h.toneMapPolicyResult(r.Context())
 				if policyErr != nil {
-					if !source.SupportsDirectPlay && !source.SupportsDirectStream {
+					if !source.SupportsDirectPlay && !source.SupportsDirectStream && !source.progressiveRemuxFallback {
 						writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Tone-map policy is temporarily unavailable")
 						return
 					}
@@ -2414,7 +2414,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 				metadata := tonemap.MetadataForFile(&models.MediaFile{HDR: version.HDR, VideoTracks: version.VideoTracks})
 				resolution := tonemap.ResolveSource(metadata)
 				if resolution.Kind != "" && toneMapCapabilities.PreferredMode(toneMapPolicy, resolution.Kind) == "" &&
-					!source.SupportsDirectPlay && !source.SupportsDirectStream {
+					!source.SupportsDirectPlay && !source.SupportsDirectStream && !source.progressiveRemuxFallback {
 					writeError(w, http.StatusServiceUnavailable, "PlaybackUnavailable", "Tone-map capability discovery is temporarily unavailable")
 					return
 				}
@@ -2431,6 +2431,11 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 			source.TargetBitrateKbps, source.TargetResolution = source.h264TargetBitrateKbps, source.h264TargetResolution
 			source.encodeCeilingKbps = source.h264EncodeCeilingKbps
 			source.SupportsTranscoding = profile.supportsTranscodingOutput(version, source.TargetAudioChannels, source.TargetBitrateKbps, source.TargetResolution)
+		}
+		// With the TranscodingUrl gone, the progressive remux cannot set off
+		// the Jellyfin Android TV loop (#2645) and is the only route left.
+		if !source.SupportsTranscoding && source.progressiveRemuxFallback {
+			source.SupportsDirectStream = true
 		}
 		source.SiloSeekReanchor = req.SiloSeekReanchor && compatHLSCopiesVideo(source) && source.SupportsTranscoding
 		sources = append(sources, source)
@@ -2713,7 +2718,8 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	// encode would leave the audio as it was (AAC within the channel target),
 	// the copy would repeat the stream that failed, so the video is encoded.
 	selectedAudio := compatAudioTrack(version, selectedAudioIndex)
-	audioEncodeChangesAudio := !strings.EqualFold(selectedAudio.Codec, "aac") || selectedAudio.Channels > targetAudioChannels
+	audioEncodeChangesAudio := !compatHasNoAudio(version) &&
+		(!strings.EqualFold(selectedAudio.Codec, "aac") || selectedAudio.Channels > targetAudioChannels)
 	hlsAudioTranscode := req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&
 		!supportsDirectPlay &&
@@ -2771,11 +2777,13 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	// in that mode cannot map an HLS audio track to a stream index, so it
 	// restarts playback to "switch" audio forever (#2645). A progressive
 	// remux is offered only when there is no TranscodingUrl at all, and only
-	// over a transport the routing policy admits.
-	supportsDirectStream := enableDirectStream && allowVideoCopy && allowAudioCopy &&
-		(supportsDirectPlay ||
-			!supportsTranscoding && videoSupported && audioSupported &&
-				compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != ""))
+	// over a transport the routing policy admits. PlaybackInfo can still drop
+	// the TranscodingUrl later, so it keeps the fallback until the route is final.
+	progressiveRemuxFallback := enableDirectStream && allowVideoCopy && allowAudioCopy &&
+		!supportsDirectPlay && videoSupported && audioSupported &&
+		compatProgressiveRemuxRouteAvailable(h.playbackRoutingPolicy(), h.JWTSecret != "")
+	supportsDirectStream := enableDirectStream && allowVideoCopy && allowAudioCopy && supportsDirectPlay ||
+		!supportsTranscoding && progressiveRemuxFallback
 	return PlaybackMediaSource{
 		ServerBitrateCapKbps:       req.serverBitrateCapKbps,
 		StreamLocation:             req.streamLocation,
@@ -2789,6 +2797,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 		encodeCeilingKbps:          max(ceilingKbps, 0),
 		h264EncodeCeilingKbps:      max(h264CeilingKbps, 0),
 		hlsRemuxInTS:               hlsRemuxInTS,
+		progressiveRemuxFallback:   progressiveRemuxFallback,
 		ID:                         sourceID,
 		FileID:                     version.FileID,
 		Version:                    version,
@@ -4089,6 +4098,7 @@ func applyCompatSubtitleDelivery(source *PlaybackMediaSource, profile DeviceProf
 		}
 		if !text || !external || alwaysBurn {
 			source.SupportsDirectStream = false
+			source.progressiveRemuxFallback = false
 			source.SupportsTranscoding = source.CanBurnSubtitle && !track.External && !track.IndexOnly
 			// A burn-in is a full encode. TranscodeAudio also marks a video-copy
 			// remux (compatHLSCopiesVideo), so it is cleared with HLSRemux.
@@ -4138,6 +4148,7 @@ func applyCompatDownloadedSubtitleDelivery(source *PlaybackMediaSource, profile 
 
 	source.SupportsDirectPlay = false
 	source.SupportsDirectStream = false
+	source.progressiveRemuxFallback = false
 	source.SupportsTranscoding = false
 }
 
