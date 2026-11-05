@@ -592,6 +592,11 @@ normalization, library selection and provider ranking. An empty `title` falls
 back to the item's title; an absent `year` searches without a year, because the
 stored year belongs to the current match, which is usually the one being
 corrected. The frozen v1 route keeps its fallback to the stored year.
+Search's optional `limit` defaults to 100 and accepts 1–500. The response contains
+`candidates` (never null) and `truncated`; refine the search when truncated.
+This bounds the response, not the provider fetch or normalization work, and
+provides no snapshot or continuation guarantee. The web requests 500 candidates
+and displays the refinement notice when needed.
 
 Hints return the `title`, `year` and `provider_ids` (`tmdb`, `imdb`, `tvdb`)
 the scanner read from the folder and file names of the content group holding
@@ -599,12 +604,7 @@ the item's files in the selected library (`library_id`, required for an item in
 several libraries, as for search). When those files span several groups, the
 one holding most of them wins. Empty values mean the scanner found nothing; the web
 then suggests the item's own title and year. The web fills the Match Item
-fields from the hints and waits for them before it allows a search.
-Its optional `limit` defaults to 100 and accepts 1–500. The response contains
-`candidates` (never null) and `truncated`; refine the search when truncated.
-This bounds the response, not the provider fetch or normalization work, and
-provides no snapshot or continuation guarantee. The web requests 500 candidates
-and displays the refinement notice when needed.
+fields the admin hasn't edited from the hints and waits for them before it allows a search.
 
 Apply requires nonempty provider IDs and runs the synchronous metadata
 pipeline. It returns `content_id` and `updated`; it is not a queued job. The

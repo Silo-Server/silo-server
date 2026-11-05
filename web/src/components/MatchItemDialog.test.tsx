@@ -305,6 +305,23 @@ describe("MatchItemDialog suggested search", () => {
     );
   });
 
+  it("keeps a field the admin edited and still fills the others", () => {
+    mocks.useItemMatchHints.mockReturnValue({ data: undefined, isLoading: true });
+    const { rerender } = render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Gisaengchung" } });
+
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "Parasite", year: 2019, provider_ids: { tmdb: "496243" } },
+      isLoading: false,
+    });
+    rerender(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Gisaengchung", year: 2019, tmdb_id: "496243" }),
+    );
+  });
+
   it("waits for the suggestion before searching", () => {
     mocks.useItemMatchHints.mockReturnValue({ data: undefined, isLoading: true });
     render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
