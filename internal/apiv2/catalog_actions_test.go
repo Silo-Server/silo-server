@@ -224,6 +224,11 @@ func TestMetadataAICapabilityAndTranslate(t *testing.T) {
 	if job.ID != "42" || job.TargetLanguage != "de" || job.Status != "pending" || fake.lastLang != "de" || fake.lastUser != 1 || fake.lastFilter.UserID != 1 {
 		t.Fatalf("job = %+v fake = %+v", job, fake)
 	}
+	// Native episode pages open under a library that holds only the series,
+	// so the native translate request checks those libraries too.
+	if !fake.lastFilter.SeriesLibraryCoversEpisodes {
+		t.Fatalf("filter = %+v, want SeriesLibraryCoversEpisodes", fake.lastFilter)
+	}
 	// Empty fails both minLength and the language tag pattern, at the member.
 	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/catalog/items/movie:heat-1995/translate-description", `{"target_language":""}`, viewerHeaders()), TypeValidationFailed)
 	if len(p.Errors) == 0 || slices.ContainsFunc(p.Errors, func(e ProblemError) bool { return e.Location != "body.target_language" }) {
