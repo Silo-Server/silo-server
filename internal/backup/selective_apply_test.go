@@ -574,8 +574,13 @@ func TestUnverifiedWorkIsClassified(t *testing.T) {
 	if on, _ := restoredSectionEnabled(seasonal, false, time.Now()); !on {
 		t.Error("a seasonal section of a verified backup is restored disabled")
 	}
+	// Every enabled row is fetched on each home page request, so every
+	// section of an unverified backup comes back off too.
 	other := HomeSectionEntry{SectionType: string(sections.SectionRecentlyAdded), Enabled: true}
-	if on, _ := restoredSectionEnabled(other, true, time.Now()); !on {
-		t.Error("a section that fetches nothing is restored disabled")
+	if on, note := restoredSectionEnabled(other, true, time.Now()); on || note == "" {
+		t.Error("a section of an unverified backup is restored enabled")
+	}
+	if on, _ := restoredSectionEnabled(other, false, time.Now()); !on {
+		t.Error("a section of a verified backup is restored disabled")
 	}
 }

@@ -425,6 +425,10 @@ func homeSectionProblem(e HomeSectionEntry) string {
 			return "Its collection names an image the backup cannot carry."
 		case collectionTooLarge(c.CollectionEntry):
 			return msgEntryTooLarge
+		// As for an admin collection: a repeated item would multiply the
+		// work its restore does under the lock.
+		case repeatsItem(c.Items):
+			return "Its collection lists an item more than once."
 		}
 	}
 	section := e

@@ -641,9 +641,11 @@ grouped by the admin page that edits each key: a key or prefix with its class.
   a restore creates (an admin collection, or one a section carries) keeps
   its source but gets no sync schedule (`applier.createCollection`, which
   every creation goes through); and a template collection keeps this
-  server's source and sync schedule; a seasonal section comes back
-  disabled (the seasonal task fetches the MDBList lists of every enabled
-  one). `unverifiedWorkFields` lists every such item field, with where the
+  server's source and sync schedule; every home section comes back
+  disabled (each home page request fetches every enabled row, and the
+  seasonal task fetches the MDBList lists of every enabled seasonal one).
+  A section's carried collection, like an admin collection, may not list
+  an item twice. `unverifiedWorkFields` lists every such item field, with where the
   restore leaves it inactive, and `TestUnverifiedWorkIsClassified` walks
   it. The preview says what is left off; for a verified backup it names the
   library options the restore turns on and the lists a seasonal section

@@ -47,7 +47,7 @@ var unverifiedWorkFields = []unverifiedWork{
 	{KindTemplateCollection, fieldSchedule, "its sync schedule", setsTemplate},
 	// A seasonal section's themes name MDBList lists the seasonal task
 	// fetches for every enabled one.
-	{KindHomeSection, "enabled (" + string(sections.SectionSeasonalThemed) + ")", "the section", "restoredSectionEnabled"},
+	{KindHomeSection, "enabled", "the section", "restoredSectionEnabled"},
 	{KindPlugin, "configuration", "its configuration", "applier.applyPlugin"},
 	{KindSettingsPage, "external_service settings", "settings that connect to outside services", "planner.planSettingsPage"},
 }
@@ -111,29 +111,33 @@ func seasonalLists(e HomeSectionEntry, now time.Time) []string {
 }
 
 // restoredSectionEnabled is whether a restored section is enabled, and a
-// note when the restore turned it off: a seasonal section of a backup this
-// server cannot verify comes back disabled, since the seasonal task
-// fetches the lists of every enabled one.
+// note when the restore turned it off: every section of a backup this
+// server cannot verify comes back disabled. A seasonal one says which
+// MDBList lists it would fetch.
 func restoredSectionEnabled(e HomeSectionEntry, unverified bool, now time.Time) (bool, string) {
-	lists := seasonalLists(e, now)
-	if !unverified || !e.Enabled || e.SectionType != string(sections.SectionSeasonalThemed) {
+	if !unverified || !e.Enabled {
 		return e.Enabled, ""
 	}
-	return false, "Restored disabled: a seasonal section of a backup this server cannot verify fetches lists from MDBList" + listedURLs(lists) + "."
+	if e.SectionType == string(sections.SectionSeasonalThemed) {
+		return false, "Restored disabled: a seasonal section of a backup this server cannot verify fetches lists from MDBList" + listedURLs(seasonalLists(e, now)) + "."
+	}
+	// Every enabled row is fetched on each home page request, so a crafted
+	// set must not be able to add thousands of them at once.
+	return false, "Restored disabled: it comes from a backup this server cannot verify. Turn it on in the page editor."
 }
 
-// seasonalNote is the preview's word on a seasonal section: the lists it
-// fetches, and, from a backup this server cannot verify, that it comes
-// back disabled.
+// seasonalNote is the preview's word on a section: from a backup this
+// server cannot verify, that it comes back disabled; otherwise, for a
+// seasonal one, the lists it fetches.
 func (p *planner) seasonalNote(e HomeSectionEntry, now time.Time) string {
 	lists := seasonalLists(e, now)
 	switch {
-	case e.SectionType != string(sections.SectionSeasonalThemed) || !e.Enabled:
+	case !e.Enabled:
 		return ""
 	case !p.authenticated:
 		_, note := restoredSectionEnabled(e, true, now)
 		return note
-	case len(lists) > 0:
+	case e.SectionType == string(sections.SectionSeasonalThemed) && len(lists) > 0:
 		return "It fetches lists from MDBList" + listedURLs(lists) + "."
 	}
 	return ""
