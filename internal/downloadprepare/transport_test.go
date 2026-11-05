@@ -173,6 +173,22 @@ func TestRequestExecutionFingerprintBindsRecipeButNotArtifactHandle(t *testing.T
 	if got := changed.ExecutionFingerprint(); got == want {
 		t.Fatal("byte-affecting duration did not change execution fingerprint")
 	}
+	// A node must leave an audiobook's cover art out, so the flag travels and
+	// an older node that drops it cannot return the matching fingerprint.
+	changed = NewRequest("attempt-a", playback.TranscodeOpts{InputPath: "/media/book.flac", TargetCodecVideo: "copy", TargetCodecAudio: "aac", AudioOnly: true})
+	wire, err := json.Marshal(changed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded Request
+	if err := json.Unmarshal(wire, &decoded); err != nil || !decoded.TranscodeOpts("ffmpeg", "none", "", nil).AudioOnly {
+		t.Fatalf("audio-only flag lost on the wire: %s %v", wire, err)
+	}
+	dropped := decoded
+	dropped.AudioOnly = false
+	if dropped.ExecutionFingerprint() == decoded.ExecutionFingerprint() {
+		t.Fatal("audio-only flag did not change execution fingerprint")
+	}
 }
 
 func TestRequestStereoDownmixBoostRequested(t *testing.T) {

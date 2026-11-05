@@ -172,6 +172,10 @@ type TranscodeOpts struct {
 	AudioTrackIndex int // -1 = default (first track), >= 0 = specific track
 	// RequireAudioTrack rejects sources missing the negotiated audio ordinal.
 	RequireAudioTrack bool
+	// AudioOnly marks a prepared download of an audiobook or podcast, whose
+	// only picture is cover art, so its prepared file maps no video
+	// (appendPreparedVideoMap). Streaming never sets it.
+	AudioOnly bool
 	// SourceAudioChannels is the selected source stream's channel count. Zero
 	// means unknown and deliberately disables stereo downmix gain: boosting an
 	// already-stereo stream would change its authored level.
@@ -1083,7 +1087,7 @@ func appendStreamSelectionArgs(args []string, opts TranscodeOpts) []string {
 	if bitmapBurnInActive(opts) {
 		args = append(args, "-map", "[vout]")
 	} else {
-		args = append(args, "-map", "0:v:0")
+		args = appendPreparedVideoMap(args, opts)
 	}
 	if audioTrackIndex >= 0 {
 		audioMap := fmt.Sprintf("0:a:%d", audioTrackIndex)

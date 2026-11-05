@@ -236198,6 +236198,9 @@
             "pattern": "^[A-Za-z0-9_-]{1,128}$",
             "type": "string"
           },
+          "audio_only": {
+            "type": "boolean"
+          },
           "audio_recipe_version": {
             "type": "string"
           },

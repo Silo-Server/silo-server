@@ -102,6 +102,17 @@ it. The row keeps the requested `quality`; `effective_quality` is `original`.
 `quality_options` in the capability (§3) reports each preset's resolution for
 labels.
 
+Audio-only media (an audiobook or podcast, whose only picture is cover art) has
+no video to encode, so neither `original` nor a bitrate preset transcodes it:
+the source is served as it is, or remuxed with its audio converted when `caps`
+show the device cannot decode it. A remux is an audio-only MP4: embedded cover
+art is left out, since it may be in a format MP4 cannot hold, and clients
+show the server's artwork. With transcoding off for the server or the account, an
+`original` request whose audio the device cannot decode, or that MP4 cannot
+hold (FLAC), is served as it is; one that only needs a new container and keeps
+its audio is still remuxed.
+The row keeps the requested `quality`, with `effective_quality` `original`.
+
 `remux` is **not** a public quality preset. It is an internal delivery format used
 when `original` is requested but device caps show the source only needs container
 or audio compatibility work. Rows expose both:
