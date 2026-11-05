@@ -327,3 +327,104 @@ func TestAllowCollectionTitlesPagesPastUnreachableLibraries(t *testing.T) {
 		t.Fatalf("AllowCollectionTitles = %d, %v; copied %d titles; want only movie:reachable", added, err, len(store.copied))
 	}
 }
+
+// multiLibraryRepo holds each item in several libraries, as
+// media_item_libraries can, and answers access by any of them.
+type multiLibraryRepo struct {
+	markItemRepo
+	libraries map[string][]int
+}
+
+func (r multiLibraryRepo) EnsureAccessible(_ context.Context, id string, filter catalog.AccessFilter) error {
+	if _, ok := r.items[id]; !ok {
+		return catalog.ErrItemNotFound
+	}
+	if filter.AllowedLibraryIDs == nil {
+		return nil
+	}
+	for _, lib := range r.libraries[id] {
+		if slices.Contains(filter.AllowedLibraryIDs, lib) {
+			return nil
+		}
+	}
+	return catalog.ErrItemNotFound
+}
+
+func (r multiLibraryRepo) EnsureAccessibleIDs(ctx context.Context, ids []string, filter catalog.AccessFilter) (map[string]bool, error) {
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = r.EnsureAccessible(ctx, id, filter) == nil
+	}
+	return out, nil
+}
+
+// orderedPreview evaluates a smart query as the catalog would: the items in
+// order that the access filter admits, up to the limit.
+type orderedPreview struct {
+	repo  multiLibraryRepo
+	order []string
+}
+
+func (p orderedPreview) Preview(ctx context.Context, _ catalog.QueryDefinition, access catalog.AccessFilter, limit int) ([]*models.MediaItem, int, error) {
+	var out []*models.MediaItem
+	for _, id := range p.order {
+		if len(out) < limit && p.repo.EnsureAccessible(ctx, id, access) == nil {
+			out = append(out, p.repo.items[id])
+		}
+	}
+	return out, len(out), nil
+}
+
+// A copy checks the acting and the target profile's access separately: a
+// title the actor sees through one library and the target reaches through
+// another is copied, and a limited smart collection's membership is what the
+// actor sees, so the target check never pulls in titles outside it.
+func TestAllowCollectionTitlesChecksActorAndTargetSeparately(t *testing.T) {
+	ctx := context.Background()
+	base := newHouseholdTestStore(t)
+	for _, p := range []userstore.Profile{{ID: "parent", Name: "Parent"}, {ID: "kid", Name: "Kid", MaxContentRating: "PG"}} {
+		if err := base.CreateProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := multiLibraryRepo{
+		markItemRepo: markItemRepo{items: map[string]*models.MediaItem{
+			"movie:both":        {ContentID: "movie:both", Type: "movie"},
+			"movie:actor-only":  {ContentID: "movie:actor-only", Type: "movie"},
+			"movie:also-shared": {ContentID: "movie:also-shared", Type: "movie"},
+		}},
+		// The actor sees library 1; the target reaches library 2.
+		libraries: map[string][]int{"movie:both": {1, 2}, "movie:actor-only": {1}, "movie:also-shared": {1, 2}},
+	}
+	actor := AllowanceActor{UserID: 1, ActiveProfileID: "parent", VerifyProfile: func(*userstore.Profile) error { return nil },
+		Viewer: PersonalListViewer{Access: catalog.AccessFilter{AllowedLibraryIDs: []int{1}}}}
+	scopes := libraryScopes{libraries: map[string][]int{"kid": {2}}}
+
+	t.Run("stored", func(t *testing.T) {
+		collection, err := base.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "parent", Name: "Stored", CollectionType: "manual"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		store := &memoryAllowances{titles: map[string]bool{}, candidates: []string{"movie:both", "movie:actor-only"}}
+		h := NewTitleAllowanceHandler(NewPersonalDataHandler(testUserStoreProvider{store: base}, repo), scopes, store)
+		added, err := h.AllowCollectionTitles(ctx, actor, "kid", collection.ID)
+		if err != nil || added != 1 || !slices.Equal(store.copied, []string{"movie:both"}) {
+			t.Fatalf("AllowCollectionTitles = %d, %v; copied %v; want movie:both, seen and reached through different libraries", added, err, store.copied)
+		}
+	})
+
+	t.Run("smart", func(t *testing.T) {
+		collection, err := base.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "parent", Name: "Smart", CollectionType: "smart",
+			QueryDefinition: `{"match":"all","groups":[{"match":"all","rules":[{"field":"content_rating","op":"is","value":"R"}]}],"limit":2}`})
+		if err != nil {
+			t.Fatal(err)
+		}
+		store := &memoryAllowances{titles: map[string]bool{}}
+		h := NewTitleAllowanceHandler(NewPersonalDataHandler(testUserStoreProvider{store: base}, repo), scopes, store)
+		h.smart = orderedPreview{repo: repo, order: []string{"movie:actor-only", "movie:both", "movie:also-shared"}}
+		added, err := h.AllowCollectionTitles(ctx, actor, "kid", collection.ID)
+		if err != nil || added != 1 || !slices.Equal(store.copied, []string{"movie:both"}) {
+			t.Fatalf("AllowCollectionTitles = %d, %v; copied %v; want only movie:both, the reachable one of the collection's 2 members", added, err, store.copied)
+		}
+	})
+}

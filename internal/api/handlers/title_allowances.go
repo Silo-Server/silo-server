@@ -451,12 +451,12 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if err != nil {
 		return 0, err
 	}
-	filter := copyFilter(actor.Viewer.Access, target)
+	checks := copyChecks{actor: actor.Viewer.Access, target: libraryOnly(target)}
 	var ids []string
 	if catalog.IsLiveQueryType(collection.CollectionType) {
-		ids, err = h.smartCollectionTitles(ctx, filter, collection)
+		ids, err = h.smartCollectionTitles(ctx, checks, collection)
 	} else {
-		ids, err = h.storedCollectionTitles(ctx, actor.UserID, filter, profileID, collectionID)
+		ids, err = h.storedCollectionTitles(ctx, actor.UserID, checks, profileID, collectionID)
 	}
 	if err != nil {
 		return 0, err
@@ -480,32 +480,45 @@ const (
 	maxScannedCopyEntries = 100_000
 )
 
-// copyFilter is what a collection copy may take: titles the acting profile
-// may see (actor) in a library the target profile can reach (target), the
-// rule a single allowance applies (no_library_access), so a copy never stores
-// an allowance a later library change would turn on without a new grant.
-// Applying both before counting keeps titles that fail either from filling a
-// copy's budget.
-func copyFilter(actor catalog.AccessFilter, target access.Scope) catalog.AccessFilter {
-	filter := actor
-	switch {
-	case actor.AllowedLibraryIDs == nil:
-		filter.AllowedLibraryIDs = slices.Clone(target.AllowedLibraryIDs)
-	case target.AllowedLibraryIDs != nil:
-		filter.AllowedLibraryIDs = slices.DeleteFunc(slices.Clone(actor.AllowedLibraryIDs), func(id int) bool {
-			return !slices.Contains(target.AllowedLibraryIDs, id)
-		})
+// copyChecks are the two access checks a collection copy applies to each
+// title, separately: the acting profile may see it (actor), and it is in a
+// library the target profile can reach (target), the rule a single allowance
+// applies (no_library_access). They are not intersected into one filter: a
+// title can sit in several libraries, the actor seeing it through one and the
+// target reaching it through another.
+type copyChecks struct {
+	actor  catalog.AccessFilter
+	target catalog.AccessFilter
+}
+
+// keep returns the ids filter admits, in order.
+func (h *TitleAllowanceHandler) keep(ctx context.Context, ids []string, filter catalog.AccessFilter) ([]string, error) {
+	if len(ids) == 0 {
+		return ids, nil
 	}
-	filter.DisabledLibraryIDs = slices.Concat(actor.DisabledLibraryIDs, target.DisabledLibraryIDs)
-	return filter
+	ok, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, ids, filter)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check the collection's titles")
+	}
+	return slices.DeleteFunc(ids, func(id string) bool { return !ok[id] }), nil
+}
+
+// eligible keeps the ids that pass both checks, in order.
+func (h *TitleAllowanceHandler) eligible(ctx context.Context, ids []string, checks copyChecks) ([]string, error) {
+	ids, err := h.keep(ctx, ids, checks.actor)
+	if err != nil {
+		return nil, err
+	}
+	return h.keep(ctx, ids, checks.target)
 }
 
 // storedCollectionTitles lists, in the collection's order, up to
 // maxCopiedTitles of the stored movies and series of a collection that the
-// profile is not yet allowed and filter admits. Titles filter turns away are
-// never allowed, so they stay candidates on every copy; reading page by page
-// past them is what lets a repeated copy reach the rest.
-func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, userID int, filter catalog.AccessFilter, profileID, collectionID string) ([]string, error) {
+// profile is not yet allowed and that pass both checks. Titles the checks turn
+// away are never allowed, so they stay candidates on every copy; checking
+// each page before counting, and reading page by page past them, is what lets
+// a repeated copy reach the rest.
+func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, userID int, checks copyChecks, profileID, collectionID string) ([]string, error) {
 	var out []string
 	var after userstore.CollectionPosition
 	for scanned := 0; scanned < maxScannedCopyEntries && len(out) < maxCopiedTitles; {
@@ -517,15 +530,11 @@ func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, user
 		for i, p := range page {
 			ids[i] = p.MediaItemID
 		}
-		visible, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, ids, filter)
+		kept, err := h.eligible(ctx, ids, checks)
 		if err != nil {
-			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check the collection's titles")
+			return nil, err
 		}
-		for _, id := range ids {
-			if visible[id] && len(out) < maxCopiedTitles {
-				out = append(out, id)
-			}
-		}
+		out = append(out, kept[:min(len(kept), maxCopiedTitles-len(out))]...)
 		if len(page) < copyPageSize {
 			break
 		}
@@ -535,10 +544,13 @@ func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, user
 	return out, nil
 }
 
-// smartCollectionTitles lists what a smart collection's query matches under
-// filter, up to the collection's item limit and maxCopiedTitles: one copy
-// takes the first matches in the query's order.
-func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, filter catalog.AccessFilter, collection *userstore.Collection) ([]string, error) {
+// smartCollectionTitles lists the members of a smart collection as the
+// actor sees it (its query under the actor's access, up to the collection's
+// item limit and maxCopiedTitles), then keeps those the target can reach. The
+// item limit defines the collection's membership, so the target check runs
+// after it rather than letting other titles take the place of unreachable
+// ones.
+func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, checks copyChecks, collection *userstore.Collection) ([]string, error) {
 	if h.smart == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Catalog queries are unavailable")
 	}
@@ -552,7 +564,7 @@ func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, filte
 	}
 	limit := min(*def.Limit, maxCopiedTitles)
 	def.Limit = &limit
-	items, _, err := h.smart.Preview(ctx, def, filter, limit)
+	items, _, err := h.smart.Preview(ctx, def, checks.actor, limit)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to evaluate the smart collection")
 	}
@@ -560,7 +572,7 @@ func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, filte
 	for _, item := range items {
 		ids = append(ids, item.ContentID)
 	}
-	return ids, nil
+	return h.keep(ctx, ids, checks.target)
 }
 
 // visibleCollection loads a personal collection the acting profile can see.
