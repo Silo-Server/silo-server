@@ -64,7 +64,7 @@ interface HeroBannerProps {
 }
 
 /**
- * Alternating slow pan/zoom for consecutive hero slides.
+ * Alternating slow pans for consecutive hero slides.
  *
  * These must be written out literally. Tailwind only keeps a theme variable
  * whose name it can find in the scanned source, and assembling the name from a
