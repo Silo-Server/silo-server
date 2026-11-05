@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -396,7 +395,7 @@ func optionalRow(ctx context.Context, tx pgx.Tx, sql string, args []any, dest ..
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
-	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && (pgErr.Code == "42P01" || pgErr.Code == "42703") {
+	if missingInSchema(err) {
 		return nil
 	}
 	return err

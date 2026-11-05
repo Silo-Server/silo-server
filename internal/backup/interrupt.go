@@ -2,13 +2,11 @@ package backup
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 )
@@ -109,7 +107,7 @@ func skipMissing(ctx context.Context, tx pgx.Tx, sql string, args ...any) (int64
 		n = tag.RowsAffected()
 		return err
 	})
-	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && (pgErr.Code == "42P01" || pgErr.Code == "42703") {
+	if missingInSchema(err) {
 		return 0, nil
 	}
 	return n, err

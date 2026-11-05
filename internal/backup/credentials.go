@@ -406,6 +406,10 @@ type CarriedCredentials struct {
 	// credentials were cleared (secretScrubbed): the live server has no
 	// such row.
 	Cleared []string
+	// Absent names the carried and scrubbed tables the restored schema does
+	// not have, which an older backup predates: it has no rows of them to
+	// replace, and the live server's are not carried.
+	Absent []string
 }
 
 // carryCredentials replaces the restored database's credentials with the
@@ -419,6 +423,9 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 	if liveURL == "" {
 		_, _ = fmt.Fprintf(out, "Left out the backup's %s; create new ones after Silo starts.\n", carriedKinds)
 		return nil
+	}
+	if len(carriedRows.Absent) > 0 {
+		_, _ = fmt.Fprintf(out, "The backup's schema predates %s; this server's rows of them are not carried.\n", strings.Join(carriedRows.Absent, ", "))
 	}
 	var kept []string
 	for _, t := range secretTablesHandled(secretCarried) {
@@ -472,6 +479,20 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	result := CarriedCredentials{Kept: map[string]int{}}
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		// A backup of an older schema may predate a table.
+		present, presentErr := tablesPresent(ctx, tx, append(slices.Clone(tables), scrubbed...))
+		if presentErr != nil {
+			return presentErr
+		}
+		keep := func(t secretTable) bool {
+			if present[t.name] {
+				return true
+			}
+			result.Absent = append(result.Absent, t.name)
+			return false
+		}
+		tables, live = keepWhere(tables, live, keep)
+		scrubbed, liveState.scrubbed = keepWhere(scrubbed, liveState.scrubbed, keep)
 		// The stricter switches first, so the authority the carry compares
 		// is the restored server's as it will start: an account kept
 		// disabled, a library deleted since restored disabled.
@@ -500,6 +521,36 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 		return nil
 	})
 	return result, err
+}
+
+// tablesPresent says which of tables the database has.
+func tablesPresent(ctx context.Context, tx pgx.Tx, tables []secretTable) (map[string]bool, error) {
+	names := make([]string, len(tables))
+	for i, t := range tables {
+		names[i] = t.name
+	}
+	found, err := collectStrings(ctx, tx, `SELECT n FROM unnest($1::text[]) n WHERE to_regclass(n) IS NOT NULL`, names)
+	if err != nil {
+		return nil, err
+	}
+	present := make(map[string]bool, len(found))
+	for _, n := range found {
+		present[n] = true
+	}
+	return present, nil
+}
+
+// keepWhere keeps the tables keep accepts and each one's rows, the entry of
+// rows at the same index.
+func keepWhere(tables []secretTable, rows []string, keep func(secretTable) bool) ([]secretTable, []string) {
+	var keptTables []secretTable
+	var keptRows []string
+	for i, t := range tables {
+		if keep(t) {
+			keptTables, keptRows = append(keptTables, t), append(keptRows, rows[i])
+		}
+	}
+	return keptTables, keptRows
 }
 
 // carriedOwners writes carried_owners, the accounts whose live credentials
@@ -598,35 +649,59 @@ func readLiveCredentials(ctx context.Context, liveURL string, tables []secretTab
 // credentials from the live row with its key (live, a JSON array), and a
 // row the live server does not have gets its credentials cleared and is
 // turned off; those with any credential are reported in result.Cleared.
+// Only the columns the restored schema has are written: a backup taken
+// before a credential column was added has no such credential to clear.
 func (t secretTable) scrubInto(ctx context.Context, tx pgx.Tx, live string, result *CarriedCredentials) error {
 	s := t.scrub
+	columns, err := tableColumns(ctx, tx, t.name)
+	if err != nil {
+		return err
+	}
+	has := func(col string) bool { return slices.Contains(columns, col) }
 	rows := fmt.Sprintf(`json_populate_recordset(NULL::%s, $1::json) r`, t.name)
 	var set []string
-	for _, col := range s.fromLive {
+	for _, col := range slices.DeleteFunc(slices.Clone(s.fromLive), func(col string) bool { return !has(col) }) {
 		set = append(set, fmt.Sprintf("%s = r.%s", col, col))
 	}
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s t SET %s FROM %s WHERE t.%s = r.%s`,
-		t.name, strings.Join(set, ", "), rows, s.key, s.key), live); err != nil {
-		return err
+	if len(set) > 0 {
+		if _, err := tx.Exec(ctx, fmt.Sprintf(`UPDATE %s t SET %s FROM %s WHERE t.%s = r.%s`,
+			t.name, strings.Join(set, ", "), rows, s.key, s.key), live); err != nil {
+			return err
+		}
 	}
 	absent := fmt.Sprintf(`NOT EXISTS (SELECT 1 FROM %s WHERE r.%s = t.%s)`, rows, s.key, s.key)
 	var holds []string
 	set = set[:0]
 	for _, col := range slices.Sorted(maps.Keys(s.cleared)) {
-		set = append(set, fmt.Sprintf("%s = %s", col, s.cleared[col]))
-		holds = append(holds, fmt.Sprintf("t.%s IS DISTINCT FROM %s", col, s.cleared[col]))
+		if has(col) {
+			set = append(set, fmt.Sprintf("%s = %s", col, s.cleared[col]))
+			holds = append(holds, fmt.Sprintf("t.%s IS DISTINCT FROM %s", col, s.cleared[col]))
+		}
 	}
-	cleared, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s t WHERE %s AND (%s)`,
-		s.describe, t.name, absent, strings.Join(holds, " OR ")), live)
-	if err != nil {
-		return err
+	if len(holds) > 0 {
+		cleared, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s t WHERE %s AND (%s)`,
+			s.describe, t.name, absent, strings.Join(holds, " OR ")), live)
+		if err != nil {
+			return err
+		}
+		result.Cleared = append(result.Cleared, cleared...)
 	}
-	result.Cleared = append(result.Cleared, cleared...)
-	if s.off != "" {
+	if s.off != "" && has(s.off) {
 		set = append(set, s.off+" = false")
+	}
+	if len(set) == 0 {
+		return nil
 	}
 	_, err = tx.Exec(ctx, fmt.Sprintf(`UPDATE %s t SET %s WHERE %s`, t.name, strings.Join(set, ", "), absent), live)
 	return err
+}
+
+// tableColumns lists the written columns of table, in order.
+func tableColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error) {
+	return collectStrings(ctx, tx, `
+		SELECT attname::text FROM pg_attribute
+		WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = ''
+		ORDER BY attnum`, table)
 }
 
 // carry runs in the restored database: it deletes the restored credentials
@@ -642,10 +717,7 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		return err
 	}
 	result.Dropped = append(result.Dropped, dropped...)
-	columns, err := collectStrings(ctx, tx, `
-		SELECT attname::text FROM pg_attribute
-		WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped AND attgenerated = ''
-		ORDER BY attnum`, t.name)
+	columns, err := tableColumns(ctx, tx, t.name)
 	if err != nil {
 		return err
 	}

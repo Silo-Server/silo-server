@@ -291,6 +291,70 @@ func humanBytes(n int64) string {
 	}
 }
 
+// missingInSchema reports whether err is PostgreSQL's for a table, column,
+// or type the database does not have.
+func missingInSchema(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && (pgErr.Code == "42P01" || pgErr.Code == "42703" || pgErr.Code == "42704")
+}
+
+// postLoad runs the steps after a restore's load against the restored
+// schema, which is the backup's. A backup of an older schema (a copy taken
+// before an upgrade, say) may lack what a step changes: that step is
+// skipped and says so, and the restore goes on. Each step changes the
+// restored database in one transaction or statement, so a skipped one
+// changed nothing. A backup of this binary's schema skips nothing.
+type postLoad struct {
+	older   bool
+	version int64
+	out     io.Writer
+}
+
+func newPostLoad(m *Manifest, opts ValidateOptions, out io.Writer) postLoad {
+	older := opts.BinaryGooseVersion > m.GooseVersion
+	if opts.BinaryMigrations != nil && m.AppliedMigrations != nil {
+		// Validate refused a migration this binary does not carry.
+		older = len(m.AppliedMigrations) < len(opts.BinaryMigrations)
+	}
+	return postLoad{older: older, version: m.GooseVersion, out: out}
+}
+
+// step returns err, the outcome of the step named what, or nil when the
+// backup's older schema lacks what it changes.
+func (p postLoad) step(what string, err error) error {
+	if err == nil || !p.older || !missingInSchema(err) {
+		return err
+	}
+	pgErr, _ := errors.AsType[*pgconn.PgError](err)
+	_, _ = fmt.Fprintf(p.out, "Skipped %s: the backup's schema (version %d) is older than this build's and %s.\n", what, p.version, pgErr.Message)
+	return nil
+}
+
+// What the restore output calls the steps both restores run after the load.
+const (
+	stepSigningKeys  = "new signing keys"
+	stepLostSettings = "clearing the settings this key cannot read"
+	stepInterrupt    = "ending the backup's unfinished work"
+	stepSubtitles    = "dropping the subtitles the backup left out"
+)
+
+// carry replaces the restored database's credentials, outbound settings,
+// plugin releases, and policies with those of liveURL, or with none when
+// liveURL is "".
+func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string) error {
+	if err := p.step("replacing the backup's credentials, so it keeps the backup's "+carriedKinds+
+		" as they were; revoke any revoked since", carryCredentials(ctx, loader, dbURL, liveURL, p.out)); err != nil {
+		return err
+	}
+	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, liveURL, p.out)); err != nil {
+		return err
+	}
+	if err := p.step("carrying the plugin releases", carryPluginReleases(ctx, loader, dbURL, liveURL, p.out)); err != nil {
+		return err
+	}
+	return p.step("carrying the account policies", carryPolicies(ctx, loader, dbURL, liveURL, p.out))
+}
+
 // ValidateOptions are the inputs to §10.2 step 1.
 type ValidateOptions struct {
 	// KeyCheck is the check value of the SECRET_KEY in the environment.
@@ -676,37 +740,29 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	}
 	// The restored settings name the backed-up server's stores, which are
 	// not where this copy's files go.
-	if err := loader.UnbindStorage(ctx, opts.Into); err != nil {
+	post := newPostLoad(src.Manifest, opts.Validate, out)
+	if err := post.step("clearing the restored storage identities", loader.UnbindStorage(ctx, opts.Into)); err != nil {
 		return RestoreReport{}, fmt.Errorf("clearing the restored storage identities: %w", err)
 	}
 	// New signing keys first, so the lost-settings pass does not list them.
-	if err := rotateSigningSecrets(ctx, loader, opts.Into, opts.Cipher, out); err != nil {
+	if err := post.step(stepSigningKeys, rotateSigningSecrets(ctx, loader, opts.Into, opts.Cipher, out)); err != nil {
 		return RestoreReport{}, err
 	}
-	if err := clearLostSettings(ctx, loader, opts.Into, src.Manifest, opts.Validate, opts.Cipher, out); err != nil {
+	if err := post.step(stepLostSettings, clearLostSettings(ctx, loader, opts.Into, src.Manifest, opts.Validate, opts.Cipher, out)); err != nil {
 		return RestoreReport{}, err
 	}
 	// A copy is not the live server: it gets none of the backup's
 	// credentials and none of the live ones.
-	if err := carryCredentials(ctx, loader, opts.Into, "", out); err != nil {
+	if err := post.carry(ctx, loader, opts.Into, ""); err != nil {
 		return RestoreReport{}, err
 	}
-	if err := carryOutboundSettings(ctx, loader, opts.Into, "", out); err != nil {
-		return RestoreReport{}, err
-	}
-	if err := carryPluginReleases(ctx, loader, opts.Into, "", out); err != nil {
-		return RestoreReport{}, err
-	}
-	if err := carryPolicies(ctx, loader, opts.Into, "", out); err != nil {
-		return RestoreReport{}, err
-	}
-	if err := interruptWork(ctx, loader, opts.Into, "", out); err != nil {
+	if err := post.step(stepInterrupt, interruptWork(ctx, loader, opts.Into, "", out)); err != nil {
 		return RestoreReport{}, err
 	}
 	// The copy's files land in an empty directory, so a subtitle the backup
 	// left out is nowhere.
 	if !opts.DatabaseOnly {
-		if err := dropOmittedSubtitles(ctx, loader, opts.Into, src.Manifest, nil, out); err != nil {
+		if err := post.step(stepSubtitles, dropOmittedSubtitles(ctx, loader, opts.Into, src.Manifest, nil, out)); err != nil {
 			return RestoreReport{}, err
 		}
 	}

@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,4 +195,68 @@ func TestBeforeMigrateBackupOnAnOldSchemaDB(t *testing.T) {
 	if err := backup.VerifyBackup(ctx, src, backup.PGLoader{Tools: db.tools}, db.newDatabase(), validate, io.Discard); err != nil {
 		t.Fatalf("verify the before-upgrade backup: %v", err)
 	}
+	restoreOldSchemaBackup(t, db, bc.SecretKey, src.Folder())
+}
+
+// restoreOldSchemaBackup restores the before-upgrade backup of an older
+// schema with the command, into a separate database and then in place of
+// the migrated live one: every step after the load meets the backup's
+// schema, not the binary's, and must not fail on what that schema lacks.
+func restoreOldSchemaBackup(t *testing.T, db oldSchemaDatabase, secretKey []byte, folder string) {
+	t.Helper()
+	ctx := t.Context()
+	t.Setenv("SECRET_KEY", string(secretKey))
+	t.Setenv("DATABASE_URL", db.url)
+	t.Setenv("REDIS_URL", "")
+	noEnv := filepath.Join(t.TempDir(), "no.env")
+	run := func(args ...string) string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := runBackupCommand(ctx, append(args, "-env", noEnv), &out); err != nil {
+			t.Fatalf("silo backup %v: %v\n%s", args, err, out.String())
+		}
+		return out.String()
+	}
+	// The schema lacks most credential tables and some columns of the
+	// others: the step replacing the backup's credentials still runs.
+	credentialsReplaced := func(out string) {
+		t.Helper()
+		if strings.Contains(out, "Skipped replacing the backup's credentials") {
+			t.Fatalf("the restore kept the backup's credentials:\n%s", out)
+		}
+	}
+	into := passwordless(t, db.newDatabase())
+	credentialsReplaced(run("restore", "--from", folder, "--into", into, "--database-only"))
+	// A swap needs the live database to itself.
+	db.pool.Close()
+	t.Chdir(t.TempDir())
+	out := run("restore", "--from", folder)
+	credentialsReplaced(out)
+	if !strings.Contains(out, "Restored ") {
+		t.Fatalf("swap restore output:\n%s", out)
+	}
+	restored, err := pgxpool.New(ctx, db.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	var version int64
+	if err := restored.QueryRow(ctx, `SELECT max(version_id) FROM goose_db_version WHERE is_applied`).Scan(&version); err != nil || version != oldSchemaVersion {
+		t.Fatalf("restored schema version %d (%v), want the backup's %d", version, err, oldSchemaVersion)
+	}
+}
+
+// passwordless moves a test database URL's password to PGPASSWORD, as the
+// commands require.
+func passwordless(t *testing.T, raw string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if password, ok := u.User.Password(); ok {
+		t.Setenv("PGPASSWORD", password)
+		u.User = url.User(u.User.Username())
+	}
+	return u.String()
 }

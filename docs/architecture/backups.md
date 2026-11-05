@@ -571,7 +571,10 @@ previous release left:
 
 - It is `db.dump` and the manifest only: no restore set, no `blobs.tar`, and
   no blob queries. Migrations do not touch blobs, so a restore from it leaves
-  the files in storage as they are.
+  the files in storage as they are. It cannot bring back a file changed or
+  deleted after it was taken: artwork, avatars, or branding replaced or
+  removed since stay as they are now, and a restored row may name a file
+  that is gone.
 - It reads only `server_settings` rows, with defaults for keys the old
   release never wrote: the first upgrade to a release with backups finds no
   `backup.*` rows and backs up to the default destination. Blob storage comes
@@ -641,6 +644,20 @@ backup holds the previous release's schema, and every later release
 carries that release's migrations, so the new release's binary can restore
 it; a release started on the restored database migrates it again and takes
 another `before-upgrade` backup.
+
+The steps after the load (new signing keys, clearing unreadable settings,
+the credential and setting carries, ending unfinished work, the account
+rollback report) run against the backup's schema, not the binary's. When
+the backup's applied migrations are fewer than the binary's, a step that
+meets a table, column, or type that schema lacks (SQLSTATE 42P01, 42703, or
+42704) is skipped with a printed line naming it, and the restore goes on.
+Each step changes the restored database in one transaction or statement, so
+a skipped step changed nothing. A backup of the binary's own schema skips
+nothing: there the same error fails the restore. The credential carry is
+narrower, so an older schema does not leave the backup's credentials in
+place: it skips only the carried tables the schema does not have (printing
+them; the live rows of those tables are not carried) and writes only the
+columns it has.
 
 ## Restore set
 
