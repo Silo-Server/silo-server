@@ -94,8 +94,10 @@ END $$;
 
 -- +goose Down
 -- Returns the ten columns the Up moves on a stock schema to the default
--- collation they were created with.
+-- collation they were created with, under the same 10-second lock limit, and
+-- analyzes them, since the change drops their statistics again.
 -- +goose StatementBegin
+SET LOCAL lock_timeout = '10s';
 ALTER TABLE public.audiobook_enrichment_state ALTER COLUMN content_id TYPE text COLLATE "default";
 ALTER TABLE public.audiobook_item_file_stats ALTER COLUMN content_id TYPE text COLLATE "default";
 ALTER TABLE public.item_videos ALTER COLUMN content_id TYPE text COLLATE "default";
@@ -106,4 +108,15 @@ ALTER TABLE public.media_item_backdrops ALTER COLUMN content_id TYPE text COLLAT
 ALTER TABLE public.media_item_rating_sources ALTER COLUMN content_id TYPE text COLLATE "default";
 ALTER TABLE public.media_item_tmdb_collections ALTER COLUMN content_id TYPE text COLLATE "default";
 ALTER TABLE public.metadata_enrichment_state ALTER COLUMN content_id TYPE text COLLATE "default";
+ANALYZE
+    public.audiobook_enrichment_state,
+    public.audiobook_item_file_stats,
+    public.item_videos,
+    public.local_sidecar_fingerprints,
+    public.media_extras,
+    public.media_item_aliases,
+    public.media_item_backdrops,
+    public.media_item_rating_sources,
+    public.media_item_tmdb_collections,
+    public.metadata_enrichment_state;
 -- +goose StatementEnd
