@@ -104,6 +104,30 @@ func TestHandlePlaybackReport_ClientPlaySessionIDFallsBackToItemRoute(t *testing
 	}
 }
 
+// TestHandlePlaybackReport_BodySizeCap pins that a report body is read up to
+// maxSessionReportBodyBytes, so a large NowPlayingQueue still reports progress
+// while an endless body is refused instead of buffered.
+func TestHandlePlaybackReport_BodySizeCap(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		padding     int
+		wantStatus  int
+		wantUpdates int
+	}{
+		{name: "large queue under the cap", padding: maxSessionReportBodyBytes / 2, wantStatus: http.StatusNoContent, wantUpdates: 1},
+		{name: "body over the cap", padding: maxSessionReportBodyBytes, wantStatus: http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler, mgr, encodedItemID, sourceID := newReportLivenessHandler("upstream-1", true)
+			rec := postProgressReport(handler, `{"PlaySessionId":"play-1","ItemId":"`+encodedItemID+`","MediaSourceId":"`+sourceID+
+				`","PositionTicks":1234500000,"NowPlayingQueue":[{"Id":"`+strings.Repeat("a", tc.padding)+`"}]}`)
+			if rec.Code != tc.wantStatus || len(mgr.progressUpdates) != tc.wantUpdates {
+				t.Fatalf("status = %d, progress updates = %d; want %d and %d", rec.Code, len(mgr.progressUpdates), tc.wantStatus, tc.wantUpdates)
+			}
+		})
+	}
+}
+
 // TestHandlePlaybackReport_MediaSourceIDFallbackWhenItemUnknown covers clients
 // that omit or send an unmatchable ItemId: the MediaSourceId in the report
 // still identifies the play session.
