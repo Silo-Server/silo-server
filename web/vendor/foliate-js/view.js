@@ -7,6 +7,14 @@ const SEARCH_PREFIX = 'foliate-search:'
 
 const NOTE_PREFIX = 'foliate-note:'
 
+// Silo: bound search work so a common term in a long book cannot freeze the
+// reader. Results stop at the limit (search's `limit` option, this by default),
+// and long sections yield to the event loop so an aborted search stops before
+// its section is exhausted.
+export const SEARCH_RESULT_LIMIT = 1000
+const SEARCH_YIELD_INTERVAL = 100
+const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve))
+
 const isZip = async file => {
     const arr = new Uint8Array(await file.slice(0, 4).arrayBuffer())
     return arr[0] === 0x50 && arr[1] === 0x4b && arr[2] === 0x03 && arr[3] === 0x04
@@ -585,28 +593,49 @@ export class View extends HTMLElement {
     goRight() {
         return this.book.dir === 'rtl' ? this.prev() : this.next()
     }
-    async * #searchSection(matcher, query, index) {
-        const doc = await this.book.sections[index].createDocument()
-        for (const { range, excerpt } of matcher(doc, query))
+    // Yields at most `limit` results for one section, pausing for the event
+    // loop every SEARCH_YIELD_INTERVAL matches; ends early once `signal` aborts.
+    async * #matchSection(matcher, query, index, doc, limit, signal) {
+        let count = 0
+        if (limit <= 0) return
+        for (const { range, excerpt } of matcher(doc, query)) {
             yield { cfi: this.getCFI(index, range), excerpt }
+            if (++count >= limit) return
+            if (count % SEARCH_YIELD_INTERVAL === 0) {
+                await yieldToEventLoop()
+                if (signal?.aborted) return
+            }
+        }
     }
-    async * #searchBook(matcher, query) {
+    async * #searchSection(matcher, query, index, limit, signal) {
+        const doc = await this.book.sections[index].createDocument()
+        if (signal?.aborted) return
+        yield* this.#matchSection(matcher, query, index, doc, limit, signal)
+    }
+    async * #searchBook(matcher, query, limit, signal) {
         const { sections } = this.book
+        let remaining = limit
         for (const [index, { createDocument }] of sections.entries()) {
             if (!createDocument) continue
             const doc = await createDocument()
-            const subitems = Array.from(matcher(doc, query), ({ range, excerpt }) =>
-                ({ cfi: this.getCFI(index, range), excerpt }))
+            if (signal?.aborted) return
+            const subitems = []
+            for await (const item of this.#matchSection(
+                matcher, query, index, doc, remaining, signal)) subitems.push(item)
+            if (signal?.aborted) return
+            remaining -= subitems.length
             const progress = (index + 1) / sections.length
             yield { progress }
             if (subitems.length) yield { index, subitems }
+            if (remaining <= 0) return
         }
     }
     async * search(opts) {
         this.clearSearch()
         const { searchMatcher } = await import('./search.js')
         const { sections } = this.book
-        const { query, index, results } = opts
+        const { query, index, results, signal, limit = SEARCH_RESULT_LIMIT } = opts
+        if (signal?.aborted) return
         const matcher = searchMatcher(textWalker,
             { defaultLocale: this.language, ...opts })
 
@@ -623,13 +652,15 @@ export class View extends HTMLElement {
                 }
             })()
             : index != null
-                ? this.#searchSection(matcher, query, index)
-                : this.#searchBook(matcher, query)
+                ? this.#searchSection(matcher, query, index, limit, signal)
+                : this.#searchBook(matcher, query, limit, signal)
 
         const list = []
         this.#searchResults.set(index, list)
 
         for await (const result of iter) {
+            // a superseded search must not draw over the current one
+            if (signal?.aborted) return
             if (result.subitems){
                 const list = result.subitems
                     .map(({ cfi }) => ({ value: SEARCH_PREFIX + cfi }))
@@ -650,6 +681,7 @@ export class View extends HTMLElement {
                 yield result
             }
         }
+        if (signal?.aborted) return
         yield 'done'
     }
     clearSearch() {

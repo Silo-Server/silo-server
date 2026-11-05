@@ -51,6 +51,7 @@ import type { TOCItem } from "@/reader/readest/libs/document";
 import FoliateBookReader, {
   DEFAULT_READER_SETTINGS,
   READER_FONT_STACKS,
+  READER_SEARCH_RESULT_LIMIT,
   formatReaderProgress,
   isReaderSupportedFile,
   normalizeReaderSettings,
@@ -288,6 +289,7 @@ export default function EbookReader() {
   const saveConfigTimerRef = useRef<number | null>(null);
   const [searchText, setSearchText] = useState("");
   const [searchResults, setSearchResults] = useState<ReaderSearchResult[]>([]);
+  const [searchTruncated, setSearchTruncated] = useState(false);
   const [searching, setSearching] = useState(false);
   const progressLabel = formatReaderProgress(readerProgress);
   const tocEntries = useMemo(() => flattenToc(toc), [toc]);
@@ -357,12 +359,19 @@ export default function EbookReader() {
     const query = searchText.trim();
     if (!query) {
       setSearchResults([]);
+      setSearchTruncated(false);
       readerRef.current?.clearSearch();
       return;
     }
     setSearching(true);
     try {
-      setSearchResults(await (readerRef.current?.search(query) ?? Promise.resolve([])));
+      const outcome = await (readerRef.current?.search(query) ??
+        Promise.resolve({ results: [], truncated: false }));
+      // null: a newer search or closing the book replaced this one.
+      if (outcome) {
+        setSearchResults(outcome.results);
+        setSearchTruncated(outcome.truncated);
+      }
     } finally {
       setSearching(false);
     }
@@ -1000,6 +1009,11 @@ export default function EbookReader() {
                       )}
                     </Button>
                   </form>
+                  {searchTruncated && (
+                    <p className="text-muted-foreground px-2 text-xs">
+                      Showing the first {READER_SEARCH_RESULT_LIMIT.toLocaleString()} matches.
+                    </p>
+                  )}
                   <div className="space-y-1">
                     {searchResults.map((result, index) => (
                       <Button
