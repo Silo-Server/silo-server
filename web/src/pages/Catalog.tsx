@@ -441,7 +441,7 @@ function CatalogResults({
         className={cn(
           "page-header",
           collectionBackdrop &&
-            "relative isolate min-h-[clamp(16rem,42vh,26rem)] content-end overflow-hidden rounded-2xl px-4 pt-24 pb-5 sm:px-6 sm:pb-6",
+            "relative isolate min-h-[clamp(16rem,42vh,26rem)] content-end overflow-hidden rounded-2xl px-4 pt-24 pb-5 sm:flex-nowrap sm:px-6 sm:pb-6",
         )}
       >
         {collectionBackdrop ? (
@@ -462,7 +462,8 @@ function CatalogResults({
             />
           </>
         ) : null}
-        <div className={cn("space-y-3", collectionBackdrop && "relative")}>
+        {/* Over the artwork the actions stay beside the title, not under it. */}
+        <div className={cn("space-y-3", collectionBackdrop && "relative min-w-0 flex-1")}>
           <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
           <CollectionByline access={collectionAccess} />
           {collectionHeader.status === "pending" ? null : collectionHeader.description ? (
@@ -479,7 +480,7 @@ function CatalogResults({
         <div
           className={cn(
             "flex flex-col items-start gap-3 sm:items-end",
-            collectionBackdrop && "relative",
+            collectionBackdrop && "relative shrink-0",
           )}
         >
           <CollectionPageActions access={collectionAccess} libraryId={state.library_id} />
