@@ -84,7 +84,7 @@ it("sends a cleared optional setting as null so the plugin's default applies", (
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
   expect(state.update).toHaveBeenCalledOnce();
-  expect(state.update.mock.calls[0][0].settings).toEqual({ topic: "alerts", tag: null });
+  expect(state.update.mock.calls[0]?.[0]?.settings).toEqual({ topic: "alerts", tag: null });
 });
 
 it("deletes with the validator seen when the confirmation opened", () => {
@@ -96,5 +96,5 @@ it("deletes with the validator seen when the confirmation opened", () => {
   fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
   expect(state.remove).toHaveBeenCalledOnce();
-  expect(state.remove.mock.calls[0][0]).toEqual({ id: "dest-1", etag: '"r1"' });
+  expect(state.remove.mock.calls[0]?.[0]).toEqual({ id: "dest-1", etag: '"r1"' });
 });
