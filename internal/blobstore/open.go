@@ -300,6 +300,25 @@ func (s *recordingStore) PutStream(ctx context.Context, key string, r io.Reader,
 	return s.recordBackend(ctx)
 }
 
+// RecordIdentity records store's storage identity now, as its first write
+// would. A caller that will write while it holds a database connection calls
+// it first, so the write never needs another connection for the settings
+// row (with a one-connection pool, it would wait forever). A store opened
+// without settings records nothing.
+func RecordIdentity(ctx context.Context, store Store) error {
+	for store != nil {
+		switch s := store.(type) {
+		case interface{ recordBackend(context.Context) error }:
+			return s.recordBackend(ctx)
+		case interface{ unwrapStore() Store }:
+			store = s.unwrapStore()
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
 func (s *recordingStore) recordBackend(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

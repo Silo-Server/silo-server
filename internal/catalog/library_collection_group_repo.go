@@ -67,6 +67,18 @@ func scanLibraryCollectionGroup(row groupRowScanner) (*models.LibraryCollectionG
 }
 
 func (r *LibraryCollectionGroupRepository) Create(ctx context.Context, in CreateLibraryCollectionGroupInput) (*models.LibraryCollectionGroup, error) {
+	return createLibraryCollectionGroup(ctx, r.pool, in)
+}
+
+// CreateLibraryCollectionGroupInTx creates a group in the caller's
+// transaction.
+func CreateLibraryCollectionGroupInTx(ctx context.Context, tx pgx.Tx, in CreateLibraryCollectionGroupInput) (*models.LibraryCollectionGroup, error) {
+	return createLibraryCollectionGroup(ctx, tx, in)
+}
+
+func createLibraryCollectionGroup(ctx context.Context, db interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}, in CreateLibraryCollectionGroupInput) (*models.LibraryCollectionGroup, error) {
 	if in.Name == "" {
 		return nil, fmt.Errorf("group name is required")
 	}
@@ -84,7 +96,7 @@ func (r *LibraryCollectionGroupRepository) Create(ctx context.Context, in Create
 		return nil, fmt.Errorf("idgen: %w", err)
 	}
 
-	row := r.pool.QueryRow(ctx, `
+	row := db.QueryRow(ctx, `
 		INSERT INTO library_collection_groups (
 			id, library_id, label, title, name, slug, kind, default_sort_mode, sort_order
 		)

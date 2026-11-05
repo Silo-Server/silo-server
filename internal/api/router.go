@@ -33,6 +33,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -304,7 +305,13 @@ type Dependencies struct {
 	AdminDefaults        *config.AdminDefaults
 	RequestServerRestart func(ctx context.Context) error
 	StorageTransition    *storagetransition.Service
-	ServerRestartStatus  *handlers.ServerRestartStatusTracker
+	// Backups owns the Backups page: listing, back up now, delete, and
+	// downloads. Nil when no database is wired.
+	Backups             *backup.Service
+	ServerRestartStatus *handlers.ServerRestartStatusTracker
+	// ProfileTransfer exports and imports a profile's own data; nil on the
+	// SQLite user store.
+	ProfileTransfer *backup.ProfileTransfer
 
 	// UserCollectionSync handles per-profile imported collections (TMDB /
 	// MDBList) — the user-facing counterpart of CollectionService.
@@ -1793,6 +1800,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		adminHandler.BeforeServerSettingCommit = deps.BeforeServerSettingCommit
+		if deps.Backups != nil {
+			adminHandler.BackupKeyCheck = deps.Backups.KeyCheck()
+		}
 		if deps.RecWorker != nil {
 			adminHandler.RecWorker = deps.RecWorker
 		}
@@ -2968,6 +2978,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.StorageTransition != nil {
 		v2deps.AdminStorageTransition = deps.StorageTransition
 	}
+	if deps.ProfileTransfer != nil {
+		deps.ProfileTransfer.SetItemsChanged(importedChanges(deps.Notifications, deps.RecWorker))
+		v2deps.ProfileTransfer = deps.ProfileTransfer
+	}
+	if deps.Backups != nil {
+		v2deps.AdminBackups = deps.Backups
+		// Presigning destinations hand out storage URLs; the signer covers the
+		// ones that cannot, and expires links on the same schedule.
+		if deps.Config != nil {
+			v2deps.AdminBackupSigner = artworkurl.NewBackupObjectSigner(deps.CurrentConfig().Auth.JWTSecret, adminJobArtifactURLTTL)
+		}
+	}
 	if catalogSeedHandler != nil {
 		v2deps.AdminCatalogSources = catalogSeedHandler
 		v2deps.AdminCatalogTransfer = catalogSeedHandler
@@ -3082,6 +3104,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminPluginLifecycle = v2PluginHandler
 		v2deps.AdminPluginUploads = v2PluginHandler
 		externalSignInPlugins = v2PluginHandler
+	}
+	if deps.Backups != nil && deps.DB != nil {
+		wireBackupRestore(deps, adminHandler, libraryHandler, adminImageHandler, externalSignInPlugins, libraryCollectionHandler, sectionHandler, rateLimitHandler)
 	}
 	if deps.DB != nil && authService != nil && userRepo != nil {
 		v2deps.ExternalSignIn = handlers.NewExternalSignInHandler(auth.NewIdentityService(deps.DB), authService, userRepo, externalSignInPlugins)

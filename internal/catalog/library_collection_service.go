@@ -171,6 +171,14 @@ type libraryCollectionSourceConfig struct {
 	Discover *libraryCollectionDiscoverConfig `json:"discover,omitempty"`
 }
 
+// TMDBCollectionSourceUnset reports whether a collection's source names no
+// TMDB collection: the placeholder a franchise template creates until an
+// administrator sets one.
+func TMDBCollectionSourceUnset(sourceConfig json.RawMessage) bool {
+	var cfg libraryCollectionSourceConfig
+	return json.Unmarshal(sourceConfig, &cfg) != nil || cfg.CollectionID <= 0
+}
+
 // libraryCollectionDiscoverConfig persists TMDB /discover filters in the
 // collection's source_config JSON. Field names follow the TMDBDiscoverSpec
 // JSON contract so the on-disk shape matches the template spec.

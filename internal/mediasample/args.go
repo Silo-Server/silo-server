@@ -210,9 +210,16 @@ func buildSheetsArgs(req Request, attempt Attempt, hw hardwareDecode, entries []
 	)
 	// Copy the same input's packets to a timing log without decoding them.
 	// Their extent distinguishes a valid final GOP from premature EOF;
-	// keyframe timestamps alone cannot. A separate file keeps packet metadata
-	// from interleaving with frame log lines on stderr.
-	args = append(args, mapStreamOption, firstVideoStream, "-c:v", "copy", "-f", "framecrc", packetTimingPath)
+	// keyframe timestamps alone cannot. The audio streams' packets tell a
+	// video that ends before its audio from a truncated file, whose streams
+	// stop together; only streams the probe found a sample rate for are
+	// copied, since the muxer refuses the others. A separate file keeps
+	// packet metadata from interleaving with frame log lines on stderr.
+	args = append(args, mapStreamOption, firstVideoStream)
+	for _, audio := range req.timingAudio {
+		args = append(args, mapStreamOption, "0:"+strconv.Itoa(audio))
+	}
+	args = append(args, "-c", "copy", "-f", "framecrc", packetTimingPath)
 	return append(args, sheetsOutputArgs(graph)...), nil, nil
 }
 

@@ -250,33 +250,40 @@ func NewSystem(
 		serverChannelSweep.Nudge() // nil-safe
 	})
 	interest := NewInterestUpdater(pool, interests, stores, scopes)
+	var system *System
+	interest.rebuildProfile = func(ctx context.Context, userID int, profileID string) error {
+		store, err := stores.ForUser(ctx, userID)
+		if err != nil {
+			return err
+		}
+		return system.rebuildProfileInterest(ctx, store, userID, profileID)
+	}
 
-	system := &System{
-		Settings:           settings,
-		Releases:           releases,
-		Interests:          interests,
-		Deliveries:         deliveries,
-		Preferences:        preferences,
-		Detector:           detector,
-		Interest:           interest,
-		Fanout:             fanout,
-		Tickets:            NewTicketStore(redisClient),
-		Webhooks:           webhookService,
-		PluginDestinations: pluginDestinationService,
-		ServerChannels:     serverChannelService,
-		WebPush:            webPushService,
-		PushDevices:        pushDeviceService,
-		EmailPrefs:         emailPrefs,
-		DiscordPrefs:       discordPrefs,
-		mailSender:         mailSender,
-		emailBrand:         emailBrand,
-		emailWorker:        emailWorker,
-		discordWorker:      discordWorker,
-		discordClient:      discordClient,
-		webhookRepo:        webhookRepo,
-		webhookDispatcher:  webhookDispatcher,
-		webhookRetry:       webhookRetry,
-
+	system = &System{
+		Settings:                    settings,
+		Releases:                    releases,
+		Interests:                   interests,
+		Deliveries:                  deliveries,
+		Preferences:                 preferences,
+		Detector:                    detector,
+		Interest:                    interest,
+		Fanout:                      fanout,
+		Tickets:                     NewTicketStore(redisClient),
+		Webhooks:                    webhookService,
+		PluginDestinations:          pluginDestinationService,
+		ServerChannels:              serverChannelService,
+		WebPush:                     webPushService,
+		PushDevices:                 pushDeviceService,
+		EmailPrefs:                  emailPrefs,
+		DiscordPrefs:                discordPrefs,
+		mailSender:                  mailSender,
+		emailBrand:                  emailBrand,
+		emailWorker:                 emailWorker,
+		discordWorker:               discordWorker,
+		discordClient:               discordClient,
+		webhookRepo:                 webhookRepo,
+		webhookDispatcher:           webhookDispatcher,
+		webhookRetry:                webhookRetry,
 		pluginDestinationSender:     pluginDestinationSenderInst,
 		pluginDestinationDispatcher: pluginDestinationDispatcher,
 		webPushRepo:                 webPushRepo,

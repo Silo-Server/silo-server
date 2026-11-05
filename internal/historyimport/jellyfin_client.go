@@ -31,11 +31,20 @@ const (
 
 type JellyfinClient struct {
 	httpClient *http.Client
-	limiter    *upstreamRateLimiter
+	// listingClient reads listing pages. Jellyfin evaluates a filter such as
+	// IsPlayed across the whole library for every page, so one page from a
+	// large library can take well over the 30 seconds that sign-in and user
+	// lookups are allowed, and a single slow page would fail the whole import.
+	listingClient *http.Client
+	limiter       *upstreamRateLimiter
 }
 
 func NewJellyfinClient() *JellyfinClient {
-	return &JellyfinClient{httpClient: netguard.NewClient(30 * time.Second), limiter: sharedHistoryImportUpstreamLimiter}
+	return &JellyfinClient{
+		httpClient:    netguard.NewClient(30 * time.Second),
+		listingClient: netguard.NewClient(5 * time.Minute),
+		limiter:       sharedHistoryImportUpstreamLimiter,
+	}
 }
 
 type jellyfinServerAuthResponse struct {
@@ -374,11 +383,16 @@ func (c *JellyfinClient) doJSON(req *http.Request, out any) error {
 }
 
 // doJSONWithBudget is doJSON for one page of a listing; budget may be nil.
+// Listing pages, the only requests with a budget, use the listing client.
 func (c *JellyfinClient) doJSONWithBudget(req *http.Request, out any, budget *listingBudget) error {
 	if err := c.limiter.Wait(req.Context(), req.URL); err != nil {
 		return err
 	}
-	resp, err := c.httpClient.Do(req)
+	client := c.httpClient
+	if budget != nil {
+		client = c.listingClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

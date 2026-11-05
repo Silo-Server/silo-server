@@ -727,6 +727,263 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/backups": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List this server's backups with their manifest summaries, the other server identities at the destination, and the warnings the dashboard shows. */
+    get: operations["listAdminBackups"];
+    put?: never;
+    /** Back up now. The backup runs on this server; poll the list or the backup task for its result. 409 when another backup or restore is running. */
+    post: operations["startAdminBackup"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete one backup of this server. 409 when another backup or restore is running, or a queued or running restore reads this backup. */
+    delete: operations["deleteAdminBackup"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/{id}/download-links": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Mint short-lived download URLs for a complete backup's objects, or for its restore set alone: presigned storage URLs, or signed links to this server where the storage cannot presign. */
+    post: operations["createAdminBackupDownloadLinks"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/{id}/objects/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Stream one object of a backup. Authorized by the signed capability in the download link, not by a session. */
+    get: operations["downloadAdminBackupObject"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/{id}/restore": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Restore the chosen items of a backup as a backup_restore job. A backup of this server is taken first; follow the job through the admin jobs endpoints. 409 when another backup or restore is running, or the backup changed since the preview. */
+    post: operations["startAdminBackupRestore"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/{id}/restore-set": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read a backup's restore set and compare each section with this server: per-item status, the library mapping, per-setting differences with encrypted values masked, and the digest a restore request must carry. 409 when the backup has no restore set or is from a newer Silo, and 409 backup_unauthenticated, before anything inside the restore set is read, when this server cannot authenticate the backup's manifest and accept_unauthenticated is not set. */
+    get: operations["getAdminBackupRestoreSet"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** What backups on this server support. not_configured when the server has no storage to write backups to. */
+    get: operations["getAdminBackupCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/s3/acknowledge-key": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Confirm that a copy of this server's SECRET_KEY is kept somewhere other than this server. backup.destination can be set to s3 only after this, and S3 backups pause when SECRET_KEY changes until it is confirmed again. 409 when key_check is not this server's current check value. */
+    post: operations["acknowledgeAdminBackupKey"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/s3/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Test a bucket for backups: reach it (HeadBucket), then write and delete a test object under the key prefix. A failed test answers ok false with the step that failed. Nothing is saved. */
+    post: operations["testAdminBackupS3"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/uploads": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List restore sets uploaded to this server, newest first, finished or not. Unfinished and rejected uploads are deleted 24 hours after their last activity, complete ones 7 days after their last use. */
+    get: operations["listAdminBackupUploads"];
+    put?: never;
+    /** Start uploading a restore set (restore-set.tar, from another server's Download restore set). The answer gives the part size; send the parts, then complete the upload. Parts go to the shared storage, so any API server takes any part. 413 above 2 GiB; 409 upload_limit_reached when three uploads are already in progress. Where this server's private storage is an S3 bucket the parts are stored encrypted with a key derived from SECRET_KEY, and uploads, like backups, need that key confirmed first (409 otherwise). */
+    post: operations["createAdminBackupUpload"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/uploads/{upload_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** Delete an upload and its parts. 409 while a restore from it is queued or running, or while another backup or restore holds the lock for a complete upload. */
+    delete: operations["deleteAdminBackupUpload"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/uploads/{upload_id}/complete": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Check a fully received upload: its bytes are read in order through the restore-set checks, and their SHA-256 is frozen. The answer is complete, or rejected with the reason (not a restore set, from a newer Silo, encrypted with another server's key). A finished upload answers as it is. 409 while another backup or restore holds the lock; complete it again then. */
+    post: operations["completeAdminBackupUpload"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/uploads/{upload_id}/parts/{part}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Store one part of an upload. Every part but the last is exactly part_size bytes. Parts may arrive in any order and on any API server; sending a part again replaces it until the upload is completed. 409 while the same part, or four parts of the upload, are being received; 408 when the part does not arrive within 2 minutes. */
+    put: operations["putAdminBackupUploadPart"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/uploads/{upload_id}/restore": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Restore the chosen items of a complete upload as a backup_restore job, as for a backup: a backup of this server is taken first. 409 when another backup or restore is running, or the digest is not the upload's. */
+    post: operations["startAdminBackupUploadRestore"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/backups/uploads/{upload_id}/restore-set": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Preview a complete upload's restore set against this server, as for a backup. The digest is the one frozen when the upload completed. 409 for an upload not yet complete, and 409 backup_unauthenticated, before anything inside it is read, without accept_unauthenticated: an upload carries no manifest this server signed. */
+    get: operations["getAdminBackupUploadRestoreSet"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/branding/assets/{kind}": {
     parameters: {
       query?: never;
@@ -6803,6 +7060,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/capabilities/profile-export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover profile export and import: the document format and version, the import size limit, and the data types carried. */
+    get: operations["getProfileExportCapability"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/capabilities/ratings": {
     parameters: {
       query?: never;
@@ -10481,6 +10755,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/profile/export": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Download the acting profile's own data as a silo-profile-export document: watch history and progress, ratings, favorites and watchlist, personal collections, dismissals, preferences, and notification preferences, leaving out titles the profile may not see now. It carries no account fields, password or PIN hashes, or access fields. */
+    get: operations["exportProfile"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profile/import": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Merge a silo-profile-export document into the acting profile: newer progress and history win, ratings, favorites, and dismissals are added where the profile has none, collections gain missing items, and preferences are overwritten. Nothing is deleted, and importing the same document again changes nothing. The target is always the acting profile; a document carrying account or access fields is refused, and items the profile cannot see are left out. A PIN-protected profile needs its PIN-verified session. */
+    post: operations["importProfile"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/profile/sections": {
     parameters: {
       query?: never;
@@ -10683,7 +10991,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the acting profile's ratings, most recently rated first. */
+    /** List the acting profile's ratings, most recently rated first; items the viewer may not see are omitted. */
     get: operations["listRatings"];
     put?: never;
     post?: never;
@@ -10700,7 +11008,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Answer the acting profile's rating of the item, or 404 when the profile has not rated it. */
+    /** Answer the acting profile's rating of the item, or 404 when the profile has not rated it (or the viewer may not see it). */
     get: operations["getRating"];
     /** Set the acting profile's rating of the item, replacing any earlier rating; automatic retries repeat the rating timestamp and recommendation refresh. */
     put: operations["setRating"];
@@ -14201,6 +14509,910 @@ export interface components {
       last_run_at?: string;
       path_rewrites: components["schemas"]["AdminAutoscanPathRewrite"][];
       plugin_id: string;
+    };
+    AdminBackup: {
+      /**
+       * Format: int64
+       * @description Files copied into blobs.tar
+       */
+      blob_count: number;
+      /** @description Whether this copy counts as a clean copy for rotation: complete, with every file, and verified under this server's SECRET_KEY. Rotation always keeps the newest clean copy, even beyond backup.keep */
+      clean: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      completed_at?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      /** @description Whether the objects are stored encrypted with a key derived from SECRET_KEY. The manifest is never encrypted */
+      encrypted: boolean;
+      /** @description The backup folder name: UTC start time and kind */
+      id: string;
+      /** @description Check value of the SECRET_KEY the backup was taken with: 16 hex digits in groups of 4 */
+      key_check?: string;
+      /** @description Whether key_check is this server's. Settings and credentials the backup holds encrypted cannot be read with another key, and an encrypted backup that does not match cannot be previewed, restored, or downloaded decrypted here */
+      key_matches: boolean;
+      /** @enum {string} */
+      kind: "nightly" | "manual" | "before-restore" | "before-upgrade";
+      /** @description Where the backup folder is: a filesystem path on this server's storage, or s3://bucket/key in a bucket */
+      location: string;
+      missing_blobs: components["schemas"]["AdminBackupMissingBlob"][];
+      /**
+       * Format: int64
+       * @description Files missing when the backup copied them, all of them; missing_blobs lists at most the first 10,000
+       */
+      missing_blobs_total: number;
+      objects: components["schemas"]["AdminBackupObject"][];
+      /** @description Items the restore set left out; the dump still holds them */
+      restore_set_omitted: components["schemas"]["AdminBackupOmitted"][];
+      silo_version?: string;
+      /** Format: int64 */
+      size_bytes: number;
+      /**
+       * @description complete: manifest written, checksums recorded, table of contents readable; it does not claim a restore was tested. complete_with_warnings: some referenced files were missing when copied, or the restore set left items out (restore_set_omitted). in_progress: being written now. incomplete: no manifest and nothing running; deleted after 24 hours. unverified: this server cannot authenticate the manifest (another SECRET_KEY, none recorded, or changed since it was written); a restore needs confirmation, and one whose manifest names this key but does not verify shows no details and cannot be restored. unreadable: its manifest could not be read just now (the destination failed or the read was cut short); it is kept, and neither rotated nor swept, until it reads
+       * @enum {string}
+       */
+      status:
+        | "complete"
+        | "complete_with_warnings"
+        | "in_progress"
+        | "incomplete"
+        | "unverified"
+        | "unreadable";
+    };
+    AdminBackupAcknowledgeKeyBody: {
+      /** @description The check value the admin was shown (key_check from the backup list). It must be this server's current one */
+      key_check: string;
+    };
+    AdminBackupAcknowledgeKeyOutputBody: {
+      /** @description The check value now confirmed */
+      key_check: string;
+    };
+    AdminBackupActive: {
+      backup_id?: string;
+      message?: string;
+      /**
+       * @description restore: a selective restore from backup_id or upload_id is running; upload: the upload upload_id is being checked
+       * @enum {string}
+       */
+      operation: "backup" | "delete" | "restore" | "upload";
+      /**
+       * Format: double
+       * @description Percent complete, for a backup
+       */
+      progress: number;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      started_at: string;
+      /** @description The upload a restore reads, or the upload being checked or deleted */
+      upload_id?: string;
+    };
+    AdminBackupCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description Backup destinations this server can write to: default, the server's own storage, when it has one, and s3, a bucket used only for backups */
+      destinations: string[];
+      /** @description Whether a full backup can be downloaded */
+      download: boolean;
+      /** @description Whether backups can be encrypted. Backups in any S3 bucket always are, with a key derived from SECRET_KEY: the s3 destination, and the default one when this server's private storage is a bucket */
+      encryption: boolean;
+      /**
+       * Format: int64
+       * @description The largest restore set an upload takes
+       */
+      max_upload_bytes: number;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /** @description Whether parts of a backup can be previewed and restored from the API: settings, plugins, libraries, accounts and their profiles' data, collections and uploaded artwork */
+      selective_restore: boolean;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description Whether a restore set can be uploaded from another server */
+      upload: boolean;
+    };
+    AdminBackupDownloadLink: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      expires_at: string;
+      name: string;
+      /** Format: int64 */
+      size_bytes: number;
+      /**
+       * Format: uri-reference
+       * @description Short-lived URL that downloads the object without a session: a presigned storage URL, or a signed path on this server
+       */
+      url: string;
+    };
+    AdminBackupDownloadLinksBody: {
+      /**
+       * @description What to download: full is every stored object as it is, encrypted for an encrypted backup (decrypt with silo backup decrypt); restore-set is restore-set.tar alone, decrypted by this server for an encrypted backup
+       * @enum {string}
+       */
+      scope: "full" | "restore-set";
+    };
+    AdminBackupDownloadLinksOutputBody: {
+      items: components["schemas"]["AdminBackupDownloadLink"][];
+    };
+    AdminBackupLastRun: {
+      /** @description Why a failed or interrupted run stopped */
+      error?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      finished_at?: string;
+      id: string;
+      /** @enum {string} */
+      kind: "nightly" | "manual" | "before-restore" | "before-upgrade";
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      started_at: string;
+      /**
+       * @description interrupted: the server running it stopped before it finished
+       * @enum {string}
+       */
+      status: "complete" | "complete_with_warnings" | "failed" | "interrupted";
+    };
+    AdminBackupLibraryMapping: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      backup_id: string;
+      /**
+       * @description The library here with the identical folder set; absent when the library is not on this server
+       * @example 1
+       */
+      local_id?: string;
+      name: string;
+      selectable: boolean;
+      /** @enum {string} */
+      status: "on_this_server" | "not_on_this_server" | "folder_missing";
+    };
+    AdminBackupList: {
+      /** @description The operation holding the lock, started on any server */
+      active?: components["schemas"]["AdminBackupActive"];
+      /** @description Whether a backup, delete, or selective restore holds the cluster-wide backup lock now */
+      busy: boolean;
+      /**
+       * @description Where new backups go (backup.destination). Items lists only this destination's backups; copies at a previous destination stay there
+       * @enum {string}
+       */
+      destination: "default" | "s3";
+      destination_available: boolean;
+      /** @description Whether nightly backups run (backup.enabled) */
+      enabled: boolean;
+      /** @description Whether new backups are encrypted: true for the s3 destination, and for default when this server's private storage is an S3 bucket. Encrypted backups run only while key_confirmed is true */
+      encrypted: boolean;
+      /** @description This server's backups, newest first */
+      items: components["schemas"]["AdminBackup"][];
+      /**
+       * Format: int64
+       * @description How many nightly and manual backups rotation keeps (backup.keep)
+       */
+      keep: number;
+      /** @description This server's SECRET_KEY check value, 16 hex digits in groups of 4. It names the key without revealing it; silo secret check prints it for a key */
+      key_check: string;
+      /** @description Whether an admin confirmed keeping a copy of the SECRET_KEY with this check value. Encrypted backups (any S3 bucket) run only while it is true */
+      key_confirmed: boolean;
+      /** @description The latest backup run, including one that failed or was interrupted */
+      last_run?: components["schemas"]["AdminBackupLastRun"];
+      /**
+       * Format: date-time
+       * @description When the latest successful backup finished, at any destination
+       */
+      last_success_at?: string;
+      /** @description Other server identities with backups at this destination */
+      other_server_ids: string[];
+      /** @description This server's identity; its backups live under backups/<server_id>/ */
+      server_id: string;
+      /** @description Conditions the dashboard should show */
+      warnings: components["schemas"]["AdminBackupWarning"][];
+    };
+    AdminBackupMissingBlob: {
+      key: string;
+      /** @description What referenced the file, such as library poster */
+      source: string;
+      /** @enum {string} */
+      store: "assets" | "operational";
+    };
+    AdminBackupObject: {
+      /** @description Object name in the backup folder as stored, such as db.dump, or db.dump.age when the backup is encrypted */
+      name: string;
+      /** @description SHA-256 of the stored bytes */
+      sha256: string;
+      /** Format: int64 */
+      size_bytes: number;
+    };
+    AdminBackupOmitted: {
+      /** @description What failed, stable across backups so items can be grouped: the part being read (a profile data type such as notifications, or profiles or items) and, when its error names one, the step that failed in it, such as notifications: reading notification preferences. Absent for too_large and for backups taken before restore set format 3 */
+      cause?: string;
+      /** @description The underlying error, without ids */
+      error?: string;
+      /** @description The item's id in its section, such as the account id */
+      id: string;
+      label: string;
+      message: string;
+      /**
+       * @description too_large: its document exceeds what a restore set may hold; export_failed: reading it failed
+       * @enum {string}
+       */
+      reason: "too_large" | "export_failed";
+      /** @enum {string} */
+      section: "users";
+    };
+    AdminBackupRestoreAccount: {
+      /** @description An administrator account: restoring it creates an administrator here */
+      admin: boolean;
+      email: string;
+      /** @description The account's access group in the backup; a new account joins the group of that name here */
+      group?: string;
+      /**
+       * Format: int64
+       * @description Library entries of the account's own library list with no library here; they are dropped, never widened
+       */
+      libraries_left_out: number;
+      /**
+       * @description The matched account here
+       * @example 1
+       */
+      local_id?: string;
+      local_username?: string;
+      /**
+       * @description account_id: the backup is this server's and the account id exists; restored: an earlier restore of this backup's server created it; username_email: the one account here whose username or email is this account's username or email; new: restoring creates it
+       * @enum {string}
+       */
+      match: "account_id" | "restored" | "username_email" | "new";
+      /** @description For a new account, what this server's policy would grant beyond the backup's; any difference makes it unselectable */
+      policy_differences: components["schemas"]["AdminBackupRestorePolicyDifference"][];
+      /**
+       * Format: int64
+       * @description How many new profiles the account can take here; a restore that chooses more leaves the rest out
+       */
+      profile_room: number;
+      profiles: components["schemas"]["AdminBackupRestoreProfile"][];
+      /** @enum {string} */
+      role: "admin" | "user";
+      /** @description What a restore selection names for this account: the local account id, or new */
+      target: string;
+      username: string;
+    };
+    AdminBackupRestoreBody: {
+      /** @description Confirms restoring from a backup whose manifest this server cannot authenticate (authenticated false in the preview); refused without it */
+      accept_unauthenticated?: boolean;
+      /** @description The digest the preview returned */
+      digest: string;
+      selection: components["schemas"]["AdminBackupRestoreSelection"];
+    };
+    AdminBackupRestoreCollection: {
+      /** @description The template bundle that created a template collection */
+      bundle_id?: string;
+      /** @description A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop */
+      changes?: string[];
+      /** Format: int64 */
+      items: number;
+      /** @description Libraries here the collection maps to */
+      library_ids?: string[];
+      /** @description The collection here: for a manual collection the one with the same name in the mapped library, for a template collection the one the same template created for the mapped library */
+      local_id?: string;
+      /**
+       * Format: int64
+       * @description Items the collection here lacks that a restore adds
+       */
+      missing_items: number;
+      /** @description A template collection's template in the collection template catalog */
+      template_id?: string;
+      /**
+       * Format: int64
+       * @description Items not in this server's catalog, left out
+       */
+      unknown_items: number;
+    };
+    AdminBackupRestoreCounts: {
+      /** Format: int64 */
+      failed: number;
+      /** Format: int64 */
+      left_out: number;
+      /** Format: int64 */
+      restored: number;
+      /** Format: int64 */
+      unchanged: number;
+    };
+    AdminBackupRestoreDataType: {
+      /**
+       * Format: int64
+       * @description Entries the backup holds
+       */
+      count: number;
+      /** @enum {string} */
+      id:
+        | "watch_history"
+        | "ratings"
+        | "favorites"
+        | "collections"
+        | "dismissals"
+        | "preferences"
+        | "notifications";
+      /**
+       * Format: int64
+       * @description For a profile matched here: how many entries restoring this data type would add or change, by the same merge rules a restore applies. Items are matched by content id only, so an item a restore would match by provider ids counts as not here. Absent for a profile a restore creates
+       */
+      pending?: number;
+    };
+    AdminBackupRestoreHomeSection: {
+      /** @description What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items */
+      changes?: string[];
+      /**
+       * @description The library here whose page holds the section
+       * @example 1
+       */
+      library_id?: string;
+      /** @description The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title */
+      local_id?: string;
+      /** @enum {string} */
+      scope: "home" | "library";
+      section_type: string;
+    };
+    AdminBackupRestoreItem: {
+      account?: components["schemas"]["AdminBackupRestoreAccount"];
+      collection?: components["schemas"]["AdminBackupRestoreCollection"];
+      /** @description A settings page whose differing settings connect to an outside service */
+      external_service: boolean;
+      home_section?: components["schemas"]["AdminBackupRestoreHomeSection"];
+      /** @description The id to choose this item by in a restore request */
+      id: string;
+      /** @enum {string} */
+      kind:
+        | "settings_page"
+        | "plugin"
+        | "library"
+        | "collection"
+        | "template_collection"
+        | "item_artwork"
+        | "branding"
+        | "home_section"
+        | "account";
+      label: string;
+      library?: components["schemas"]["AdminBackupRestoreLibrary"];
+      /** @description What restoring the item does or why it cannot be chosen, for display */
+      message?: string;
+      /** @description Files the item references that were missing when the backup was taken */
+      missing_blobs: string[];
+      plugin?: components["schemas"]["AdminBackupRestorePlugin"];
+      /** @enum {string} */
+      reason?:
+        | "same"
+        | "path_in_use"
+        | "folder_missing"
+        | "library_not_restorable"
+        | "library_not_mapped"
+        | "ambiguous_name"
+        | "needs_another_key"
+        | "config_needs_another_key"
+        | "other_version"
+        | "item_not_on_this_server"
+        | "file_missing"
+        | "not_in_backup"
+        | "changed_since_preview"
+        | "ambiguous_account"
+        | "ambiguous_profile"
+        | "policy_wider"
+        | "group_not_on_this_server"
+        | "login_taken"
+        | "profile_limit"
+        | "user_store_unsupported"
+        | "template_not_available"
+        | "collection_not_mapped"
+        | "unreadable"
+        | "files_missing_here"
+        | "needs_install"
+        | "kept_stricter"
+        | "unverified_backup"
+        | "over_restore_budget"
+        | "needs_primary_profile";
+      /** @description Items (section:id) that must be chosen with this one: a collection whose library is restored by the same request */
+      requires: string[];
+      restart_required: boolean;
+      /** @description Whether the item can be chosen. Items on this server already have nothing to restore. */
+      selectable: boolean;
+      settings?: components["schemas"]["AdminBackupRestoreSetting"][];
+      /** @enum {string} */
+      status:
+        | "on_this_server"
+        | "not_on_this_server"
+        | "differs"
+        | "folder_missing"
+        | "ambiguous"
+        | "needs_another_key";
+    };
+    AdminBackupRestoreLibrary: {
+      /**
+       * @description The library here with the identical folder set
+       * @example 1
+       */
+      local_id?: string;
+      /** @description Folders this server cannot open */
+      missing_paths?: string[];
+      paths: string[];
+      type: string;
+    };
+    AdminBackupRestorePlugin: {
+      config_keys: string[];
+      /** @description False when the configuration was encrypted with another SECRET_KEY: the plugin installs without it and stays disabled */
+      config_restorable: boolean;
+      /** @description Whether the plugin was enabled in the backup */
+      enabled: boolean;
+      /** @description The version installed here, when the plugin is installed */
+      installed_version?: string;
+      version: string;
+    };
+    AdminBackupRestorePolicyDifference: {
+      /** @description The value in the backup, as display text */
+      backup: string;
+      /** @enum {string} */
+      field:
+        | "library_ids"
+        | "max_playback_quality"
+        | "max_streams"
+        | "max_transcodes"
+        | "max_remote_stream_bitrate_kbps"
+        | "max_local_stream_bitrate_kbps"
+        | "max_profiles"
+        | "download_allowed"
+        | "download_transcode_allowed"
+        | "transcode_allowed"
+        | "audio_transcode_allowed"
+        | "requests_allowed"
+        | "permissions";
+      /** @description The value this server would give, as display text */
+      here: string;
+    };
+    AdminBackupRestoreProfile: {
+      /** @description The data the profile carries, in restore order */
+      data_types: components["schemas"]["AdminBackupRestoreDataType"][];
+      has_pin: boolean;
+      /** @description The id to choose this profile by in a restore request */
+      id: string;
+      is_primary: boolean;
+      /**
+       * Format: int64
+       * @description Allowed libraries with no library here; dropped, never widened
+       */
+      libraries_left_out: number;
+      local_id?: string;
+      /** @enum {string} */
+      match: "profile_id" | "restored" | "name" | "new";
+      message?: string;
+      name: string;
+      /** @description A restricted profile with none of its allowed libraries here: restored with no library access */
+      no_library_access: boolean;
+      /** @enum {string} */
+      reason?: "same" | "ambiguous_profile" | "profile_limit";
+      /** @description Library restrictions are on */
+      restricted: boolean;
+      selectable: boolean;
+      /**
+       * @description on_this_server: matched here, and restoring would change nothing in the data the backup has for it (data_types[].pending all 0); differs: matched, with pending changes
+       * @enum {string}
+       */
+      status: "on_this_server" | "not_on_this_server" | "differs" | "ambiguous";
+      /** @description What a restore selection names for this profile: the local profile id, or new */
+      target: string;
+    };
+    AdminBackupRestoreProfileSelection: {
+      /** @description Data types to merge; none restores or keeps the profile without data */
+      data_types?: (
+        | "watch_history"
+        | "ratings"
+        | "favorites"
+        | "collections"
+        | "dismissals"
+        | "preferences"
+        | "notifications"
+      )[];
+      /** @description The profile's id in the preview */
+      profile: string;
+      /** @description The target the preview showed: the local profile id, or new */
+      target: string;
+    };
+    AdminBackupRestoreReport: {
+      /** @description The backup restored from; absent for an upload */
+      backup_id?: string;
+      /** @description The recovery point taken before anything was restored. Restoring it in full with silo backup restore goes back to how the server was. */
+      before_restore_backup_id?: string;
+      counts: components["schemas"]["AdminBackupRestoreCounts"];
+      /** @description Why the restore stopped, when it did */
+      error?: string;
+      /**
+       * @description Classifies error: restore_set_changed (the backup changed since its preview; nothing was restored), busy (another backup or restore held the lock), before_restore_backup_failed (nothing was restored), interrupted, or failed
+       * @enum {string}
+       */
+      error_code?:
+        | "restore_set_changed"
+        | "busy"
+        | "before_restore_backup_failed"
+        | "interrupted"
+        | "failed";
+      /** @description The server running the restore stopped; items listed committed, the rest did not. Running the same restore again is safe. */
+      interrupted: boolean;
+      items: components["schemas"]["AdminBackupRestoreReportItem"][];
+      library_map: components["schemas"]["AdminBackupLibraryMapping"][];
+      /** @description The upload restored from; absent for a backup */
+      upload_id?: string;
+    };
+    AdminBackupRestoreReportAccount: {
+      created: boolean;
+      /** @description Titles of items a restored profile's access here hides (its libraries, content rating, or advisory limits); their entries were left out */
+      hidden: string[];
+      /**
+       * @description The account here, created or matched
+       * @example 1
+       */
+      local_id?: string;
+      profiles: components["schemas"]["AdminBackupRestoreReportProfile"][];
+      /** @description Titles of items the account's data names that this server's catalog does not hold; their entries were left out */
+      unmatched: string[];
+    };
+    AdminBackupRestoreReportData: {
+      /** Format: int64 */
+      added: number;
+      /**
+       * Format: int64
+       * @description Entries left out: items not in this catalog, or references with nothing to map to
+       */
+      left_out: number;
+      notes: string[];
+      /** @enum {string} */
+      type:
+        | "watch_history"
+        | "ratings"
+        | "favorites"
+        | "collections"
+        | "dismissals"
+        | "preferences"
+        | "notifications";
+      /** Format: int64 */
+      unchanged: number;
+      /** Format: int64 */
+      updated: number;
+    };
+    AdminBackupRestoreReportItem: {
+      account?: components["schemas"]["AdminBackupRestoreReportAccount"];
+      /** @description Why a failed item failed */
+      error?: string;
+      id: string;
+      /** @enum {string} */
+      kind:
+        | "settings_page"
+        | "plugin"
+        | "library"
+        | "collection"
+        | "template_collection"
+        | "item_artwork"
+        | "branding"
+        | "home_section"
+        | "account";
+      label: string;
+      message?: string;
+      missing_blobs: string[];
+      notes: string[];
+      /** @enum {string} */
+      outcome: "restored" | "unchanged" | "left_out" | "failed";
+      /**
+       * @description Why a left_out item was left out
+       * @enum {string}
+       */
+      reason?:
+        | "same"
+        | "path_in_use"
+        | "folder_missing"
+        | "library_not_restorable"
+        | "library_not_mapped"
+        | "ambiguous_name"
+        | "needs_another_key"
+        | "config_needs_another_key"
+        | "other_version"
+        | "item_not_on_this_server"
+        | "file_missing"
+        | "not_in_backup"
+        | "changed_since_preview"
+        | "ambiguous_account"
+        | "ambiguous_profile"
+        | "policy_wider"
+        | "group_not_on_this_server"
+        | "login_taken"
+        | "profile_limit"
+        | "user_store_unsupported"
+        | "template_not_available"
+        | "collection_not_mapped"
+        | "unreadable"
+        | "files_missing_here"
+        | "needs_install"
+        | "kept_stricter"
+        | "unverified_backup"
+        | "over_restore_budget"
+        | "needs_primary_profile";
+      restart_keys: string[];
+      restart_required: boolean;
+      /** @enum {string} */
+      section: "libraries" | "plugins" | "settings" | "collections" | "home_sections" | "users";
+    };
+    AdminBackupRestoreReportProfile: {
+      created: boolean;
+      data: components["schemas"]["AdminBackupRestoreReportData"][];
+      id: string;
+      label: string;
+      local_id?: string;
+      message?: string;
+      notes: string[];
+      /** @enum {string} */
+      outcome: "restored" | "unchanged" | "left_out";
+      /** @enum {string} */
+      reason?:
+        | "same"
+        | "path_in_use"
+        | "folder_missing"
+        | "library_not_restorable"
+        | "library_not_mapped"
+        | "ambiguous_name"
+        | "needs_another_key"
+        | "config_needs_another_key"
+        | "other_version"
+        | "item_not_on_this_server"
+        | "file_missing"
+        | "not_in_backup"
+        | "changed_since_preview"
+        | "ambiguous_account"
+        | "ambiguous_profile"
+        | "policy_wider"
+        | "group_not_on_this_server"
+        | "login_taken"
+        | "profile_limit"
+        | "user_store_unsupported"
+        | "template_not_available"
+        | "collection_not_mapped";
+    };
+    AdminBackupRestoreSection: {
+      /**
+       * Format: int64
+       * @description Items the section holds in the backup
+       */
+      count: number;
+      /** @enum {string} */
+      id: "libraries" | "plugins" | "settings" | "collections" | "home_sections" | "users";
+      items: components["schemas"]["AdminBackupRestoreItem"][];
+    };
+    AdminBackupRestoreSelection: {
+      /** @description Collection, template collection, item artwork, and branding item ids */
+      collections?: string[];
+      /** @description Page section item ids (section:<id>) */
+      home_sections?: string[];
+      /** @description Backup library ids */
+      libraries?: string[];
+      /** @description Plugin ids */
+      plugins?: string[];
+      /** @description Settings page ids */
+      settings?: string[];
+      /** @description Accounts of the users section, each with the target the preview showed */
+      users?: components["schemas"]["AdminBackupRestoreUserSelection"][];
+    };
+    AdminBackupRestoreSet: {
+      /** @description Whether the backup's manifest verified under this server's SECRET_KEY. When false the server cannot tell whether the backup was changed after it was written, and a restore needs accept_unauthenticated */
+      authenticated: boolean;
+      /** @description The backup previewed; absent for an upload */
+      backup_id?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      /** @description SHA-256 of the restore set; a restore request must carry it */
+      digest: string;
+      /** Format: int64 */
+      format_version: number;
+      /** @description Whether the backup was taken with this server's SECRET_KEY; when false, encrypted settings and plugin configuration cannot be restored */
+      key_matches: boolean;
+      library_map: components["schemas"]["AdminBackupLibraryMapping"][];
+      missing_blobs: string[];
+      /** @description Setting keys a restore never writes because they describe this server (its identity, storage, infrastructure, and credentials). An entry ending in . or _ is a key prefix. */
+      never_restored_settings: string[];
+      /** @description Items the restore set left out (the dump still holds them), so they are not in any section */
+      omitted: components["schemas"]["AdminBackupOmitted"][];
+      same_server: boolean;
+      sections: components["schemas"]["AdminBackupRestoreSection"][];
+      /** @description The server the backup was taken on */
+      server_id: string;
+      server_name: string;
+      silo_version: string;
+      /** @description The upload previewed; absent for a backup */
+      upload_id?: string;
+    };
+    AdminBackupRestoreSetting: {
+      /** @description The value in the backup; empty when masked */
+      backup_value: string;
+      /**
+       * @description external_service: connects to an outside service (mail, requests, metadata providers)
+       * @enum {string}
+       */
+      class: "portable" | "external_service";
+      /** @description The value on this server; empty when masked */
+      current_value: string;
+      key: string;
+      /** @description An encrypted or sensitive setting: both values are omitted */
+      masked: boolean;
+      /** @description The setting applies after a restart */
+      restart_required: boolean;
+      /**
+       * @description on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores
+       * @enum {string}
+       */
+      status:
+        | "on_this_server"
+        | "differs"
+        | "needs_another_key"
+        | "kept_stricter"
+        | "cleared"
+        | "unverified_backup";
+    };
+    AdminBackupRestoreSource: {
+      /** @description The backup restored from; absent for an upload */
+      backup_id?: string;
+      /** @description The upload restored from; absent for a backup */
+      upload_id?: string;
+    };
+    AdminBackupRestoreUserSelection: {
+      /** @description The account's id in the preview */
+      account: string;
+      /** @description Profiles to restore; none restores the account alone */
+      profiles?: components["schemas"]["AdminBackupRestoreProfileSelection"][];
+      /** @description The target the preview showed: the local account id, or new */
+      target: string;
+    };
+    AdminBackupS3TestBody: {
+      access_key?: string;
+      bucket: string;
+      /** @description The S3 API endpoint, such as https://s3.us-east-1.amazonaws.com. It is not validated as a URI here: an endpoint the test cannot reach fails with step endpoint */
+      endpoint: string;
+      /** @description The folder in the bucket; backups go under <key_prefix>/backups/ */
+      key_prefix?: string;
+      /** @description Path-style addressing (endpoint/bucket/key) instead of virtual-hosted (bucket.endpoint/key) */
+      path_style?: boolean;
+      region?: string;
+      /** @description Omitted uses the stored backup.s3.secret_key, but only when endpoint and access_key are the stored ones */
+      secret_key?: string;
+    };
+    AdminBackupS3TestResult: {
+      /** @description What happened, for display: Connected. Silo wrote and deleted a test file. or what failed */
+      message: string;
+      ok: boolean;
+      /**
+       * @description The step that failed: endpoint, the address cannot be reached; credentials, the keys were refused; bucket, no such bucket or the wrong region; permission, the keys cannot write under the folder; a bucket that refuses only the delete passes, and its lifecycle rules remove old backups
+       * @enum {string}
+       */
+      step?: "endpoint" | "credentials" | "bucket" | "permission";
+    };
+    AdminBackupStarted: {
+      id: string;
+      /** @enum {string} */
+      kind: "manual";
+      /** @enum {string} */
+      status: "in_progress";
+    };
+    AdminBackupUpload: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      completed_at?: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      created_at: string;
+      /** @description SHA-256 of the file as uploaded (the bytes sent, not the parts as stored, which are encrypted on a bucket), frozen when the upload completed; a restore request must carry it */
+      digest?: string;
+      /**
+       * Format: date-time
+       * @description When the upload is deleted: an unfinished or rejected one 24 hours after its last activity, a complete one 7 days after it was last completed, previewed, or restored from. One a queued or running restore reads is kept.
+       */
+      expires_at?: string;
+      id: string;
+      /** @description Where the upload's parts are: a folder in this server's storage, or s3://bucket/key in a bucket */
+      location: string;
+      /** Format: int64 */
+      part_count: number;
+      /**
+       * Format: int64
+       * @description Every part but the last is exactly this many bytes
+       */
+      part_size: number;
+      /** Format: int64 */
+      received_bytes: number;
+      /** Format: int64 */
+      received_parts: number;
+      rejection?: components["schemas"]["AdminBackupUploadRejection"];
+      /** Format: int64 */
+      size_bytes: number;
+      /** @description What a complete restore set says about itself */
+      source?: components["schemas"]["AdminBackupUploadSource"];
+      /**
+       * @description uploading: taking parts; checking: being read and checked; complete: checked, and can be previewed and restored; rejected: not a restore set this server reads (rejection says why); its parts are deleted
+       * @enum {string}
+       */
+      status: "uploading" | "checking" | "complete" | "rejected";
+      /**
+       * Format: date-time
+       * @description The last part or status change
+       */
+      updated_at: string;
+    };
+    AdminBackupUploadCreateBody: {
+      /**
+       * Format: int64
+       * @description Omitted picks 4 MiB
+       */
+      part_size?: number;
+      /** @description The file's SHA-256, when the client knows it; completion rejects other bytes */
+      sha256?: string;
+      /**
+       * Format: int64
+       * @description The file's size; at most max_upload_bytes from the capabilities (2 GiB)
+       */
+      size_bytes: number;
+    };
+    AdminBackupUploadListOutputBody: {
+      items: components["schemas"]["AdminBackupUpload"][];
+    };
+    AdminBackupUploadRejection: {
+      message: string;
+      /**
+       * @description not_a_restore_set: the file is not a restore set Silo reads (message says what failed); newer_silo: written by a newer Silo, upgrade this server first; encrypted: encrypted with another server's SECRET_KEY, decrypt it with silo backup decrypt first; checksum_mismatch: the bytes do not match the sha256 sent when the upload started
+       * @enum {string}
+       */
+      reason: "not_a_restore_set" | "newer_silo" | "encrypted" | "checksum_mismatch";
+    };
+    AdminBackupUploadSource: {
+      /**
+       * Format: date-time
+       * @description When the backup holding the restore set was taken
+       */
+      created_at: string;
+      /** Format: int64 */
+      format_version: number;
+      /** @description The server the restore set was taken on */
+      server_id: string;
+      server_name: string;
+      silo_version: string;
+    };
+    AdminBackupWarning: {
+      /**
+       * @description no_recent_backup: no backup completed in 48 hours, at any destination. no_backups_at_destination: backups completed before, but none is at the current destination (it was switched); earlier copies stay where they were written. key_not_confirmed: backups are encrypted (an S3 bucket) and this server's SECRET_KEY was not confirmed, or changed since; encrypted backups and uploads are paused until POST /admin/backups/s3/acknowledge-key. backup_unreadable: some backups' manifests could not be read just now
+       * @enum {string}
+       */
+      code:
+        | "disabled"
+        | "no_recent_backup"
+        | "destination_unavailable"
+        | "sqlite_user_store"
+        | "pg_dump_missing"
+        | "pg_dump_too_old"
+        | "key_not_confirmed"
+        | "no_backups_at_destination"
+        | "backup_unreadable";
+      message: string;
     };
     AdminBrandingAsset: {
       /** @enum {string} */
@@ -20484,6 +21696,10 @@ export interface components {
     AdminTaskJob: {
       /** Format: int64 */
       artifact_size_bytes: number;
+      /** @description A backup_restore job's report: each chosen item restored, unchanged, left out (with a reason), or failed (with an error). Kept when the job is canceled or interrupted. */
+      backup_restore_result?: components["schemas"]["AdminBackupRestoreReport"];
+      /** @description The backup a backup_restore job restores from, present from the moment it is queued */
+      backup_restore_source?: components["schemas"]["AdminBackupRestoreSource"];
       cancelable: boolean;
       catalog_result?: components["schemas"]["AdminTaskJobCatalogResult"];
       /**
@@ -24437,6 +25653,7 @@ export interface components {
       custom_name?: string | null;
     };
     DiagnosticsCapabilities: {
+      accepted_crash_sources: string[];
       accepted_schema_versions: number[];
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
@@ -30802,6 +32019,67 @@ export interface components {
        * @example auto
        */
       subtitle_mode?: string;
+    };
+    ProfileExportCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description The data types an export carries, in import order */
+      data_types: string[];
+      /**
+       * @description The document format exports carry and imports accept
+       * @example silo-profile-export
+       */
+      format: string;
+      /**
+       * Format: int64
+       * @description The largest document an import accepts
+       */
+      max_import_bytes: number;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      /**
+       * Format: int64
+       * @description The newest format version this server writes and reads
+       * @example 1
+       */
+      version: number;
+    };
+    ProfileImportData: {
+      /** Format: int64 */
+      added: number;
+      /**
+       * Format: int64
+       * @description Entries left out: items not in this catalog or that the profile cannot see, or references with nothing to map to
+       */
+      left_out: number;
+      notes: string[];
+      /** @enum {string} */
+      type:
+        | "watch_history"
+        | "ratings"
+        | "favorites"
+        | "collections"
+        | "dismissals"
+        | "preferences"
+        | "notifications";
+      /** Format: int64 */
+      unchanged: number;
+      /** Format: int64 */
+      updated: number;
+    };
+    ProfileImportResult: {
+      data: components["schemas"]["ProfileImportData"][];
+      /** @description Always empty: items the profile may not see are listed in unmatched, so an import cannot reveal what a hidden library holds */
+      hidden: string[];
+      /** @description The export came from this server; library references were kept only then */
+      same_server: boolean;
+      /** @description Titles of items left out: not in this server's catalog, or not available to this profile. The two are not told apart */
+      unmatched: string[];
     };
     ProfilePINCheck: {
       /**
@@ -42292,6 +43570,2135 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminTask"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminBackups: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupList"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  startAdminBackup: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupStarted"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAdminBackup: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createAdminBackupDownloadLinks: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminBackupDownloadLinksBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupDownloadLinksOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  downloadAdminBackupObject: {
+    parameters: {
+      query: {
+        exp: number;
+        sig: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+        name:
+          | "manifest.json"
+          | "db.dump"
+          | "blobs.tar"
+          | "restore-set.tar"
+          | "db.dump.age"
+          | "blobs.tar.age"
+          | "restore-set.tar.age";
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The stored object */
+      200: {
+        headers: {
+          "Content-Disposition"?: string;
+          "Content-Length"?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/octet-stream": string;
+        };
+      };
+      /** @description Object not found, or the capability is invalid or expired */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description The backup is encrypted with another server's SECRET_KEY, so this server cannot decrypt its restore set, or the stored restore set no longer matches its checksum in the manifest */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Backup storage unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  startAdminBackupRestore: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminBackupRestoreBody"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          Location?: string;
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminTaskJob"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminBackupRestoreSet: {
+    parameters: {
+      query?: {
+        /** @description Confirms reading a backup whose manifest this server cannot authenticate; without it such a backup answers 409 backup_unauthenticated and nothing inside it is read */
+        accept_unauthenticated?: boolean;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupRestoreSet"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminBackupCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  acknowledgeAdminBackupKey: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminBackupAcknowledgeKeyBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupAcknowledgeKeyOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  testAdminBackupS3: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminBackupS3TestBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupS3TestResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAdminBackupUploads: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupUploadListOutputBody"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  createAdminBackupUpload: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminBackupUploadCreateBody"];
+      };
+    };
+    responses: {
+      /** @description Created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupUpload"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  deleteAdminBackupUpload: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        upload_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  completeAdminBackupUpload: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        upload_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupUpload"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  putAdminBackupUploadPart: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description The part's position, counting from 0 */
+        part: number;
+        upload_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/octet-stream": string;
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupUpload"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  startAdminBackupUploadRestore: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        upload_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminBackupRestoreBody"];
+      };
+    };
+    responses: {
+      /** @description Accepted */
+      202: {
+        headers: {
+          Location?: string;
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminTaskJob"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminBackupUploadRestoreSet: {
+    parameters: {
+      query?: {
+        /** @description Confirms reading an upload, which this server cannot authenticate: it carries no manifest this server signed. Without it the preview answers 409 backup_unauthenticated and nothing inside the upload is read */
+        accept_unauthenticated?: boolean;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        upload_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminBackupRestoreSet"];
         };
       };
       /** @description Bad Request */
@@ -95410,6 +98817,138 @@ export interface operations {
       };
     };
   };
+  getProfileExportCapability: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProfileExportCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getRatingsCapability: {
     parameters: {
       query?: never;
@@ -128327,6 +131866,281 @@ export interface operations {
         headers: {
           /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
           ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  exportProfile: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Content-Disposition"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  importProfile: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": {
+          [key: string]: unknown;
+        };
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProfileImportResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
           [name: string]: unknown;
         };
         content: {
