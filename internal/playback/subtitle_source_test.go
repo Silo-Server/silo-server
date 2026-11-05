@@ -126,6 +126,9 @@ func TestServeExtractReadsWholeTracksThroughTheSource(t *testing.T) {
 		whole       error
 		failPackets bool
 		format      string
+		// refused leaves a cache dir writable by others, which the cache
+		// refuses.
+		refused bool
 		// want is the body; demuxes counts extracts of the source, and
 		// keptCopy what the demux copied for keeping ("" for none).
 		want     string
@@ -136,9 +139,21 @@ func TestServeExtractReadsWholeTracksThroughTheSource(t *testing.T) {
 		{name: "a track the source can't read is demuxed and kept", whole: errors.New("no cues"), format: "matroska", want: "demuxed", demuxes: 1, keptCopy: "copy"},
 		{name: "a track the source can't keep is demuxed", whole: errors.New("no cues"), want: "demuxed", demuxes: 1},
 		{name: "a failed conversion falls back to the demux", failPackets: true, format: "matroska", want: "demuxed", demuxes: 1, keptCopy: "copy"},
+		{name: "a refused cache dir is demuxed without a copy", whole: errors.New("no cues"), format: "matroska", refused: true, want: "demuxed", demuxes: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, source := newTestCache(t)
+			wholeCalls := 1
+			if tc.refused {
+				dir := filepath.Join(filepath.Dir(source), "subtitle-cache")
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(dir, 0o777); err != nil {
+					t.Fatal(err)
+				}
+				wholeCalls = 2
+			}
 			src := &fakeEmbeddedSource{whole: tc.whole, format: tc.format, keptCopy: make(chan string, 1)}
 			c.SetEmbeddedSource(src)
 			var mu sync.Mutex
@@ -159,9 +174,9 @@ func TestServeExtractReadsWholeTracksThroughTheSource(t *testing.T) {
 					}
 				}
 			}
-			// The second request is a cache hit.
-			if demuxes != tc.demuxes || src.wholeCalls != 1 {
-				t.Fatalf("%d demuxes and %d source reads, want %d and 1", demuxes, src.wholeCalls, tc.demuxes)
+			// The second request is a cache hit unless the dir was refused.
+			if demuxes != tc.demuxes || src.wholeCalls != wholeCalls {
+				t.Fatalf("%d demuxes and %d source reads, want %d and %d", demuxes, src.wholeCalls, tc.demuxes, wholeCalls)
 			}
 			if tc.keptCopy != "" {
 				select {
