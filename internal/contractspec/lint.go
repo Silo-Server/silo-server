@@ -40,6 +40,9 @@ const (
 	typeString = "string"
 )
 
+// componentSchemas prefixes the location of a component schema in findings.
+const componentSchemas = "components.schemas."
+
 // Lint checks the generated document against the contract's shape rules and
 // returns every violation, sorted, so a report names them all at once. The
 // rules: every operation names a unique lowerCamelCase operationId; every
@@ -96,8 +99,8 @@ func Lint(doc []byte) []string {
 		if !isPascal(name) {
 			fail("components.schemas.%s: schema name is not PascalCase", name)
 		}
-		lintFreeForm(fail, "components.schemas."+name, d.Components.Schemas[name])
-		lintMemberShapes(fail, "components.schemas."+name, d.Components.Schemas[name])
+		lintFreeForm(fail, componentSchemas+name, d.Components.Schemas[name])
+		lintMemberShapes(fail, componentSchemas+name, d.Components.Schemas[name])
 	}
 	if _, ok := d.Components.SecuritySchemes[securityScheme]; !ok {
 		fail("components.securitySchemes.%s is missing", securityScheme)
@@ -369,7 +372,7 @@ func lintMemberShapes(fail func(string, ...any), where string, s *schema) {
 // the member it was written for.
 func lintNullableEnum(fail func(string, ...any), where string, s *schema) {
 	refused := s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil)
-	if reason, withheld := apiv2.NullEnumWithheld[strings.TrimPrefix(where, "components.schemas.")]; withheld {
+	if reason, withheld := apiv2.NullEnumWithheld[strings.TrimPrefix(where, componentSchemas)]; withheld {
 		if !refused {
 			fail("%s: no longer a nullable enum without null; delete its apiv2.NullEnumWithheld entry (%s)", where, reason)
 		}
