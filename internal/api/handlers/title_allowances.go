@@ -36,8 +36,9 @@ type titleAllowanceStore interface {
 	// SetCollectionAllowance adds or removes one collection allowance and
 	// reports whether a row changed.
 	SetCollectionAllowance(ctx context.Context, m userstore.AllowanceManager, profileID, collectionID string, allowed bool) (bool, error)
-	// CollectionItemIDs lists the media items a personal collection stores.
-	CollectionItemIDs(ctx context.Context, userID int, collectionID string) ([]string, error)
+	// CollectionItemIDs lists up to limit of the media items a personal
+	// collection stores, in its order.
+	CollectionItemIDs(ctx context.Context, userID int, collectionID string, limit int) ([]string, error)
 	// AllowTitles adds a title allowance for every movie and series among
 	// contentIDs and returns how many were new.
 	AllowTitles(ctx context.Context, m userstore.AllowanceManager, profileID string, contentIDs []string) (int, error)
@@ -451,10 +452,15 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	return added, nil
 }
 
+// maxCopiedTitles bounds how many titles one collection copy allows: the most
+// a synced list holds (collectionutil.MDBListMaxEntries). A smart collection
+// with no item limit would otherwise read the whole matching catalog.
+const maxCopiedTitles = 10_000
+
 // storedCollectionTitles lists the stored items of a collection that the
-// actor may see.
+// actor may see, up to maxCopiedTitles.
 func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, actor AllowanceActor, collectionID string) ([]string, error) {
-	ids, err := h.allowances.CollectionItemIDs(ctx, actor.UserID, collectionID)
+	ids, err := h.allowances.CollectionItemIDs(ctx, actor.UserID, collectionID, maxCopiedTitles)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list the collection's titles")
 	}
@@ -466,7 +472,7 @@ func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, acto
 }
 
 // smartCollectionTitles lists what a smart collection's query matches for the
-// actor, up to the collection's item limit.
+// actor, up to the collection's item limit and maxCopiedTitles.
 func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, actor AllowanceActor, collection *userstore.Collection) ([]string, error) {
 	if h.smart == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Catalog queries are unavailable")
@@ -479,7 +485,9 @@ func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, actor
 	if err := def.ValidateWithOptions(true, true); err != nil {
 		return nil, apiError(http.StatusUnprocessableEntity, "invalid_query", err.Error())
 	}
-	items, _, err := h.smart.Preview(ctx, def, actor.Viewer.Access, *def.Limit)
+	limit := min(*def.Limit, maxCopiedTitles)
+	def.Limit = &limit
+	items, _, err := h.smart.Preview(ctx, def, actor.Viewer.Access, limit)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to evaluate the smart collection")
 	}

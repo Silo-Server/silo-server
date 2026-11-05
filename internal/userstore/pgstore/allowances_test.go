@@ -209,7 +209,7 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 	})
 
 	t.Run("copying a collection's items allows its movies and series once", func(t *testing.T) {
-		ids, err := f.allow.CollectionItemIDs(ctx, f.userID, f.live)
+		ids, err := f.allow.CollectionItemIDs(ctx, f.userID, f.live, 10)
 		if err != nil || len(ids) != 2 {
 			t.Fatalf("CollectionItemIDs = %v, %v; want the movie and the audiobook", ids, err)
 		}

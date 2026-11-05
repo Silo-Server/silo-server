@@ -100,13 +100,15 @@ func (s *TitleAllowances) SetCollectionAllowance(ctx context.Context, m userstor
 		WHERE user_id = $1 AND profile_id = $2 AND collection_id = $3`, m.UserID, profileID, collectionID)
 }
 
-// CollectionItemIDs lists the media items a personal collection stores. Smart
-// collections store none; their items come from their query.
-func (s *TitleAllowances) CollectionItemIDs(ctx context.Context, userID int, collectionID string) ([]string, error) {
+// CollectionItemIDs lists up to limit of the media items a personal
+// collection stores, in its order. Smart collections store none; their items
+// come from their query.
+func (s *TitleAllowances) CollectionItemIDs(ctx context.Context, userID int, collectionID string, limit int) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT media_item_id FROM user_personal_collection_items
 		WHERE user_id = $1 AND collection_id = $2
-		ORDER BY position, media_item_id`, userID, collectionID)
+		ORDER BY position, media_item_id
+		LIMIT $3`, userID, collectionID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing collection items: %w", err)
 	}

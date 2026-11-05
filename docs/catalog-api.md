@@ -563,7 +563,8 @@ answers `403` otherwise.
 - `POST /api/v2/profiles/{id}/allowed-titles/copy-collection` with
   `{"collection_id": ...}` allows the movies and series a personal collection
   holds now (for a smart collection, what its query matches for the acting
-  profile), as individual allowances, and answers how many were new.
+  profile), as individual allowances, and answers how many were new. One copy
+  allows at most 10,000 titles.
 
 An allowed title is visible and playable for the profile everywhere content is
 reached, Jellyfin clients included. A series allowance covers its seasons and
