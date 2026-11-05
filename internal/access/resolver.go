@@ -106,8 +106,9 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	}
 
 	preferences := ResolveViewerPreferences(ctx, store, r.defaults, input.ProfileID)
+	var profile *userstore.Profile
 	if input.ProfileID != "" {
-		profile, err := store.GetProfile(ctx, input.ProfileID)
+		profile, err = store.GetProfile(ctx, input.ProfileID)
 		if err != nil {
 			return Scope{}, fmt.Errorf("loading profile %s: %w", input.ProfileID, err)
 		}
@@ -133,6 +134,9 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	}
 
 	scope.PreferencesDegraded = preferences.Degraded
+	if profile != nil {
+		scope.MaturityLimits = scope.WithAllowedTitles(profile.AllowedTitleIDs)
+	}
 
 	// Apply the profile's disabled library IDs setting.
 	disabled := preferences.DisabledLibraryIDs

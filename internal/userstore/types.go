@@ -42,9 +42,15 @@ type Profile struct {
 	ShowForcedSubtitles        bool
 	LibraryRestrictionsEnabled bool
 	AllowedLibraryIDs          []int
-	MaxPlaybackQuality         string
-	CreatedAt                  string
-	UpdatedAt                  string
+	// AllowedTitleIDs are the movies and series the profile may watch above
+	// its maturity limits (access.MaturityLimits.AllowedTitleIDs): its title
+	// allowances plus the titles of its live-allowed collections, sorted.
+	// Read-only here; only single-profile reads fill it, and the allowance
+	// service writes the rows.
+	AllowedTitleIDs    []string
+	MaxPlaybackQuality string
+	CreatedAt          string
+	UpdatedAt          string
 }
 
 // DeviceSettingEntry is a server-managed setting override scoped to one

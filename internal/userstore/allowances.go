@@ -1,0 +1,36 @@
+package userstore
+
+import "slices"
+
+// TitleAllowance is one movie or series a limited profile may watch above its
+// maturity limits.
+type TitleAllowance struct {
+	ContentID string
+	CreatedAt string
+}
+
+// CollectionAllowance is a personal collection whose titles a limited profile
+// may watch above its maturity limits. Live reports whether the collection
+// currently allows anything: only a manual collection created by the
+// account's primary profile does (see pgstore.ProfileAllowedTitleIDsSQL).
+type CollectionAllowance struct {
+	CollectionID string
+	Name         string
+	ItemCount    int
+	Live         bool
+	CreatedAt    string
+}
+
+// CollectionTypeManual is the collection_type of a hand-picked personal
+// collection, the only kind a profile can be allowed as it changes.
+const CollectionTypeManual = "manual"
+
+// AllowanceTitleTypes are the media_items types an allowance may name. A
+// series allowance covers its seasons and episodes, so neither is allowed on
+// its own.
+var AllowanceTitleTypes = []string{"movie", "series"}
+
+// AllowableTitleType reports whether an item of this type can be allowed.
+func AllowableTitleType(itemType string) bool {
+	return slices.Contains(AllowanceTitleTypes, itemType)
+}

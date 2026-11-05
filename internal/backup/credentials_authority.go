@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // accountAuthority is what an account may do: its rank (the Owner over
@@ -36,7 +37,7 @@ type accountAuthority struct {
 // profileLimits are a profile's protections and restrictions: its PIN,
 // whether it manages the household (the primary profile), a child
 // profile, its rating and advisory-age ceilings, its library restriction,
-// and its playback-quality ceiling.
+// its playback-quality ceiling, and the titles allowed above its ceilings.
 type profileLimits struct {
 	pin                bool
 	primary            bool
@@ -47,6 +48,10 @@ type profileLimits struct {
 	restricted         bool
 	libraries          []int
 	quality            string
+	// allowedTitles are the titles the profile may watch above its
+	// ceilings: its title allowances and the titles of its live-allowed
+	// collections, resolved as the access scope resolves them.
+	allowedTitles []string
 }
 
 // readAuthority reads the authority of the accounts ids in tx's database;
@@ -106,7 +111,8 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 		SELECT p.id, coalesce(p.pin_hash, '') <> '', p.is_primary, p.is_child, coalesce(p.max_content_rating, ''), p.max_advisory_age::int,
 			p.require_advisory_age, p.library_restrictions_enabled,
 			coalesce((SELECT array_agg(a.library_id ORDER BY a.library_id) FROM user_profile_allowed_libraries a WHERE a.user_id = p.user_id AND a.profile_id = p.id), '{}'),
-			coalesce(p.max_playback_quality, '')
+			coalesce(p.max_playback_quality, ''),
+			ARRAY(`+pgstore.ProfileAllowedTitleIDsSQL("p.user_id", "p.id")+`)
 		FROM user_profiles p WHERE p.user_id = $1`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("reading account %d's profiles: %w", userID, err)
@@ -117,7 +123,7 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 		var id string
 		var p profileLimits
 		if err := rows.Scan(&id, &p.pin, &p.primary, &p.child, &p.ceiling, &p.advisoryAge, &p.requireAdvisoryAge, &p.restricted, &p.libraries,
-			&p.quality); err != nil {
+			&p.quality, &p.allowedTitles); err != nil {
 			return nil, err
 		}
 		out[id] = p
@@ -192,6 +198,11 @@ func (p profileLimits) looserThan(live profileLimits) bool {
 			if !slices.Contains(live.libraries, id) {
 				return true
 			}
+		}
+	}
+	for _, id := range p.allowedTitles {
+		if !slices.Contains(live.allowedTitles, id) {
+			return true
 		}
 	}
 	return false

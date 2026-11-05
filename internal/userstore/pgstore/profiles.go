@@ -127,7 +127,7 @@ func QueueProfile(batch *pgx.Batch, userID int, id string) func(pgx.BatchResults
 
 // profileByIDQuery reads one profile together with its allowed libraries in
 // ascending id order, so a profile costs one statement.
-const profileByIDQuery = `
+var profileByIDQuery = `
 	SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
 	       require_advisory_age,
 	       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
@@ -137,12 +137,34 @@ const profileByIDQuery = `
 	           SELECT library_id FROM user_profile_allowed_libraries l
 	           WHERE l.user_id = user_profiles.user_id AND l.profile_id = user_profiles.id
 	           ORDER BY library_id ASC
-	       )
+	       ),
+	       ARRAY(` + ProfileAllowedTitleIDsSQL("user_profiles.user_id", "user_profiles.id") + `)
 	FROM user_profiles WHERE user_id = $1 AND id = $2`
+
+// ProfileAllowedTitleIDsSQL renders the ordered, distinct content IDs a
+// profile is allowed above its maturity limits: its own title allowances plus
+// the titles of each live-allowed collection. A collection allows its titles
+// only while it is a manual collection created by the account's current
+// primary profile, so the household manager alone decides what it holds.
+// userIDExpr and profileIDExpr are SQL expressions for the profile's key.
+func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
+	return `
+	           SELECT content_id FROM profile_title_allowances ta
+	           WHERE ta.user_id = ` + userIDExpr + ` AND ta.profile_id = ` + profileIDExpr + `
+	           UNION
+	           SELECT ci.media_item_id FROM profile_collection_allowances ca
+	           JOIN user_personal_collections c ON c.user_id = ca.user_id AND c.id = ca.collection_id
+	           JOIN user_profiles creator ON creator.user_id = c.user_id AND creator.id = c.creator_profile_id
+	           JOIN user_personal_collection_items ci ON ci.user_id = c.user_id AND ci.collection_id = c.id
+	           WHERE ca.user_id = ` + userIDExpr + ` AND ca.profile_id = ` + profileIDExpr + `
+	             AND c.collection_type = 'manual' AND creator.is_primary
+	           ORDER BY 1`
+}
 
 func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	var libraryIDs []int
-	p, err := scanProfile(row, &libraryIDs)
+	var allowedTitleIDs []string
+	p, err := scanProfile(row, &libraryIDs, &allowedTitleIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -153,6 +175,9 @@ func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	// reports it.
 	if len(libraryIDs) > 0 {
 		p.AllowedLibraryIDs = libraryIDs
+	}
+	if len(allowedTitleIDs) > 0 {
+		p.AllowedTitleIDs = allowedTitleIDs
 	}
 	return p, nil
 }
