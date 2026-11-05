@@ -301,7 +301,9 @@ func missingInSchema(err error) bool {
 // postLoad runs the steps after a restore's load against the restored
 // schema, which is the backup's. A backup of an older schema (a copy taken
 // before an upgrade, say) may lack what a step changes: that step is
-// skipped and says so, and the restore goes on. Each step changes the
+// skipped and says so, and the restore goes on, except a step that guards
+// access (strictStep), which takes its stricter outcome instead or fails
+// the restore. Each step changes the
 // restored database in one transaction or statement, so a skipped one
 // changed nothing. A backup of this binary's schema skips nothing.
 type postLoad struct {
@@ -330,6 +332,23 @@ func (p postLoad) step(what string, err error) error {
 	return nil
 }
 
+// strictStep is step for a step whose outcome guards access: when the
+// backup's older schema lacks what it reads, it says so and runs
+// fallback, the stricter outcome (named instead), and fails if that
+// fails too. It never skips.
+func (p postLoad) strictStep(what string, err error, instead string, fallback func() error) error {
+	if err == nil || !p.older || !missingInSchema(err) {
+		return err
+	}
+	pgErr, _ := errors.AsType[*pgconn.PgError](err)
+	_, _ = fmt.Fprintf(p.out, "Could not run %s: the backup's schema (version %d) is older than this build's and %s. %s instead.\n",
+		what, p.version, pgErr.Message, strings.ToUpper(instead[:1])+instead[1:])
+	if ferr := fallback(); ferr != nil {
+		return fmt.Errorf("%s on the backup's older schema: %w", instead, ferr)
+	}
+	return nil
+}
+
 // What the restore output calls the steps both restores run after the load.
 const (
 	stepSigningKeys  = "new signing keys"
@@ -342,14 +361,24 @@ const (
 // plugin releases, and policies with those of liveURL, or with none when
 // liveURL is "".
 func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string) error {
-	if err := p.step("replacing the backup's credentials, so it keeps the backup's "+carriedKinds+
-		" as they were; revoke any revoked since", carryCredentials(ctx, loader, dbURL, liveURL, p.out)); err != nil {
+	// What the credential and plugin steps guard (revoked keys, replaced
+	// releases) must not come back because a step could not run on an
+	// older schema: each falls back to the stricter outcome, or fails.
+	if err := p.strictStep("replacing the backup's credentials", carryCredentials(ctx, loader, dbURL, liveURL, p.out),
+		"leaving out all of the backup's "+carriedKinds, func() error { return carryCredentials(ctx, loader, dbURL, "", p.out) }); err != nil {
 		return err
 	}
 	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, liveURL, p.out)); err != nil {
 		return err
 	}
-	if err := p.step("carrying the plugin releases", carryPluginReleases(ctx, loader, dbURL, liveURL, p.out)); err != nil {
+	if err := p.strictStep("carrying the plugin releases", carryPluginReleases(ctx, loader, dbURL, liveURL, p.out),
+		"turning off every restored plugin", func() error {
+			off, err := loader.DisablePlugins(ctx, dbURL)
+			if err == nil && len(off) > 0 {
+				_, _ = fmt.Fprintf(p.out, "Turned off %d plugins; check and enable them after Silo starts: %s.\n", len(off), strings.Join(off, ", "))
+			}
+			return err
+		}); err != nil {
 		return err
 	}
 	return p.step("carrying the account policies", carryPolicies(ctx, loader, dbURL, liveURL, p.out))
@@ -566,6 +595,10 @@ type DatabaseLoader interface {
 	// CarryPluginReleases gives dbURL's plugin installations liveURL's
 	// releases ("" for none), returning those it turned off.
 	CarryPluginReleases(ctx context.Context, dbURL, liveURL string) ([]string, error)
+	// DisablePlugins turns off every plugin installation in dbURL, and
+	// returns them: the fallback when CarryPluginReleases cannot run on a
+	// backup's older schema.
+	DisablePlugins(ctx context.Context, dbURL string) ([]string, error)
 	// CarryServerSpecificSettings gives dbURL liveURL's server-specific
 	// settings and returns how many it changed.
 	CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error)

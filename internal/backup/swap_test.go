@@ -267,6 +267,9 @@ func (l fakeLoader) CarryPolicies(context.Context, string, string) ([]string, er
 func (l fakeLoader) CarryPluginReleases(context.Context, string, string) ([]string, error) {
 	return nil, nil
 }
+func (l fakeLoader) DisablePlugins(context.Context, string) ([]string, error) {
+	return nil, nil
+}
 func (l fakeLoader) CarryServerSpecificSettings(context.Context, string, string) (int, error) {
 	return 0, nil
 }
