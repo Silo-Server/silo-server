@@ -69,7 +69,7 @@ const (
 	// uploadCheckTimeout bounds a completion's reads of the parts (a hash
 	// pass when a SHA-256 was sent, then the decode), and with them how long
 	// a completion holds the subsystem lock.
-	uploadCheckTimeout = 20 * time.Minute
+	uploadCheckTimeout = UploadCheckTimeout
 	// uploadObjectSweepInterval spaces the sweeps that list the upload
 	// folders on create and list.
 	uploadObjectSweepInterval = 10 * time.Minute
@@ -85,6 +85,11 @@ const (
 	// maxRejectionMessage bounds what a rejection keeps of the reader's error.
 	maxRejectionMessage = 1000
 )
+
+// UploadCheckTimeout is the longest a completion reads an upload's parts
+// before it answers; the API's response deadline for a completion derives
+// from it.
+const UploadCheckTimeout = 20 * time.Minute
 
 // Upload statuses.
 const (

@@ -28,8 +28,9 @@ const (
 	// deadline: storing the last bytes and recording the part.
 	uploadPartWriteSlack = time.Minute
 	// uploadCheckWriteDeadline covers the completion's bounded read of a
-	// 2 GiB set (backup.uploadCheckTimeout) before it answers.
-	uploadCheckWriteDeadline = 15 * time.Minute
+	// 2 GiB set (backup.UploadCheckTimeout) before it answers, with time to
+	// write the answer, so a check that runs to its limit still answers.
+	uploadCheckWriteDeadline = backup.UploadCheckTimeout + 2*time.Minute
 )
 
 type AdminBackupUploadSource struct {
