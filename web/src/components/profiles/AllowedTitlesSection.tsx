@@ -18,11 +18,23 @@ import { useDebounce } from "@/hooks/useDebounce";
 const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
 
-/** A list that could not load, with a retry, in place of a wrong empty state. */
-function LoadError({ what, onRetry }: { what: string; onRetry: () => void }) {
+/**
+ * A list that could not load, with a retry: in place of a wrong empty state
+ * when nothing loaded (`stale` false), or above the cached list when only a
+ * refresh failed (`stale` true).
+ */
+function LoadError({
+  what,
+  stale,
+  onRetry,
+}: {
+  what: string;
+  stale: boolean;
+  onRetry: () => void;
+}) {
   return (
     <p role="alert" className="text-muted-foreground flex items-center gap-2 text-sm">
-      Couldn't load the {what}.
+      {stale ? `The ${what} may be out of date.` : `Couldn't load the ${what}.`}
       <Button type="button" variant="link" size="sm" onClick={onRetry}>
         Retry
       </Button>
@@ -56,11 +68,16 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
         onPick={(item) => setTitle.mutate({ profileId, itemId: item.content_id, allowed: true })}
       />
 
+      {titles.isError ? (
+        <LoadError
+          what="allowed titles"
+          stale={titles.data !== undefined}
+          onRetry={() => void titles.refetch()}
+        />
+      ) : null}
       {titles.isLoading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
-      ) : titles.isError && !titles.data ? (
-        <LoadError what="allowed titles" onRetry={() => void titles.refetch()} />
-      ) : (titles.data ?? []).length === 0 ? (
+      ) : titles.isError && !titles.data ? null : (titles.data ?? []).length === 0 ? (
         <p className="text-muted-foreground text-sm">No titles allowed yet.</p>
       ) : (
         <ul aria-label="Allowed titles" className="grid gap-2 sm:grid-cols-2">
@@ -97,8 +114,12 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
         </ul>
       )}
 
-      {collections.isError && !collections.data ? (
-        <LoadError what="allowed collections" onRetry={() => void collections.refetch()} />
+      {collections.isError ? (
+        <LoadError
+          what="allowed collections"
+          stale={collections.data !== undefined}
+          onRetry={() => void collections.refetch()}
+        />
       ) : null}
       {(collections.data ?? []).length > 0 ? (
         <div className="space-y-2">
