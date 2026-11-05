@@ -2723,7 +2723,6 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	hlsAudioTranscode := req.serverBitrateCapKbps == 0 && !bitrateRequiresEncode && !hlsAudioCopy &&
 		enableTranscoding &&
 		!supportsDirectPlay &&
-		(!allowAudioCopy || !audioSupported || !enableDirectStream) &&
 		(remuxAudioEncodeFMP4 || remuxAudioEncodeTS)
 	transcodeAudio := !hlsAudioCopy &&
 		allowVideoCopy &&

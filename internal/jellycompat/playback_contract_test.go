@@ -232,13 +232,16 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 		AudioTracks: []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}}}
 	// The relevant parts of the Jellyfin Android TV 0.19 default profile.
 	profile := DeviceProfile{
-		DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv,mp4,ts", VideoCodec: "h264,hevc", AudioCodec: "aac,ac3,eac3"}},
+		DirectPlayProfiles:  []DirectPlayProfile{{Type: "Video", Container: "mkv,mp4,ts", VideoCodec: "h264,hevc", AudioCodec: "aac,ac3,eac3,flac"}},
 		TranscodingProfiles: []TranscodingProfile{{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3"}},
 	}
 	h := &PlaybackHandler{codec: NewResourceIDCodec(), JWTSecret: "secret"}
 	stereoAAC := version
 	stereoAAC.CodecAudio = "aac"
 	stereoAAC.AudioTracks = []models.AudioTrack{{Codec: "aac", Channels: 2, Default: true}}
+	flac := version
+	flac.CodecAudio = "flac"
+	flac.AudioTracks = []models.AudioTrack{{Codec: "flac", Channels: 2, Default: true}}
 	videoOnly := version
 	videoOnly.CodecAudio = ""
 	videoOnly.AudioTracks = nil
@@ -253,6 +256,9 @@ func TestJellyfinAndroidTVRetriesCopyVideo(t *testing.T) {
 		{name: "direct play also reports direct stream", version: version, directPlay: true, directStream: true},
 		{name: "first retry copies video and audio", version: version, directStream: true, wantVideoCopy: true},
 		{name: "second retry copies video and encodes audio", version: version, wantVideoCopy: true, wantAudioEncode: true},
+		// Direct play accepts FLAC but HLS cannot carry it, so the audio is
+		// encoded rather than the video.
+		{name: "first retry encodes audio HLS cannot carry", version: flac, directStream: true, wantVideoCopy: true, wantAudioEncode: true},
 		// Encoding AAC stereo to AAC stereo would repeat the stream that failed.
 		{name: "second retry encodes video when the audio would not change", version: stereoAAC},
 		// Without direct play profiles no audio counts as supported, which
