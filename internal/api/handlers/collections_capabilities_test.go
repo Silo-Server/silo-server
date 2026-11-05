@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -28,9 +29,9 @@ func TestCollectionCapabilitiesAdvertiseSortSupport(t *testing.T) {
 
 	// Every advertised kind must actually be accepted, or a client that trusts
 	// the capability gets a 400. This is the guard against the list drifting
-	// away from what normalizeCollectionRef allows.
+	// away from what catalog.NormalizeSortPreferenceRef allows.
 	for _, kind := range got.SortPreferenceKinds {
-		if _, _, ok := normalizeCollectionRef(kind, "collection-1"); !ok {
+		if _, _, ok := catalog.NormalizeSortPreferenceRef(kind, "collection-1"); !ok {
 			t.Fatalf("advertised kind %q is rejected by normalizeCollectionRef", kind)
 		}
 	}

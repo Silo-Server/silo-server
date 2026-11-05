@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -24,7 +25,12 @@ import (
 
 type sessionContextKey string
 
-const compatSessionKey sessionContextKey = "jellycompat_session"
+const (
+	compatSessionKey sessionContextKey = "jellycompat_session"
+	// compatPlaybackGrantKey carries the negotiation whose PlaySessionId
+	// authorized a media request, when one did.
+	compatPlaybackGrantKey sessionContextKey = "jellycompat_playback_grant"
+)
 
 var mediaBrowserTokenPattern = regexp.MustCompile(`(?i)token="?([^",\s]+)"?`)
 
@@ -355,7 +361,7 @@ func PlaybackSessionAuth(sessions *SessionStore, playbackStore CompatPlaybackSto
 						return
 					}
 					if ok {
-						serveWithSession(next, w, r, session)
+						serveWithSession(next, w, r.WithContext(context.WithValue(r.Context(), compatPlaybackGrantKey, playSession)), session)
 						return
 					}
 					writeError(w, http.StatusUnauthorized, "Unauthorized", "Session expired")
@@ -459,14 +465,51 @@ func touchStaticStreamGrant(store CompatPlaybackStore, playSession *PlaybackSess
 }
 
 func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool {
-	if session == nil || session.Terminal || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
 	}
 	itemID := firstNonEmpty(chi.URLParam(r, "id"), chi.URLParam(r, "routeItemId"))
-	if itemID == "" || !mediaSourceIDsEqual(itemID, session.RouteItemID) {
+	sourceID := chi.URLParam(r, "routeMediaSourceId")
+	if sourceID == "" {
+		var ok bool
+		if sourceID, ok = queryMediaSourceID(r.URL.Query()); !ok {
+			return false
+		}
+	}
+	return playbackGrantCovers(session, itemID, sourceID)
+}
+
+// queryMediaSourceID is the MediaSourceId query value in any spelling the
+// handlers read (newCaseInsensitiveQuery also takes "MediaSourceId[]"), and
+// false when spellings carry different sources: the grant check and the
+// handler each read the key case-insensitively, and the lookup would pick one
+// arbitrarily. Empty values name no source.
+func queryMediaSourceID(query url.Values) (string, bool) {
+	sourceID := ""
+	for key, values := range query {
+		if !strings.EqualFold(strings.TrimSuffix(key, "[]"), "MediaSourceId") {
+			continue
+		}
+		for _, value := range values {
+			if value == "" {
+				continue
+			}
+			if sourceID != "" && !mediaSourceIDsEqual(sourceID, value) {
+				return "", false
+			}
+			sourceID = value
+		}
+	}
+	return sourceID, true
+}
+
+// playbackGrantCovers reports whether a live negotiation authorizes media
+// requests for routeItemID, the item as the request path names it, and for
+// sourceID when the request names one.
+func playbackGrantCovers(session *PlaybackSession, routeItemID, sourceID string) bool {
+	if session == nil || session.Terminal || routeItemID == "" || !mediaSourceIDsEqual(routeItemID, session.RouteItemID) {
 		return false
 	}
-	sourceID := firstNonEmpty(chi.URLParam(r, "routeMediaSourceId"), newCaseInsensitiveQuery(r.URL.Query()).Get("MediaSourceId"))
 	if sourceID == "" {
 		return true
 	}
@@ -476,6 +519,13 @@ func playbackGrantMatchesRequest(r *http.Request, session *PlaybackSession) bool
 		}
 	}
 	return false
+}
+
+// playbackGrantFromContext returns the negotiation whose PlaySessionId
+// authorized the request, or nil when a token did.
+func playbackGrantFromContext(ctx context.Context) *PlaybackSession {
+	grant, _ := ctx.Value(compatPlaybackGrantKey).(*PlaybackSession)
+	return grant
 }
 
 // SessionFromContext returns the authenticated compat session, if present.

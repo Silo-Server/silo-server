@@ -35,6 +35,11 @@ it. A library with a refresh job queued or running, or another refresh holding
 its per-library lock, is skipped. A PostgreSQL advisory lock allows one run
 across all servers; a run that finds it held fails without refreshing anything.
 
+`backup` backs up the server daily at `backup.time` and on "Back up now"; its
+schedule follows that setting, so editing the task's triggers does not stick.
+A cluster-wide lock lets one server back up; the others record a skip. See
+[backups-api.md](backups-api.md#the-backup-task).
+
 `database_maintenance` runs the routine retention sweeps in turn, daily at 05:00
 by default: processed search index events, activity log, task history, autoscan
 events, expired login sessions, device sign-in requests, OAuth sign-in flows, policy
@@ -136,9 +141,17 @@ the jobs realtime channel use the same safe storage-transition receipt,
 including the websocket snapshot; they omit the raw request and result
 documents for this job type.
 
+Backup restore jobs (`backup_restore`) include `backup_restore_result`, the
+restore report described in [backups-api.md](backups-api.md#restore): each
+chosen item restored, unchanged, left out with a reason, or failed with its
+error, kept when the job is canceled or interrupted. A restore is never
+requeued: a worker that stops heartbeating leaves the job failed with
+`interrupted: true` in its report.
+
 The existing `POST /api/v2/library-jobs/{job_id}/cancel` contract remains intact.
 `POST /api/v2/admin/jobs/{id}/cancel` (`cancelAdminJob`) requests cancellation
-for library refresh, storage-transition, and image cache cleanup jobs. A job's
+for library refresh, storage-transition, image cache cleanup, and backup
+restore jobs. A restore stops between items and keeps what committed. A job's
 `cancelable` field is true exactly when it is one of these types and not
 terminal, and every job resource that reports `cancelable: true` accepts the
 cancellation through its own cancel operation. A library refresh can therefore
