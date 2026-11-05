@@ -3456,7 +3456,7 @@ func TestShutdownClosesUnderTheLifecycleLock(t *testing.T) {
 			unlock()
 			t.Fatal("Shutdown never waited for the lifecycle lock")
 		}
-		time.Sleep(time.Millisecond)
+		time.Sleep(time.Millisecond) //nolint:forbidigo // polls the lifecycle lock refs that Shutdown takes on its own goroutine
 	}
 	if _, err := os.Stat(dir); err != nil {
 		t.Fatalf("the session closed while its lifecycle lock was held: %v", err)
