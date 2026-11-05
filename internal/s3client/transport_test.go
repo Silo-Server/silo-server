@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -260,25 +259,35 @@ func TestBurstNeverClosesUnusedConnections(t *testing.T) {
 	}
 }
 
-func TestS3ClientRefusesHTTPSToHTTPRedirects(t *testing.T) {
+func TestSharedClientsRefuseHTTPSToHTTPRedirects(t *testing.T) {
 	var leaked atomic.Int32
 	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		leaked.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer plain.Close()
-	for _, status := range []int{307, 308} {
-		t.Run(strconv.Itoa(status), func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		client *http.Client
+		status int
+	}{
+		{"storage 307", sharedHTTPClient(), http.StatusTemporaryRedirect},
+		{"storage 308", sharedHTTPClient(), http.StatusPermanentRedirect},
+		{"delivery 302", sharedDeliveryHTTPClient, http.StatusFound},
+		{"delivery 307", sharedDeliveryHTTPClient, http.StatusTemporaryRedirect},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The redirect keeps the query, as a token-authenticated delivery
+			// endpoint or a misbehaving S3 provider might.
 			secure := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, _ = io.Copy(io.Discard, r.Body)
-				w.Header().Set("Location", plain.URL+"/object")
-				w.WriteHeader(status)
+				w.Header().Set("Location", plain.URL+r.URL.RequestURI())
+				w.WriteHeader(tc.status)
 			}))
 			defer secure.Close()
 			// The test server's certificate needs its own transport; the redirect
 			// policy under test is the shared client's.
-			client := &http.Client{Transport: secure.Client().Transport, CheckRedirect: sharedHTTPClient().CheckRedirect}
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, secure.URL+"/object", strings.NewReader("payload"))
+			client := &http.Client{Transport: secure.Client().Transport, CheckRedirect: tc.client.CheckRedirect}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, secure.URL+"/object?token=secret", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -288,7 +297,7 @@ func TestS3ClientRefusesHTTPSToHTTPRedirects(t *testing.T) {
 				_ = resp.Body.Close()
 			}
 			if err == nil {
-				t.Error("upload followed a redirect from https to plain http")
+				t.Error("followed a redirect from https to plain http")
 			}
 		})
 	}
