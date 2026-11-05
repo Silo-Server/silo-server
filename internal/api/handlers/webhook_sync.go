@@ -565,7 +565,8 @@ func logWebhookDelivery(result *webhooksync.ProcessWebhookResult, meta webhooksy
 
 // requestBaseURL is the origin r arrived on. X-Forwarded-Proto and
 // X-Forwarded-Host count only from a trusted proxy (see clientip.RequestOrigin),
-// so a client cannot choose the scheme or host of the links built from it.
+// so a client cannot use them to change the scheme or host of the links built
+// from it.
 func requestBaseURL(r *http.Request) string {
 	return clientip.RequestOrigin(r)
 }
