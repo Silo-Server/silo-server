@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -587,9 +588,14 @@ func normalizeDynamicRangeV3(track models.VideoTrack) string {
 }
 
 // ParseFrameRate reads a probed frame rate ("24000/1001" or "23.976") as
-// frames per second; zero when absent or unreadable.
+// frames per second; zero when absent, unreadable, or not a finite positive
+// rate, so callers can serialize it.
 func ParseFrameRate(value string) float64 {
-	return parseFrameRateV3(value)
+	rate := parseFrameRateV3(value)
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return 0
+	}
+	return rate
 }
 
 func parseFrameRateV3(value string) float64 {

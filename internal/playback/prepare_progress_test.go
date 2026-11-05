@@ -192,3 +192,20 @@ func TestPrepareFileReportsProgressAndLogsStderr(t *testing.T) {
 		t.Fatalf("events = %q", events)
 	}
 }
+
+func TestParseFrameRateRejectsUnserializableRates(t *testing.T) {
+	for value, want := range map[string]float64{
+		"24000/1001": 24000.0 / 1001.0,
+		"25":         25,
+		"":           0,
+		"0/0":        0,
+		"NaN":        0,
+		"Inf":        0,
+		"-Inf":       0,
+		"-30":        0,
+	} {
+		if got := ParseFrameRate(value); got != want {
+			t.Errorf("ParseFrameRate(%q) = %v, want %v", value, got, want)
+		}
+	}
+}
