@@ -55,13 +55,13 @@ function MissingGroupRow({ group }: { group: MissingFileGroup }) {
 }
 
 /** Files missing when the backup copied them, grouped by what referenced them. */
-function MissingFiles({ blobs }: { blobs: AdminBackup["missing_blobs"] }) {
+function MissingFiles({ blobs, total }: { blobs: AdminBackup["missing_blobs"]; total: number }) {
   const bodyId = useId();
   const [open, setOpen] = useState(false);
   if (blobs.length === 0) return null;
   return (
     <div className="min-w-0 space-y-1.5">
-      <Headline>{missingHeadline(blobs.length)}</Headline>
+      <Headline>{missingHeadline(blobs.length, total)}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
         {open ? "Hide the files" : "Show the files"}
       </Disclosure>
@@ -86,14 +86,18 @@ function MissingFiles({ blobs }: { blobs: AdminBackup["missing_blobs"] }) {
 export function BackupWarningDetails({ backup }: { backup: AdminBackup }) {
   const copy = () =>
     copyTextToClipboard(
-      warningDetailsReport({ backupId: backup.id, missing: backup.missing_blobs }),
+      warningDetailsReport({
+        backupId: backup.id,
+        missing: backup.missing_blobs,
+        missingTotal: backup.missing_blobs_total,
+      }),
     ).then(
       () => toast.success("Details copied"),
       () => toast.error("Couldn't copy the details. Open each list and copy it by hand."),
     );
   return (
     <div className="min-w-0 space-y-3">
-      <MissingFiles blobs={backup.missing_blobs} />
+      <MissingFiles blobs={backup.missing_blobs} total={backup.missing_blobs_total} />
       <Button variant="outline" size="sm" onClick={() => void copy()}>
         <Copy data-icon="inline-start" aria-hidden="true" />
         Copy details

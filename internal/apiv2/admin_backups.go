@@ -88,10 +88,13 @@ type AdminBackup struct {
 	Location     string                   `json:"location" doc:"Where the backup folder is: a filesystem path on this server's storage"`
 	BlobCount    int                      `json:"blob_count" doc:"Files copied into blobs.tar"`
 	MissingBlobs []AdminBackupMissingBlob `json:"missing_blobs"`
-	Objects      []AdminBackupObject      `json:"objects"`
-	KeyCheck     string                   `json:"key_check,omitempty" doc:"Check value of the SECRET_KEY the backup was taken with: 16 hex digits in groups of 4"`
-	KeyMatches   bool                     `json:"key_matches" doc:"Whether key_check is this server's. Settings and credentials the backup holds encrypted cannot be read with another key"`
-	Clean        bool                     `json:"clean" doc:"Whether this copy counts as a clean copy for rotation: complete, with every file, and verified under this server's SECRET_KEY. Rotation always keeps the newest clean copy, even beyond backup.keep"`
+	// MissingBlobsTotal can exceed len(MissingBlobs): a manifest lists at
+	// most 10,000 missing files.
+	MissingBlobsTotal int                 `json:"missing_blobs_total" doc:"Files missing when the backup copied them, all of them; missing_blobs lists at most the first 10,000"`
+	Objects           []AdminBackupObject `json:"objects"`
+	KeyCheck          string              `json:"key_check,omitempty" doc:"Check value of the SECRET_KEY the backup was taken with: 16 hex digits in groups of 4"`
+	KeyMatches        bool                `json:"key_matches" doc:"Whether key_check is this server's. Settings and credentials the backup holds encrypted cannot be read with another key"`
+	Clean             bool                `json:"clean" doc:"Whether this copy counts as a clean copy for rotation: complete, with every file, and verified under this server's SECRET_KEY. Rotation always keeps the newest clean copy, even beyond backup.keep"`
 }
 
 // AdminBackupActive is the operation holding the cluster-wide backup lock,
@@ -309,7 +312,7 @@ func adminBackupListOf(l backup.Listing) AdminBackupList {
 			ID: b.ID, Kind: string(b.Kind), Status: string(b.Status), CreatedAt: NewInstant(b.CreatedAt),
 			CompletedAt: instantPtr(b.CompletedAt), SizeBytes: b.SizeBytes, SiloVersion: b.SiloVersion, Location: b.Location, BlobCount: b.BlobCount,
 			MissingBlobs: make([]AdminBackupMissingBlob, 0, len(b.MissingBlobs)), Objects: make([]AdminBackupObject, 0, len(b.Objects)),
-			KeyCheck: b.KeyCheck, KeyMatches: b.KeyMatches, Clean: b.Clean,
+			KeyCheck: b.KeyCheck, KeyMatches: b.KeyMatches, Clean: b.Clean, MissingBlobsTotal: b.MissingBlobsTotal,
 		}
 		for _, m := range b.MissingBlobs {
 			item.MissingBlobs = append(item.MissingBlobs, AdminBackupMissingBlob{Store: m.Store, Key: m.Key, Source: m.Source})

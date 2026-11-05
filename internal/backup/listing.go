@@ -59,8 +59,11 @@ type Summary struct {
 	// Location is where the folder is: a path on a local store.
 	Location     string        `json:"location"`
 	MissingBlobs []MissingBlob `json:"missing_blobs"`
-	BlobCount    int           `json:"blob_count"`
-	Objects      []ObjectEntry `json:"objects"`
+	// MissingBlobsTotal counts every missing blob; MissingBlobs lists at
+	// most maxRecordedMissingBlobs of them.
+	MissingBlobsTotal int           `json:"missing_blobs_total"`
+	BlobCount         int           `json:"blob_count"`
+	Objects           []ObjectEntry `json:"objects"`
 	// KeyCheck is the check value of the SECRET_KEY the backup was taken
 	// with, and KeyMatches whether it is this server's.
 	KeyCheck   string `json:"key_check,omitempty"`
@@ -226,6 +229,7 @@ func (s *Service) fromManifest(summary *Summary, m *Manifest) {
 		summary.Status = StatusUnverified
 	}
 	summary.SizeBytes, summary.MissingBlobs, summary.Objects, summary.BlobCount = m.Size(), m.MissingBlobs, m.Objects, m.Blobs.Count
+	summary.MissingBlobsTotal = max(m.MissingBlobsTotal, len(m.MissingBlobs))
 	summary.KeyCheck, summary.KeyMatches = m.KeyCheck, m.KeyCheck != "" && m.KeyCheck == s.opts.KeyCheck
 	if summary.MissingBlobs == nil {
 		summary.MissingBlobs = []MissingBlob{}

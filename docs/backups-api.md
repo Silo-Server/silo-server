@@ -71,7 +71,8 @@ when it has a local operational store. `download` is `true` when available.
   `created_at`, `completed_at`, `size_bytes`, `silo_version`, `location`
   (a filesystem path on this server's storage),
   `blob_count`,
-  `missing_blobs` (`store`, `key`, `source`),
+  `missing_blobs` (`store`, `key`, `source`; at most the first 10,000),
+  `missing_blobs_total` (every missing file),
   `objects` (`name`, `size_bytes`, and `sha256` of the stored bytes),
   `key_check` (the check value of the key the backup was taken with), and
   `key_matches` (whether that is this server's; settings and credentials the

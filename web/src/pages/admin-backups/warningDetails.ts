@@ -31,23 +31,26 @@ export function missingGroupTitle(group: MissingFileGroup): string {
 }
 
 /** "101 files were missing when the backup copied them." */
-export function missingHeadline(count: number): string {
-  return count === 1
-    ? "1 file was missing when the backup copied it."
-    : `${count} files were missing when the backup copied them.`;
+export function missingHeadline(listed: number, total: number = listed): string {
+  if (total === 1) return "1 file was missing when the backup copied it.";
+  const missing = `${total.toLocaleString()} files were missing when the backup copied them.`;
+  return total > listed ? `${missing} The first ${listed.toLocaleString()} are listed.` : missing;
 }
 
 /** Every group as plain text, for pasting into an issue. */
 export function warningDetailsReport({
   backupId,
   missing,
+  missingTotal = missing.length,
 }: {
   backupId: string;
   missing: readonly MissingBlob[];
+  /** Every missing file; `missing` lists at most the first 10,000. */
+  missingTotal?: number;
 }): string {
   const lines = [`Backup ${backupId}`];
   if (missing.length > 0) {
-    lines.push("", missingHeadline(missing.length));
+    lines.push("", missingHeadline(missing.length, missingTotal));
     for (const group of groupMissingBlobs(missing)) {
       lines.push("", missingGroupTitle(group), ...group.keys.map((key) => `  ${key}`));
     }

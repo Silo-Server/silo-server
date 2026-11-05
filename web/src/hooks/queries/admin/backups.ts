@@ -14,6 +14,12 @@ import { adminKeys } from "@/hooks/queries/keys";
 
 /** How often the list is read again while a backup runs. */
 const RUNNING_POLL_MS = 3_000;
+/**
+ * While nothing runs, the list is still read this often while the page is
+ * visible: a nightly backup, or one another server starts, shows up without
+ * a reload. React Query pauses the interval while the tab is hidden.
+ */
+const IDLE_POLL_MS = 30_000;
 
 /** The root of every backup query, scoped to the admin authority. */
 export function backupsRootKey() {
@@ -49,7 +55,7 @@ export function useAdminBackups() {
     // list when it ends, so keep reading while it is held.
     refetchInterval: (query) => {
       const list = query.state.data;
-      return list?.busy || list?.active || backupRunning(list) ? RUNNING_POLL_MS : false;
+      return list?.busy || list?.active || backupRunning(list) ? RUNNING_POLL_MS : IDLE_POLL_MS;
     },
   });
 }

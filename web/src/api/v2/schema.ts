@@ -14247,6 +14247,11 @@ export interface components {
       /** @description Where the backup folder is: a filesystem path on this server's storage */
       location: string;
       missing_blobs: components["schemas"]["AdminBackupMissingBlob"][];
+      /**
+       * Format: int64
+       * @description Files missing when the backup copied them, all of them; missing_blobs lists at most the first 10,000
+       */
+      missing_blobs_total: number;
       objects: components["schemas"]["AdminBackupObject"][];
       silo_version?: string;
       /** Format: int64 */
