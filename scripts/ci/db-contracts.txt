@@ -407,6 +407,12 @@
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
 
+# A bound device sign-in is collected only with its secret, on this release
+# and, through the schema, on an older one; one TV signs in to two accounts.
+./internal/auth TestDeviceLoginSessionBindingDB
+./internal/auth TestDeviceLoginCopiedBindingDB
+./internal/auth TestDeviceLoginTwoAccountsOneDeviceDB
+
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsFinishedPlayback
 
