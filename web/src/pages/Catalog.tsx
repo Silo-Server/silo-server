@@ -477,9 +477,12 @@ function CatalogResults({
             </p>
           )}
         </div>
+        {/* A collection's actions, Shuffle and count share one centred row. */}
         <div
           className={cn(
-            "flex flex-col items-start gap-3 sm:items-end",
+            isCollectionSource
+              ? "flex flex-wrap items-center gap-3 sm:justify-end"
+              : "flex flex-col items-start gap-3 sm:items-end",
             collectionBackdrop && "relative shrink-0",
           )}
         >
@@ -509,8 +512,20 @@ function CatalogResults({
             ) : null}
             <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
             {showExactResultCount ? (
-              <div className="text-right tabular-nums" role="status" aria-live="polite">
-                <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
+              <div
+                className={cn(
+                  "text-right tabular-nums",
+                  canShuffleCollection && "flex items-center",
+                )}
+                role="status"
+                aria-live="polite"
+              >
+                <span
+                  className={cn(
+                    "hidden text-3xl font-extralight tracking-tight sm:inline",
+                    canShuffleCollection && "leading-none",
+                  )}
+                >
                   {totalItems}
                 </span>
                 <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
