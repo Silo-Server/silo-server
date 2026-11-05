@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { markerProvenanceLabel } from "@/lib/markerProvenance";
 import type { PlayerMarkerProvenance } from "../types";
@@ -50,6 +50,19 @@ export function IntroSkipButton({
   useEffect(() => {
     if (focusOnMount) buttonRef.current?.focus({ preventScroll: true });
   }, [focusOnMount]);
+
+  // A timed pill that runs out can stay on screen as the untimed offer. It
+  // gives up the focus it held, as it did when it unmounted, so the next Space
+  // reaches play/pause instead of skipping the intro.
+  const timed = timer !== undefined;
+  const wasTimedRef = useRef(timed);
+  useLayoutEffect(() => {
+    const button = buttonRef.current;
+    if (wasTimedRef.current && !timed && button !== null && document.activeElement === button) {
+      button.blur();
+    }
+    wasTimedRef.current = timed;
+  }, [timed]);
 
   useEffect(() => {
     if (timer?.deadlineMs == null) return;
