@@ -158,12 +158,16 @@ function AddAllowedTitle({
     (item) => item.type === "movie" || item.type === "series",
   );
 
+  // A failed refresh keeps the results it already has and offers a retry;
+  // only a search with nothing to show reports the failure in their place.
+  const hasResults = results.data !== undefined;
   let status: string | null = null;
   if (debounced.length > 0) {
     if (results.isLoading) status = "Searching…";
-    else if (results.isError) status = "The search didn't work. Try again.";
+    else if (results.isError && !hasResults) status = "The search didn't work. Try again.";
     else if (found.length === 0) status = "No movies or series match.";
   }
+  const staleResults = results.isError && hasResults;
 
   return (
     <div className="grid gap-2">
@@ -190,7 +194,16 @@ function AddAllowedTitle({
         <p role="status" className="text-muted-foreground text-[13px]">
           {status}
         </p>
-      ) : debounced.length > 0 ? (
+      ) : null}
+      {staleResults ? (
+        <p role="status" className="text-muted-foreground flex items-center gap-2 text-[13px]">
+          These results may be out of date.
+          <Button type="button" variant="link" size="sm" onClick={() => void results.refetch()}>
+            Retry
+          </Button>
+        </p>
+      ) : null}
+      {!status && debounced.length > 0 ? (
         <ul
           aria-label="Search results"
           className="border-border divide-border max-h-52 divide-y overflow-y-auto rounded-xl border"

@@ -41,6 +41,7 @@ var allowanceFixtureTitles = map[string]string{
 	"movie-other":      "movie",
 	"movie-hidden":     "movie",
 	"series-allowed":   "series",
+	"audiobook-live":   "audiobook",
 }
 
 func seedAllowanceFixture(t *testing.T) allowanceFixture {
@@ -100,6 +101,10 @@ func seedAllowanceFixture(t *testing.T) allowanceFixture {
 		return c.ID
 	}
 	f.live = collection("parent", "manual", "movie-collection")
+	// A live collection allows only the movies and series it holds.
+	if err := f.store.AddCollectionItem(ctx, f.live, f.id("audiobook-live"), 1); err != nil {
+		t.Fatal(err)
+	}
 	f.smart = collection("parent", "smart", "movie-smart")
 	f.teens = collection("teen", "manual", "movie-other")
 	return f
@@ -189,18 +194,25 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 				t.Errorf("%s is allowed and must pass the PG ceiling", id)
 			}
 		}
-		for _, suffix := range []string{"movie-smart", "movie-other", "movie-hidden"} {
+		for _, suffix := range []string{"movie-smart", "movie-other", "movie-hidden", "audiobook-live"} {
 			if visible[f.id(suffix)] {
 				t.Errorf("%s is not allowed and must stay hidden", suffix)
 			}
 		}
 	})
 
-	t.Run("copying a collection allows its current titles once", func(t *testing.T) {
-		for pass, want := range []int{1, 0} {
-			added, err := f.allow.AllowCollectionTitles(ctx, f.userID, "kid", f.smart)
+	t.Run("copying a collection's items allows its movies and series once", func(t *testing.T) {
+		ids, err := f.allow.CollectionItemIDs(ctx, f.userID, f.live)
+		if err != nil || len(ids) != 2 {
+			t.Fatalf("CollectionItemIDs = %v, %v; want the movie and the audiobook", ids, err)
+		}
+		ids = append(ids, f.id("movie-smart"))
+		// movie-collection is allowed through the collection but not as a
+		// title, so it and movie-smart are new; the audiobook never is.
+		for pass, want := range []int{2, 0} {
+			added, err := f.allow.AllowTitles(ctx, f.userID, "kid", ids)
 			if err != nil || added != want {
-				t.Fatalf("AllowCollectionTitles pass %d = %d, %v; want %d", pass, added, err, want)
+				t.Fatalf("AllowTitles pass %d = %d, %v; want %d", pass, added, err, want)
 			}
 		}
 	})

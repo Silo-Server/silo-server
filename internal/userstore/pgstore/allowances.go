@@ -99,15 +99,17 @@ func (s *TitleAllowances) SetCollectionAllowance(ctx context.Context, userID int
 		WHERE user_id = $1 AND profile_id = $2 AND collection_id = $3`, userID, profileID, collectionID)
 }
 
-func (s *TitleAllowances) AllowCollectionTitles(ctx context.Context, userID int, profileID, collectionID string) (int, error) {
-	changed, err := s.changeAllowancesCount(ctx, userID, copyAudit(profileID), `
-		INSERT INTO profile_title_allowances (user_id, profile_id, content_id)
-		SELECT $1, $2, ci.media_item_id
-		FROM user_personal_collection_items ci
-		JOIN media_items mi ON mi.content_id = ci.media_item_id
-		WHERE ci.user_id = $1 AND ci.collection_id = $3 AND mi.type = ANY($4)
-		ON CONFLICT DO NOTHING`, userID, profileID, collectionID, userstore.AllowanceTitleTypes)
-	return int(changed), err
+// CollectionItemIDs lists the media items a personal collection stores. Smart
+// collections store none; their items come from their query.
+func (s *TitleAllowances) CollectionItemIDs(ctx context.Context, userID int, collectionID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT media_item_id FROM user_personal_collection_items
+		WHERE user_id = $1 AND collection_id = $2
+		ORDER BY position, media_item_id`, userID, collectionID)
+	if err != nil {
+		return nil, fmt.Errorf("listing collection items: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // AllowTitles adds a title allowance for every movie and series among

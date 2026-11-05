@@ -36,9 +36,8 @@ type titleAllowanceStore interface {
 	// SetCollectionAllowance adds or removes one collection allowance and
 	// reports whether a row changed.
 	SetCollectionAllowance(ctx context.Context, userID int, profileID, collectionID string, allowed bool) (bool, error)
-	// AllowCollectionTitles adds a title allowance for every movie and series
-	// the collection's stored items hold now and returns how many were new.
-	AllowCollectionTitles(ctx context.Context, userID int, profileID, collectionID string) (int, error)
+	// CollectionItemIDs lists the media items a personal collection stores.
+	CollectionItemIDs(ctx context.Context, userID int, collectionID string) ([]string, error)
 	// AllowTitles adds a title allowance for every movie and series among
 	// contentIDs and returns how many were new.
 	AllowTitles(ctx context.Context, userID int, profileID string, contentIDs []string) (int, error)
@@ -401,8 +400,10 @@ func (h *TitleAllowanceHandler) SetCollectionAllowance(ctx context.Context, acto
 }
 
 // AllowCollectionTitles allows a profile every movie and series a personal
-// collection the actor can see holds now, and returns how many were new. A
-// smart collection holds what its query matches for the actor.
+// collection the actor can see holds now, and returns how many were new. Only
+// titles the actor may see are copied: a smart collection holds what its query
+// matches for the actor, and another collection's stored items are filtered
+// by the actor's access.
 func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor AllowanceActor, profileID, collectionID string) (int, error) {
 	store, err := h.manage(ctx, actor)
 	if err != nil {
@@ -419,20 +420,34 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if err != nil {
 		return 0, err
 	}
-	var added int
+	var ids []string
 	if catalog.IsLiveQueryType(collection.CollectionType) {
-		ids, titlesErr := h.smartCollectionTitles(ctx, actor, collection)
-		if titlesErr != nil {
-			return 0, titlesErr
-		}
-		added, err = h.allowances.AllowTitles(ctx, actor.UserID, profileID, ids)
+		ids, err = h.smartCollectionTitles(ctx, actor, collection)
 	} else {
-		added, err = h.allowances.AllowCollectionTitles(ctx, actor.UserID, profileID, collectionID)
+		ids, err = h.storedCollectionTitles(ctx, actor, collectionID)
 	}
+	if err != nil {
+		return 0, err
+	}
+	added, err := h.allowances.AllowTitles(ctx, actor.UserID, profileID, ids)
 	if err != nil {
 		return 0, apiError(http.StatusInternalServerError, "internal_error", "Failed to allow the collection's titles")
 	}
 	return added, nil
+}
+
+// storedCollectionTitles lists the stored items of a collection that the
+// actor may see.
+func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, actor AllowanceActor, collectionID string) ([]string, error) {
+	ids, err := h.allowances.CollectionItemIDs(ctx, actor.UserID, collectionID)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list the collection's titles")
+	}
+	visible, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, ids, actor.Viewer.Access)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check the collection's titles")
+	}
+	return slices.DeleteFunc(ids, func(id string) bool { return !visible[id] }), nil
 }
 
 // smartCollectionTitles lists what a smart collection's query matches for the

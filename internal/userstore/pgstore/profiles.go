@@ -145,7 +145,9 @@ var profileByIDQuery = `
 // profile is allowed above its maturity limits: its own title allowances plus
 // the titles of each live-allowed collection. A collection allows its titles
 // only while it is a manual collection created by the account's current
-// primary profile, so the household manager alone decides what it holds.
+// primary profile, so the household manager alone decides what it holds, and
+// only its movies and series, as a title allowance may name
+// (userstore.AllowanceTitleTypes).
 // userIDExpr and profileIDExpr are SQL expressions for the profile's key.
 func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	return `
@@ -156,8 +158,10 @@ func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	           JOIN user_personal_collections c ON c.user_id = ca.user_id AND c.id = ca.collection_id
 	           JOIN user_profiles creator ON creator.user_id = c.user_id AND creator.id = c.creator_profile_id
 	           JOIN user_personal_collection_items ci ON ci.user_id = c.user_id AND ci.collection_id = c.id
+	           JOIN media_items mi ON mi.content_id = ci.media_item_id
 	           WHERE ca.user_id = ` + userIDExpr + ` AND ca.profile_id = ` + profileIDExpr + `
 	             AND c.collection_type = 'manual' AND creator.is_primary
+	             AND mi.type IN ('movie', 'series')
 	           ORDER BY 1`
 }
 

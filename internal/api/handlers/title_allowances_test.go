@@ -53,8 +53,8 @@ func (s *memoryAllowances) SetCollectionAllowance(context.Context, int, string, 
 	return true, nil
 }
 
-func (s *memoryAllowances) AllowCollectionTitles(context.Context, int, string, string) (int, error) {
-	return 0, nil
+func (s *memoryAllowances) CollectionItemIDs(context.Context, int, string) ([]string, error) {
+	return nil, nil
 }
 
 func (s *memoryAllowances) AllowTitles(context.Context, int, string, []string) (int, error) {
