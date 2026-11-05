@@ -252,8 +252,10 @@ func (a *applier) recordItem(ctx context.Context, tx pgx.Tx, item ReportItem) er
 }
 
 // collectItems puts every item's outcome into the report, in order, once
-// the run ends, and removes the rows. Without them (a failure reading
-// them) the report keeps the latest outcomes.
+// the run ends. Without them (a failure reading them) the report keeps the
+// latest outcomes. The rows stay until the statement that records the final
+// report removes them (adminjob Complete, Fail, CancelWithResult, or the
+// recovery of an interrupted run), so a crash before then loses none.
 func (a *applier) collectItems(ctx context.Context) {
 	pool := a.s.opts.Pool
 	if pool == nil {
@@ -278,7 +280,6 @@ func (a *applier) collectItems(ctx context.Context) {
 	if len(items) > 0 {
 		a.report.Items = items
 	}
-	_, _ = pool.Exec(ctx, `DELETE FROM backup_restore_items WHERE run_id = $1`, a.runID)
 }
 
 // commit records next as the job's result in a fenced transaction of its

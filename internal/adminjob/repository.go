@@ -497,7 +497,11 @@ func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobI
 		return fmt.Errorf("marshaling admin job result payload: %w", err)
 	}
 
-	tag, err := r.pool.Exec(ctx, `
+	// A restore's item outcome rows go in the statement that records its
+	// final report, so a crash before it keeps them for the report.
+	var finished int
+	err = r.pool.QueryRow(ctx, `
+		WITH done AS (
 		UPDATE admin_jobs
 		SET status = CASE WHEN cancel_requested THEN 'cancelled' ELSE $2 END,
 			result_payload = CASE WHEN cancel_requested AND $12 = '' THEN '{}'::jsonb ELSE $3 END,
@@ -512,7 +516,12 @@ func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobI
 			heartbeat_at = NOW(),
 			expires_at = GREATEST($10, NOW() + INTERVAL '24 hours'),
 			updated_at = NOW()
-		WHERE id = $1 AND status = 'running' AND ($11::bigint IS NULL OR claim_generation = $11)`,
+		WHERE id = $1 AND status = 'running' AND ($11::bigint IS NULL OR claim_generation = $11)
+		RETURNING id
+		), removed AS (
+			DELETE FROM backup_restore_items i USING done WHERE i.run_id = done.id
+		)
+		SELECT count(*) FROM done`,
 		id,
 		StatusCompleted,
 		resultPayload,
@@ -525,11 +534,11 @@ func (r *Repository) Complete(ctx context.Context, id string, input CompleteJobI
 		input.ExpiresAt,
 		r.claim,
 		input.CanceledMessage,
-	)
+	).Scan(&finished)
 	if err != nil {
 		return fmt.Errorf("completing admin job: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if finished == 0 {
 		return ErrJobNotFound
 	}
 	return nil
@@ -597,7 +606,9 @@ func (r *Repository) Fail(ctx context.Context, id string, input FailJobInput) er
 			return fmt.Errorf("marshaling failed admin job result payload: %w", err)
 		}
 	}
-	tag, err := r.pool.Exec(ctx, `
+	var finished int
+	err := r.pool.QueryRow(ctx, `
+		WITH done AS (
 		UPDATE admin_jobs
 		SET status = CASE WHEN cancel_requested THEN 'cancelled' ELSE $2 END,
 			message = $3,
@@ -609,7 +620,12 @@ func (r *Repository) Fail(ctx context.Context, id string, input FailJobInput) er
 			heartbeat_at = NOW(),
 			expires_at = GREATEST($8, NOW() + INTERVAL '24 hours'),
 			updated_at = NOW()
-		WHERE id = $1 AND status = 'running' AND ($9::bigint IS NULL OR claim_generation = $9)`,
+		WHERE id = $1 AND status = 'running' AND ($9::bigint IS NULL OR claim_generation = $9)
+		RETURNING id
+		), removed AS (
+			DELETE FROM backup_restore_items i USING done WHERE i.run_id = done.id
+		)
+		SELECT count(*) FROM done`,
 		id,
 		StatusFailed,
 		input.Message,
@@ -619,11 +635,11 @@ func (r *Repository) Fail(ctx context.Context, id string, input FailJobInput) er
 		input.ProgressTotal,
 		input.ExpiresAt,
 		r.claim,
-	)
+	).Scan(&finished)
 	if err != nil {
 		return fmt.Errorf("failing admin job: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if finished == 0 {
 		return ErrJobNotFound
 	}
 	return nil
@@ -678,6 +694,7 @@ func (r *Repository) CancelWithResult(ctx context.Context, id string, current, t
 		return nil, fmt.Errorf("marshaling admin job result payload: %w", err)
 	}
 	return scanAdminJob(r.pool.QueryRow(ctx, `
+		WITH done AS (
 		UPDATE admin_jobs
 		SET status = $2,
 			message = $3,
@@ -692,7 +709,11 @@ func (r *Repository) CancelWithResult(ctx context.Context, id string, current, t
 		WHERE id = $1
 		  AND status = $8
 		  AND ($9::bigint IS NULL OR claim_generation = $9)
-		RETURNING `+adminJobColumns,
+		RETURNING `+adminJobColumns+`
+		), removed AS (
+			DELETE FROM backup_restore_items i USING done WHERE i.run_id = done.id
+		)
+		SELECT `+adminJobColumns+` FROM done`,
 		id, StatusCancelled, message, current, total, payload, expiresAt, StatusRunning, r.claim,
 	))
 }

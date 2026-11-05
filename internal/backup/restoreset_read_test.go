@@ -846,6 +846,9 @@ func TestReadRestoreSetLeavesOutUnusableEntries(t *testing.T) {
 		"a section carrying a collection its configuration does not name": {editDocument(homeSectionsDocumentName, &sections, func() {
 			sections.Sections[1].Config = json.RawMessage(`{"library_collection_id":"c1"}`)
 		}), SectionHomeSections, func(rs *RestoreSet) bool { return len(rs.HomeSections.Sections) == 1 }},
+		"a collection listing an item twice": {editDocument(collectionsDocumentName, &collections, func() {
+			collections.Collections[0].Items = []string{"m1", "m1"}
+		}), SectionCollections, func(rs *RestoreSet) bool { return len(rs.Collections.Collections) == 0 }},
 		// No editor writes more for one collection in one request.
 		"a collection description larger than a request": {editDocument(collectionsDocumentName, &collections, func() { collections.Collections[0].Description = huge }),
 			SectionCollections, func(rs *RestoreSet) bool { return len(rs.Collections.Collections) == 0 }},

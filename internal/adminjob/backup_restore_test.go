@@ -178,3 +178,56 @@ func checkLongItem(t *testing.T, r *Repository, worker *Repository, id string) {
 		t.Fatalf("after an item longer than the stale window the job is %+v, %v; want still running", current, err)
 	}
 }
+
+// TestRestoreOutcomeRowsLastUntilTheFinalReportDB: a restore's item outcome
+// rows stay until the statement that records its final report, whichever
+// way it ends, so a crash before that keeps every outcome for recovery.
+func TestRestoreOutcomeRowsLastUntilTheFinalReportDB(t *testing.T) {
+	r := lifecycleRepo(t)
+	ctx := t.Context()
+	userID := lifecycleUser(t, r, "restore-rows")
+	expires := time.Now().UTC().Add(time.Hour)
+	for name, finish := range map[string]func(worker *Repository, id string) error{
+		"completed": func(w *Repository, id string) error {
+			return w.Complete(ctx, id, CompleteJobInput{Message: "Restored", ExpiresAt: expires})
+		},
+		"failed": func(w *Repository, id string) error {
+			return w.Fail(ctx, id, FailJobInput{Message: "Restore failed", ErrorMessage: "boom", ExpiresAt: expires})
+		},
+		"canceled": func(w *Repository, id string) error {
+			_, err := w.CancelWithResult(ctx, id, 1, 2, "Restore canceled", map[string]int{"items": 1}, expires)
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			created, err := r.Create(ctx, CreateJobInput{JobType: JobTypeBackupRestore, CreatedByUserID: userID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _, _ = r.pool.Exec(context.Background(), `DELETE FROM admin_jobs WHERE id = $1`, created.ID) })
+			job, err := r.ClaimNextQueuedByTypes(ctx, []string{JobTypeBackupRestore})
+			if err != nil || job == nil || job.ID != created.ID {
+				t.Fatalf("claim = %+v, %v", job, err)
+			}
+			if _, err := r.pool.Exec(ctx, `INSERT INTO backup_restore_items (run_id, seq, item) VALUES ($1, 1, '{}'), ($1, 2, '{}')`, job.ID); err != nil {
+				t.Fatal(err)
+			}
+			count := func() int {
+				var n int
+				if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM backup_restore_items WHERE run_id = $1`, job.ID).Scan(&n); err != nil {
+					t.Fatal(err)
+				}
+				return n
+			}
+			if n := count(); n != 2 {
+				t.Fatalf("%d rows before the report", n)
+			}
+			if err := finish(r.withClaim(job), job.ID); err != nil {
+				t.Fatal(err)
+			}
+			if n := count(); n != 0 {
+				t.Fatalf("%d outcome rows left after the final report", n)
+			}
+		})
+	}
+}

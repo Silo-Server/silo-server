@@ -232,6 +232,18 @@ func libraryProblem(l LibraryEntry) string {
 	return ""
 }
 
+// repeatsItem reports whether ids holds an id twice.
+func repeatsItem(ids []string) bool {
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			return true
+		}
+		seen[id] = struct{}{}
+	}
+	return false
+}
+
 // maxLibraryFolders bounds a restored library's folders, each of which a
 // preview checks on this server's disk. The library editor sets no limit;
 // a library has a handful.
@@ -272,6 +284,12 @@ func (p *restoreSetParser) validateCollections() error {
 		}
 		if collectionTooLarge(c) {
 			p.unusable(SectionCollections, KindCollection, c.Title, msgEntryTooLarge)
+			continue
+		}
+		// No editor lists an item twice; a document that repeats one would
+		// multiply the work its restore does under the lock.
+		if repeatsItem(c.Items) {
+			p.unusable(SectionCollections, KindCollection, c.Title, "It lists an item more than once.")
 			continue
 		}
 		collections = append(collections, c)

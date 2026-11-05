@@ -662,7 +662,7 @@ func (f *sizedFence) run(ctx context.Context, fn func(pgx.Tx) (FencedUpdate, err
 // TestRestoreItemWritesDoNotGrowDB: each item's commit writes a result the
 // same size whatever its place in the restore (counts, the library map, the
 // latest outcomes), each outcome is a row of its own, and the report the
-// restore returns lists every item, its rows removed.
+// restore returns lists every item.
 func TestRestoreItemWritesDoNotGrowDB(t *testing.T) {
 	f := newSelectiveFixture(t)
 	ctx := t.Context()
@@ -680,7 +680,11 @@ func TestRestoreItemWritesDoNotGrowDB(t *testing.T) {
 	}
 	fence := &sizedFence{testFence: testFence{pool: f.pool}}
 	payload, _ := json.Marshal(RestoreRequest{BackupID: source.ID, Digest: preview.Digest, Selection: map[string][]string{SectionLibraries: ids}})
-	result, err := f.svc.ExecuteRestore(ctx, RestoreRun{JobID: "items-" + randomHex(t, 4), Payload: payload, Fenced: fence.run})
+	jobID := "items-" + randomHex(t, 4)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM backup_restore_items WHERE run_id = $1`, jobID)
+	})
+	result, err := f.svc.ExecuteRestore(ctx, RestoreRun{JobID: jobID, Payload: payload, Fenced: fence.run})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,8 +696,10 @@ func TestRestoreItemWritesDoNotGrowDB(t *testing.T) {
 	if late > early+early/4 {
 		t.Fatalf("the last item's commit wrote %d bytes, the %dth %d: writes grow with the item's place", late, recentItems+2, early)
 	}
-	if n := countRows(t, f.pool, `SELECT count(*) FROM backup_restore_items`); n != 0 {
-		t.Fatalf("%d outcome rows left after the restore", n)
+	// The rows stay until the job records this report (adminjob removes
+	// them in that statement).
+	if n := countRows(t, f.pool, `SELECT count(*) FROM backup_restore_items WHERE run_id = $1`, jobID); n != len(ids) {
+		t.Fatalf("%d outcome rows after the restore, want %d until its report is recorded", n, len(ids))
 	}
 }
 

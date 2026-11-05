@@ -823,8 +823,11 @@ Whichever API server claims it:
    result holds the counts, the library map, and the latest 20 outcomes, so
    each item's write is the same size however many came before it. The full
    list goes into the result once: when the restore returns, however it
-   ends, or when stale recovery marks it interrupted; the rows are then
-   removed. The package write paths take that transaction.
+   ends, or when stale recovery marks it interrupted. The rows are removed
+   in the statement that records that final report (`Complete`, `Fail`,
+   `CancelWithResult`, or the recovery's own update), never before, so a
+   crash between reading them and recording the report loses no outcome.
+   The package write paths take that transaction.
    A failed item rolls back to a savepoint and is recorded as failed; the
    restore continues. Events are published after each commit.
 6. honors cancellation between items, never inside one.
