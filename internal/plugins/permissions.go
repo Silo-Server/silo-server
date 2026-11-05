@@ -624,6 +624,14 @@ func (p *PermissionService) approve(ctx context.Context, actorID, installationID
 	return committed, nil
 }
 
+// DeleteInstallation uninstalls the plugin as InstallationStore.Delete does,
+// deleting its host API key through the issuer, as actorID, so the key's
+// deletion is audited like one on the API keys page.
+// Errors: ErrInstallationNotFound, ErrBuiltinInstallationImmutable.
+func (p *PermissionService) DeleteInstallation(ctx context.Context, actorID, installationID int) error {
+	return p.installations.delete(ctx, installationID, &hostAPIKeyRevoker{keys: p.keys, actorID: actorID})
+}
+
 // opens reports whether the grant's stored key still decrypts. One sealed
 // under an earlier SECRET_KEY doesn't, and an approval replaces it.
 func (p *PermissionService) opens(grant *PermissionGrant) bool {

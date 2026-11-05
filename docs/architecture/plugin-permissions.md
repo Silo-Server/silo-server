@@ -101,9 +101,11 @@ installation with nothing approved or its key revoked, gets
   accounts (`HostAPIKeyIssuer.LockAccounts`), reads which key the grant names,
   locks it, then locks the grant (`lockPermissionGrant`). If the grant then
   names another key, it rolls back and starts again, up to five times.
-- Uninstalling locks the grant's key and then the grant the same way and
-  deletes both with the installation in one transaction, so no scoped
-  credential outlives its plugin. An approval that lands meanwhile either
+- Uninstalling (`PermissionService.DeleteInstallation`) takes the same locks
+  in the same order, deletes the key through `HostAPIKeyIssuer.RevokeTx`,
+  which audits it like a deletion on the API keys page, and deletes the
+  installation, all in one transaction, so no scoped credential outlives its
+  plugin. An approval that lands meanwhile either
   commits first, and its key is the one deleted, or finds the installation
   gone and rolls back.
 - An automatic or manual upgrade never widens a grant. New requirements stay

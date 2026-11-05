@@ -5,17 +5,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -41,7 +46,7 @@ func subscriber(events ...string) plugins.Capability {
 // so an update landing after the read is refused; a failure before the
 // approval commits leaves the previous key, still named by the grant, as the
 // only one; a stored key opens only for its own installation; and
-// uninstalling deletes the key with the installation.
+// uninstalling deletes the key with the installation and audits it.
 func TestPluginPermissionGrantsPostgres(t *testing.T) {
 	f := newPermissionsFixture(t)
 	t.Run("installing approves subscribed events and a replacement never widens them", f.installApprovesEventsAndReplaceNeverWidens)
@@ -459,12 +464,26 @@ func (f *permissionsFixture) storedKeyOpensOnlyForItsInstallation(t *testing.T) 
 func (f *permissionsFixture) uninstallDeletesKey(t *testing.T) {
 	approver := f.admin(t, "uninstall")
 	installation := f.install(t, "uninstall", []string{auth.ScopeAdminMonitorRead})
-	approved := f.approve(t, approver, installation.ID)
-	if err := f.store.Delete(t.Context(), installation.ID); err != nil {
+	keyID := *f.approve(t, approver, installation.ID).Grant.APIKeyID
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM activity_log WHERE target_type = $1 AND target_id = $2`,
+			auditmutation.TargetAPIKey, strconv.FormatInt(keyID, 10))
+	})
+	lc := &auditmutation.LogContext{Request: httptest.NewRequest(http.MethodDelete,
+		fmt.Sprintf("/api/v2/admin/plugins/installations/%d", installation.ID), nil), Started: time.Now(), UserID: &approver}
+	var ctx context.Context
+	capture := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { ctx = r.Context() }) //nolint:fatcontext // captures the one request context the middleware builds
+	clientip.Middleware(clientip.NewResolver(nil))(capture).ServeHTTP(httptest.NewRecorder(), lc.Request.WithContext(auditmutation.SetLogContext(t.Context(), lc)))
+	if err := f.permissions.DeleteInstallation(ctx, approver, installation.ID); err != nil {
 		t.Fatal(err)
 	}
-	if f.keyExists(t, *approved.Grant.APIKeyID) {
+	if f.keyExists(t, keyID) {
 		t.Fatalf("the host API key outlived its plugin")
+	}
+	if !slices.ContainsFunc(lc.Committed, func(e auditmutation.Entry) bool {
+		return e.Action == auditmutation.ActionAPIKeyDeleted && e.TargetID == strconv.FormatInt(keyID, 10)
+	}) {
+		t.Fatalf("uninstalling audited %+v, want the host API key's deletion", lc.Committed)
 	}
 	if _, err := f.permissions.Approve(t.Context(), approver, installation.ID, nil); !errors.Is(err, plugins.ErrInstallationNotFound) {
 		t.Fatalf("approving an uninstalled plugin: %v, want ErrInstallationNotFound", err)

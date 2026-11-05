@@ -520,7 +520,22 @@ func (s *InstallationStore) GetArchive(ctx context.Context, installationID int) 
 	return scanArchive(s.pool.QueryRow(ctx, query, installationID))
 }
 
+// Delete removes the installation, its rows and its files. It deletes the
+// host API key the installation's grant names directly, without an audit
+// entry; an administrator's uninstall goes through
+// PermissionService.DeleteInstallation, which audits that deletion.
 func (s *InstallationStore) Delete(ctx context.Context, id int) error {
+	return s.delete(ctx, id, nil)
+}
+
+// hostAPIKeyRevoker deletes an installation's host API key through the
+// issuer, acting as actorID, so the deletion is audited.
+type hostAPIKeyRevoker struct {
+	keys    HostAPIKeyIssuer
+	actorID int
+}
+
+func (s *InstallationStore) delete(ctx context.Context, id int, revoker *hostAPIKeyRevoker) error {
 	installation, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -534,9 +549,15 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 
 	// The host API key issued to the plugin goes with it, in the same
 	// transaction, so no scoped credential outlives its plugin.
-	if err := retryOnGrantChange(func() error { return s.deleteInstallationRows(ctx, id) }); err != nil {
+	var committed func()
+	if err := retryOnGrantChange(func() error {
+		var err error
+		committed, err = s.deleteInstallationRows(ctx, id, revoker)
+		return err
+	}); err != nil {
 		return err
 	}
+	committed()
 
 	if err := removeInstallationFiles(ctx, installation); err != nil {
 		return fmt.Errorf("removing plugin installation files: %w", err)
@@ -546,36 +567,50 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 }
 
 // deleteInstallationRows deletes the installation and the host API key its
-// grant names in one transaction. Locking the key and then the grant
-// (lockPermissionGrant) means an approval that lands meanwhile either
-// commits first, and its key is the one deleted, or finds the installation
-// gone and rolls back the key it minted.
-func (s *InstallationStore) deleteInstallationRows(ctx context.Context, id int) error {
+// grant names in one transaction, and returns the hook to run once it has
+// committed. Locking the key and then the grant (lockPermissionGrant) means
+// an approval that lands meanwhile either commits first, and its key is the
+// one deleted, or finds the installation gone and rolls back the key it
+// minted.
+func (s *InstallationStore) deleteInstallationRows(ctx context.Context, id int, revoker *hostAPIKeyRevoker) (func(), error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin delete installation transaction: %w", err)
+		return nil, fmt.Errorf("begin delete installation transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if revoker != nil {
+		// Accounts before the key and the grant, the order RevokeTx and
+		// every other key deletion lock them in.
+		if err := revoker.keys.LockAccounts(ctx, tx, revoker.actorID); err != nil {
+			return nil, err
+		}
+	}
 	grant, err := lockPermissionGrant(ctx, tx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	committed := func() {}
 	if grant != nil && grant.APIKeyID != nil {
-		if _, err := tx.Exec(ctx, `DELETE FROM api_keys WHERE id = $1`, *grant.APIKeyID); err != nil {
-			return fmt.Errorf("deleting plugin host API key: %w", err)
+		if revoker != nil {
+			committed, err = revoker.keys.RevokeTx(ctx, tx, *grant.APIKeyID)
+		} else {
+			_, err = tx.Exec(ctx, `DELETE FROM api_keys WHERE id = $1`, *grant.APIKeyID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("deleting plugin host API key: %w", err)
 		}
 	}
 	tag, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, id)
 	if err != nil {
-		return fmt.Errorf("deleting plugin installation: %w", err)
+		return nil, fmt.Errorf("deleting plugin installation: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrInstallationNotFound
+		return nil, ErrInstallationNotFound
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit delete installation transaction: %w", err)
+		return nil, fmt.Errorf("commit delete installation transaction: %w", err)
 	}
-	return nil
+	return committed, nil
 }
 
 func (s *InstallationStore) replaceCapabilities(
