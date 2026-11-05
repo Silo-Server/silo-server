@@ -78,7 +78,8 @@ export function extractSourceHint(fileName: string): string | null {
 }
 
 // An episode token such as S01E01, S01E01E02 or S01E01-E02.
-const EPISODE_TOKEN = /\bS\d{1,4}E\d{1,4}(?:[-_.]?E\d{1,4})*\b/i;
+// Lookarounds rather than \b, so an underscore counts as a separator.
+const EPISODE_TOKEN = /(?<![a-z0-9])S\d{1,4}E\d{1,4}(?:[-_.]?E\d{1,4})*(?![a-z0-9])/i;
 
 /**
  * The part of a version's file name that tells it apart from the other

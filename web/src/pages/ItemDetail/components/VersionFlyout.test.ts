@@ -46,6 +46,7 @@ describe("versionFileLabel", () => {
       "Episode name 1st version [1080p]",
     ],
     ["handles a multi-episode token", "Show.S02E03-E04.Two.Parter.WEB-DL.mkv", "Two.Parter.WEB-DL"],
+    ["handles an underscore-separated token", "Show_S01E01_Pilot_1080p.mkv", "Pilot_1080p"],
     ["handles a lowercase dotted token", "show.s01e01e02.720p.hdtv.mkv", "720p.hdtv"],
     [
       "keeps a movie name whole",
