@@ -13,11 +13,17 @@
 -- foreign keys are not rechecked, but the indexes on these columns are rebuilt.
 -- Each change also recreates the foreign key's triggers on the referenced table,
 -- so the referenced tables (media_items on a stock schema) are locked against
--- reads and writes until the migration commits. They are locked first, so the
--- lock order is fixed, and a lock that takes more than 10 seconds to get fails
--- the migration rather than queue every read of media_items behind a long-running
--- query; startup then fails and the next start tries again. A 1 GB child table
--- with 4 million rows took 4.5 seconds.
+-- reads and writes until the migration commits.
+--
+-- Running servers write to these tables while this runs, and a writer can hold
+-- a child and then need its parent, or the reverse, so no fixed lock order
+-- avoids a deadlock. The migration therefore takes every lock it needs up front,
+-- gives each try 200ms, and on a miss releases them all and tries again. It never
+-- waits long enough while holding a lock for a deadlock to form, and each try
+-- queues reads of media_items for 200ms at most. When the locks are not
+-- all free within 10 seconds, the migration fails rather than hold up reads;
+-- startup then fails and the next start tries again. A 1 GB child table with 4
+-- million rows took 4.5 seconds.
 --
 -- Changing a column's type drops its statistics, so the changed tables are
 -- analyzed before the commit: the joins this fixes should not be planned from
@@ -30,6 +36,10 @@ DO $$
 DECLARE
     c RECORD;
     parents regclass[];
+    children regclass[];
+    deadline timestamptz := clock_timestamp() + interval '10 seconds';
+    try_until timestamptz;
+    wait_ms integer;
 BEGIN
     CREATE TEMP TABLE _content_id_collation_targets ON COMMIT DROP AS
     SELECT DISTINCT con.conrelid::regclass AS table_name, a.attname AS column_name, con.confrelid::regclass AS parent
@@ -46,10 +56,32 @@ BEGIN
     IF parents IS NULL THEN
         RETURN;
     END IF;
-    SET LOCAL lock_timeout = '10s';
-    FOR c IN SELECT unnest(parents) AS parent LOOP
-        EXECUTE format('LOCK TABLE %s IN ACCESS EXCLUSIVE MODE', c.parent);
+    SELECT array_agg(DISTINCT table_name ORDER BY table_name) INTO children FROM _content_id_collation_targets;
+
+    -- Take every lock the changes need before making any of them. One try lasts
+    -- less than the default deadlock_timeout (1s), and a miss releases every lock
+    -- it took, so a running writer that holds a child and then needs its parent
+    -- never deadlocks with this.
+    LOOP
+        try_until := clock_timestamp() + interval '200 milliseconds';
+        BEGIN
+            FOR c IN SELECT unnest(parents || children) AS rel LOOP
+                wait_ms := ceil(extract(epoch FROM try_until - clock_timestamp()) * 1000);
+                IF wait_ms < 1 THEN
+                    RAISE lock_not_available;
+                END IF;
+                PERFORM set_config('lock_timeout', wait_ms || 'ms', true);
+                EXECUTE format('LOCK TABLE %s IN ACCESS EXCLUSIVE MODE', c.rel);
+            END LOOP;
+            EXIT;
+        EXCEPTION WHEN lock_not_available OR deadlock_detected THEN
+            IF clock_timestamp() >= deadline THEN
+                RAISE;
+            END IF;
+        END;
+        PERFORM pg_sleep(0.1);
     END LOOP;
+    PERFORM set_config('lock_timeout', '10s', true);
 
     FOR c IN SELECT DISTINCT table_name, column_name FROM _content_id_collation_targets ORDER BY 1, 2 LOOP
         EXECUTE format('ALTER TABLE %s ALTER COLUMN %I TYPE text COLLATE "C"', c.table_name, c.column_name);
