@@ -15,7 +15,7 @@ ALTER TABLE plugin_instance_state
 -- conditional write could land on a version an older server already wrote
 -- past and silently discard that write.
 -- +goose StatementBegin
-CREATE OR REPLACE FUNCTION public.advance_plugin_instance_state_version() RETURNS trigger
+CREATE OR REPLACE FUNCTION advance_plugin_instance_state_version() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
     NEW.version := OLD.version + 1;
@@ -23,13 +23,13 @@ BEGIN
 END;
 $$;
 -- +goose StatementEnd
-DROP TRIGGER IF EXISTS plugin_instance_state_advance_version ON public.plugin_instance_state;
+DROP TRIGGER IF EXISTS plugin_instance_state_advance_version ON plugin_instance_state;
 CREATE TRIGGER plugin_instance_state_advance_version
-    BEFORE UPDATE ON public.plugin_instance_state
+    BEFORE UPDATE ON plugin_instance_state
     FOR EACH ROW
-    EXECUTE FUNCTION public.advance_plugin_instance_state_version();
+    EXECUTE FUNCTION advance_plugin_instance_state_version();
 
 -- +goose Down
-DROP TRIGGER IF EXISTS plugin_instance_state_advance_version ON public.plugin_instance_state;
-DROP FUNCTION IF EXISTS public.advance_plugin_instance_state_version();
+DROP TRIGGER IF EXISTS plugin_instance_state_advance_version ON plugin_instance_state;
+DROP FUNCTION IF EXISTS advance_plugin_instance_state_version();
 ALTER TABLE plugin_instance_state DROP COLUMN IF EXISTS version;
