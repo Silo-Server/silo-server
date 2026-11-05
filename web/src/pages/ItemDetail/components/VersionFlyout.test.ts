@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeFileVersion } from "../itemDetail.test-support";
 import { buildQualitySummary, buildDetailLine, sortByResolution } from "./VersionFlyout";
+import { versionFileLabel } from "./versionFormatUtils";
 
 describe("buildQualitySummary", () => {
   it("joins resolution, codec, HDR, and audio", () => {
@@ -34,6 +35,28 @@ describe("buildDetailLine", () => {
       file_name: "Movie.2160p.Remux.mkv",
     });
     expect(buildDetailLine(version)).toBe("45.0 GB · Remux");
+  });
+});
+
+describe("versionFileLabel", () => {
+  it.each([
+    [
+      "drops the show and episode prefix",
+      "My TVShow (2026) - S01E01 - Episode name 1st version [1080p].mkv",
+      "Episode name 1st version [1080p]",
+    ],
+    ["handles a multi-episode token", "Show.S02E03-E04.Two.Parter.WEB-DL.mkv", "Two.Parter.WEB-DL"],
+    ["handles a lowercase dotted token", "show.s01e01e02.720p.hdtv.mkv", "720p.hdtv"],
+    [
+      "keeps a movie name whole",
+      "Movie (2024) [Bluray-2160p Remux].mkv",
+      "Movie (2024) [Bluray-2160p Remux]",
+    ],
+    ["keeps the name when nothing follows the token", "Show - S01E01.mkv", "Show - S01E01"],
+    ["returns nothing for an empty name", "  ", ""],
+    ["returns nothing for a missing name", undefined, ""],
+  ])("%s", (_case, fileName, expected) => {
+    expect(versionFileLabel(fileName)).toBe(expected);
   });
 });
 

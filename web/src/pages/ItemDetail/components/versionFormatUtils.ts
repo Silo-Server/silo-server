@@ -77,6 +77,30 @@ export function extractSourceHint(fileName: string): string | null {
   return null;
 }
 
+// An episode token such as S01E01, S01E01E02 or S01E01-E02.
+const EPISODE_TOKEN = /\bS\d{1,4}E\d{1,4}(?:[-_.]?E\d{1,4})*\b/i;
+
+/**
+ * The part of a version's file name that tells it apart from the other
+ * versions: the base name without its extension and, for an episode, without
+ * the show and episode prefix up to the SxxExx token. Falls back to the whole
+ * base name when no token is found or nothing follows it.
+ */
+export function versionFileLabel(fileName: string | undefined): string {
+  const name = fileName?.trim() ?? "";
+  if (!name) return "";
+
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+
+  const token = EPISODE_TOKEN.exec(stem);
+  if (token) {
+    const rest = stem.slice(token.index + token[0].length).replace(/^[\s._-]+/, "");
+    if (rest) return rest;
+  }
+  return stem;
+}
+
 export function metadataLine(parts: Array<string | undefined | false>): string {
   return parts.filter(Boolean).join(" \u00B7 ");
 }

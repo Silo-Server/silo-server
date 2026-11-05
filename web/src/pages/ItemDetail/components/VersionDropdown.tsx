@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { videoRangeLabel } from "@/lib/videoRange";
 import DetailPopover from "./DetailPopover";
+import { versionFileLabel } from "./versionFormatUtils";
 import { sortPlaybackVariantsByEditionPreference } from "./versionRankingUtils";
 import { buildDetailLine, buildQualitySummary, sortByResolution } from "./VersionFlyout";
 
@@ -134,6 +135,7 @@ function VersionDropdown({
               const isSelected = version.file_id === activeVersion?.file_id;
               const summary = buildQualitySummary(version);
               const detail = buildDetailLine(version);
+              const fileLabel = versionFileLabel(version.file_name);
               const rangeLabel = videoRangeLabel(version);
 
               return (
@@ -164,6 +166,14 @@ function VersionDropdown({
                     </div>
                     {detail && (
                       <span className="text-muted-foreground block truncate text-xs">{detail}</span>
+                    )}
+                    {fileLabel && (
+                      <span
+                        className="text-muted-foreground line-clamp-2 text-xs break-words"
+                        title={version.file_name}
+                      >
+                        {fileLabel}
+                      </span>
                     )}
                   </div>
                   {isSelected && <Check className="text-primary size-4 shrink-0" />}
