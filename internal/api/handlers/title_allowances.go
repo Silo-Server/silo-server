@@ -205,10 +205,22 @@ func (h *TitleAllowanceHandler) SetTitleAllowance(ctx context.Context, actor All
 			return err
 		}
 	}
-	if _, err := h.allowances.SetTitleAllowance(ctx, manager, profileID, itemID, allowed); err != nil {
+	changed, err := h.allowances.SetTitleAllowance(ctx, manager, profileID, itemID, allowed)
+	if err != nil {
 		return allowanceWriteError(err, "Failed to change the allowed title")
 	}
+	h.scopeChanged(ctx, actor.UserID, profileID, changed)
 	return nil
+}
+
+// scopeChanged tells the recommendations worker when a write changed what
+// profileID may see, so its cached rows are rebuilt under the new scope (see
+// notifyScopeSettingChanged). Titles a live collection gains later reach them
+// when the daily recommendations job or another change rebuilds them.
+func (h *TitleAllowanceHandler) scopeChanged(ctx context.Context, userID int, profileID string, changed bool) {
+	if changed {
+		notifySignalsChanged(ctx, h.personal.signalsNotifier, userID, profileID)
+	}
 }
 
 // checkAllowanceFor requires what allowing a title needs: a profile with
@@ -403,9 +415,11 @@ func (h *TitleAllowanceHandler) SetCollectionAllowance(ctx context.Context, acto
 			return err
 		}
 	}
-	if _, err := h.allowances.SetCollectionAllowance(ctx, manager, profileID, collectionID, allowed); err != nil {
+	changed, err := h.allowances.SetCollectionAllowance(ctx, manager, profileID, collectionID, allowed)
+	if err != nil {
 		return allowanceWriteError(err, "Failed to change the allowed collection")
 	}
+	h.scopeChanged(ctx, actor.UserID, profileID, changed)
 	return nil
 }
 
@@ -465,6 +479,7 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if err != nil {
 		return 0, allowanceWriteError(err, "Failed to allow the collection's titles")
 	}
+	h.scopeChanged(ctx, actor.UserID, profileID, added > 0)
 	return added, nil
 }
 

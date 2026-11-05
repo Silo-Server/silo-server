@@ -100,6 +100,14 @@ not; the allowed list itself is part of the access scope, cache keys
 (`AccessFilter.WriteAccessScopeCacheKey`) and v2 cursor digests, so those
 change with it.
 
+Cached recommendation rows are built under a profile's scope and only
+filtered by it when read, so they cannot gain a newly allowed title on their
+own. An allowance write that changed a row tells the recommendations worker
+to rebuild the target profile, as a change to its limits does. Titles a live
+collection gains later reach its recommendations when the daily recommendations
+job or another signal change rebuilds them; they are visible everywhere else at
+once.
+
 Allowance rows cascade away with their profile, title or collection. Writes go
 through `pgstore.TitleAllowances`, a store over the shared tables rather than
 optional methods on the per-account user store, so a decorated user-store
