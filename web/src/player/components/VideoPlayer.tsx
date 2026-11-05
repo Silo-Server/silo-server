@@ -2447,6 +2447,10 @@ export function VideoPlayer({
     !roomPlaybackActive ||
     (watchTogether.room?.self_can_manage_room === true &&
       watchTogetherSync.attachedSessionId === sessionId);
+  // Whether the player controls show. Their timers live with the rest of the
+  // control visibility code below; it is declared here because the intro
+  // prompt brings a timed-out offer back while the controls are up.
+  const [controlsVisible, setControlsVisible] = useState(true);
   const introKey = activeIntro
     ? `${sessionId}:${activeFileId ?? selectedVersion?.file_id ?? "unknown"}:${activeIntro.start}:${activeIntro.end}`
     : null;
@@ -2460,6 +2464,7 @@ export function VideoPlayer({
     introKey,
     currentTime,
     playing,
+    controlsVisible,
     enabled:
       displayMode === "foreground" &&
       isPlayerReady &&
@@ -3361,7 +3366,6 @@ export function VideoPlayer({
   }, []);
 
   // -- Control visibility (hover anywhere to show) --
-  const [controlsVisible, setControlsVisible] = useState(true);
   const isCoarsePointer = useCoarsePointer();
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const surfaceTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3462,6 +3466,11 @@ export function VideoPlayer({
   }, [dismissActiveIntroPrompt, focusTransportAfterIntroPrompt]);
 
   const introPromptVisible = activeIntroPrompt !== null;
+  // Only a timed prompt takes focus and claims Enter/Space/Escape from the rest
+  // of the player. The untimed offer that returns with the controls answers
+  // Enter/Space only while it has focus, or Space with nothing focused would
+  // skip the intro instead of resuming.
+  const introPromptTimed = activeIntroPrompt?.timer != null;
 
   useEffect(() => {
     if (!introPromptVisible || displayMode !== "foreground") return;
@@ -3472,6 +3481,10 @@ export function VideoPlayer({
       if (event.defaultPrevented) return;
       const key = pillKey(event, promptSelector, containerRef.current);
       if (!key) return;
+      if (!introPromptTimed) {
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (key !== "select" || target?.closest(promptSelector) == null) return;
+      }
 
       const handled = key === "select" ? selectIntroPrompt() : dismissIntroPrompt();
       if (!handled) return;
@@ -3481,7 +3494,7 @@ export function VideoPlayer({
 
     document.addEventListener("keydown", handlePromptKeyDown, true);
     return () => document.removeEventListener("keydown", handlePromptKeyDown, true);
-  }, [dismissIntroPrompt, displayMode, introPromptVisible, selectIntroPrompt]);
+  }, [dismissIntroPrompt, displayMode, introPromptTimed, introPromptVisible, selectIntroPrompt]);
 
   // A pill takes focus only after keyboard input, and never from a scrub, an
   // open menu or a text field.
@@ -3496,7 +3509,7 @@ export function VideoPlayer({
         null;
     return !interactionInProgress;
   };
-  const focusIntroPromptOnMount = activeIntroPrompt !== null && pillMayTakeFocus();
+  const focusIntroPromptOnMount = introPromptTimed && pillMayTakeFocus();
 
   // -- Marker editing --
   const currentMarkers = useMemo<MarkerDraft>(
@@ -5469,7 +5482,8 @@ export function VideoPlayer({
           onSkip={selectIntroPrompt}
           label={activeIntroPrompt.label}
           caption={activeIntroPrompt.caption}
-          timer={activeIntroPrompt}
+          timer={activeIntroPrompt.timer ?? undefined}
+          introPrompt
           controlsVisible={controlsVisible}
           focusOnMount={focusIntroPromptOnMount}
           provenance={activeIntro}
