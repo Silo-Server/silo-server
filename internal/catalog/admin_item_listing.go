@@ -34,6 +34,9 @@ type AdminCatalogItemFilter struct {
 	Type       string     `json:",omitempty"`
 	AddedAfter *time.Time `json:",omitempty"`
 	ContentIDs []string   `json:",omitempty"`
+	// People loads the cast and crew of movies and series. It changes no
+	// row, only what each row carries.
+	People bool `json:",omitempty"`
 }
 
 // AdminCatalogItem is one movie, series or episode present in an enabled
@@ -54,6 +57,18 @@ type AdminCatalogItem struct {
 	LibraryIDs    []int
 	AddedAt       time.Time
 	Versions      []AdminCatalogVersion
+	// Stored metadata of a movie or series, unlocalized; empty for an episode.
+	Genres           []string
+	ContentRating    string
+	Studios          []string
+	Networks         []string
+	RatingIMDB       *float64
+	RatingTMDB       *float64
+	RatingRTCritic   *int
+	RatingRTAudience *int
+	// Cast and Crew of a movie or series, loaded only with filter.People.
+	Cast []CastCredit
+	Crew []CrewCredit
 }
 
 // AdminCatalogVersion is one present file of an item. Video facts come from
@@ -81,7 +96,8 @@ type AdminCatalogItemPage struct {
 }
 
 // ListAdminCatalogItems reads the items after the given content_id and their
-// present files in one snapshot: one statement for the page, one for its files.
+// present files in one snapshot: one statement for the page, one for its files,
+// and one for credits when filter.People is set.
 func (r *ItemRepository) ListAdminCatalogItems(ctx context.Context, filter AdminCatalogItemFilter, after string, limit int) (AdminCatalogItemPage, error) {
 	page := AdminCatalogItemPage{Items: []AdminCatalogItem{}}
 	if r == nil || r.pool == nil {
@@ -110,7 +126,9 @@ func (r *ItemRepository) ListAdminCatalogItems(ctx context.Context, filter Admin
 		item := AdminCatalogItem{Versions: []AdminCatalogVersion{}}
 		if err := rows.Scan(&item.ContentID, &item.Type, &item.Title, &item.Year, &item.Status,
 			&item.ImdbID, &item.TmdbID, &item.TvdbID, &item.SeriesID, &item.SeriesTitle,
-			&item.SeasonNumber, &item.EpisodeNumber, &item.AddedAt, &item.LibraryIDs); err != nil {
+			&item.SeasonNumber, &item.EpisodeNumber, &item.Genres, &item.ContentRating, &item.Studios, &item.Networks,
+			&item.RatingIMDB, &item.RatingTMDB, &item.RatingRTCritic, &item.RatingRTAudience,
+			&item.AddedAt, &item.LibraryIDs); err != nil {
 			rows.Close()
 			return page, fmt.Errorf("scanning admin catalog item: %w", err)
 		}
@@ -125,6 +143,11 @@ func (r *ItemRepository) ListAdminCatalogItems(ctx context.Context, filter Admin
 	}
 	if err := attachAdminCatalogVersions(ctx, tx, page.Items); err != nil {
 		return page, err
+	}
+	if filter.People {
+		if err := attachAdminCatalogCredits(ctx, tx, page.Items); err != nil {
+			return page, err
+		}
 	}
 	return page, tx.Commit(ctx)
 }
@@ -198,7 +221,9 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 		}
 		branches = append(branches, branch(`p.content_id, p.type, p.title, p.year, p.status,
 				p.imdb_id, p.tmdb_id, p.tvdb_id, ''::text AS series_id, ''::text AS series_title,
-				NULL::int AS season_number, NULL::int AS episode_number`,
+				NULL::int AS season_number, NULL::int AS episode_number,
+				p.genres, coalesce(p.content_rating, ''), p.studios, p.networks,
+				p.rating_imdb, p.rating_tmdb, p.rating_rt_critic, p.rating_rt_audience`,
 			"media_items", "media_item_libraries", "content_id", "p.type = ANY("+bind(itemTypes)+"::text[])"))
 	}
 	if filter.Type == "" || filter.Type == AdminCatalogTypeEpisode {
@@ -206,7 +231,9 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 				coalesce(extract(year FROM p.air_date)::int, 0), ''::text,
 				p.imdb_id, p.tmdb_id, p.tvdb_id, p.series_id::text,
 				(SELECT s.title FROM media_items s WHERE s.content_id = p.series_id),
-				p.season_number, p.episode_number`,
+				p.season_number, p.episode_number,
+				NULL::text[], ''::text, NULL::text[], NULL::text[],
+				NULL::double precision, NULL::double precision, NULL::int, NULL::int`,
 			"episodes", "episode_libraries", "episode_id",
 			"EXISTS (SELECT 1 FROM media_items s WHERE s.content_id = p.series_id AND s.type = 'series')"))
 	}
@@ -272,6 +299,51 @@ func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCat
 		}
 	}
 	return rows.Err()
+}
+
+// attachAdminCatalogCredits loads the cast and crew of the page's movies and
+// series, in credit order, split as item detail splits them. No photos.
+func attachAdminCatalogCredits(ctx context.Context, tx pgx.Tx, items []AdminCatalogItem) error {
+	var ids []string
+	for i := range items {
+		if items[i].Type != AdminCatalogTypeEpisode {
+			ids = append(ids, items[i].ContentID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT ip.content_id, p.id, p.name, ip.kind, ip.character, ip.sort_order,
+			p.tmdb_id, p.imdb_id, p.tvdb_id, p.plex_guid
+		FROM item_people ip
+		JOIN people p ON p.id = ip.person_id
+		WHERE ip.content_id = ANY($1::text[])
+		ORDER BY ip.kind, ip.sort_order, ip.id`, ids)
+	if err != nil {
+		return fmt.Errorf("listing admin catalog credits: %w", err)
+	}
+	credits := make(map[string][]PersonCredit, len(ids))
+	for rows.Next() {
+		var owner string
+		var credit PersonCredit
+		if err := rows.Scan(&owner, &credit.PersonID, &credit.Name, &credit.Kind, &credit.Character, &credit.SortOrder,
+			&credit.TmdbID, &credit.ImdbID, &credit.TvdbID, &credit.PlexGUID); err != nil {
+			rows.Close()
+			return fmt.Errorf("scanning admin catalog credit: %w", err)
+		}
+		credits[owner] = append(credits[owner], credit)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("listing admin catalog credits: %w", err)
+	}
+	for i := range items {
+		if items[i].Type != AdminCatalogTypeEpisode {
+			items[i].Cast, items[i].Crew = splitCastCrew(credits[items[i].ContentID])
+		}
+	}
+	return nil
 }
 
 func adminCatalogVersion(file *models.MediaFile) AdminCatalogVersion {

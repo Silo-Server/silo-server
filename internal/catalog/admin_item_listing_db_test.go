@@ -30,6 +30,7 @@ func (*adminListingStatementTracer) TraceQueryEnd(context.Context, *pgx.Conn, pg
 type adminListingFixture struct {
 	movies, movies2, disabled, tv int
 	movieA, series, episode1      string
+	actor, director               string
 	every                         []string
 	t0                            time.Time
 }
@@ -60,7 +61,9 @@ func seedAdminListing(t *testing.T, pool *pgxpool.Pool) adminListingFixture {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		_, _ = pool.Exec(ctx, `DELETE FROM media_files WHERE media_folder_id = ANY($1)`, folders)
+		_, _ = pool.Exec(ctx, `DELETE FROM item_people WHERE content_id LIKE $1`, p+"-%")
 		_, _ = pool.Exec(ctx, `DELETE FROM media_items WHERE content_id LIKE $1`, p+"-%")
+		_, _ = pool.Exec(ctx, `DELETE FROM people WHERE name LIKE $1`, p+"-%")
 		_, _ = pool.Exec(ctx, `DELETE FROM media_folders WHERE id = ANY($1)`, folders)
 	})
 	t0 := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
@@ -69,6 +72,11 @@ func seedAdminListing(t *testing.T, pool *pgxpool.Pool) adminListingFixture {
 		($1,'movie','Movie A',1999,'matched','tt1','11'), ($2,'movie','Hidden',2000,'matched','',''),
 		($3,'movie','Unlisted',2001,'matched','',''), ($4,'series','Show',2010,'matched','','')`, movieA, movieHidden, movieUnlisted, series)
 	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'podcast','Cast'), ($2,'audiobook','Book')`, podcast, book)
+	exec(`UPDATE media_items SET genres='{Crime,Drama}', content_rating='R', rating_imdb=8.5, rating_rt_critic=0 WHERE content_id=$1`, movieA)
+	person := time.Now().UnixNano() % 1_000_000_000_000
+	exec(`INSERT INTO people (id,name,tmdb_id) VALUES ($1,$2,'1158'), ($1+1,$3,'')`, person, p+"-actor", p+"-director")
+	exec(`INSERT INTO item_people (id,content_id,person_id,kind,character,sort_order) VALUES
+		($1,$2,$1,1,'Michael',0), ($1+1,$2,$1+1,2,'',0)`, person, movieA)
 	exec(`INSERT INTO episodes (content_id,series_id,season_number,episode_number,title,air_date,tvdb_id) VALUES
 		($1,$3,1,1,'Pilot','2010-05-02',$1), ($2,$3,1,2,'Absent',NULL,''), ($4,$5,1,1,'Cast ep',NULL,'')`,
 		episode1, episode2, series, podcastEpisode, podcast)
@@ -94,7 +102,7 @@ func seedAdminListing(t *testing.T, pool *pgxpool.Pool) adminListingFixture {
 
 	return adminListingFixture{
 		movies: movies, movies2: movies2, disabled: disabled, tv: tv,
-		movieA: movieA, series: series, episode1: episode1, t0: t0,
+		movieA: movieA, series: series, episode1: episode1, t0: t0, actor: p + "-actor", director: p + "-director",
 		every: []string{movieA, movieHidden, movieUnlisted, series, episode1, episode2, podcast, podcastEpisode, book},
 	}
 }
@@ -127,8 +135,9 @@ func adminCatalogIDs(items []AdminCatalogItem) []string {
 
 // TestListAdminCatalogItemsDB pins what the administrator listing returns —
 // present movies, series and episodes only, per-library versus earliest
-// first-seen times, every present file with consistent track facts — and that
-// a page with files costs two statements, whatever else it holds.
+// first-seen times, every present file with consistent track facts, stored
+// metadata and opt-in credits — and that a page with files costs two
+// statements, whatever else it holds, and three with credits.
 func TestListAdminCatalogItemsDB(t *testing.T) {
 	tracer := &adminListingStatementTracer{}
 	pool := searchOptimizationPool(t, tracer)
@@ -167,13 +176,28 @@ func TestListAdminCatalogItemsDB(t *testing.T) {
 		}
 	}
 
-	for _, filter := range []AdminCatalogItemFilter{{ContentIDs: fx.every}, {ContentIDs: []string{fx.movieA}}} {
+	for _, c := range []struct {
+		filter AdminCatalogItemFilter
+		want   int64
+	}{
+		{AdminCatalogItemFilter{ContentIDs: fx.every}, 2},
+		{AdminCatalogItemFilter{ContentIDs: []string{fx.movieA}}, 2},
+		{AdminCatalogItemFilter{ContentIDs: fx.every, People: true}, 3},
+	} {
 		tracer.selects.Store(0)
-		if _, err := repo.ListAdminCatalogItems(t.Context(), filter, "", 50); err != nil {
+		page, err := repo.ListAdminCatalogItems(t.Context(), c.filter, "", 50)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if n := tracer.selects.Load(); n != 2 {
-			t.Fatalf("a page of %v ran %d statements, want 2", filter.ContentIDs, n)
+		if n := tracer.selects.Load(); n != c.want {
+			t.Fatalf("a page of %+v ran %d statements, want %d", c.filter, n, c.want)
+		}
+		if c.filter.People {
+			movie := page.Items[1]
+			if len(movie.Cast) != 1 || movie.Cast[0].Name != fx.actor || movie.Cast[0].Character != "Michael" || movie.Cast[0].TmdbID != "1158" ||
+				len(movie.Crew) != 1 || movie.Crew[0].Name != fx.director || movie.Crew[0].Job != "Director" {
+				t.Fatalf("movie credits = %+v / %+v", movie.Cast, movie.Crew)
+			}
 		}
 	}
 }
@@ -192,6 +216,14 @@ func checkAdminListingItems(t *testing.T, fx adminListingFixture, ep, movie, sho
 	}
 	if !movie.AddedAt.Equal(fx.t0) || !slices.Equal(movie.LibraryIDs, []int{fx.movies, fx.movies2}) || movie.ImdbID != "tt1" || movie.Status != "matched" {
 		t.Fatalf("movie = %+v", movie)
+	}
+	// A zero score is a score, and credits load only on request.
+	if !slices.Equal(movie.Genres, []string{"Crime", "Drama"}) || movie.ContentRating != "R" || movie.RatingIMDB == nil || *movie.RatingIMDB != 8.5 ||
+		movie.RatingRTCritic == nil || *movie.RatingRTCritic != 0 || movie.RatingTMDB != nil || movie.Cast != nil || movie.Crew != nil {
+		t.Fatalf("movie metadata = %+v", movie)
+	}
+	if ep.Genres != nil || ep.ContentRating != "" || ep.RatingIMDB != nil {
+		t.Fatalf("episode metadata = %+v", ep)
 	}
 	want := []AdminCatalogVersion{
 		{LibraryID: fx.movies, Resolution: "2160p", CodecVideo: "hevc", DynamicRange: "dolby_vision", CodecAudio: "truehd", AudioChannels: 8, Atmos: true, Container: "mkv", BitrateKbps: 60000, FileSize: 5000, Edition: "Extended"},

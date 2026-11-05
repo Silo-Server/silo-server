@@ -15392,6 +15392,8 @@ export interface components {
        * @description Most content_ids one listAdminCatalogItems request accepts
        */
       item_listing_max_content_ids: number;
+      /** @description listAdminCatalogItems returns genres, content_rating, studios, networks and ratings on movies and series, and accepts include_people */
+      item_metadata: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -15419,16 +15421,49 @@ export interface components {
        * @description When Silo first saw the item: the earliest first-seen time across its libraries, or its first-seen time in library_id when that filter is set. Not a change cursor; metadata and file changes do not move it
        */
       added_at: string;
+      /** @description Actors and guest stars of a movie or series in credit order, only with include_people; absent when there are none. No photos */
+      cast?: components["schemas"]["CastCredit"][];
       /** @example movie-tmdb-949 */
       content_id: string;
+      /**
+       * @description Stored content rating of a movie or series; absent when unknown and for an episode
+       * @example PG-13
+       */
+      content_rating?: string;
+      /** @description Other credits of a movie or series, only with include_people; absent when there are none. No photos */
+      crew?: components["schemas"]["CrewCredit"][];
       /**
        * Format: int64
        * @description An episode's number in its season; absent otherwise
        */
       episode_number?: number;
+      /** @description Stored genres of a movie or series, not localized; absent when there are none and for an episode */
+      genres?: string[];
       imdb_id?: string;
       /** @description Every enabled library the item is present in, whatever library_id filters */
       library_ids: string[];
+      /** @description Networks a series aired on; absent when there are none and for a movie or episode */
+      networks?: string[];
+      /**
+       * Format: double
+       * @description Stored IMDb rating of a movie or series on IMDb's 0-10 scale
+       */
+      rating_imdb?: number;
+      /**
+       * Format: int64
+       * @description Stored Rotten Tomatoes audience score of a movie or series, a percentage, whether or not title pages show it
+       */
+      rating_rt_audience?: number;
+      /**
+       * Format: int64
+       * @description Stored Rotten Tomatoes critic score of a movie or series, a percentage, whether or not title pages show it
+       */
+      rating_rt_critic?: number;
+      /**
+       * Format: double
+       * @description Stored TMDB rating of a movie or series on TMDB's 0-10 scale
+       */
+      rating_tmdb?: number;
       /**
        * Format: int64
        * @description An episode's season; absent otherwise
@@ -15443,6 +15478,8 @@ export interface components {
        * @example matched
        */
       status?: string;
+      /** @description Production studios of a movie or series; absent when there are none and for an episode */
+      studios?: string[];
       /** @description Episode title for an episode; empty when the episode has none */
       title: string;
       tmdb_id?: string;
@@ -46803,6 +46840,8 @@ export interface operations {
         content_ids?: string[];
         /** @description Opaque cursor from page.next_cursor; valid only with the filters that produced it */
         cursor?: string;
+        /** @description Also return cast and crew on movies and series. Send it only when getAdminCatalogCapabilities reports item_metadata */
+        include_people?: boolean;
         /** @description Only items present in this library; added_at and added_after then use the item's first-seen time in this library */
         library_id?: string;
         /** @description Page size; default 50, maximum 200 */
