@@ -278,3 +278,35 @@ func TestRatingsHideItemsTheViewerMayNotSee(t *testing.T) {
 	decodeJSON(t, first.Body, &page)
 	requireProblem(t, do(t, rh, http.MethodGet, "/api/v2/ratings?limit=1&cursor="+page.Page.NextCursor, "", viewerHeaders()), TypeInvalidCursor)
 }
+
+func TestGetRating(t *testing.T) {
+	h := newTestHandler(t, ratingsDeps(&fakeRatings{ratings: ratingRows()}))
+	rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:c", "", viewerHeaders())
+	if rec.Code != 200 || rec.Body.String() != `{"item_id":"movie:c","rating":5,"rated_at":"2026-01-02T03:04:05.678Z"}`+"\n" {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	// Not rated, and another profile's rating, are both 404.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:nope", "", viewerHeaders()), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:z", "", viewerHeaders()), TypeNotFound)
+}
+
+func TestRatingsDenied(t *testing.T) {
+	h := newTestHandler(t, ratingsDeps(&fakeRatings{err: errStore}))
+	for _, tc := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v2/ratings", ""}, {http.MethodGet, "/api/v2/ratings/movie:c", ""},
+		{http.MethodPut, "/api/v2/ratings/movie:c", `{"rating":3}`}, {http.MethodDelete, "/api/v2/ratings/movie:c", ""},
+	} {
+		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, nil), TypeAuthenticationRequired)
+		p := requireProblem(t, do(t, h, tc.method, tc.path, tc.body, bearer(memberToken)), TypeValidationFailed)
+		if len(p.Errors) != 1 || p.Errors[0].Location != locationProfileHeader {
+			t.Fatalf("%s %s: errors = %+v", tc.method, tc.path, p.Errors)
+		}
+		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, with(bearer(memberToken), "X-Profile-Id", "p-unknown")), TypeNotFound)
+		requireProblem(t, do(t, h, tc.method, tc.path, tc.body, viewerHeaders()), TypeInternalError)
+	}
+	deps := pilotDeps(nil, nil)
+	deps.Ratings = nil
+	requireProblem(t, do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/ratings", "", viewerHeaders()), TypeDependencyUnavailable)
+}
+
+var _ RatingService = (*handlers.RatingsHandler)(nil)
