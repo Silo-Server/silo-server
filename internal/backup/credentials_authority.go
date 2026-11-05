@@ -52,6 +52,10 @@ type profileLimits struct {
 	// ceilings: its title allowances and the titles of its live-allowed
 	// collections, resolved as the access scope resolves them.
 	allowedTitles []string
+	// directTitles are its own title allowances, every row: allowedTitles
+	// stops at userstore.MaxAllowedTitles, so a row past it would be
+	// invisible to the comparison yet could become effective later.
+	directTitles []string
 	// allowedCollections are the collections it is allowed live. They are
 	// compared on their own: a collection empty today resolves no title, yet
 	// allows whatever is added to it later.
@@ -111,7 +115,7 @@ func roleRank(user *models.User) int {
 }
 
 func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]profileLimits, error) {
-	allowedTitles, allowedCollections, err := allowanceSQL(ctx, tx)
+	allowedTitles, directTitles, allowedCollections, err := allowanceSQL(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +124,7 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 			p.require_advisory_age, p.library_restrictions_enabled,
 			coalesce((SELECT array_agg(a.library_id ORDER BY a.library_id) FROM user_profile_allowed_libraries a WHERE a.user_id = p.user_id AND a.profile_id = p.id), '{}'),
 			coalesce(p.max_playback_quality, ''),
-			`+allowedTitles+`, `+allowedCollections+`
+			`+allowedTitles+`, `+directTitles+`, `+allowedCollections+`
 		FROM user_profiles p WHERE p.user_id = $1`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("reading account %d's profiles: %w", userID, err)
@@ -131,7 +135,7 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 		var id string
 		var p profileLimits
 		if err := rows.Scan(&id, &p.pin, &p.primary, &p.child, &p.ceiling, &p.advisoryAge, &p.requireAdvisoryAge, &p.restricted, &p.libraries,
-			&p.quality, &p.allowedTitles, &p.allowedCollections); err != nil {
+			&p.quality, &p.allowedTitles, &p.directTitles, &p.allowedCollections); err != nil {
 			return nil, err
 		}
 		out[id] = p
@@ -139,21 +143,23 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 	return out, rows.Err()
 }
 
-// allowanceSQL is the select expressions for a profile row p's allowed
-// titles and its allowed collections. A backup taken before title allowances
-// existed has neither table, and its profiles allow nothing above their
-// limits.
-func allowanceSQL(ctx context.Context, q queryer) (titles, collections string, err error) {
+// allowanceSQL is the select expressions for a profile row p's resolved
+// allowed titles, its own title allowances, and its allowed collections. A
+// backup taken before title allowances existed has neither table, and its
+// profiles allow nothing above their limits.
+func allowanceSQL(ctx context.Context, q queryer) (resolved, direct, collections string, err error) {
+	const none = "'{}'::text[]"
 	for _, table := range []string{"profile_title_allowances", "profile_collection_allowances"} {
 		present, err := tableExists(ctx, q, table)
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 		if !present {
-			return "'{}'::text[]", "'{}'::text[]", nil
+			return none, none, none, nil
 		}
 	}
 	return "ARRAY(" + pgstore.ProfileAllowedTitleIDsSQL("p.user_id", "p.id") + ")",
+		"ARRAY(SELECT ta.content_id FROM profile_title_allowances ta WHERE ta.user_id = p.user_id AND ta.profile_id = p.id ORDER BY 1)",
 		"ARRAY(SELECT ca.collection_id FROM profile_collection_allowances ca WHERE ca.user_id = p.user_id AND ca.profile_id = p.id ORDER BY 1)", nil
 }
 
@@ -228,6 +234,11 @@ func (p profileLimits) looserThan(live profileLimits) bool {
 	}
 	for _, id := range p.allowedTitles {
 		if !slices.Contains(live.allowedTitles, id) {
+			return true
+		}
+	}
+	for _, id := range p.directTitles {
+		if !slices.Contains(live.directTitles, id) {
 			return true
 		}
 	}
