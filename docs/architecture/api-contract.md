@@ -1447,7 +1447,8 @@ the unique item id. PostgreSQL keeps full stored timestamp precision in the curs
 orders by the raw `added_at` column so the existing profile/time indexes can supply ordered
 rows; visible API instants remain UTC milliseconds. The v1 offset queries are untouched. The
 favorites, watchlist and Not interested page seams read past entries the catalog no longer has or
-the viewer may not see, in growing batches, until they have a full page of visible entries, so
+the viewer may not see (an episode entry counts as visible when its series is, as its card does),
+in growing batches, until they have a full page of visible entries, so
 `has_more` comes from a visible probe entry and the cursor row is always an item the viewer may see:
 a cursor payload is signed, not encrypted, and must not name a hidden title. A watchlist series
 hidden because it is fully watched is still an entry without a card, since the viewer may see it.

@@ -483,10 +483,9 @@ const listScanBatchMax = 400
 
 // visibleListPage reads a personal list's keyset pages from after until it
 // has limit entries the viewer may see or the store runs out, and answers
-// those entries in store order. An entry is kept only when the catalog has
-// the item and the viewer's access filter admits it, the same test the
-// cards use, so every entry answered has a card unless a later filter (the
-// watchlist's fully-watched series) drops it.
+// those entries in store order. An entry is kept by the same test the cards
+// use (listEntriesVisible), so every entry answered has a card unless a
+// later filter (the watchlist's fully-watched series) drops it.
 //
 // The v2 listings build their next cursor from the last entry of a page and
 // decide has_more from a limit+1 probe. A cursor payload is signed but not
@@ -497,9 +496,11 @@ const listScanBatchMax = 400
 // The first read asks for limit rows, so a list without hidden entries costs
 // one store query and one access query as before. Each further read is four
 // times larger, up to listScanBatchMax, so a long run of hidden entries
-// costs a few round trips rather than one per page. The store queries stay
-// unfiltered because the user store may be SQLite, which has no catalog to
-// join, and recommendations read the same lists without an access filter.
+// costs a few round trips rather than one per page; the total is bounded by
+// the list's length. An empty library allowlist admits nothing, so it reads
+// nothing. The store queries stay unfiltered because the user store may be
+// SQLite, which has no catalog to join, and recommendations read the same
+// lists without an access filter.
 func visibleListPage[E any](ctx context.Context, h *PersonalDataHandler, viewer PersonalListViewer, after *userstore.ListKey, limit int, listFailure string, read func(after *userstore.ListKey, n int) ([]E, error), keyOf func(E) userstore.ListKey) ([]E, error) {
 	if h.itemRepo == nil {
 		// No catalog to check against: answer the store page as is.
@@ -508,6 +509,9 @@ func visibleListPage[E any](ctx context.Context, h *PersonalDataHandler, viewer 
 			return nil, apiError(http.StatusInternalServerError, "internal_error", listFailure)
 		}
 		return rows, nil
+	}
+	if viewer.Access.AllowedLibraryIDs != nil && len(viewer.Access.AllowedLibraryIDs) == 0 {
+		return nil, nil
 	}
 	kept := make([]E, 0, limit)
 	batch := limit
@@ -523,7 +527,7 @@ func visibleListPage[E any](ctx context.Context, h *PersonalDataHandler, viewer 
 		for i, row := range rows {
 			ids[i] = keyOf(row).MediaItemID
 		}
-		visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, viewer.Access)
+		visible, err := h.listEntriesVisible(ctx, ids, viewer.Access)
 		if err != nil {
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
 		}
@@ -540,6 +544,54 @@ func visibleListPage[E any](ctx context.Context, h *PersonalDataHandler, viewer 
 		batch = min(max(batch*4, limit), max(limit, listScanBatchMax))
 	}
 	return kept, nil
+}
+
+// listEntriesVisible reports which of a personal list's item IDs get a card
+// for the viewer, by the rule resolveItemsByIDs applies: a catalog item the
+// access filter admits, or an episode whose parent series it admits.
+// Favorites and the watchlist can hold episodes (jellycompat clients
+// favorite them), and an episode card stands for the episode itself.
+func (h *PersonalDataHandler) listEntriesVisible(ctx context.Context, ids []string, filter catalog.AccessFilter) (map[string]bool, error) {
+	visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, filter)
+	if err != nil {
+		return nil, err
+	}
+	if visible == nil {
+		visible = map[string]bool{}
+	}
+	if h.episodeRepo == nil {
+		return visible, nil
+	}
+	var rest []string
+	for _, id := range ids {
+		if !visible[id] {
+			rest = append(rest, id)
+		}
+	}
+	if len(rest) == 0 {
+		return visible, nil
+	}
+	episodes, err := h.episodeRepo.GetByIDs(ctx, rest)
+	if err != nil {
+		return nil, err
+	}
+	if len(episodes) == 0 {
+		return visible, nil
+	}
+	seriesIDs := make([]string, 0, len(episodes))
+	for _, ep := range episodes {
+		seriesIDs = append(seriesIDs, ep.SeriesID)
+	}
+	seriesVisible, err := h.itemRepo.EnsureAccessibleIDs(ctx, seriesIDs, filter)
+	if err != nil {
+		return nil, err
+	}
+	for _, ep := range episodes {
+		if seriesVisible[ep.SeriesID] {
+			visible[ep.ContentID] = true
+		}
+	}
+	return visible, nil
 }
 
 // VisibleItemIDs reports which of the given catalog items the viewer may see.
