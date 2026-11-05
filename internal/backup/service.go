@@ -338,19 +338,20 @@ func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, er
 // On success rotation and the sweep run; a failed backup deletes nothing. The
 // run is published as the active operation and then as the latest run.
 func (s *Service) Backup(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string)) (RunResult, error) {
-	return s.backupWith(ctx, held, kind, id, progress, nil)
+	return s.backupWith(ctx, held, kind, id, progress, nil, nil)
 }
 
-// backupWith is Backup with ids its rotation must keep: a restore pins its
-// source, so the before-restore backup it takes cannot rotate it away.
-func (s *Service) backupWith(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string), pinned map[string]bool) (RunResult, error) {
+// backupWith is Backup with ids its rotation must keep (a restore pins its
+// source, so the before-restore backup it takes cannot rotate it away) and,
+// for a before-upgrade backup, the upgrade its manifest records.
+func (s *Service) backupWith(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string), pinned map[string]bool, upgrade *UpgradeRecord) (RunResult, error) {
 	if progress == nil {
 		progress = func(float64, string) {}
 	}
 	started := s.opts.Now()
 	prep, prepErr := s.prepareBackup(ctx, kind, id, started)
 	if prepErr == nil {
-		id, prep.held = prep.id, held
+		id, prep.held, prep.upgrade = prep.id, held, upgrade
 	} else if id == "" {
 		id = FolderName(started, kind)
 	}
@@ -384,6 +385,8 @@ type backupPrep struct {
 	id       string
 	// held is the subsystem lock the backup runs under.
 	held Held
+	// upgrade is what a before-upgrade backup's manifest records.
+	upgrade *UpgradeRecord
 }
 
 // prepareBackup resolves the destination and reserves the backup's id under
@@ -553,6 +556,7 @@ func (s *Service) backup(ctx context.Context, prep backupPrep, kind Kind, starte
 		ExcludedTableData: excluded,
 		Objects:           append(objects, blobObjects...),
 		RestoreSet:        restoreSet,
+		Upgrade:           prep.upgrade,
 		Encrypted:         t.key != nil,
 		KeyCheck:          s.opts.KeyCheck,
 		TOCCheck:          tocMode,
@@ -802,10 +806,15 @@ func (s *Service) writeRestoreSet(ctx context.Context, t target, tx pgx.Tx, clos
 	return entry, build.summary(), nil
 }
 
+// errNoDatabase is a service without a database (tests): it cannot read
+// which migrations are applied.
+var errNoDatabase = errors.New("no database")
+
 // rotate runs rotation and the sweeps (incomplete folders, and with
 // sweepUploads expired and orphaned uploads) after a manifest landed, under
-// the subsystem lock. pinned and the source of a queued or running restore
-// are never rotated away; when that restore cannot be read, nothing is. A
+// the subsystem lock. pinned, the source of a queued or running restore,
+// and a before-upgrade copy whose upgrade has not completed are never
+// rotated away; when that restore cannot be read, nothing is. A
 // before-upgrade backup skips the upload sweep: the schema it runs against
 // may predate the upload tables. Failures are warnings: the backup itself
 // succeeded.
@@ -825,12 +834,27 @@ func (s *Service) rotate(ctx context.Context, held Held, t target, serverID stri
 	if err != nil {
 		return nil, nil, []string{"rotation skipped: " + err.Error()}
 	}
+	pinned = maps.Clone(pinned)
+	if pinned == nil {
+		pinned = map[string]bool{}
+	}
 	if active.backupID != "" {
-		pinned = maps.Clone(pinned)
-		if pinned == nil {
-			pinned = map[string]bool{}
-		}
 		pinned[active.backupID] = true
+	}
+	// The copy from before an upgrade that has not completed is the way
+	// back from what its failed migrations left; when the applied
+	// migrations cannot be read, every copy that records its upgrade is.
+	var applied []int64
+	appliedErr := errNoDatabase
+	if s.opts.Pool != nil {
+		if _, applied, appliedErr = appliedMigrations(ctx, s.opts.Pool); appliedErr != nil {
+			warnings = append(warnings, "keeping every before-upgrade backup: "+appliedErr.Error())
+		}
+	}
+	for _, f := range folders {
+		if f.kind == KindBeforeUpgrade && f.manifest != nil && (appliedErr != nil || f.manifest.upgradeUnfinished(applied)) {
+			pinned[f.id] = true
+		}
 	}
 	for _, id := range planRotation(folders, keep, now, pinned) {
 		if err := deleteBackupFolder(ctx, t, folderPrefix(serverID, id)); err != nil {

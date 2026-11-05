@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/migrations"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -77,8 +79,12 @@ func beforeMigrateBackup(bc *config.BootstrapConfig, pool *pgxpool.Pool, cipher 
 		// from the admin jobs (Options.ActiveRestore). On a schema the job
 		// repository cannot read, rotation is skipped with a warning; the
 		// backup itself stands.
+		carried, err := database.MigrationVersions(migrations.FS, "sql")
+		if err != nil {
+			return nil, err
+		}
 		svc := backup.New(opts)
-		held, err := svc.BeforeUpgrade(ctx, backup.UpgradeOptions{Wait: wait, Skip: skip})
+		held, err := svc.BeforeUpgrade(ctx, backup.UpgradeOptions{Wait: wait, Skip: skip, Migrations: carried})
 		if err != nil {
 			return nil, err
 		}

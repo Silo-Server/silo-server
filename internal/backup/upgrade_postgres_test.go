@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -280,5 +281,99 @@ func TestBeforeUpgradeDestinationsDB(t *testing.T) {
 	}
 	if dump, _ := srv.Object(testBucket, folder+DumpName+EncryptedSuffix); !isAgeHeader(dump) {
 		t.Fatal("the stored before-upgrade dump is not encrypted")
+	}
+}
+
+// TestBeforeUpgradeRetriesDB: a retry of an upgrade whose migrations failed
+// keeps the backup the first attempt took while it is the newest, within
+// upgradeReuseWindow, over the same applied migrations; otherwise it takes
+// another. Rotation keeps every copy of an upgrade that has not completed,
+// and lets them go once a later upgrade finds all their migrations applied.
+func TestBeforeUpgradeRetriesDB(t *testing.T) {
+	const p1, p2, p3, next = 99990001, 99990002, 99990003, 99990004
+	type attempt struct {
+		// apply is what the failed attempt before this one left applied.
+		apply []int64
+		// after is how long after the first attempt this one runs.
+		after time.Duration
+	}
+	tests := []struct {
+		name     string
+		attempts []attempt
+		want     int
+	}{
+		{name: "a failed migration retried twice", attempts: []attempt{{}, {after: time.Minute}, {after: 2 * time.Minute}}, want: 1},
+		{name: "migrations applied between attempts", attempts: []attempt{{}, {apply: []int64{p1}, after: time.Minute}, {apply: []int64{p2}, after: 2 * time.Minute}}, want: 3},
+		{name: "a retry after the window", attempts: []attempt{{}, {after: upgradeReuseWindow + time.Minute}, {after: 2 * (upgradeReuseWindow + time.Minute)}}, want: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := t.Context()
+			opts, store := upgradeOptions(t)
+			start := time.Now().UTC().Truncate(time.Second)
+			now := start
+			opts.Now = func() time.Time { return now }
+			svc := New(opts)
+			_, applied, err := appliedMigrations(ctx, opts.Pool)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binary := append(slices.Clone(applied), p1, p2, p3)
+			apply := func(versions ...int64) {
+				t.Helper()
+				for _, v := range versions {
+					if _, err := opts.Pool.Exec(ctx, `INSERT INTO goose_db_version (version_id, is_applied) VALUES ($1, true)`, v); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			upgrade := func() {
+				t.Helper()
+				held, err := svc.BeforeUpgrade(ctx, UpgradeOptions{Migrations: binary})
+				if err != nil {
+					t.Fatal(err)
+				}
+				held.Release(ctx)
+			}
+			serverID, _ := opts.ServerID(ctx)
+			upgradeCopies := func() int {
+				t.Helper()
+				folders, err := svc.folders(ctx, target{Destination: NewStoreDestination(store)}, serverID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				n := 0
+				for _, f := range folders {
+					if f.kind == KindBeforeUpgrade && f.manifest != nil {
+						n++
+					}
+				}
+				return n
+			}
+			for _, a := range tt.attempts {
+				apply(a.apply...)
+				now = start.Add(a.after)
+				upgrade()
+			}
+			if got := upgradeCopies(); got != tt.want {
+				t.Fatalf("before-upgrade backups after the attempts = %d, want %d", got, tt.want)
+			}
+			// The upgrade completes, and the next one rotates as usual.
+			_, applied, err = appliedMigrations(ctx, opts.Pool)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, v := range []int64{p1, p2, p3} {
+				if _, found := slices.BinarySearch(applied, v); !found {
+					apply(v)
+				}
+			}
+			binary = append(binary, next)
+			now = now.Add(time.Minute)
+			upgrade()
+			if got, want := upgradeCopies(), min(tt.want+1, beforeUpgradeKeep); got != want {
+				t.Fatalf("before-upgrade backups after the next upgrade = %d, want %d", got, want)
+			}
+		})
 	}
 }

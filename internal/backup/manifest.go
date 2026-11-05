@@ -105,12 +105,38 @@ type Manifest struct {
 	// RestoreSet describes restore-set.tar, the sections selective restore
 	// reads. Absent when the backup has none (before-upgrade backups).
 	RestoreSet *RestoreSetSummary `json:"restore_set,omitempty"`
+	// Upgrade is, on a before-upgrade backup, the upgrade it is the way back
+	// from. Absent on other kinds and on before-upgrade backups of builds
+	// that did not record it.
+	Upgrade *UpgradeRecord `json:"upgrade,omitempty"`
 	// MAC authenticates every other field: HMAC-SHA256, under the key
 	// secret.BackupManifestKey derives from SECRET_KEY, of the manifest
 	// encoded with MAC empty, in hex. Anyone who can write the destination
 	// can change objects and their checksums together; only a server with
 	// SECRET_KEY can write a MAC that verifies (checkMAC).
 	MAC string `json:"mac,omitempty"`
+}
+
+// UpgradeRecord is the upgrade a before-upgrade backup was taken for.
+type UpgradeRecord struct {
+	// Pending lists the migrations that were pending, ascending: the
+	// upgrade is complete once the database has applied all of them.
+	Pending []int64 `json:"pending"`
+}
+
+// upgradeUnfinished reports whether m is a before-upgrade backup whose
+// upgrade the database, with applied (ascending), has not completed: it is
+// the copy from before migrations that failed, or that a restore undid.
+func (m *Manifest) upgradeUnfinished(applied []int64) bool {
+	if m.Upgrade == nil {
+		return false
+	}
+	for _, v := range m.Upgrade.Pending {
+		if _, found := slices.BinarySearch(applied, v); !found {
+			return true
+		}
+	}
+	return false
 }
 
 // Errors of a manifest's MAC.

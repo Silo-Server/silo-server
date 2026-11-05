@@ -111,7 +111,8 @@ The objects are exactly `db.dump` and `blobs.tar`, plus `restore-set.tar`
 when `restore_set` is present, each named with `.age` when `encrypted` is
 true; a manifest whose names disagree with `encrypted` is refused. A
 `before-upgrade` manifest lists `db.dump` alone, with no restore set and no
-blob counts (see [Before upgrades](#before-upgrades)).
+blob counts, and records the upgrade it precedes in `upgrade.pending`, the
+migrations pending when it was taken (see [Before upgrades](#before-upgrades)).
 A manifest is at most 16 MiB, the most a reader reads: `missing_blobs` lists
 at most 10,000 entries, with `missing_blobs_total` counting them all when
 there are more, and a manifest that would still be larger is not written.
@@ -514,7 +515,12 @@ unencrypted copy to this server instead of the S3 bucket, and one of
 - `before-restore` copies are deleted after 7 days; `before-upgrade` copies
   keep the 2 newest, and always the 2 newest whose manifests this server
   authenticated, so unverified copies at the destination cannot rotate its
-  own away. Neither counts toward `backup.keep`.
+  own away. A `before-upgrade` copy whose upgrade has not completed (some of
+  its `upgrade.pending` migrations are not applied in the database rotation
+  runs against) is never deleted: it is the way back from what failed
+  migrations, or a restore that undid them, left. When the applied
+  migrations cannot be read, every copy that records its upgrade is kept.
+  Neither kind counts toward `backup.keep`.
 - Rotation manages only the current destination and the current server id's
   prefix, and never deletes a backup that is the source of a queued or
   running restore. A running restore holds the subsystem lock for its whole
@@ -565,6 +571,20 @@ back. A `NO TRANSACTION` migration (a concurrent index build, a backfill
 that commits in batches) can stop with its earlier statements committed:
 the next start runs it again, and the `before-upgrade` backup is the way
 back to the database as it was before any of them ran.
+
+A start after failed migrations does not back up the database those
+migrations left. It keeps the earlier attempt's backup, logging its id, when
+that backup is this server's newest at the destination, complete and
+verified, taken less than 6 hours ago, and records the same pending
+migrations over the same applied ones as the database has now. Otherwise it
+takes another backup, and rotation keeps both, since neither upgrade has
+completed (see rotation above). The 6-hour bound covers the one way the
+database can change between attempts: a server running the previous release
+on it, whose writes a kept backup would lack. A failed migration retried any
+number of times within the window leaves one backup; once all its migrations
+are applied, the next rotation treats it like any other `before-upgrade`
+copy. A destination that cannot be listed takes a backup, which then fails
+with the reason.
 
 The backup runs before this release's schema exists, against whatever the
 previous release left:
