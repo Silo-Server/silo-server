@@ -26,7 +26,7 @@ import {
   getOverlayDef,
   getPreset,
   isOverlayOffered,
-  isOverlaySuppressed,
+  overlaySuppressedBy,
   OVERLAY_REGISTRY,
   POSITION_OPTIONS,
   type CardOverlayPrefs,
@@ -227,9 +227,9 @@ function BadgeRow({
   const def = getOverlayDef(overlayId);
   if (!def) return null;
   const config = prefs.items[overlayId];
-  const suppressed = config.enabled && isOverlaySuppressed(overlayId, prefs);
-  const hint = suppressed
-    ? "Hidden while the combined Resolution + HDR badge is on."
+  const suppressedBy = config.enabled ? overlaySuppressedBy(overlayId, prefs) : null;
+  const hint = suppressedBy
+    ? `Hidden while the combined ${getOverlayDef(suppressedBy)?.label.replace(" (combined)", "")} badge is on.`
     : def.availabilityNote;
   const update = (next: Partial<OverlayItemConfig>) =>
     onUpdate({ ...prefs, items: { ...prefs.items, [overlayId]: { ...config, ...next } } });

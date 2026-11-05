@@ -86,8 +86,15 @@ describe("overlayPrefsForServer", () => {
     expect(storable.items.show_status.position).toBe("top-right");
   });
 
-  it("keeps everything for a server at revision 25", () => {
+  it("drops the revision 26 combined badge for a server at revision 25", () => {
     const storable = overlayPrefsForServer(prefs, { manifestRevision: 25, storedIds: new Set() });
+    expect(storable.items).not.toHaveProperty("resolution_hdr_audio");
+    const { resolution_hdr_audio: _added, ...items } = prefs.items;
+    expect(storable).toEqual({ ...prefs, items });
+  });
+
+  it("keeps everything for a server at revision 26", () => {
+    const storable = overlayPrefsForServer(prefs, { manifestRevision: 26, storedIds: new Set() });
     expect(storable).toEqual(prefs);
   });
 });
