@@ -49,7 +49,7 @@ func TestMergePluginSettings(t *testing.T) {
 		AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{
 			{Key: "topic"}, {Key: "token", Secret: true}, {Key: "priority"},
 		}},
-	}, PublicFields: []string{"priority", "topic"}, SecretFields: []string{"token"}}
+	}, PublicFields: []string{"priority", "region", "topic"}, SecretFields: []string{"token"}}
 	stored := map[string]any{"topic": "alerts", "token": "s3cret", "priority": float64(3)}
 	for _, tc := range []struct {
 		name    string
@@ -72,6 +72,8 @@ func TestMergePluginSettings(t *testing.T) {
 		{name: "clear removes a secret", stored: stored, clear: []string{"token"},
 			want: map[string]any{"topic": "alerts", "priority": float64(3)}},
 		{name: "undeclared field", write: map[string]any{"server_url": "http://10.0.0.1"}, wantErr: true},
+		// "region" comes from an allOf branch, so only the host's field sets know it.
+		{name: "field declared outside the root properties", write: map[string]any{"region": "eu"}, want: map[string]any{"region": "eu"}},
 		{name: "clearing a plain field", stored: stored, clear: []string{"topic"}, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

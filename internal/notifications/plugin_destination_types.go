@@ -2,7 +2,6 @@ package notifications
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -38,17 +37,19 @@ type PluginChannel struct {
 	SecretFields []string
 }
 
-// declaredFields returns the top-level properties of the settings JSON
-// schema, and false when the schema declares none (any field is allowed).
+// declaredFields returns every setting the destination schema declares: the
+// public and secret fields the host classified, which follow allOf, $ref,
+// dependentSchemas and the admin form, not just the root properties. It
+// returns false when the schema declares none (any field is allowed).
 func (c PluginChannel) declaredFields() (map[string]struct{}, bool) {
-	var schema struct {
-		Properties map[string]json.RawMessage `json:"properties"`
-	}
-	if err := json.Unmarshal([]byte(c.Schema.GetJsonSchema()), &schema); err != nil || len(schema.Properties) == 0 {
+	if len(c.PublicFields)+len(c.SecretFields) == 0 {
 		return nil, false
 	}
-	out := make(map[string]struct{}, len(schema.Properties))
-	for key := range schema.Properties {
+	out := make(map[string]struct{}, len(c.PublicFields)+len(c.SecretFields))
+	for _, key := range c.PublicFields {
+		out[key] = struct{}{}
+	}
+	for _, key := range c.SecretFields {
 		out[key] = struct{}{}
 	}
 	return out, true
