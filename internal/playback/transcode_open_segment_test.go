@@ -64,7 +64,7 @@ func TestOpenSegmentRefusesNamesOutsideOutputDir(t *testing.T) {
 		SubtitleTrackIndex: 0,
 		SubtitleCodec:      "subrip",
 	}
-	if err := prepareSubtitleFilterInput(&opts); err != nil {
+	if err := prepareSubtitleFilterInput(t.Context(), &opts); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(outputDir, subtitleFilterAliasName)); err != nil {
