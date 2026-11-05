@@ -515,6 +515,11 @@
 # task-page edit made after it, and a re-enabled task starts on it.
 ./internal/plugins TestTaskBindingScheduleAppliesOnceOnEveryServerDB
 
+# A plugin update moves a task whose saved schedule still equals the old
+# manifest default to the new one, and keeps an edited schedule and a binding's
+# own trigger.
+./internal/plugins TestPluginUpdateMovesUneditedTaskScheduleDB
+
 # A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.

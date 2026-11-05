@@ -24,11 +24,11 @@ unknown-type binding trigger, falls through to the next source.
 
 The default seeds `task_schedules` the first time the task registers, as it
 does for core tasks. After that the saved schedule wins, so an administrator's
-edit on the task page survives restarts, disabling and enabling the task, and
-plugin upgrades that change the manifest default.
+edit on the task page survives restarts and disabling and enabling the task.
 
-One thing replaces the saved schedule: a binding write whose runnable trigger
-differs from the one the binding stored before (none for a new row).
+Two things replace the saved schedule. The first is a binding write whose
+runnable trigger differs from the one the binding stored before (none for a
+new row).
 `RuntimeConfigStore.UpsertTaskBinding` saves the default the new binding
 implies (its trigger, else the manifest default, else startup) in the same
 transaction as the binding row, locking that row first so concurrent writes of
@@ -37,18 +37,36 @@ Resending the stored trigger with only `enabled` changed, as the plugin page's
 switch does, keeps the saved schedule. A binding for a capability that is not a
 scheduled task stores no schedule.
 
+The second is a plugin update, because a saved schedule follows the manifest
+default until someone changes it. When an update (a new release of the same
+installation from any source, auto-update included) changes the default of a
+scheduled task that both the old and the new manifest declare, and the task's
+binding has no runnable trigger, a saved schedule equal to the old default (the
+old manifest's `default_trigger`, else startup) becomes the new default. Equal
+means the same triggers in order, each with the same type and the fields that
+type reads. Any other saved schedule is an edit and stays.
+`InstallationStore.Update` does this in the transaction that replaces the
+installation's capabilities, after locking the binding row and the saved
+schedule. An edit that matches the
+old default exactly cannot be told apart from it, so it follows the new default
+too. This is how a task saved as `[startup]` before its plugin declared a
+default picks up the default from the release that adds one.
+
 Invariants:
 
-- A binding's schedule change is written once, by the server that takes the
-  write, and commits or rolls back with the binding. No server keeps state
-  about it in memory, so a restart, a crash after the write, or a server that
-  registers the task later all see the same saved schedule.
+- A binding's or update's schedule change is written once, by the server that
+  takes the write, and commits or rolls back with the binding or the update.
+  No server keeps state about it in memory, so a restart, a crash after the
+  write, or a server that registers the task later all see the same saved
+  schedule.
 - Syncs never write a schedule (apart from seeding the default of a task that
   has none). An edit on the task page made after a binding write therefore
-  stands on every server until the next binding write changes the trigger.
-- A task registers on its saved schedule, which already holds any binding
-  change its sync read, so it never starts on a trigger its binding replaced.
-  Registering resumes an interval from the last run, as a restart does.
+  stands on every server until the next binding write changes the trigger, or
+  an update changes the default while the edit still equals the old one.
+- A task registers on its saved schedule, which already holds any binding or
+  update change its sync read, so it never starts on a trigger that change
+  replaced. Registering resumes an interval from the last run, as a restart
+  does.
 - An unregistered task never starts a run: its worker refuses runs once
   retired, including a firing its trigger loop took before `Unregister` and a
   manual run that looked the task up before it.

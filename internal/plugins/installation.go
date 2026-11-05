@@ -388,7 +388,14 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 	}
 
 	if input.Capabilities != nil {
+		previous, err := s.WithTx(tx).ListCapabilities(ctx, id)
+		if err != nil {
+			return err
+		}
 		if err := s.replaceCapabilities(ctx, tx, id, input.Capabilities); err != nil {
+			return err
+		}
+		if err := followManifestDefaultSchedules(ctx, tx, id, previous, input.Capabilities); err != nil {
 			return err
 		}
 	}

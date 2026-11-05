@@ -37,7 +37,7 @@ func (r *PgTriggerRepository) GetSchedule(ctx context.Context, taskKey string) (
 		return taskmanager.Schedule{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	snapshot, err := readSchedule(ctx, tx, taskKey)
+	snapshot, err := readSchedule(ctx, tx, taskKey, false)
 	if err != nil {
 		return taskmanager.Schedule{}, err
 	}
@@ -57,10 +57,22 @@ func (r *PgTriggerRepository) GetOrCreateTriggers(ctx context.Context, taskKey s
 	return saved.Triggers, nil
 }
 
-func readSchedule(ctx context.Context, tx pgx.Tx, taskKey string) (taskmanager.Schedule, error) {
+// LockScheduleInTx reads a task's saved schedule inside the caller's
+// transaction and locks it until that transaction ends, so a replacement the
+// caller derives from it cannot overwrite an edit saved in between. Revision
+// zero means the task has no saved schedule; nothing is locked then.
+func LockScheduleInTx(ctx context.Context, tx pgx.Tx, taskKey string) (taskmanager.Schedule, error) {
+	return readSchedule(ctx, tx, taskKey, true)
+}
+
+func readSchedule(ctx context.Context, tx pgx.Tx, taskKey string, lock bool) (taskmanager.Schedule, error) {
 	var snapshot taskmanager.Schedule
 	snapshot.Triggers = []taskmanager.TriggerConfig{}
-	err := tx.QueryRow(ctx, `SELECT revision FROM task_schedules WHERE task_key=$1`, taskKey).Scan(&snapshot.Revision)
+	query := `SELECT revision FROM task_schedules WHERE task_key=$1`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	err := tx.QueryRow(ctx, query, taskKey).Scan(&snapshot.Revision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return snapshot, nil
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -475,4 +476,97 @@ func saveTaskBindingSchedule(ctx context.Context, tx pgx.Tx, previous, binding *
 		return fmt.Errorf("saving plugin task %s schedule: %w", key, err)
 	}
 	return nil
+}
+
+// followManifestDefaultSchedules runs in the transaction that replaces an
+// installation's capabilities on a plugin update; previous are the
+// capabilities it replaced. A task's saved schedule follows the manifest
+// default until someone changes it: for each scheduled task present before
+// and after whose default changed and whose binding sets no runnable trigger,
+// a saved schedule that still equals the old default (the old manifest's
+// default_trigger, else startup) is replaced with the new one. Any other
+// saved schedule is an edit and stays; an edit identical to the old default
+// cannot be told apart from it and moves too. A task with no saved schedule
+// is left for the task manager to seed.
+func followManifestDefaultSchedules(ctx context.Context, tx pgx.Tx, installationID int, previous []*Capability, current []Capability) error {
+	before := make(map[string]*Capability, len(previous))
+	for _, capability := range previous {
+		if capability.Type == "scheduled_task.v1" {
+			before[capability.ID] = capability
+		}
+	}
+	for i := range current {
+		capability := &current[i]
+		old, ok := before[capability.ID]
+		if !ok || capability.Type != "scheduled_task.v1" {
+			continue
+		}
+		oldDefault, newDefault := pluginTaskTriggers(nil, old), pluginTaskTriggers(nil, capability)
+		if sameSchedule(oldDefault, newDefault) {
+			continue
+		}
+		bound, err := lockBindingTrigger(ctx, tx, installationID, capability.ID)
+		if err != nil {
+			return err
+		}
+		if bound != nil {
+			continue
+		}
+		key := pluginTaskKey(installationID, capability.ID)
+		saved, err := taskrepository.LockScheduleInTx(ctx, tx, key)
+		if err != nil {
+			return fmt.Errorf("reading plugin task %s schedule: %w", key, err)
+		}
+		if saved.Revision == 0 || !sameSchedule(saved.Triggers, oldDefault) {
+			continue
+		}
+		if err := taskrepository.ReplaceScheduleInTx(ctx, tx, key, newDefault); err != nil {
+			return fmt.Errorf("saving plugin task %s schedule: %w", key, err)
+		}
+	}
+	return nil
+}
+
+// lockBindingTrigger is the runnable trigger stored on a task's binding, or
+// nil when it has none or no binding row exists. It locks the row, ordering
+// the caller against a binding write, which locks it before saving the
+// schedule its trigger implies.
+func lockBindingTrigger(ctx context.Context, tx pgx.Tx, installationID int, capabilityID string) (*taskmanager.TriggerConfig, error) {
+	var triggerJSON []byte
+	err := tx.QueryRow(ctx, `SELECT trigger FROM plugin_task_bindings
+		WHERE plugin_installation_id = $1 AND capability_id = $2 FOR SHARE`,
+		installationID, capabilityID).Scan(&triggerJSON)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading plugin task binding: %w", err)
+	}
+	binding := &TaskBinding{}
+	if err := json.Unmarshal(triggerJSON, &binding.Trigger); err != nil {
+		return nil, fmt.Errorf("unmarshaling plugin task binding trigger: %w", err)
+	}
+	return bindingTrigger(binding), nil
+}
+
+// sameSchedule reports whether two trigger lists fire alike: the same
+// triggers in order, each with the same type and the fields that type reads.
+func sameSchedule(a, b []taskmanager.TriggerConfig) bool {
+	return slices.EqualFunc(a, b, func(x, y taskmanager.TriggerConfig) bool {
+		return firing(x) == firing(y)
+	})
+}
+
+// firing is the part of trigger that decides when it fires.
+func firing(trigger taskmanager.TriggerConfig) taskmanager.TriggerConfig {
+	out := taskmanager.TriggerConfig{Type: trigger.Type}
+	switch trigger.Type {
+	case taskmanager.TriggerTypeInterval:
+		out.IntervalMs = trigger.IntervalMs
+	case taskmanager.TriggerTypeDaily:
+		out.TimeOfDay = trigger.TimeOfDay
+	case taskmanager.TriggerTypeWeekly:
+		out.TimeOfDay, out.DayOfWeek = trigger.TimeOfDay, trigger.DayOfWeek
+	}
+	return out
 }

@@ -396,3 +396,70 @@ func TestTaskBindingScheduleAppliesOnceOnEveryServerDB(t *testing.T) {
 	h.sync(a, b)
 	h.expect("trigger cleared", hourly, a, b)
 }
+
+// A plugin update moves a task whose saved schedule is still the old
+// manifest default to the new default, and keeps an edited schedule and a
+// binding's own trigger.
+func TestPluginUpdateMovesUneditedTaskScheduleDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	store := NewInstallationStore(pool)
+	configs := NewRuntimeConfigStore(pool)
+	triggerRepo := taskrepository.NewPgTriggerRepository(pool)
+	manifestHourly := &pluginv1.ScheduledTaskTrigger{Type: "interval", IntervalMs: 3_600_000}
+	manifestDaily := &pluginv1.ScheduledTaskTrigger{Type: "daily", TimeOfDay: "02:00"}
+	hourly := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeInterval, IntervalMs: 3_600_000}}
+	startup := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+	weekly := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeWeekly, TimeOfDay: "04:00", DayOfWeek: 3}}
+	for _, tc := range []struct {
+		name          string
+		before, after *pluginv1.ScheduledTaskTrigger
+		binding       map[string]any
+		edit          []taskmanager.TriggerConfig
+		want          []taskmanager.TriggerConfig
+	}{
+		{name: "startup moves to an added default", after: manifestHourly, want: hourly},
+		{name: "edited schedule stays", after: manifestHourly, edit: weekly, want: weekly},
+		// The binding's trigger is the old default, so only the binding check keeps it.
+		{name: "binding trigger stays", after: manifestHourly, binding: map[string]any{"type": "startup"}, want: startup},
+		{name: "old default moves to the changed default", before: manifestDaily, after: manifestHourly, want: hourly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			id := seedResidentQueryInstallation(t, pool, true)
+			key := pluginTaskKey(id, "sync")
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM task_triggers WHERE task_key = $1`, key)
+				_, _ = pool.Exec(context.Background(), `DELETE FROM task_schedules WHERE task_key = $1`, key)
+			})
+			release := func(version string, trigger *pluginv1.ScheduledTaskTrigger) *Capability {
+				capability := scheduledTaskCapability(t, "sync", "Sync", trigger)
+				if err := store.Update(ctx, id, UpdateInstallationInput{Version: &version, Capabilities: []Capability{*capability}}); err != nil {
+					t.Fatal(err)
+				}
+				return capability
+			}
+
+			installed := release("1", tc.before)
+			binding := &TaskBinding{InstallationID: id, CapabilityID: "sync", Enabled: true, Trigger: tc.binding}
+			if tc.binding != nil {
+				if err := configs.UpsertTaskBinding(ctx, *binding); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The task manager saves the default when the task first registers.
+			if _, err := triggerRepo.GetOrCreateTriggers(ctx, key, pluginTaskTriggers(binding, installed)); err != nil {
+				t.Fatal(err)
+			}
+			if tc.edit != nil {
+				if err := triggerRepo.SetTriggers(ctx, key, tc.edit); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			release("2", tc.after)
+			if got, err := triggerRepo.GetTriggers(ctx, key); err != nil || !slices.Equal(got, tc.want) {
+				t.Fatalf("saved schedule after the update = %+v (%v), want %+v", got, err, tc.want)
+			}
+		})
+	}
+}
