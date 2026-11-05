@@ -227,6 +227,7 @@ var restoredFlagColumns = map[string]string{
 	"movie_match_queue.rerun_requested":                       whyQueue,
 	"page_sections.enabled":                                   whyShown,
 	"page_sections.featured":                                  whyShown,
+	"page_sections.web_only":                                  whyShown,
 	"profile_series_interest.continue_watching":               whyDerived,
 	"profile_series_interest.favorite":                        whyDerived,
 	"profile_series_interest.next_up_candidate":               whyDerived,
