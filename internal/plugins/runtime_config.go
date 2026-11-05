@@ -520,6 +520,14 @@ func (s *RuntimeConfigStore) UpsertTaskBinding(ctx context.Context, binding Task
 	// A write that finds the row locks it first, so concurrent writes of one
 	// binding each compare against the trigger the one before stored.
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// A plugin update holds the installation row while it moves
+		// unedited schedules to a changed manifest default. Waiting for it
+		// keeps a first binding, which has no row of its own to lock yet,
+		// from saving its schedule between the update's binding check and
+		// its schedule move.
+		if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations WHERE id = $1 FOR SHARE`, binding.InstallationID); err != nil {
+			return fmt.Errorf("locking plugin installation for task binding: %w", err)
+		}
 		inserted, err := tx.Exec(ctx, `
 			INSERT INTO plugin_task_bindings (plugin_installation_id, capability_id, enabled, trigger)
 			VALUES ($1, $2, $3, $4)

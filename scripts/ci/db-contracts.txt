@@ -520,8 +520,9 @@
 
 # A plugin update moves a task whose saved schedule still equals the old
 # manifest default to the new one, and keeps an edited schedule and a binding's
-# own trigger.
+# own trigger, including a first binding written while the update runs.
 ./internal/plugins TestPluginUpdateMovesUneditedTaskScheduleDB
+./internal/plugins TestFirstTaskBindingWaitsForPluginUpdateDB
 
 # A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
 # the row and leaves its files, which can sit above the plugin root, and the

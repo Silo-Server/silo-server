@@ -487,7 +487,9 @@ func saveTaskBindingSchedule(ctx context.Context, tx pgx.Tx, previous, binding *
 // default_trigger, else startup) is replaced with the new one. Any other
 // saved schedule is an edit and stays; an edit identical to the old default
 // cannot be told apart from it and moves too. A task with no saved schedule
-// is left for the task manager to seed.
+// is left for the task manager to seed. The caller holds the installation
+// row, which binding writes lock before they write, so no binding lands
+// between the binding check and the schedule move.
 func followManifestDefaultSchedules(ctx context.Context, tx pgx.Tx, installationID int, previous []*Capability, current []Capability) error {
 	before := make(map[string]*Capability, len(previous))
 	for _, capability := range previous {
@@ -505,7 +507,7 @@ func followManifestDefaultSchedules(ctx context.Context, tx pgx.Tx, installation
 		if sameSchedule(oldDefault, newDefault) {
 			continue
 		}
-		bound, err := lockBindingTrigger(ctx, tx, installationID, capability.ID)
+		bound, err := storedBindingTrigger(ctx, tx, installationID, capability.ID)
 		if err != nil {
 			return err
 		}
@@ -527,14 +529,12 @@ func followManifestDefaultSchedules(ctx context.Context, tx pgx.Tx, installation
 	return nil
 }
 
-// lockBindingTrigger is the runnable trigger stored on a task's binding, or
-// nil when it has none or no binding row exists. It locks the row, ordering
-// the caller against a binding write, which locks it before saving the
-// schedule its trigger implies.
-func lockBindingTrigger(ctx context.Context, tx pgx.Tx, installationID int, capabilityID string) (*taskmanager.TriggerConfig, error) {
+// storedBindingTrigger is the runnable trigger stored on a task's binding,
+// or nil when it has none or no binding row exists.
+func storedBindingTrigger(ctx context.Context, tx pgx.Tx, installationID int, capabilityID string) (*taskmanager.TriggerConfig, error) {
 	var triggerJSON []byte
 	err := tx.QueryRow(ctx, `SELECT trigger FROM plugin_task_bindings
-		WHERE plugin_installation_id = $1 AND capability_id = $2 FOR SHARE`,
+		WHERE plugin_installation_id = $1 AND capability_id = $2`,
 		installationID, capabilityID).Scan(&triggerJSON)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil

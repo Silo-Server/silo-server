@@ -463,3 +463,78 @@ func TestPluginUpdateMovesUneditedTaskScheduleDB(t *testing.T) {
 		})
 	}
 }
+
+// A task's first binding, written while a plugin update moves its schedule
+// to a changed default, waits for the update and then saves its own trigger,
+// so the update cannot overwrite a schedule the binding set.
+func TestFirstTaskBindingWaitsForPluginUpdateDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := t.Context()
+	store := NewInstallationStore(pool)
+	triggerRepo := taskrepository.NewPgTriggerRepository(pool)
+	id := seedResidentQueryInstallation(t, pool, true)
+	key := pluginTaskKey(id, "sync")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM task_triggers WHERE task_key = $1`, key)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM task_schedules WHERE task_key = $1`, key)
+	})
+	version := "1"
+	if err := store.Update(ctx, id, UpdateInstallationInput{Version: &version, Capabilities: []Capability{*scheduledTaskCapability(t, "sync", "Sync", nil)}}); err != nil {
+		t.Fatal(err)
+	}
+	startup := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeStartup}}
+	if _, err := triggerRepo.GetOrCreateTriggers(ctx, key, startup); err != nil {
+		t.Fatal(err)
+	}
+
+	// The update's transaction, as InstallationStore.Update runs it.
+	update, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = update.Rollback(context.WithoutCancel(ctx)) }()
+	var holder int
+	if err := update.QueryRow(ctx, `SELECT pg_backend_pid() FROM plugin_installations WHERE id = $1 FOR NO KEY UPDATE`, id).Scan(&holder); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- NewRuntimeConfigStore(pool).UpsertTaskBinding(ctx, TaskBinding{InstallationID: id, CapabilityID: "sync", Enabled: true, Trigger: map[string]any{"type": "startup"}})
+	}()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for waiting := false; !waiting; {
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, holder).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("binding write finished during the plugin update: %v", err)
+		case <-deadline.C:
+			t.Fatal("binding write never waited for the plugin update")
+		case <-tick.C:
+		}
+	}
+	previous, err := store.WithTx(update).ListCapabilities(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hourly := []Capability{*scheduledTaskCapability(t, "sync", "Sync", &pluginv1.ScheduledTaskTrigger{Type: "interval", IntervalMs: 3_600_000})}
+	if err := store.replaceCapabilities(ctx, update, id, hourly); err != nil {
+		t.Fatal(err)
+	}
+	if err := followManifestDefaultSchedules(ctx, update, id, previous, hourly); err != nil {
+		t.Fatal(err)
+	}
+	if err := update.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got, err := triggerRepo.GetTriggers(ctx, key); err != nil || !slices.Equal(got, startup) {
+		t.Fatalf("saved schedule = %+v (%v), want the binding's %+v", got, err, startup)
+	}
+}

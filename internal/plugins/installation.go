@@ -388,6 +388,10 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 	}
 
 	if input.Capabilities != nil {
+		// Task binding writes wait on this row; see UpsertTaskBinding.
+		if _, err := tx.Exec(ctx, `SELECT id FROM plugin_installations WHERE id = $1 FOR NO KEY UPDATE`, id); err != nil {
+			return fmt.Errorf("locking plugin installation: %w", err)
+		}
 		previous, err := s.WithTx(tx).ListCapabilities(ctx, id)
 		if err != nil {
 			return err
