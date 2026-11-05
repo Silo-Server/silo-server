@@ -320,3 +320,25 @@ func TestRejectIdentityProviderIDsIncludesMalformedStoredValues(t *testing.T) {
 		t.Fatalf("stored IDs after suppression = %#v, want the malformed IMDb value rejected too", stored)
 	}
 }
+
+// The first ID both sides carry decides, in the series order TVDB, TMDB, IMDb,
+// and a correction sharing no ID has nothing showing it is the same show.
+func TestCorrectionNamesDifferentShow(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		stored, resolved map[string]string
+		want             bool
+	}{
+		{"a corrected lower-priority id", map[string]string{"tvdb": "1", "imdb": "tt1"}, map[string]string{"tvdb": "1", "imdb": "tt2"}, false},
+		{"a corrected anchor with the first shared id agreeing", map[string]string{"tvdb": "1", "tmdb": "2"}, map[string]string{"tvdb": "1", "tmdb": "3"}, false},
+		{"a different first id despite a shared later one", map[string]string{"tvdb": "1", "tmdb": "2"}, map[string]string{"tvdb": "9", "tmdb": "2"}, true},
+		{"the same show by another provider's id", map[string]string{"tvdb": "1"}, map[string]string{"tvdb": "1", "tmdb": "2"}, false},
+		{"no shared id", map[string]string{"tvdb": "1"}, map[string]string{"tmdb": "2"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := correctionNamesDifferentShow("series", tc.stored, tc.resolved); got != tc.want {
+				t.Errorf("correctionNamesDifferentShow = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

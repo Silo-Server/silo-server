@@ -2839,7 +2839,8 @@ func (s *MetadataService) mergeAndPersist(
 		accumulator.rejectedIdentityProviderIDs, req.recordedStaleProviderIDs, accumulator.sameRunStaleProviderIDs)
 	if shouldReanchorProviderContentID(contentID, isNew, req.Mode, anchorRejected) {
 		reanchored, err := s.reanchorContentID(
-			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify, anchorRejected)
+			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify,
+			anchorRejected && correctionNamesDifferentShow(contentType, storedItemIdentity(existingItem, req.durableProviderIDs), accumulator.ProviderIDs))
 		if err != nil {
 			return nil, fmt.Errorf("reanchor provider content id: %w", err)
 		}
