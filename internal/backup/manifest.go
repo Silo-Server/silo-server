@@ -91,6 +91,9 @@ type Manifest struct {
 	// Tables is the core table inventory from the backup's snapshot. Full
 	// restore compares the restored database with it, presence and counts.
 	Tables []TableCount `json:"tables"`
+	// RestoreSet describes restore-set.tar, the sections selective restore
+	// reads. Absent when the backup has none.
+	RestoreSet *RestoreSetSummary `json:"restore_set,omitempty"`
 	// MAC authenticates every other field: HMAC-SHA256, under the key
 	// secret.BackupManifestKey derives from SECRET_KEY, of the manifest
 	// encoded with MAC empty, in hex. Anyone who can write the destination
@@ -162,6 +165,18 @@ func (m *Manifest) checkMAC(key []byte, keyCheck string) (authenticated bool, er
 		return false, ErrManifestTampered
 	}
 	return true, nil
+}
+
+// RestoreSetSummary is the manifest's record of restore-set.tar: its format
+// version and how many items each section holds.
+type RestoreSetSummary struct {
+	FormatVersion int            `json:"format_version"`
+	Sections      map[string]int `json:"sections"`
+	// IndexSHA256 is the digest of the restore set's index, its first
+	// entry. With the manifest authenticated, a read checks the index
+	// against it before decoding it, and the archive against its object
+	// digest before decoding any document.
+	IndexSHA256 string `json:"index_sha256,omitempty"`
 }
 
 // ObjectEntry is one stored object: its size and the SHA-256 of the bytes as
@@ -269,7 +284,10 @@ func (m *Manifest) validate() error {
 	if err := validateApplied(m.AppliedMigrations, m.GooseVersion); err != nil {
 		return err
 	}
-	if err := validateObjects(m.Objects); err != nil {
+	if err := validateObjects(m.Objects, m.RestoreSet != nil); err != nil {
+		return err
+	}
+	if err := m.RestoreSet.validate(); err != nil {
 		return err
 	}
 	if m.Blobs.Count < 0 || m.Blobs.Bytes < 0 {
@@ -283,10 +301,13 @@ func (m *Manifest) validate() error {
 	return validateInventory(m.Tables)
 }
 
-// validateObjects requires exactly db.dump and blobs.tar, each once, with a
-// size and a SHA-256.
-func validateObjects(objects []ObjectEntry) error {
+// validateObjects requires exactly db.dump, blobs.tar, and restore-set.tar
+// when the manifest describes one, each once, with a size and a SHA-256.
+func validateObjects(objects []ObjectEntry, restoreSet bool) error {
 	want := map[string]bool{DumpName: false, BlobsName: false}
+	if restoreSet {
+		want[RestoreSetName] = false
+	}
 	for _, o := range objects {
 		seen, known := want[o.Name]
 		switch {
@@ -304,6 +325,31 @@ func validateObjects(objects []ObjectEntry) error {
 	for name, seen := range want {
 		if !seen {
 			return fmt.Errorf("object %q is not listed", name)
+		}
+	}
+	return nil
+}
+
+// validate checks a restore set summary: a format version, and a
+// non-negative count for each section. Sections must be ones this server
+// knows unless the format is newer than it reads; the restore set reader
+// refuses that format with its own message, and the backup still lists.
+func (r *RestoreSetSummary) validate() error {
+	if r == nil {
+		return nil
+	}
+	if r.FormatVersion < 1 {
+		return fmt.Errorf("restore set format version %d is not valid", r.FormatVersion)
+	}
+	if r.IndexSHA256 != "" && !sha256Hex.MatchString(r.IndexSHA256) {
+		return errors.New("restore set index digest is not valid")
+	}
+	for id, count := range r.Sections {
+		if _, known := sectionByID(id); !known && (r.FormatVersion <= restoreSetVersion || !validSectionID(id)) {
+			return fmt.Errorf("restore set section %q is not known", id)
+		}
+		if count < 0 {
+			return fmt.Errorf("restore set section %q has a negative count", id)
 		}
 	}
 	return nil

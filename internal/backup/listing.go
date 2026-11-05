@@ -15,7 +15,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 )
 
-// Delete removes one backup of this server under the subsystem lock.
+// Delete removes one backup of this server, unless a queued or running
+// restore reads it (ErrBackupInUse), checked under the subsystem lock.
 func (s *Service) Delete(ctx context.Context, id string) error {
 	if _, _, ok := ParseFolderName(id); !ok {
 		return ErrNotFound
@@ -35,6 +36,11 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	defer held.Release(context.WithoutCancel(ctx))
 	ctx, cancel := withLost(ctx, held)
 	defer cancel()
+	if active, err := s.activeRestoreSource(ctx); err != nil {
+		return err
+	} else if active.backupID == id {
+		return ErrBackupInUse
+	}
 	op := s.beginOperation(ctx, held, ActiveOperation{Operation: OperationDelete, BackupID: id, StartedAt: s.opts.Now()})
 	defer op.end(ctx, nil)
 	objects, err := t.List(ctx, folderPrefix(serverID, id))

@@ -11,6 +11,7 @@
 //	backups/<server-id>/<UTC time>-<kind>/
 //	  db.dump      pg_dump custom format, zstd
 //	  blobs.tar    assets/<key> and operational/<key> entries
+//	  restore-set.tar the sections selective restore reads
 //	  manifest.json written last
 //
 // A folder without manifest.json is incomplete. The sweep deletes incomplete
@@ -20,9 +21,13 @@
 //
 // One cluster-wide lock covers the subsystem: a PostgreSQL session advisory
 // lock (SubsystemLockKey) on a dedicated connection. Every operation that
-// writes or deletes backups holds it: the backup task, "Back up now",
-// rotation, deletion, and the incomplete-folder sweep.
+// writes or deletes backups, or restores from one, holds it: the backup
+// task, "Back up now", rotation, deletion, and the incomplete-folder sweep.
 // Rotation and the sweep run inside the backup that holds the lock, so they
 // never take it a second time. A lost lock session cancels the work holding
 // it; the incomplete folder it leaves is the sweep's.
+//
+// A restore holds the subsystem lock for its whole run and takes its
+// before-restore backup by calling Backup directly, never by acquiring the
+// lock again.
 package backup

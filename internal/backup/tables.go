@@ -72,7 +72,7 @@ var restoredDataTables = strings.Fields(`
 
 // serverStateTables describe the running server rather than its data.
 var serverStateTables = strings.Fields(`
-	admin_dashboard_layout_revisions admin_jobs anime_ids_refresh
+	admin_dashboard_layout_revisions admin_jobs anime_ids_refresh backup_restore_items
 	api_client_usage_hourly artwork_revision_gc_candidates artwork_revision_gc_dormant_cursor
 	audiobook_item_file_stats autoscan_events autoscan_webhook_deliveries blob_gc_queue
 	catalog_item_change_drain catalog_item_change_events catalog_search_index_state
@@ -101,4 +101,6 @@ var serverStateTables = strings.Fields(`
 	watch_provider_dropped_items watch_provider_history_exports watch_provider_list_items
 	watch_provider_rating_items watch_provider_scrobble_sessions watch_provider_sync_runs
 	watch_together_room_creation_receipts watch_together_suggestion_receipts webhook_sync_event_logs
-	webhook_sync_item_state`)
+	webhook_sync_item_state
+	backup_restore_followups
+`)

@@ -68,6 +68,7 @@ type Runner struct {
 	templateBundleApply        templateBundleApplyExecutor
 	storageTransition          storageTransitionExecutor
 	storageTransitionCommitted func(context.Context) error
+	backupRestore              backupRestoreExecutor
 	realtimeHub                *notifications.Hub
 	imageCacheCleanupSlice     time.Duration
 	pollInterval               time.Duration
@@ -230,6 +231,7 @@ func (r *Runner) runNext() {
 		JobTypeDeleteLibrary,
 		JobTypeTemplateBundleApply,
 		JobTypeStorageTransition,
+		JobTypeBackupRestore,
 	})
 	cancel()
 	if err != nil {
@@ -259,8 +261,8 @@ func (r *Runner) runNext() {
 		itemRefresh: r.itemRefresh, libraryRefresh: r.libraryRefresh, libraryDelete: r.libraryDelete,
 		imageCacheCleanup: r.imageCacheCleanup, imageCacheCleanupSlice: r.imageCacheCleanupSlice,
 		templateBundleApply: r.templateBundleApply, storageTransition: r.storageTransition,
-		storageTransitionCommitted: r.storageTransitionCommitted,
-		realtimeHub:                r.realtimeHub, heartbeatInterval: r.heartbeatInterval, retention: r.retention, cancelRegistry: r.cancelRegistry,
+		storageTransitionCommitted: r.storageTransitionCommitted, backupRestore: r.backupRestore,
+		realtimeHub: r.realtimeHub, heartbeatInterval: r.heartbeatInterval, retention: r.retention, cancelRegistry: r.cancelRegistry,
 		storageRestart: r.storageRestart, stop: r.stop,
 	}
 	if job.JobType == JobTypeStorageTransition && r.storageRestartPending() {
@@ -273,6 +275,9 @@ func (r *Runner) runNext() {
 		message := "Library metadata refresh canceled"
 		if job.JobType == JobTypeImageCacheCleanup {
 			message = QueuedImageCacheCleanupCanceledMessage(job.ProgressCurrent, job.ProgressTotal)
+		}
+		if job.JobType == JobTypeBackupRestore {
+			message = "Restore canceled"
 		}
 		if job.JobType == JobTypeStorageTransition {
 			message = "Storage transition canceled; verified copy checkpoints retained"
@@ -318,6 +323,8 @@ func (r *Runner) runNext() {
 		r.executeImageCacheCleanup(job)
 	case JobTypeStorageTransition:
 		r.executeStorageTransition(job)
+	case JobTypeBackupRestore:
+		r.executeBackupRestore(job)
 	default:
 		r.failJob(job.ID, 0, 0, "Admin job failed", "unsupported admin job type")
 	}

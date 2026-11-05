@@ -146,20 +146,55 @@ func ladderSiblings(ctx context.Context, store blobstore.Store, original string)
 	if err != nil {
 		return nil, fmt.Errorf("listing variants of %s: %w", original, err)
 	}
-	revision := artworkkey.Revision(original)
 	var keys []string
 	for _, obj := range objects {
-		if obj.Key == original || path.Dir(obj.Key)+"/" != dir {
-			continue
-		}
-		sameRevision := revision != "" && artworkkey.OriginalOf(obj.Key) == original
-		bothLegacy := revision == "" && artworkkey.Revision(obj.Key) == ""
-		if sameRevision || bothLegacy {
+		if ladderSibling(original, obj.Key) {
 			keys = append(keys, obj.Key)
 		}
 	}
 	return keys, nil
 }
+
+// ladderSibling reports whether key is a variant stored beside the artwork
+// original: in its directory, of its revision, or both without one.
+func ladderSibling(original, key string) bool {
+	dir := artworkkey.Directory(original)
+	if key == original || dir == "" || path.Dir(key)+"/" != dir {
+		return false
+	}
+	if revision := artworkkey.Revision(original); revision != "" {
+		return artworkkey.OriginalOf(key) == original
+	}
+	return artworkkey.Revision(key) == ""
+}
+
+// legacyImageExts are the image formats artwork was stored in before keys
+// carried a revision.
+var legacyImageExts = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true}
+
+// legacyOriginalName reports whether key is a legacy artwork original as
+// the writer names one: original.<ext>, with no revision.
+func legacyOriginalName(key string) bool {
+	base := path.Base(key)
+	ext := path.Ext(base)
+	return legacyImageExts[ext] && base == artworkkey.OriginalVariant+ext
+}
+
+// legacyVariantName reports whether key is a legacy ladder variant as the
+// writer names one: w<width>.<ext>, with no revision.
+func legacyVariantName(key string) bool {
+	base := path.Base(key)
+	ext := path.Ext(base)
+	width := strings.TrimSuffix(strings.TrimPrefix(base, "w"), ext)
+	if !legacyImageExts[ext] || !strings.HasPrefix(base, "w") || width == "" {
+		return false
+	}
+	return strings.Trim(width, "0123456789") == ""
+}
+
+// maxLadderVariants bounds the variants a restore set may carry beside one
+// original: the ladder has at most five, and older ladders a few more.
+const maxLadderVariants = 16
 
 // blobEntry is one parsed blobs.tar entry.
 type blobEntry struct {

@@ -2,7 +2,6 @@ package backup
 
 import (
 	"context"
-	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -118,33 +117,4 @@ func blobstoreAt(t *testing.T) blobstore.Store {
 		t.Fatal(err)
 	}
 	return store
-}
-
-// putPlainBackup stores a complete backup at the destination.
-func putPlainBackup(t *testing.T, store blobstore.Store, serverID, id string, change ...func(*Manifest)) {
-	t.Helper()
-	ctx := t.Context()
-	m := validTestManifest()
-	m.ID, m.ServerID = id, serverID
-	m.CreatedAt, m.Kind, _ = ParseFolderName(id)
-	m.CompletedAt = m.CreatedAt
-	m.Objects = nil
-	for name, data := range map[string][]byte{DumpName: []byte("dump"), BlobsName: {}} {
-		if err := store.Put(ctx, objectKey(serverID, id, name), data); err != nil {
-			t.Fatal(err)
-		}
-		s := newSum()
-		_, _ = s.Write(data)
-		m.Objects = append(m.Objects, s.entry(name))
-	}
-	for _, c := range change {
-		c(&m)
-	}
-	data, err := json.Marshal(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Put(ctx, objectKey(serverID, id, ManifestName), data); err != nil {
-		t.Fatal(err)
-	}
 }
