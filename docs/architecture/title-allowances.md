@@ -48,12 +48,13 @@ never looser: it hides allowed titles and exposes nothing.
 
 The list is bounded, because every request the profile makes reads it and
 passes it to the catalog SQL. The read is a `UNION ALL` with a `LIMIT` and no
-`ORDER BY`, so PostgreSQL stops once it has 20,000 rows rather than reading
-every member of every live collection. The collection branch leaves out titles
-the profile is allowed directly, so only titles in more than one allowed
-collection repeat; `profileFromRow` deduplicates the rows and keeps at most
-`userstore.MaxAllowedTitles` (10,000) distinct titles. Within those bounds the
-list is exact. A profile allowed more sees at most 10,000, which ones is
+`ORDER BY`, so PostgreSQL stops once it has `userstore.MaxAllowedTitles`
+(10,000) rows rather than reading every member of every live collection. Each
+title comes back once, so the bound counts distinct titles: the collection
+branch leaves out a title the profile is allowed directly or an earlier live
+collection (by id) holds, and reads only whole-title entries
+(`sub_item_id = ''`), as collection membership does elsewhere. Below the bound
+the list is exact. A profile allowed more sees at most 10,000, which ones is
 unspecified and can change between reads, and the rest stay hidden, so the
 bound fails closed. Writes are not capped: checking a live collection's
 future size at write time would be imprecise and racy, and the read bound

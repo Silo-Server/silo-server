@@ -208,6 +208,8 @@ func TestTitleAllowancesLiftProfileLimitsDB(t *testing.T) {
 		}
 	})
 
+	t.Run("a title held several times is read once", func(t *testing.T) { f.checkReadOnce(t, want) })
+
 	t.Run("copying a collection allows its movies and series once and then continues", f.checkCollectionCopy)
 
 	t.Run("a write after the manager's PIN changed is refused", func(t *testing.T) {
@@ -266,5 +268,33 @@ func (f allowanceFixture) checkCollectionCopy(t *testing.T) {
 	// collection longer than one copy's cap reaches the rest.
 	if left, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, userstore.CollectionPosition{}, 10); err != nil || len(left) != 0 {
 		t.Fatalf("UnallowedCollectionTitles after the copy = %v, %v; want none", left, err)
+	}
+}
+
+// checkReadOnce adds a second live collection holding a title the first one
+// holds and two the profile is allowed directly. The read's row bound counts
+// distinct titles only when each title comes back once, however many live
+// collections or direct allowances hold it.
+func (f allowanceFixture) checkReadOnce(t *testing.T, want []string) {
+	ctx := context.Background()
+	overlap, err := f.store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "parent", Name: "Overlap", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, suffix := range []string{"movie-collection", "movie-allowed", "series-allowed"} {
+		if err := f.store.AddCollectionItem(ctx, overlap.ID, f.id(suffix), i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.allow.SetCollectionAllowance(ctx, f.manager(), "kid", overlap.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	var raw []string
+	if err := f.pool.QueryRow(ctx, `SELECT ARRAY(`+ProfileAllowedTitleIDsSQL("$1::integer", "$2::text")+`)`, f.userID, "kid").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(raw)
+	if !slices.Equal(raw, want) {
+		t.Fatalf("allowed-title read = %v, want each of %v once", raw, want)
 	}
 }

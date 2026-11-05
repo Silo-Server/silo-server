@@ -150,35 +150,36 @@ var profileByIDQuery = `
 // series, as a title allowance may name (userstore.AllowanceTitleTypes).
 //
 // Every request the profile makes reads this, so it reads at most
-// allowedTitleRowLimit rows: UNION ALL with no ORDER BY lets PostgreSQL stop
-// as soon as it has them rather than reading every member of every live
-// collection. The collection branch leaves out titles the profile is allowed
-// directly, so only titles in more than one allowed collection repeat;
-// profileFromRow deduplicates the rows and keeps at most
-// userstore.MaxAllowedTitles of them. userIDExpr and profileIDExpr are SQL
-// expressions for the profile's key.
+// userstore.MaxAllowedTitles rows: UNION ALL with no ORDER BY lets PostgreSQL
+// stop as soon as it has them rather than reading every member of every live
+// collection. Each title appears once, so the bound counts distinct titles: a
+// collection title is left out when the profile is allowed it directly or an
+// earlier live collection (by id) holds it. userIDExpr and profileIDExpr are
+// SQL expressions for the profile's key.
 func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
 	return `
+	           WITH live AS (
+	               SELECT c.id FROM profile_collection_allowances ca
+	               JOIN user_personal_collections c ON c.user_id = ca.user_id AND c.id = ca.collection_id
+	               JOIN user_profiles creator ON creator.user_id = c.user_id AND creator.id = c.creator_profile_id
+	               WHERE ca.user_id = ` + userIDExpr + ` AND ca.profile_id = ` + profileIDExpr + `
+	                 AND c.collection_type = 'manual' AND creator.is_primary
+	           )
 	           SELECT content_id FROM profile_title_allowances ta
 	           WHERE ta.user_id = ` + userIDExpr + ` AND ta.profile_id = ` + profileIDExpr + `
 	           UNION ALL
-	           SELECT ci.media_item_id FROM profile_collection_allowances ca
-	           JOIN user_personal_collections c ON c.user_id = ca.user_id AND c.id = ca.collection_id
-	           JOIN user_profiles creator ON creator.user_id = c.user_id AND creator.id = c.creator_profile_id
-	           JOIN user_personal_collection_items ci ON ci.user_id = c.user_id AND ci.collection_id = c.id
+	           SELECT ci.media_item_id FROM live
+	           JOIN user_personal_collection_items ci ON ci.user_id = ` + userIDExpr + ` AND ci.collection_id = live.id AND ci.sub_item_id = ''
 	           JOIN media_items mi ON mi.content_id = ci.media_item_id
-	           WHERE ca.user_id = ` + userIDExpr + ` AND ca.profile_id = ` + profileIDExpr + `
-	             AND c.collection_type = 'manual' AND creator.is_primary
-	             AND mi.type IN ('movie', 'series')
+	           WHERE mi.type IN ('movie', 'series')
 	             AND NOT EXISTS (SELECT 1 FROM profile_title_allowances dup
-	                 WHERE dup.user_id = ca.user_id AND dup.profile_id = ca.profile_id AND dup.content_id = ci.media_item_id)
-	           LIMIT ` + strconv.Itoa(allowedTitleRowLimit)
+	                 WHERE dup.user_id = ` + userIDExpr + ` AND dup.profile_id = ` + profileIDExpr + ` AND dup.content_id = ci.media_item_id)
+	             AND NOT EXISTS (SELECT 1 FROM live earlier
+	                 JOIN user_personal_collection_items held ON held.user_id = ci.user_id AND held.collection_id = earlier.id
+	                     AND held.media_item_id = ci.media_item_id AND held.sub_item_id = ''
+	                 WHERE earlier.id < live.id)
+	           LIMIT ` + strconv.Itoa(userstore.MaxAllowedTitles)
 }
-
-// allowedTitleRowLimit bounds the allowance rows one profile read takes:
-// twice the titles it keeps, so titles held by more than one allowed
-// collection do not use up the bound before deduplication.
-const allowedTitleRowLimit = 2 * userstore.MaxAllowedTitles
 
 func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	var libraryIDs []int
@@ -195,10 +196,11 @@ func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	if len(libraryIDs) > 0 {
 		p.AllowedLibraryIDs = libraryIDs
 	}
+	// The read returns distinct IDs in no set order; sorting keeps scope
+	// fingerprints stable.
 	if len(allowedTitleIDs) > 0 {
 		slices.Sort(allowedTitleIDs)
-		allowedTitleIDs = slices.Compact(allowedTitleIDs)
-		p.AllowedTitleIDs = allowedTitleIDs[:min(len(allowedTitleIDs), userstore.MaxAllowedTitles)]
+		p.AllowedTitleIDs = allowedTitleIDs
 	}
 	return p, nil
 }
