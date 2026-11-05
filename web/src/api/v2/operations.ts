@@ -186,6 +186,7 @@ export const v2Operations = {
   "GET /api/v2/admin/ips": "listAdminIPUsers",
   "GET /api/v2/admin/items/{id}/files": "listAdminItemFiles",
   "GET /api/v2/admin/items/{id}/images": "listAdminItemImages",
+  "GET /api/v2/admin/items/{id}/match/hints": "getAdminItemMatchHints",
   "GET /api/v2/admin/items/{id}/metadata-translation/jobs": "listAdminMetadataTranslationJobs",
   "GET /api/v2/admin/items/{id}/trickplay": "getAdminItemTrickplay",
   "GET /api/v2/admin/jellyfin-compat/status": "getAdminJellyfinCompatStatus",

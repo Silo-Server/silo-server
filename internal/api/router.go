@@ -1853,6 +1853,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			deps.MetadataService,
 		)
 		adminMatchHandler.EventBus = deps.EventBus
+		adminMatchHandler.Groups = scanner.NewScannedGroupRepository(deps.DB)
 	}
 
 	// Build admin split/merge handler for repairing wrong version groupings.

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   useApplyItemMatch: vi.fn(),
   useCatalogItemDetail: vi.fn(),
   useItemFiles: vi.fn(),
+  useItemMatchHints: vi.fn(),
   useIsActingAdmin: vi.fn(),
 }));
 
@@ -15,6 +16,7 @@ vi.mock("@/hooks/queries/items", () => ({
   useSearchItemMatchCandidates: (...args: unknown[]) => mocks.useSearchItemMatchCandidates(...args),
   useApplyItemMatch: (...args: unknown[]) => mocks.useApplyItemMatch(...args),
   useItemFiles: (...args: unknown[]) => mocks.useItemFiles(...args),
+  useItemMatchHints: (...args: unknown[]) => mocks.useItemMatchHints(...args),
 }));
 
 vi.mock("@/hooks/useIsActingAdmin", () => ({
@@ -67,6 +69,10 @@ vi.mock("@/components/ui/dialog", () => ({
 }));
 
 import MatchItemDialog from "./MatchItemDialog";
+
+beforeEach(() => {
+  mocks.useItemMatchHints.mockReturnValue({ data: undefined, isLoading: false });
+});
 
 const baseItem = {
   content_id: "movie-1",
@@ -200,6 +206,110 @@ describe("MatchItemDialog", () => {
     // repeating the same string as a second line is noise, so it is suppressed.
     expect(markup).not.toContain("Matched alias: 倒凶十将伝");
     expect(markup).not.toContain("Native title: 10 Tokyo Warriors");
+  });
+});
+
+describe("MatchItemDialog suggested search", () => {
+  // Matched to Parasite (1982), but the folder says
+  // "Parasite (2019) {imdb-tt6751668} {tmdb-496243}".
+  const wrongMatch = {
+    content_id: "movie-1",
+    title: "Parasite",
+    year: 1982,
+    type: "movie" as const,
+  };
+  const searchMutate = vi.fn();
+
+  beforeEach(() => {
+    searchMutate.mockReset();
+    mocks.useSearchItemMatchCandidates.mockReturnValue({
+      mutate: searchMutate,
+      isPending: false,
+      isSuccess: false,
+      data: null,
+    });
+    mocks.useApplyItemMatch.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    mocks.useCatalogItemDetail.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.useItemFiles.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.useIsActingAdmin.mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("searches what the folder name says instead of the current match", () => {
+    mocks.useItemMatchHints.mockReturnValue({
+      data: {
+        title: "Parasite",
+        year: 2019,
+        provider_ids: { tmdb: "496243", imdb: "tt6751668" },
+      },
+      isLoading: false,
+    });
+    render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    expect(screen.getByLabelText("Year")).toHaveValue(2019);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Parasite",
+        year: 2019,
+        tmdb_id: "496243",
+        imdb_id: "tt6751668",
+      }),
+    );
+  });
+
+  it("falls back to the item's title and year when the scanner read nothing", () => {
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "", year: 0, provider_ids: {} },
+      isLoading: false,
+    });
+    render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Parasite", year: 1982, tmdb_id: undefined }),
+    );
+  });
+
+  it("fills in tagged provider IDs even without a parsed title", () => {
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "", year: 0, provider_ids: { tmdb: "496243" } },
+      isLoading: false,
+    });
+    render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Parasite", year: 1982, tmdb_id: "496243" }),
+    );
+  });
+
+  it("drops another library's suggestion when the new one has none", () => {
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "Parasite", year: 2019, provider_ids: { tmdb: "496243" } },
+      isLoading: false,
+    });
+    const { rerender } = render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "", year: 0, provider_ids: {} },
+      isLoading: false,
+    });
+    rerender(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Parasite", year: 1982, tmdb_id: undefined }),
+    );
+  });
+
+  it("waits for the suggestion before searching", () => {
+    mocks.useItemMatchHints.mockReturnValue({ data: undefined, isLoading: true });
+    render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled();
   });
 });
 
