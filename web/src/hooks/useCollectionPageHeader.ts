@@ -59,8 +59,9 @@ export function useCollectionPageHeader(target: CollectionPageTarget | null): Co
       ? serverCollectionLibraryIds(
           target.id,
           target.libraryId,
-          // A failed lookup reads as no library, so the page stops waiting.
-          serverList.isError ? [] : serverList.data,
+          // A first load that failed reads as no library, so the page stops
+          // waiting; a failed refetch keeps the list it already has.
+          serverList.data ?? (serverList.isError ? [] : undefined),
         )
       : [];
   const libraryLists = useQueries({

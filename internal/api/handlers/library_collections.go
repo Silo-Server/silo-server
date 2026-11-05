@@ -2734,11 +2734,15 @@ func (h *LibraryCollectionHandler) presignGPURLCtx(ctx context.Context, path str
 	return h.presignArtworkCtx(ctx, path, cardThumbnailPath)
 }
 
-// presignBackdropURLCtx resolves a collection backdrop at the width an item
-// detail hero uses: a collection page draws it across the full page width,
-// where the card thumbnail would be stretched several times over.
+// presignBackdropURLCtx resolves a collection backdrop at the widest variant
+// stored for it: a collection page draws it across the full page width, where
+// the card thumbnail would be stretched several times over.
 func (h *LibraryCollectionHandler) presignBackdropURLCtx(ctx context.Context, path string) string {
-	return h.presignArtworkCtx(ctx, path, featuredBackdropPath)
+	return h.presignArtworkCtx(ctx, path, collectionBackdropPath)
+}
+
+func collectionBackdropPath(path string) string {
+	return catalog.BackdropVariantPath(path, "w"+strconv.Itoa(collectionBackdropWidths[0]))
 }
 
 func (h *LibraryCollectionHandler) presignArtworkCtx(ctx context.Context, path string, variantOf func(string) string) string {
