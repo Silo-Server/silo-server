@@ -56,11 +56,18 @@ func (s *memoryAllowances) SetCollectionAllowance(context.Context, userstore.All
 	return true, nil
 }
 
-func (s *memoryAllowances) UnallowedCollectionTitles(_ context.Context, _ int, _, _ string, offset, limit int) ([]string, error) {
-	if offset >= len(s.candidates) {
-		return nil, nil
+// UnallowedCollectionTitles pages the candidates by their index, used as the
+// position.
+func (s *memoryAllowances) UnallowedCollectionTitles(_ context.Context, _ int, _, _ string, after userstore.CollectionPosition, limit int) ([]userstore.CollectionPosition, error) {
+	start := 0
+	if after.MediaItemID != "" {
+		start = after.Position + 1
 	}
-	return s.candidates[offset:min(offset+limit, len(s.candidates))], nil
+	var out []userstore.CollectionPosition
+	for i := start; i < len(s.candidates) && len(out) < limit; i++ {
+		out = append(out, userstore.CollectionPosition{Position: i, MediaItemID: s.candidates[i]})
+	}
+	return out, nil
 }
 
 func (s *memoryAllowances) AllowTitles(_ context.Context, _ userstore.AllowanceManager, _ string, ids []string) (int, error) {

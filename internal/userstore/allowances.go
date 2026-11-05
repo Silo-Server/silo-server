@@ -24,6 +24,13 @@ type CollectionAllowance struct {
 	CreatedAt    string
 }
 
+// CollectionPosition is a stored collection entry's place in the
+// collection's order, the key a copy pages by.
+type CollectionPosition struct {
+	Position    int
+	MediaItemID string
+}
+
 // CollectionTypeManual is the collection_type of a hand-picked personal
 // collection, the only kind a profile can be allowed as it changes.
 const CollectionTypeManual = "manual"

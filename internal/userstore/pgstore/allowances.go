@@ -100,23 +100,29 @@ func (s *TitleAllowances) SetCollectionAllowance(ctx context.Context, m userstor
 		WHERE user_id = $1 AND profile_id = $2 AND collection_id = $3`, m.UserID, profileID, collectionID)
 }
 
-// UnallowedCollectionTitles lists one page, in the collection's order, of the
-// movies and series a personal collection stores that the profile is not yet
-// allowed, so a repeated copy continues where the last one stopped. Smart
+// UnallowedCollectionTitles lists one page, in the collection's order and
+// after the given position, of the movies and series a personal collection
+// stores that the profile is not yet allowed, so a repeated copy continues
+// where the last one stopped. A zero position starts at the beginning. Smart
 // collections store none; their items come from their query.
-func (s *TitleAllowances) UnallowedCollectionTitles(ctx context.Context, userID int, profileID, collectionID string, offset, limit int) ([]string, error) {
+func (s *TitleAllowances) UnallowedCollectionTitles(ctx context.Context, userID int, profileID, collectionID string, after userstore.CollectionPosition, limit int) ([]userstore.CollectionPosition, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT ci.media_item_id FROM user_personal_collection_items ci
+		SELECT COALESCE(ci.position, 0), ci.media_item_id FROM user_personal_collection_items ci
 		JOIN media_items mi ON mi.content_id = ci.media_item_id AND mi.type = ANY($4)
-		WHERE ci.user_id = $1 AND ci.collection_id = $2
+		WHERE ci.user_id = $1 AND ci.collection_id = $2 AND ci.sub_item_id = ''
+		  AND (COALESCE(ci.position, 0), ci.media_item_id) > ($5, $6)
 		  AND NOT EXISTS (SELECT 1 FROM profile_title_allowances ta
 		      WHERE ta.user_id = ci.user_id AND ta.profile_id = $3 AND ta.content_id = ci.media_item_id)
-		ORDER BY ci.position, ci.media_item_id
-		OFFSET $5 LIMIT $6`, userID, collectionID, profileID, userstore.AllowanceTitleTypes, offset, limit)
+		ORDER BY COALESCE(ci.position, 0), ci.media_item_id
+		LIMIT $7`, userID, collectionID, profileID, userstore.AllowanceTitleTypes, after.Position, after.MediaItemID, limit)
 	if err != nil {
-		return nil, fmt.Errorf("listing collection items: %w", err)
+		return nil, fmt.Errorf("listing collection titles: %w", err)
 	}
-	return pgx.CollectRows(rows, pgx.RowTo[string])
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (userstore.CollectionPosition, error) {
+		var p userstore.CollectionPosition
+		err := row.Scan(&p.Position, &p.MediaItemID)
+		return p, err
+	})
 }
 
 // AllowTitles adds a title allowance for every movie and series among

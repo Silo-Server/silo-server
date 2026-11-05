@@ -247,11 +247,15 @@ func (f allowanceFixture) checkCollectionCopy(t *testing.T) {
 	ctx := context.Background()
 	// movie-collection is allowed through the collection but not as a
 	// title; the audiobook is never a candidate.
-	ids, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, 0, 10)
-	if err != nil || !slices.Equal(ids, []string{f.id("movie-collection")}) {
-		t.Fatalf("UnallowedCollectionTitles = %v, %v; want only the movie", ids, err)
+	page, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, userstore.CollectionPosition{}, 10)
+	if err != nil || len(page) != 1 || page[0].MediaItemID != f.id("movie-collection") {
+		t.Fatalf("UnallowedCollectionTitles = %v, %v; want only the movie", page, err)
 	}
-	ids = append(ids, f.id("movie-smart"))
+	// Keyset paging: nothing comes after the last entry.
+	if rest, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, page[0], 10); err != nil || len(rest) != 0 {
+		t.Fatalf("UnallowedCollectionTitles after the last entry = %v, %v; want none", rest, err)
+	}
+	ids := []string{page[0].MediaItemID, f.id("movie-smart")}
 	for pass, want := range []int{2, 0} {
 		added, err := f.allow.AllowTitles(ctx, f.manager(), "kid", ids)
 		if err != nil || added != want {
@@ -260,7 +264,7 @@ func (f allowanceFixture) checkCollectionCopy(t *testing.T) {
 	}
 	// Allowed titles drop out of the candidates, so a repeated copy of a
 	// collection longer than one copy's cap reaches the rest.
-	if left, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, 0, 10); err != nil || len(left) != 0 {
+	if left, err := f.allow.UnallowedCollectionTitles(ctx, f.userID, "kid", f.live, userstore.CollectionPosition{}, 10); err != nil || len(left) != 0 {
 		t.Fatalf("UnallowedCollectionTitles after the copy = %v, %v; want none", left, err)
 	}
 }
