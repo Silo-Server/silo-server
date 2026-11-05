@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -37,12 +38,15 @@ type PluginChannel struct {
 	SecretFields []string
 }
 
-// declaredFields returns every setting the destination schema declares: the
-// public and secret fields the host classified, which follow allOf, $ref,
+// declaredFields returns the settings a write may name: the public and
+// secret fields the host classified, which follow allOf, $ref,
 // dependentSchemas and the admin form, not just the root properties. It
-// returns false when the schema declares none (any field is allowed).
+// returns false when any field is allowed: the schema's root allows keys it
+// doesn't name, through patternProperties or an additionalProperties other
+// than false, or the schema declares no fields. The plugin's
+// ValidateDestination then decides.
 func (c PluginChannel) declaredFields() (map[string]struct{}, bool) {
-	if len(c.PublicFields)+len(c.SecretFields) == 0 {
+	if c.allowsUndeclaredFields() || len(c.PublicFields)+len(c.SecretFields) == 0 {
 		return nil, false
 	}
 	out := make(map[string]struct{}, len(c.PublicFields)+len(c.SecretFields))
@@ -53,6 +57,20 @@ func (c PluginChannel) declaredFields() (map[string]struct{}, bool) {
 		out[key] = struct{}{}
 	}
 	return out, true
+}
+
+// allowsUndeclaredFields reports whether the settings JSON schema's root
+// explicitly allows keys it doesn't name.
+func (c PluginChannel) allowsUndeclaredFields() bool {
+	var root struct {
+		PatternProperties    any `json:"patternProperties"`
+		AdditionalProperties any `json:"additionalProperties"`
+	}
+	if err := json.Unmarshal([]byte(c.Schema.GetJsonSchema()), &root); err != nil {
+		return false
+	}
+	return root.PatternProperties != nil ||
+		(root.AdditionalProperties != nil && root.AdditionalProperties != false)
 }
 
 // PluginChannelHost reaches the plugins that provide notification channels.
