@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { V2ProblemError } from "@/api/v2/request";
 import LibraryItemLink from "./LibraryItemLink";
 
@@ -31,7 +31,16 @@ function renderLink() {
     >
       <MemoryRouter initialEntries={["/requests"]}>
         <Routes>
-          <Route path="*" element={<LibraryItemLink contentId="movie-603">Open</LibraryItemLink>} />
+          <Route
+            path="/requests"
+            element={
+              <>
+                <LibraryItemLink contentId="movie-603">Open</LibraryItemLink>
+                <Link to="/elsewhere">Leave</Link>
+              </>
+            }
+          />
+          <Route path="*" element={null} />
         </Routes>
         <Location />
       </MemoryRouter>
@@ -59,6 +68,19 @@ describe("LibraryItemLink", () => {
       expect(screen.getByTestId("location")).toHaveTextContent("/item/movie-603"),
     );
     expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it("drops a check the viewer abandoned by leaving the page", async () => {
+    let resolve!: (value: unknown) => void;
+    mocks.fetchDetail.mockReturnValue(new Promise((r) => (resolve = r)));
+    renderLink();
+    fireEvent.click(screen.getByRole("link", { name: "Leave" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/elsewhere");
+
+    resolve({ content_id: "movie-603" });
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByTestId("location")).toHaveTextContent("/elsewhere");
   });
 
   it("stays put and says why when the viewer cannot open the item", async () => {

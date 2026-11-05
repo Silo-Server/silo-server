@@ -1,5 +1,6 @@
-import { forwardRef, useState, type ComponentProps } from "react";
+import { forwardRef, useEffect, useRef, useState, type ComponentProps } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "react-router";
 import { toast } from "sonner";
 import { isNotFoundProblem } from "@/api/v2/request";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
@@ -15,13 +16,24 @@ type LibraryItemLinkProps = Omit<ComponentProps<typeof ViewTransitionLink>, "to"
  * Links to a library item that the server matched without checking this
  * viewer's access, as a request's library copy is. A plain click reads the
  * item first and stays put when the viewer cannot open it; the read warms the
- * item page's own query. Modified clicks open the item page directly.
+ * item page's own query. Modified clicks open the item page directly. A check
+ * still pending when the link unmounts or the location changes is dropped, so
+ * it cannot pull the viewer back after they have moved on.
  */
 const LibraryItemLink = forwardRef<HTMLAnchorElement, LibraryItemLinkProps>(
   function LibraryItemLink({ contentId, onClick, ...rest }, ref) {
     const queryClient = useQueryClient();
     const navigate = useViewTransitionNavigate();
+    const location = useLocation();
     const [checking, setChecking] = useState(false);
+    // The click whose check may still navigate; cleared when the viewer leaves.
+    const pendingCheck = useRef<object | null>(null);
+    useEffect(
+      () => () => {
+        pendingCheck.current = null;
+      },
+      [location.key],
+    );
     const to = `/item/${encodeURIComponent(contentId)}`;
 
     return (
@@ -43,6 +55,8 @@ const LibraryItemLink = forwardRef<HTMLAnchorElement, LibraryItemLinkProps>(
           }
           event.preventDefault();
           if (checking) return;
+          const check = {};
+          pendingCheck.current = check;
           setChecking(true);
           queryClient
             .fetchQuery({
@@ -50,8 +64,11 @@ const LibraryItemLink = forwardRef<HTMLAnchorElement, LibraryItemLinkProps>(
               queryFn: ({ signal }) => fetchCatalogItemDetail(contentId, undefined, { signal }),
             })
             .then(
-              () => navigate(to),
+              () => {
+                if (pendingCheck.current === check) navigate(to);
+              },
               (error: unknown) => {
+                if (pendingCheck.current !== check) return;
                 if (isNotFoundProblem(error)) {
                   toast.error("This title is in a library this profile can't open.");
                   return;
