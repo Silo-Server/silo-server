@@ -1,9 +1,12 @@
 package s3client
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -56,6 +59,34 @@ func TestListObjectInfosPageRejectsNonadvancingToken(t *testing.T) {
 			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", AccessKey: "test", SecretKey: "test", PathStyle: true})
 			if _, _, err := client.ListObjectInfosPage(t.Context(), "silo", "catalog-seeds/", "same", 2); err == nil {
 				t.Fatal("accepted nonadvancing token")
+			}
+		})
+	}
+}
+
+// An endpoint that ignores MaxKeys or pads its reply must not make the client
+// read an unbounded list response, and a retryable status must not make it
+// read the reply again.
+func TestListRejectsOversizedResponses(t *testing.T) {
+	body := `<ListBucketResult><IsTruncated>false</IsTruncated><Padding>` + strings.Repeat("x", 16<<20) + `</Padding><Contents><Key>k</Key><Size>1</Size></Contents></ListBucketResult>`
+	for _, status := range []int{http.StatusOK, http.StatusInternalServerError, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/xml")
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, body)
+			}))
+			defer server.Close()
+			client := NewClient(BucketConfig{Endpoint: server.URL, Region: "us-east-1", Bucket: "silo", AccessKey: "test", SecretKey: "test", PathStyle: true})
+			_, _, err := client.ListObjectInfosPage(t.Context(), "silo", "", "", 10)
+			var tooLarge *http.MaxBytesError
+			if !errors.As(err, &tooLarge) || errors.Is(err, ErrThrottled) {
+				t.Fatalf("ListObjectInfosPage() error = %v, want a size error", err)
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("list requests = %d, want 1 (an oversized reply is not retried)", got)
 			}
 		})
 	}
