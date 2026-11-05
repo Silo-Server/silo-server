@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type {
   MediaRequest,
@@ -99,13 +100,15 @@ function LocationProbe() {
 
 function renderAt(url: string) {
   render(
-    <MemoryRouter initialEntries={[url]}>
-      <Routes>
-        <Route path="/requests" element={<Requests />} />
-        <Route path="*" element={null} />
-      </Routes>
-      <LocationProbe />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[url]}>
+        <Routes>
+          <Route path="/requests" element={<Requests />} />
+          <Route path="*" element={null} />
+        </Routes>
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -284,7 +287,7 @@ describe("Requests (Yours list)", () => {
 
     expect(
       within(row("Arrived Movie")).getByRole("link", { name: "Open Arrived Movie in library" }),
-    ).toHaveAttribute("href", "/title/movie/30");
+    ).toHaveAttribute("href", "/item/movie%2030");
     expect(within(row("Waiting Movie")).queryByRole("link", { name: /in library/ })).toBeNull();
   });
 
