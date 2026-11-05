@@ -359,20 +359,31 @@ func (s *Scanner) ScanFolder(ctx context.Context, folder *models.MediaFolder) (*
 }
 
 // ScanSubtree walks a single subtree within a media folder and reconciles only
-// files that live beneath that subtree. A podcast library scans the whole show
-// folder that holds the subtree (see scanPodcastSubtree).
+// files that live beneath that subtree. subtreePath must lie under one of
+// folder's roots. A podcast library scans the whole show folder that holds
+// the subtree (see scanPodcastSubtree).
 func (s *Scanner) ScanSubtree(ctx context.Context, folder *models.MediaFolder, subtreePath string) (*ScanResult, error) {
 	cleanSubtree := filepath.Clean(subtreePath)
+	if err := requirePathInLibrary(cleanSubtree, folder); err != nil {
+		return nil, err
+	}
 	// A subtree scan under a skipped library root would walk nothing and
 	// retire the subtree piece by piece, bypassing the empty-root guard. Only
 	// a full library scan decides what happens to a skipped root's catalog.
-	if root := scopeLibraryRoot(cleanSubtree, folder.Paths); root != "" && libraryRootSkipped(root) {
-		slog.InfoContext(ctx, "scanner: library root is skipped by its ignore files; leaving subtree to a full library scan", "component", "scanner",
-			"folder_id", folder.ID,
-			"root", root,
-			"scope", cleanSubtree,
-		)
-		return &ScanResult{}, nil
+	if root := scopeLibraryRoot(cleanSubtree, folder.Paths); root != "" {
+		skipped, err := libraryRootSkipped(root)
+		if err != nil {
+			// Without the root's rules the scope cannot tell what it excludes.
+			return nil, fmt.Errorf("library root %s: %w", root, err)
+		}
+		if skipped {
+			slog.InfoContext(ctx, "scanner: library root is skipped by its ignore files; leaving subtree to a full library scan", "component", "scanner",
+				"folder_id", folder.ID,
+				"root", root,
+				"scope", cleanSubtree,
+			)
+			return &ScanResult{}, nil
+		}
 	}
 	watchCtx, stopWatch := s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()
@@ -635,7 +646,12 @@ func walkLogicalTree(
 		sidecars.record(logicalPath, entries)
 	}
 
-	childRules, skip := dirIgnoreRules(ignoreRulesStack, logicalPath, physicalPath, entries)
+	childRules, skip, err := dirIgnoreRules(ignoreRulesStack, logicalPath, physicalPath, entries)
+	if err != nil {
+		slog.WarnContext(ctx, "scanner: ignore file read failed", "component", "scanner", "path", logicalPath, "physical_path", physicalPath, "error", err)
+		recordWalkFailure(walkFailures, logicalPath)
+		return nil
+	}
 	if skip {
 		return nil
 	}
@@ -2706,8 +2722,29 @@ func pathWithinAnyRoot(path string, roots []string) bool {
 	return false
 }
 
-// ScanFile scans a single file and upserts it into the database.
+// ErrPathOutsideLibrary reports a scoped scan of a path that is not under any
+// of the library's configured roots.
+var ErrPathOutsideLibrary = errors.New("path is outside the library")
+
+// requirePathInLibrary returns ErrPathOutsideLibrary unless path lies
+// lexically under one of folder's roots. Walks keep the logical path below a
+// symlinked root, so this covers every path the catalog records. A physical
+// or aliased path that only resolves into a root is refused: scanning it would
+// record a second row for a file the catalog already holds under its logical
+// path.
+func requirePathInLibrary(path string, folder *models.MediaFolder) error {
+	if pathWithinAnyRoot(path, folder.Paths) {
+		return nil
+	}
+	return fmt.Errorf("%w: library %d, path %s", ErrPathOutsideLibrary, folder.ID, path)
+}
+
+// ScanFile scans a single file and upserts it into the database. filePath
+// must lie under one of folder's roots.
 func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.MediaFolder) error {
+	if err := requirePathInLibrary(filepath.Clean(filePath), folder); err != nil {
+		return err
+	}
 	var stopWatch context.CancelFunc
 	ctx, stopWatch = s.watchFolderContext(ctx, folder.ID)
 	defer stopWatch()

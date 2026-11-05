@@ -15,7 +15,10 @@ diagnostic bundles, job artifacts, and profile avatars.
 - **Assets** — artwork, branding assets, intro/credit markers, chapter
   thumbnails, trickplay sprite sheets, and downloaded subtitles. Carries the
   recorded storage identity.
-- **Operational** — diagnostic bundles, job artifacts, and profile avatars.
+- **Operational** — diagnostic bundles, job artifacts, profile avatars, and
+  backups on local storage ([backups.md](backups.md)). Every API server must
+  share it: any server can list, download, or delete a backup another server
+  wrote.
 
 These are separate because the public bucket can serve browsers directly under
 token auth and the private one never does. A configured private bucket owns the
@@ -39,6 +42,7 @@ root, where the key prefixes each caller already uses keep the namespaces apart:
 | `diagnostics/…` | diagnostic bundles |
 | `catalog-seeds/…` | admin job artifacts |
 | `profile-avatars/…` | profile avatars |
+| `backups/…` | server backups and full-restore journals ([backups.md](backups.md)) |
 
 Kept embedded subtitle tracks come from users' media and are never delivered to
 browsers, so they are kept in the operational store, never in a bucket whose
@@ -48,6 +52,13 @@ while its reads are presigned (`public_url_auth` `presigned`). Under `public` or
 `cloudflare_token` delivery nothing is kept, and tracks are read through their
 index or demuxed instead. The blob collector and sweep reach them in whichever
 store holds them (`blobgc.Namespace.Store`).
+
+On a local backend every namespace shares one root, so the signed artwork
+route (`/api/v2/artwork/…`) and the artwork signer refuse keys under
+`backups/`, `diagnostics/`, and `catalog-seeds/`
+(`blobstore.UnservedNamespaces`): their own routes serve them to whoever may
+read them, and no stored path, however it was written, can turn one into an
+artwork link.
 
 Artwork keys start with a metadata provider segment, so they do not collide with
 the reserved prefixes. That is convention rather than enforcement:
@@ -202,6 +213,19 @@ Listings use lexical keys and a cursor equal to the last returned key. Local
 pagination skips completed subtrees and stops after a page plus one object;
 each visited directory's entries are read and sorted in memory.
 
+`CreateExclusive` writes an object only when none exists at its key and
+otherwise returns `ErrExists` without writing; a concurrent writer of the
+same key is never replaced. Local storage hard-links the synced temporary
+file into place (`link(2)` fails on an existing name, where a rename would
+replace it). S3 sends one `PutObject` with `If-None-Match: *`, answered 412
+(or 409 for a conflicting concurrent conditional write) when the key exists.
+A backend that rejects the header (501, or a 400 naming it) returns
+`ErrExclusiveUnsupported` without writing, with a warning in the log, and so
+does a store without an atomic create: a check followed by a write could
+replace an object published between the two, so there is no such fallback.
+Selective restore writes every blob this way and fails the item on
+`ErrExclusiveUnsupported`; ordinary writes are unaffected.
+
 `Matches` lets the image cache skip rewriting an immutable object whose bytes
 are already stored. It is only an optimization, so on S3 a `HeadObject` 403
 reports no match instead of an error and the object is rewritten. A HEAD
@@ -279,7 +303,10 @@ artwork is not copied by either policy; refresh metadata for affected libraries
 after restart and artwork reconciliation. Backfill Metadata Images does not
 process local sidecar sources. `migrate_all` copies all data from each source
 location that changes. PostgreSQL catalog metadata is retained and the old
-storage is never deleted automatically.
+storage is never deleted automatically. No policy copies anything under
+`backups/` (`blobstore.BackupNamespace`) in any pass: local backups are
+unencrypted dumps that must never reach a bucket, and a bucket's backups
+belong to it. They stay where they are ([backups.md](backups.md#destinations)).
 
 Admission serializes stage selection and job creation across API nodes. A lost
 job-creation response retains the stage until a separate read confirms that no

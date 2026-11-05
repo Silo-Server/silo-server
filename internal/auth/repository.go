@@ -176,6 +176,19 @@ func (r *UserRepository) Create(ctx context.Context, input models.CreateUserInpu
 	return createUser(ctx, r.pool, input)
 }
 
+// NewUserPermissions is the permissions a new account created from input
+// stores: the requested ones, or DefaultUserPermissions for a non-admin that
+// requests none, normalized. A check of what an account created later would
+// get (a backup restore comparing invitations) uses it too, so the two
+// cannot drift.
+func NewUserPermissions(input models.CreateUserInput) ([]string, error) {
+	permissions := append([]string(nil), input.Permissions...)
+	if input.Permissions == nil && input.Role != models.RoleAdmin {
+		permissions = DefaultUserPermissions()
+	}
+	return NormalizePermissions(permissions)
+}
+
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
@@ -190,11 +203,7 @@ func createUser(ctx context.Context, db interface {
 		localPasswordLoginEnabled = *input.LocalPasswordLoginEnabled
 	}
 
-	permissions := append([]string(nil), input.Permissions...)
-	if input.Permissions == nil && input.Role != "admin" {
-		permissions = DefaultUserPermissions()
-	}
-	permissions, err = NormalizePermissions(permissions)
+	permissions, err := NewUserPermissions(input)
 	if err != nil {
 		return nil, err
 	}
@@ -845,6 +854,16 @@ func (r *UserRepository) CreateInvited(ctx context.Context, input models.CreateU
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 	if err := EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
 		return nil, err
+	}
+	// The local-login guard holds the settings mutation lock until commit.
+	// Judge signup policy under that same lock before spending the invite.
+	enabled, err := readServerSetting(ctx, tx, "signup.enabled")
+	if err != nil {
+		return nil, err
+	}
+	const signupEnabledValue = "true"
+	if enabled != signupEnabledValue {
+		return nil, ErrSignupDisabled
 	}
 	if err := redeemCode(ctx, tx, code); err != nil {
 		return nil, err

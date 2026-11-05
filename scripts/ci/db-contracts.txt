@@ -12,6 +12,7 @@
 ./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
+./internal/catalog TestRatingsPageFollowsAccessDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
@@ -140,6 +141,8 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
+./internal/auth TestSignupPolicySerializationDB
+./internal/apiv2 TestSignupCommitPolicyErrorsDB
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
@@ -822,3 +825,50 @@
 # in_watchlist after the batch read the watchlist first.
 ./internal/userstore/pgstore TestQueueItemViewerStateMatchesSingleReads
 ./internal/api/handlers TestItemDetailViewerStateBatchDB
+
+# Watch-sync admission commits one manual reservation across repository instances.
+./internal/watchsync TestSyncRunAdmissionDB
+
+# Backups: the full restore round trip (needs the PostgreSQL 18 client), the
+# manifest written last and the sweep, the cluster-wide subsystem lock, the
+# published status of the operation holding it, and every table classified
+# for backup and restore. Selective restore: the
+# restore round trip with re-run after interruption, idempotency and digest
+# refusal; plugins never installed from a backup, only reconfigured; restore job fencing;
+# a restored library whose setup partly failed, or whose provider placement
+# could not be read, reports it so it is retried without a fallback chain.
+./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestFullRestoresAreSerializedDB
+./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB
+./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
+./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
+./internal/backup TestBackupWritesManifestLastDB
+./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
+./internal/backup TestLostLockSessionCancelsWorkDB
+./internal/backup TestListReportsThePublishedOperationDB
+./internal/backup TestStatusBelongsToTheOperationHoldingTheLockDB
+./internal/backup TestStatusRecordsTheLastSuccessDB
+./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
+./internal/backup TestEveryTableIsClassifiedDB
+./internal/backup TestSelectiveRestoreDB
+./internal/backup TestRestoreRechecksAccessSettingsUnderTheLockDB
+./internal/backup TestRestoreNeverSendsLiveSecretsToARestoredAddressDB
+./internal/backup TestTemplateCollectionsAndHomeSectionsDB
+./internal/backup TestRestoredLibrarySectionsWaitForTheRestoreDB
+./internal/backup TestManagedSectionPointedElsewhereIsRestoredDB
+./internal/backup TestSelectiveRestoreOnOneConnectionDB
+./internal/backup TestUnverifiedRestoreLeavesCostlyWorkOffDB
+./internal/backup TestRestoreItemWritesDoNotGrowDB
+./internal/backup TestUnverifiedSectionCollectionHasNoScheduleDB
+./internal/backup TestRestoreRefusesCollectionSourcesTheEditorWouldDB
+./internal/backup TestManagedCollectionKeysMapLibrariesDB
+./internal/api/handlers TestRestoredRateLimitsUseTheirWritePathDB
+./internal/backup TestIdentityTwinsRestoreOneToOneDB
+./internal/plugins TestRestoreInstallationDB
+./internal/plugins TestRestoreInstallationOnOneConnectionDB
+./internal/adminjob TestBackupRestoreFencingDB
+./internal/adminjob TestRestoreOutcomeRowsLastUntilTheFinalReportDB
+./internal/catalog TestGroupingWaitsForTheEditorDB
+./internal/api/handlers TestLibraryRestoredReportsFailedSetupDB
+./internal/api/handlers TestRestoredLibraryChainNeedsItsProviderLookupDB
+./internal/api/handlers TestRestoredPluginJoinsChainsOnlyFromItsManifestDB

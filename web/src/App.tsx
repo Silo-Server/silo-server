@@ -116,6 +116,8 @@ const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
 const AdminMaintenance = lazy(() => import("@/pages/AdminMaintenance"));
+const AdminBackups = lazy(() => import("@/pages/AdminBackups"));
+const AdminBackupRestore = lazy(() => import("@/pages/AdminBackupRestore"));
 const AdminApiKeys = lazy(() => import("@/pages/AdminApiKeys"));
 const AdminSubtitles = lazy(() => import("@/pages/AdminSubtitles"));
 const AdminUserDetail = lazy(() => import("@/pages/AdminUserDetail"));
@@ -492,6 +494,8 @@ function AppRoutes() {
                   <Route path="diagnostics" element={<AdminDiagnostics />} />
                   <Route path="libraries" element={<AdminLibraries />} />
                   <Route path="maintenance" element={<AdminMaintenance />} />
+                  <Route path="backups" element={<AdminBackups />} />
+                  <Route path="backups/:id/restore" element={<AdminBackupRestore />} />
                   <Route path="collections" element={<AdminCollections />} />
                   {/* One page from /new to /:id/edit, so Create keeps the editor mounted. */}
                   <Route element={<CollectionEditorPage scope="server" />}>
