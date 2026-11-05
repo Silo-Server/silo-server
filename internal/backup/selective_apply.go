@@ -101,7 +101,7 @@ func (s *Service) ExecuteRestore(ctx context.Context, run RestoreRun) (any, erro
 	if req.BackupID != "" {
 		pinned[req.BackupID] = true
 	}
-	result, err := s.backupWith(work, held, KindBeforeRestore, "", nil, pinned)
+	result, err := s.backupWith(work, held, KindBeforeRestore, "", nil, pinned, nil)
 	if err != nil {
 		return fail(fmt.Errorf("%w: %w", errBeforeRestoreBackup, err))
 	}

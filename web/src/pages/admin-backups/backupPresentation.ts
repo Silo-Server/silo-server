@@ -89,6 +89,7 @@ export const BACKUP_KIND_LABELS: Record<AdminBackupKind, string> = {
   nightly: "Nightly",
   manual: "Manual",
   "before-restore": "Taken before a restore",
+  "before-upgrade": "Taken before an upgrade",
 };
 
 export const BACKUP_STATUS_LABELS: Record<AdminBackupStatus, string> = {

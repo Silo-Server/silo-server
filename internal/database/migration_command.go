@@ -19,7 +19,12 @@ func MigrateOnly(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS, dir string
 	if err := RunMigrations(ctx, pool, fsys, dir); err != nil {
 		return err
 	}
-	// Parent audit indexes need concurrent builds on existing partitions.
+	return ensureAuditIndexes(ctx, pool)
+}
+
+// ensureAuditIndexes builds the parent audit indexes, which need concurrent
+// builds on existing partitions.
+func ensureAuditIndexes(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := partman.NewManager(pool, "activity_log", partman.Weekly, 2).EnsureIndexes(ctx,
 		"activity_log_action_time_idx", "activity_log_target_time_idx"); err != nil {
 		return fmt.Errorf("ensure audit detail indexes: %w", err)

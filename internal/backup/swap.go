@@ -115,6 +115,8 @@ func timedOut(err error) string {
 func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl ControlDB, opts SwapOptions) error {
 	out := writerOrDiscard(opts.Out)
 	m := src.Manifest
+	// A database-only backup leaves the live files as they are.
+	opts.DatabaseOnly = opts.DatabaseOnly || !m.HasBlobs()
 	live, unlock, err := lockLive(ctx, ctl, opts.LiveURL)
 	if err != nil {
 		return err
@@ -177,20 +179,21 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 			return discard(fmt.Errorf("the backup records another storage location than this deployment uses: %w", err))
 		}
 	}
+	post := newPostLoad(m, opts.Validate, out)
 	// New signing keys first, so the lost-settings pass does not list them.
-	if err := rotateSigningSecrets(ctx, loader, restoredURL, opts.Cipher, out); err != nil {
+	if err := post.step(stepSigningKeys, rotateSigningSecrets(ctx, loader, restoredURL, opts.Cipher, out)); err != nil {
 		return discard(err)
 	}
-	if err := clearLostSettings(ctx, loader, restoredURL, m, opts.Validate, opts.Cipher, out); err != nil {
+	if err := post.step(stepLostSettings, clearLostSettings(ctx, loader, restoredURL, m, opts.Validate, opts.Cipher, out)); err != nil {
 		return discard(err)
 	}
-	if err := carryLiveState(ctx, ctl, live, loader, restoredURL, opts, sameDeployment, m.CreatedAt, out); err != nil {
+	if err := carryLiveState(ctx, ctl, live, loader, restoredURL, opts, sameDeployment, m.CreatedAt, post); err != nil {
 		return discard(err)
 	}
 	// A subtitle the backup left out may still be in the live storage the
 	// restored server keeps using.
 	if !opts.DatabaseOnly {
-		if err := dropOmittedSubtitles(ctx, loader, restoredURL, m, storedIn(opened.Assets), out); err != nil {
+		if err := post.step(stepSubtitles, dropOmittedSubtitles(ctx, loader, restoredURL, m, storedIn(opened.Assets), out)); err != nil {
 			return discard(err)
 		}
 	}
@@ -268,11 +271,13 @@ func lockLive(ctx context.Context, ctl ControlDB, liveURL string) (string, func(
 // They are as they will be at the swap only while no other client is on the
 // live database: one that connected since preflight stops the restore here,
 // and the swap checks again once the live database is closed (swap.run).
-func carryLiveState(ctx context.Context, ctl ControlDB, live string, loader DatabaseLoader, restoredURL string, opts SwapOptions, sameDeployment bool, taken time.Time, out io.Writer) error {
+func carryLiveState(ctx context.Context, ctl ControlDB, live string, loader DatabaseLoader, restoredURL string, opts SwapOptions, sameDeployment bool, taken time.Time, post postLoad) error {
+	out := post.out
 	if err := checkLiveIdle(ctx, ctl, live); err != nil {
 		return err
 	}
-	if err := reportAccountRollback(ctx, loader, restoredURL, opts.LiveURL, taken, sameDeployment, out); err != nil {
+	if err := post.step("the report of accounts the restore rolls back",
+		reportAccountRollback(ctx, loader, restoredURL, opts.LiveURL, taken, sameDeployment, out)); err != nil {
 		return err
 	}
 	// What is tied to an account, a profile, or an installation is the live
@@ -282,27 +287,18 @@ func carryLiveState(ctx context.Context, ctl ControlDB, live string, loader Data
 	if !sameDeployment {
 		carryFrom = ""
 	}
-	if err := carryCredentials(ctx, loader, restoredURL, carryFrom, out); err != nil {
-		return err
-	}
-	if err := carryOutboundSettings(ctx, loader, restoredURL, carryFrom, out); err != nil {
-		return err
-	}
-	if err := carryPluginReleases(ctx, loader, restoredURL, carryFrom, out); err != nil {
-		return err
-	}
-	if err := carryPolicies(ctx, loader, restoredURL, carryFrom, out); err != nil {
+	if err := post.carry(ctx, loader, restoredURL, carryFrom); err != nil {
 		return err
 	}
 	// This server's own settings describe it whichever deployment the
 	// backup came from.
-	if err := carryServerSpecificSettings(ctx, loader, restoredURL, opts.LiveURL, out); err != nil {
+	if err := post.step("carrying this server's own settings", carryServerSpecificSettings(ctx, loader, restoredURL, opts.LiveURL, out)); err != nil {
 		return err
 	}
-	if err := interruptWork(ctx, loader, restoredURL, opts.LiveURL, out); err != nil {
+	if err := post.step(stepInterrupt, interruptWork(ctx, loader, restoredURL, opts.LiveURL, out)); err != nil {
 		return err
 	}
-	return keepStricterSettings(ctx, loader, restoredURL, opts.LiveURL, opts.Cipher, out)
+	return post.step("keeping this server's stricter access settings", keepStricterSettings(ctx, loader, restoredURL, opts.LiveURL, opts.Cipher, out))
 }
 
 // now is the swap's clock.
@@ -555,9 +551,12 @@ func (s *swap) run(ctx context.Context, src *Source, databaseOnly bool) error {
 		return s.settle(ctx, fmt.Errorf("ending sessions on %s: %w", h.LiveDatabase, err))
 	}
 	// Step 6.
-	if databaseOnly {
+	switch {
+	case !src.Manifest.HasBlobs():
+		_, _ = fmt.Fprintln(s.out, noBlobsNote)
+	case databaseOnly:
 		_, _ = fmt.Fprintln(s.out, "Skipped files (--database-only): uploaded artwork, avatars, and branding will be missing.")
-	} else {
+	default:
 		n, err := writeBlobsFromTar(ctx, src.path(BlobsName), s.stores, func(e blobEntry) error { return s.preserve(ctx, e) })
 		if err != nil {
 			return s.settle(ctx, err)

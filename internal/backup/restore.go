@@ -72,8 +72,12 @@ func OpenSource(dir string) (*Source, error) {
 func (src *Source) path(name string) string { return filepath.Join(src.Dir, name) }
 
 // writesBlobs reports whether a restore from src writes blobs.tar: not for
-// a database-only restore.
-func (src *Source) writesBlobs() bool { return !src.withoutBlobs }
+// a database-only restore, and not from a backup that has none.
+func (src *Source) writesBlobs() bool { return !src.withoutBlobs && src.Manifest.HasBlobs() }
+
+// noBlobsNote is what a restore from a database-only backup prints instead
+// of writing files.
+const noBlobsNote = "This backup was taken before an upgrade and holds the database only; files in storage are left as they are."
 
 // Objects reads the stored objects of one backup folder by name.
 type Objects interface {
@@ -166,7 +170,8 @@ type FetchOptions struct {
 }
 
 // FetchSource copies the objects a full restore reads (db.dump, and
-// blobs.tar unless opts.DatabaseOnly) into opts.WorkDir as plaintext,
+// blobs.tar unless opts.DatabaseOnly or the backup has none) into
+// opts.WorkDir as plaintext,
 // decrypting as each streams and checking its stored bytes against the
 // manifest's size and SHA-256. Before anything is fetched, the working
 // folder must have room for the objects' stored sizes (a plaintext is never
@@ -182,7 +187,7 @@ func FetchSource(ctx context.Context, objects Objects, m *Manifest, opts FetchOp
 		key = nil
 	}
 	bases := []string{DumpName, BlobsName}
-	if opts.DatabaseOnly {
+	if opts.DatabaseOnly || !m.HasBlobs() {
 		bases = bases[:1]
 	}
 	entries := make([]ObjectEntry, 0, len(bases))
@@ -284,6 +289,99 @@ func humanBytes(n int64) string {
 	default:
 		return fmt.Sprintf("%d bytes", n)
 	}
+}
+
+// missingInSchema reports whether err is PostgreSQL's for a table, column,
+// or type the database does not have.
+func missingInSchema(err error) bool {
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && (pgErr.Code == "42P01" || pgErr.Code == "42703" || pgErr.Code == "42704")
+}
+
+// postLoad runs the steps after a restore's load against the restored
+// schema, which is the backup's. A backup of an older schema (a copy taken
+// before an upgrade, say) may lack what a step changes: that step is
+// skipped and says so, and the restore goes on, except a step that guards
+// access (strictStep), which takes its stricter outcome instead or fails
+// the restore. Each step changes the
+// restored database in one transaction or statement, so a skipped one
+// changed nothing. A backup of this binary's schema skips nothing.
+type postLoad struct {
+	older   bool
+	version int64
+	out     io.Writer
+}
+
+func newPostLoad(m *Manifest, opts ValidateOptions, out io.Writer) postLoad {
+	older := opts.BinaryGooseVersion > m.GooseVersion
+	if opts.BinaryMigrations != nil && m.AppliedMigrations != nil {
+		// Validate refused a migration this binary does not carry.
+		older = len(m.AppliedMigrations) < len(opts.BinaryMigrations)
+	}
+	return postLoad{older: older, version: m.GooseVersion, out: out}
+}
+
+// step returns err, the outcome of the step named what, or nil when the
+// backup's older schema lacks what it changes.
+func (p postLoad) step(what string, err error) error {
+	if err == nil || !p.older || !missingInSchema(err) {
+		return err
+	}
+	pgErr, _ := errors.AsType[*pgconn.PgError](err)
+	_, _ = fmt.Fprintf(p.out, "Skipped %s: the backup's schema (version %d) is older than this build's and %s.\n", what, p.version, pgErr.Message)
+	return nil
+}
+
+// strictStep is step for a step whose outcome guards access: when the
+// backup's older schema lacks what it reads, it says so and runs
+// fallback, the stricter outcome (named instead), and fails if that
+// fails too. It never skips.
+func (p postLoad) strictStep(what string, err error, instead string, fallback func() error) error {
+	if err == nil || !p.older || !missingInSchema(err) {
+		return err
+	}
+	pgErr, _ := errors.AsType[*pgconn.PgError](err)
+	_, _ = fmt.Fprintf(p.out, "Could not run %s: the backup's schema (version %d) is older than this build's and %s. %s instead.\n",
+		what, p.version, pgErr.Message, strings.ToUpper(instead[:1])+instead[1:])
+	if ferr := fallback(); ferr != nil {
+		return fmt.Errorf("%s on the backup's older schema: %w", instead, ferr)
+	}
+	return nil
+}
+
+// What the restore output calls the steps both restores run after the load.
+const (
+	stepSigningKeys  = "new signing keys"
+	stepLostSettings = "clearing the settings this key cannot read"
+	stepInterrupt    = "ending the backup's unfinished work"
+	stepSubtitles    = "dropping the subtitles the backup left out"
+)
+
+// carry replaces the restored database's credentials, outbound settings,
+// plugin releases, and policies with those of liveURL, or with none when
+// liveURL is "".
+func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string) error {
+	// What the credential and plugin steps guard (revoked keys, replaced
+	// releases) must not come back because a step could not run on an
+	// older schema: each falls back to the stricter outcome, or fails.
+	if err := p.strictStep("replacing the backup's credentials", carryCredentials(ctx, loader, dbURL, liveURL, p.out),
+		"leaving out all of the backup's "+carriedKinds, func() error { return carryCredentials(ctx, loader, dbURL, "", p.out) }); err != nil {
+		return err
+	}
+	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, liveURL, p.out)); err != nil {
+		return err
+	}
+	if err := p.strictStep("carrying the plugin releases", carryPluginReleases(ctx, loader, dbURL, liveURL, p.out),
+		"turning off every restored plugin", func() error {
+			off, err := loader.DisablePlugins(ctx, dbURL)
+			if err == nil && len(off) > 0 {
+				_, _ = fmt.Fprintf(p.out, "Turned off %d plugins; check and enable them after Silo starts: %s.\n", len(off), strings.Join(off, ", "))
+			}
+			return err
+		}); err != nil {
+		return err
+	}
+	return p.step("carrying the account policies", carryPolicies(ctx, loader, dbURL, liveURL, p.out))
 }
 
 // ValidateOptions are the inputs to §10.2 step 1.
@@ -497,6 +595,10 @@ type DatabaseLoader interface {
 	// CarryPluginReleases gives dbURL's plugin installations liveURL's
 	// releases ("" for none), returning those it turned off.
 	CarryPluginReleases(ctx context.Context, dbURL, liveURL string) ([]string, error)
+	// DisablePlugins turns off every plugin installation in dbURL, and
+	// returns them: the fallback when CarryPluginReleases cannot run on a
+	// backup's older schema.
+	DisablePlugins(ctx context.Context, dbURL string) ([]string, error)
 	// CarryServerSpecificSettings gives dbURL liveURL's server-specific
 	// settings and returns how many it changed.
 	CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error)
@@ -650,7 +752,8 @@ type SeparateOptions struct {
 // open for the operator to point DATABASE_URL at.
 func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, opts SeparateOptions) (RestoreReport, error) {
 	out := writerOrDiscard(opts.Out)
-	if !opts.DatabaseOnly && opts.BlobsInto == "" {
+	hasBlobs := src.Manifest.HasBlobs()
+	if !opts.DatabaseOnly && hasBlobs && opts.BlobsInto == "" {
 		return RestoreReport{}, errors.New("--blobs-into is required unless --database-only")
 	}
 	if err := src.Validate(ctx, opts.Validate); err != nil {
@@ -660,7 +763,7 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 		return RestoreReport{}, err
 	}
 	// Both stores land in one directory.
-	if !opts.DatabaseOnly {
+	if !opts.DatabaseOnly && hasBlobs {
 		if err := src.checkArchive(ctx, func(string) (string, bool) { return opts.BlobsInto, true }); err != nil {
 			return RestoreReport{}, err
 		}
@@ -670,44 +773,39 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	}
 	// The restored settings name the backed-up server's stores, which are
 	// not where this copy's files go.
-	if err := loader.UnbindStorage(ctx, opts.Into); err != nil {
+	post := newPostLoad(src.Manifest, opts.Validate, out)
+	if err := post.step("clearing the restored storage identities", loader.UnbindStorage(ctx, opts.Into)); err != nil {
 		return RestoreReport{}, fmt.Errorf("clearing the restored storage identities: %w", err)
 	}
 	// New signing keys first, so the lost-settings pass does not list them.
-	if err := rotateSigningSecrets(ctx, loader, opts.Into, opts.Cipher, out); err != nil {
+	if err := post.step(stepSigningKeys, rotateSigningSecrets(ctx, loader, opts.Into, opts.Cipher, out)); err != nil {
 		return RestoreReport{}, err
 	}
-	if err := clearLostSettings(ctx, loader, opts.Into, src.Manifest, opts.Validate, opts.Cipher, out); err != nil {
+	if err := post.step(stepLostSettings, clearLostSettings(ctx, loader, opts.Into, src.Manifest, opts.Validate, opts.Cipher, out)); err != nil {
 		return RestoreReport{}, err
 	}
 	// A copy is not the live server: it gets none of the backup's
 	// credentials and none of the live ones.
-	if err := carryCredentials(ctx, loader, opts.Into, "", out); err != nil {
+	if err := post.carry(ctx, loader, opts.Into, ""); err != nil {
 		return RestoreReport{}, err
 	}
-	if err := carryOutboundSettings(ctx, loader, opts.Into, "", out); err != nil {
-		return RestoreReport{}, err
-	}
-	if err := carryPluginReleases(ctx, loader, opts.Into, "", out); err != nil {
-		return RestoreReport{}, err
-	}
-	if err := carryPolicies(ctx, loader, opts.Into, "", out); err != nil {
-		return RestoreReport{}, err
-	}
-	if err := interruptWork(ctx, loader, opts.Into, "", out); err != nil {
+	if err := post.step(stepInterrupt, interruptWork(ctx, loader, opts.Into, "", out)); err != nil {
 		return RestoreReport{}, err
 	}
 	// The copy's files land in an empty directory, so a subtitle the backup
 	// left out is nowhere.
 	if !opts.DatabaseOnly {
-		if err := dropOmittedSubtitles(ctx, loader, opts.Into, src.Manifest, nil, out); err != nil {
+		if err := post.step(stepSubtitles, dropOmittedSubtitles(ctx, loader, opts.Into, src.Manifest, nil, out)); err != nil {
 			return RestoreReport{}, err
 		}
 	}
 	report := RestoreReport{Database: opts.Into, MissingBlobs: src.Manifest.MissingBlobs}
-	if opts.DatabaseOnly {
+	switch {
+	case !hasBlobs:
+		_, _ = fmt.Fprintln(out, noBlobsNote)
+	case opts.DatabaseOnly:
 		_, _ = fmt.Fprintln(out, "Skipped files (--database-only): uploaded artwork, avatars, and branding will be missing.")
-	} else {
+	default:
 		n, err := writeSeparateBlobs(ctx, src, opts)
 		if err != nil {
 			return report, err
@@ -822,7 +920,9 @@ func VerifyBackup(ctx context.Context, src *Source, loader DatabaseLoader, scrat
 	if err := loadAndVerify(ctx, src, loader, scratch, validate, out); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(out, "blobs.tar holds the %d files the manifest records.\n", src.Manifest.Blobs.Count)
+	if src.Manifest.HasBlobs() {
+		_, _ = fmt.Fprintf(out, "blobs.tar holds the %d files the manifest records.\n", src.Manifest.Blobs.Count)
+	}
 	printMissing(out, src.Manifest)
 	_, _ = fmt.Fprintln(out, "Verified: the backup restores and matches its manifest.")
 	return nil

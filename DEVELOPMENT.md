@@ -12,7 +12,7 @@ pre-submission gate are in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Node.js 24+ with pnpm 10.32.1. The managed Jellyfin Web installer (`make jellyfin-web`,
   `silo compat-web install`, or the admin settings) also needs Node.js 24+ for Jellyfin Web 12.x.
 - PostgreSQL 18 with pgvector, and the PostgreSQL 18 client tools (`pg_dump`, `pg_restore`)
-  for backups
+  for backups, including the one taken before startup migrations
 - Redis
 - FFmpeg (transcoding). On macOS, install Homebrew's keg-only full build so
   text-subtitle burn-in and the complete filter set are available alongside
@@ -59,6 +59,13 @@ Run the backend and frontend in separate terminals, backend first:
 ```sh
 make dev-backend
 ```
+
+When a migration is pending, the backend backs up the database before applying
+it and refuses to start if it cannot, for example when `pg_dump` 18 is not
+installed (the dev Compose file runs PostgreSQL in a container, so the host may
+have no client). For local development, add `SILO_SKIP_BACKUP_BEFORE_MIGRATE=true`
+to `.env`, or turn off backups (`backup.enabled=false`) on the Backups page. See
+[backups](docs/architecture/backups.md#before-upgrades).
 
 The source-built backend listens on `:8080`, while the Vite proxy defaults to
 the Compose port `8090`. Point it at the source backend in `web/.env.local`:

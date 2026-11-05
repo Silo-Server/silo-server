@@ -3431,7 +3431,8 @@
             "enum": [
               "nightly",
               "manual",
-              "before-restore"
+              "before-restore",
+              "before-upgrade"
             ],
             "type": "string"
           },
@@ -3720,7 +3721,8 @@
             "enum": [
               "nightly",
               "manual",
-              "before-restore"
+              "before-restore",
+              "before-upgrade"
             ],
             "type": "string"
           },
