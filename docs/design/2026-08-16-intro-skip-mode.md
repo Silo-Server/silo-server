@@ -63,7 +63,8 @@ same identity:
 
 `ON CONFLICT DO NOTHING` so a re-run, or a client that already wrote the enum,
 never has its choice overwritten by the mirror. Nobody currently has `never`,
-so no data becomes unrepresentable. Down: delete the `intro_skip_mode` rows.
+so no data becomes unrepresentable. Down is deliberately a no-op: it cannot tell
+backfilled rows from ones a client wrote later, and an older server ignores the key.
 
 ### Compatibility mirror (one release)
 
