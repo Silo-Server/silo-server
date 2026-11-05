@@ -116,7 +116,7 @@ type itemImageEntry struct {
 	Height      int     `json:"height"`
 	Rating      float64 `json:"rating"`
 	// Fallback marks show artwork a season list offers after the season's own
-	// images. It is set only on season lists and is not serialised.
+	// images. It is set only on season lists and is left out of JSON.
 	Fallback bool `json:"-"`
 }
 
