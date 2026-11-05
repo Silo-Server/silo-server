@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/access"
@@ -102,9 +101,13 @@ func intersectAllowedTitles(viewer, owner access.MaturityLimits) []string {
 	case !viewer.Active():
 		return owner.AllowedTitleIDs
 	}
+	ownerAllowed := make(map[string]struct{}, len(owner.AllowedTitleIDs))
+	for _, id := range owner.AllowedTitleIDs {
+		ownerAllowed[id] = struct{}{}
+	}
 	var both []string
 	for _, id := range viewer.AllowedTitleIDs {
-		if slices.Contains(owner.AllowedTitleIDs, id) {
+		if _, ok := ownerAllowed[id]; ok {
 			both = append(both, id)
 		}
 	}
