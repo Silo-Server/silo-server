@@ -578,9 +578,14 @@ func (h *PersonalDataHandler) listEntriesVisible(ctx context.Context, ids []stri
 	if len(episodes) == 0 {
 		return visible, nil
 	}
+	// Several episodes of one series share its access check.
 	seriesIDs := make([]string, 0, len(episodes))
+	seen := make(map[string]bool, len(episodes))
 	for _, ep := range episodes {
-		seriesIDs = append(seriesIDs, ep.SeriesID)
+		if !seen[ep.SeriesID] {
+			seen[ep.SeriesID] = true
+			seriesIDs = append(seriesIDs, ep.SeriesID)
+		}
 	}
 	seriesVisible, err := h.itemRepo.EnsureAccessibleIDs(ctx, seriesIDs, filter)
 	if err != nil {
