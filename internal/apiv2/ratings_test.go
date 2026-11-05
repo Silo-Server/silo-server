@@ -4,11 +4,14 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 )
 
@@ -29,10 +32,10 @@ func ratingKeyAfter(row catalogpkg.UserRating, after catalogpkg.RatingKey) bool 
 	return row.MediaItemID < after.MediaItemID
 }
 
-func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID string, after *catalogpkg.RatingKey, limit int) ([]catalogpkg.UserRating, error) {
+func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID string, _ catalogpkg.AccessFilter, after *catalogpkg.RatingKey, limit int) ([]catalogpkg.UserRating, map[string]bool, error) {
 	f.limits = append(f.limits, limit)
 	if f.err != nil {
-		return nil, f.err
+		return nil, nil, f.err
 	}
 	var page []catalogpkg.UserRating
 	for _, r := range f.ratings {
@@ -50,12 +53,19 @@ func (f *fakeRatings) ListRatingsPage(_ context.Context, userID int, profileID s
 	if len(page) > limit {
 		page = page[:limit]
 	}
-	return page, nil
+	visible := make(map[string]bool, len(page))
+	for _, r := range page {
+		visible[r.MediaItemID] = !f.hidden[r.MediaItemID]
+	}
+	return page, visible, nil
 }
 
-func (f *fakeRatings) GetRating(_ context.Context, userID int, profileID, itemID string) (catalogpkg.UserRating, bool, error) {
+func (f *fakeRatings) GetRating(_ context.Context, userID int, profileID, itemID string, _ catalogpkg.AccessFilter) (catalogpkg.UserRating, bool, error) {
 	if f.err != nil {
 		return catalogpkg.UserRating{}, false, f.err
+	}
+	if f.hidden[itemID] {
+		return catalogpkg.UserRating{}, false, &handlers.APIError{Status: http.StatusNotFound, Code: "not_found", Message: "Item not found"}
 	}
 	for _, r := range f.ratings {
 		if r.UserID == userID && r.ProfileID == profileID && r.MediaItemID == itemID {
@@ -166,9 +176,100 @@ func TestListRatings(t *testing.T) {
 	if len(p.Errors) != 1 || p.Errors[0].Location != "query.offset" || p.Errors[0].Code != codeUnknownParameter {
 		t.Fatalf("errors = %+v", p.Errors)
 	}
-	// A signed cursor whose timestamp cannot be parsed is still a client error.
-	bad, _ := NewCursors(deps.CursorSecret).Encode(CursorScope{OperationID: opListRatings, Security: "1/p-owner", Sort: "-rated_at,-item_id", Tiebreaker: tiebreakerItemID}, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
+	// A signed cursor whose timestamp cannot be parsed is still a client
+	// error. The same scope with a good timestamp pages, so the refusal is the
+	// timestamp's and not the scope's.
+	scope := ratingsScope(access.SetScope(context.Background(), access.Scope{UserID: 1, ProfileID: "p-owner"}), 1, "p-owner")
+	good, _ := NewCursors(deps.CursorSecret).Encode(scope, ratingPosition{RatedAt: fixedTime().Format(time.RFC3339Nano), MediaItemID: "movie:c"})
+	if rec := do(t, h, http.MethodGet, "/api/v2/ratings?cursor="+good, "", viewerHeaders()); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"item_id":"movie:b"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	bad, _ := NewCursors(deps.CursorSecret).Encode(scope, ratingPosition{RatedAt: "yesterday", MediaItemID: "movie:a"})
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings?cursor="+bad, "", viewerHeaders()), TypeInvalidCursor)
+}
+
+// ratingPages walks listRatings at the given page size and answers each
+// page's item ids and whether it said more follow.
+func ratingPages(t *testing.T, h http.Handler, limit int) (pages [][]string, more []bool, firstCursor string) {
+	t.Helper()
+	cursor := ""
+	for {
+		url := "/api/v2/ratings?limit=" + strconv.Itoa(limit)
+		if cursor != "" {
+			url += "&cursor=" + cursor
+		}
+		rec := do(t, h, http.MethodGet, url, "", viewerHeaders())
+		if rec.Code != 200 {
+			t.Fatalf("%d %s", rec.Code, rec.Body.String())
+		}
+		var page struct {
+			Items []struct {
+				ItemID string `json:"item_id"`
+			} `json:"items"`
+			Page struct {
+				NextCursor string `json:"next_cursor"`
+				HasMore    bool   `json:"has_more"`
+			} `json:"page"`
+		}
+		decodeJSON(t, rec.Body, &page)
+		ids := []string{}
+		for _, it := range page.Items {
+			ids = append(ids, it.ItemID)
+		}
+		pages = append(pages, ids)
+		more = append(more, page.Page.HasMore)
+		if firstCursor == "" {
+			firstCursor = page.Page.NextCursor
+		}
+		if !page.Page.HasMore || len(pages) > 10 {
+			return pages, more, firstCursor
+		}
+		cursor = page.Page.NextCursor
+	}
+}
+
+// Ratings of items the viewer may not see are left out of the list and read
+// as 404, without breaking the keyset paging: a hidden row as the cursor row
+// or the probe row, and a page that is wholly hidden, still lead to the
+// visible rows behind them.
+func TestRatingsHideItemsTheViewerMayNotSee(t *testing.T) {
+	ratings := &fakeRatings{
+		ratings: []catalogpkg.UserRating{
+			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:e", Rating: 5, RatedAt: fixedTime()},
+			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:d", Rating: 4, RatedAt: fixedTime().Add(-time.Hour)},
+			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:c", Rating: 3, RatedAt: fixedTime().Add(-2 * time.Hour)},
+			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:b", Rating: 2, RatedAt: fixedTime().Add(-3 * time.Hour)},
+			{UserID: 1, ProfileID: "p-owner", MediaItemID: "movie:a", Rating: 1, RatedAt: fixedTime().Add(-4 * time.Hour)},
+		},
+		hidden: map[string]bool{"movie:d": true, "movie:c": true, "movie:b": true},
+	}
+	deps := ratingsDeps(ratings)
+	deps.CursorSecret = []byte("ratings-cursor-test-key")
+	h := newTestHandler(t, deps)
+
+	// Pages of two: [e, d*] [c*, b*] [a]. The first page's cursor row (d) and
+	// probe row (c) are hidden, and the second page is hidden entirely.
+	pages, more, cursor := ratingPages(t, h, 2)
+	if len(pages) != 3 || strings.Join(pages[0], ",") != "movie:e" || len(pages[1]) != 0 || strings.Join(pages[2], ",") != "movie:a" ||
+		!more[0] || !more[1] || more[2] {
+		t.Fatalf("pages = %v, has_more = %v", pages, more)
+	}
+	rec := do(t, h, http.MethodGet, "/api/v2/ratings", "", viewerHeaders())
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `{"item_id":"movie:e","rating":5,`) || !strings.Contains(rec.Body.String(), `{"item_id":"movie:a","rating":1,`) ||
+		strings.Contains(rec.Body.String(), "movie:d") || strings.Contains(rec.Body.String(), "movie:c") || strings.Contains(rec.Body.String(), "movie:b") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+
+	// A hidden title's rating reads as 404, a visible one as before.
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/ratings/movie:d", "", viewerHeaders()), TypeNotFound)
+	if rec := do(t, h, http.MethodGet, "/api/v2/ratings/movie:e", "", viewerHeaders()); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"rating":5`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+
+	// A cursor minted under one access policy does not page under another.
+	restricted := deps
+	restricted.ViewerAccess = apimw.NewViewerAccessMiddleware(policyResolver{scope: &access.Scope{LibrariesRestricted: true, AllowedLibraryIDs: []int{1}}})
+	requireProblem(t, do(t, newTestHandler(t, restricted), http.MethodGet, "/api/v2/ratings?limit=2&cursor="+cursor, "", viewerHeaders()), TypeInvalidCursor)
 }
 
 func TestGetRating(t *testing.T) {

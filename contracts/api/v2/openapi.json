@@ -198595,7 +198595,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List the acting profile's ratings, most recently rated first.",
+        "summary": "List the acting profile's ratings, most recently rated first; items the viewer may not see are omitted.",
         "tags": [
           "ratings"
         ],
@@ -198901,7 +198901,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Answer the acting profile's rating of the item, or 404 when the profile has not rated it.",
+        "summary": "Answer the acting profile's rating of the item, or 404 when the profile has not rated it (or the viewer may not see it).",
         "tags": [
           "ratings"
         ],

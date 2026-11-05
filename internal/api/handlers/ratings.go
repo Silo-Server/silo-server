@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
@@ -151,7 +152,11 @@ func (h *RatingsHandler) HandleDeleteRating(w http.ResponseWriter, r *http.Reque
 }
 
 // DeleteRating removes the profile's rating of an item. Deleting a rating
-// that does not exist succeeds, so a retried delete converges.
+// that does not exist succeeds, so a retried delete converges. No access
+// check runs: the item may have left the viewer's scope since it was rated,
+// and the profile must still be able to drop its own rating. The answer is
+// the same 204 whether or not a rating existed, so it reveals nothing about
+// a hidden item.
 func (h *RatingsHandler) DeleteRating(ctx context.Context, userID int, profileID, itemID string) error {
 	if err := h.ratingsRepo.Delete(ctx, userID, profileID, itemID); err != nil {
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete rating")
@@ -173,7 +178,7 @@ func (h *RatingsHandler) HandleGetRating(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	rating, found, err := h.GetRating(r.Context(), userID, profileID, itemID)
+	rating, found, err := h.GetRating(r.Context(), userID, profileID, itemID, requestAccessFilter(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -190,10 +195,15 @@ func (h *RatingsHandler) HandleGetRating(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// GetRating answers the profile's rating of an item; found is false when
-// the profile has not rated it. No access check runs, matching v1: a rating
-// is the profile's own data.
-func (h *RatingsHandler) GetRating(ctx context.Context, userID int, profileID, itemID string) (rating catalog.UserRating, found bool, err error) {
+// GetRating answers the profile's rating of an item the viewer may see;
+// found is false when the profile has not rated it. An item outside the
+// viewer's access is a 404 error whether or not it was rated, as the catalog
+// answers it, so a restricted profile cannot learn which hidden titles it
+// rated. The stored rating is kept and reads again once the item is visible.
+func (h *RatingsHandler) GetRating(ctx context.Context, userID int, profileID, itemID string, access catalog.AccessFilter) (rating catalog.UserRating, found bool, err error) {
+	if err := h.ensureAccessibleItem(ctx, itemID, access); err != nil {
+		return catalog.UserRating{}, false, itemLookupError(ctx, itemID, err)
+	}
 	r, err := h.ratingsRepo.Get(ctx, userID, profileID, itemID)
 	if err != nil {
 		return catalog.UserRating{}, false, apiError(http.StatusInternalServerError, "internal_error", "Failed to get rating")
@@ -204,25 +214,73 @@ func (h *RatingsHandler) GetRating(ctx context.Context, userID int, profileID, i
 	return *r, true, nil
 }
 
-// ListRatings answers the store page [offset, offset+limit) of the profile's
-// ratings, newest first.
-func (h *RatingsHandler) ListRatings(ctx context.Context, userID int, profileID string, limit, offset int) ([]catalog.UserRating, error) {
+// ensureAccessibleItem checks that the viewer may see the item. A rating is
+// only ever set on a catalog item (SetRating checks the same way), so there
+// is no episode fallback.
+func (h *RatingsHandler) ensureAccessibleItem(ctx context.Context, itemID string, access catalog.AccessFilter) error {
+	// An ID Postgres refuses as text names no item; querying with it would
+	// fail with an encoding error that reads as a server fault.
+	if !auth.ValidTextKey(itemID) {
+		return catalog.ErrItemNotFound
+	}
+	return h.itemRepo.EnsureAccessible(ctx, itemID, access)
+}
+
+// visibleRatings reports which of the rated items the viewer may see, in one
+// query. An item the viewer may not see, or that has left the catalog, is
+// absent from the set.
+func (h *RatingsHandler) visibleRatings(ctx context.Context, ratings []catalog.UserRating, access catalog.AccessFilter) (map[string]bool, error) {
+	if len(ratings) == 0 {
+		return map[string]bool{}, nil
+	}
+	ids := make([]string, len(ratings))
+	for i, r := range ratings {
+		ids[i] = r.MediaItemID
+	}
+	visible, err := h.itemRepo.EnsureAccessibleIDs(ctx, ids, access)
+	if err != nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check item access")
+	}
+	return visible, nil
+}
+
+// ListRatings answers the profile's ratings in the store page
+// [offset, offset+limit), newest first, without the items the viewer may not
+// see. A page can therefore hold fewer than limit rows while more follow.
+func (h *RatingsHandler) ListRatings(ctx context.Context, userID int, profileID string, access catalog.AccessFilter, limit, offset int) ([]catalog.UserRating, error) {
 	ratings, err := h.ratingsRepo.List(ctx, userID, profileID, limit, offset)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list ratings")
 	}
-	return ratings, nil
+	visible, err := h.visibleRatings(ctx, ratings, access)
+	if err != nil {
+		return nil, err
+	}
+	kept := ratings[:0]
+	for _, r := range ratings {
+		if visible[r.MediaItemID] {
+			kept = append(kept, r)
+		}
+	}
+	return kept, nil
 }
 
 // ListRatingsPage is the keyset form of ListRatings the v2 listing uses: at
 // most limit rows ordered by (rated_at DESC, media_item_id DESC) strictly
-// after the key (nil = from the most recently rated row).
-func (h *RatingsHandler) ListRatingsPage(ctx context.Context, userID int, profileID string, after *catalog.RatingKey, limit int) ([]catalog.UserRating, error) {
+// after the key (nil = from the most recently rated row). It answers the raw
+// rows and, separately, which of them the viewer may see, so the caller
+// decides has_more and the next key from the raw rows and a hidden entry
+// never hides the rows behind it.
+func (h *RatingsHandler) ListRatingsPage(ctx context.Context, userID int, profileID string, access catalog.AccessFilter, after *catalog.RatingKey, limit int) ([]catalog.UserRating, map[string]bool, error) {
 	ratings, err := h.ratingsRepo.ListPage(ctx, userID, profileID, after, limit)
 	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list ratings")
+		return nil, nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list ratings")
 	}
-	return ratings, nil
+	visible, err := h.visibleRatings(ctx, ratings, access)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ratings, visible, nil
 }
 
 // HandleListRatings handles GET /ratings/.
@@ -233,7 +291,7 @@ func (h *RatingsHandler) HandleListRatings(w http.ResponseWriter, r *http.Reques
 
 	limit, offset := parsePagination(r)
 
-	ratings, err := h.ListRatings(r.Context(), userID, profileID, limit, offset)
+	ratings, err := h.ListRatings(r.Context(), userID, profileID, requestAccessFilter(r), limit, offset)
 	if err != nil {
 		writeAPIError(w, err)
 		return

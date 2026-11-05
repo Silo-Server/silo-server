@@ -1064,11 +1064,13 @@ type PersonalListService interface {
 type RatingService interface {
 	// ListRatingsPage answers at most limit of the profile's ratings ordered
 	// by (rated_at DESC, media_item_id DESC) strictly after the key (nil =
-	// from the most recently rated).
-	ListRatingsPage(ctx context.Context, userID int, profileID string, after *mediacatalog.RatingKey, limit int) ([]mediacatalog.UserRating, error)
-	// GetRating answers the profile's rating of the item; found is false
-	// when the profile has not rated it.
-	GetRating(ctx context.Context, userID int, profileID, itemID string) (rating mediacatalog.UserRating, found bool, err error)
+	// from the most recently rated), and the set of those items the access
+	// filter admits. The rows are unfiltered so the caller can page by them.
+	ListRatingsPage(ctx context.Context, userID int, profileID string, access mediacatalog.AccessFilter, after *mediacatalog.RatingKey, limit int) ([]mediacatalog.UserRating, map[string]bool, error)
+	// GetRating answers the profile's rating of an item the access filter
+	// admits; found is false when the profile has not rated it, and an item
+	// outside the filter is a 404 error.
+	GetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter) (rating mediacatalog.UserRating, found bool, err error)
 	// SetRating records a validated rating of an item the access filter
 	// admits; an item outside it is a 404 error.
 	SetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter, rating int) error

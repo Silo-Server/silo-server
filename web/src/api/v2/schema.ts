@@ -10613,7 +10613,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the acting profile's ratings, most recently rated first. */
+    /** List the acting profile's ratings, most recently rated first; items the viewer may not see are omitted. */
     get: operations["listRatings"];
     put?: never;
     post?: never;
@@ -10630,7 +10630,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Answer the acting profile's rating of the item, or 404 when the profile has not rated it. */
+    /** Answer the acting profile's rating of the item, or 404 when the profile has not rated it (or the viewer may not see it). */
     get: operations["getRating"];
     /** Set the acting profile's rating of the item, replacing any earlier rating; automatic retries repeat the rating timestamp and recommendation refresh. */
     put: operations["setRating"];
