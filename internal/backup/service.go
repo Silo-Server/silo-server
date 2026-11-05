@@ -104,6 +104,9 @@ type Service struct {
 
 	pendingMu sync.Mutex
 	pending   *pendingRun
+
+	// manifests are the manifests the listing read (listFolders).
+	manifests manifestCache
 }
 
 // pendingRun hands a lock taken by StartManual to the task run it starts.
@@ -650,6 +653,17 @@ func (s *Service) rotate(ctx context.Context, t target, serverID string) (rotate
 
 // folders lists this server's backup folders at t, reading each manifest.
 func (s *Service) folders(ctx context.Context, t target, serverID string) ([]folder, error) {
+	return s.readFolders(ctx, t, serverID, nil)
+}
+
+// listFolders is folders for the listing, through the manifest cache: a
+// manifest listed unchanged since the listing last read it is not read
+// again. Rotation and a backup's own checks read every manifest.
+func (s *Service) listFolders(ctx context.Context, t target, serverID string) ([]folder, error) {
+	return s.readFolders(ctx, t, serverID, &s.manifests)
+}
+
+func (s *Service) readFolders(ctx context.Context, t target, serverID string, cache *manifestCache) ([]folder, error) {
 	objects, err := t.List(ctx, serverPrefix(serverID))
 	if err != nil {
 		return nil, err
@@ -657,6 +671,7 @@ func (s *Service) folders(ctx context.Context, t target, serverID string) ([]fol
 	byID := map[string]*folder{}
 	var order []string
 	listedManifest := map[string]bool{}
+	cached := map[string]bool{}
 	for _, obj := range objects {
 		rest := strings.TrimPrefix(obj.Key, serverPrefix(serverID))
 		id, name, ok := strings.Cut(rest, "/")
@@ -679,7 +694,7 @@ func (s *Service) folders(ctx context.Context, t target, serverID string) ([]fol
 		}
 		if name == ManifestName {
 			listedManifest[id] = true
-			m, err := s.readManifest(ctx, t, serverID, id)
+			m, err := s.cachedManifest(ctx, t, serverID, id, obj, cache, cached)
 			if err != nil {
 				f.tampered = errors.Is(err, ErrManifestTampered)
 				f.unreadable = !f.tampered
@@ -688,6 +703,9 @@ func (s *Service) folders(ctx context.Context, t target, serverID string) ([]fol
 			}
 			f.manifest, f.verified = m, m.authenticated || s.opts.ManifestKey == nil
 		}
+	}
+	if cache != nil {
+		cache.keepOnly(cacheLocation(t, serverPrefix(serverID)), cached)
 	}
 	out := make([]folder, 0, len(order))
 	for _, id := range order {
@@ -699,6 +717,25 @@ func (s *Service) folders(ctx context.Context, t target, serverID string) ([]fol
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].at.After(out[j].at) })
 	return out, nil
+}
+
+// cachedManifest is readManifest through cache, when there is one, for the
+// manifest object obj of backup id; seen collects the cache locations the
+// listing saw.
+func (s *Service) cachedManifest(ctx context.Context, t target, serverID, id string, obj blobstore.ObjectInfo, cache *manifestCache, seen map[string]bool) (*Manifest, error) {
+	if cache == nil {
+		return s.readManifest(ctx, t, serverID, id)
+	}
+	location := cacheLocation(t, obj.Key)
+	seen[location] = true
+	if m, ok := cache.get(location, obj); ok {
+		return m, nil
+	}
+	m, err := s.readManifest(ctx, t, serverID, id)
+	if err == nil {
+		cache.put(cacheLocation(t, serverPrefix(serverID)), location, obj, m)
+	}
+	return m, err
 }
 
 // readManifest reads and checks the manifest of backup id of serverID: it

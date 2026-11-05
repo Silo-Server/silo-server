@@ -179,3 +179,94 @@ func TestListShowsUnverifiedBackups(t *testing.T) {
 		t.Fatalf("the sweep would delete %v", swept)
 	}
 }
+
+// countingManifests counts the manifest reads through it, and fails those
+// fail names.
+type countingManifests struct {
+	Destination
+	fail   map[string]bool
+	opened *[]string
+}
+
+func (d countingManifests) Open(ctx context.Context, key string) (io.ReadCloser, int64, error) {
+	if strings.HasSuffix(key, "/"+ManifestName) {
+		*d.opened = append(*d.opened, key)
+	}
+	if d.fail[key] {
+		return nil, 0, errors.New("the destination timed out")
+	}
+	return d.Destination.Open(ctx, key)
+}
+
+// TestListReadsUnchangedManifestsOnce: a listing reads again only the
+// manifests it could not read or verify before, and one whose object
+// changed; a manifest that becomes readable is read and shown, and a
+// deleted folder leaves the cache.
+func TestListReadsUnchangedManifestsOnce(t *testing.T) {
+	ctx := t.Context()
+	store, err := blobstore.NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	var opened []string
+	fail := map[string]bool{}
+	svc := New(Options{Destination: countingManifests{Destination: NewStoreDestination(store), fail: fail, opened: &opened},
+		KeyCheck: "aaaa-bbbb-cccc-dddd", ManifestKey: []byte("0123456789abcdef0123456789abcdef"),
+		Now: func() time.Time { return now }, ServerID: func(context.Context) (string, error) { return "server", nil }})
+	write := func(day int) string {
+		t.Helper()
+		m := validTestManifest()
+		m.ID = FolderName(now.AddDate(0, 0, -day), KindNightly)
+		m.CreatedAt, m.CompletedAt, m.KeyCheck = now.AddDate(0, 0, -day), now.AddDate(0, 0, -day), "aaaa-bbbb-cccc-dddd"
+		if err := writeManifest(ctx, target{Destination: NewStoreDestination(store)}, &m, svc.opts.ManifestKey); err != nil {
+			t.Fatal(err)
+		}
+		return m.ID
+	}
+	first, second, unreadable := write(1), write(2), write(3)
+	fail[objectKey("server", unreadable, ManifestName)] = true
+	list := func() map[string]Status {
+		t.Helper()
+		opened = nil
+		listing, err := svc.List(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		status := map[string]Status{}
+		for _, b := range listing.Backups {
+			status[b.ID] = b.Status
+		}
+		return status
+	}
+	if status := list(); len(opened) != 3 || status[unreadable] != StatusUnreadable {
+		t.Fatalf("first listing read %v: %v", opened, status)
+	}
+	if status := list(); !slices.Equal(opened, []string{objectKey("server", unreadable, ManifestName)}) || status[first] != StatusComplete {
+		t.Fatalf("second listing read %v, want only the unreadable manifest: %v", opened, status)
+	}
+	delete(fail, objectKey("server", unreadable, ManifestName))
+	if status := list(); status[unreadable] != StatusComplete {
+		t.Fatalf("a manifest readable again lists %v", status[unreadable])
+	}
+	if list(); len(opened) != 0 {
+		t.Fatalf("listing after every manifest was read read %v", opened)
+	}
+	// A rewritten manifest is read again.
+	m := validTestManifest()
+	m.ID, m.CreatedAt, m.CompletedAt, m.KeyCheck = second, now, now.Add(time.Minute), "aaaa-bbbb-cccc-dddd"
+	m.SiloVersion = "rewritten-" + m.SiloVersion
+	if err := writeManifest(ctx, target{Destination: NewStoreDestination(store)}, &m, svc.opts.ManifestKey); err != nil {
+		t.Fatal(err)
+	}
+	if list(); !slices.Equal(opened, []string{objectKey("server", second, ManifestName)}) {
+		t.Fatalf("listing after a rewrite read %v", opened)
+	}
+	if _, err := store.DeletePrefix(ctx, folderPrefix("server", first)); err != nil {
+		t.Fatal(err)
+	}
+	list()
+	if n := len(svc.manifests.entries); n != 2 {
+		t.Fatalf("cache holds %d manifests after a folder was deleted, want 2", n)
+	}
+}

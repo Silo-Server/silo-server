@@ -164,7 +164,7 @@ func (s *Service) list(ctx context.Context) (Listing, error) {
 		return listing, err
 	}
 	listing.OtherServerIDs = otherServerIDs(objects, serverID)
-	folders, err := s.folders(ctx, t, serverID)
+	folders, err := s.listFolders(ctx, t, serverID)
 	if err != nil {
 		return listing, err
 	}

@@ -56,6 +56,15 @@ backups/<server-id>/<UTC time>-<kind>/
   `backup_unreadable` warning, never rotated, not counted toward
   `backup.keep`, and never swept. A failed listing skips rotation and the
   sweep for that run.
+- **The listing reads a manifest once.** A manifest is not rewritten after
+  its backup completes, so the Backups listing (which the page polls every
+  few seconds while a backup runs) keeps each manifest it read and checked,
+  keyed by destination and location, and reads it again only when the
+  listing reports another size, modification time, or ETag. A failed read,
+  including a manifest that names this server's key and does not verify, is
+  not kept, entries of folders no longer listed
+  are dropped, and the cache holds at most 32 MiB of manifests. Rotation, the
+  sweep, and a backup's own checks read every manifest.
 
 ### Manifest
 
