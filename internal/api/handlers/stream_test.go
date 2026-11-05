@@ -656,7 +656,7 @@ func TestHandleSubtitle_EmbeddedPGSSupportsCachedHEADAndRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
-	cacheRoot := t.TempDir()
+	cacheRoot := filepath.Join(t.TempDir(), "transcode")
 	cache := playback.NewSubtitleCache(func() string { return cacheRoot })
 	warmReq := httptest.NewRequest(http.MethodGet, "/sub.sup", nil)
 	warmRR := httptest.NewRecorder()

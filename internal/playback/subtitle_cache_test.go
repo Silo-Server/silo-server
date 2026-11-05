@@ -343,6 +343,11 @@ func TestServeExtractTextFailedFillRetries(t *testing.T) {
 func newTestCache(t *testing.T) (*SubtitleCache, string) {
 	t.Helper()
 	base := t.TempDir()
+	// The cache refuses a transcode dir writable by its group, which
+	// t.TempDir creates under a 002 umask.
+	if err := os.Chmod(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	source := filepath.Join(base, "movie.mkv")
 	if err := os.WriteFile(source, []byte("fake mkv contents"), 0o644); err != nil {
 		t.Fatal(err)
