@@ -3816,16 +3816,19 @@ describe("VideoPlayer intro skip prompt", () => {
     return rendered;
   }
 
-  it("renders the ask pill and consumes Escape", async () => {
-    await enterIntro("ask");
-    expect(await screen.findByRole("button", { name: "Skip Intro" })).toBeInTheDocument();
+  it.each(["Escape", "Backspace", "GoBack"])(
+    "renders the ask pill and consumes %s",
+    async (key) => {
+      await enterIntro("ask");
+      expect(await screen.findByRole("button", { name: "Skip Intro" })).toBeInTheDocument();
 
-    fireEvent.keyDown(document, { key: "Escape" });
+      fireEvent.keyDown(document, { key });
 
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Skip Intro" })).not.toBeInTheDocument(),
-    );
-  });
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Skip Intro" })).not.toBeInTheDocument(),
+      );
+    },
+  );
 
   it("prompts for nothing while the intro mode is still unknown", async () => {
     const rendered = renderPlayer({ intro: { start: 10, end: 20 }, introSkipMode: null });

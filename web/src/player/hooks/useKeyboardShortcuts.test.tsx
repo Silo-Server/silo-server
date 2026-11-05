@@ -140,16 +140,21 @@ describe("with a remote", () => {
     expect(handlePlayPause).toHaveBeenCalledOnce();
   });
 
-  it("leaves on Back unless a dialog over the player has focus", () => {
-    const { container, remote } = setup(true);
+  it("leaves Back, Enter and arrows to a dialog over the player", () => {
+    const { remote, handlePlayPause } = setup(true);
+    // Portaled outside the player, as the subtitle search dialog is.
     const dialog = document.createElement("div");
     dialog.setAttribute("role", "dialog");
     const button = document.createElement("button");
     dialog.appendChild(button);
-    container.appendChild(dialog);
+    document.body.appendChild(dialog);
 
-    fireEvent.keyDown(button, { key: "Backspace" });
+    for (const key of ["Backspace", "Enter", "ArrowDown"]) {
+      expect(fireEvent.keyDown(button, { key })).toBe(true);
+    }
     expect(remote.back).not.toHaveBeenCalled();
+    expect(handlePlayPause).not.toHaveBeenCalled();
+    expect(remote.focusTransport).not.toHaveBeenCalled();
     fireEvent.keyDown(document.body, { key: "Backspace" });
     fireEvent.keyDown(document.body, { key: "GoBack" });
     expect(remote.back).toHaveBeenCalledTimes(2);

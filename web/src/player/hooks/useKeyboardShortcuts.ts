@@ -61,6 +61,9 @@ export function useKeyboardShortcuts(
       if (e.altKey || e.ctrlKey || e.metaKey) return;
 
       if (remote) {
+        // A dialog over the player, often portaled outside it, keeps every key
+        // for its own controls.
+        if (target.closest?.('[role="dialog"], [role="alertdialog"]')) return;
         const container = remote.container.current;
         const onControl =
           remote.visible &&
@@ -68,10 +71,8 @@ export function useKeyboardShortcuts(
           target !== container &&
           container.contains(target);
         if (REMOTE_BACK_KEYS.has(e.key)) {
-          // Escape in fullscreen is the browser leaving fullscreen, and a
-          // dialog over the player takes Back for itself.
+          // Escape in fullscreen is the browser leaving fullscreen.
           if (e.key === "Escape" && document.fullscreenElement) return;
-          if (target.closest?.('[role="dialog"], [role="alertdialog"]')) return;
           e.preventDefault();
           remote.back();
           return;

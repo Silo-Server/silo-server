@@ -28,6 +28,7 @@ import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
 import { useKeyboardShortcuts, type RemoteControls } from "../hooks/useKeyboardShortcuts";
+import { REMOTE_BACK_KEYS } from "@/hooks/useRemoteBackKey";
 import { usePlayerFullscreenRoot } from "../context/PlayerFullscreenContext";
 import { isNativeVideoFullscreen, isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
 import { useIntroSkipPrompt } from "../hooks/useIntroSkipPrompt";
@@ -163,7 +164,9 @@ function pillKey(
   if (isEditingOrInMenu) return null;
 
   const isSelect = event.key === "Enter" || event.key === " ";
-  const isBack = event.key === "Escape" || event.key === "BrowserBack";
+  // Every key a remote sends as Back, so Backspace dismisses the pill rather
+  // than leaving the player.
+  const isBack = REMOTE_BACK_KEYS.has(event.key) || event.key === "BrowserBack";
   if (!isSelect && !isBack) return null;
 
   // Select belongs to the focused control: Space on Play/Pause or Seek must

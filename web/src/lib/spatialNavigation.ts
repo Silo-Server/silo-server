@@ -146,6 +146,19 @@ function isTextEntry(el: Element): boolean {
   return false;
 }
 
+// Inputs that use Up and Down too: a radio group moves its selection, the
+// rest step a number or a date or time segment.
+const INPUTS_OWNING_ALL_ARROWS = new Set([
+  "radio",
+  "range",
+  "number",
+  "date",
+  "time",
+  "datetime-local",
+  "month",
+  "week",
+]);
+
 /**
  * Whether the focused element uses this arrow itself. A text field keeps Left
  * and Right for its caret but hands Up and Down on, so a remote can leave the
@@ -155,7 +168,7 @@ function ownsArrow(el: Element, direction: NavDirection): boolean {
   if (isTextEntry(el)) return true;
   if (el instanceof HTMLMediaElement) return true;
   if (el instanceof HTMLInputElement) {
-    if (el.type === "radio" || el.type === "range") return true;
+    if (INPUTS_OWNING_ALL_ARROWS.has(el.type)) return true;
     return direction === "left" || direction === "right";
   }
   return false;
