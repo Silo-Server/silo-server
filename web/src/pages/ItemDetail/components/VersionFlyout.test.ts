@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeFileVersion } from "../itemDetail.test-support";
 import { buildQualitySummary, buildDetailLine, sortByResolution } from "./VersionFlyout";
-import { versionFileLabel } from "./versionFormatUtils";
+import { versionFileLabel, versionFileLabels } from "./versionFormatUtils";
 
 describe("buildQualitySummary", () => {
   it("joins resolution, codec, HDR, and audio", () => {
@@ -58,6 +58,21 @@ describe("versionFileLabel", () => {
     ["returns nothing for a missing name", undefined, ""],
   ])("%s", (_case, fileName, expected) => {
     expect(versionFileLabel(fileName)).toBe(expected);
+  });
+});
+
+describe("versionFileLabels", () => {
+  it("keeps the whole name when two short labels match", () => {
+    const versions = [
+      makeFileVersion({ file_id: 1, file_name: "Show.GroupA.S01E01.1080p.mkv" }),
+      makeFileVersion({ file_id: 2, file_name: "Show.GroupB.S01E01.1080p.mkv" }),
+      makeFileVersion({ file_id: 3, file_name: "Show.S01E01.720p.mkv" }),
+    ];
+    expect([...versionFileLabels(versions).values()]).toEqual([
+      "Show.GroupA.S01E01.1080p",
+      "Show.GroupB.S01E01.1080p",
+      "720p",
+    ]);
   });
 });
 
