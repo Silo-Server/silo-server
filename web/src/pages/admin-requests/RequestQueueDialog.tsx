@@ -178,8 +178,9 @@ function RequestDetail({
               <Term label="TMDB ID">{request.tmdb_id}</Term>
               {request.library_content_id ? (
                 <Term label="Library">
+                  {/* The title page opens the item only when this profile can. */}
                   <Link
-                    to={`/item/${encodeURIComponent(request.library_content_id)}`}
+                    to={requestDetailHref(request.media_type, request.tmdb_id)}
                     className="inline-flex items-center gap-1 hover:underline"
                   >
                     <Library className="h-3.5 w-3.5" aria-hidden="true" />

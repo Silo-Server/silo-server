@@ -510,11 +510,10 @@ function RequestRow({
         {onCancel || onRemove || request.library_content_id ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {request.library_content_id ? (
+              // The title page opens the library item when this viewer can,
+              // since the request's library copy may sit where they cannot.
               <Button asChild variant="outline" size="sm">
-                <ViewTransitionLink
-                  to={`/item/${encodeURIComponent(request.library_content_id)}`}
-                  aria-label={`Open ${request.title} in library`}
-                >
+                <ViewTransitionLink to={href} aria-label={`Open ${request.title} in library`}>
                   <Library className="h-3.5 w-3.5" aria-hidden />
                   Open in library
                 </ViewTransitionLink>

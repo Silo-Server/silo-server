@@ -284,7 +284,7 @@ describe("Requests (Yours list)", () => {
 
     expect(
       within(row("Arrived Movie")).getByRole("link", { name: "Open Arrived Movie in library" }),
-    ).toHaveAttribute("href", "/item/movie%2030");
+    ).toHaveAttribute("href", "/title/movie/30");
     expect(within(row("Waiting Movie")).queryByRole("link", { name: /in library/ })).toBeNull();
   });
 
