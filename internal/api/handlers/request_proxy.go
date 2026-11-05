@@ -29,6 +29,6 @@ func forwardedHost(r *http.Request) string {
 }
 
 // RequestBaseURL is the client-facing origin (scheme and host) of a request,
-// honoring the forwarded headers a reverse proxy sets. The v2 listener uses
+// reading forwarded headers only from a trusted proxy. The v2 listener uses
 // it to build the same absolute URLs the v1 handlers build.
 func RequestBaseURL(r *http.Request) string { return requestBaseURL(r) }

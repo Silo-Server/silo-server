@@ -229,7 +229,7 @@ func TestPlaybackV2ProbeURLOrigin(t *testing.T) {
 				r.Header.Set(k, v)
 			}
 			response := httptest.NewRecorder()
-			newTestHandler(t, deps).ServeHTTP(response, r)
+			behindTrustedProxy(t, newTestHandler(t, deps)).ServeHTTP(response, r)
 			var body PlaybackCapabilities
 			if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil {
 				t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())
