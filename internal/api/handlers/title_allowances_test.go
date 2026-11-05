@@ -290,3 +290,40 @@ func TestAllowCollectionTitlesSkipsUnreachableLibraries(t *testing.T) {
 		t.Fatalf("AllowCollectionTitles = %d, %v; copied %v; want only movie:r", added, err, store.copied)
 	}
 }
+
+// Titles the target profile cannot reach are filtered while a copy pages, not
+// after it fills its budget, so they cannot keep it from the reachable titles
+// that follow them.
+func TestAllowCollectionTitlesPagesPastUnreachableLibraries(t *testing.T) {
+	ctx := context.Background()
+	base := newHouseholdTestStore(t)
+	for _, p := range []userstore.Profile{{ID: "parent", Name: "Parent"}, {ID: "kid", Name: "Kid", MaxContentRating: "PG"}} {
+		if err := base.CreateProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	collection, err := base.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: "parent", Name: "Big list", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := libraryItemRepo{markItemRepo: markItemRepo{items: map[string]*models.MediaItem{}}, library: map[string]int{}}
+	store := &memoryAllowances{titles: map[string]bool{}}
+	add := func(id string, library int) {
+		repo.items[id] = &models.MediaItem{ContentID: id, Type: "movie"}
+		repo.library[id] = library
+		store.candidates = append(store.candidates, id)
+	}
+	for i := range maxCopiedTitles {
+		add(fmt.Sprintf("movie:other-library-%d", i), 2)
+	}
+	add("movie:reachable", 1)
+	h := NewTitleAllowanceHandler(
+		NewPersonalDataHandler(testUserStoreProvider{store: base}, repo),
+		libraryScopes{libraries: map[string][]int{"kid": {1}}}, store,
+	)
+	actor := AllowanceActor{UserID: 1, ActiveProfileID: "parent", VerifyProfile: func(*userstore.Profile) error { return nil }}
+	added, err := h.AllowCollectionTitles(ctx, actor, "kid", collection.ID)
+	if err != nil || added != 1 || !slices.Equal(store.copied, []string{"movie:reachable"}) {
+		t.Fatalf("AllowCollectionTitles = %d, %v; copied %d titles; want only movie:reachable", added, err, len(store.copied))
+	}
+}

@@ -447,16 +447,18 @@ func (h *TitleAllowanceHandler) AllowCollectionTitles(ctx context.Context, actor
 	if err != nil {
 		return 0, err
 	}
-	var ids []string
-	if catalog.IsLiveQueryType(collection.CollectionType) {
-		ids, err = h.smartCollectionTitles(ctx, actor, collection)
-	} else {
-		ids, err = h.storedCollectionTitles(ctx, actor, profileID, collectionID)
-	}
+	target, err := h.contentScope(ctx, actor.UserID, profileID)
 	if err != nil {
 		return 0, err
 	}
-	if ids, err = h.reachableBy(ctx, actor.UserID, profileID, ids); err != nil {
+	filter := copyFilter(actor.Viewer.Access, target)
+	var ids []string
+	if catalog.IsLiveQueryType(collection.CollectionType) {
+		ids, err = h.smartCollectionTitles(ctx, filter, collection)
+	} else {
+		ids, err = h.storedCollectionTitles(ctx, actor.UserID, filter, profileID, collectionID)
+	}
+	if err != nil {
 		return 0, err
 	}
 	added, err := h.allowances.AllowTitles(ctx, manager, profileID, ids)
@@ -478,34 +480,36 @@ const (
 	maxScannedCopyEntries = 100_000
 )
 
-// reachableBy keeps the ids in a library the profile can reach, the rule a
-// single allowance applies (no_library_access): a copy must not store an
-// allowance a later library change would turn on without a new grant.
-func (h *TitleAllowanceHandler) reachableBy(ctx context.Context, userID int, profileID string, ids []string) ([]string, error) {
-	if len(ids) == 0 {
-		return ids, nil
+// copyFilter is what a collection copy may take: titles the acting profile
+// may see (actor) in a library the target profile can reach (target), the
+// rule a single allowance applies (no_library_access), so a copy never stores
+// an allowance a later library change would turn on without a new grant.
+// Applying both before counting keeps titles that fail either from filling a
+// copy's budget.
+func copyFilter(actor catalog.AccessFilter, target access.Scope) catalog.AccessFilter {
+	filter := actor
+	switch {
+	case actor.AllowedLibraryIDs == nil:
+		filter.AllowedLibraryIDs = slices.Clone(target.AllowedLibraryIDs)
+	case target.AllowedLibraryIDs != nil:
+		filter.AllowedLibraryIDs = slices.DeleteFunc(slices.Clone(actor.AllowedLibraryIDs), func(id int) bool {
+			return !slices.Contains(target.AllowedLibraryIDs, id)
+		})
 	}
-	scope, err := h.contentScope(ctx, userID, profileID)
-	if err != nil {
-		return nil, err
-	}
-	reachable, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, ids, libraryOnly(scope))
-	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check the profile's library access")
-	}
-	return slices.DeleteFunc(ids, func(id string) bool { return !reachable[id] }), nil
+	filter.DisabledLibraryIDs = slices.Concat(actor.DisabledLibraryIDs, target.DisabledLibraryIDs)
+	return filter
 }
 
 // storedCollectionTitles lists, in the collection's order, up to
 // maxCopiedTitles of the stored movies and series of a collection that the
-// profile is not yet allowed and the actor may see. Titles the actor cannot
-// see are never allowed, so they stay candidates on every copy; reading page
-// by page past them is what lets a repeated copy reach the rest.
-func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, actor AllowanceActor, profileID, collectionID string) ([]string, error) {
+// profile is not yet allowed and filter admits. Titles filter turns away are
+// never allowed, so they stay candidates on every copy; reading page by page
+// past them is what lets a repeated copy reach the rest.
+func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, userID int, filter catalog.AccessFilter, profileID, collectionID string) ([]string, error) {
 	var out []string
 	var after userstore.CollectionPosition
 	for scanned := 0; scanned < maxScannedCopyEntries && len(out) < maxCopiedTitles; {
-		page, err := h.allowances.UnallowedCollectionTitles(ctx, actor.UserID, profileID, collectionID, after, copyPageSize)
+		page, err := h.allowances.UnallowedCollectionTitles(ctx, userID, profileID, collectionID, after, copyPageSize)
 		if err != nil {
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to list the collection's titles")
 		}
@@ -513,7 +517,7 @@ func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, acto
 		for i, p := range page {
 			ids[i] = p.MediaItemID
 		}
-		visible, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, ids, actor.Viewer.Access)
+		visible, err := h.personal.itemRepo.EnsureAccessibleIDs(ctx, ids, filter)
 		if err != nil {
 			return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to check the collection's titles")
 		}
@@ -531,10 +535,10 @@ func (h *TitleAllowanceHandler) storedCollectionTitles(ctx context.Context, acto
 	return out, nil
 }
 
-// smartCollectionTitles lists what a smart collection's query matches for the
-// actor, up to the collection's item limit and maxCopiedTitles: one copy
+// smartCollectionTitles lists what a smart collection's query matches under
+// filter, up to the collection's item limit and maxCopiedTitles: one copy
 // takes the first matches in the query's order.
-func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, actor AllowanceActor, collection *userstore.Collection) ([]string, error) {
+func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, filter catalog.AccessFilter, collection *userstore.Collection) ([]string, error) {
 	if h.smart == nil {
 		return nil, apiError(http.StatusServiceUnavailable, "unavailable", "Catalog queries are unavailable")
 	}
@@ -548,7 +552,7 @@ func (h *TitleAllowanceHandler) smartCollectionTitles(ctx context.Context, actor
 	}
 	limit := min(*def.Limit, maxCopiedTitles)
 	def.Limit = &limit
-	items, _, err := h.smart.Preview(ctx, def, actor.Viewer.Access, limit)
+	items, _, err := h.smart.Preview(ctx, def, filter, limit)
 	if err != nil {
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to evaluate the smart collection")
 	}
