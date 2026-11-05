@@ -15,7 +15,9 @@ A task's default schedule is the first of these the task manager can run:
 1. The binding's `trigger`.
 2. The manifest's `scheduled_task.default_trigger` (SDK
    `docs/scheduled-task.md`), with `interval_ms` at least 60000.
-3. One run at each server start.
+3. One run shortly after the task starts on a server: at server start, and on a
+   running server when the task registers (install or enable) or its saved
+   schedule changes to this one.
 
 "Can run" means a type the task manager knows (`interval`, `daily`, `weekly`,
 `startup`) with the fields that type reads: a positive interval, an `HH:MM`
@@ -31,8 +33,10 @@ runnable trigger differs from the one the binding stored before (none for a
 new row).
 `RuntimeConfigStore.UpsertTaskBinding` saves the default the new binding
 implies (its trigger, else the manifest default, else startup) in the same
-transaction as the binding row, locking that row first so concurrent writes of
-one binding each compare against the trigger the previous write stored.
+transaction as the binding row. It first takes a share lock on the
+installation row, so it waits for a plugin update in progress, then locks an
+existing binding row, so concurrent writes of one binding each compare against
+the trigger the previous write stored.
 Resending the stored trigger with only `enabled` changed, as the plugin page's
 switch does, keeps the saved schedule. A binding for a capability that is not a
 scheduled task stores no schedule.
@@ -46,11 +50,13 @@ old manifest's `default_trigger`, else startup) becomes the new default. Equal
 means the same triggers in order, each with the same type and the fields that
 type reads. Any other saved schedule is an edit and stays.
 `InstallationStore.Update` does this in the transaction that replaces the
-installation's capabilities, after locking the binding row and the saved
-schedule. An edit that matches the
-old default exactly cannot be told apart from it, so it follows the new default
-too. This is how a task saved as `[startup]` before its plugin declared a
-default picks up the default from the release that adds one.
+installation's capabilities, holding the installation row, which binding
+writes lock before they write, and locking the saved schedule. A task's first
+binding therefore cannot land between the update's binding check and its
+schedule move. An edit that matches the old default exactly cannot be told
+apart from it, so it follows the new default too. This is how a task saved as
+`[startup]` before its plugin declared a default picks up the default from the
+release that adds one.
 
 Invariants:
 

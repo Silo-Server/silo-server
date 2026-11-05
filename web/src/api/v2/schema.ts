@@ -19570,7 +19570,7 @@ export interface components {
        */
       callback_url?: string;
       config_schema: components["schemas"]["AdminPluginConfigSchema"][];
-      /** @description On a scheduled_task.v1 capability: the schedule its manifest declares, which the task uses until a binding sets one. Omitted when the manifest declares none the server can run; such a task runs once at each server start */
+      /** @description On a scheduled_task.v1 capability: the schedule its manifest declares, the task's default until a binding or a task-page edit saves another. Omitted when the manifest declares none the server can run; the default is then one run at server start */
       default_schedule?: components["schemas"]["AdminTaskTrigger"];
       description: string;
       display_name: string;
@@ -19891,12 +19891,12 @@ export interface components {
       updated_at: string;
     };
     AdminPluginTaskBindingResult: {
-      /** @description False when the binding applied on every API server without a restart; true only on a server with no task scheduler, where it applies at the next start */
+      /** @description False when the binding applies without a restart: this server syncs its tasks before answering, and every other API server at its next plugin task sync. True only on a server with no task scheduler, where it applies at the next start */
       restart_required: boolean;
     };
     AdminPluginTaskBindingWrite: {
       enabled: boolean;
-      /** @description The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). Changing it replaces the task's saved schedule. Omitted stores an empty object; an empty or unrunnable trigger uses the manifest default_trigger, else one run at server start */
+      /** @description The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). A change to a trigger the task manager can run, or from one to none, replaces the task's saved schedule; a change between two unrunnable triggers keeps it. Omitted stores an empty object. When it replaces the saved schedule, an empty or unrunnable trigger saves the manifest default_trigger, else one run at server start */
       trigger?: {
         [key: string]: unknown;
       };

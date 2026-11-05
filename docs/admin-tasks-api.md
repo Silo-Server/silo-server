@@ -81,7 +81,8 @@ remains configured across restarts rather than restoring task defaults.
 Successful edits apply to the responding process. Other running processes load
 the persisted configuration when they restart. Plugin tasks are the exception:
 every API server installs a plugin task's saved schedule at its next plugin task
-sync, within a minute, and a plugin task binding write that changes the binding's
+sync: right after a binding write or plugin change is announced, else within a minute,
+with a failed sync retried after 10 seconds. A plugin task binding write that changes the binding's
 trigger saves the new schedule with the binding
 ([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)).
 Runtime state and persisted schedule state are separate reads. The web editor

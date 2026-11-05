@@ -63,7 +63,7 @@ type AdminPluginAuthBindingOutput struct {
 // AdminPluginTaskBindingWrite is the whole-row task binding assignment.
 type AdminPluginTaskBindingWrite struct {
 	Enabled bool            `json:"enabled"`
-	Trigger PluginJSONValue `json:"trigger,omitempty" doc:"The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). Changing it replaces the task's saved schedule. Omitted stores an empty object; an empty or unrunnable trigger uses the manifest default_trigger, else one run at server start"`
+	Trigger PluginJSONValue `json:"trigger,omitempty" doc:"The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). A change to a trigger the task manager can run, or from one to none, replaces the task's saved schedule; a change between two unrunnable triggers keeps it. Omitted stores an empty object. When it replaces the saved schedule, an empty or unrunnable trigger saves the manifest default_trigger, else one run at server start"`
 }
 type AdminPluginTaskBindingInput struct {
 	ID           ID     `path:"id" pattern:"^[1-9][0-9]*$"`
@@ -72,7 +72,7 @@ type AdminPluginTaskBindingInput struct {
 	Body         AdminPluginTaskBindingWrite
 }
 type AdminPluginTaskBindingResult struct {
-	RestartRequired bool `json:"restart_required" doc:"False when the binding applied on every API server without a restart; true only on a server with no task scheduler, where it applies at the next start"`
+	RestartRequired bool `json:"restart_required" doc:"False when the binding applies without a restart: this server syncs its tasks before answering, and every other API server at its next plugin task sync. True only on a server with no task scheduler, where it applies at the next start"`
 }
 type AdminPluginTaskBindingOutput struct{ Body AdminPluginTaskBindingResult }
 

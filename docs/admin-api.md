@@ -3519,14 +3519,15 @@ is enabled is 409 `provider_already_enabled`
 ([external-sign-in.md](architecture/external-sign-in.md)). The task binding applies on
 every API server without a restart and answers 200 with `restart_required` false: a disabled
 binding removes the task from the task manager, an enabled one registers it, and a trigger
-that differs from the stored one replaces the task's saved schedule in the same transaction
-as the binding. Resending the stored
-trigger, as the plugin page's on/off switch does, keeps the saved schedule. `restart_required`
-is true only on a server with no task manager, where the binding applies at the next start.
-An omitted task trigger stores an empty object. A task whose binding has no trigger the task
-manager can run (an empty object, a malformed value, or an unknown type) uses the manifest's
-`scheduled_task.default_trigger` when it is valid, else it runs once at each server start
-([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). The frozen v1
+that runs differently from the stored one replaces the task's saved schedule in the same
+transaction as the binding. Resending the stored trigger, as the plugin page's on/off switch
+does, keeps the saved schedule, and so does a change between two triggers the task manager
+cannot run (an empty object, a malformed value, or an unknown type). `restart_required` is
+true only on a server with no task manager, where the binding applies at the next start.
+An omitted task trigger stores an empty object. When a binding without a runnable trigger
+replaces the saved schedule, it saves the manifest's `scheduled_task.default_trigger` when
+that is valid, else one run at server start. Any other saved schedule, including a
+task-page edit, stays ([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). The frozen v1
 `PUT .../task-bindings/{capability_id}` shares this path, so it also applies live and answers
 `restart_required` false. Both are naturally idempotent upserts.
 
