@@ -117,6 +117,7 @@ func TestProfileComparisonCoversEveryField(t *testing.T) {
 	// Raw allowance rows, uncapped: no Profile field carries them.
 	compared["allowedCollections"] = true
 	compared["directTitles"] = true
+	compared["collectionTitles"] = true
 	for _, f := range reflect.VisibleFields(reflect.TypeFor[profileLimits]()) {
 		if !compared[f.Name] {
 			t.Errorf("profileLimits field %s maps to no profile field", f.Name)
@@ -139,6 +140,7 @@ func TestProfileComparisonCoversEveryField(t *testing.T) {
 		"allowedTitles":      func(p *profileLimits) { p.allowedTitles = []string{"movie-r"} },
 		"allowedCollections": func(p *profileLimits) { p.allowedCollections = []string{"family-night"} },
 		"directTitles":       func(p *profileLimits) { p.directTitles = []string{"movie-r"} },
+		"collectionTitles":   func(p *profileLimits) { p.collectionTitles = []string{"movie-r"} },
 	}
 	for _, f := range reflect.VisibleFields(reflect.TypeFor[profileLimits]()) {
 		widen, ok := profileWidenings[f.Name]

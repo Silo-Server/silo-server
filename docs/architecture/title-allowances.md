@@ -125,7 +125,10 @@ A full restore carries both tables like the rest of the server's data. The
 restore authority check (`backup.profileLimits.looserThan`) reads each
 profile's allowed titles with the same SQL as the access scope and counts a
 title allowed in the backup but not on the live server as a loosening, like a
-lifted ceiling. A single-account restore and a profile export leave
+lifted ceiling. That read is bounded, so the check also compares the raw rows
+uncapped: every title allowance, every allowed collection, and every member
+of those collections. A row past the bound could otherwise become effective
+later without having been compared. A single-account restore and a profile export leave
 allowances out; the household manager grants them again.
 
 ## Playback and downloads
