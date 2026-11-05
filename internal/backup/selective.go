@@ -205,11 +205,13 @@ type PluginRestorer interface {
 // SetRestoreTargets wires selective restore.
 func (s *Service) SetRestoreTargets(t RestoreTargets) { s.targets = t }
 
-// RestoreRequest is a restore job's payload: the source backup of this
-// server, the digest its preview returned, and the chosen item ids by
-// section.
+// RestoreRequest is a restore job's payload: the source (a backup of this
+// server, or an uploaded restore set), the digest its preview returned, and
+// the chosen item ids by section.
 type RestoreRequest struct {
-	BackupID  string              `json:"backup_id"`
+	BackupID string `json:"backup_id"`
+	// UploadID names an uploaded restore set instead of a backup.
+	UploadID  string              `json:"upload_id,omitempty"`
 	Digest    string              `json:"digest"`
 	Selection map[string][]string `json:"selection"`
 	// Users are the chosen accounts of the users section, with their
@@ -246,11 +248,12 @@ type RestoreRun struct {
 	Published func(ctx context.Context)
 }
 
-// restoreSource names a restore set: a backup of this server.
-type restoreSource struct{ backupID string }
+// restoreSource names a restore set: a backup of this server, or an
+// uploaded restore set.
+type restoreSource struct{ backupID, uploadID string }
 
 func (r RestoreRequest) source() restoreSource {
-	return restoreSource{backupID: r.BackupID}
+	return restoreSource{backupID: r.BackupID, uploadID: r.UploadID}
 }
 
 // locatedSource is a restore set as its manifest records it.
@@ -265,12 +268,26 @@ type locatedSource struct {
 	// then checks every byte against it before decoding any. A manifest of
 	// another key cannot verify.
 	authenticated bool
-	open          func(context.Context) (*storedReader, error)
+	// uploaded marks an uploaded restore set, whose digest was taken when
+	// the upload completed.
+	uploaded bool
+	open     func(context.Context) (*storedReader, error)
 }
 
 // locate reads a source's manifest, which completeBackup refuses when it
 // was changed after the backup wrote it, and returns its restore set.
 func (s *Service) locate(ctx context.Context, src restoreSource) (locatedSource, error) {
+	if src.uploadID != "" {
+		digest, keys, err := s.completedUpload(ctx, src.uploadID)
+		if err != nil {
+			return locatedSource{}, err
+		}
+		// An upload has no manifest this server wrote: nothing in it can be
+		// authenticated, so it reads only with the admin's confirmation.
+		return locatedSource{digest: digest, uploaded: true, open: func(ctx context.Context) (*storedReader, error) {
+			return openUploaded(s.openParts(ctx, keys)), nil
+		}}, nil
+	}
 	b, err := s.completeBackup(ctx, src.backupID)
 	if err != nil {
 		return locatedSource{}, err
@@ -294,7 +311,7 @@ var ErrUnauthenticated = &SelectionError{Message: "this server cannot authentica
 // of the stored bytes it read, which is what manifests and uploads freeze.
 // A non-empty digest is the one the stored bytes must have: the read checks
 // it once the whole archive is read and before it decodes any document.
-func readStoredRestoreSet(ctx context.Context, body *storedReader, opts ReadOptions, digest string) (*RestoreSet, error) {
+func readStoredRestoreSet(ctx context.Context, body *storedReader, opts ReadOptions, digest, mismatch string) (*RestoreSet, error) {
 	if digest != "" {
 		opts.Verify = func() error {
 			stored, err := body.storedEntry(RestoreSetName)
@@ -302,7 +319,7 @@ func readStoredRestoreSet(ctx context.Context, body *storedReader, opts ReadOpti
 				return err
 			}
 			if stored.SHA256 != digest {
-				return fmt.Errorf("%s does not match the checksum in its manifest", RestoreSetName)
+				return errors.New(mismatch)
 			}
 			return nil
 		}
@@ -338,7 +355,11 @@ func (s *Service) openRestoreSet(ctx context.Context, located locatedSource, ext
 	if located.authenticated {
 		opts.IndexSHA256 = located.indexSHA256
 	}
-	rs, err := readStoredRestoreSet(ctx, body, opts, located.digest)
+	mismatch := RestoreSetName + " does not match the checksum in its manifest"
+	if located.uploaded {
+		mismatch = "the uploaded restore set no longer matches the checksum taken when it was uploaded"
+	}
+	rs, err := readStoredRestoreSet(ctx, body, opts, located.digest, mismatch)
 	if err != nil {
 		if errors.Is(err, ErrRestoreSetTooNew) || ctx.Err() != nil {
 			return nil, err
@@ -390,16 +411,16 @@ func (s *Service) cachedSet(ctx context.Context, located locatedSource) (*Restor
 // beyond the manifest: the job reads the restore set, under the lock.
 //
 // The source is checked again and the job created under the subsystem lock,
-// which backup deletion and rotation hold while they check the queued
-// restore's source: either they see the job, or the job's check sees the
-// source gone. The lock is released once the job is queued; its worker
-// takes it again.
+// which backup deletion, rotation, and upload deletion and expiry hold
+// while they check the queued restore's source: either they see the job, or
+// the job's check sees the source gone. The lock is released once the job
+// is queued; its worker takes it again.
 func (s *Service) StartRestore(ctx context.Context, userID int, req RestoreRequest) (*models.AdminJob, error) {
 	if s.targets.CreateJob == nil || s.opts.Locker == nil {
 		return nil, errors.New("selective restore is not available on this server")
 	}
-	if req.BackupID == "" {
-		return nil, &SelectionError{Message: "a restore names a backup"}
+	if (req.BackupID == "") == (req.UploadID == "") {
+		return nil, &SelectionError{Message: "a restore names one backup or one upload"}
 	}
 	total := len(req.Users)
 	if err := validateUserSelection(req.Users); err != nil {
@@ -519,6 +540,7 @@ func (e *SelectionError) Error() string { return e.Message }
 // what committed, even after an interruption.
 type SelectiveReport struct {
 	BackupID              string `json:"backup_id"`
+	UploadID              string `json:"upload_id,omitempty"`
 	Digest                string `json:"digest"`
 	BeforeRestoreBackupID string `json:"before_restore_backup_id,omitempty"`
 	// LibraryMap maps each backup library id to the library it is on this
