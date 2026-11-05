@@ -516,17 +516,42 @@ func followManifestDefaultSchedules(ctx context.Context, tx pgx.Tx, installation
 		if bound != nil {
 			continue
 		}
-		key := pluginTaskKey(installationID, capability.ID)
-		saved, err := taskrepository.LockScheduleInTx(ctx, tx, key)
-		if err != nil {
-			return fmt.Errorf("reading plugin task %s schedule: %w", key, err)
+		if err := followManifestDefault(ctx, tx, pluginTaskKey(installationID, capability.ID), oldDefault, newDefault); err != nil {
+			return err
 		}
-		if saved.Revision != 0 && !sameSchedule(saved.Triggers, oldDefault) {
-			continue
+	}
+	return nil
+}
+
+// followManifestDefault replaces one task's saved schedule with newDefault
+// when it still equals oldDefault, and saves newDefault when the task has
+// none. A schedule another transaction saves after the read found none, such
+// as a server seeding the old default or an edit, is waited for and then
+// judged like one that was already there.
+func followManifestDefault(ctx context.Context, tx pgx.Tx, key string, oldDefault, newDefault []taskmanager.TriggerConfig) error {
+	saved, err := taskrepository.LockScheduleInTx(ctx, tx, key)
+	if err != nil {
+		return fmt.Errorf("reading plugin task %s schedule: %w", key, err)
+	}
+	if saved.Revision == 0 {
+		// With no schedule there is no row to lock, so save only if none
+		// has appeared since; a conflict leaves the new one locked.
+		err := taskrepository.ReplaceScheduleIfInTx(ctx, tx, key, 0, newDefault)
+		if err == nil {
+			return nil
 		}
-		if err := taskrepository.ReplaceScheduleInTx(ctx, tx, key, newDefault); err != nil {
+		if _, conflict := errors.AsType[*taskmanager.ScheduleConflict](err); !conflict {
 			return fmt.Errorf("saving plugin task %s schedule: %w", key, err)
 		}
+		if saved, err = taskrepository.LockScheduleInTx(ctx, tx, key); err != nil {
+			return fmt.Errorf("reading plugin task %s schedule: %w", key, err)
+		}
+	}
+	if !sameSchedule(saved.Triggers, oldDefault) {
+		return nil
+	}
+	if err := taskrepository.ReplaceScheduleInTx(ctx, tx, key, newDefault); err != nil {
+		return fmt.Errorf("saving plugin task %s schedule: %w", key, err)
 	}
 	return nil
 }

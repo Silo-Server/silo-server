@@ -510,22 +510,7 @@ func TestFirstTaskBindingWaitsForPluginUpdateDB(t *testing.T) {
 	go func() {
 		done <- NewRuntimeConfigStore(pool).UpsertTaskBinding(ctx, TaskBinding{InstallationID: id, CapabilityID: "sync", Enabled: true, Trigger: map[string]any{"type": "startup"}})
 	}()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for waiting := false; !waiting; {
-		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, holder).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-		select {
-		case err := <-done:
-			t.Fatalf("binding write finished during the plugin update: %v", err)
-		case <-deadline.C:
-			t.Fatal("binding write never waited for the plugin update")
-		case <-tick.C:
-		}
-	}
+	waitUntilBlockedBy(t, pool, holder, done, "binding write")
 	previous, err := store.WithTx(update).ListCapabilities(ctx, id)
 	if err != nil {
 		t.Fatal(err)
@@ -545,5 +530,90 @@ func TestFirstTaskBindingWaitsForPluginUpdateDB(t *testing.T) {
 	}
 	if got, err := triggerRepo.GetTriggers(ctx, key); err != nil || !slices.Equal(got, startup) {
 		t.Fatalf("saved schedule = %+v (%v), want the binding's %+v", got, err, startup)
+	}
+}
+
+// waitUntilBlockedBy returns once a session waits on a lock the backend
+// holder holds, failing if what, whose result arrives on done, finishes
+// first or nothing waits within five seconds.
+func waitUntilBlockedBy(t *testing.T, pool *pgxpool.Pool, holder int, done <-chan error, what string) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for waiting := false; !waiting; {
+		if err := pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)))`, holder).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("%s finished without waiting: %v", what, err)
+		case <-deadline.C:
+			t.Fatalf("%s never waited", what)
+		case <-tick.C:
+		}
+	}
+}
+
+// A schedule another transaction saves while a plugin update finds none,
+// such as a server seeding the old default or an edit, is waited for: the
+// update then moves the old default and keeps the edit.
+func TestPluginUpdateWaitsForAScheduleBeingSavedDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	store := NewInstallationStore(pool)
+	triggerRepo := taskrepository.NewPgTriggerRepository(pool)
+	daily := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "02:00"}}
+	hourly := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeInterval, IntervalMs: 3_600_000}}
+	weekly := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeWeekly, TimeOfDay: "04:00", DayOfWeek: 3}}
+	for _, tc := range []struct {
+		name         string
+		saving, want []taskmanager.TriggerConfig
+	}{
+		{name: "old default moves", saving: daily, want: hourly},
+		{name: "edit stays", saving: weekly, want: weekly},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			id := seedResidentQueryInstallation(t, pool, true)
+			key := pluginTaskKey(id, "sync")
+			t.Cleanup(func() {
+				_, _ = pool.Exec(context.Background(), `DELETE FROM task_triggers WHERE task_key = $1`, key)
+				_, _ = pool.Exec(context.Background(), `DELETE FROM task_schedules WHERE task_key = $1`, key)
+			})
+			release := func(version string, trigger *pluginv1.ScheduledTaskTrigger) error {
+				return store.Update(ctx, id, UpdateInstallationInput{Version: &version, Capabilities: []Capability{*scheduledTaskCapability(t, "sync", "Sync", trigger)}})
+			}
+			if err := release("1", &pluginv1.ScheduledTaskTrigger{Type: "daily", TimeOfDay: "02:00"}); err != nil {
+				t.Fatal(err)
+			}
+
+			saving, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = saving.Rollback(context.WithoutCancel(ctx)) }()
+			var holder int
+			if err := saving.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holder); err != nil {
+				t.Fatal(err)
+			}
+			if err := taskrepository.ReplaceScheduleInTx(ctx, saving, key, tc.saving); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() {
+				done <- release("2", &pluginv1.ScheduledTaskTrigger{Type: "interval", IntervalMs: 3_600_000})
+			}()
+			waitUntilBlockedBy(t, pool, holder, done, "plugin update")
+			if err := saving.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if got, err := triggerRepo.GetTriggers(ctx, key); err != nil || !slices.Equal(got, tc.want) {
+				t.Fatalf("saved schedule = %+v (%v), want %+v", got, err, tc.want)
+			}
+		})
 	}
 }

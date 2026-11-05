@@ -144,6 +144,16 @@ func ReplaceScheduleInTx(ctx context.Context, tx pgx.Tx, taskKey string, trigger
 	return err
 }
 
+// ReplaceScheduleIfInTx is ReplaceScheduleInTx guarded by the revision the
+// caller read (zero: no saved schedule). When the saved schedule has another
+// revision it changes nothing and returns *taskmanager.ScheduleConflict; the
+// schedule is then locked until the caller's transaction ends. A schedule
+// another transaction is creating is waited for, not missed.
+func ReplaceScheduleIfInTx(ctx context.Context, tx pgx.Tx, taskKey string, expected int64, triggers []taskmanager.TriggerConfig) error {
+	_, err := replaceSchedule(ctx, tx, taskKey, expected, triggers)
+	return err
+}
+
 func replaceSchedule(ctx context.Context, tx pgx.Tx, taskKey string, expected int64, triggers []taskmanager.TriggerConfig) (taskmanager.Schedule, error) {
 	inserted, err := tx.Exec(ctx, `INSERT INTO task_schedules (task_key) VALUES ($1) ON CONFLICT DO NOTHING`, taskKey)
 	if err != nil {
