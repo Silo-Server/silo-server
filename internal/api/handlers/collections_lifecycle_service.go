@@ -172,14 +172,24 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to update collection")
 	}
 	// Rows titled with the old name follow the rename, on the profiles that
-	// can still see the collection after this update; a failure leaves them on
-	// it. The rename has committed, so a dropped request must not cut this short.
+	// can see the collection as it now stands, and keep following while an
+	// overlapping rename lands (userstore.FollowCollectionTitle); a failure
+	// leaves them on it. The rename has committed, so a dropped request must
+	// not cut this short.
 	if oldName := strings.TrimSpace(existing.Name); req.Name != nil && oldName != "" && strings.TrimSpace(*req.Name) != oldName {
-		updated := *existing
-		if req.IsShared != nil {
-			updated.IsShared = *req.IsShared
+		var latest *userstore.Collection
+		currentTitle := func(ctx context.Context) (string, error) {
+			c, err := store.GetCollection(ctx, collectionID)
+			if err != nil {
+				return "", err
+			}
+			latest = c
+			return c.Name, nil
 		}
-		if err := store.RenameCollectionRows(context.WithoutCancel(ctx), userstore.CollectionKindUser, collectionID, existing.Name, *req.Name, updated.VisibleTo); err != nil {
+		err := userstore.FollowCollectionTitle(context.WithoutCancel(ctx), existing.Name, currentTitle, func(ctx context.Context, from, to string) error {
+			return store.RenameCollectionRows(ctx, userstore.CollectionKindUser, collectionID, from, to, latest.VisibleTo)
+		})
+		if err != nil {
 			slog.WarnContext(ctx, "collection rename: retitling rows failed", "component", "api",
 				"collection_id", collectionID, "error", err)
 		}

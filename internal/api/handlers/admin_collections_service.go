@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -758,27 +759,31 @@ func (h *LibraryCollectionHandler) DeleteAdminCollection(ctx context.Context, id
 }
 
 // renameCollectionRows carries a rename into the rows that still show the
-// collection under its old name. Admin rows are retitled before the response
-// re-reads the collection, because retitling one advances the collection's
-// revision and the caller's next If-Match needs the new one. The rows profiles
-// built, in every account, are retitled after the response, detached from the
-// request: that sweep leaves the revision alone and grows with the number of
-// accounts. It writes the collection's title as it reads it at each account,
-// so an earlier rename's sweep that is still running cannot undo a later one.
-// A failure is logged and leaves those rows on the old name.
+// collection under its old name, following the collection's current title so
+// overlapping renames end on the last one (userstore.FollowCollectionTitle).
+// Admin rows are retitled before the response re-reads the collection,
+// because retitling one advances the collection's revision and the caller's
+// next If-Match needs the new one. The rows profiles built, in every account,
+// are retitled after the response, detached from the request: that sweep
+// leaves the revision alone and grows with the number of accounts. The rename
+// has committed, so a dropped request must not cut either short. A failure is
+// logged and leaves those rows on the old name.
 func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, collectionID, oldTitle, newTitle string) {
 	if strings.TrimSpace(oldTitle) == strings.TrimSpace(newTitle) {
 		return
 	}
+	ctx = context.WithoutCancel(ctx)
+	currentTitle := func(ctx context.Context) (string, error) { return h.repo.Title(ctx, collectionID) }
 	if h.SectionRepo != nil {
-		// The rename has committed, so a dropped request must not cut this short.
-		if err := h.SectionRepo.RenameLibraryCollectionRows(context.WithoutCancel(ctx), collectionID, oldTitle, newTitle); err != nil {
+		err := userstore.FollowCollectionTitle(ctx, oldTitle, currentTitle, func(ctx context.Context, from, to string) error {
+			return h.SectionRepo.RenameLibraryCollectionRows(ctx, collectionID, from, to)
+		})
+		if err != nil {
 			slog.WarnContext(ctx, "collection rename: retitling admin rows failed", "component", "api",
 				"collection_id", collectionID, "error", err)
 		}
 	}
 	if h.CollectionRowRenamer != nil {
-		currentTitle := func(ctx context.Context) (string, error) { return h.repo.Title(ctx, collectionID) }
-		go h.CollectionRowRenamer.RenameForCollection(context.WithoutCancel(ctx), collectionID, oldTitle, currentTitle)
+		go h.CollectionRowRenamer.RenameForCollection(ctx, collectionID, oldTitle, currentTitle)
 	}
 }

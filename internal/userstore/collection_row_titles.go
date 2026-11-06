@@ -73,37 +73,46 @@ func NewCollectionRowRenamer(users UserLister, stores UserStoreProvider) *Collec
 	}
 }
 
-// collectionRowRenameRounds caps the re-reads one account takes while the
-// collection keeps being renamed, so a sweep always ends.
-const collectionRowRenameRounds = 5
+// followTitleRounds caps the re-reads one FollowCollectionTitle takes while
+// the collection keeps being renamed, so it always ends.
+const followTitleRounds = 5
+
+// FollowCollectionTitle moves rows from a collection's old title to its
+// current one: it reads the title, renames rows from the title it last wrote
+// to it, and reads again until the title stops changing. A rename that lands
+// between a read and its write runs its own retitle, but that one may already
+// have passed rows still on the earlier name; the next read here catches them
+// up. Only rows that carry the exact title last written follow, so typed
+// titles stay.
+func FollowCollectionTitle(ctx context.Context, oldTitle string, currentTitle func(context.Context) (string, error), rename func(ctx context.Context, from, to string) error) error {
+	from := oldTitle
+	for range followTitleRounds {
+		to, err := currentTitle(ctx)
+		if err != nil {
+			return fmt.Errorf("reading the collection's title: %w", err)
+		}
+		if to == from {
+			return nil
+		}
+		if err := rename(ctx, from, to); err != nil {
+			return err
+		}
+		from = to
+	}
+	return nil
+}
 
 // RenameForCollection gives every account's rows still titled oldTitle the
-// collection's current title. After writing an account it reads the title
-// again and, while it has changed, carries the rows on: a later rename that
-// lands between the read and the write has a sweep of its own, but that sweep
-// may already have passed this account while its rows still carried oldTitle.
-// Only rows that carry the exact title the sweep last wrote follow, so typed
-// titles stay. Failures are logged per account and do not undo the rename; a
-// row left behind keeps its old title, as before this sweep existed.
+// collection's current title, through FollowCollectionTitle. Failures are
+// logged per account and do not undo the rename; a row left behind keeps its
+// old title, as before this sweep existed.
 func (r *CollectionRowRenamer) RenameForCollection(ctx context.Context, collectionID, oldTitle string, currentTitle func(context.Context) (string, error)) {
 	if r == nil || r.users == nil || r.stores == nil {
 		return
 	}
 	forEachUserStore(ctx, r.users, r.stores, r.logger, "collection row rename", []any{"collection_id", collectionID}, func(_ int, store UserStore) error {
-		from := oldTitle
-		for range collectionRowRenameRounds {
-			to, err := currentTitle(ctx)
-			if err != nil {
-				return fmt.Errorf("reading the collection's title: %w", err)
-			}
-			if to == from {
-				return nil
-			}
-			if err := store.RenameCollectionRows(ctx, CollectionKindLibrary, collectionID, from, to, nil); err != nil {
-				return err
-			}
-			from = to
-		}
-		return nil
+		return FollowCollectionTitle(ctx, oldTitle, currentTitle, func(ctx context.Context, from, to string) error {
+			return store.RenameCollectionRows(ctx, CollectionKindLibrary, collectionID, from, to, nil)
+		})
 	})
 }
