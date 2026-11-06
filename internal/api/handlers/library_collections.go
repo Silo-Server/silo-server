@@ -57,6 +57,9 @@ type LibraryCollectionHandler struct {
 	JobRepo               *adminjob.Repository
 	EventsHub             *evt.Hub
 	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
+	// CollectionRowRenamer carries a rename into the rows profiles built for
+	// the collection on their own pages.
+	CollectionRowRenamer *userstore.CollectionRowRenamer
 	// CollectionOwners resolves the owner's access for another profile's
 	// shared collection opted into the library tab.
 	CollectionOwners catalog.PersonalCollectionAccess

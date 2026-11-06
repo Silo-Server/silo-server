@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -169,6 +170,13 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 			return none, apiError(http.StatusForbidden, "forbidden", "Only the creator can edit this collection")
 		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to update collection")
+	}
+	// Rows titled with the old name follow the rename; a failure leaves them on it.
+	if oldName := strings.TrimSpace(existing.Name); req.Name != nil && oldName != "" && strings.TrimSpace(*req.Name) != oldName {
+		if err := store.RenameCollectionRows(ctx, userstore.CollectionKindUser, collectionID, existing.Name, *req.Name); err != nil {
+			slog.WarnContext(ctx, "collection rename: retitling rows failed", "component", "api",
+				"collection_id", collectionID, "error", err)
+		}
 	}
 
 	posterSource := pointerStringValue(req.PosterSourceURL)

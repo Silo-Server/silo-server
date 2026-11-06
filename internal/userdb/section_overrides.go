@@ -129,3 +129,27 @@ func ResetSectionOverrides(db *sql.DB, profileID, scope, libraryID string) error
 	)
 	return err
 }
+
+// RenameCollectionRows retitles the profile-built rows for one collection
+// that still carry its old name (see userstore.RenameCollectionRowTitle). Each
+// write checks the titles it read, so a row edited in between keeps the edit.
+func RenameCollectionRows(db *sql.DB, kind, collectionID, oldTitle, newTitle string) error {
+	overrides, err := ListAllSectionOverrides(db)
+	if err != nil {
+		return err
+	}
+	for _, o := range overrides {
+		readTitle, readUserTitle := o.Title, o.UserTitle
+		if !userstore.RenameCollectionRowTitle(&o, kind, collectionID, oldTitle, newTitle) {
+			continue
+		}
+		if _, err := db.Exec(
+			`UPDATE profile_section_overrides SET title = NULLIF(?,''), user_title = NULLIF(?,''), updated_at = ?
+			WHERE id = ? AND COALESCE(title,'') = ? AND COALESCE(user_title,'') = ?`,
+			o.Title, o.UserTitle, nowUTC(), o.ID, readTitle, readUserTitle,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}

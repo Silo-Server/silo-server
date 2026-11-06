@@ -381,6 +381,10 @@ func (s *SQLiteUserStore) SaveSectionOverrides(_ context.Context, profileID, sco
 	return SaveSectionOverrides(s.db, profileID, scope, libraryID, overrides)
 }
 
+func (s *SQLiteUserStore) RenameCollectionRows(_ context.Context, kind, collectionID, oldTitle, newTitle string) error {
+	return RenameCollectionRows(s.db, kind, collectionID, oldTitle, newTitle)
+}
+
 func (s *SQLiteUserStore) ResetSectionOverrides(_ context.Context, profileID, scope, libraryID string) error {
 	return ResetSectionOverrides(s.db, profileID, scope, libraryID)
 }

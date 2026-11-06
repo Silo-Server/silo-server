@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -268,6 +269,9 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 			return none, apiError(http.StatusNotFound, "not_found", "Collection group not found")
 		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to update collection")
+	}
+	if req.Title != nil {
+		h.renameCollectionRows(ctx, collectionID, existing.Title, *req.Title)
 	}
 
 	if err := artwork(collectionID, pointerStringValue(req.PosterSourceURL), pointerStringValue(req.BackdropSourceURL)); err != nil {
@@ -751,4 +755,22 @@ func (h *LibraryCollectionHandler) DeleteAdminCollection(ctx context.Context, id
 	}
 	h.cleanupDeletedCollection(ctx, id)
 	return nil
+}
+
+// renameCollectionRows carries a rename into the rows that still show the
+// collection under its old name: admin rows, then rows profiles built. It runs
+// before the response re-reads the collection, because retitling an admin row
+// advances the collection's revision and the caller's next If-Match needs the
+// new one. A failure is logged and leaves those rows on the old name.
+func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, collectionID, oldTitle, newTitle string) {
+	if strings.TrimSpace(oldTitle) == strings.TrimSpace(newTitle) {
+		return
+	}
+	if h.SectionRepo != nil {
+		if err := h.SectionRepo.RenameLibraryCollectionRows(ctx, collectionID, oldTitle, newTitle); err != nil {
+			slog.WarnContext(ctx, "collection rename: retitling admin rows failed", "component", "api",
+				"collection_id", collectionID, "error", err)
+		}
+	}
+	h.CollectionRowRenamer.RenameForCollection(ctx, collectionID, oldTitle, newTitle)
 }
