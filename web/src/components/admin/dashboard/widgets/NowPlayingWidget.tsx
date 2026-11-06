@@ -94,7 +94,9 @@ export function NowPlayingWidget() {
           <>
             {/* auto-rows-fr gives every row the tallest card's height, so a card
                 whose tags wrap onto an extra line doesn't make its row taller
-                than the others. */}
+                than the others. Hidden cards count toward that height too, so
+                each card's free text stays on one line and only the fixed set
+                of tags can wrap. */}
             <div ref={setGrid} className="grid auto-rows-fr grid-cols-1 gap-3.5 lg:grid-cols-2">
               {rendered.map((session, index) => {
                 // Cards past the fit stay laid out, so a taller widget can
@@ -263,7 +265,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             ) : (
               <div className="truncate text-sm font-bold">{title}</div>
             )}
-            <div className="text-muted-foreground mb-1.5 text-xs">
+            <div className="text-muted-foreground mb-1.5 truncate text-xs">
               S{session.season_number} · E{session.episode_number}
               {session.series_name ? ` — ${session.series_name}` : ""}
             </div>
@@ -281,7 +283,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
               <div className="truncate text-sm font-bold">{title}</div>
             )}
             {session.media_type && (
-              <div className="text-muted-foreground mb-1.5 text-xs">
+              <div className="text-muted-foreground mb-1.5 truncate text-xs">
                 {session.media_type === "movie" ? "Movie" : "Series"}
               </div>
             )}
@@ -313,13 +315,13 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
         {/* User */}
         <div className="mt-auto flex items-center gap-1.5">
           <div
-            className="text-primary-foreground flex h-[22px] w-[22px] items-center justify-center rounded-full text-[9px] font-bold"
+            className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
             style={{ background: `var(--primary)` }}
           >
             {username.charAt(0).toUpperCase()}
           </div>
-          <span className="text-xs font-medium">{username}</span>
-          <span className="text-muted-foreground ml-auto text-[10px]">{elapsed}</span>
+          <span className="min-w-0 truncate text-xs font-medium">{username}</span>
+          <span className="text-muted-foreground ml-auto shrink-0 text-[10px]">{elapsed}</span>
         </div>
       </div>
     </div>
