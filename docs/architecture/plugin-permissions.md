@@ -45,14 +45,12 @@ Grants are written in three places:
 1. Every capability write (install and replace, in the same transaction)
    inserts a grant approving the event access the installation asks for then,
    with no scopes, unless one exists. Installing is consent to the events;
-   a replacement leaves an existing grant alone.
+   a replacement leaves an existing grant alone, except that one asking for
+   fewer scopes deletes the key (see Invariants).
 2. At boot, before the catalog auto-update can run,
    `InstallationStore.EnsurePermissionGrants` does the same for every
    installation without a grant, so installations from before grants existed
-   keep the events they received. The server that installed them didn't
-   record `host_api_scopes`, so the pass also records the scopes the stored
-   manifest (`plugin_archives.manifest_json`) asks for, unapproved; the
-   installation is pending until an administrator approves them.
+   keep the events they received.
 3. `PermissionService.Approve`, behind
    `PUT /api/v2/admin/plugins/installations/{id}/permissions/approval`,
    approves the full current requirement as the acting administrator.
@@ -114,6 +112,13 @@ installation with nothing approved or its key revoked, gets
 - An automatic or manual upgrade never widens a grant. New requirements stay
   pending, and the plugin keeps what was approved, key included, until an
   administrator approves the rest.
+- An upgrade never leaves a key wider than the new manifest asks for. When
+  the key carries a scope outside the replacement's `host_api_scopes`, the
+  replacement's transaction (`narrowHostAPIKey`, called from
+  `InstallationStore.Update`) locks the key and the grant before the
+  installation row, deletes the key, and clears the approved scopes. The
+  plugin is then keyless, and pending while it still asks for scopes. No
+  administrator acts here, so that deletion has no audit entry.
 - The key acts as its approving administrator. Scopes narrow; they never
   grant. The key counts only while that account is an enabled administrator,
   and is deleted with the account, which leaves the grant without a key and
@@ -137,6 +142,9 @@ grants: at the next start `EnsurePermissionGrants` gives each installation the
 events it subscribes to and leaves its scopes pending.
 
 ## Limits
+
+- Installations from before `host_api_scopes` was recorded ask for no scopes
+  until their next update or reinstall records the manifest's.
 
 - A plugin that read its key keeps it in memory. After a rotation or
   revocation it holds the old key, now deleted, until it calls

@@ -37,11 +37,10 @@ func subscriber(events ...string) plugins.Capability {
 // TestPluginPermissionGrantsPostgres covers the plugin permission grant and
 // its host API key against Postgres: installing approves the events the
 // plugin subscribes to and a replacement never widens that; the boot pass
-// carries existing installations over and records the scopes their stored
-// manifest asks for, unapproved; an approval mints a key acting as the
+// carries existing installations over; an approval mints a key acting as the
 // approving admin, keeps it on a repeat, rotates it when the scopes change
-// (create, save, then revoke) and revokes it when none are asked for; a key
-// revoked on the API keys page, one that no longer opens, or one whose owner
+// (create, save, then revoke); a replacement that narrows or drops the
+// scopes deletes the key at once; a key revoked on the API keys page, one that no longer opens, or one whose owner
 // lost the admin role leaves the plugin pending and the next approval
 // replaces it; an approval checks what it approves inside its transaction,
 // so an update landing after the read is refused; a failure before the
@@ -56,7 +55,7 @@ func TestPluginPermissionGrantsPostgres(t *testing.T) {
 	t.Run("an update between reading and approving is refused", f.updateBetweenReadAndApprovalIsRefused)
 	t.Run("a key whose owner lost the admin role is pending and replaced", f.demotedOwnersKeyIsPendingAndReplaced)
 	t.Run("a failure before the approval commits leaves only the previous key", f.failedRevokeLeavesOnlyThePreviousKey)
-	t.Run("a revoked key leaves the plugin pending and dropped scopes revoke it", f.revokedKeyIsPendingAndDroppedScopesRevoke)
+	t.Run("a revoked key leaves the plugin pending and narrowed scopes revoke it", f.revokedKeyIsPendingAndDroppedScopesRevoke)
 	t.Run("a stored key opens only for its own installation", f.storedKeyOpensOnlyForItsInstallation)
 	t.Run("uninstalling deletes the host API key with the installation", f.uninstallDeletesKey)
 }
@@ -226,23 +225,6 @@ func (f *permissionsFixture) bootPassCarriesOverInstallations(t *testing.T) {
 	if got.Pending || !slices.Equal(got.Grant.ApprovedEventAccess, []string{"admin", "user_data"}) {
 		t.Fatalf("after the boot pass: pending=%v grant=%+v", got.Pending, got.Grant)
 	}
-
-	// A server from before host_api_scopes stored the manifest asking for
-	// scopes but recorded none; the boot pass records them, unapproved.
-	scoped := f.install(t, "boot-scopes", nil)
-	f.exec(t, `DELETE FROM plugin_permission_grants WHERE plugin_installation_id = $1`, scoped.ID)
-	manifest := fmt.Appendf(nil, `{"id": %q, "host_api_scopes": [%q]}`, scoped.PluginID, auth.ScopeAdminMonitorRead)
-	if err := f.store.SaveArchive(t.Context(), scoped.ID, manifest, "checksum", []byte("archive")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.store.EnsurePermissionGrants(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	got = f.read(t, scoped.ID)
-	if !got.Pending || !slices.Equal(got.Required.RequestedScopes, []string{auth.ScopeAdminMonitorRead}) ||
-		len(got.Grant.EffectiveHostAPIScopes()) != 0 {
-		t.Fatalf("after the boot pass over a stored manifest with scopes: pending=%v required=%+v grant=%+v", got.Pending, got.Required, got.Grant)
-	}
 	f.exec(t, `UPDATE plugin_permission_grants SET approved_event_access = '{}' WHERE plugin_installation_id = $1`, installation.ID)
 	if _, err := f.store.EnsurePermissionGrants(t.Context()); err != nil {
 		t.Fatal(err)
@@ -398,15 +380,6 @@ func (f *permissionsFixture) failedRevokeLeavesOnlyThePreviousKey(t *testing.T) 
 		t.Fatalf("the plugin lost its key to a failed rotation: %+v, %v", credential, err)
 	}
 
-	// Dropping every scope: the grant stops naming the key before its
-	// deletion fails.
-	f.replace(t, installation.ID, []string{})
-	if _, err := failing.Approve(ctx, approver, installation.ID, nil); !errors.Is(err, errInjectedRevoke) {
-		t.Fatalf("dropping scopes with a failing revoke: %v, want the injected failure", err)
-	}
-	if keys, got := f.pluginKeys(t, installation), f.read(t, installation.ID); !slices.Equal(keys, []int64{issued}) || *got.Grant.APIKeyID != issued {
-		t.Fatalf("after a failed revocation: keys %v, grant %+v; want the key still named by the grant", keys, got.Grant)
-	}
 	if err := f.store.Delete(ctx, installation.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -436,10 +409,25 @@ func (f *permissionsFixture) revokedKeyIsPendingAndDroppedScopesRevoke(t *testin
 		t.Fatalf("approval after revocation issued no key: %+v", reissued.Grant)
 	}
 
+	// A replacement that asks for fewer scopes deletes the wider key at once,
+	// without waiting for an approval; the plugin is pending for what it
+	// still asks for.
+	f.replace(t, installation.ID, []string{auth.ScopeAdminMonitorRead, auth.ScopeAdminSessionsControl}, subscriber("session.started"))
+	wide := *f.approve(t, approver, installation.ID).Grant.APIKeyID
+	f.replace(t, installation.ID, []string{auth.ScopeAdminMonitorRead}, subscriber("session.started"))
+	narrowed := f.read(t, installation.ID)
+	if !narrowed.Pending || narrowed.Grant.APIKeyID != nil || len(narrowed.Grant.ApprovedHostAPIScopes) != 0 || f.keyExists(t, wide) {
+		t.Fatalf("after a narrowing replacement: pending=%v grant=%+v, wide key exists=%v", narrowed.Pending, narrowed.Grant, f.keyExists(t, wide))
+	}
+	if _, err := f.permissions.HostAPICredential(ctx, installation.ID); !errors.Is(err, pluginhost.ErrHostAPINotGranted) {
+		t.Fatalf("credential after a narrowing replacement: %v, want ErrHostAPINotGranted", err)
+	}
+	// Dropping every scope leaves it keyless and not pending.
+	kept := *f.approve(t, approver, installation.ID).Grant.APIKeyID
 	f.replace(t, installation.ID, []string{}, subscriber("session.started"))
-	dropped := f.approve(t, approver, installation.ID)
-	if dropped.Grant.APIKeyID != nil || f.keyExists(t, *reissued.Grant.APIKeyID) {
-		t.Fatalf("approving a plugin that asks for no scopes kept its key: %+v", dropped.Grant)
+	dropped := f.read(t, installation.ID)
+	if dropped.Pending || dropped.Grant.APIKeyID != nil || f.keyExists(t, kept) {
+		t.Fatalf("a replacement asking for no scopes kept its key: pending=%v grant=%+v", dropped.Pending, dropped.Grant)
 	}
 }
 

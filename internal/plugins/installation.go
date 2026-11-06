@@ -342,12 +342,24 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 	if installation.IsBuiltin() {
 		return ErrBuiltinInstallationImmutable
 	}
+	return retryOnGrantChange(func() error { return s.update(ctx, id, input) })
+}
 
+// update is one attempt at Update in its own transaction.
+func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInstallationInput) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin update installation transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	if input.HostAPIScopes != nil {
+		// Before the installation row: an uninstall locks the key and the
+		// grant first, then deletes the installation.
+		if err := narrowHostAPIKey(ctx, tx, id, input.HostAPIScopes); err != nil {
+			return err
+		}
+	}
 
 	var setClauses []string
 	var args []any
