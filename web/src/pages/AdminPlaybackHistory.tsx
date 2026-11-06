@@ -263,9 +263,6 @@ export default function AdminPlaybackHistory() {
                       <TableHead>Profile</TableHead>
                       <TableHead>Method</TableHead>
                       <TableHead>Watch Time</TableHead>
-                      <TableHead title="Bytes the API servers sent the viewer. Bytes a stream node or proxy sent directly are not included.">
-                        API-served
-                      </TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Ended</TableHead>
                       <TableHead className="text-right">Logs</TableHead>
@@ -323,9 +320,20 @@ export default function AdminPlaybackHistory() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="secondary">
-                              {formatDecisionLabel(row.play_method)}
-                            </Badge>
+                            <div className="space-y-1">
+                              <Badge variant="secondary">
+                                {formatDecisionLabel(row.play_method)}
+                              </Badge>
+                              {row.api_served_bytes !== null ? (
+                                <div
+                                  className="text-muted-foreground text-xs whitespace-normal"
+                                  title="Bytes the API servers sent the viewer. Bytes a stream node or proxy sent directly are not included."
+                                >
+                                  {formatFileSize(row.api_served_bytes)}{" "}
+                                  <span className="whitespace-nowrap">API-served</span>
+                                </div>
+                              ) : null}
+                            </div>
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">
@@ -343,9 +351,6 @@ export default function AdminPlaybackHistory() {
                                 of {formatDuration(row.duration_seconds)}
                               </div>
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            {formatFileSize(row.api_served_bytes ?? undefined, { fallback: "—" })}
                           </TableCell>
                           <TableCell>
                             <Badge variant={row.completed ? "default" : "outline"}>
