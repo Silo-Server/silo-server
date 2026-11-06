@@ -437,6 +437,7 @@ func TestPluginDestinationsOfAMissingPluginGetNothingQueuedDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	sender.refreshChannels(ctx)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)

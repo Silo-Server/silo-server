@@ -164,6 +164,9 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	settle := w.settings.SettleDelay(ctx)
 	maxBurst := w.settings.MaxSeriesBurst(ctx)
 
+	// The channel listing reads through the pool, so refresh it before the
+	// transaction holds a connection.
+	w.pluginSender.refreshChannels(ctx)
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin fanout tx: %w", err)

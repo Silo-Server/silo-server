@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -101,6 +102,66 @@ type pluginDestinationSender struct {
 	linkBase    func(ctx context.Context) string
 	payload     func(ctx context.Context, row DeliveryRow) DeliveryRowPayload
 	logger      *slog.Logger
+
+	// channels caches which channels an enabled plugin provides, for
+	// enqueueable. The host reads them through the pool, so they're read
+	// before a delivery's transaction holds a connection, at most once per
+	// pluginChannelCacheTTL; see refreshChannels.
+	channelsMu sync.Mutex
+	channels   pluginChannelSet
+}
+
+// pluginChannelCacheTTL bounds how stale enqueueable's view of available
+// channels can be. Within it, a just-removed plugin's destinations can still
+// get an attempt queued; its send finds the plugin gone and retries, as
+// when the listing fails.
+const pluginChannelCacheTTL = 30 * time.Second
+
+// pluginChannelSet is which channels can take a delivery. With all set
+// (never read, or the last read failed) every destination is queued rather
+// than losing the delivery.
+type pluginChannelSet struct {
+	readAt time.Time
+	all    bool
+	refs   map[PluginChannelRef]struct{}
+}
+
+// refreshChannels rereads the available channels when the cached set is
+// older than pluginChannelCacheTTL. Call it before beginning a transaction
+// that enqueues plugin destination attempts, never while holding one.
+func (s *pluginDestinationSender) refreshChannels(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	host := s.host()
+	if host == nil {
+		return
+	}
+	s.channelsMu.Lock()
+	defer s.channelsMu.Unlock()
+	if !s.channels.readAt.IsZero() && time.Since(s.channels.readAt) < pluginChannelCacheTTL {
+		return
+	}
+	channels, err := host.Channels(ctx)
+	if err != nil {
+		s.logger.WarnContext(ctx, "plugin channels unavailable; queueing every enabled destination", "error", err)
+		s.channels = pluginChannelSet{readAt: time.Now(), all: true}
+		return
+	}
+	refs := make(map[PluginChannelRef]struct{}, len(channels))
+	for _, channel := range channels {
+		refs[channel.PluginChannelRef] = struct{}{}
+	}
+	s.channels = pluginChannelSet{readAt: time.Now(), refs: refs}
+}
+
+func (s *pluginDestinationSender) cachedChannels() pluginChannelSet {
+	s.channelsMu.Lock()
+	defer s.channelsMu.Unlock()
+	if s.channels.readAt.IsZero() {
+		return pluginChannelSet{all: true}
+	}
+	return s.channels
 }
 
 func newPluginDestinationSender(repo *PluginDestinationRepository, deliveries *DeliveryRepository, cipher *secret.Cipher) *pluginDestinationSender {
@@ -149,32 +210,26 @@ func (s *pluginDestinationSender) encryptConfig(id string, config map[string]any
 // enqueueable returns the profiles' enabled destinations that can take a
 // delivery now, read inside the delivery's transaction. A destination whose
 // channel no enabled plugin provides gets nothing: its plugin is off or
-// removed, and queued attempts would only retry for a day. Nothing is
-// enqueued before the plugin runtime is wired.
+// removed, and queued attempts would only retry for a day. Which channels are
+// available comes from the set refreshChannels cached before the
+// transaction, so this makes no query outside tx. Nothing is enqueued before
+// the plugin runtime is wired.
 func (s *pluginDestinationSender) enqueueable(ctx context.Context, tx pgx.Tx, profiles []profileKey) (map[profileKey][]PluginDestination, error) {
-	host := s.host()
-	if host == nil {
+	if s.host() == nil {
 		return nil, nil
 	}
 	byProfile, err := s.repo.ListEnabledByProfiles(ctx, tx, profiles)
 	if err != nil || len(byProfile) == 0 {
 		return byProfile, err
 	}
-	channels, err := host.Channels(ctx)
-	if err != nil {
-		// Queue them all rather than lose the delivery: a send that finds
-		// the plugin gone retries on the schedule.
-		s.logger.WarnContext(ctx, "plugin channels unavailable while enqueueing", "error", err)
+	available := s.cachedChannels()
+	if available.all {
 		return byProfile, nil
-	}
-	available := make(map[PluginChannelRef]struct{}, len(channels))
-	for _, channel := range channels {
-		available[channel.PluginChannelRef] = struct{}{}
 	}
 	for key, destinations := range byProfile {
 		kept := destinations[:0]
 		for _, d := range destinations {
-			if _, ok := available[d.Ref()]; ok {
+			if _, ok := available.refs[d.Ref()]; ok {
 				kept = append(kept, d)
 			}
 		}
@@ -333,14 +388,16 @@ func (s *pluginDestinationSender) message(ctx context.Context, row DeliveryRow, 
 		message.Type = "test"
 		return message
 	}
-	message.Details = s.details(ctx, row)
+	message.Details = s.details(ctx, row, message.ImageUrl)
 	return message
 }
 
 // details is the delivery in the public events.Notification shape, so a
 // plugin sees the same fields here as in a notification.created event.
-// Every identifier is a string, as the catalog requires.
-func (s *pluginDestinationSender) details(ctx context.Context, row DeliveryRow) *structpb.Struct {
+// Every identifier is a string, as the catalog requires. poster_url is the
+// message's image URL, which follows the administrator's poster policy; the
+// delivery payload's own poster URL doesn't.
+func (s *pluginDestinationSender) details(ctx context.Context, row DeliveryRow, posterURL string) *structpb.Struct {
 	payload := PayloadForRow(row)
 	if s.payload != nil {
 		payload = s.payload(ctx, row)
@@ -359,7 +416,7 @@ func (s *pluginDestinationSender) details(ctx context.Context, row DeliveryRow) 
 		SeasonNumber:  payload.SeasonNumber,
 		EpisodeNumber: payload.EpisodeNumber,
 		PosterPath:    payload.PosterPath,
-		PosterURL:     payload.PosterURL,
+		PosterURL:     posterURL,
 		ReasonFlags:   payload.ReasonFlags,
 		CreatedAt:     payload.CreatedAt,
 	}

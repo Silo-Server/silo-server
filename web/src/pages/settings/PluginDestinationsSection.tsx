@@ -168,8 +168,10 @@ function DestinationFormDialog({
   const submit = () => {
     setSettingsRejection(null);
     const onError = (error: unknown) => {
+      // The rejection shows under the settings fields; a channel without a
+      // form has none, so it falls back to a toast.
       const rejection = pluginSettingsRejection(error);
-      if (rejection) setSettingsRejection(rejection);
+      if (rejection && form) setSettingsRejection(rejection);
       else toast.error(pluginDestinationErrorMessage(error, "The destination couldn't be saved"));
     };
     if (editing) {
