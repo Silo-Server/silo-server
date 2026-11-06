@@ -14,11 +14,13 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { useOptionalAuth } from "@/hooks/useAuth";
+import { useSettingValue } from "@/hooks/queries/settingValues";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useSeasonEpisodes, useSeasons } from "@/hooks/queries/episodes";
 import { createWatchTogetherRoom, type WatchTogetherSelectionMode } from "@/lib/watchTogether";
 import { copyWatchTogetherInvite } from "@/lib/watchTogetherActions";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import type { EpisodeListItem, ItemDetail } from "@/api/types";
 import { rememberRecentRoom } from "./hooks/useRecentRooms";
 
@@ -149,13 +151,20 @@ export function StartPartySheet({
   const navigate = useViewTransitionNavigate();
   const auth = useOptionalAuth();
   const [mode, setMode] = useState<WatchTogetherSelectionMode>("host_pick");
-  const [guestsCanPause, setGuestsCanPause] = useState(false);
+  const savedPolicy = useSettingValue<string>(SETTING_KEYS.WATCH_PARTY_GUEST_CONTROL_POLICY, {
+    enabled: open,
+  });
+  // null follows the profile's saved choice, which the server applies to the
+  // new room itself; the switch only overrides it once the host flips it.
+  const [guestsCanPauseChoice, setGuestsCanPause] = useState<boolean | null>(null);
+  const guestsCanPause = guestsCanPauseChoice ?? savedPolicy.value === "guest_play_pause";
   const [target, setTarget] = useState<StartPartyTarget | null>(initialTarget);
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (open) {
       setTarget(initialTarget);
+      setGuestsCanPause(null);
       setChoosing(false);
       setBusy(false);
     }
@@ -179,10 +188,15 @@ export function StartPartySheet({
       const created = await createWatchTogetherRoom(draft);
       if (!active() || !created.room_access_token) return;
       const roomId = created.room.room_id;
-      if (guestsCanPause) {
-        await updateRoomPolicy(roomId, "guest_play_pause", authority!).catch((error: unknown) => {
+      const policy = guestsCanPauseChoice ? "guest_play_pause" : "host_only";
+      if (guestsCanPauseChoice !== null && created.room.guest_control_policy !== policy) {
+        await updateRoomPolicy(roomId, policy, authority!).catch((error: unknown) => {
           if (error instanceof StaleApiRequestContextError) throw error;
-          toast.error("Room created, but guests can't pause yet. Change it from the room.");
+          toast.error(
+            guestsCanPauseChoice
+              ? "Room created, but guests can't pause yet. Change it from the room."
+              : "Room created, but guests can still pause. Change it from the room.",
+          );
         });
         if (!active()) return;
       }
@@ -234,7 +248,7 @@ export function StartPartySheet({
     } finally {
       setBusy(false);
     }
-  }, [auth?.profile, auth?.user, guestsCanPause, mode, navigate, onOpenChange, target]);
+  }, [auth?.profile, auth?.user, guestsCanPauseChoice, mode, navigate, onOpenChange, target]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
