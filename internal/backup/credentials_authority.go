@@ -430,13 +430,21 @@ func requestPolicy(ctx context.Context, tx pgx.Tx, user *models.User, allowed bo
 	if err != nil {
 		return requests.EffectivePolicy{}, err
 	}
+	// The 4K columns are read on their own, so a backup from before them
+	// still has its limits read.
+	if err := optionalRow(ctx, tx, `SELECT uhd_requests_allowed FROM request_settings WHERE id = true`, nil, &settings.UHDRequestsAllowed); err != nil {
+		return requests.EffectivePolicy{}, err
+	}
 	var own *requests.UserLimit
 	var limit requests.UserLimit
 	if err := optionalRow(ctx, tx, `SELECT limit_mode, max_requests, window_days, approval_mode FROM request_user_limits WHERE user_id = $1`,
 		[]any{user.ID}, &limit.LimitMode, &limit.MaxRequests, &limit.WindowDays, &limit.ApprovalMode); err != nil {
 		return requests.EffectivePolicy{}, err
 	}
-	if limit.LimitMode != "" || limit.ApprovalMode != "" {
+	if err := optionalRow(ctx, tx, `SELECT uhd_mode FROM request_user_limits WHERE user_id = $1`, []any{user.ID}, &limit.UHDMode); err != nil {
+		return requests.EffectivePolicy{}, err
+	}
+	if limit.LimitMode != "" || limit.ApprovalMode != "" || limit.UHDMode != "" {
 		own = &limit
 	}
 	var group *requests.GroupLimit
@@ -446,7 +454,10 @@ func requestPolicy(ctx context.Context, tx pgx.Tx, user *models.User, allowed bo
 			[]any{*user.AccessGroupID}, &g.LimitMode, &g.MaxRequests, &g.WindowDays, &g.ApprovalMode); err != nil {
 			return requests.EffectivePolicy{}, err
 		}
-		if g.LimitMode != "" || g.ApprovalMode != "" {
+		if err := optionalRow(ctx, tx, `SELECT uhd_mode FROM request_group_limits WHERE group_id = $1`, []any{*user.AccessGroupID}, &g.UHDMode); err != nil {
+			return requests.EffectivePolicy{}, err
+		}
+		if g.LimitMode != "" || g.ApprovalMode != "" || g.UHDMode != "" {
 			group = &g
 		}
 	}
@@ -479,6 +490,8 @@ func requestsWider(restored, live requests.EffectivePolicy) bool {
 	case !canRequest(restored):
 		return false
 	case restored.AutoApprove && !live.AutoApprove:
+		return true
+	case restored.AllowUHD && !live.AllowUHD:
 		return true
 	case live.Unlimited:
 		return false

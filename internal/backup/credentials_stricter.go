@@ -118,6 +118,7 @@ var stricterFlags = func() []stricterFlag {
 		flag("request_settings", "requests_enabled", false, "requests"),
 		flag("request_settings", "global_auto_approval_enabled", false, "requests"),
 		flag("request_settings", "watchlist_requests", false, "requests"),
+		flag("request_settings", "uhd_requests_allowed", false, "4K requests"),
 		// A child profile, and a profile's restrictions, never loosen.
 		{table: tableUserProfiles, column: "is_child", stricter: true, key: profileKey, scope: everyRow,
 			describe: `format('profile %s kept a child profile', t.name)`},
@@ -223,6 +224,7 @@ var restoredFlagColumns = map[string]string{
 	"media_items.episode_metadata_incomplete":                 whyFacts,
 	"media_request_targets.is_anime":                          whyFacts,
 	"media_requests.is_anime":                                 whyFacts,
+	"media_requests.is_4k":                                    "what a request asks for, not whether one may be made",
 	"movie_match_queue.lease_forced_rerun":                    whyQueue,
 	"movie_match_queue.rerun_requested":                       whyQueue,
 	"page_sections.enabled":                                   whyShown,
