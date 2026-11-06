@@ -94,12 +94,23 @@ type carrySpec struct {
 	// limit, when set, turns a switch off on a carried row instead of
 	// dropping it.
 	limit *carryLimit
+	// detach clears references to rows the restored data may not have,
+	// instead of dropping the row or failing on its foreign key.
+	detach []carryDetach
 }
 
 // carryLimit carries a row with column false where keep, over the live row
 // r, does not hold, and reports it with why.
 type carryLimit struct {
 	column, keep, why string
+}
+
+// carryDetach carries a row with columns NULL where keep, over the live row
+// r, does not hold. When why is set, a row whose first column it clears is
+// reported with why.
+type carryDetach struct {
+	columns   []string
+	keep, why string
 }
 
 // everyRow is a carrySpec.credential that selects every row.
@@ -314,6 +325,20 @@ var secretTables = []secretTable{
 		key: "plugin_installation_id, host_scope, state_key", same: []string{columnInstallation, "host_scope", "state_key"}, credential: everyRow, owned: pluginInstalled,
 		describe: `format('state %L of plugin installation %s', r.state_key, r.plugin_installation_id)`,
 	}},
+	// What an administrator approved for a plugin, with the host API key it
+	// was issued (sealed). It follows api_keys: a grant names a key only
+	// where the carry kept that key, and otherwise keeps its approvals
+	// without one, which leaves the plugin waiting for approval as when the
+	// key is deleted on the API keys page.
+	{name: "plugin_permission_grants", handling: secretCarried, why: "plugin permissions and the host API key each was issued", carry: &carrySpec{
+		key: columnInstallation, same: []string{columnInstallation}, credential: everyRow, owned: pluginInstalled,
+		describe: `format('permissions of plugin installation %s', r.plugin_installation_id)`,
+		detach: []carryDetach{
+			{columns: []string{"api_key_id", "api_key_ciphertext"}, keep: `EXISTS (SELECT 1 FROM api_keys k WHERE k.id = r.api_key_id)`,
+				why: "its host API key was not kept; approve the plugin's permissions again"},
+			{columns: []string{"approved_by_user_id"}, keep: `EXISTS (SELECT 1 FROM users u WHERE u.id = r.approved_by_user_id)`},
+		},
+	}},
 	// Stream nodes are what clients' requests are routed through, some with
 	// the client's bearer: a node removed since the backup stays removed.
 	{name: "stream_nodes", handling: secretCarried, why: "stream nodes, which clients' requests are routed through", carry: &carrySpec{
@@ -385,7 +410,7 @@ func leftOutTables() []string {
 // carriedKinds is what the restore output calls the carried tables.
 const carriedKinds = "API keys, pending invitations, invite codes, autoscan webhook tokens, audiobook RSS feed links, " +
 	"Plex and Jellyfin webhook sync secrets, external sign-in links and providers, watch-provider connections, " +
-	"plugin configuration and state, and notification destinations " +
+	"plugin configuration, state, and permissions, and notification destinations " +
 	"(push registrations, webhooks, email addresses, Discord links, server channels)"
 
 // CarriedCredentials is what DatabaseLoader.CarryCredentials did.
@@ -737,6 +762,11 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 	values := make([]string, len(columns))
 	for i, col := range columns {
 		values[i] = "r." + col
+		for _, d := range c.detach {
+			if slices.Contains(d.columns, col) {
+				values[i] = fmt.Sprintf("CASE WHEN %s THEN r.%s END", d.keep, col)
+			}
+		}
 		if l := c.limit; l != nil && col == l.column {
 			values[i] = fmt.Sprintf("(r.%s AND (%s))", col, l.keep)
 			limited, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE (%s) AND r.%s AND NOT (%s)`, c.describe, rows, c.owned, col, l.keep), live)
@@ -746,6 +776,19 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 			for _, row := range limited {
 				result.Limited = append(result.Limited, row+": "+l.why)
 			}
+		}
+	}
+	for _, d := range c.detach {
+		if d.why == "" {
+			continue
+		}
+		detached, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE (%s) AND r.%s IS NOT NULL AND NOT (%s)`,
+			c.describe, rows, c.owned, d.columns[0], d.keep), live)
+		if err != nil {
+			return err
+		}
+		for _, row := range detached {
+			result.Limited = append(result.Limited, row+": "+d.why)
 		}
 	}
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (%s) OVERRIDING SYSTEM VALUE

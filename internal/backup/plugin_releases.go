@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -15,15 +16,22 @@ import (
 // besides its id, plugin, and switch: which release it runs and where.
 var pluginReleaseColumns = []string{"repository_id", "version", "install_path", "update_policy", "available_version", "kind", "runtime_generation"}
 
+// pluginReleaseColumnsSince are release columns a backup's older schema may
+// lack, copied only where the restored schema has them. Without them the
+// migration adds the column empty and, at the next start,
+// EnsurePermissionGrants records the scopes from the stored manifest.
+var pluginReleaseColumnsSince = []string{"host_api_scopes"}
+
 // CarryPluginReleases gives each plugin installation of the restored
 // database (dbURL) that the live server (liveURL) has, by id and plugin,
 // the live release: its row's release columns, its stored archive, and its
 // capabilities, so a release replaced since the backup is never launched
 // again. An installation of the same id but another plugin, and every
 // installation when liveURL is "" (another deployment, or a separate
-// restore), is turned off and reported; one only the backup has is turned
-// off by the stricter switches (stricterFlags). It returns the
-// installations it turned off here.
+// restore), is turned off and reported, and loses the permission grant the
+// credential carry gave it from the live installation with its id; one only
+// the backup has is turned off by the stricter switches (stricterFlags). It
+// returns the installations it turned off here.
 func (l PGLoader) CarryPluginReleases(ctx context.Context, dbURL, liveURL string) ([]string, error) {
 	conn, err := pgx.Connect(ctx, dbURL)
 	if err != nil {
@@ -43,6 +51,20 @@ func (l PGLoader) CarryPluginReleases(ctx context.Context, dbURL, liveURL string
 		if err != nil {
 			return err
 		}
+		columns, err := tableColumns(ctx, tx, "plugin_installations")
+		if err != nil {
+			return err
+		}
+		release := slices.Clone(pluginReleaseColumns)
+		for _, col := range pluginReleaseColumnsSince {
+			if slices.Contains(columns, col) {
+				release = append(release, col)
+			}
+		}
+		var grants bool
+		if err := tx.QueryRow(ctx, `SELECT to_regclass('plugin_permission_grants') IS NOT NULL`).Scan(&grants); err != nil {
+			return err
+		}
 		for id, plugin := range restored {
 			matched := false
 			if live != nil {
@@ -57,13 +79,20 @@ func (l PGLoader) CarryPluginReleases(ctx context.Context, dbURL, liveURL string
 				matched = livePlugin == plugin
 			}
 			if matched {
-				if err := copyPluginRelease(ctx, live, tx, id); err != nil {
+				if err := copyPluginRelease(ctx, live, tx, id, release); err != nil {
 					return fmt.Errorf("plugin installation %d: %w", id, err)
 				}
 				continue
 			}
 			if _, err := tx.Exec(ctx, `UPDATE plugin_installations SET enabled = false WHERE id = $1`, id); err != nil {
 				return err
+			}
+			// What was approved for another plugin is not this one's: it
+			// waits for approval once enabled, as a fresh install does.
+			if grants {
+				if _, err := tx.Exec(ctx, `DELETE FROM plugin_permission_grants WHERE plugin_installation_id = $1`, id); err != nil {
+					return err
+				}
 			}
 			off = append(off, fmt.Sprintf("%s (installation %d)", plugin, id))
 		}
@@ -73,13 +102,14 @@ func (l PGLoader) CarryPluginReleases(ctx context.Context, dbURL, liveURL string
 }
 
 // copyPluginRelease writes the live installation id's release into tx:
-// the release columns, the stored archive, and the capabilities.
-func copyPluginRelease(ctx context.Context, live *pgx.Conn, tx pgx.Tx, id int64) error {
-	set := make([]string, len(pluginReleaseColumns))
-	args := make([]any, 0, len(pluginReleaseColumns)+1)
+// the release columns (release, which starts with pluginReleaseColumns),
+// the stored archive, and the capabilities.
+func copyPluginRelease(ctx context.Context, live *pgx.Conn, tx pgx.Tx, id int64, release []string) error {
+	set := make([]string, len(release))
+	args := make([]any, 0, len(release)+1)
 	args = append(args, id)
-	row := live.QueryRow(ctx, `SELECT `+strings.Join(pluginReleaseColumns, ", ")+` FROM plugin_installations WHERE id = $1`, id)
-	values := make([]any, len(pluginReleaseColumns))
+	row := live.QueryRow(ctx, `SELECT `+strings.Join(release, ", ")+` FROM plugin_installations WHERE id = $1`, id)
+	values := make([]any, len(release))
 	ptrs := make([]any, len(values))
 	for i := range values {
 		ptrs[i] = &values[i]
@@ -87,7 +117,7 @@ func copyPluginRelease(ctx context.Context, live *pgx.Conn, tx pgx.Tx, id int64)
 	if err := row.Scan(ptrs...); err != nil {
 		return err
 	}
-	for i, col := range pluginReleaseColumns {
+	for i, col := range release {
 		set[i] = fmt.Sprintf("%s = $%d", col, i+2)
 		args = append(args, values[i])
 	}

@@ -3439,7 +3439,8 @@ can be turned off or uninstalled; a server that still has a good copy of the fil
 unaffected.
 
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
-(configuration, bindings and archives cascade) and removes its files; on a failed row delete
+(configuration, bindings, archives and the permission grant cascade) together with the
+plugin's host API key in one transaction, and removes its files; on a failed row delete
 an enabled plugin is restarted. Row delete and file removal are not one transaction and a
 repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. A row
 admitted before the host refused IDs and versions that map to an empty, `.` or `..` directory
@@ -3525,6 +3526,54 @@ installation, 409 for the reserved built-in host row, 422 for a blank key or cap
 503 when the plugin service or stores are not wired. The web plugin dialog captures profile
 authority before each submission and ignores a completion that arrives under a replaced
 authority.
+
+### Plugin permissions in v2
+
+Every installation carries `permissions_pending`: true while it asks for event access or
+host API scopes an administrator hasn't approved. The plugins page badges it.
+
+`GET /api/v2/admin/plugins/installations/{id}/permissions` answers what the installation
+asks for and what was approved:
+
+- `event_access.required` is the access classes of the catalog events its
+  `event_consumer.v1` subscriptions name that need approval, `admin` and `user_data`
+  (public and plugin events need none). `event_access.approved` is what the grant approves;
+  the dispatcher delivers no event of an unapproved class.
+- `host_api_scopes.requested` is the manifest's `host_api_scopes`; `required` is the subset
+  in this server's API key scope catalog; `unsupported` is the rest, which is never granted;
+  `approved` is the scopes of the issued key while it is usable, and empty otherwise:
+  none issued, the key revoked on the API keys page, its account no longer an enabled
+  administrator, or the key unreadable on this server.
+- `pending`, `approved_at` and `approved_by_user_id` (the last explicit approval; omitted
+  when event access was approved by installing the plugin, or the account was deleted).
+- `host_api_key`: `issued`, `usable` (false when the key's account is no longer an enabled
+  administrator or this server can't read the key; such a key grants nothing), its `id` on
+  the API keys page and `owner_user_id`, the account it acts as. The key itself is never
+  returned.
+
+The read is conditional: its `ETag` validates the whole representation, and
+`If-None-Match` with it answers 304.
+
+`PUT /api/v2/admin/plugins/installations/{id}/permissions/approval` approves everything the
+installation asks for now, as the acting administrator, and answers 200 with the same body
+and its new `ETag`. It is guarded: `If-Match` must carry the `ETag` of the read the
+administrator approved (428 without one). The server compares it with the permissions
+inside the approval's transaction, so a plugin update that asks for more, another approval,
+or a revoked key landing in between is 412 with the current `ETag` and changes nothing; the
+web panel then reloads and shows the new requirements. When it requests known scopes and has
+no usable key with exactly those, the server mints a key on the administrator's own account,
+points the grant at it and deletes the previous key in that one transaction; when it
+requests none, its key is deleted the same way. A repeat with a fresh `ETag` keeps a usable
+key whose scopes match, so the operation is naturally idempotent. Every API server rebuilds
+its event subscriber index; the plugin is not restarted.
+
+Both require an acting administrator, and the approval restricts demo access. They answer 404
+for an unknown installation, 409 for the reserved built-in host row, and 503 when the plugin
+service is not wired. Installing a plugin approves the event access it asks for then; an
+upgrade, including an automatic catalog update, never widens a grant. The plugin keeps what
+was approved before until an administrator approves the rest.
+[plugin-permissions.md](architecture/plugin-permissions.md) has the invariants. The frozen v1
+surface has no equivalent.
 
 ## Bridge note
 

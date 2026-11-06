@@ -102,7 +102,7 @@ var eventRetryDelays = []time.Duration{
 type EventDispatcher struct {
 	bus           cache.EventBus
 	hub           *events.Hub
-	installations taskInstallationStore
+	installations eventInstallationStore
 	resolver      eventConsumerResolver
 	deliveries    eventDeliveryStore
 	// sem holds one token per delivery in flight on this server.
@@ -140,6 +140,14 @@ type EventDispatcher struct {
 	now         func() time.Time
 }
 
+// eventInstallationStore is what the dispatcher reads to build its index:
+// the enabled installations, their capabilities, and the event access each
+// one's permission grant approves.
+type eventInstallationStore interface {
+	taskInstallationStore
+	ApprovedEventAccess(ctx context.Context) (map[int][]string, error)
+}
+
 // eventSubscriber is the event_consumer.v1 capability an installation
 // receives one event name on.
 type eventSubscriber struct {
@@ -163,7 +171,7 @@ type producedEvent struct {
 func NewEventDispatcher(
 	bus cache.EventBus,
 	hub *events.Hub,
-	installations taskInstallationStore,
+	installations eventInstallationStore,
 	resolver eventConsumerResolver,
 	deliveries eventDeliveryStore,
 	concurrency int,
@@ -188,7 +196,7 @@ func NewEventDispatcher(
 func NewEventDispatcherWithTypedResolver(
 	bus cache.EventBus,
 	hub *events.Hub,
-	installations taskInstallationStore,
+	installations eventInstallationStore,
 	resolver interface {
 		EventConsumerClient(ctx context.Context, installationID int, capabilityID string) (*pluginhost.EventConsumerClient, error)
 	},
@@ -497,11 +505,17 @@ func (d *EventDispatcher) invalidateIndex() {
 
 // buildIndex maps every event name an enabled installation subscribes to onto
 // that installation's first event_consumer.v1 capability listing it, which
-// preserves one delivery per installation. Subscribers stay in installation
-// order. complete is false when an installation's capabilities could not be
-// read; that installation is left out and the caller must not keep the index.
+// preserves one delivery per installation. An admin or user_data event is
+// indexed only when the installation's permission grant approves its access
+// class. Subscribers stay in installation order. complete is false when an
+// installation's capabilities could not be read; that installation is left
+// out and the caller must not keep the index.
 func (d *EventDispatcher) buildIndex(ctx context.Context) (index map[string][]eventSubscriber, complete bool, err error) {
 	installations, err := d.installations.ListEnabled(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	approved, err := d.installations.ApprovedEventAccess(ctx)
 	if err != nil {
 		return nil, false, err
 	}
@@ -532,8 +546,10 @@ func (d *EventDispatcher) buildIndex(ctx context.Context) (index map[string][]ev
 					continue
 				}
 				// Only catalog and plugin events reach plugins; the host's
-				// internal event names are not a contract.
-				if _, deliverable := publicevents.AccessOf(eventName); !deliverable {
+				// internal event names are not a contract. Admin activity
+				// and personal data reach only installations approved for it.
+				access, deliverable := publicevents.AccessOf(eventName)
+				if !deliverable || !eventAccessApproved(access, approved[installation.ID]) {
 					continue
 				}
 				indexed[eventName] = struct{}{}

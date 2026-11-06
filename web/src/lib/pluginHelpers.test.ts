@@ -168,12 +168,18 @@ describe("pluginStatus", () => {
       attention: true,
       rank: 2,
     });
+    expect(pluginStatus(installation({ permissions_pending: true }))).toMatchObject({
+      label: "Active",
+      attention: true,
+      rank: 2,
+    });
     expect(pluginStatus(installation())).toMatchObject({ label: "Active", attention: false });
   });
 
   it("never asks for attention on a plugin that is off", () => {
     const off = installation({
       enabled: false,
+      permissions_pending: true,
       global_config_schema: REQUIRED_ACCOUNT,
       runtime: { resident: true, state: "failed", restart_count: 1 },
     });

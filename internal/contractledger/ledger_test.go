@@ -623,14 +623,15 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 // is empty today; the reconcile test refuses an unmapped guarded operation
 // that is not listed here.
 var guardedWithoutLegacyRow = map[string]string{
-	"updateRequestRoute":           "V2-only request routing rule: the rule's revision from request_editor_revision_seq is its ETag.",
-	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
-	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
-	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
-	"updateRequestDiscoverLayout":  "V2-only Requests Discover layout: the layout's revision from request_editor_revision_seq is its ETag; the default layout, with none stored, is revision zero.",
-	"resetRequestDiscoverLayout":   "V2-only return to the default Discover layout: guarded by the stored layout's revision.",
-	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
-	"setSubtitleTiming":            "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
+	"updateRequestRoute":                        "V2-only request routing rule: the rule's revision from request_editor_revision_seq is its ETag.",
+	"deleteRequestRoute":                        "V2-only request routing rule: deletion is guarded by the rule's revision.",
+	"updateAdminRequestGroupLimit":              "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
+	"updateRequestRouting":                      "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
+	"updateRequestDiscoverLayout":               "V2-only Requests Discover layout: the layout's revision from request_editor_revision_seq is its ETag; the default layout, with none stored, is revision zero.",
+	"resetRequestDiscoverLayout":                "V2-only return to the default Discover layout: guarded by the stored layout's revision.",
+	"setStoredSubtitleTiming":                   "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
+	"setSubtitleTiming":                         "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
+	"approveAdminPluginInstallationPermissions": "V2-only plugin permission approval: guarded by a digest of the permissions representation the administrator read, so an update that asks for more between the read and the approval is 412.",
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
@@ -1081,11 +1082,12 @@ var mutationWithoutLegacyRow = map[string]string{
 	"queryWatchTogetherMemberState":            "V2-only POST-shaped read: the content id set (up to 200) exceeds what a query string carries. It changes no state; repeating it returns the current classification.",
 	"resetAdminRecommendationEmbeddings":       "V2-only embeddings reset: v1 had no way to clear the embedding lock. A replay right after success deletes nothing more, but a later replay also deletes what the embedding job built since, so it is non-retryable like the recommendation job triggers.",
 
-	"replaceAdminUserProfileSectionOverrides": "V2-only administrator edit of one profile's page layout: v1 could only change the caller's own profile. It runs the same full-replacement write as replaceProfileSectionOverrides, which is non-retryable because a save can start a trending refresh.",
-	"resetAdminUserProfileSectionOverrides":   "V2-only administrator reset of one profile's page layout: v1 reset only the caller's own profile or every profile at once. It runs the same delete as resetProfileSectionOverrides and is non-retryable like it.",
-	"createAdminUserProfile":                  "V2-only administrator creation of a profile on any account: v1 created profiles only on the caller's own household. It runs the same create as createProfile, which is non-retryable because a retry after a lost response makes a second profile or answers 409.",
-	"updateAdminUserProfile":                  "V2-only administrator edit of any account's profile, including setting or removing its PIN: v1 edited profiles only on the caller's own household. It runs the same write as updateProfile and is non-retryable like it: a retried PIN advances the profile's PIN revision again.",
-	"deleteAdminUserProfile":                  "V2-only administrator deletion of any account's profile: v1 deleted profiles only on the caller's own household. It runs the same delete as deleteProfile and is non-retryable like the other admin profile writes; a repeat answers 404.",
+	"replaceAdminUserProfileSectionOverrides":   "V2-only administrator edit of one profile's page layout: v1 could only change the caller's own profile. It runs the same full-replacement write as replaceProfileSectionOverrides, which is non-retryable because a save can start a trending refresh.",
+	"resetAdminUserProfileSectionOverrides":     "V2-only administrator reset of one profile's page layout: v1 reset only the caller's own profile or every profile at once. It runs the same delete as resetProfileSectionOverrides and is non-retryable like it.",
+	"createAdminUserProfile":                    "V2-only administrator creation of a profile on any account: v1 created profiles only on the caller's own household. It runs the same create as createProfile, which is non-retryable because a retry after a lost response makes a second profile or answers 409.",
+	"updateAdminUserProfile":                    "V2-only administrator edit of any account's profile, including setting or removing its PIN: v1 edited profiles only on the caller's own household. It runs the same write as updateProfile and is non-retryable like it: a retried PIN advances the profile's PIN revision again.",
+	"deleteAdminUserProfile":                    "V2-only administrator deletion of any account's profile: v1 deleted profiles only on the caller's own household. It runs the same delete as deleteProfile and is non-retryable like the other admin profile writes; a repeat answers 404.",
+	"approveAdminPluginInstallationPermissions": "V2-only approval of a plugin's event access and host API scopes (v1 is frozen). It requires If-Match; a replay with the same tag after a lost response is 412 when the first attempt changed the representation, and a repeat with a fresh tag keeps a usable key whose scopes already match, so it converges on one grant and one key.",
 }
 
 // retrySafetyMismatches compares every operation the v2 registry declares

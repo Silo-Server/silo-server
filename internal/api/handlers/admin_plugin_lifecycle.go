@@ -197,11 +197,9 @@ func (h *PluginHandler) DeleteAdminPluginInstallation(ctx context.Context, id in
 		}
 		stopped = true
 	}
-	if err := h.installations.Delete(ctx, id); err != nil {
+	if err := h.deleteInstallation(ctx, id); err != nil {
 		if stopped && installation.Enabled {
-			if _, restartErr := h.service.Start(ctx, id); restartErr != nil {
-				slog.ErrorContext(ctx, "restarting plugin after failed uninstall", "component", "api", "installation_id", id, "error", restartErr)
-			}
+			h.restartAfterFailedUninstall(ctx, id)
 		}
 		if errors.Is(err, plugins.ErrBuiltinInstallationImmutable) {
 			return ErrPluginBuiltinInstallation
@@ -212,6 +210,21 @@ func (h *PluginHandler) DeleteAdminPluginInstallation(ctx context.Context, id in
 		h.service.OnLifecycleChange(ctx)
 	}
 	return nil
+}
+
+func (h *PluginHandler) restartAfterFailedUninstall(ctx context.Context, id int) {
+	if _, err := h.service.Start(ctx, id); err != nil {
+		slog.ErrorContext(ctx, "restarting plugin after failed uninstall", "component", "api", "installation_id", id, "error", err)
+	}
+}
+
+// deleteInstallation uninstalls through the permission service when there is
+// one, so the plugin's host API key is deleted with an audit entry.
+func (h *PluginHandler) deleteInstallation(ctx context.Context, id int) error {
+	if permissions := h.service.Permissions(); permissions != nil {
+		return permissions.DeleteInstallation(ctx, actorUserID(ctx), id)
+	}
+	return h.installations.Delete(ctx, id)
 }
 
 // writePluginLifecycleError keeps the frozen bridge answers for the seams.

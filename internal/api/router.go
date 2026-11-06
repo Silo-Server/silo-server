@@ -3100,6 +3100,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2PluginHandler.SetAuthProvidersChanged(deps.OnAuthProvidersChanged)
 		v2deps.AdminPluginInventory = v2PluginHandler
 		v2deps.AdminPluginConfiguration = v2PluginHandler
+		v2deps.AdminPluginPermissions = v2PluginHandler
 		v2deps.AdminPluginLifecycle = v2PluginHandler
 		v2deps.AdminPluginUploads = v2PluginHandler
 		externalSignInPlugins = v2PluginHandler

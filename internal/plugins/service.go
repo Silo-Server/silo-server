@@ -105,6 +105,10 @@ type Service struct {
 	networkAccessStatus   NetworkAccessStatusSink
 	networkAccessNodes    NetworkAccessNodes
 
+	// permissions approves what plugins receive and may call; see
+	// SetPermissions.
+	permissions *PermissionService
+
 	// installationCache memoizes plugin_installations rows keyed by ID so the
 	// hot plugin-RPC path (ensureClient -> loadInstallation) and the metadata
 	// chain enabled-check answer from memory instead of a per-call DB read. It
@@ -135,6 +139,23 @@ func (s *Service) SetEventDispatcher(d *EventDispatcher) {
 	if d != nil {
 		s.lifecycleHooks = slices.Insert(s.lifecycleHooks, 0, func(context.Context) { d.invalidateIndex() })
 	}
+}
+
+// SetPermissions wires the plugin permission service the admin API reads
+// and approves through.
+func (s *Service) SetPermissions(p *PermissionService) {
+	if s != nil {
+		s.permissions = p
+	}
+}
+
+// Permissions returns the plugin permission service, or nil when none is
+// wired.
+func (s *Service) Permissions() *PermissionService {
+	if s == nil {
+		return nil
+	}
+	return s.permissions
 }
 
 // AddLifecycleHook registers a callback invoked after plugin install, enable,

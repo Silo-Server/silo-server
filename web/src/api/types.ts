@@ -4085,6 +4085,8 @@ export interface PluginInstallation {
   repo_url?: string;
   presentation?: PluginPresentation;
   updates_paused: boolean;
+  /** True while the plugin asks for event access or API key scopes not yet approved. */
+  permissions_pending?: boolean;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;

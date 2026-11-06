@@ -50,6 +50,9 @@ type Installation struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	RuntimeGeneration int64 `json:"-"`
+	// HostAPIScopes is the manifest's host_api_scopes: the API key scopes
+	// the plugin asks for, whether or not this server knows or granted them.
+	HostAPIScopes []string `json:"-"`
 }
 
 // IsBuiltin reports whether this is the reserved builtin-host installation.
@@ -83,6 +86,8 @@ type CreateInstallationInput struct {
 	Enabled      bool
 	UpdatePolicy string
 	Capabilities []Capability
+	// HostAPIScopes is the manifest's host_api_scopes.
+	HostAPIScopes []string
 }
 
 type UpdateInstallationInput struct {
@@ -92,6 +97,8 @@ type UpdateInstallationInput struct {
 	UpdatePolicy     *string
 	AvailableVersion *string
 	Capabilities     []Capability
+	// HostAPIScopes replaces the manifest's host_api_scopes when non-nil.
+	HostAPIScopes []string
 	// Restart durably requests a new process on every resident host.
 	Restart bool
 	// SetRepository records RepositoryID as where the installed package now
@@ -127,7 +134,7 @@ func (s *InstallationStore) WithTx(tx pgx.Tx) *InstallationStore {
 	return &InstallationStore{pool: tx}
 }
 
-const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation`
+const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation, host_api_scopes`
 const capabilityColumns = `plugin_installation_id, capability_type, capability_id, metadata, created_at, updated_at`
 const archiveColumns = `plugin_installation_id, manifest_json, checksum, archive_bytes, created_at, updated_at`
 
@@ -147,6 +154,7 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		&installation.CreatedAt,
 		&installation.UpdatedAt,
 		&installation.RuntimeGeneration,
+		&installation.HostAPIScopes,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrInstallationNotFound
@@ -215,8 +223,8 @@ func (s *InstallationStore) Create(ctx context.Context, input CreateInstallation
 	if updatePolicy == "" {
 		updatePolicy = "auto"
 	}
-	query := `INSERT INTO plugin_installations (repository_id, plugin_id, version, install_path, enabled, update_policy)
-		VALUES ($1, $2, $3, $4, $5, $6)
+	query := `INSERT INTO plugin_installations (repository_id, plugin_id, version, install_path, enabled, update_policy, host_api_scopes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING ` + installationColumns
 	installation, err := scanInstallation(tx.QueryRow(
 		ctx,
@@ -227,12 +235,17 @@ func (s *InstallationStore) Create(ctx context.Context, input CreateInstallation
 		input.InstallPath,
 		input.Enabled,
 		updatePolicy,
+		nonNilStrings(input.HostAPIScopes),
 	))
 	if err != nil {
 		return nil, fmt.Errorf("creating plugin installation: %w", err)
 	}
 
 	if err := s.replaceCapabilities(ctx, tx, installation.ID, input.Capabilities); err != nil {
+		return nil, err
+	}
+	// Installing a plugin is consent to the events it subscribes to.
+	if err := ensurePermissionGrant(ctx, tx, installation.ID, capabilityPointers(input.Capabilities)); err != nil {
 		return nil, err
 	}
 
@@ -243,8 +256,12 @@ func (s *InstallationStore) Create(ctx context.Context, input CreateInstallation
 }
 
 func (s *InstallationStore) GetByID(ctx context.Context, id int) (*Installation, error) {
+	return getInstallation(ctx, s.pool, id)
+}
+
+func getInstallation(ctx context.Context, q pgQuerier, id int) (*Installation, error) {
 	query := `SELECT ` + installationColumns + ` FROM plugin_installations WHERE id = $1`
-	return scanInstallation(s.pool.QueryRow(ctx, query, id))
+	return scanInstallation(q.QueryRow(ctx, query, id))
 }
 
 func (s *InstallationStore) List(ctx context.Context) ([]*Installation, error) {
@@ -325,12 +342,24 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 	if installation.IsBuiltin() {
 		return ErrBuiltinInstallationImmutable
 	}
+	return retryOnGrantChange(func() error { return s.update(ctx, id, input) })
+}
 
+// update is one attempt at Update in its own transaction.
+func (s *InstallationStore) update(ctx context.Context, id int, input UpdateInstallationInput) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin update installation transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	if input.HostAPIScopes != nil {
+		// Before the installation row: an uninstall locks the key and the
+		// grant first, then deletes the installation.
+		if err := narrowHostAPIKey(ctx, tx, id, input.HostAPIScopes); err != nil {
+			return err
+		}
+	}
 
 	var setClauses []string
 	var args []any
@@ -369,6 +398,11 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		args = append(args, input.RepositoryID)
 		argIndex++
 	}
+	if input.HostAPIScopes != nil {
+		setClauses = append(setClauses, fmt.Sprintf("host_api_scopes = $%d", argIndex))
+		args = append(args, input.HostAPIScopes)
+		argIndex++
+	}
 
 	if len(setClauses) > 0 {
 		setClauses = append(setClauses, "updated_at = NOW()")
@@ -389,6 +423,11 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 
 	if input.Capabilities != nil {
 		if err := s.replaceCapabilities(ctx, tx, id, input.Capabilities); err != nil {
+			return err
+		}
+		// A replacement keeps an existing grant as it is, so an upgrade that
+		// asks for more waits for an administrator.
+		if err := ensurePermissionGrant(ctx, tx, id, capabilityPointers(input.Capabilities)); err != nil {
 			return err
 		}
 	}
@@ -436,10 +475,14 @@ func (s *InstallationStore) ListEnabledWithCapabilityTypes(ctx context.Context, 
 }
 
 func (s *InstallationStore) ListCapabilities(ctx context.Context, installationID int) ([]*Capability, error) {
+	return listCapabilities(ctx, s.pool, installationID)
+}
+
+func listCapabilities(ctx context.Context, q pgQuerier, installationID int) ([]*Capability, error) {
 	query := `SELECT ` + capabilityColumns + ` FROM plugin_capabilities
 		WHERE plugin_installation_id = $1
 		ORDER BY capability_type ASC, capability_id ASC`
-	rows, err := s.pool.Query(ctx, query, installationID)
+	rows, err := q.Query(ctx, query, installationID)
 	if err != nil {
 		return nil, fmt.Errorf("listing plugin capabilities: %w", err)
 	}
@@ -508,7 +551,22 @@ func (s *InstallationStore) GetArchive(ctx context.Context, installationID int) 
 	return scanArchive(s.pool.QueryRow(ctx, query, installationID))
 }
 
+// Delete removes the installation, its rows and its files. It deletes the
+// host API key the installation's grant names directly, without an audit
+// entry; an administrator's uninstall goes through
+// PermissionService.DeleteInstallation, which audits that deletion.
 func (s *InstallationStore) Delete(ctx context.Context, id int) error {
+	return s.delete(ctx, id, nil)
+}
+
+// hostAPIKeyRevoker deletes an installation's host API key through the
+// issuer, acting as actorID, so the deletion is audited.
+type hostAPIKeyRevoker struct {
+	keys    HostAPIKeyIssuer
+	actorID int
+}
+
+func (s *InstallationStore) delete(ctx context.Context, id int, revoker *hostAPIKeyRevoker) error {
 	installation, err := s.GetByID(ctx, id)
 	if err != nil {
 		return err
@@ -520,19 +578,70 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 		return ErrBuiltinInstallationImmutable
 	}
 
-	tag, err := s.pool.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("deleting plugin installation: %w", err)
+	// The host API key issued to the plugin goes with it, in the same
+	// transaction, so no scoped credential outlives its plugin.
+	var committed func()
+	if err := retryOnGrantChange(func() error {
+		var err error
+		committed, err = s.deleteInstallationRows(ctx, id, revoker)
+		return err
+	}); err != nil {
+		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return ErrInstallationNotFound
-	}
+	committed()
 
 	if err := removeInstallationFiles(ctx, installation); err != nil {
 		return fmt.Errorf("removing plugin installation files: %w", err)
 	}
 
 	return nil
+}
+
+// deleteInstallationRows deletes the installation and the host API key its
+// grant names in one transaction, and returns the hook to run once it has
+// committed. Locking the key and then the grant (lockPermissionGrant) means
+// an approval that lands meanwhile either commits first, and its key is the
+// one deleted, or finds the installation gone and rolls back the key it
+// minted.
+func (s *InstallationStore) deleteInstallationRows(ctx context.Context, id int, revoker *hostAPIKeyRevoker) (func(), error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin delete installation transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if revoker != nil {
+		// Accounts before the key and the grant, the order RevokeTx and
+		// every other key deletion lock them in.
+		if err := revoker.keys.LockAccounts(ctx, tx, revoker.actorID); err != nil {
+			return nil, err
+		}
+	}
+	grant, err := lockPermissionGrant(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	committed := func() {}
+	if grant != nil && grant.APIKeyID != nil {
+		if revoker != nil {
+			committed, err = revoker.keys.RevokeTx(ctx, tx, *grant.APIKeyID)
+		} else {
+			_, err = tx.Exec(ctx, `DELETE FROM api_keys WHERE id = $1`, *grant.APIKeyID)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("deleting plugin host API key: %w", err)
+		}
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, id)
+	if err != nil {
+		return nil, fmt.Errorf("deleting plugin installation: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrInstallationNotFound
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit delete installation transaction: %w", err)
+	}
+	return committed, nil
 }
 
 func (s *InstallationStore) replaceCapabilities(

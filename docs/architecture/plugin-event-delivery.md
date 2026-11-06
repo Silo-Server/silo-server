@@ -60,6 +60,22 @@ The index check happens before queueing, so events no plugin subscribes to
 cost a map lookup and never take a place in the intake queue. An envelope
 keeps its `EventID`.
 
+## Gating by approved access
+
+Every catalog event has an access class (`events.AccessOf`): `public`,
+`admin` or `user_data`. Plugin events are `public`. The subscriber index
+includes a subscriber for an `admin` or `user_data` event only when its
+installation's `plugin_permission_grants` row approves that class; public and
+plugin events need no approval. An installation without a grant receives only
+those. `buildIndex` reads every grant in one query with the enabled
+installations, so gating costs nothing per event.
+
+An approval runs `Service.OnLifecycleChange`, which drops this server's index
+and publishes `plugins_changed`, so every API server rebuilds its index on the
+next event. It restarts no plugin. Installing, the boot pass and approvals are
+the only writers of approved access;
+[plugin-permissions.md](plugin-permissions.md) covers when each one runs.
+
 ## Outbox
 
 The producing server writes one `plugin_event_deliveries` row per
@@ -100,6 +116,9 @@ published while the server drains its requests after its context ended.
 - Catalog payload IDs are strings. Change a producer's ID to a string on the
   events socket and the conversion leaves it alone; add a numeric ID under a
   name other than `id` or `*_id` and projection refuses the event.
+- An `admin` or `user_data` event reaches only installations whose grant
+  approves its class. The check lives in the index, so a stored delivery was
+  approved when its event was produced.
 - A claim must stay a `MATERIALIZED` CTE. As
   `id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` the planner may run the
   subquery more than once and claim more than `n` rows.
@@ -131,7 +150,10 @@ published while the server drains its requests after its context ended.
 - One process sees each event, so a plugin that keeps per-process state
   cannot use events to keep every process's copy current.
 - During a rolling upgrade, servers on older builds still deliver internal
-  event names, unprojected payloads and numeric IDs until they are replaced.
+  event names, unprojected payloads and numeric IDs, and ignore grants, until
+  they are replaced.
+- Gating applies when an event is stored. Deliveries already stored when an
+  approval narrows a grant are still delivered.
 
 ## Plugin contract
 

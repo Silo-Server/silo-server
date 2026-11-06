@@ -551,6 +551,9 @@ export const adminKeys = {
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
+  // Under pluginInstallations so every plugin lifecycle refresh reloads it.
+  pluginPermissions: (installationId: number) =>
+    ["admin", "plugins", "installations", installationId, "permissions"] as const,
   unmatchedItems: (search?: string, ignored = false) =>
     search === undefined
       ? (["admin", "libraries", "unmatchedItems"] as const)

@@ -516,6 +516,12 @@
 # and only the latest claim records the outcome.
 ./internal/plugins TestEventDeliveryOutboxPostgres
 
+# Plugin permissions: installing approves the events a plugin subscribes to, an
+# upgrade never widens that, the boot pass carries existing installations over,
+# an approval issues, keeps, rotates and revokes the host API key, a stored key
+# opens only for its own installation, and uninstalling deletes the key.
+./internal/plugins TestPluginPermissionGrantsPostgres
+
 # A row whose plugin ID or version is "." or ".." never loads. Uninstall drops
 # the row and leaves its files, which can sit above the plugin root, and the
 # installation and user settings lists still answer with the row present.

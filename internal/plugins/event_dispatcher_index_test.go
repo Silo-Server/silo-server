@@ -28,6 +28,26 @@ type countingDispatchStore struct {
 	onListEnabled func()
 	// capabilitiesErr fails ListCapabilities for the listed installations.
 	capabilitiesErr map[int]error
+	// approved is each installation's approved event access; nil approves
+	// every class for every installation.
+	approved map[int][]string
+}
+
+func (s *countingDispatchStore) ApprovedEventAccess(context.Context) (map[int][]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return approvedOrAll(s.approved, s.installations), nil
+}
+
+// approve sets an installation's approved event access, as an administrator's
+// approval on another replica would.
+func (s *countingDispatchStore) approve(installationID int, access ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.approved == nil {
+		s.approved = map[int][]string{}
+	}
+	s.approved[installationID] = access
 }
 
 func (s *countingDispatchStore) ListEnabled(context.Context) ([]*Installation, error) {
@@ -551,5 +571,53 @@ func TestLifecycleChangeIsAnnouncedBeforeSlowHooks(t *testing.T) {
 	svc.OnLifecycleChange(ctx)
 	if want := []string{"announce", "reconcile"}; !reflect.DeepEqual(order, want) {
 		t.Fatalf("lifecycle order = %v, want %v", order, want)
+	}
+}
+
+// TestDispatcherDeliversAdminAndPersonalEventsOnlyWhenApproved covers event
+// gating: a subscription to an admin or user_data event receives nothing until
+// the installation's grant approves that class, and an approval on another
+// replica reaches this one through cache.EventPluginsChanged. Public and plugin
+// events need no approval.
+func TestDispatcherDeliversAdminAndPersonalEventsOnlyWhenApproved(t *testing.T) {
+	ctx := t.Context()
+	bus := newFakeBus()
+	store := &countingDispatchStore{}
+	store.install(&Installation{ID: 1, PluginID: "silo.inbox", Enabled: true},
+		eventConsumer(1, "events", "notification.created", "scan.completed", "catalog.library.changed", "plugin.silo.other.ping"),
+	)
+	store.approve(1)
+	recorder := &deliveryRecorder{}
+	d := NewEventDispatcher(bus, nil, store, recorder, newMemoryDeliveryStore(), 4)
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("start dispatcher: %v", err)
+	}
+	t.Cleanup(d.Stop)
+
+	notification := events.Envelope{Event: "notification.created", EventID: "n1", UserID: 7, ProfileID: "p1",
+		Data: json.RawMessage(`{"id":"d1","type":"episode.available","profile_id":"p1","created_at":"2026-11-04T10:00:00Z"}`)}
+	delivered := func() []string {
+		t.Helper()
+		for _, env := range []events.Envelope{notification, scanCompleted(), mediaAdded(), catalogEnvelope("plugin.silo.other.ping", `{}`)} {
+			d.dispatchEnvelope(ctx, env)
+		}
+		var names []string
+		for _, got := range recorder.take() {
+			names = append(names, got.eventName)
+		}
+		slices.Sort(names)
+		return names
+	}
+
+	if got, want := delivered(), []string{"catalog.library.changed", "plugin.silo.other.ping"}; !slices.Equal(got, want) {
+		t.Fatalf("deliveries without approval = %v, want %v", got, want)
+	}
+
+	store.approve(1, "user_data")
+	if err := bus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventPluginsChanged}); err != nil {
+		t.Fatalf("publish plugins_changed: %v", err)
+	}
+	if got, want := delivered(), []string{"catalog.library.changed", "notification.created", "plugin.silo.other.ping"}; !slices.Equal(got, want) {
+		t.Fatalf("deliveries after approving user_data = %v, want %v", got, want)
 	}
 }

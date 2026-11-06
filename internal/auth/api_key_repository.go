@@ -94,8 +94,7 @@ func (r *APIKeyRepository) Create(ctx context.Context, userID int, label string,
 // refused when CheckOwnerTarget refuses actorID acting on that account. Both
 // accounts stay share-locked, in id order as ownership transfers lock them,
 // until the key is inserted: a promotion or transfer that commits first is
-// what the check sees, and a later promotion of the account, or transfer of
-// ownership to it, deletes the key with the account's other keys. An unknown account passes the check and fails the
+// what the check sees, and a later promotion of the account, or transfer of ownership to it, deletes the key with the account's other keys. An unknown account passes the check and fails the
 // insert, as it does with Create.
 func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID int, label string, scopes []string) (*models.APIKey, error) {
 	tx, err := r.pool.Begin(ctx)
@@ -107,19 +106,52 @@ func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID in
 		defer cancel()
 		_ = tx.Rollback(cleanupCtx)
 	}()
-	// The audit row's accounts, an impersonator included, join that id order.
+	created, committed, err := r.CreateAsActorTx(ctx, tx, actorID, userID, label, scopes)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing api key creation: %w", err)
+	}
+	committed()
+	return created, nil
+}
+
+// CreateAsActorTx is CreateAsActor inside the caller's transaction: the key
+// exists only once tx commits. The caller runs committed after that commit
+// succeeds, which publishes the audit entry, and never runs it otherwise.
+func (r *APIKeyRepository) CreateAsActorTx(ctx context.Context, tx pgx.Tx, actorID, userID int, label string, scopes []string) (*models.APIKey, func(), error) {
+	actor, target, err := lockAPIKeyAccounts(ctx, tx, actorID, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := CheckOwnerTarget(actor, target); err != nil {
+		return nil, nil, err
+	}
+	created, audit, err := insertAPIKeyTx(ctx, tx, userID, label, scopes)
+	if err != nil {
+		return nil, nil, err
+	}
+	return created, func() { auditmutation.CommitMutation(ctx, audit) }, nil
+}
+
+// lockAPIKeyAccounts share-locks the actor, the key's account and the audit
+// row's accounts (an impersonator included) in one id order, and returns
+// what CheckOwnerTarget needs. Account locks come before any key row lock,
+// the order an account deletion takes them in.
+func lockAPIKeyAccounts(ctx context.Context, tx pgx.Tx, actorID, userID int) (OwnerActor, *models.User, error) {
 	rows, err := tx.Query(ctx, `SELECT id, role, is_owner FROM users
 		WHERE id = ANY($1) ORDER BY id FOR SHARE`, append([]int{actorID, userID}, auditmutation.ActorIDs(ctx)...))
 	if err != nil {
-		return nil, fmt.Errorf("locking api key accounts: %w", err)
+		return OwnerActor{}, nil, fmt.Errorf("locking api key accounts: %w", err)
 	}
+	defer rows.Close()
 	actor := OwnerActor{ID: actorID}
 	var target *models.User
 	for rows.Next() {
 		var user models.User
 		if err := rows.Scan(&user.ID, &user.Role, &user.IsOwner); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("scanning api key account: %w", err)
+			return OwnerActor{}, nil, fmt.Errorf("scanning api key account: %w", err)
 		}
 		if user.ID == actorID {
 			actor.IsOwner = user.IsOwner
@@ -128,21 +160,32 @@ func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID in
 			target = &user
 		}
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("locking api key accounts: %w", err)
+		return OwnerActor{}, nil, fmt.Errorf("locking api key accounts: %w", err)
 	}
-	if err := CheckOwnerTarget(actor, target); err != nil {
-		return nil, err
-	}
-	return insertAPIKey(ctx, tx, userID, label, scopes)
+	return actor, target, nil
 }
 
 // insertAPIKey inserts the key and its audit row in tx and commits tx.
 func insertAPIKey(ctx context.Context, tx pgx.Tx, userID int, label string, scopes []string) (*models.APIKey, error) {
-	key, err := generateAPIKey()
+	created, audit, err := insertAPIKeyTx(ctx, tx, userID, label, scopes)
 	if err != nil {
 		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("committing api key creation: %w", err)
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return created, nil
+}
+
+// insertAPIKeyTx inserts the key and its audit row in tx without committing.
+// The returned key carries its bearer, disclosed this once: no ordinary row
+// projection carries it.
+func insertAPIKeyTx(ctx context.Context, tx pgx.Tx, userID int, label string, scopes []string) (*models.APIKey, *auditmutation.Entry, error) {
+	key, err := generateAPIKey()
+	if err != nil {
+		return nil, nil, err
 	}
 	if scopes == nil {
 		scopes = []string{}
@@ -154,20 +197,15 @@ func insertAPIKey(ctx context.Context, tx pgx.Tx, userID int, label string, scop
 
 	created, err := scanAPIKey(tx.QueryRow(ctx, query, userID, label, HashLinkToken(key), key[:11], scopes))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	audit, err := recordAPIKeyMutation(ctx, tx, nil, &models.APIKeyMetadata{ID: created.ID, UserID: created.UserID,
 		Label: created.Label, RateTier: created.RateTier, Scopes: created.Scopes})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("committing api key creation: %w", err)
-	}
-	auditmutation.CommitMutation(ctx, audit)
-	// The bearer is disclosed once. No ordinary row projection carries it.
 	created.Key = key
-	return created, nil
+	return created, audit, nil
 }
 
 // GetByKey looks up an API key by its full key string (including "sa_" prefix).

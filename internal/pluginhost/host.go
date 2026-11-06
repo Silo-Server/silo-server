@@ -58,6 +58,10 @@ type Config struct {
 	// the host starts, revokes it when the process stops, and receives status
 	// pushes. When nil, providers get no token and pushes are dropped.
 	NetworkAccess NetworkAccessBroker
+	// HostAPICredentials answers GetHostAPICredential with the API key
+	// issued for the calling installation. When nil, the RPC is
+	// Unimplemented: proxy nodes issue no keys.
+	HostAPICredentials HostAPICredentialSource
 }
 
 type StartRequest struct {
@@ -89,6 +93,7 @@ type Host struct {
 	instanceState       InstanceStateStore
 	runtimeHostForStart func(context.Context) (HostInfoFunc, InstanceStateStore, error)
 	networkAccess       NetworkAccessBroker
+	hostAPICredentials  HostAPICredentialSource
 
 	mu        sync.RWMutex
 	instances map[int]*instance
@@ -148,6 +153,7 @@ func NewHost(cfg Config) *Host {
 		instanceState:       cfg.InstanceState,
 		runtimeHostForStart: cfg.RuntimeHostForStart,
 		networkAccess:       cfg.NetworkAccess,
+		hostAPICredentials:  cfg.HostAPICredentials,
 		instances:           make(map[int]*instance),
 		starting:            make(map[int]chan struct{}),
 	}
@@ -541,7 +547,7 @@ func (h *Host) stopInstance(instance *instance) {
 // Skipped when no RuntimeHost services are configured.
 func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client, pluginID string, installationID int, provider, ingressToken string, hostInfo HostInfoFunc, instanceState InstanceStateStore) error {
 	if h.eventPublisher == nil && h.libraryLister == nil && h.catalogPresence == nil && h.installedPlugins == nil && h.globalConfigSetter == nil &&
-		hostInfo == nil && instanceState == nil && h.networkAccess == nil {
+		hostInfo == nil && instanceState == nil && h.networkAccess == nil && h.hostAPICredentials == nil {
 		return nil
 	}
 
@@ -564,6 +570,7 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 			HostInfo:              hostInfo,
 			InstanceState:         instanceState,
 			NetworkAccess:         h.networkAccess,
+			HostAPICredentials:    h.hostAPICredentials,
 			Logger:                h.logger,
 			PluginID:              pluginID,
 			InstallationID:        installationID,
@@ -571,6 +578,9 @@ func (h *Host) bindRuntimeHost(ctx context.Context, sdkClient *sdkruntime.Client
 			IngressToken:          ingressToken,
 		})
 		pluginv1.RegisterRuntimeHostServer(s, srv)
+		// The host API credential is its own service on the same
+		// connection, so RuntimeHost's generated interfaces stay unchanged.
+		pluginv1.RegisterHostAPICredentialsServer(s, srv)
 		return s
 	})
 

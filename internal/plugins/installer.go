@@ -304,6 +304,7 @@ func (i *Installer) replaceBinary(
 		Enabled:          &enabled,
 		AvailableVersion: &availableVersion,
 		Capabilities:     capabilities,
+		HostAPIScopes:    nonNilStrings(manifest.GetHostApiScopes()),
 		SetRepository:    true,
 		RepositoryID:     repositoryID,
 	}); err != nil {
@@ -321,6 +322,7 @@ func (i *Installer) replaceBinary(
 	updated.InstallPath = binaryPath
 	updated.Enabled = enabled
 	updated.RepositoryID = repositoryID
+	updated.HostAPIScopes = nonNilStrings(manifest.GetHostApiScopes())
 
 	return &InstallResult{
 		Installation: &updated,
@@ -393,6 +395,7 @@ func (i *Installer) replaceArchive(
 		Enabled:          &enabled,
 		AvailableVersion: &availableVersion,
 		Capabilities:     capabilities,
+		HostAPIScopes:    nonNilStrings(manifest.GetHostApiScopes()),
 		SetRepository:    true,
 		RepositoryID:     repositoryID,
 	}); err != nil {
@@ -410,6 +413,7 @@ func (i *Installer) replaceArchive(
 	updated.InstallPath = binaryPath
 	updated.Enabled = enabled
 	updated.RepositoryID = repositoryID
+	updated.HostAPIScopes = nonNilStrings(manifest.GetHostApiScopes())
 
 	return &InstallResult{
 		Installation: &updated,
@@ -465,11 +469,12 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 	}
 
 	createInput := CreateInstallationInput{
-		PluginID:     manifest.GetPluginId(),
-		Version:      manifest.GetVersion(),
-		InstallPath:  binaryPath,
-		Enabled:      false,
-		Capabilities: capabilities,
+		PluginID:      manifest.GetPluginId(),
+		Version:       manifest.GetVersion(),
+		InstallPath:   binaryPath,
+		Enabled:       false,
+		Capabilities:  capabilities,
+		HostAPIScopes: manifest.GetHostApiScopes(),
 	}
 	if repositoryID != nil {
 		createInput.RepositoryID = *repositoryID
@@ -558,11 +563,12 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, req Install
 	}
 
 	createInput := CreateInstallationInput{
-		PluginID:     manifest.GetPluginId(),
-		Version:      manifest.GetVersion(),
-		InstallPath:  binaryPath,
-		Enabled:      false,
-		Capabilities: capabilities,
+		PluginID:      manifest.GetPluginId(),
+		Version:       manifest.GetVersion(),
+		InstallPath:   binaryPath,
+		Enabled:       false,
+		Capabilities:  capabilities,
+		HostAPIScopes: manifest.GetHostApiScopes(),
 	}
 	if repositoryID != nil {
 		createInput.RepositoryID = *repositoryID

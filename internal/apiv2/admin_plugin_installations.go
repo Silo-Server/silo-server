@@ -237,6 +237,7 @@ type AdminPluginInstallation struct {
 	AuthBindings       []AdminPluginAuthBinding  `json:"auth_bindings"`
 	TaskBindings       []AdminPluginTaskBinding  `json:"task_bindings"`
 	Runtime            AdminPluginRuntime        `json:"runtime"`
+	PermissionsPending bool                      `json:"permissions_pending" doc:"True while the installation asks for event access or host API scopes an administrator hasn't approved; see getAdminPluginInstallationPermissions"`
 	CreatedAt          Instant                   `json:"created_at"`
 	UpdatedAt          Instant                   `json:"updated_at"`
 }
@@ -376,7 +377,16 @@ func adminPluginRuntimeOf(v *handlers.PluginRuntimeView) AdminPluginRuntime {
 	return out
 }
 
-func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView) (AdminPluginInstallation, error) {
+// adminPluginInstallationOne projects one installation a mutation returned.
+func (reg *Registry) adminPluginInstallationOne(ctx context.Context, v handlers.PluginInstallationView) (AdminPluginInstallation, error) {
+	pending, err := reg.adminPluginPermissionsPending(ctx, v.ID)
+	if err != nil {
+		return AdminPluginInstallation{}, err
+	}
+	return reg.adminPluginInstallationOf(v, pending)
+}
+
+func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView, permissionsPending bool) (AdminPluginInstallation, error) {
 	caps, err := adminPluginCapabilitiesOf(v.Capabilities)
 	if err != nil {
 		return AdminPluginInstallation{}, err
@@ -389,7 +399,7 @@ func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView
 	if err != nil {
 		return AdminPluginInstallation{}, err
 	}
-	out := AdminPluginInstallation{ID: IDFromInt(int64(v.ID)), PluginID: v.PluginID, Version: v.Version, InstallPath: v.InstallPath, Enabled: v.Enabled, Kind: v.Kind, UpdatePolicy: v.UpdatePolicy, SourceKind: v.SourceKind, RepositoryName: v.RepositoryName, RepoURL: v.RepoURL, Presentation: adminPluginPresentationOf(v.Presentation), UpdatesPaused: v.UpdatesPaused, Capabilities: caps, GlobalConfigSchema: global, UserConfigSchema: user, Routes: pluginRoutesOf(v.Routes), Assets: pluginAssetsOf(v.Assets), Metadata: NonNilMap(PluginJSONValue(v.Metadata)), GlobalConfigs: make([]AdminPluginConfigValue, 0, len(v.GlobalConfigs)), AuthBindings: make([]AdminPluginAuthBinding, 0, len(v.AuthBindings)), TaskBindings: make([]AdminPluginTaskBinding, 0, len(v.TaskBindings)), Runtime: adminPluginRuntimeOf(v.Runtime), CreatedAt: NewInstant(v.CreatedAt), UpdatedAt: NewInstant(v.UpdatedAt)}
+	out := AdminPluginInstallation{ID: IDFromInt(int64(v.ID)), PluginID: v.PluginID, Version: v.Version, InstallPath: v.InstallPath, Enabled: v.Enabled, Kind: v.Kind, UpdatePolicy: v.UpdatePolicy, SourceKind: v.SourceKind, RepositoryName: v.RepositoryName, RepoURL: v.RepoURL, Presentation: adminPluginPresentationOf(v.Presentation), UpdatesPaused: v.UpdatesPaused, Capabilities: caps, GlobalConfigSchema: global, UserConfigSchema: user, Routes: pluginRoutesOf(v.Routes), Assets: pluginAssetsOf(v.Assets), Metadata: NonNilMap(PluginJSONValue(v.Metadata)), GlobalConfigs: make([]AdminPluginConfigValue, 0, len(v.GlobalConfigs)), AuthBindings: make([]AdminPluginAuthBinding, 0, len(v.AuthBindings)), TaskBindings: make([]AdminPluginTaskBinding, 0, len(v.TaskBindings)), Runtime: adminPluginRuntimeOf(v.Runtime), PermissionsPending: permissionsPending, CreatedAt: NewInstant(v.CreatedAt), UpdatedAt: NewInstant(v.UpdatedAt)}
 	if v.RepositoryID != nil {
 		out.RepositoryID = new(IDFromInt(int64(*v.RepositoryID)))
 	}
@@ -521,6 +531,12 @@ func registerAdminPluginInventory(reg *Registry) {
 			seen[r.ID] = true
 		}
 		slices.SortFunc(rows, func(a, b handlers.PluginInstallationView) int { return cmp.Compare(a.ID, b.ID) })
+		pending := map[int]bool{}
+		if svc := reg.deps.AdminPluginPermissions; svc != nil {
+			if pending, err = svc.AdminPluginPermissionsPending(ctx); err != nil {
+				return nil, serviceProblem(err)
+			}
+		}
 		items := make([]AdminPluginInstallation, 0, in.Limit)
 		next := ""
 		last := 0
@@ -535,7 +551,7 @@ func registerAdminPluginInventory(reg *Registry) {
 				}
 				break
 			}
-			item, err := reg.adminPluginInstallationOf(r)
+			item, err := reg.adminPluginInstallationOf(r, pending[r.ID])
 			if err != nil {
 				return nil, serviceProblem(err)
 			}

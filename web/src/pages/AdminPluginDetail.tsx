@@ -20,6 +20,10 @@ import {
   PluginDetailRail,
   PluginSettingsPanels,
 } from "@/components/admin/plugins/PluginDetailSections";
+import {
+  PLUGIN_PERMISSIONS_PANEL_ID,
+  PluginPermissionsPanel,
+} from "@/components/admin/plugins/PluginPermissionsPanel";
 import type { PluginPageLinkState } from "@/components/admin/plugins/PluginTile";
 import { PluginMonogram, PluginStatusLabel } from "@/components/admin/plugins/PluginVisuals";
 import {
@@ -479,6 +483,24 @@ function InstalledPluginPage({
         </Banner>
       ) : null}
 
+      {installation.permissions_pending ? (
+        <Banner
+          tone="warning"
+          icon={
+            <AlertTriangle aria-hidden="true" className="text-warning mt-0.5 size-4 shrink-0" />
+          }
+        >
+          <p>
+            <strong className="font-semibold">{name} asks for new permissions.</strong> It keeps
+            what you approved before until you{" "}
+            <a href={`#${PLUGIN_PERMISSIONS_PANEL_ID}`} className="underline underline-offset-4">
+              review and approve them
+            </a>
+            .
+          </p>
+        </Banner>
+      ) : null}
+
       {installation.updates_paused ? (
         <Banner
           tone="info"
@@ -506,6 +528,7 @@ function InstalledPluginPage({
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start">
         <div className="flex min-w-0 flex-col gap-3.5">
+          <PluginPermissionsPanel installationId={installation.id} />
           <PluginSettingsPanels
             installation={installation}
             missingKeys={new Set(missing.map((entry) => entry.key))}

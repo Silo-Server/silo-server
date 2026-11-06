@@ -224,6 +224,8 @@ export const v2Operations = {
   "GET /api/v2/admin/plugins/catalog-settings": "getAdminPluginCatalogSettings",
   "GET /api/v2/admin/plugins/catalog-status": "getAdminPluginCatalogStatus",
   "GET /api/v2/admin/plugins/installations": "listAdminPluginInstallations",
+  "GET /api/v2/admin/plugins/installations/{id}/permissions":
+    "getAdminPluginInstallationPermissions",
   "GET /api/v2/admin/plugins/repositories": "listAdminPluginRepositories",
   "GET /api/v2/admin/policy/decisions": "listAdminPolicyDecisions",
   "GET /api/v2/admin/policy/decisions/{id}": "getAdminPolicyDecision",
@@ -920,6 +922,8 @@ export const v2Operations = {
   "PUT /api/v2/admin/plugins/installations/{id}": "updateAdminPluginInstallation",
   "PUT /api/v2/admin/plugins/installations/{id}/auth-binding": "updateAdminPluginAuthBinding",
   "PUT /api/v2/admin/plugins/installations/{id}/config": "updateAdminPluginInstallationConfig",
+  "PUT /api/v2/admin/plugins/installations/{id}/permissions/approval":
+    "approveAdminPluginInstallationPermissions",
   "PUT /api/v2/admin/plugins/installations/{id}/task-bindings/{capability_id}":
     "updateAdminPluginTaskBinding",
   "PUT /api/v2/admin/plugins/repositories/{id}": "updateAdminPluginRepository",

@@ -3961,6 +3961,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/plugins/installations/{id}/permissions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read what one installation asks to receive and call, and what an administrator approved: the event access classes its subscriptions need, the host API scopes its manifest requests, and the host API key issued for them. The key itself is never returned. The ETag validates the whole representation; approving requires it. The reserved builtin row is 409. */
+    get: operations["getAdminPluginInstallationPermissions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/plugins/installations/{id}/permissions/approval": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Approve everything the installation asks for now, as the acting administrator. If-Match must carry the ETag of the permissions read the administrator approved; the server compares it with the permissions inside the approval's transaction, so a plugin update that asks for more, or another approval, landing in between is 412 with the current ETag and changes nothing. When the installation requests host API scopes this server knows and has no usable key with exactly those, a key acting as the acting administrator is issued and the previous key revoked in the same transaction; when it requests none, its key is revoked. The event subscriber index rebuilds on every server; the plugin is not restarted. */
+    put: operations["approveAdminPluginInstallationPermissions"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/plugins/installations/{id}/restart": {
     parameters: {
       query?: never;
@@ -19881,6 +19915,12 @@ export interface components {
       message: string;
       success: boolean;
     };
+    AdminPluginEventAccess: {
+      /** @description Access classes an administrator approved. The plugin receives events of these classes and of no others that need approval. */
+      approved: ("admin" | "user_data")[];
+      /** @description Access classes of the events the plugin subscribes to that need approval: admin (server operations such as playback activity, scans and jobs) and user_data (one profile's personal data, such as its notifications). Public and plugin events need none. The vocabulary is open: ignore a class you don't know. */
+      required: ("admin" | "user_data")[];
+    };
     AdminPluginForm: {
       fields: components["schemas"]["AdminPluginFormField"][];
       sections: components["schemas"]["AdminPluginFormSection"][];
@@ -19927,6 +19967,32 @@ export interface components {
       min_length: number;
       pattern?: string;
     };
+    AdminPluginHostAPIKey: {
+      /**
+       * @description The key on the API keys page, where it can be revoked; omitted while none is issued
+       * @example 1
+       */
+      id?: string;
+      /** @description True while a host API key is issued to the plugin */
+      issued: boolean;
+      /**
+       * @description The account the key acts as: the administrator whose approval issued it. It stops working if that account loses the admin role or is disabled, and is deleted with the account. Omitted while none is issued
+       * @example 1
+       */
+      owner_user_id?: string;
+      /** @description True while the issued key can act for the plugin. False when none is issued, when the account it acts as is no longer an enabled administrator, or when this server can't read it (it was stored under another SECRET_KEY). An unusable key grants nothing: the plugin is pending and an approval issues a replacement */
+      usable: boolean;
+    };
+    AdminPluginHostAPIScopes: {
+      /** @description Scopes the plugin's usable host API key carries; empty while none is usable, including after the key was revoked or its account lost the admin role */
+      approved: string[];
+      /** @description The manifest's host_api_scopes */
+      requested: string[];
+      /** @description The requested scopes this server can issue */
+      required: string[];
+      /** @description The requested scopes this server doesn't know; they are never granted */
+      unsupported: string[];
+    };
     AdminPluginInstallation: {
       assets: components["schemas"]["PluginAsset"][];
       auth_bindings: components["schemas"]["AdminPluginAuthBinding"][];
@@ -19950,6 +20016,8 @@ export interface components {
       metadata: {
         [key: string]: unknown;
       };
+      /** @description True while the installation asks for event access or host API scopes an administrator hasn't approved; see getAdminPluginInstallationPermissions */
+      permissions_pending: boolean;
       plugin_id: string;
       presentation?: components["schemas"]["AdminPluginPresentation"];
       /** Format: uri-reference */
@@ -19994,6 +20062,28 @@ export interface components {
        */
       repository_id?: string;
       version?: string;
+    };
+    AdminPluginPermissions: {
+      /**
+       * Format: date-time
+       * @description The last explicit approval; omitted when none was given, such as when event access was approved by installing the plugin
+       */
+      approved_at?: string;
+      /**
+       * @description The administrator who gave the last explicit approval; omitted when none was given or the account was deleted
+       * @example 1
+       */
+      approved_by_user_id?: string;
+      event_access: components["schemas"]["AdminPluginEventAccess"];
+      host_api_key: components["schemas"]["AdminPluginHostAPIKey"];
+      host_api_scopes: components["schemas"]["AdminPluginHostAPIScopes"];
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      installation_id: string;
+      /** @description True while the plugin asks for event access or host API scopes that aren't approved. It keeps what was approved before until an administrator approves the rest */
+      pending: boolean;
     };
     AdminPluginPresentation: {
       /** Format: uri-reference */
@@ -71994,6 +72084,293 @@ export interface operations {
       };
       /** @description Unprocessable Entity */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminPluginInstallationPermissions: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPluginPermissions"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  approveAdminPluginInstallationPermissions: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The resource's current ETag, or "*" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag. */
+        "If-Match": string;
+        /** @description Optional second precondition, evaluated after If-Match succeeds: "*" or any tag matching the current representation is 412 precondition_failed with the current ETag. */
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Opaque identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPluginPermissions"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Required */
+      428: {
         headers: {
           [name: string]: unknown;
         };
