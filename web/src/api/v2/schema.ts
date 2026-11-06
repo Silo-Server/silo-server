@@ -2521,6 +2521,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/items/{id}/match/hints": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the title, year, and provider IDs the scanner parsed from an authorized catalog item's folder and file names. */
+    get: operations["getAdminItemMatchHints"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/items/{id}/match/search": {
     parameters: {
       query?: never;
@@ -15513,6 +15530,8 @@ export interface components {
        * @description Most content_ids one listAdminCatalogItems request accepts
        */
       item_listing_max_content_ids: number;
+      /** @description getAdminItemMatchHints is served: the title, year and provider IDs the scanner parsed from an item's folder and file names */
+      item_match_hints: boolean;
       /** @description listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people */
       item_metadata: boolean;
       /** @description Opaque revision of this document */
@@ -18746,6 +18765,19 @@ export interface components {
       candidates: components["schemas"]["MatchCandidate"][];
       /** @description More candidates were returned by providers; refine the search to narrow results. */
       truncated: boolean;
+    };
+    AdminMatchHints: {
+      /** @description Provider IDs tagged in the folder or file name, keyed by provider (tmdb, imdb, tvdb); empty, never null. */
+      provider_ids: {
+        [key: string]: string;
+      };
+      /** @description Title the scanner parsed from the folder or file name; empty when it found none. */
+      title: string;
+      /**
+       * Format: int64
+       * @description Year the scanner parsed from the folder or file name; 0 when it found none.
+       */
+      year: number;
     };
     AdminMatchSearchBody: {
       imdb_id?: string;
@@ -60410,6 +60442,117 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminItemMatchHints: {
+    parameters: {
+      query?: {
+        /** @description Library to read; required for an item in several libraries. */
+        library_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminMatchHints"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };

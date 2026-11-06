@@ -195,6 +195,7 @@ GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
 POST /api/v2/admin/items/{id}/images/upload	non-media
 POST /api/v2/admin/items/{id}/match/apply	non-media
+GET /api/v2/admin/items/{id}/match/hints	non-media
 POST /api/v2/admin/items/{id}/match/search	non-media
 POST /api/v2/admin/items/{id}/merge	non-media
 PATCH /api/v2/admin/items/{id}/metadata	non-media
@@ -1549,6 +1550,7 @@ GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
 POST /api/v2/admin/items/{id}/images/upload	non-media
 POST /api/v2/admin/items/{id}/match/apply	non-media
+GET /api/v2/admin/items/{id}/match/hints	non-media
 POST /api/v2/admin/items/{id}/match/search	non-media
 POST /api/v2/admin/items/{id}/merge	non-media
 PATCH /api/v2/admin/items/{id}/metadata	non-media
