@@ -380,7 +380,13 @@ to the plugin service, so neither package imports the other.
   `PluginDestinationFilter` selects them (request updates use
   `notify_requests`). Nothing is enqueued until the plugin runtime is wired,
   or for a destination whose channel no enabled plugin provides: it lists as
-  unavailable and gets nothing until its plugin is back.
+  unavailable and gets nothing until its plugin is back. Which channels are
+  available is read through the pool, so each server refreshes that set
+  before the enqueueing transaction begins, at most every 30 seconds
+  (`pluginChannelCacheTTL`). Within that window a just-removed plugin's
+  destination can still get an attempt, and when the read fails every
+  enabled destination does; the send finds no plugin and retries on the
+  schedule, so the delivery isn't lost.
 - **Send.** `plugin_destination_delivery_attempts` follows the webhook
   outbox: a claim lease, a sweep for due retries and stranded pending rows,
   and the webhook retry schedule. A claim holds at most 10 attempts and the
