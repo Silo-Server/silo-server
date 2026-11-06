@@ -3,6 +3,7 @@ package watchtogether
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -106,5 +107,68 @@ func TestRoomStartsWithAndSavesHostGuestControlPolicy(t *testing.T) {
 	}
 	if len(saved.saved) != 1 || saved.saved[0] != GuestControlPolicyGuestPlayPause {
 		t.Fatalf("saved = %v, want only the host's stored change", saved.saved)
+	}
+}
+
+func TestGuestControlPolicySaveKeepsRoomsLatestPolicyPG(t *testing.T) {
+	pool := selectionPG(t)
+	repo := NewRepository(pool)
+	room := baseRoom(time.Now().UTC())
+	room.GuestControlPolicy = GuestControlPolicyGuestPlayPause
+	if _, err := repo.CreateRoom(t.Context(), room); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var saved []GuestControlPolicy
+	record := func(policy GuestControlPolicy) {
+		mu.Lock()
+		saved = append(saved, policy)
+		mu.Unlock()
+	}
+
+	// Server A has read guest_play_pause and is slow to save it.
+	aRead, releaseA, aDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseA) }) }
+	// Runs before the pool closes, so a failed wait cannot leave A's
+	// transaction holding the pool open.
+	t.Cleanup(release)
+	go func() {
+		aDone <- repo.saveCommittedGuestControlPolicy(t.Context(), room.ID, 7, "host", func(policy GuestControlPolicy) error {
+			close(aRead)
+			<-releaseA
+			record(policy)
+			return nil
+		})
+	}()
+	<-aRead
+	// Server B commits host_only and saves while A is still pending.
+	if _, err := pool.Exec(t.Context(), `UPDATE watch_together_rooms SET guest_control_policy='host_only' WHERE id=$1`, room.ID); err != nil {
+		t.Fatal(err)
+	}
+	bDone := make(chan error, 1)
+	go func() {
+		bDone <- repo.saveCommittedGuestControlPolicy(t.Context(), room.ID, 7, "host", func(policy GuestControlPolicy) error {
+			record(policy)
+			return nil
+		})
+	}()
+	// B waits on the profile's lock rather than reading ahead of A's save.
+	deadline := time.Now().Add(5 * time.Second)
+	for waiting := 0; waiting == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("second save did not wait for the first")
+		}
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity
+ WHERE application_name = current_setting('application_name') AND wait_event_type = 'Lock' AND wait_event = 'advisory'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release()
+	if err := errors.Join(<-aDone, <-bDone); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 2 || saved[1] != GuestControlPolicyHostOnly {
+		t.Fatalf("saves = %v, want the room's latest policy (host_only) saved last", saved)
 	}
 }

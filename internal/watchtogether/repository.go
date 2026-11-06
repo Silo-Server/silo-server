@@ -22,12 +22,31 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-// committedGuestControlPolicy reads the room's committed guest-control policy
-// from the pool, outside any room operation's transaction.
-func (r *Repository) committedGuestControlPolicy(ctx context.Context, roomID string) (GuestControlPolicy, error) {
+// saveCommittedGuestControlPolicy hands the room's committed guest-control
+// policy to save while holding a cluster-wide lock on the host profile's saved
+// choice. Every save reads the room after its own change committed, and the
+// lock orders the reads with the saves, so the save that runs last always
+// carries the room's latest policy whichever server ran it.
+func (r *Repository) saveCommittedGuestControlPolicy(
+	ctx context.Context, roomID string, userID int, profileID string, save func(GuestControlPolicy) error,
+) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	lock := fmt.Sprintf("watch_together.guest_control_policy:%d:%s", userID, profileID)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lock); err != nil {
+		return err
+	}
 	var policy GuestControlPolicy
-	err := r.pool.QueryRow(ctx, `SELECT guest_control_policy FROM watch_together_rooms WHERE id=$1`, roomID).Scan(&policy)
-	return policy, err
+	if err := tx.QueryRow(ctx, `SELECT guest_control_policy FROM watch_together_rooms WHERE id=$1`, roomID).Scan(&policy); err != nil {
+		return err
+	}
+	if err := save(policy); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *Repository) CreateRoom(ctx context.Context, room Room) (*Room, error) {
