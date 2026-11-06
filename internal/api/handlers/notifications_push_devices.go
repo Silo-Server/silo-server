@@ -60,6 +60,7 @@ func (h *NotificationsHandler) HandleRegisterApplePushDevice(w http.ResponseWrit
 		APNsEnvironment: req.APNsEnvironment,
 		APNsTopic:       req.APNsTopic,
 		PushMode:        req.PushMode,
+		LoginSessionID:  pushRegistrationLoginSession(r),
 	})
 	if err != nil {
 		switch {
@@ -128,9 +129,10 @@ func (h *NotificationsHandler) HandleRegisterPushDevice(w http.ResponseWriter, r
 	}
 
 	device, err := service.RegisterFCM(r.Context(), apimw.GetUserID(r.Context()), apimw.GetProfileID(r.Context()), notifications.FCMPushRegistrationInput{
-		DeviceID: req.DeviceID,
-		FCMToken: req.Token,
-		PushMode: req.PushMode,
+		DeviceID:       req.DeviceID,
+		FCMToken:       req.Token,
+		PushMode:       req.PushMode,
+		LoginSessionID: pushRegistrationLoginSession(r),
 	})
 	if err != nil {
 		switch {
@@ -180,4 +182,13 @@ func (h *NotificationsHandler) HandleUnregisterPushDevice(w http.ResponseWriter,
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// pushRegistrationLoginSession names the login session registering a device;
+// empty for an API key.
+func pushRegistrationLoginSession(r *http.Request) string {
+	if claims := apimw.GetClaims(r.Context()); claims != nil {
+		return claims.SessionID
+	}
+	return ""
 }

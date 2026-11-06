@@ -97,6 +97,49 @@ shared Keychain access group) and clear it on sign-out, server removal, or
 profile change. The server revokes it implicitly when the login session is
 revoked or expires.
 
+## Delivery follows the login
+
+A registration records the login session that made it. Once that session ends,
+by sign-out, revocation, a password change, an admin, or expiry, the server sends
+nothing more to the device, including attempts already queued, which fail with
+reason `login_session_ended`. Notification retention then deletes the registration
+and its token. The next sign-in registers again at a newer generation.
+
+A registration with no recorded session keeps delivering: an API key has none, and
+neither does a registration made before the server recorded them. An Apple client
+fills it in when it renews its display token, which can be weeks later. An Android
+client registers once more at a newer generation when capabilities report
+`binds_login_session`, because a replay of its current generation records nothing.
+A registration stays unbound until then.
+
+A device that is already signed out can never fill it in, so notification retention
+also deletes an unbound registration when the device has no live login. Because
+deleting a working phone's registration stops its push until its next sign-in, it
+does this only when all of these hold:
+
+- The account holds no API key.
+- No live login, on any account, names the device.
+- Either the account has no live login at all, or, for Apple, a login of this account
+  naming the device was live at the registration's last write and has ended, and no
+  live login of the account lacks a device ID.
+
+A full restore carries registrations but no logins, so the first retention run after
+one deletes every unbound registration on an account that has not signed in again and
+holds no API key. Those phones have to sign in again anyway, and that registers them.
+
+Some signed-out phones can't be told apart from working ones, so they stay unbound
+and keep delivering until they sign in again or the conditions above start to hold:
+
+- An Android login does not name its push device, so an Android registration on an
+  account still signed in anywhere else waits until that account's last login ends.
+- The Apple condition needs the ended login's row, which cleanup deletes once the
+  login's expiry passes. An Apple phone on an account signed in elsewhere is not
+  matched if that row is gone or names no device, or if another live login of the
+  account names no device.
+
+The device IDs read here are client-supplied and authorize nothing; this sweep only
+uses them as evidence, and only to stop push to the account's own registrations.
+
 ## Reset after a lost installation key
 
 The server binds an Apple installation (`device_id`) to the installation key and
@@ -242,8 +285,9 @@ the same way.
 ## Ordered Android registration
 
 `GET /api/v2/notifications/push/devices/capabilities` reports `platforms`
-(`["android"]`) and `registration_available`, which says whether local registration
-storage is configured. It requires the acting login/profile. `registration_available`
+(`["android"]`), `binds_login_session` (see "Delivery follows the login"), and
+`registration_available`, which says whether local registration storage is
+configured. It requires the acting login/profile. `registration_available`
 is independent of relay delivery availability; use notification capabilities
 for delivery configuration. Apple registration and browser web push remain
 separate contracts.
@@ -378,9 +422,9 @@ which serializes bridge writers and ordered v2 writers across API nodes.
 
 An older client switching accounts can therefore receive a conflict while the
 previous account's destination remains registered. Repeating registration does
-not resolve it, and neither does signing out or revoking the owning account's
-sessions. The conflict clears only when the owning account unregisters that
-device, or when the owning profile or account is deleted. Ordered bootstrap must
+not resolve it. The conflict clears when the owning account unregisters that
+device, when the owning profile or account is deleted, or when notification
+retention removes the registration because its login session ended. Ordered bootstrap must
 occur while that existing account is selected; subsequent account transfers
 require its installation key and a newer generation. This repair adds no
 recovery or automatic rebinding mechanism.

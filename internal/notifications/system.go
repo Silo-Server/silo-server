@@ -807,7 +807,11 @@ type RetentionStats struct {
 	InterestPruned           int64
 	WebhookAttemptsDeleted   int64
 	WebPushAttemptsDeleted   int64
-	DiscordLinkStatesDeleted int64
+	PushRegistrationsDeleted int64
+	// UnboundPushRegistrationsDeleted counts registrations from before
+	// login_session_id whose device has no live login.
+	UnboundPushRegistrationsDeleted int64
+	DiscordLinkStatesDeleted        int64
 	// Email verification outbox: payloads dropped from terminal rows whose
 	// link expired, and receipt rows deleted past the retention window.
 	EmailVerificationPayloadsRetired int64
@@ -817,7 +821,8 @@ type RetentionStats struct {
 // RunRetention applies the retention policy: read deliveries past the read
 // window, unread past the unread window, processed release events past the
 // debug window, unprocessed release events past the fanout staleness horizon,
-// and inert interest rows.
+// inert interest rows, and push registrations whose login ended or, for one with
+// no recorded login, whose device has no live one.
 func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	var stats RetentionStats
 	now := time.Now().UTC()
@@ -865,6 +870,18 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 			return stats, fmt.Errorf("prune web push attempts: %w", err)
 		}
 		stats.WebPushAttemptsDeleted = attempts
+	}
+	if s.pushDeviceRepo != nil {
+		registrations, err := s.pushDeviceRepo.DeleteEndedLoginRegistrations(ctx)
+		if err != nil {
+			return stats, fmt.Errorf("prune push registrations of ended logins: %w", err)
+		}
+		stats.PushRegistrationsDeleted = registrations
+		unbound, err := s.pushDeviceRepo.DeleteRegistrationsWithNoLogin(ctx)
+		if err != nil {
+			return stats, fmt.Errorf("prune unbound push registrations: %w", err)
+		}
+		stats.UnboundPushRegistrationsDeleted = unbound
 	}
 	if s.DiscordPrefs != nil {
 		states, err := s.DiscordPrefs.DeleteExpiredLinkStates(ctx)
