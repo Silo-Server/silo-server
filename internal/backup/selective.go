@@ -368,7 +368,7 @@ func (s *Service) openRestoreSet(ctx context.Context, located locatedSource, ext
 	}
 	rs, err := readStoredRestoreSet(ctx, body, opts, located.digest, mismatch)
 	if err != nil {
-		if errors.Is(err, ErrRestoreSetTooNew) || ctx.Err() != nil {
+		if errors.Is(err, ErrRestoreSetTooNew) || errors.Is(err, ErrNotEnoughTempSpace) || ctx.Err() != nil {
 			return nil, err
 		}
 		return nil, &InvalidRestoreSetError{Err: err}
@@ -377,17 +377,17 @@ func (s *Service) openRestoreSet(ctx context.Context, located locatedSource, ext
 }
 
 // previewSet returns a source's validated restore set for a preview,
-// sharing one read among previews of the same archive (restoreSetCache).
-// A source this server cannot authenticate is read only with the admin's
-// confirmation (accept); without it nothing inside the archive is parsed
-// (ErrUnauthenticated).
-func (s *Service) previewSet(ctx context.Context, src restoreSource, accept bool) (*RestoreSet, bool, error) {
+// sharing one read among previews of the same archive (restoreSetCache),
+// and the release the caller runs once done with it. A source this server
+// cannot authenticate is read only with the admin's confirmation (accept);
+// without it nothing inside the archive is parsed (ErrUnauthenticated).
+func (s *Service) previewSet(ctx context.Context, src restoreSource, accept bool) (*RestoreSet, func(), bool, error) {
 	located, err := s.locateConfirmed(ctx, src, accept)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	rs, err := s.cachedSet(ctx, located)
-	return rs, located.authenticated, err
+	rs, release, err := s.cachedSet(ctx, located)
+	return rs, release, located.authenticated, err
 }
 
 // locateConfirmed is locate, refusing a source this server cannot
@@ -403,8 +403,9 @@ func (s *Service) locateConfirmed(ctx context.Context, src restoreSource, accept
 	return located, nil
 }
 
-// cachedSet is the located restore set as previews share it.
-func (s *Service) cachedSet(ctx context.Context, located locatedSource) (*RestoreSet, error) {
+// cachedSet is the located restore set as previews share it, with the
+// release of the caller's reference (restoreSetCache.get).
+func (s *Service) cachedSet(ctx context.Context, located locatedSource) (*RestoreSet, func(), error) {
 	return s.restoreSets.get(ctx, located.digest, func(ctx context.Context) (*RestoreSet, error) {
 		rs, err := s.openRestoreSet(ctx, located, nil)
 		if rs != nil {

@@ -430,18 +430,13 @@ export function backUpNowBlocker({
 
 /**
  * What to tell the admin when a backup action fails. The server's own detail
- * says what happened; this adds what to do about it. A plain conflict means
- * another backup or restore holds the lock, except on the SQLite user store,
- * whose conflict detail already says what to do.
+ * says what happened and what to do about it.
  */
-export function backupErrorMessage(error: unknown, { sqliteUserStore = false } = {}): string {
+export function backupErrorMessage(error: unknown): string {
   if (!(error instanceof V2ProblemError)) {
     return "The server didn't answer. Check that Silo is running, then try again.";
   }
   if (error.status === 404) return "That backup no longer exists. The list is refreshing.";
-  if (error.status === 409 && error.problemType === "conflict" && !sqliteUserStore) {
-    return `${error.message} Try again when it finishes.`;
-  }
   return error.message;
 }
 

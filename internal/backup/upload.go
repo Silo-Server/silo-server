@@ -630,6 +630,13 @@ func (s *Service) CompleteUpload(ctx context.Context, id string) (UploadSession,
 		}
 		return UploadSession{}, fmt.Errorf("reading the upload: %w", err)
 	}
+	// The set's directory goes with it unless the cache takes it.
+	cached := false
+	defer func() {
+		if !cached {
+			rs.Cleanup()
+		}
+	}()
 	if rejection != nil {
 		if err := s.rejectUpload(ctx, held, id, *rejection); err != nil {
 			return UploadSession{}, err
@@ -647,6 +654,7 @@ func (s *Service) CompleteUpload(ctx context.Context, id string) (UploadSession,
 		return UploadSession{}, ErrUploadCheckTakenOver
 	}
 	// The first preview needs exactly this read.
+	cached = true
 	s.restoreSets.store(rs.Digest, rs)
 	return s.Upload(ctx, id)
 }
@@ -819,6 +827,7 @@ func (s *Service) checkUpload(ctx context.Context, parts *partsReader, declared 
 		return nil, &UploadRejection{Reason: RejectNotRestoreSet, Message: truncateRejection(err.Error())}, nil
 	case declared != "" && declared != rs.Digest:
 		// Changed between the hash and the read.
+		rs.Cleanup()
 		return nil, &UploadRejection{Reason: RejectChecksum, Message: msgUploadChecksum}, nil
 	}
 	return rs, nil, nil

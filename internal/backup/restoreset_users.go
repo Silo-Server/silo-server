@@ -561,13 +561,13 @@ const (
 func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 	for _, id := range p.itemIDs(spec) {
 		name := spec.itemDir + id + spec.itemExt
-		var doc UserDocument
-		ok, err := p.document(name, &doc)
-		if err != nil {
-			return 0, err
-		}
+		file, ok := p.userFiles[name]
 		if !ok {
 			return 0, fmt.Errorf("%s is missing", name)
+		}
+		doc, err := decodeUserFile(file, p.files[name].SHA256)
+		if err != nil {
+			return 0, fmt.Errorf("%s: %w", name, err)
 		}
 		label := doc.Account.Username
 		if label == "" {
@@ -577,12 +577,7 @@ func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 			p.unusable(SectionUsers, KindAccount, label, "Its document names another account than its file.")
 			continue
 		}
-		// Bounds first: validation may clear what it locks.
-		err = userdata.CheckBounds(&doc)
-		var blobs []string
-		if err == nil {
-			blobs, err = validateUserDocument(&doc)
-		}
+		blobs, err := checkUserDocument(doc)
 		if err != nil {
 			p.unusable(SectionUsers, KindAccount, label, truncateText("It cannot be restored: "+err.Error(), 500))
 			continue
@@ -596,7 +591,8 @@ func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 			p.rs.accountBlobs = map[string][]string{}
 		}
 		p.rs.accountBlobs[id] = blobs
-		p.rs.Users = append(p.rs.Users, doc)
+		p.rs.Users = append(p.rs.Users, UserRef{Account: doc.Account, file: file, sha256: p.files[name].SHA256})
+		p.rs.metadataBytes += userRefCost
 	}
 	return len(p.itemIDs(spec)), nil
 }
