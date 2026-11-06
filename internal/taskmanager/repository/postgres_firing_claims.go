@@ -11,7 +11,7 @@ import (
 
 // firingClaimRetention is how long a claim is kept when its window is
 // shorter: longer than a weekly trigger's period, so a slot is never claimed
-// twice.
+// twice. A claim with a longer window is kept for that window.
 const firingClaimRetention = 8 * 24 * time.Hour
 
 // PgFiringClaims implements taskmanager.FiringClaims on task_firing_claims.
@@ -27,9 +27,11 @@ func NewPgFiringClaims(pool *pgxpool.Pool) *PgFiringClaims {
 // of one task run one at a time, then inserts the claim unless one exists at
 // slot or within window. The row, not the lock, is what a later firing on
 // another server checks, so firings a few seconds apart are caught as well as
-// concurrent ones. Claims of every task older than firingClaimRetention,
-// which is longer than any window, are pruned in the same transaction, so a
-// task that stopped firing (an uninstalled plugin's) doesn't keep its claims.
+// concurrent ones. Each claim records when it expires, after the longer of
+// its window and firingClaimRetention, and expired claims of every task are
+// pruned in the same transaction: a task that stopped firing (an uninstalled
+// plugin's) doesn't keep its claims, and a short-interval task never prunes
+// a long-interval task's claim inside that claim's window.
 func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.Time, window time.Duration) (bool, error) {
 	window = max(window, 0)
 	won := false
@@ -50,14 +52,13 @@ func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.
 			return nil
 		}
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO task_firing_claims (task_key, slot, claimed_at) VALUES ($1, $2, clock_timestamp())`,
-			key, slot); err != nil {
+			INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at)
+			VALUES ($1, $2, clock_timestamp(), clock_timestamp() + $3 * interval '1 microsecond')`,
+			key, slot, max(window, firingClaimRetention).Microseconds()); err != nil {
 			return fmt.Errorf("claiming task firing: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
-			DELETE FROM task_firing_claims
-			WHERE claimed_at < clock_timestamp() - $1 * interval '1 microsecond'`,
-			max(window, firingClaimRetention).Microseconds()); err != nil {
+			DELETE FROM task_firing_claims WHERE expires_at < clock_timestamp()`); err != nil {
 			return fmt.Errorf("pruning task firing claims: %w", err)
 		}
 		won = true

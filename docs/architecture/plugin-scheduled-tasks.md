@@ -67,8 +67,9 @@ Every API server registers every plugin task and arms its triggers, so each
 firing happens on every server. A plugin task is a
 `taskmanager.ClusterFiringTask`: before its trigger loop runs a firing, the
 task manager claims it through `taskmanager.FiringClaims`
-(`repository.PgFiringClaims`, table `task_firing_claims`, migration
-`20261106022808_add_task_firing_claims`). The server that records the claim
+(`repository.PgFiringClaims`, table `task_firing_claims`, migrations
+`20261106022808_add_task_firing_claims` and
+`20261106153043_add_task_firing_claim_expiry`). The server that records the claim
 runs the firing; every other server skips it and rearms its triggers from now,
 as after a skipped preflight. Manual runs (Run now) never claim. Core tasks do
 not claim; those that must not run on two servers at once take an advisory
@@ -107,5 +108,8 @@ Invariants:
   A server restarted alone later runs it again.
 - A claim that cannot be recorded fails closed: the server skips the firing
   and logs a warning, and the next firing tries again.
-- Claims are pruned in the claiming transaction: a task's claims older than
-  both its window and eight days.
+- Each claim records its expiry, the longer of its window and eight days
+  after it was taken. The transaction that takes a claim prunes expired claims
+  of all tasks, so a task that stopped firing leaves no claims behind, and a
+  short-interval task never prunes a long-interval task's claim inside that
+  claim's window.
