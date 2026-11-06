@@ -138,7 +138,6 @@ export default function AdminBackups() {
   });
   const active = list?.active;
   const busy = Boolean(list?.busy || active || running);
-  const sqliteUserStore = warnings.some((warning) => warning.code === "sqlite_user_store");
   const configured = capabilities.data ? capabilities.data.state === "available" : true;
   const selectiveRestore = capabilities.data?.selective_restore === true;
   const uploadAvailable = capabilities.data?.upload === true;
@@ -236,7 +235,7 @@ export default function AdminBackups() {
       },
       onError: (error) =>
         toast.error("Couldn't start a backup", {
-          description: backupErrorMessage(error, { sqliteUserStore }),
+          description: backupErrorMessage(error),
         }),
     });
 
@@ -398,7 +397,6 @@ export default function AdminBackups() {
                 setShowAll(value);
                 if (!value && selectedId === linkedId) setSelectedId(null);
               }}
-              sqliteUserStore={sqliteUserStore}
               active={active}
               deleteBlocker={lock}
               selectiveRestore={selectiveRestore}

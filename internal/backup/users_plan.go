@@ -197,7 +197,7 @@ type userPlanner struct {
 	pending *pendingCompare
 	// users are the backup's accounts; claims counts, per account here, the
 	// backup accounts that match it (sharedTargets).
-	users  []UserDocument
+	users  []UserRef
 	claims map[int]int
 }
 
@@ -208,18 +208,6 @@ func (s *Service) newUserPlanner(rs *RestoreSet, q queryer, serverID string, lib
 	}
 	return &userPlanner{q: q, sourceID: rs.Index.ServerID, sameServer: rs.Index.ServerID == serverID, libMap: libMap, userStore: backend != "sqlite",
 		users: rs.Users}
-}
-
-func (u *userPlanner) planAll(ctx context.Context, docs []UserDocument) ([]accountPlan, error) {
-	out := make([]accountPlan, 0, len(docs))
-	for i := range docs {
-		plan, err := u.plan(ctx, &docs[i])
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, plan)
-	}
-	return out, nil
 }
 
 // plan matches one account and its profiles.

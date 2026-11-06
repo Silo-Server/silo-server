@@ -221,7 +221,7 @@ type AdminBackupDownloadLinksOutput struct {
 func backupProblem(err error) error {
 	switch {
 	case errors.Is(err, backup.ErrBusy):
-		return NewProblem(TypeConflict, "Another backup or restore is running.")
+		return NewProblem(TypeConflict, "Another backup or restore is running. Try again when it finishes.")
 	case errors.Is(err, backup.ErrBackupInUse):
 		return NewProblem(TypeConflict, "A restore from this backup is queued or running. Delete it once the restore finishes.")
 	case errors.Is(err, backup.ErrNotFound):
@@ -238,6 +238,8 @@ func backupProblem(err error) error {
 		return NewProblem(TypeBackupUnauthenticated, backup.ErrUnauthenticated.Message)
 	case errors.Is(err, backup.ErrDigestMismatch):
 		return NewProblem(TypeRestoreSetChanged, "The backup changed since it was previewed. Open it again.")
+	case errors.Is(err, backup.ErrNotEnoughTempSpace):
+		return NewProblem(TypeConflict, err.Error()+".")
 	case errors.As(err, new(*backup.InvalidRestoreSetError)):
 		return NewProblem(TypeConflict, "The backup's restore set cannot be read: "+err.Error())
 	case errors.As(err, new(*backup.WrongKeyError)):
