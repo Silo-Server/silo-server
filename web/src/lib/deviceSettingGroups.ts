@@ -81,8 +81,11 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
  * and Navigation & Cards screens, which already edit them at profile scope; showing them here would
  * give one setting two homes. `ui.library_page_state` is remembered browse
  * state rather than a preference — it has no control in the manifest at all.
+ * `ui.app_language` stays off until the web client applies an app language;
+ * until then a control here would save a choice that changes nothing.
  */
 const HIDDEN_KEYS = new Set<string>([
+  "ui.app_language",
   "ui.theme",
   "ui.text_scale",
   "ui.text_weight",

@@ -22,6 +22,19 @@ export interface SettingOptionSet {
 }
 
 export const SETTING_OPTION_SETS = {
+  app_languages: {
+    type: "language_tag",
+    options: [
+      { value: "en", introducedIn: 27 },
+      { value: "es", introducedIn: 27 },
+      { value: "de", introducedIn: 27 },
+      { value: "fr", introducedIn: 27 },
+      { value: "pt-BR", introducedIn: 27 },
+      { value: "ja", introducedIn: 27 },
+      { value: "zh-Hans", introducedIn: 27 },
+      { value: "ar", introducedIn: 27 },
+    ],
+  },
   catalog_metadata_languages: {
     type: "language_tag",
     options: [
@@ -284,6 +297,8 @@ export const SETTING_KEYS = {
   SEARCH_MEDIA_SCOPE: "search.media_scope",
   /** Match device caption settings */
   SUBTITLE_MATCHES_DEVICE: "subtitle.matches_device",
+  /** App language */
+  UI_APP_LANGUAGE: "ui.app_language",
   /** Poster badges */
   UI_CARD_OVERLAYS: "ui.card_overlays",
   /** Card overlays enabled */
@@ -1353,6 +1368,24 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "playback",
     control: "switch",
     platforms: ["ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "ui.app_language": {
+    key: "ui.app_language",
+    type: "language_tag",
+    nullable: true,
+    persistence: "remote",
+    introducedIn: 27,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [27, 27],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: null,
+    label: "App language",
+    description:
+      "Language of the app's menus, buttons and messages. Separate from the audio, subtitle and metadata languages.",
+    category: "appearance",
+    control: "select",
+    suggestedOptions: "app_languages",
+    unsetLabel: "Match device",
   },
   "ui.card_overlays": {
     key: "ui.card_overlays",
