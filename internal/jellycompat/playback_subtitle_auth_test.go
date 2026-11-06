@@ -256,7 +256,7 @@ func TestHandleSubtitleStreamUsesConfiguredFFmpegForEmbeddedText(t *testing.T) {
 		},
 	}
 	source := PlaybackMediaSource{ID: "source-42", FileID: file.ID}
-	cacheRoot := t.TempDir()
+	cacheRoot := filepath.Join(t.TempDir(), "transcode")
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{
 		ID: "play-1", CompatToken: "token-1", RouteItemID: "item-1",

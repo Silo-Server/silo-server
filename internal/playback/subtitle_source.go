@@ -3,6 +3,7 @@ package playback
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -322,8 +323,7 @@ func (s *spillWriter) finish() error {
 // viewer the track.
 func (c *SubtitleCache) demuxAndKeep(ctx context.Context, opts StreamExtractOpts, extract SUPExtractFunc) error {
 	ref := *opts.Embedded
-	dir := c.dir()
-	if dir == "" {
+	if c.dir() == "" {
 		return extract(ctx, opts)
 	}
 	demuxCopy, err := c.source.DemuxCopy(ctx, opts.InputPath, ref)
@@ -334,8 +334,14 @@ func (c *SubtitleCache) demuxAndKeep(ctx context.Context, opts StreamExtractOpts
 	if err != nil {
 		return extract(ctx, opts)
 	}
-	// The fill running this demux created dir.
-	tmp, err := os.CreateTemp(dir, "kept.part-*")
+	// ffmpeg writes the copy by path, which only openDir's check of the
+	// cache dir and the transcode dir above it keeps inside the cache dir.
+	root := c.openDir()
+	if root == nil {
+		return extract(ctx, opts)
+	}
+	tmp, err := root.OpenFile("kept.part-"+rand.Text(), os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	_ = root.Close()
 	if err != nil {
 		return extract(ctx, opts)
 	}
