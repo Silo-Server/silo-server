@@ -168,7 +168,7 @@ func (s *PostgresUserStore) RenameCollectionRows(ctx context.Context, kind, coll
 	if err != nil {
 		return fmt.Errorf("beginning collection row rename: %w", err)
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer func() { _ = tx.Rollback(ctx) }()
 	err = rewriteSectionOverrides(ctx, tx, s.userID, func(overrides []userstore.SectionOverride) ([]userstore.SectionOverride, bool) {
 		changed := false
 		for i := range overrides {

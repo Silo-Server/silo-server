@@ -607,10 +607,7 @@ func rewriteSectionOverrides(ctx context.Context, tx pgx.Tx, userID int, rewrite
 		if len(next) == 0 {
 			_, err = tx.Exec(ctx, `DELETE FROM user_settings WHERE user_id = $1 AND key = $2`, userID, st.key)
 		} else {
-			var data []byte
-			if data, err = json.Marshal(next); err != nil {
-				return fmt.Errorf("encoding section overrides %s: %w", st.key, err)
-			}
+			data, _ := json.Marshal(next)
 			_, err = tx.Exec(ctx, `UPDATE user_settings SET value = $3 WHERE user_id = $1 AND key = $2`, userID, st.key, string(data))
 		}
 		if err != nil {

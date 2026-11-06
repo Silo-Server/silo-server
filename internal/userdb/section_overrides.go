@@ -1,6 +1,7 @@
 package userdb
 
 import (
+	"context"
 	"database/sql"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -133,7 +134,7 @@ func ResetSectionOverrides(db *sql.DB, profileID, scope, libraryID string) error
 // RenameCollectionRows retitles the profile-built rows for one collection
 // that still carry its old name (see userstore.RenameCollectionRowTitle). Each
 // write checks the titles it read, so a row edited in between keeps the edit.
-func RenameCollectionRows(db *sql.DB, kind, collectionID, oldTitle, newTitle string) error {
+func RenameCollectionRows(ctx context.Context, db *sql.DB, kind, collectionID, oldTitle, newTitle string) error {
 	overrides, err := ListAllSectionOverrides(db)
 	if err != nil {
 		return err
@@ -143,7 +144,7 @@ func RenameCollectionRows(db *sql.DB, kind, collectionID, oldTitle, newTitle str
 		if !userstore.RenameCollectionRowTitle(&o, kind, collectionID, oldTitle, newTitle) {
 			continue
 		}
-		if _, err := db.Exec(
+		if _, err := db.ExecContext(ctx,
 			`UPDATE profile_section_overrides SET title = NULLIF(?,''), user_title = NULLIF(?,''), updated_at = ?
 			WHERE id = ? AND COALESCE(title,'') = ? AND COALESCE(user_title,'') = ?`,
 			o.Title, o.UserTitle, nowUTC(), o.ID, readTitle, readUserTitle,
