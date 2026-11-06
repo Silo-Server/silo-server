@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/taskmanager"
@@ -513,6 +514,45 @@ func TestTaskManagerRegisterAndUnregisterAfterStart(t *testing.T) {
 	if got := manager.GetTaskInfo(key).Triggers; !slices.Equal(got, []taskmanager.TriggerConfig{hourly}) {
 		t.Fatalf("re-registered triggers = %+v, want the saved schedule", got)
 	}
+}
+
+// A task whose saved schedule is empty waits for a schedule change. When
+// ReloadSchedule installs a schedule another server saved, the first firing
+// must run the task: a one-shot trigger that fires into a stale change flag
+// leaves the task unscheduled.
+func TestReloadScheduleRunsTaskThatHadNoTriggers(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const key = "plugin:7:sync"
+		hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+		triggerRepo := &fakeTriggerRepository{triggers: map[string][]taskmanager.TriggerConfig{key: {}}}
+		var armed *fakeTrigger
+		factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+			armed = &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
+			return armed
+		}
+		manager := taskmanager.New(triggerRepo, fakeExecutionRepository{}, factory, slog.New(slog.DiscardHandler))
+		ctx, cancel := context.WithCancel(context.Background())
+		defer synctest.Wait()
+		defer cancel()
+		manager.Start(ctx)
+		task := manualMarkerTask{stubTask: stubTask{key: key, triggers: []taskmanager.TriggerConfig{hourly}}, seen: make(chan bool, 1)}
+		manager.Register(task)
+		synctest.Wait() // the trigger loop waits with no triggers
+
+		if err := triggerRepo.SetTriggers(ctx, key, []taskmanager.TriggerConfig{hourly}); err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.ReloadSchedule(ctx, key); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		armed.ch <- struct{}{}
+		select {
+		case <-task.seen:
+		case <-time.After(time.Minute):
+			t.Fatal("the first firing of the reloaded schedule did not run the task")
+		}
+	})
 }
 
 type manualMarkerTask struct {

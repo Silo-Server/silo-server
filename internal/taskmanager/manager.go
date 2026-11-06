@@ -212,6 +212,9 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			case <-w.retired:
 				return
 			case <-w.triggerUpdate:
+				// The update is handled by re-reading the triggers, so the
+				// first firing of the new ones must not be taken for it.
+				w.triggerChanged.Store(false)
 				continue
 			}
 		}
