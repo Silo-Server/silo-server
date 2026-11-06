@@ -59,13 +59,15 @@ export function isStructuredSetting(definition: SettingDisplay | null): boolean 
  * The option list for a select, in manifest order.
  *
  * Enum members come straight from the contract. Open language tags use the
- * definition's generated advisory option set. A nullable definition gains a
- * leading, context-specific unset entry so a control can express clearing it.
- * Deprecated members stay valid stored values but are not offered.
+ * definition's generated advisory option set, plus `currentValue` when the set
+ * lacks it, so a stored tag such as `pt-PT` stays selected instead of blank.
+ * A nullable definition gains a leading, context-specific unset entry so a
+ * control can express clearing it. Deprecated members stay valid stored values
+ * but are not offered.
  */
-export function optionsFor(definition: SettingDisplay): SettingOption[] {
+export function optionsFor(definition: SettingDisplay, currentValue?: string): SettingOption[] {
   if (definition.type === "language_tag") {
-    return languageOptionsFor(definition.key);
+    return languageOptionsFor(definition.key, currentValue);
   }
   const members = (definition.values ?? [])
     .filter((member) => !member.deprecated)
