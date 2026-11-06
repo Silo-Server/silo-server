@@ -129,9 +129,13 @@ func NewSampler(pool *pgxpool.Pool, telemetry *streamtelemetry.Registry, nodeID 
 }
 
 // Start samples once immediately — which also establishes the egress baseline —
-// and then every minute until ctx is canceled or Stop is called. On the way
-// out it saves the session bytes served since the last tick, so a restart or
-// deploy does not lose up to a minute of every active play.
+// and then every minute until ctx is canceled or Stop is called. Once Stop is
+// called it saves the session bytes served since the last tick, so a restart
+// or deploy does not lose up to a minute of every active play. A canceled ctx
+// only ends the ticks: the server cancels it before its HTTP servers finish
+// draining, and responses still sending then would lose their last bytes if
+// the save ran at once, so the save waits for Stop, which the server calls
+// after the drain.
 func (s *Sampler) Start(ctx context.Context) {
 	if s == nil || s.pool == nil {
 		return
@@ -152,6 +156,7 @@ func (s *Sampler) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
+				<-s.stop
 				return
 			case <-s.stop:
 				return
