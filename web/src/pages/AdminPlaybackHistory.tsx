@@ -25,7 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
-import { formatFileSize } from "@/lib/mediaFormat";
+import { formatDataTotal } from "@/components/admin/dashboard/format";
 import type { AdminPlaybackHistoryItem } from "@/api/types";
 
 import { episodeCode } from "./admin-users/detail/format";
@@ -329,7 +329,7 @@ export default function AdminPlaybackHistory() {
                                   className="text-muted-foreground text-xs whitespace-normal"
                                   title="Bytes the API servers sent the viewer. Bytes a stream node or proxy sent directly are not included."
                                 >
-                                  {formatFileSize(row.api_served_bytes)}{" "}
+                                  {formatDataTotal(row.api_served_bytes)}{" "}
                                   <span className="whitespace-nowrap">API-served</span>
                                 </div>
                               ) : null}
