@@ -115,6 +115,14 @@ func (i *Identity) Config() *tls.Config {
 	}
 }
 
+// HTTP3Config clones the API listener configuration for HTTP/3. It presents
+// the same certificate and SPKI pin and offers only the h3 application protocol.
+func (i *Identity) HTTP3Config() *tls.Config {
+	config := i.Config().Clone()
+	config.NextProtos = []string{"h3"}
+	return config
+}
+
 // deriveKey turns HKDF output into a P-256 private key, moving to the next
 // counter in the rare case the output is not a valid scalar.
 func deriveKey(masterKey []byte) (*ecdsa.PrivateKey, error) {

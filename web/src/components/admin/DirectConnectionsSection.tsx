@@ -39,6 +39,7 @@ function labelText(t: Translate, label: Label) {
 
 const FEATURE_LABELS: Record<Feature["feature"], Label> = {
   direct: "web.admin.settings.network.direct.title",
+  engine: "web.admin.settings.network.direct.feature.engine",
   nat_mapping: "web.admin.settings.network.direct.feature.nat_mapping",
   nat_hairpin: "web.admin.settings.network.direct.feature.nat_hairpin",
   ipv4: { name: "IPv4" },
@@ -88,6 +89,14 @@ const REASON_LABELS = {
   granted_below_request: "web.admin.settings.network.direct.reason.granted_below_request",
   not_needed: "web.admin.settings.network.direct.reason.not_needed",
   invalid: "web.admin.settings.network.direct.reason.invalid",
+  clamped: "web.admin.settings.network.direct.reason.clamped",
+  multiple_api_replicas: "web.admin.settings.network.direct.reason.multiple_api_replicas",
+  replica_census_unavailable: "web.admin.settings.network.direct.reason.replica_census_unavailable",
+  replica_lease_pending: "web.admin.settings.network.direct.reason.replica_lease_pending",
+  replica_lease_held: "web.admin.settings.network.direct.reason.replica_lease_held",
+  udp_port_invalid: "web.admin.settings.network.direct.reason.udp_port_invalid",
+  udp_port_bind_failed: "web.admin.settings.network.direct.reason.udp_port_bind_failed",
+  engine_start_failed: "web.admin.settings.network.direct.reason.engine_start_failed",
 } satisfies Record<NonNullable<Feature["reason"]>, MessageKey> & Record<string, MessageKey>;
 
 const PORT_MAPPING_LABELS: Record<string, string> = {

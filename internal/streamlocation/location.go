@@ -35,7 +35,7 @@ func FromMetadata(clientIP, provider string) Location {
 
 // IsRemote fails closed to remote when the resolved client address is absent
 // or invalid. A validated network-access provider is remote even when its
-// proxy connects from a private address.
+// proxy connects from a private address. N4 direct paths are also remote.
 func IsRemote(ctx context.Context) bool {
 	return FromContext(ctx) == Remote
 }
@@ -43,9 +43,10 @@ func IsRemote(ctx context.Context) bool {
 // FromContext classifies the trusted network metadata on a playback request.
 // A request forwarded for a client the client-IP resolver could not identify
 // is remote: its resolved address is the forwarder's, and a forwarder Silo
-// does not trust may pass on clients from anywhere.
+// does not trust may pass on clients from anywhere. A direct path is remote
+// regardless of its observed address.
 func FromContext(ctx context.Context) Location {
-	if clientip.ForwardedClientUnknown(ctx) {
+	if netaccess.PathFromContext(ctx).Direct != nil || clientip.ForwardedClientUnknown(ctx) {
 		return Remote
 	}
 	return FromMetadata(clientip.FromContext(ctx), netaccess.PathFromContext(ctx).Provider)

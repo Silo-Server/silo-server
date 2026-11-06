@@ -2,7 +2,9 @@
 
 `GET /api/v2/admin/direct-connections/status` requires an acting administrator.
 Operation ID: `getAdminDirectConnectionsStatus`.
-The hidden self-check is a readiness diagnostic; it starts no direct engine.
+The hidden setting `direct_connections.enabled` gates readiness probes and the
+API host's direct engine. The engine also requires a valid UDP port and permission
+from the replica gate. Status reads report that lifecycle; refreshes rerun probes.
 `GET /api/v2/admin/direct-connections/capabilities` (operation ID
 `getAdminDirectConnectionsCapabilities`) requires the same acting administrator.
 Its common head contains `revision`, `state`, and `allowed`; the typed `status`
@@ -45,12 +47,52 @@ Hairpin and mapped-address reachability remain
 `unknown/not_measured`; reachability includes a mapped address when observed.
 Non-Linux local rows are `off/unsupported_platform`.
 
+The `engine` feature has kind `local`. It is `on` while the engine runs and `off`
+otherwise. Its reasons include `disabled`, `udp_port_invalid`,
+`udp_port_bind_failed`, and `engine_start_failed`. `engine_start_failed` means the
+engine is stopped because the HTTP/3 server stopped while the engine ran. The engine
+restarts once after a settings read and, with Redis, a successful lease renewal or
+acquisition that both completed after the stop; the next such success permits the
+restart, and a failed read or renewal keeps it pending. Without Redis the read alone
+permits it. After a second stop the engine stays off until the settings or the replica
+gate change. Both `engine` and `direct` can report these replica reasons:
+
+| Reason | Meaning |
+|---|---|
+| `multiple_api_replicas` | The census sees more than one API process. |
+| `replica_census_unavailable` | The census or restoration of this process's marker fails, or Redis is configured but this process has no usable client or presence identity. |
+| `replica_lease_pending` | No lease is held locally; acquisition is pending or unavailable. |
+| `replica_lease_held` | Another process holds the lease. |
+
+The gate projects an otherwise `on` `direct` row to `off` when new direct
+connections are unavailable. An `on` `engine` row can carry
+`multiple_api_replicas` or `replica_census_unavailable`: a holder keeps serving
+established sessions while its last successful renewal is less than 60 seconds
+old. Engine state and replica permission are read live; `checked_at` identifies
+the probe snapshot. See the [gate table](architecture/direct-connections.md#replica-census-and-lease).
+
 Listener rows carry `listener`, `requested`, `granted`, `state`, `reason`, optional
 `errno`, and `send_buffer`. The nested send-buffer requested and granted values
 are integers; the grant uses the same usable-byte convention as feature rows.
-Knob rows carry `env`, `default`, optional `allowed`, `effective`,
-and optional `requested` and `reason` when startup parsing adjusted a request.
-Numeric byte-request knobs omit `allowed`.
+Knob rows carry `env`, `default`, `effective`, optional `allowed`, `min`, and `max`,
+and optional `requested` and `reason` when startup parsing adjusts a request.
+The bounds are decimal strings for numeric knobs, which omit `allowed`.
+`internal/tuning/tuning.go` defines these numeric rows:
+
+| Knob | Default | `min` | `max` | Meaning |
+|---|---|---|---|---|
+| `SILO_NET_TCP_SEND_BUFFER` | `33554432` | `1` | `1073741823` | TCP send-buffer request in bytes; `off` disables the request. |
+| `SILO_NET_DIRECT_UDP_PORT` | `8094` | `1` | `65535` | Fixed engine UDP port; invalid input becomes effective `0` and prevents binding. |
+| `SILO_NET_DIRECT_RECEIVE_WINDOW` | `128` | `4` | `128` | Client maximum stream receive window in MiB; it does not affect downloads or playback speed. |
+
+Receive-window values outside the bounds clamp with reason `clamped`. Malformed
+receive windows use the default with reason `invalid`; invalid UDP ports use
+`0` with reason `invalid`. `SILO_NET_DIRECT_GSO` and
+`SILO_NET_DIRECT_ACK_DECIMATION` allow `on` and `off`, defaulting to `on`.
+`SILO_NET_DIRECT_BBR_LOSS` allows `both`, `no_lower`, `loss_thresh`, and `off`,
+defaulting to `both`. Invalid direct enum values use their defaults with reason
+`invalid`. These adjustments do not prevent process startup. The receive-window
+and ACK-decimation knobs do not change the server's transport policy.
 
 The architecture and privilege invariants are in
 [Direct Connections](architecture/direct-connections.md). The web administrator

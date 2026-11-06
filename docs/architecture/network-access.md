@@ -235,6 +235,15 @@ is seen (best effort, no hard refusal). The census runs once per start, so
 the warning appears in the log of whichever replica starts second, not the
 one already running. Proxy nodes scale freely because each has its own scope.
 
+Direct connections also terminate on one API replica. They share this process
+presence marker and count live replicas every 30 seconds. A Redis lease allows
+one holder to run the engine, renews every 30 seconds, and expires after 90 seconds;
+the holder stops the engine once its last successful renewal is older than
+60 seconds. Multiple replicas or a census error make new direct connections
+unavailable while a valid holder can keep established sessions. Without Redis,
+the gate permits the engine without a census or lease. See
+[Direct Connections](direct-connections.md#replica-census-and-lease).
+
 ## Discovery
 
 A provider's API host also answers plain HTTP on overlay port 80 with a
