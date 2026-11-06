@@ -95,36 +95,28 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 
 	t.Run("pruning keeps each claim for its own window", func(t *testing.T) {
 		gone, monthly, live := newKey("uninstalled"), newKey("monthly"), newKey("live")
-		if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at) VALUES ($1, $2::timestamptz, $2::timestamptz, $2::timestamptz + interval '8 days')`,
-			gone, now.Add(-9*24*time.Hour)); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at, expires_at) VALUES ($1, $2::timestamptz, $2::timestamptz, $2::timestamptz + interval '8 days')`, gone, now.Add(-9*24*time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 		thirtyDays := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: (30 * 24 * time.Hour).Milliseconds()}
 		if !claim(t, monthly, thirtyDays, now) {
 			t.Fatal("the monthly task's first claim must win")
 		}
-		// Age the monthly claim past the fixed retention, still inside its window.
 		if _, err := pool.Exec(ctx, `UPDATE task_firing_claims SET claimed_at = claimed_at - interval '10 days', expires_at = expires_at - interval '10 days' WHERE task_key = $1`, monthly); err != nil {
 			t.Fatal(err)
 		}
-		hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: time.Hour.Milliseconds()}
-		if !claim(t, live, hourly, now) {
+		if !claim(t, live, taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: time.Hour.Milliseconds()}, now) {
 			t.Fatal("the live task's claim must win")
 		}
-		count := func(key string) (n int) {
-			if err := pool.QueryRow(ctx, `SELECT count(*) FROM task_firing_claims WHERE task_key = $1`, key).Scan(&n); err != nil {
-				t.Fatal(err)
-			}
-			return n
+		var expired int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM task_firing_claims WHERE task_key = $1`, gone).Scan(&expired); err != nil {
+			t.Fatal(err)
 		}
-		if n := count(gone); n != 0 {
-			t.Fatalf("%d expired claims of a task that stopped firing remain", n)
-		}
-		if n := count(monthly); n != 1 {
-			t.Fatalf("the monthly task has %d claims after another task pruned, want 1", n)
+		if expired != 0 {
+			t.Fatalf("%d expired claims of a task that stopped firing remain", expired)
 		}
 		if claim(t, monthly, thirtyDays, now.Add(10*24*time.Hour)) {
-			t.Fatal("a server firing ten days into the monthly window must lose")
+			t.Fatal("the live task's prune dropped a monthly claim aged past eight days but inside its window")
 		}
 	})
 }
