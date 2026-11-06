@@ -1698,6 +1698,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				watchtogether.NewProfileNameResolver(deps.UserStoreProvider),
 			)
 			watchTogetherService.SetPlaybackAttemptStore(playbackHandler.PlanStoreV3)
+			if settingValuesHandler != nil {
+				watchTogetherService.SetGuestControlPreferences(settingValuesHandler.WatchPartyGuestControlPreferences())
+			}
 			if err := watchTogetherService.SetClusterEventBus(deps.EventBus); err != nil {
 				slog.Warn("watch together cluster synchronization unavailable", "error", err)
 			}
