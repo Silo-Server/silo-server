@@ -337,7 +337,7 @@ func TestServeRemuxBreaksTheResponseWhenTheOutputEndsShort(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			body, err := io.ReadAll(resp.Body)
 			if resp.StatusCode != http.StatusOK || string(body) != "remuxed" {
 				t.Fatalf("response = %d %q, want 200 with the remuxed bytes", resp.StatusCode, body)

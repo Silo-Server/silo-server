@@ -179,9 +179,9 @@ type RemuxSession struct {
 	stderr     *remuxStderr
 	closeOnce  sync.Once
 	closeErr   error
-	// cancelled records that the session's context ended before it was
+	// contextEnded records that the session's context ended before it was
 	// reaped: the request went away or Abort withdrew the stream.
-	cancelled bool
+	contextEnded bool
 }
 
 // ffmpegDemuxErrorLine starts the line FFmpeg logs when reading its input
@@ -524,16 +524,20 @@ func (s *RemuxSession) Close() error {
 	return s.close(true)
 }
 
-// finishOutput reaps an FFmpeg whose output reached EOF and reports whether
-// that output ends before the source does: FFmpeg exited non-zero or was
-// killed, or it logged a demux error and then exited 0. It does not cancel
-// first, so an exit status is FFmpeg's own and not this cleanup's. A session
-// whose context ended first, because the request went away or Abort withdrew
-// the stream, reports nil: that end was the caller's choice.
-func (s *RemuxSession) finishOutput() error {
+// finishOutput reaps an FFmpeg whose output stopped with readErr and reports
+// whether that output ends before the source does: reading it failed with
+// anything other than EOF, FFmpeg exited non-zero or was killed, or it logged
+// a demux error and then exited 0. It does not cancel first, so an exit
+// status is FFmpeg's own and not this cleanup's. A session whose context
+// ended first, because the request went away or Abort withdrew the stream,
+// reports nil: that end was the caller's choice.
+func (s *RemuxSession) finishOutput(readErr error) error {
 	err := s.close(false)
-	if s.cancelled {
+	if s.contextEnded {
 		return nil
+	}
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return fmt.Errorf("reading ffmpeg remux output: %w", readErr)
 	}
 	if err != nil {
 		return fmt.Errorf("ffmpeg remux failed: %w", err)
@@ -568,7 +572,7 @@ func (s *RemuxSession) close(cancelFirst bool) error {
 			// The request went away, or Abort fired, while FFmpeg was reaped.
 			contextErr = s.ctx.Err()
 		}
-		s.cancelled = contextErr != nil
+		s.contextEnded = contextErr != nil
 		s.cancel()
 		// Cleanup cancellation must not relabel an already completed FFmpeg
 		// failure. A process killed by this Close has a signal exit instead.
@@ -742,22 +746,22 @@ func ServeRemuxWithOptions(w http.ResponseWriter, r *http.Request, filePath, out
 			}
 		}
 		if readErr != nil {
-			finishRemuxResponse(r, filePath, session, streamWriter)
+			finishRemuxResponse(r, filePath, session, streamWriter, readErr)
 			return nil
 		}
 	}
 }
 
-// finishRemuxResponse ends a progressive remux whose FFmpeg output has
-// closed. A complete output ends the response normally. An output that stops
+// finishRemuxResponse ends a progressive remux whose FFmpeg output stopped
+// with readErr. A complete output ends the response normally. An output that stops
 // short of the source, such as a disk that stopped returning data mid-title,
 // must not: a clean end of a chunked response tells the player it has
 // reached the end of the title, which marks it watched and starts the next
 // one. Aborting the response instead leaves the stream visibly broken, so
 // the player stalls and then reports a network error that its reconnect
 // handling owns.
-func finishRemuxResponse(r *http.Request, filePath string, session *RemuxSession, streamWriter *httpstream.RollingDeadlineWriter) {
-	err := session.finishOutput()
+func finishRemuxResponse(r *http.Request, filePath string, session *RemuxSession, streamWriter *httpstream.RollingDeadlineWriter, readErr error) {
+	err := session.finishOutput(readErr)
 	if err == nil || r.Context().Err() != nil {
 		return
 	}
