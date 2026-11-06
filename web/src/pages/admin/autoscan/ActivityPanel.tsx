@@ -68,6 +68,7 @@ import { cn } from "@/lib/utils";
 import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/datetime";
 
 import { eventSourceName } from "./sourceDisplay";
+import { formatLocale } from "@/lib/appLocale";
 
 const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const DEFAULT_HISTORY_PAGE_SIZE = 25;
@@ -233,7 +234,7 @@ function DataTable({ head, children }: { head: ReactNode; children: ReactNode })
 type ScanResultSummary = { text: string; tone: "skipped" | "errors" | "changes" | "none" };
 
 function plural(count: number, noun: string): string {
-  return `${count.toLocaleString()} ${noun}${count === 1 ? "" : "s"}`;
+  return `${count.toLocaleString(formatLocale())} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 /**
@@ -247,9 +248,9 @@ function summarizeScanResult(result: AutoscanScanResult | undefined): ScanResult
     return { text: "Skipped — overlapping scan in progress", tone: "skipped" };
   }
   const parts: string[] = [];
-  if (result.new > 0) parts.push(`${result.new.toLocaleString()} new`);
-  if (result.updated > 0) parts.push(`${result.updated.toLocaleString()} updated`);
-  if (result.missing > 0) parts.push(`${result.missing.toLocaleString()} missing`);
+  if (result.new > 0) parts.push(`${result.new.toLocaleString(formatLocale())} new`);
+  if (result.updated > 0) parts.push(`${result.updated.toLocaleString(formatLocale())} updated`);
+  if (result.missing > 0) parts.push(`${result.missing.toLocaleString(formatLocale())} missing`);
   if (result.files_deleted > 0) parts.push(`${plural(result.files_deleted, "file")} removed`);
   // A scan can drop catalog items whose files were already gone.
   if (result.items_deleted > 0) parts.push(`${plural(result.items_deleted, "item")} removed`);
@@ -257,13 +258,15 @@ function summarizeScanResult(result: AutoscanScanResult | undefined): ScanResult
   if (result.memberships_removed > 0)
     parts.push(`${plural(result.memberships_removed, "title")} removed from library`);
   if (result.missing_skipped_protected > 0)
-    parts.push(`${result.missing_skipped_protected.toLocaleString()} kept (storage offline)`);
+    parts.push(
+      `${result.missing_skipped_protected.toLocaleString(formatLocale())} kept (storage offline)`,
+    );
   if (result.errors > 0) parts.push(plural(result.errors, "error"));
   if (parts.length === 0) {
     return {
       text:
         result.unchanged > 0
-          ? `No changes · ${result.unchanged.toLocaleString()} unchanged`
+          ? `No changes · ${result.unchanged.toLocaleString(formatLocale())} unchanged`
           : "No changes",
       tone: "none",
     };
@@ -496,7 +499,7 @@ function ChangeList({
       ))}
       {event.changes_truncated ? (
         <p className="text-muted-foreground text-xs">
-          Showing the first {event.changes.length.toLocaleString()} of{" "}
+          Showing the first {event.changes.length.toLocaleString(formatLocale())} of{" "}
           {plural(event.changes_returned, "change")}.
         </p>
       ) : null}

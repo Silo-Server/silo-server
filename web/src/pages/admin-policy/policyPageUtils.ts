@@ -1,9 +1,10 @@
 import { ApiClientError } from "@/api/client";
 import type { PolicyCompileIssue } from "@/api/adminPolicy";
+import { formatLocale } from "@/lib/appLocale";
 
 export function formatPolicyDate(value?: string | null) {
   if (!value) return "—";
-  return new Date(value).toLocaleString();
+  return new Date(value).toLocaleString(formatLocale());
 }
 
 export function formatPolicyEvalMicros(evalTimeNS?: number | null) {

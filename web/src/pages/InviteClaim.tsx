@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthBackground } from "@/components/auth/AuthBackground";
+import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { clearHouseholdSetupDone, setTourSuppressed } from "@/lib/onboarding";
 import { buildInviteDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
 import { Smartphone } from "lucide-react";
@@ -95,6 +96,7 @@ function ClaimForm({ token }: { token: string }) {
     return (
       <div className="auth-shell">
         <AuthBackground />
+        <AuthLanguagePicker />
         <Card className="auth-card glass panel-border w-full max-w-sm border-0">
           <CardHeader>
             <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
@@ -226,6 +228,7 @@ function ClaimForm({ token }: { token: string }) {
   return (
     <div className="auth-shell">
       <AuthBackground />
+      <AuthLanguagePicker />
       <Card className="auth-card glass panel-border w-full max-w-sm border-0">
         <CardHeader>
           {invitation.inviter_name && (

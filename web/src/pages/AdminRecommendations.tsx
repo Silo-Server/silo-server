@@ -36,6 +36,7 @@ import {
 import { useRefreshAIProviders } from "@/hooks/queries/admin/aiProviders";
 import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
 import { ModelField } from "@/pages/admin-settings/AIModelField";
+import { formatLocale } from "@/lib/appLocale";
 
 type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
 
@@ -280,8 +281,8 @@ function RecJobStatusCard({
           <span className="text-sm font-semibold">{title}</span>
           <p className="text-muted-foreground text-xs">
             {hasProgress
-              ? `${count.toLocaleString()} / ${total.toLocaleString()} items`
-              : `${count.toLocaleString()} ${count === 1 ? "entry" : "entries"}`}
+              ? `${count.toLocaleString(formatLocale())} / ${total.toLocaleString(formatLocale())} items`
+              : `${count.toLocaleString(formatLocale())} ${count === 1 ? "entry" : "entries"}`}
           </p>
           {note && <p className="text-muted-foreground text-xs">{note}</p>}
           <RecJobLastRun run={lastRun} />
@@ -522,7 +523,7 @@ export default function AdminRecommendations() {
     try {
       const deleted = await resetEmbeddings.mutateAsync();
       toast.success(
-        `Embeddings reset: deleted ${deleted.embeddings.toLocaleString()} embeddings and cleared ${deleted.taste_profiles.toLocaleString()} taste profiles.`,
+        `Embeddings reset: deleted ${deleted.embeddings.toLocaleString(formatLocale())} embeddings and cleared ${deleted.taste_profiles.toLocaleString(formatLocale())} taste profiles.`,
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to reset embeddings");
@@ -625,7 +626,7 @@ export default function AdminRecommendations() {
               secondaryRunLabel="Last stale sweep"
               note={
                 status.stale_sweep.pending > 0
-                  ? `${status.stale_sweep.pending.toLocaleString()} ${status.stale_sweep.pending === 1 ? "profile waits" : "profiles wait"} for a rebuild`
+                  ? `${status.stale_sweep.pending.toLocaleString(formatLocale())} ${status.stale_sweep.pending === 1 ? "profile waits" : "profiles wait"} for a rebuild`
                   : undefined
               }
               onTrigger={() => triggerTasteProfiles.mutate()}

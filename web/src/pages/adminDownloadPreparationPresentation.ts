@@ -5,6 +5,7 @@ import type {
   AdminDownloadPreparationList,
 } from "@/api/v2/adminDownloadPreparations";
 import { formatChannels, formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
+import { formatLocale } from "@/lib/appLocale";
 
 export type PreparationState = AdminDownloadPreparation["state"];
 
@@ -286,7 +287,7 @@ export function preparationSearchText(p: AdminDownloadPreparation): string {
 }
 
 function jobs(n: number): string {
-  return `${n.toLocaleString()} ${n === 1 ? "job" : "jobs"}`;
+  return `${n.toLocaleString(formatLocale())} ${n === 1 ? "job" : "jobs"}`;
 }
 
 const ACTION_PAST: Record<AdminDownloadPreparationAction, string> = {
@@ -340,7 +341,7 @@ export function cancelPreparationsPrompt(
   const description = [
     encoding ? "Encoding stops and its progress is lost." : "",
     waiting > 0
-      ? `${waiting.toLocaleString()} waiting ${waiting === 1 ? "download fails" : "downloads fail"} with "Canceled by an administrator". Users can download again later, which starts a new job.`
+      ? `${waiting.toLocaleString(formatLocale())} waiting ${waiting === 1 ? "download fails" : "downloads fail"} with "Canceled by an administrator". Users can download again later, which starts a new job.`
       : `No downloads are waiting on ${targets.length === 1 ? "this job" : "these jobs"}.`,
   ]
     .filter(Boolean)

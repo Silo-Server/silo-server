@@ -46,6 +46,7 @@ import {
   storageFileUsage,
 } from "./downloadStoragePresentation";
 import { CHECKBOX, LoadMoreButton, SearchField } from "./controls";
+import { formatLocale } from "@/lib/appLocale";
 
 const ALL = "all";
 
@@ -183,7 +184,7 @@ export default function PreparedFilesTab({
           className="bg-surface/60 border-border flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
         >
           <span className="text-[12px] font-medium tabular-nums">
-            {selectedRows.length.toLocaleString()} selected ·{" "}
+            {selectedRows.length.toLocaleString(formatLocale())} selected ·{" "}
             {formatStorageBytes(selectedRows.reduce((sum, row) => sum + row.bytes, 0))}
             {selectedInUse > 0 ? ` · ${selectedInUse} in use` : ""}
           </span>

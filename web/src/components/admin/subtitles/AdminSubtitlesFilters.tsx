@@ -8,7 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { LANGUAGES } from "@/player/utils/languageNames";
+import { languageOptions } from "@/player/utils/languageNames";
 import { SUBTITLE_PROVIDER_OPTIONS } from "./subtitleAdminStyles";
 
 const ALL = "all";
@@ -84,7 +84,7 @@ export default function AdminSubtitlesFilters({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL}>All languages</SelectItem>
-              {LANGUAGES.map((lang) => (
+              {languageOptions().map((lang) => (
                 <SelectItem key={lang.code} value={lang.code}>
                   {lang.label}
                 </SelectItem>

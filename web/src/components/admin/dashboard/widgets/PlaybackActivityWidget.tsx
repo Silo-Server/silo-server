@@ -14,6 +14,7 @@ import {
   DEFAULT_PLAYBACK_BUCKET_SECONDS,
   PLAYBACK_SERIES_LABELS,
 } from "./playbackActivitySeries";
+import { formatLocale } from "@/lib/appLocale";
 
 /** Playback starts per bucket over the chosen window, stacked by play method. */
 export function PlaybackActivityWidget() {
@@ -46,7 +47,7 @@ export function PlaybackActivityWidget() {
     <Card className="h-full">
       <WidgetHeader title={rangeTitle("Playback activity", range)}>
         <span className="text-muted-foreground text-[11px] tabular-nums">
-          {total.toLocaleString()} {total === 1 ? "session" : "sessions"}
+          {total.toLocaleString(formatLocale())} {total === 1 ? "session" : "sessions"}
         </span>
         <WidgetRangePicker />
       </WidgetHeader>

@@ -11,6 +11,7 @@ import { useBuildInfo } from "@/hooks/queries/admin/system";
 import { cn } from "@/lib/utils";
 import { SectionError } from "../feedback";
 import { formatLatency, formatUptime } from "../format";
+import { formatLocale } from "@/lib/appLocale";
 
 /**
  * One-line deployment health.
@@ -98,8 +99,10 @@ export function HealthStripWidget() {
         <HealthCell
           icon={AlertTriangle}
           label="Errors · 24h"
-          value={health ? health.errors_24h.toLocaleString() : "—"}
-          detail={health ? `${health.warnings_24h.toLocaleString()} warnings` : undefined}
+          value={health ? health.errors_24h.toLocaleString(formatLocale()) : "—"}
+          detail={
+            health ? `${health.warnings_24h.toLocaleString(formatLocale())} warnings` : undefined
+          }
           tone={health && health.errors_24h > 0 ? "error" : undefined}
           to="/admin/logs"
         />

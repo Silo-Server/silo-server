@@ -68,6 +68,7 @@ import { WebhookEndpointSection } from "./WebhookEndpoint";
 import { absoluteWebhookURL } from "./webhookURL";
 import { WebhookInstructions, WebhookProviderSelect, WebhookTriggerHint } from "./WebhookSetupStep";
 import { hasUsableMapping, newMapping, seedMappings, usableMappings } from "./webhookSetup";
+import { formatLocale } from "@/lib/appLocale";
 
 // ---------------------------------------------------------------------------
 // Add and edit share one dialog.
@@ -503,7 +504,8 @@ export function SourceDialog(props: SourceDialogProps) {
       </div>
       {intervalInvalid && (
         <p className="text-destructive text-xs">
-          Must be a whole number from 1 to {MAX_POLL_INTERVAL_SECONDS.toLocaleString()}.
+          Must be a whole number from 1 to{" "}
+          {MAX_POLL_INTERVAL_SECONDS.toLocaleString(formatLocale())}.
         </p>
       )}
       <p className="text-muted-foreground text-xs">

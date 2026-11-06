@@ -13,8 +13,7 @@ import {
 import { BULK_LIBRARY_LIMIT } from "@/lib/homeRows/bulkCopy";
 import { RowChangedError, type HomeRow, type LibraryPage } from "@/lib/homeRows/types";
 import { LibraryPageChips } from "./addRow/LibraryPageChips";
-
-const listFormat = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
+import { appLanguage } from "@/lib/appLocale";
 
 function confirmLabel(count: number) {
   if (count === 0) return "Add to pages";
@@ -54,7 +53,8 @@ export function AddToOtherLibrariesDialog({
     try {
       await onCopy(selectedIds);
       const names = pages.filter((page) => selectedIds.includes(page.id)).map((page) => page.label);
-      toast.success(`Added to ${listFormat.format(names)}.`);
+      const list = new Intl.ListFormat(appLanguage(), { style: "long", type: "conjunction" });
+      toast.success(`Added to ${list.format(names)}.`);
       setOpen(false);
     } catch (error) {
       if (error instanceof RowChangedError) setChanged(true);

@@ -3,6 +3,8 @@
 // differences between surfaces (empty-string vs "—" fallback, GB vs GiB
 // labels) are expressed via parameters here instead of per-surface copies.
 
+import { formatLocale } from "@/lib/appLocale";
+
 export const CODEC_LABELS: Record<string, string> = {
   aac: "AAC",
   ac3: "AC3",
@@ -134,7 +136,7 @@ export function formatFileSize(bytes?: number, options: FormatFileSizeOptions = 
 
 export function formatBitrate(kbps?: number, fallback = ""): string {
   if (!isPositive(kbps)) return fallback;
-  return `${Math.round(kbps).toLocaleString()} kbps`;
+  return `${Math.round(kbps).toLocaleString(formatLocale())} kbps`;
 }
 
 export function formatMbpsFromKbps(kbps?: number, fallback = "—"): string {
@@ -144,7 +146,7 @@ export function formatMbpsFromKbps(kbps?: number, fallback = "—"): string {
 
 export function formatSampleRate(sampleRate?: number, fallback = ""): string {
   if (!isPositive(sampleRate)) return fallback;
-  return `${sampleRate.toLocaleString()} Hz`;
+  return `${sampleRate.toLocaleString(formatLocale())} Hz`;
 }
 
 export function formatChannels(channels?: number): string {

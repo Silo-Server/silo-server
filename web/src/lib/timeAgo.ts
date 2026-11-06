@@ -1,3 +1,16 @@
+import { appLanguage } from "@/lib/appLocale";
+
+let relative: { language: string; format: Intl.RelativeTimeFormat } | null = null;
+
+/** One formatter per interface language; cards call this in long grids. */
+function relativeFormat(): Intl.RelativeTimeFormat {
+  const language = appLanguage();
+  if (relative?.language !== language) {
+    relative = { language, format: new Intl.RelativeTimeFormat(language, { numeric: "always" }) };
+  }
+  return relative.format;
+}
+
 const MINUTE = 60;
 const HOUR = 3600;
 const DAY = 86400;
@@ -11,22 +24,12 @@ export function timeAgo(iso: string): string | null {
   if (Number.isNaN(date.getTime())) return null;
 
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 0) return "Added just now";
-
   if (seconds < MINUTE) return "Added just now";
-  if (seconds < HOUR) {
-    const m = Math.floor(seconds / MINUTE);
-    return `Added ${m} ${m === 1 ? "minute" : "minutes"} ago`;
-  }
-  if (seconds < DAY) {
-    const h = Math.floor(seconds / HOUR);
-    return `Added ${h} ${h === 1 ? "hour" : "hours"} ago`;
-  }
+
+  const ago = relativeFormat();
+  if (seconds < HOUR) return `Added ${ago.format(-Math.floor(seconds / MINUTE), "minute")}`;
+  if (seconds < DAY) return `Added ${ago.format(-Math.floor(seconds / HOUR), "hour")}`;
 
   const days = Math.floor(seconds / DAY);
-  if (days <= 30) {
-    return `Added ${days} ${days === 1 ? "day" : "days"} ago`;
-  }
-
-  return null;
+  return days <= 30 ? `Added ${ago.format(-days, "day")}` : null;
 }

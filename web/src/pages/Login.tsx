@@ -24,6 +24,7 @@ import {
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useServerBranding } from "@/hooks/useServerBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
+import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { formatDeviceCode, spokenDeviceCode } from "@/lib/deviceCode";
 import {
@@ -466,6 +467,7 @@ export default function Login() {
   return (
     <main className="auth-shell">
       <AuthBackground />
+      <AuthLanguagePicker />
       <h1 className="sr-only">Sign in to {serverName}</h1>
       <Card className="auth-card glass panel-border w-full max-w-md border-0">
         <CardHeader>

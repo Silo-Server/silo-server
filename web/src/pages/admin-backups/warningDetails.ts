@@ -1,4 +1,5 @@
 import type { AdminBackup, AdminBackupOmitted } from "@/api/v2/adminBackups";
+import { formatLocale } from "@/lib/appLocale";
 
 type MissingBlob = AdminBackup["missing_blobs"][number];
 
@@ -124,8 +125,10 @@ export function omittedHeadline(count: number): string {
 /** "101 files were missing when the backup copied them." */
 export function missingHeadline(listed: number, total: number = listed): string {
   if (total === 1) return "1 file was missing when the backup copied it.";
-  const missing = `${total.toLocaleString()} files were missing when the backup copied them.`;
-  return total > listed ? `${missing} The first ${listed.toLocaleString()} are listed.` : missing;
+  const missing = `${total.toLocaleString(formatLocale())} files were missing when the backup copied them.`;
+  return total > listed
+    ? `${missing} The first ${listed.toLocaleString(formatLocale())} are listed.`
+    : missing;
 }
 
 /** Every group as plain text, for pasting into an issue. */

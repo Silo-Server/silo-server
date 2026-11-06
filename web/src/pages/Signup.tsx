@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useServerBranding } from "@/hooks/useServerBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
+import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
 import { toast } from "sonner";
@@ -103,6 +104,7 @@ export default function Signup() {
   return (
     <div className="auth-shell">
       <AuthBackground />
+      <AuthLanguagePicker />
       <Card className="auth-card glass panel-border w-full max-w-sm border-0">
         <CardHeader>
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{serverName}</CardTitle>

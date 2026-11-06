@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import { LANGUAGES, getLanguageName } from "@/player/utils/languageNames";
+import { languageOptions, getLanguageName } from "@/player/utils/languageNames";
 
 function isCanceledSubtitleRequest(err: unknown): boolean {
   return (
@@ -320,7 +320,7 @@ export function SubtitleUploadForm({
               onChange={(event) => handleLanguageChange(event.target.value)}
               disabled={detectingLanguage}
             >
-              {LANGUAGES.map((lang) => (
+              {languageOptions().map((lang) => (
                 <option key={lang.code} value={lang.code}>
                   {lang.label}
                 </option>
@@ -336,7 +336,7 @@ export function SubtitleUploadForm({
                 <SelectValue placeholder="Language" />
               </SelectTrigger>
               <SelectContent>
-                {LANGUAGES.map((lang) => (
+                {languageOptions().map((lang) => (
                   <SelectItem key={lang.code} value={lang.code}>
                     {lang.label}
                   </SelectItem>

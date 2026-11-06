@@ -1,6 +1,7 @@
 import type { DraftField } from "./draft";
 import type { ArtworkSlot, ScopeKind } from "./scope";
 import { COLLECTION_KIND_LABEL, type CollectionKind } from "./types";
+import { formatLocale } from "@/lib/appLocale";
 
 /**
  * Words every collections surface shares, so the editor, lists and dialogs
@@ -416,7 +417,7 @@ export const PREVIEW_NEEDS_RULE_HELP =
   "A smart collection needs at least one rule. Without one it would hold every title.";
 
 export function previewMatches(total: number): string {
-  return total === 1 ? "1 title matches" : `${total.toLocaleString()} titles match`;
+  return total === 1 ? "1 title matches" : `${total.toLocaleString(formatLocale())} titles match`;
 }
 
 /** The save bar's hint on a new Smart collection, once the preview has answered. */

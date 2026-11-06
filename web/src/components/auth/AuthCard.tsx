@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthBackground } from "@/components/auth/AuthBackground";
+import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 
 /** The signed-out account screens' card (password reset and its request). */
 export function AuthCard({
@@ -18,6 +19,7 @@ export function AuthCard({
   return (
     <div className="auth-shell">
       <AuthBackground />
+      <AuthLanguagePicker />
       <Card className="auth-card glass panel-border w-full max-w-sm border-0">
         <CardHeader>
           {eyebrow && (

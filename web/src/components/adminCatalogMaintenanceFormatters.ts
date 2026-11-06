@@ -1,7 +1,8 @@
 import type { AdminJob } from "@/api/types";
+import { formatLocale } from "@/lib/appLocale";
 
 function formatCount(value: number) {
-  return value.toLocaleString();
+  return value.toLocaleString(formatLocale());
 }
 
 export function formatExportProgressLabel(

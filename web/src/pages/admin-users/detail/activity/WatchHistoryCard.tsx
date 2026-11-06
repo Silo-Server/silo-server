@@ -37,6 +37,7 @@ import {
   watchedFraction,
 } from "../format";
 import { DetailCard, ProgressBar } from "../ui";
+import { formatLocale } from "@/lib/appLocale";
 
 const ALL_PROFILES = "all";
 const PERIODS = [
@@ -138,7 +139,7 @@ export function WatchHistoryCard({
       title="Watch history"
       description={
         plays !== undefined
-          ? `${plays.toLocaleString()} ${plays === 1 ? "play" : "plays"} in the last ${days} days`
+          ? `${plays.toLocaleString(formatLocale())} ${plays === 1 ? "play" : "plays"} in the last ${days} days`
           : undefined
       }
       actions={

@@ -34,6 +34,7 @@ import {
 } from "@/pages/adminNodesPresentation";
 import { SectionError } from "../feedback";
 import { formatMbps, formatMbpsValue } from "../format";
+import { formatLocale } from "@/lib/appLocale";
 
 /**
  * Remote transcode/streaming workers from `nodepool`, as a grouped table.
@@ -286,7 +287,7 @@ function FleetSummary({ nodes }: { nodes: StreamNode[] }) {
     const active = list
       .filter((node) => live.includes(node))
       .reduce((sum, node) => sum + node.active_jobs, 0);
-    return `${active.toLocaleString()} ${unit}${active === 1 ? "" : "s"}`;
+    return `${active.toLocaleString(formatLocale())} ${unit}${active === 1 ? "" : "s"}`;
   };
   const proxies = nodes.filter((node) => node.type === "proxy");
   const others = nodes.filter((node) => node.type !== "proxy");
@@ -567,7 +568,7 @@ function NoReading() {
 
 /** One "Active" column holds both kinds of work, so each count names its unit. */
 function ActiveCount({ node }: { node: StreamNode }) {
-  const active = node.active_jobs.toLocaleString();
+  const active = node.active_jobs.toLocaleString(formatLocale());
   const cap = positiveCap(node.max_jobs);
   const proxy = node.type === "proxy";
   return (
@@ -575,7 +576,7 @@ function ActiveCount({ node }: { node: StreamNode }) {
       <span className={describeNodeJobs(node).warning ? "text-warning font-semibold" : undefined}>
         {active}
         {cap !== null ? (
-          <span className="text-muted-foreground font-normal"> / {cap.toLocaleString()}</span>
+          <span className="text-muted-foreground font-normal"> / {cap.toLocaleString(formatLocale())}</span>
         ) : null}
       </span>{" "}
       <abbr

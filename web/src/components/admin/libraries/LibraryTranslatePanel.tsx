@@ -14,10 +14,10 @@ import {
   watchedLibraryTranslationJobs,
 } from "@/hooks/queries/admin/libraryTranslation";
 import { refreshLocalizedMediaQueries } from "@/hooks/queries/mediaSurfaceRefresh";
-import { LANGUAGES } from "@/player/utils/languageNames";
+import { languageOptions } from "@/player/utils/languageNames";
 
 function languageLabel(code: string): string {
-  return LANGUAGES.find((lang) => lang.code === code)?.label ?? code;
+  return languageOptions().find((lang) => lang.code === code)?.label ?? code;
 }
 
 /**
@@ -104,7 +104,7 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
             disabled={busy}
           >
             <option value="">Select…</option>
-            {LANGUAGES.map((lang) => (
+            {languageOptions().map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {lang.label}
               </option>

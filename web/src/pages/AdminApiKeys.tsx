@@ -56,6 +56,7 @@ import { toast } from "sonner";
 import { canManageAccount } from "@/lib/accountOwner";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDate } from "@/lib/datetime";
+import { formatLocale } from "@/lib/appLocale";
 
 type Tier = AdminAPIKeyMetadata["rate_tier"];
 type Scope = components["schemas"]["APIKeyScope"];
@@ -73,7 +74,7 @@ function rateLimitLabel(tier: Tier): string {
 }
 
 function formatRateLimit(limit: { requests_per_second: number; requests_per_minute: number }) {
-  const format = new Intl.NumberFormat();
+  const format = new Intl.NumberFormat(formatLocale());
   return `${format.format(limit.requests_per_second)} requests/s, ${format.format(limit.requests_per_minute)}/min`;
 }
 // An empty scope list is how the server stores a full-access key.

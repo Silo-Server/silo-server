@@ -20,6 +20,7 @@ import { SectionError } from "../feedback";
 import { rangeHours, rangePhrase, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
 import { WidgetRangePicker } from "../WidgetRangePicker";
+import { formatLocale } from "@/lib/appLocale";
 
 const ROW_LIMIT = 8;
 
@@ -60,7 +61,7 @@ export function ApiClientsWidget() {
         <div className="flex min-w-0 items-center gap-2">
           {data && data.total_requests > 0 ? (
             <span className="text-muted-foreground hidden text-[11px] whitespace-nowrap tabular-nums sm:inline">
-              {data.total_requests.toLocaleString()} requests
+              {data.total_requests.toLocaleString(formatLocale())} requests
             </span>
           ) : null}
           <WidgetRangePicker />
@@ -117,7 +118,7 @@ export function ApiClientsWidget() {
                     </span>
                     {client.refused > 0 ? (
                       <span className="text-destructive relative shrink-0 text-[11px] tabular-nums">
-                        {client.refused.toLocaleString()} refused
+                        {client.refused.toLocaleString(formatLocale())} refused
                       </span>
                     ) : null}
                     {!client.session_active ? (
@@ -126,7 +127,7 @@ export function ApiClientsWidget() {
                       </span>
                     ) : null}
                     <span className="relative shrink-0 text-[13px] font-semibold tabular-nums">
-                      {client.requests.toLocaleString()}
+                      {client.requests.toLocaleString(formatLocale())}
                     </span>
                     <span className="text-muted-foreground relative w-10 shrink-0 text-right text-[11px] tabular-nums">
                       {sharePercent(client.requests, data?.total_requests ?? 0)}
@@ -164,7 +165,7 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
         ) : null}
         <dt>Busiest hour</dt>
         <dd className="text-foreground tabular-nums">
-          {client.peak_hour_requests.toLocaleString()} requests
+          {client.peak_hour_requests.toLocaleString(formatLocale())} requests
         </dd>
       </dl>
       <div>Routes called in the last {Math.min(hours, MAX_ENDPOINT_HOURS)} h</div>
@@ -185,7 +186,9 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
               >
                 {endpoint.route}
               </span>
-              <span className="shrink-0 tabular-nums">{endpoint.requests.toLocaleString()}</span>
+              <span className="shrink-0 tabular-nums">
+                {endpoint.requests.toLocaleString(formatLocale())}
+              </span>
             </li>
           ))}
         </ol>

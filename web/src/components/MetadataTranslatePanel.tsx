@@ -14,7 +14,7 @@ import {
 } from "@/hooks/queries/items";
 import { useMetadataAIStatus } from "@/hooks/queries/metadataAI";
 import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
-import { LANGUAGES } from "@/player/utils/languageNames";
+import { languageOptions } from "@/player/utils/languageNames";
 
 function isActive(job: MetadataTranslationJob): boolean {
   return job.status === "pending" || job.status === "running";
@@ -110,7 +110,7 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
             disabled={busy}
           >
             <option value="">Select…</option>
-            {LANGUAGES.map((lang) => (
+            {languageOptions().map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {lang.label}
               </option>

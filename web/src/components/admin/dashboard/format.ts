@@ -1,11 +1,12 @@
 import type { ScanRun } from "@/api/types";
 import { formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
+import { formatLocale } from "@/lib/appLocale";
 
 export function formatFileCount(count: number | null | undefined) {
   if (count == null) {
     return "—";
   }
-  return count === 1 ? "1 file" : `${count.toLocaleString()} files`;
+  return count === 1 ? "1 file" : `${count.toLocaleString(formatLocale())} files`;
 }
 
 /**
@@ -20,7 +21,7 @@ export function formatWatchTime(totalSeconds: number | null | undefined) {
     return `${Math.max(1, Math.round(totalSeconds / 60))}m`;
   }
   const hours = totalSeconds / 3600;
-  return `${hours.toLocaleString(undefined, { maximumFractionDigits: 1 })}h`;
+  return `${hours.toLocaleString(formatLocale(), { maximumFractionDigits: 1 })}h`;
 }
 
 /**
@@ -32,7 +33,7 @@ export function formatMbpsValue(mbps: number) {
     return "—";
   }
   const decimals = mbps > 0 && mbps < 10 ? 1 : 0;
-  return mbps.toLocaleString(undefined, {
+  return mbps.toLocaleString(formatLocale(), {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
@@ -71,7 +72,7 @@ export function formatDataTotal(bytes: number | null | undefined) {
       continue;
     }
     const shown = unit > 0 && rounded < 100 ? 1 : 0;
-    return `${rounded.toLocaleString(undefined, {
+    return `${rounded.toLocaleString(formatLocale(), {
       minimumFractionDigits: shown,
       maximumFractionDigits: shown,
     })} ${DATA_TOTAL_UNITS[unit]}`;
@@ -151,7 +152,7 @@ export function formatLatency(latencyMs: number) {
   if (!Number.isFinite(latencyMs)) {
     return "—";
   }
-  return `${latencyMs.toLocaleString(undefined, {
+  return `${latencyMs.toLocaleString(formatLocale(), {
     maximumFractionDigits: latencyMs < 10 ? 2 : 0,
   })} ms`;
 }

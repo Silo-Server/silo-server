@@ -62,6 +62,7 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
+import { formatLocale } from "@/lib/appLocale";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
 type SortDir = "asc" | "desc";
@@ -368,7 +369,7 @@ export default function AdminActivity() {
                         </TableCell>
                         <TableCell className="text-sm">{formatDateTime(entry.last_seen)}</TableCell>
                         <TableCell className="text-right">
-                          {entry.request_count.toLocaleString()}
+                          {entry.request_count.toLocaleString(formatLocale())}
                         </TableCell>
                       </TableRow>
                     ))}

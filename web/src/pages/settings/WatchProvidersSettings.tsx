@@ -45,6 +45,7 @@ import {
   connectionSchemasAreValid,
   renderableConnectionSchemas,
 } from "./watchProviderConnectionConfig";
+import { formatLocale } from "@/lib/appLocale";
 
 function formatRelativeTime(value?: string) {
   return formatRelativeTimeBase(value, { rounding: "floor", justNowLabel: "Just now" }) ?? "Never";
@@ -663,11 +664,11 @@ function WatchProviderCard({
             <div className="grid grid-cols-2 gap-3 sm:hidden">
               <StatCell
                 label="Last imported"
-                value={`${runInfo.imported.watched.toLocaleString()} watched · ${runInfo.imported.progress.toLocaleString()} progress · ${runInfo.imported.favorites.toLocaleString()} favorites · ${runInfo.imported.watchlist.toLocaleString()} watchlist${supportsRatings ? ` · ${runInfo.imported.ratings.toLocaleString()} ratings` : ""}`}
+                value={`${runInfo.imported.watched.toLocaleString(formatLocale())} watched · ${runInfo.imported.progress.toLocaleString(formatLocale())} progress · ${runInfo.imported.favorites.toLocaleString(formatLocale())} favorites · ${runInfo.imported.watchlist.toLocaleString(formatLocale())} watchlist${supportsRatings ? ` · ${runInfo.imported.ratings.toLocaleString(formatLocale())} ratings` : ""}`}
               />
               <StatCell
                 label="Last exported"
-                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals + runInfo.exported.ratings).toLocaleString()} sent`}
+                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals + runInfo.exported.ratings).toLocaleString(formatLocale())} sent`}
               />
             </div>
             <div
@@ -678,29 +679,29 @@ function WatchProviderCard({
             >
               <StatCell
                 label="Watched"
-                value={`${runInfo.imported.watched.toLocaleString()} imported`}
+                value={`${runInfo.imported.watched.toLocaleString(formatLocale())} imported`}
               />
               <StatCell
                 label="Progress"
-                value={`${runInfo.imported.progress.toLocaleString()} resumed`}
+                value={`${runInfo.imported.progress.toLocaleString(formatLocale())} resumed`}
               />
               <StatCell
                 label="Favorites"
-                value={`${runInfo.imported.favorites.toLocaleString()} imported`}
+                value={`${runInfo.imported.favorites.toLocaleString(formatLocale())} imported`}
               />
               <StatCell
                 label="Watchlist"
-                value={`${runInfo.imported.watchlist.toLocaleString()} imported`}
+                value={`${runInfo.imported.watchlist.toLocaleString(formatLocale())} imported`}
               />
               {supportsRatings ? (
                 <StatCell
                   label="Ratings"
-                  value={`${runInfo.imported.ratings.toLocaleString()} imported`}
+                  value={`${runInfo.imported.ratings.toLocaleString(formatLocale())} imported`}
                 />
               ) : null}
               <StatCell
                 label="Exported"
-                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals + runInfo.exported.ratings).toLocaleString()} sent`}
+                value={`${(runInfo.exported.watched + runInfo.exported.favorites + runInfo.exported.favoriteRemovals + runInfo.exported.watchlist + runInfo.exported.watchlistRemovals + runInfo.exported.ratings).toLocaleString(formatLocale())} sent`}
               />
             </div>
           </div>

@@ -88,6 +88,7 @@ import {
 } from "@/lib/permissions";
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { formatLocale } from "@/lib/appLocale";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -691,7 +692,7 @@ function formatRelativeTime(value?: string | null, fallback = "-") {
     ["minute", 60],
     ["second", 1],
   ];
-  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "always" });
+  const formatter = new Intl.RelativeTimeFormat(formatLocale(), { numeric: "always" });
 
   for (const [unit, secondsPerUnit] of ranges) {
     if (Math.abs(seconds) >= secondsPerUnit || unit === "second") {

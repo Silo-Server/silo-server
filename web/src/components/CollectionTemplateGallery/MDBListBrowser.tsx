@@ -29,6 +29,7 @@ import type { ScopeKind } from "@/lib/collections/scope";
 import { cn } from "@/lib/utils";
 
 import { CollectionTemplateCard, PickRow } from "./CollectionTemplateCard";
+import { formatLocale } from "@/lib/appLocale";
 
 const ALL = "all";
 
@@ -43,8 +44,8 @@ function listMeta(list: MDBListListSummary) {
   return [
     `by ${list.user_name}`,
     kind,
-    `${list.items.toLocaleString()} title${list.items === 1 ? "" : "s"}`,
-    list.likes > 0 ? `♥ ${list.likes.toLocaleString()}` : null,
+    `${list.items.toLocaleString(formatLocale())} title${list.items === 1 ? "" : "s"}`,
+    list.likes > 0 ? `♥ ${list.likes.toLocaleString(formatLocale())}` : null,
   ]
     .filter(Boolean)
     .join(" · ");

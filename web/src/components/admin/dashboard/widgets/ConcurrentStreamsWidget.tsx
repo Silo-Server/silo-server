@@ -14,6 +14,7 @@ import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
+import { formatLocale } from "@/lib/appLocale";
 
 /**
  * Concurrent playback sessions over the chosen window, one point per bucket the
@@ -38,7 +39,7 @@ export function ConcurrentStreamsWidget() {
     <Card className="h-full">
       <WidgetHeader title={rangeTitle("Concurrent streams", range)}>
         <span className="text-muted-foreground text-[11px] tabular-nums">
-          Peak {peak.toLocaleString()}
+          Peak {peak.toLocaleString(formatLocale())}
         </span>
         <WidgetRangePicker />
       </WidgetHeader>

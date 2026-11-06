@@ -72,6 +72,7 @@ import {
   getPreferredPlexServerURL,
   type BrowserPlexServer,
 } from "@/lib/plexAuth";
+import { formatLocale } from "@/lib/appLocale";
 
 const UNMAPPED_VALUE = "__unmapped__";
 
@@ -114,7 +115,7 @@ function formatTimestamp(value?: string | null) {
   if (!value) return "Never";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Never";
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(formatLocale(), {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
