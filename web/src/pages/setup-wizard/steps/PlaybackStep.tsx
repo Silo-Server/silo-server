@@ -8,6 +8,7 @@ import { SettingField, SettingFieldStatus } from "@/pages/admin-settings/Setting
 import {
   HW_ACCEL_OPTIONS,
   describeDetection,
+  hardwareVerified,
   formatResolved,
   hasHardwareToneMapCapability,
 } from "@/pages/admin-settings/playbackSettings.utils";
@@ -44,7 +45,7 @@ function playbackSummary(
 ): string | undefined {
   if (!transcodeEnabled) return "Video transcoding off";
   if (hwAccel === "none") return "Software";
-  if (probed?.resolved && probed.resolved !== "none") return formatResolved(probed.resolved);
+  if (hardwareVerified(probed)) return formatResolved(probed.resolved);
   return hwAccel === "auto" ? undefined : formatResolved(hwAccel);
 }
 
@@ -61,7 +62,7 @@ export function PlaybackStep() {
   const detection = useHWAccelDetection(hwAccel !== "none");
   const probed = hwAccel === "none" ? undefined : detection.data;
   const detectedLabel = describeDetection(probed);
-  const hardwareFound = Boolean(probed?.resolved && probed.resolved !== "none");
+  const hardwareFound = hardwareVerified(probed);
   const hardwareToneMapAvailable = hasHardwareToneMapCapability(probed);
 
   useStepSummary("playback", playbackSummary(transcodeEnabled, hwAccel, probed));
