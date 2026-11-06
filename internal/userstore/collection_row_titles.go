@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"sort"
 	"strings"
 )
 
@@ -80,23 +79,7 @@ func (r *CollectionRowRenamer) RenameForCollection(ctx context.Context, collecti
 	if r == nil || r.users == nil || r.stores == nil {
 		return
 	}
-	users, err := r.users.List(ctx)
-	if err != nil {
-		r.logger.WarnContext(ctx, "collection row rename: list users failed", "collection_id", collectionID, "error", err)
-		return
-	}
-	sort.Slice(users, func(i, j int) bool { return users[i].ID < users[j].ID })
-	for _, user := range users {
-		if ctx.Err() != nil {
-			return
-		}
-		store, err := r.stores.ForUser(ctx, user.ID)
-		if err != nil {
-			r.logger.WarnContext(ctx, "collection row rename: open user store failed", "collection_id", collectionID, "user_id", user.ID, "error", err)
-			continue
-		}
-		if err := store.RenameCollectionRows(ctx, CollectionKindLibrary, collectionID, oldTitle, newTitle); err != nil {
-			r.logger.WarnContext(ctx, "collection row rename failed", "collection_id", collectionID, "user_id", user.ID, "error", err)
-		}
-	}
+	forEachUserStore(ctx, r.users, r.stores, r.logger, "collection row rename", []any{"collection_id", collectionID}, func(_ int, store UserStore) error {
+		return store.RenameCollectionRows(ctx, CollectionKindLibrary, collectionID, oldTitle, newTitle)
+	})
 }

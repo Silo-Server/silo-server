@@ -758,10 +758,12 @@ func (h *LibraryCollectionHandler) DeleteAdminCollection(ctx context.Context, id
 }
 
 // renameCollectionRows carries a rename into the rows that still show the
-// collection under its old name: admin rows, then rows profiles built. It runs
-// before the response re-reads the collection, because retitling an admin row
-// advances the collection's revision and the caller's next If-Match needs the
-// new one. A failure is logged and leaves those rows on the old name.
+// collection under its old name. Admin rows are retitled before the response
+// re-reads the collection, because retitling one advances the collection's
+// revision and the caller's next If-Match needs the new one. The rows profiles
+// built, in every account, are retitled after the response, detached from the
+// request: that sweep leaves the revision alone and grows with the number of
+// accounts. A failure is logged and leaves those rows on the old name.
 func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, collectionID, oldTitle, newTitle string) {
 	if strings.TrimSpace(oldTitle) == strings.TrimSpace(newTitle) {
 		return
@@ -772,5 +774,7 @@ func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, col
 				"collection_id", collectionID, "error", err)
 		}
 	}
-	h.CollectionRowRenamer.RenameForCollection(ctx, collectionID, oldTitle, newTitle)
+	if h.CollectionRowRenamer != nil {
+		go h.CollectionRowRenamer.RenameForCollection(context.WithoutCancel(ctx), collectionID, oldTitle, newTitle)
+	}
 }
