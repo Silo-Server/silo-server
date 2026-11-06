@@ -89,6 +89,6 @@ func (r *CollectionRowRenamer) RenameForCollection(ctx context.Context, collecti
 		if err != nil {
 			return fmt.Errorf("reading the collection's title: %w", err)
 		}
-		return store.RenameCollectionRows(ctx, CollectionKindLibrary, collectionID, oldTitle, title)
+		return store.RenameCollectionRows(ctx, CollectionKindLibrary, collectionID, oldTitle, title, nil)
 	})
 }

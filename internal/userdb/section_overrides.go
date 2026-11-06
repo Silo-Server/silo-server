@@ -135,7 +135,7 @@ func ResetSectionOverrides(db *sql.DB, profileID, scope, libraryID string) error
 // that still carry its old name (see userstore.RenameCollectionRowTitle), in
 // one transaction. Each write checks the row still holds what was read, so a
 // row edited in between keeps the edit.
-func RenameCollectionRows(ctx context.Context, db *sql.DB, kind, collectionID, oldTitle, newTitle string) error {
+func RenameCollectionRows(ctx context.Context, db *sql.DB, kind, collectionID, oldTitle, newTitle string, visibleTo func(profileID string) bool) error {
 	overrides, err := ListAllSectionOverrides(db)
 	if err != nil {
 		return err
@@ -147,6 +147,9 @@ func RenameCollectionRows(ctx context.Context, db *sql.DB, kind, collectionID, o
 	defer func() { _ = tx.Rollback() }()
 	for _, o := range overrides {
 		read := o
+		if visibleTo != nil && !visibleTo(o.ProfileID) {
+			continue
+		}
 		if !userstore.RenameCollectionRowTitle(&o, kind, collectionID, oldTitle, newTitle) {
 			continue
 		}

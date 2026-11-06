@@ -254,8 +254,9 @@ type UserStore interface {
 	ResetSectionOverrides(ctx context.Context, profileID, scope, libraryID string) error
 	// RenameCollectionRows retitles the account's profile-built rows for one
 	// collection (kind is CollectionKindLibrary or CollectionKindUser) whose
-	// title still equals oldTitle; rows with any other title keep it.
-	RenameCollectionRows(ctx context.Context, kind, collectionID, oldTitle, newTitle string) error
+	// title still equals oldTitle; rows with any other title keep it. When
+	// visibleTo is set, only rows of profiles it accepts are retitled.
+	RenameCollectionRows(ctx context.Context, kind, collectionID, oldTitle, newTitle string, visibleTo func(profileID string) bool) error
 
 	// Settings & Preferences
 	GetSetting(ctx context.Context, key string) (string, error)
