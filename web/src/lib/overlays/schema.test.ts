@@ -89,13 +89,34 @@ describe("overlayPrefsForServer", () => {
   it("drops the revision 26 combined badge for a server at revision 25", () => {
     const storable = overlayPrefsForServer(prefs, { manifestRevision: 25, storedIds: new Set() });
     expect(storable.items).not.toHaveProperty("resolution_hdr_audio");
-    const { resolution_hdr_audio: _added, ...items } = prefs.items;
+    expect(storable.items).not.toHaveProperty("availability");
+    const { resolution_hdr_audio: _added, availability: _availability, ...items } = prefs.items;
     expect(storable).toEqual({ ...prefs, items });
   });
 
-  it("keeps everything for a server at revision 26", () => {
+  it("keeps a revision 26 document except badges that revision does not know", () => {
     const storable = overlayPrefsForServer(prefs, { manifestRevision: 26, storedIds: new Set() });
-    expect(storable).toEqual(prefs);
+    expect(storable.items).not.toHaveProperty("availability");
+    const { availability: _availability, ...items } = prefs.items;
+    expect(storable).toEqual({ ...prefs, items });
+  });
+
+  it("drops the revision 27 availability badge for a server at revision 26", () => {
+    const withAvailability = {
+      ...prefs,
+      items: {
+        ...prefs.items,
+        availability: { enabled: true, position: "top-left" as const },
+      },
+    };
+    const at26 = overlayPrefsForServer(withAvailability, {
+      manifestRevision: 26,
+      storedIds: new Set(),
+    });
+    expect(at26.items).not.toHaveProperty("availability");
+    expect(
+      overlayPrefsForServer(withAvailability, { manifestRevision: 27, storedIds: new Set() }),
+    ).toEqual(withAvailability);
   });
 });
 
