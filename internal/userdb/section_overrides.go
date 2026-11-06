@@ -42,8 +42,13 @@ func ListSectionOverrides(db *sql.DB, profileID, scope, libraryID string) ([]use
 	return overrides, rows.Err()
 }
 
+// sqlQueryer is a database or a transaction.
+type sqlQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 // ListAllSectionOverrides returns all overrides in one account database.
-func ListAllSectionOverrides(db *sql.DB) ([]userstore.SectionOverride, error) {
+func ListAllSectionOverrides(ctx context.Context, db sqlQueryer) ([]userstore.SectionOverride, error) {
 	query := `SELECT id, profile_id, scope, COALESCE(library_id,''), COALESCE(section_id,''),
 		position, hidden, removed, COALESCE(section_type,''), COALESCE(title,''),
 		featured, item_limit, COALESCE(config,''),
@@ -53,7 +58,7 @@ func ListAllSectionOverrides(db *sql.DB) ([]userstore.SectionOverride, error) {
 		FROM profile_section_overrides
 		ORDER BY profile_id, scope, COALESCE(library_id,''), COALESCE(position, 999999)`
 
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -136,15 +141,15 @@ func ResetSectionOverrides(db *sql.DB, profileID, scope, libraryID string) error
 // one transaction. Each write checks the row still holds what was read, so a
 // row edited in between keeps the edit.
 func RenameCollectionRows(ctx context.Context, db *sql.DB, kind, collectionID, oldTitle, newTitle string, visibleTo func(profileID string) bool) error {
-	overrides, err := ListAllSectionOverrides(db)
-	if err != nil {
-		return err
-	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	overrides, err := ListAllSectionOverrides(ctx, tx)
+	if err != nil {
+		return err
+	}
 	for _, o := range overrides {
 		read := o
 		if visibleTo != nil && !visibleTo(o.ProfileID) {

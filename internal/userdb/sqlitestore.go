@@ -30,8 +30,8 @@ var _ userstore.SectionOverrideEnumerator = (*SQLiteUserStore)(nil)
 
 // ListAllSectionOverrides exposes the account-wide read capability used by
 // scheduled section maintenance.
-func (s *SQLiteUserStore) ListAllSectionOverrides(_ context.Context) ([]userstore.SectionOverride, error) {
-	return ListAllSectionOverrides(s.db)
+func (s *SQLiteUserStore) ListAllSectionOverrides(ctx context.Context) ([]userstore.SectionOverride, error) {
+	return ListAllSectionOverrides(ctx, s.db)
 }
 
 // --- Profiles ---
