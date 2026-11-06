@@ -1,6 +1,7 @@
 package dashmetrics
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -39,7 +40,7 @@ func TestComputeEgressDelta(t *testing.T) {
 			snapshot: streamtelemetry.Snapshot{
 				Sessions: []streamtelemetry.SessionView{viewerSession("s1", 4_000)},
 			},
-			wantDelta: egressDelta{Total: 4_000},
+			wantDelta: egressDelta{Total: 4_000, Sessions: map[string]int64{"s1": 4_000}},
 			wantNext:  map[string]int64{"session:s1": 4_000},
 		},
 		{
@@ -48,7 +49,7 @@ func TestComputeEgressDelta(t *testing.T) {
 			snapshot: streamtelemetry.Snapshot{
 				Sessions: []streamtelemetry.SessionView{viewerSession("s1", 6_500)},
 			},
-			wantDelta: egressDelta{Total: 2_500},
+			wantDelta: egressDelta{Total: 2_500, Sessions: map[string]int64{"s1": 2_500}},
 			wantNext:  map[string]int64{"session:s1": 6_500},
 		},
 		{
@@ -78,7 +79,7 @@ func TestComputeEgressDelta(t *testing.T) {
 					viewerSession("s2", 900),
 				},
 			},
-			wantDelta: egressDelta{Total: 800},
+			wantDelta: egressDelta{Total: 800, Sessions: map[string]int64{"s2": 800}},
 			wantNext:  map[string]int64{"session:s1": 500, "session:s2": 900},
 		},
 		{
@@ -94,7 +95,7 @@ func TestComputeEgressDelta(t *testing.T) {
 					},
 				}},
 			},
-			wantDelta: egressDelta{Total: 700},
+			wantDelta: egressDelta{Total: 700, Sessions: map[string]int64{"s1": 700}},
 			wantNext:  map[string]int64{"session:s1": 700},
 		},
 		{
@@ -116,7 +117,7 @@ func TestComputeEgressDelta(t *testing.T) {
 				Sessions:  []streamtelemetry.SessionView{viewerSession("x", 10)},
 				Transfers: []streamtelemetry.TransferView{{ID: "x", Role: streamtelemetry.RoleViewerEgress, BytesAccepted: 20}},
 			},
-			wantDelta: egressDelta{Total: 30, Download: 20},
+			wantDelta: egressDelta{Total: 30, Download: 20, Sessions: map[string]int64{"x": 10}},
 			wantNext:  map[string]int64{"session:x": 10, "transfer:x": 20},
 		},
 		{
@@ -126,14 +127,14 @@ func TestComputeEgressDelta(t *testing.T) {
 				Sessions:  []streamtelemetry.SessionView{viewerSession("s1", 700)},
 				Transfers: []streamtelemetry.TransferView{{ID: "t1", Role: streamtelemetry.RoleViewerEgress, BytesAccepted: 350}},
 			},
-			wantDelta: egressDelta{Total: 850, Download: 250},
+			wantDelta: egressDelta{Total: 850, Download: 250, Sessions: map[string]int64{"s1": 600}},
 			wantNext:  map[string]int64{"session:s1": 700, "transfer:t1": 350},
 		},
 		{
 			name:      "a nil previous map behaves like an empty one",
 			prev:      nil,
 			snapshot:  streamtelemetry.Snapshot{Sessions: []streamtelemetry.SessionView{viewerSession("s1", 42)}},
-			wantDelta: egressDelta{Total: 42},
+			wantDelta: egressDelta{Total: 42, Sessions: map[string]int64{"s1": 42}},
 			wantNext:  map[string]int64{"session:s1": 42},
 		},
 	}
@@ -143,7 +144,7 @@ func TestComputeEgressDelta(t *testing.T) {
 			t.Parallel()
 
 			delta, next := computeEgressDelta(tt.prev, tt.snapshot)
-			if delta != tt.wantDelta {
+			if !reflect.DeepEqual(delta, tt.wantDelta) {
 				t.Fatalf("delta = %+v, want %+v", delta, tt.wantDelta)
 			}
 			if len(next) != len(tt.wantNext) {

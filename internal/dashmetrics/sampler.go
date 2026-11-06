@@ -27,6 +27,10 @@
 // won the minute writes it, so a minute's split and total come from one
 // snapshot. Idle nodes write no row.
 //
+// The same per-minute telemetry deltas also add each playback session's
+// growth to playback_session_api_egress, which the admin playback history
+// shows as the play's API-served bytes.
+//
 // Sampling is best-effort: every failure is logged and swallowed. A missed
 // minute is a gap in the chart, never a failed request or a dead server.
 package dashmetrics
@@ -34,8 +38,10 @@ package dashmetrics
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -222,6 +228,11 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	previous, previousAt := s.prevBytes, s.lastEgressAt
 	s.prevBytes, s.lastEgressAt = next, at
 
+	// Unlike the rate below, the first tick's session bytes are recorded:
+	// they were served since this process started and no earlier tick saved
+	// them.
+	s.recordSessionBytes(ctx, delta.Sessions)
+
 	// The very first snapshot carries every byte served since the process
 	// started. Charting that as one minute of egress would draw a spike that
 	// never happened, so the first tick only establishes the baseline.
@@ -250,8 +261,42 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	}
 }
 
-// pruneExpired drops samples older than the retention window.
+// recordSessionBytes adds each session's growth to its API-served bytes.
+// Every API process adds only what it served, so replicas never overwrite one
+// another. The ids are sorted so two replicas adding to the same sessions take
+// the row locks in the same order and cannot deadlock.
+func (s *Sampler) recordSessionBytes(ctx context.Context, sessions map[string]int64) {
+	if len(sessions) == 0 {
+		return
+	}
+	ids := slices.Sorted(maps.Keys(sessions))
+	bytes := make([]int64, len(ids))
+	for i, id := range ids {
+		bytes[i] = sessions[id]
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO playback_session_api_egress (session_id, api_served_bytes)
+		SELECT * FROM unnest($1::text[], $2::bigint[])
+		ON CONFLICT (session_id) DO UPDATE
+		SET api_served_bytes = playback_session_api_egress.api_served_bytes + EXCLUDED.api_served_bytes,
+		    updated_at = now()
+	`, ids, bytes)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to record playback session API-served bytes", "component", component, "sessions", len(ids), "error", err)
+	}
+}
+
+// pruneExpired drops samples older than the retention window, and the
+// API-served bytes of sessions that never got a history row.
 func (s *Sampler) pruneExpired(ctx context.Context) {
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM playback_session_api_egress e
+		WHERE e.updated_at < now() - make_interval(days => $1)
+		  AND NOT EXISTS (SELECT 1 FROM admin_playback_history h WHERE h.session_id = e.session_id)
+	`, retentionDays)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to prune playback session API-served bytes", "component", component, "error", err)
+	}
 	for _, table := range []string{"dashboard_metric_samples", "dashboard_node_egress_samples"} {
 		_, err := s.pool.Exec(ctx, `
 			DELETE FROM `+table+`

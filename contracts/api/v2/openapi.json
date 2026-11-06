@@ -15343,6 +15343,14 @@
       "AdminPlaybackHistoryEntry": {
         "additionalProperties": false,
         "properties": {
+          "api_served_bytes": {
+            "description": "Viewer bytes the API servers sent for the play, counted a minute at a time while it played. Bytes a stream node or proxy sent the viewer directly are not included. Null when the API servers sent none, which includes every play recorded before it was counted",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "audio_decision": {
             "description": "How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown",
             "enum": [
@@ -15605,7 +15613,8 @@
           "video_decision",
           "audio_decision",
           "end_reason",
-          "lifecycle_seq"
+          "lifecycle_seq",
+          "api_served_bytes"
         ],
         "type": "object"
       },

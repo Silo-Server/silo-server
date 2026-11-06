@@ -82,6 +82,8 @@ export function adminPlaybackHistoryItemFromV2(
     duration_seconds: entry.duration_seconds,
     completed: entry.completed,
     played_seconds: entry.played_seconds,
+    // A server older than the field leaves it out.
+    api_served_bytes: entry.api_served_bytes ?? null,
     series_title: entry.series_title,
     season_number: entry.season_number,
     episode_number: entry.episode_number,

@@ -33,7 +33,8 @@
       "video_decision": "direct",
       "audio_decision": null,
       "end_reason": "stopped",
-      "lifecycle_seq": null
+      "lifecycle_seq": null,
+      "api_served_bytes": null
     }
   ],
   "page": {

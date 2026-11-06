@@ -25,6 +25,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import { formatFileSize } from "@/lib/mediaFormat";
 import type { AdminPlaybackHistoryItem } from "@/api/types";
 
 import { episodeCode } from "./admin-users/detail/format";
@@ -262,6 +263,9 @@ export default function AdminPlaybackHistory() {
                       <TableHead>Profile</TableHead>
                       <TableHead>Method</TableHead>
                       <TableHead>Watch Time</TableHead>
+                      <TableHead title="Bytes the API servers sent the viewer. Bytes a stream node or proxy sent directly are not included.">
+                        API-served
+                      </TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Ended</TableHead>
                       <TableHead className="text-right">Logs</TableHead>
@@ -339,6 +343,9 @@ export default function AdminPlaybackHistory() {
                                 of {formatDuration(row.duration_seconds)}
                               </div>
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            {formatFileSize(row.api_served_bytes ?? undefined, { fallback: "—" })}
                           </TableCell>
                           <TableCell>
                             <Badge variant={row.completed ? "default" : "outline"}>

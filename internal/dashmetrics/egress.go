@@ -7,10 +7,12 @@ import "github.com/Silo-Server/silo-server/internal/streamtelemetry"
 // served by file-transfer routes (telemetry transfers: offline/direct
 // downloads, ebook and ABS file fetches) rather than streaming playback.
 // Download is always <= Total, so a reader can derive playback as the
-// difference without ever going negative.
+// difference without ever going negative. Sessions holds each playback
+// session's share of the growth, keyed by session id, for sessions that grew.
 type egressDelta struct {
 	Total    int64
 	Download int64
+	Sessions map[string]int64
 }
 
 // computeEgressDelta returns the viewer bytes this process served between two
@@ -51,7 +53,13 @@ func computeEgressDelta(prev map[string]int64, snapshot streamtelemetry.Snapshot
 				bytes += route.BytesAccepted
 			}
 		}
-		delta.Total += record("session:"+session.SessionID, bytes)
+		if grown := record("session:"+session.SessionID, bytes); grown > 0 {
+			delta.Total += grown
+			if delta.Sessions == nil {
+				delta.Sessions = make(map[string]int64)
+			}
+			delta.Sessions[session.SessionID] = grown
+		}
 	}
 
 	for _, transfer := range snapshot.Transfers {

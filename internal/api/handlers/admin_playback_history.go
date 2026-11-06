@@ -77,6 +77,11 @@ type AdminPlaybackHistoryRow struct {
 	// LifecycleSeq is the sequence number of the end the row records; nil
 	// on rows recorded before lifecycle numbers existed.
 	LifecycleSeq *int64
+	// APIServedBytes is the viewer bytes the API processes sent for the play
+	// (playback_session_api_egress); nil when they sent none, which includes
+	// every play recorded before it was measured and a play a stream node or
+	// proxy served on its own.
+	APIServedBytes *int64
 	// SeriesTitle, SeasonNumber and EpisodeNumber describe an episode's
 	// place in its series; empty and nil for anything else.
 	SeriesTitle   string
@@ -165,6 +170,7 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			h.audio_decision,
 			h.end_reason,
 			h.lifecycle_seq,
+			eg.api_served_bytes,
 			COALESCE(sm.title, ''),
 			ep.season_number,
 			ep.episode_number
@@ -172,7 +178,8 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 		LEFT JOIN users u ON u.id = h.user_id
 		LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
 		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-		LEFT JOIN media_items sm ON sm.content_id = ep.series_id`
+		LEFT JOIN media_items sm ON sm.content_id = ep.series_id
+		LEFT JOIN playback_session_api_egress eg ON eg.session_id = h.session_id`
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
@@ -198,7 +205,7 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			&row.MeasuredSince, &row.MeasuredUntil, &row.ClientIP,
 			&row.DeviceID, &row.DevicePlatform, &row.ClientName, &row.ClientVersion,
 			&row.VideoDecision, &row.AudioDecision, &row.EndReason, &row.LifecycleSeq,
-			&row.SeriesTitle, &row.SeasonNumber, &row.EpisodeNumber,
+			&row.APIServedBytes, &row.SeriesTitle, &row.SeasonNumber, &row.EpisodeNumber,
 		); err != nil {
 			rows.Close()
 			return out, err

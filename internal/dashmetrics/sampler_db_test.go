@@ -36,7 +36,8 @@ func samplerTestPool(t *testing.T) *pgxpool.Pool {
 			t.Error(err)
 		}
 	})
-	for _, table := range []string{"dashboard_metric_samples", "dashboard_node_egress_samples", "stream_nodes", "playback_sessions_sync"} {
+	for _, table := range []string{"dashboard_metric_samples", "dashboard_node_egress_samples", "stream_nodes", "playback_sessions_sync",
+		"playback_session_api_egress", "admin_playback_history"} {
 		if _, err := admin.Exec(t.Context(), fmt.Sprintf("CREATE TABLE %s.%s (LIKE public.%s INCLUDING ALL)", schema, table, table)); err != nil {
 			t.Fatal(err)
 		}
@@ -130,5 +131,58 @@ func TestSampleSharedRecordsEgressPerNodeDB(t *testing.T) {
 	NewSampler(pool, nil, "replica-b").sampleShared(ctx)
 	if got := samples(); fmt.Sprint(got) != fmt.Sprint([]string{"shared=1", "shared=1"}) {
 		t.Fatalf("after a losing replica: samples = %v, want only the winner's shared rows", got)
+	}
+}
+
+// TestSessionAPIEgressAccumulatesDB: each tick adds a session's growth to the
+// bytes already recorded for it, and the hourly prune drops only stale rows
+// whose play never got a history row.
+func TestSessionAPIEgressAccumulatesDB(t *testing.T) {
+	pool := samplerTestPool(t)
+	ctx := t.Context()
+	sampler := NewSampler(pool, nil, "replica-a")
+
+	sampler.recordSessionBytes(ctx, map[string]int64{"played": 100, "abandoned": 50})
+	sampler.recordSessionBytes(ctx, map[string]int64{"played": 25})
+
+	bytes := func() map[string]int64 {
+		t.Helper()
+		rows, err := pool.Query(ctx, `SELECT session_id, api_served_bytes FROM playback_session_api_egress`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]int64{}
+		for rows.Next() {
+			var id string
+			var n int64
+			if err := rows.Scan(&id, &n); err != nil {
+				t.Fatal(err)
+			}
+			got[id] = n
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got, want := bytes(), map[string]int64{"played": 125, "abandoned": 50}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("bytes = %v, want %v", got, want)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE playback_session_api_egress SET updated_at = now() - make_interval(days => $1 + 1)
+	`, retentionDays); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_playback_history
+			(session_id, user_id, profile_id, media_file_id, play_method, started_at, ended_at)
+		VALUES ('played', 1, 'p', 1, 'direct', now(), now())
+	`); err != nil {
+		t.Fatal(err)
+	}
+	sampler.pruneExpired(ctx)
+	if got, want := bytes(), map[string]int64{"played": 125}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("after prune: bytes = %v, want %v", got, want)
 	}
 }
