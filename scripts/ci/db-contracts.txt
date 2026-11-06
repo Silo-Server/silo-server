@@ -245,6 +245,7 @@
 # subscribing again records the new login.
 ./internal/notifications TestWebPushStopsWhenTheRegisteringLoginEndsDB
 ./internal/notifications TestWebPushResubscribeRecordsTheNewLoginDB
+./internal/notifications TestWebPushSweepOfUnboundSubscriptionsDB
 ./internal/notifications TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB
 
 # Session-less Android push retirement is ordered against registration by generation.

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -22,6 +23,7 @@ func loginSessionWebPushDB(t *testing.T) (*WebPushRepository, *pgxpool.Pool) {
 	pool := schemaDB(t, "web_push_login_session_")
 	if _, err := pool.Exec(t.Context(), `
 		CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL);
+		CREATE TABLE api_keys (LIKE public.api_keys INCLUDING ALL);
 		CREATE TABLE notification_deliveries (LIKE public.notification_deliveries INCLUDING ALL);
 		CREATE TABLE web_push_subscriptions (LIKE public.web_push_subscriptions INCLUDING ALL);
 		CREATE TABLE web_push_delivery_attempts (LIKE public.web_push_delivery_attempts INCLUDING ALL);
@@ -96,6 +98,40 @@ func TestWebPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
 	for session, delivered := range want {
 		if remaining[session] != delivered {
 			t.Errorf("retention kept the browser of session %q = %v, want %v", session, remaining[session], delivered)
+		}
+	}
+}
+
+// A subscription with no recorded login stops once its account has no live
+// login and no API key: it predates the column, or a restore of an older backup
+// dropped it, and a signed-out browser can never record one.
+func TestWebPushSweepOfUnboundSubscriptionsDB(t *testing.T) {
+	repo, pool := loginSessionWebPushDB(t)
+	ctx := t.Context()
+	// 7 has a live login; 9 has none at all, as after a full restore; 10's only
+	// login was revoked; 11's too, but it holds an API key.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO auth_sessions (id, user_id, expires_at, revoked_at) VALUES
+			('revoked-10', 10, now() + interval '1 hour', now()),
+			('revoked-11', 11, now() + interval '1 hour', now());
+		INSERT INTO api_keys (user_id, label, key_hash, revision)
+			VALUES (11, 'integration', encode(sha256('k'), 'hex'), 1)`); err != nil {
+		t.Fatal(err)
+	}
+	want := map[int]bool{7: true, 9: false, 10: false, 11: true}
+	for user := range want {
+		subscribeBrowser(t, repo, fmt.Sprintf("browser-%d", user), user, "default", "")
+	}
+	if deleted, err := repo.DeleteSubscriptionsWithNoLogin(ctx); err != nil || deleted != 2 {
+		t.Fatalf("sweep deleted %d subscriptions, err=%v, want 2", deleted, err)
+	}
+	for user, kept := range want {
+		rows, err := repo.ListByProfile(ctx, user, "default")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (len(rows) == 1) != kept {
+			t.Errorf("account %d kept its unbound subscription = %v, want %v", user, len(rows) == 1, kept)
 		}
 	}
 }

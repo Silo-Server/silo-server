@@ -240,6 +240,27 @@ func (r *WebPushRepository) DeleteEndedLoginSubscriptions(ctx context.Context) (
 	return tag.RowsAffected(), nil
 }
 
+// DeleteSubscriptionsWithNoLogin removes subscriptions with no recorded login
+// whose account has no live login and no API key. Such a subscription predates
+// login_session_id, or was carried through a restore of a backup taken before
+// it, which drops the column; a browser already signed out can never record
+// one, so it would otherwise receive real titles indefinitely. The web app
+// cannot bring it back by itself, because it remembers only subscriptions it
+// registered on a login; turning push on again in Settings does.
+func (r *WebPushRepository) DeleteSubscriptionsWithNoLogin(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM web_push_subscriptions w
+		WHERE w.login_session_id IS NULL
+		  -- An API key registers with no session, and it has no revoked state.
+		  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = w.user_id)
+		  -- A full restore leaves auth_sessions empty, so this covers its rows too.
+		  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = w.user_id AND `+authSessionLive+`)`)
+	if err != nil {
+		return 0, fmt.Errorf("delete web push subscriptions with no login: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // RecordSuccess resets the failure streak after a delivered push.
 func (r *WebPushRepository) RecordSuccess(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx, `
