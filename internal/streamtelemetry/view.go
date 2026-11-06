@@ -21,9 +21,13 @@ type RouteActivityView struct {
 }
 
 type SessionView struct {
-	Subject                     Subject
-	ProfileID                   string
-	SessionID                   string
+	Subject   Subject
+	ProfileID string
+	SessionID string
+	// Generation tells a session apart from an earlier one this registry
+	// pruned under the same SessionID, whose byte count started again from
+	// zero. It is local to the process and not published.
+	Generation                  uint64
 	MediaFileID                 int
 	PlayMethod                  string
 	MediaFileIDs                []int
@@ -95,7 +99,7 @@ type Snapshot struct {
 
 func sessionViewOf(s *logicalSession) SessionView {
 	view := SessionView{
-		Subject: s.subject, ProfileID: s.profileID, SessionID: s.sessionID,
+		Subject: s.subject, ProfileID: s.profileID, SessionID: s.sessionID, Generation: s.generation,
 		MediaFileID: s.mediaFileID, PlayMethod: s.playMethod,
 		MediaFileIDsOverflowed: s.mediaFileIDs.overflowed,
 		PlayMethodsOverflowed:  s.playMethods.overflowed,
