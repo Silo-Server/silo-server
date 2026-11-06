@@ -2133,9 +2133,9 @@ func TestServiceImportWatchedDeduplicatesResolvedLeavesAtNewestTimestamp(t *test
 
 // A scrobbled play comes back from the provider stamped when the stop arrived,
 // a second or so after Silo's own row (#3433). The import treats a watch within
-// ten minutes of a stop this connection sent as that play, and records a watch
-// with no such stop: a later play, a play Silo didn't scrobble to this
-// provider, or one another connection scrobbled.
+// two minutes of a stop this connection sent as that play, and records a watch
+// with no such stop: a later play of a short item, a play Silo didn't scrobble
+// to this provider, or one another connection scrobbled.
 func TestServiceImportWatchedSkipsProviderCopyOfScrobbledPlay(t *testing.T) {
 	localPlay := time.Date(2026, 11, 3, 1, 8, 27, 0, time.UTC)
 	stopSent := localPlay.Add(time.Second)
@@ -2146,8 +2146,8 @@ func TestServiceImportWatchedSkipsProviderCopyOfScrobbledPlay(t *testing.T) {
 		wantRecorded bool
 	}{
 		{name: "provider stamp at the stop", connectionID: "conn-1", remote: stopSent},
-		{name: "provider stamp minutes after the stop", connectionID: "conn-1", remote: stopSent.Add(9 * time.Minute)},
-		{name: "a later play", connectionID: "conn-1", remote: stopSent.Add(11 * time.Minute), wantRecorded: true},
+		{name: "provider stamp a minute after the stop", connectionID: "conn-1", remote: stopSent.Add(time.Minute)},
+		{name: "a second play of a short item", connectionID: "conn-1", remote: stopSent.Add(3 * time.Minute), wantRecorded: true},
 		{name: "a play this connection didn't scrobble", remote: stopSent, wantRecorded: true},
 		{name: "a play another connection scrobbled", connectionID: "conn-2", remote: stopSent, wantRecorded: true},
 	}

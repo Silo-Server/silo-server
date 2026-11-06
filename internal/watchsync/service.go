@@ -78,9 +78,10 @@ const (
 	// importedWatchSamePlayWindow is how close a provider's watch time must be
 	// to a scrobble stop the connection sent for a watched import to treat it
 	// as that scrobbled play. A scrobble carries no watch time, so the provider
-	// stamps its copy when the stop arrives; the window covers clock skew and
-	// a slow provider.
-	importedWatchSamePlayWindow = 10 * time.Minute
+	// stamps its copy when the stop arrives, within a second of it; the window
+	// covers clock skew and a slow provider. A second play of the same item
+	// can't finish inside it unless the item is shorter than the window.
+	importedWatchSamePlayWindow = 2 * time.Minute
 )
 
 var errConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")

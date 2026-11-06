@@ -1956,18 +1956,21 @@ func (r *PostgresRepository) ListPendingScrobbleReconciliations(ctx context.Cont
 	return sessions, nil
 }
 
-// ListScrobbleStops returns when the connection sent a scrobble stop for a
-// play Silo recorded, for each of mediaItemIDs that has one.
+// ListScrobbleStops returns when the connection sent, or last tried to send, a
+// scrobble stop for a play Silo recorded, for each of mediaItemIDs that has
+// one. A stop still in flight counts at its attempt: the provider may already
+// hold its copy before stop_sent_at is written, and a stop it never received
+// left no copy to match.
 func (r *PostgresRepository) ListScrobbleStops(ctx context.Context, connectionID string, mediaItemIDs []string) (map[string][]time.Time, error) {
 	stops := make(map[string][]time.Time)
 	if len(mediaItemIDs) == 0 {
 		return stops, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT media_item_id, stop_sent_at
+		SELECT media_item_id, COALESCE(stop_sent_at, updated_at)
 		FROM watch_provider_scrobble_sessions
 		WHERE connection_id = $1::uuid AND media_item_id = ANY($2)
-			AND stop_sent_at IS NOT NULL AND history_id <> ''
+			AND history_id <> '' AND last_action LIKE 'stop%'
 	`, connectionID, mediaItemIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list scrobble stops: %w", err)
