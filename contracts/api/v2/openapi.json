@@ -14856,7 +14856,7 @@
         "additionalProperties": false,
         "properties": {
           "profile_id": {
-            "description": "Opaque identifier",
+            "description": "A profile on the authenticated account. A profile or device on another account answers 404, as a device that does not exist does.",
             "examples": [
               "1"
             ],

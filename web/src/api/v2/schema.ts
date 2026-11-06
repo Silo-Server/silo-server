@@ -19139,7 +19139,7 @@ export interface components {
     };
     AdminNotificationPushTestInputBody: {
       /**
-       * @description Opaque identifier
+       * @description A profile on the authenticated account. A profile or device on another account answers 404, as a device that does not exist does.
        * @example 1
        */
       profile_id: string;
