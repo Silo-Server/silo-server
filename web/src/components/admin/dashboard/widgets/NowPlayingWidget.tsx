@@ -103,7 +103,7 @@ export function NowPlayingWidget() {
                     className={hidden ? "invisible" : undefined}
                     inert={hidden}
                   >
-                    <StreamCard session={session} />
+                    <StreamCard session={session} showPoster={!hidden} />
                   </div>
                 );
               })}
@@ -202,7 +202,10 @@ function useFittedCardCount(cardCount: number) {
   return { setViewport, setGrid, visibleCount: Math.min(visibleCount, cardCount) };
 }
 
-function StreamCard({ session }: { session: AdminSession }) {
+// A hidden card skips its poster request (the placeholder icon stands in); the
+// poster box has a fixed aspect ratio, so the card keeps the height the fit
+// measures either way.
+function StreamCard({ session, showPoster }: { session: AdminSession; showPoster: boolean }) {
   const isEpisode =
     session.series_name && session.season_number != null && session.episode_number != null;
   const title = isEpisode
@@ -224,7 +227,7 @@ function StreamCard({ session }: { session: AdminSession }) {
         className="bg-surface border-border relative flex w-[70px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border"
         style={{ aspectRatio: "2/3" }}
       >
-        {session.poster_url ? (
+        {showPoster && session.poster_url ? (
           <img
             src={session.poster_url}
             alt={session.media_title}
