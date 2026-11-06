@@ -61,6 +61,10 @@ const (
 	// interval so a wedged pool costs missed minutes, not a stuck sampler.
 	sampleTickTimeout = 30 * time.Second
 
+	// shutdownFlushTimeout bounds the last session-bytes write as the sampler
+	// stops, so a wedged pool cannot hold up shutdown.
+	shutdownFlushTimeout = 5 * time.Second
+
 	// retentionDays is how much history the charts can show — a month, so the
 	// dashboard's widest range has samples to draw. 1440 minutes a day times 31
 	// days is ~45k rows per source, and sources are (1 + replicas), so the table
@@ -90,8 +94,18 @@ type Sampler struct {
 	prevBytes    map[string]int64
 	lastEgressAt time.Time
 
+	// unsaved holds per-session growth that has not reached
+	// playback_session_api_egress yet. A failed write keeps it for the next
+	// tick: prevBytes has already moved past those bytes, so dropping them
+	// would leave the play's total short for good.
+	unsaved map[string]int64
+
 	stopOnce sync.Once
 	stop     chan struct{}
+	// done closes when the goroutine Start launched has saved its last
+	// session bytes and returned; started records that there is one.
+	started bool
+	done    chan struct{}
 }
 
 // NewSampler builds a sampler for this process. telemetry may be nil, in which
@@ -110,16 +124,27 @@ func NewSampler(pool *pgxpool.Pool, telemetry *streamtelemetry.Registry, nodeID 
 		source:    "proc:" + nodeID,
 		interval:  sampleInterval,
 		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
 // Start samples once immediately — which also establishes the egress baseline —
-// and then every minute until ctx is canceled or Stop is called.
+// and then every minute until ctx is canceled or Stop is called. On the way
+// out it saves the session bytes served since the last tick, so a restart or
+// deploy does not lose up to a minute of every active play.
 func (s *Sampler) Start(ctx context.Context) {
 	if s == nil || s.pool == nil {
 		return
 	}
+	s.started = true
 	go func() {
+		defer close(s.done)
+		defer func() {
+			// ctx is usually already canceled at shutdown.
+			flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownFlushTimeout)
+			defer cancel()
+			s.flushSessionBytes(flushCtx)
+		}()
 		s.sampleOnce(ctx, time.Now())
 
 		ticker := time.NewTicker(s.interval)
@@ -137,7 +162,8 @@ func (s *Sampler) Start(ctx context.Context) {
 	}()
 }
 
-// Stop ends the sampling goroutine. It is safe to call more than once.
+// Stop ends the sampling goroutine and waits for it to save its last session
+// bytes. It is safe to call more than once.
 func (s *Sampler) Stop() {
 	if s == nil {
 		return
@@ -145,6 +171,9 @@ func (s *Sampler) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stop)
 	})
+	if s.started {
+		<-s.done
+	}
 }
 
 // sampleOnce writes this minute's rows and, once an hour, prunes expired ones.
@@ -227,18 +256,22 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	delta, next := computeEgressDelta(s.prevBytes, s.telemetry.Sweep())
 	previous, previousAt := s.prevBytes, s.lastEgressAt
 	s.prevBytes, s.lastEgressAt = next, at
-
-	// Unlike the rate below, the first tick's session bytes are recorded:
-	// they were served since this process started and no earlier tick saved
-	// them.
-	s.recordSessionBytes(ctx, delta.Sessions)
+	s.queueSessionBytes(delta.Sessions)
 
 	// The very first snapshot carries every byte served since the process
 	// started. Charting that as one minute of egress would draw a spike that
-	// never happened, so the first tick only establishes the baseline.
-	if previous == nil || previousAt.IsZero() {
-		return
+	// never happened, so the first tick only establishes the baseline. Its
+	// session bytes are still saved below: no earlier tick saved them.
+	if previous != nil && !previousAt.IsZero() {
+		s.sampleEgressRate(ctx, delta, at.Sub(previousAt))
 	}
+	// After the chart row, so a slow write of many sessions cannot use up the
+	// tick deadline the chart row needs.
+	s.saveSessionBytes(ctx)
+}
+
+// sampleEgressRate writes this process's egress rate for the minute.
+func (s *Sampler) sampleEgressRate(ctx context.Context, delta egressDelta, elapsed time.Duration) {
 
 	// Zero minutes are written too: an idle server should draw a line along the
 	// baseline, not a gap that reads as "no data". egress_kbps stays the total
@@ -246,7 +279,6 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	// carries the file-transfer subset. The subset is clamped under the total
 	// after rounding so a reader deriving playback as total - download can
 	// never see a negative minute from two independent roundings.
-	elapsed := at.Sub(previousAt)
 	totalKbps := egressKbps(delta.Total, elapsed)
 	downloadKbps := min(egressKbps(delta.Download, elapsed), totalKbps)
 	_, err := s.pool.Exec(ctx, `
@@ -261,18 +293,42 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	}
 }
 
-// recordSessionBytes adds each session's growth to its API-served bytes.
-// Every API process adds only what it served, so replicas never overwrite one
-// another. The ids are sorted so two replicas adding to the same sessions take
-// the row locks in the same order and cannot deadlock.
-func (s *Sampler) recordSessionBytes(ctx context.Context, sessions map[string]int64) {
-	if len(sessions) == 0 {
+// flushSessionBytes sweeps the telemetry once more and saves the session
+// growth since the last tick. It runs once, as the sampler stops.
+func (s *Sampler) flushSessionBytes(ctx context.Context) {
+	if s.telemetry != nil {
+		delta, next := computeEgressDelta(s.prevBytes, s.telemetry.Sweep())
+		s.prevBytes = next
+		s.queueSessionBytes(delta.Sessions)
+	}
+	s.saveSessionBytes(ctx)
+}
+
+// queueSessionBytes adds per-session growth to the bytes waiting to be saved.
+func (s *Sampler) queueSessionBytes(sessions map[string]int64) {
+	for id, grown := range sessions {
+		if s.unsaved == nil {
+			s.unsaved = make(map[string]int64, len(sessions))
+		}
+		s.unsaved[id] += grown
+	}
+}
+
+// saveSessionBytes adds the waiting growth to each session's API-served
+// bytes, and keeps it for the next try when the write fails. Every API process
+// adds only what it served, so replicas never overwrite one another. The ids
+// are sorted so two replicas adding to the same sessions take the row locks in
+// the same order and cannot deadlock. A write that times out after the
+// database committed it is added again on the next try; that over-count is
+// the price of never under-counting after an ordinary failure.
+func (s *Sampler) saveSessionBytes(ctx context.Context) {
+	if len(s.unsaved) == 0 {
 		return
 	}
-	ids := slices.Sorted(maps.Keys(sessions))
+	ids := slices.Sorted(maps.Keys(s.unsaved))
 	bytes := make([]int64, len(ids))
 	for i, id := range ids {
-		bytes[i] = sessions[id]
+		bytes[i] = s.unsaved[id]
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO playback_session_api_egress (session_id, api_served_bytes)
@@ -282,8 +338,10 @@ func (s *Sampler) recordSessionBytes(ctx context.Context, sessions map[string]in
 		    updated_at = now()
 	`, ids, bytes)
 	if err != nil {
-		slog.WarnContext(ctx, "failed to record playback session API-served bytes", "component", component, "sessions", len(ids), "error", err)
+		slog.WarnContext(ctx, "failed to record playback session API-served bytes; retrying next tick", "component", component, "sessions", len(ids), "error", err)
+		return
 	}
+	s.unsaved = nil
 }
 
 // pruneExpired drops samples older than the retention window, and the

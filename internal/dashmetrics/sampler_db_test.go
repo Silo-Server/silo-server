@@ -142,8 +142,10 @@ func TestSessionAPIEgressAccumulatesDB(t *testing.T) {
 	ctx := t.Context()
 	sampler := NewSampler(pool, nil, "replica-a")
 
-	sampler.recordSessionBytes(ctx, map[string]int64{"played": 100, "abandoned": 50})
-	sampler.recordSessionBytes(ctx, map[string]int64{"played": 25})
+	for _, tick := range []map[string]int64{{"played": 100, "abandoned": 50}, {"played": 25}} {
+		sampler.queueSessionBytes(tick)
+		sampler.saveSessionBytes(ctx)
+	}
 
 	bytes := func() map[string]int64 {
 		t.Helper()

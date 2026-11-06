@@ -33,8 +33,8 @@ type egressDelta struct {
 // session growth is playback egress and transfer growth is download egress. A
 // route added to either class is classified automatically.
 //
-// Sessions are keyed by id and generation: the registry prunes a session five
-// minutes after its last request, and one re-created under the same id (a play
+// Sessions are keyed by id and generation: the registry prunes a session its
+// retention window (five minutes by default) after its last request, and one re-created under the same id (a play
 // resumed after a long pause) counts from zero again under a new generation,
 // so all of its bytes are new growth. A counter that shrinks anyway
 // contributes nothing rather than a negative rate. Entries that vanished from the snapshot are dropped, which

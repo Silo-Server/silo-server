@@ -1,9 +1,12 @@
 package dashmetrics
 
 import (
+	"context"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
@@ -251,4 +254,26 @@ func TestSamplerStopIsIdempotent(t *testing.T) {
 	sampler := NewSampler(nil, nil, "api-1")
 	sampler.Stop()
 	sampler.Stop()
+}
+
+// TestSaveSessionBytesKeepsBytesAfterAFailedWrite: the baseline has already
+// moved past bytes whose write failed, so they must wait for the next try
+// rather than be dropped.
+func TestSaveSessionBytesKeepsBytesAfterAFailedWrite(t *testing.T) {
+	t.Parallel()
+	pool, err := pgxpool.New(t.Context(), "postgres://nobody@127.0.0.1:1/none?connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	sampler := NewSampler(pool, nil, "replica-a")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	sampler.queueSessionBytes(map[string]int64{"s1": 5})
+	sampler.saveSessionBytes(ctx)
+	sampler.queueSessionBytes(map[string]int64{"s1": 3, "s2": 1})
+	if want := map[string]int64{"s1": 8, "s2": 1}; !reflect.DeepEqual(sampler.unsaved, want) {
+		t.Fatalf("unsaved = %v, want %v", sampler.unsaved, want)
+	}
 }
