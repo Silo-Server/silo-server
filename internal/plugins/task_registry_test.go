@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -271,4 +272,46 @@ func TestTaskRegistryRetriesTaskWhoseScheduleFailedToLoad(t *testing.T) {
 	if got := manager.GetTaskInfo(key).Triggers; !slices.Equal(got, hourly) {
 		t.Fatalf("retried task runs %+v, want the saved schedule", got)
 	}
+}
+
+type countingBindingStore struct {
+	calls atomic.Int32
+	err   error
+}
+
+func (s *countingBindingStore) ListTaskBindings(context.Context) ([]*TaskBinding, error) {
+	s.calls.Add(1)
+	return nil, s.err
+}
+
+// A sync that fails on a local change is retried after the retry wait, not
+// at once, so an outage doesn't turn every change into a tight retry loop.
+func TestTaskRegistryRetriesFailedSyncNowAfterTheWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		bindings := &countingBindingStore{err: errors.New("database unavailable")}
+		manager := taskmanager.New(&memoryTriggerStore{saved: map[string][]taskmanager.TriggerConfig{}}, noExecutions{},
+			func(cfg taskmanager.TriggerConfig) taskmanager.Trigger { return idleTrigger{cfg: cfg} }, slog.New(slog.DiscardHandler))
+		defer manager.Stop()
+		registry := NewTaskRegistry(&fakeInstallationStore{}, bindings, nil, manager)
+		go registry.RunSyncs(ctx, time.Hour, TaskSyncRetryWait)
+		synctest.Wait()
+
+		registry.SyncNow(ctx)
+		synctest.Wait()
+		if got := bindings.calls.Load(); got != 1 {
+			t.Fatalf("syncs right after a failed SyncNow = %d, want 1", got)
+		}
+		time.Sleep(TaskSyncRetryWait - time.Second) //nolint:forbidigo // synctest: advances the bubble's fake clock, no real wait
+		synctest.Wait()
+		if got := bindings.calls.Load(); got != 1 {
+			t.Fatalf("syncs before the retry wait = %d, want 1", got)
+		}
+		time.Sleep(2 * time.Second) //nolint:forbidigo // synctest: advances the bubble's fake clock, no real wait
+		synctest.Wait()
+		if got := bindings.calls.Load(); got != 2 {
+			t.Fatalf("syncs after the retry wait = %d, want 2", got)
+		}
+	})
 }

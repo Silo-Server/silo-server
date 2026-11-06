@@ -68,6 +68,9 @@ type TaskRegistry struct {
 	registered map[string]*pluginTask
 	// wake asks RunSyncs for a sync; one pending request is enough.
 	wake chan struct{}
+	// retry tells RunSyncs a sync failed elsewhere, so it syncs again after
+	// its retry wait rather than at once.
+	retry chan struct{}
 }
 
 func NewTaskRegistry(
@@ -83,6 +86,7 @@ func NewTaskRegistry(
 		scheduler:     scheduler,
 		registered:    make(map[string]*pluginTask),
 		wake:          make(chan struct{}, 1),
+		retry:         make(chan struct{}, 1),
 	}
 }
 
@@ -158,11 +162,14 @@ func (r *TaskRegistry) RequestSync() {
 }
 
 // SyncNow syncs before returning, for a change made on this server, and
-// leaves a failed sync to RunSyncs.
+// leaves a failed sync to RunSyncs, which retries it after its retry wait.
 func (r *TaskRegistry) SyncNow(ctx context.Context) {
 	if err := r.Sync(ctx); err != nil {
 		slog.WarnContext(ctx, "sync plugin tasks failed; retrying", "component", "plugins", "error", err)
-		r.RequestSync()
+		select {
+		case r.retry <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -172,10 +179,19 @@ func (r *TaskRegistry) SyncNow(ctx context.Context) {
 func (r *TaskRegistry) RunSyncs(ctx context.Context, interval, retryWait time.Duration) {
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
+	due := time.Now().Add(interval)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-r.retry:
+			// Another sync failed: try again after the retry wait, unless a
+			// sync is already due sooner.
+			if at := time.Now().Add(retryWait); at.Before(due) {
+				due = at
+				timer.Reset(retryWait)
+			}
+			continue
 		case <-r.wake:
 		case <-timer.C:
 		}
@@ -187,6 +203,7 @@ func (r *TaskRegistry) RunSyncs(ctx context.Context, interval, retryWait time.Du
 			slog.WarnContext(ctx, "sync plugin tasks failed; retrying", "component", "plugins", "retry_in", retryWait, "error", err)
 			next = retryWait
 		}
+		due = time.Now().Add(next)
 		timer.Reset(next)
 	}
 }
