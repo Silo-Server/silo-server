@@ -27056,6 +27056,13 @@
             },
             "type": "array"
           },
+          "imdb_id": {
+            "description": "The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent",
+            "examples": [
+              "tt0113277"
+            ],
+            "type": "string"
+          },
           "item_source": {
             "description": "On a continue-watching card: in_progress or next_up",
             "type": "string"
@@ -27244,6 +27251,20 @@
           "title": {
             "examples": [
               "Heat"
+            ],
+            "type": "string"
+          },
+          "tmdb_id": {
+            "description": "The item's TMDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "949"
+            ],
+            "type": "string"
+          },
+          "tvdb_id": {
+            "description": "The item's TVDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "81189"
             ],
             "type": "string"
           },
@@ -27517,6 +27538,10 @@
             "type": "array"
           },
           "imdb_id": {
+            "description": "The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent",
+            "examples": [
+              "tt0113277"
+            ],
             "type": "string"
           },
           "intro": {
@@ -27790,9 +27815,17 @@
             "type": "string"
           },
           "tmdb_id": {
+            "description": "The item's TMDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "949"
+            ],
             "type": "string"
           },
           "tvdb_id": {
+            "description": "The item's TVDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "81189"
+            ],
             "type": "string"
           },
           "type": {
@@ -35681,6 +35714,13 @@
             },
             "type": "array"
           },
+          "imdb_id": {
+            "description": "The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent",
+            "examples": [
+              "tt0113277"
+            ],
+            "type": "string"
+          },
           "item_source": {
             "description": "On a continue-watching card: in_progress or next_up",
             "type": "string"
@@ -35869,6 +35909,20 @@
           "title": {
             "examples": [
               "Heat"
+            ],
+            "type": "string"
+          },
+          "tmdb_id": {
+            "description": "The item's TMDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "949"
+            ],
+            "type": "string"
+          },
+          "tvdb_id": {
+            "description": "The item's TVDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "81189"
             ],
             "type": "string"
           },
@@ -57193,6 +57247,13 @@
             },
             "type": "array"
           },
+          "imdb_id": {
+            "description": "The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent",
+            "examples": [
+              "tt0113277"
+            ],
+            "type": "string"
+          },
           "item_source": {
             "description": "On a continue-watching card: in_progress or next_up",
             "type": "string"
@@ -57381,6 +57442,20 @@
           "title": {
             "examples": [
               "Heat"
+            ],
+            "type": "string"
+          },
+          "tmdb_id": {
+            "description": "The item's TMDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "949"
+            ],
+            "type": "string"
+          },
+          "tvdb_id": {
+            "description": "The item's TVDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "81189"
             ],
             "type": "string"
           },
@@ -57586,6 +57661,13 @@
             },
             "type": "array"
           },
+          "imdb_id": {
+            "description": "The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent",
+            "examples": [
+              "tt0113277"
+            ],
+            "type": "string"
+          },
           "item_source": {
             "description": "On a continue-watching card: in_progress or next_up",
             "type": "string"
@@ -57774,6 +57856,20 @@
           "title": {
             "examples": [
               "Heat"
+            ],
+            "type": "string"
+          },
+          "tmdb_id": {
+            "description": "The item's TMDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "949"
+            ],
+            "type": "string"
+          },
+          "tvdb_id": {
+            "description": "The item's TVDB ID, the one item detail shows. Present where imdb_id is",
+            "examples": [
+              "81189"
             ],
             "type": "string"
           },
