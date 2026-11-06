@@ -138,9 +138,10 @@ type ProfileEntry struct {
 	// Data is each type's own document, which the type bounds itself
 	// (userdata.DecodeStrict).
 	Data map[string]json.RawMessage `json:"data" bound:"-"`
-	// counts is each data type's entry count, recorded when the reader
-	// validated Data, so a preview does not decode the documents again.
-	counts map[string]int
+	// validated is each data type's summary, recorded when the reader
+	// validated Data, so a preview or restore does not decode the
+	// documents again to count their entries or list their items.
+	validated map[string]userdata.Summary
 }
 
 // ItemRef describes one catalog item a profile's data names.
@@ -559,16 +560,41 @@ const (
 )
 
 func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
-	for _, id := range p.itemIDs(spec) {
-		name := spec.itemDir + id + spec.itemExt
-		file, ok := p.userFiles[name]
-		if !ok {
-			return 0, fmt.Errorf("%s is missing", name)
+	ids := p.itemIDs(spec)
+	type checked struct {
+		doc   *UserDocument
+		blobs []string
+		// invalid is why the document cannot be restored, with doc set.
+		invalid error
+	}
+	names := make([]string, len(ids))
+	for i, id := range ids {
+		names[i] = spec.itemDir + id + spec.itemExt
+		if _, ok := p.userFiles[names[i]]; !ok {
+			return 0, fmt.Errorf("%s is missing", names[i])
 		}
-		doc, err := decodeUserFile(file, p.files[name].SHA256)
+	}
+	// Documents decode and validate ahead on other cores; what they add to
+	// the set is recorded here, in order.
+	loads := loadAhead(len(ids), func(i int) int64 { return p.files[names[i]].Size }, func(i int) (checked, error) {
+		doc, err := decodeUserFile(p.userFiles[names[i]], p.files[names[i]].SHA256)
 		if err != nil {
-			return 0, fmt.Errorf("%s: %w", name, err)
+			return checked{}, fmt.Errorf("%s: %w", names[i], err)
 		}
+		if strconv.Itoa(doc.Account.ID) != ids[i] {
+			return checked{doc: doc}, nil
+		}
+		blobs, err := checkUserDocument(doc)
+		return checked{doc: doc, blobs: blobs, invalid: err}, nil
+	})
+	defer loads.close()
+	for i, id := range ids {
+		name := names[i]
+		c, err := loads.take()
+		if err != nil {
+			return 0, err
+		}
+		doc := c.doc
 		label := doc.Account.Username
 		if label == "" {
 			label = doc.Account.Email
@@ -577,11 +603,11 @@ func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 			p.unusable(SectionUsers, KindAccount, label, "Its document names another account than its file.")
 			continue
 		}
-		blobs, err := checkUserDocument(doc)
-		if err != nil {
-			p.unusable(SectionUsers, KindAccount, label, truncateText("It cannot be restored: "+err.Error(), 500))
+		if c.invalid != nil {
+			p.unusable(SectionUsers, KindAccount, label, truncateText("It cannot be restored: "+c.invalid.Error(), 500))
 			continue
 		}
+		blobs := c.blobs
 		// The keys stay in memory with the account, so they count against
 		// the set's decoded bound as the document no longer does.
 		slices.Sort(blobs)
@@ -601,10 +627,10 @@ func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 		// Only what matching reads stays in memory: the policy lists can be
 		// large, and the whole entry is in the document.
 		identity := AccountEntry{ID: doc.Account.ID, Username: doc.Account.Username, Email: doc.Account.Email}
-		p.rs.Users = append(p.rs.Users, UserRef{Account: identity, file: file, sha256: p.files[name].SHA256})
+		p.rs.Users = append(p.rs.Users, UserRef{Account: identity, file: p.userFiles[name], sha256: p.files[name].SHA256, size: p.files[name].Size})
 		p.rs.metadataBytes += userRefCost
 	}
-	return len(p.itemIDs(spec)), nil
+	return len(ids), nil
 }
 
 // validateUserDocument checks an untrusted user document and returns the
@@ -679,18 +705,17 @@ func validateAccountEntry(a AccountEntry) error {
 	return nil
 }
 
-// count is a data type's entry count: the one the reader recorded, or, for
-// a profile no reader validated, the document's own.
-func (p *ProfileEntry) count(t userdata.Type, raw json.RawMessage) (int, error) {
-	if n, ok := p.counts[t.ID()]; ok {
-		return n, nil
+// summary is a data type's summary: the one the reader recorded, or, for a
+// profile no reader validated, the document's own.
+func (p *ProfileEntry) summary(t userdata.Type, raw json.RawMessage) (userdata.Summary, error) {
+	if sum, ok := p.validated[t.ID()]; ok {
+		return sum, nil
 	}
-	sum, err := t.Validate(raw)
-	return sum.Count, err
+	return t.Validate(raw)
 }
 
 // validateProfileEntry checks one profile and its data, records each data
-// type's entry count, and returns the blob keys they reference.
+// type's summary, and returns the blob keys they reference.
 func validateProfileEntry(p *ProfileEntry) ([]string, error) {
 	if strings.TrimSpace(p.Name) == "" || len(p.Name) > maxAccountField || len(p.PINHash) > maxAccountField || len(p.Avatar) > 2048 ||
 		len(p.MaxContentRating) > 64 || len(p.MaxPlaybackQuality) > 64 || p.MaxAdvisoryAge < 0 || p.MaxAdvisoryAge > 21 {
@@ -711,10 +736,10 @@ func validateProfileEntry(p *ProfileEntry) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("profile %q %s: %w", p.ID, typeID, err)
 		}
-		if p.counts == nil {
-			p.counts = make(map[string]int, len(p.Data))
+		if p.validated == nil {
+			p.validated = make(map[string]userdata.Summary, len(p.Data))
 		}
-		p.counts[typeID] = sum.Count
+		p.validated[typeID] = sum
 		for _, b := range sum.Blobs {
 			blobs = append(blobs, b.Key)
 		}
