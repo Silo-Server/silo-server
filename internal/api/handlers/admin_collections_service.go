@@ -778,13 +778,7 @@ func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, col
 		}
 	}
 	if h.CollectionRowRenamer != nil {
-		currentTitle := func(ctx context.Context) (string, error) {
-			collection, err := h.repo.GetByID(ctx, collectionID)
-			if err != nil {
-				return "", err
-			}
-			return collection.Title, nil
-		}
+		currentTitle := func(ctx context.Context) (string, error) { return h.repo.Title(ctx, collectionID) }
 		go h.CollectionRowRenamer.RenameForCollection(context.WithoutCancel(ctx), collectionID, oldTitle, currentTitle)
 	}
 }
