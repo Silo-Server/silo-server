@@ -766,13 +766,16 @@ func (h *LibraryCollectionHandler) DeleteAdminCollection(ctx context.Context, id
 // next If-Match needs the new one. The rows profiles built, in every account,
 // are retitled after the response, detached from the request: that sweep
 // leaves the revision alone and grows with the number of accounts. The rename
-// has committed, so a dropped request must not cut either short. A failure is
-// logged and leaves those rows on the old name.
+// has committed, so a dropped request must not cut either short; each has its
+// own deadline instead. A failure is logged and leaves those rows on the old
+// name.
 func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, collectionID, oldTitle, newTitle string) {
 	if strings.TrimSpace(oldTitle) == strings.TrimSpace(newTitle) {
 		return
 	}
-	ctx = context.WithoutCancel(ctx)
+	detached := context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(detached, userstore.RetitleTimeout)
+	defer cancel()
 	currentTitle := func(ctx context.Context) (string, error) { return h.repo.Title(ctx, collectionID) }
 	if h.SectionRepo != nil {
 		err := userstore.FollowCollectionTitle(ctx, oldTitle, currentTitle, func(ctx context.Context, from, to string) error {
@@ -784,6 +787,10 @@ func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, col
 		}
 	}
 	if h.CollectionRowRenamer != nil {
-		go h.CollectionRowRenamer.RenameForCollection(ctx, collectionID, oldTitle, currentTitle)
+		go func() {
+			ctx, cancel := context.WithTimeout(detached, userstore.RetitleSweepTimeout)
+			defer cancel()
+			h.CollectionRowRenamer.RenameForCollection(ctx, collectionID, oldTitle, currentTitle)
+		}()
 	}
 }

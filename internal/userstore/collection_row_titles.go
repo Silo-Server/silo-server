@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // collectionRowConfigKey is the section config key that names the collection
@@ -72,6 +73,15 @@ func NewCollectionRowRenamer(users UserLister, stores UserStoreProvider) *Collec
 		logger: slog.Default().With("component", "userstore.collection_row_titles"),
 	}
 }
+
+// RetitleTimeout bounds a collection's in-request row retitle, and
+// RetitleSweepTimeout its sweep across every account. Both run detached from
+// request cancellation once the rename has committed, so they need their own
+// deadline.
+const (
+	RetitleTimeout      = 15 * time.Second
+	RetitleSweepTimeout = 5 * time.Minute
+)
 
 // followTitleRounds caps the re-reads one FollowCollectionTitle takes while
 // the collection keeps being renamed, so it always ends.
