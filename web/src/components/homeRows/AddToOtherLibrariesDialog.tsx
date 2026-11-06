@@ -51,7 +51,7 @@ export function AddToOtherLibrariesDialog({
       await onCopy(selectedIds);
       const names = pages.filter((page) => selectedIds.includes(page.id)).map((page) => page.label);
       const list = new Intl.ListFormat(appLanguage(), { style: "long", type: "conjunction" });
-      toast.success(t("web.homeRows.addToOtherLibraries.added", { pages: list.format(names) }));
+      toast.success(t("web.home.rows.addToOtherLibraries.added", { pages: list.format(names) }));
       setOpen(false);
     } catch (error) {
       if (error instanceof RowChangedError) setChanged(true);
@@ -59,7 +59,7 @@ export function AddToOtherLibrariesDialog({
         toast.error(
           error instanceof Error && error.message
             ? error.message
-            : t("web.homeRows.addToOtherLibraries.failed"),
+            : t("web.home.rows.addToOtherLibraries.failed"),
         );
     } finally {
       busyRef.current = false;
@@ -77,26 +77,28 @@ export function AddToOtherLibrariesDialog({
       >
         <DialogHeader>
           <DialogTitle>
-            {t("web.homeRows.addToOtherLibraries.title", { row: row.title })}
+            {t("web.home.rows.addToOtherLibraries.title", { row: row.title })}
           </DialogTitle>
-          <DialogDescription>{t("web.homeRows.addToOtherLibraries.description")}</DialogDescription>
+          <DialogDescription>
+            {t("web.home.rows.addToOtherLibraries.description")}
+          </DialogDescription>
         </DialogHeader>
         <LibraryPageChips
           pages={pages}
           currentId={currentId}
-          currentNote={t("web.homeRows.addToOtherLibraries.alreadyHere")}
+          currentNote={t("web.home.rows.addToOtherLibraries.alreadyHere")}
           selectedIds={selectedIds}
           onChange={setSelectedIds}
           maxSelected={BULK_LIBRARY_LIMIT}
           help={t(
             row.hero
-              ? "web.homeRows.addToOtherLibraries.helpHero"
-              : "web.homeRows.addToOtherLibraries.helpRow",
+              ? "web.home.rows.addToOtherLibraries.helpHero"
+              : "web.home.rows.addToOtherLibraries.helpRow",
           )}
         />
         {changed ? (
           <p role="alert" className="text-sm">
-            {t("web.homeRows.addToOtherLibraries.changed", { row: row.title })}
+            {t("web.home.rows.addToOtherLibraries.changed", { row: row.title })}
           </p>
         ) : null}
         <DialogFooter>
@@ -106,8 +108,8 @@ export function AddToOtherLibrariesDialog({
           <Button disabled={busy || changed || selectedIds.length === 0} onClick={confirm}>
             <Copy aria-hidden className="size-4" />
             {selectedIds.length === 0
-              ? t("web.homeRows.addToOtherLibraries.confirmNone")
-              : t("web.homeRows.addToOtherLibraries.confirm", { count: selectedIds.length })}
+              ? t("web.home.rows.addToOtherLibraries.confirmNone")
+              : t("web.home.rows.addToOtherLibraries.confirm", { count: selectedIds.length })}
           </Button>
         </DialogFooter>
       </DialogContent>

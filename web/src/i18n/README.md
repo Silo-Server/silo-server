@@ -35,7 +35,7 @@ import { useT } from "@/i18n";
 function Dialog({ row }: { row: HomeRow }) {
   const t = useT();
   return (
-    <DialogTitle>{t("web.homeRows.addToOtherLibraries.title", { row: row.title })}</DialogTitle>
+    <DialogTitle>{t("web.home.rows.addToOtherLibraries.title", { row: row.title })}</DialogTitle>
   );
 }
 ```

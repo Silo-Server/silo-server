@@ -25,10 +25,10 @@ export function timeAgo(iso: string): string | null {
   if (Number.isNaN(date.getTime())) return null;
 
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < MINUTE) return t("web.itemCard.addedJustNow");
+  if (seconds < MINUTE) return t("web.item.card.addedJustNow");
 
   const added = (value: number, unit: Intl.RelativeTimeFormatUnit) =>
-    t("web.itemCard.addedAgo", { ago: relativeFormat().format(-value, unit) });
+    t("web.item.card.addedAgo", { ago: relativeFormat().format(-value, unit) });
   if (seconds < HOUR) return added(Math.floor(seconds / MINUTE), "minute");
   if (seconds < DAY) return added(Math.floor(seconds / HOUR), "hour");
 

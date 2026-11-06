@@ -88,10 +88,10 @@ describe("serverTextWith", () => {
 describe("formatWith", () => {
   it("formats a message the language lacks in English, with English plural rules", () => {
     const japanese = createAppIntl("ja", {});
-    expect(formatWith(japanese, "web.homeRows.addToOtherLibraries.confirm", { count: 1 })).toBe(
+    expect(formatWith(japanese, "web.home.rows.addToOtherLibraries.confirm", { count: 1 })).toBe(
       "Add to 1 page",
     );
-    expect(formatWith(japanese, "web.homeRows.addToOtherLibraries.confirm", { count: 3 })).toBe(
+    expect(formatWith(japanese, "web.home.rows.addToOtherLibraries.confirm", { count: 3 })).toBe(
       "Add to 3 pages",
     );
   });
