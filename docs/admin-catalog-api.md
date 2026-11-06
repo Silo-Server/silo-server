@@ -649,7 +649,9 @@ array. No current web, native or Jellyfin consumer needs migration for this rout
 `items`, `page`, `current`, and optional `provider_errors`. Pages default to 50
 choices and accept `limit` 1–200. On movie and series lists, local sidecar
 choices come first, in discovery order. Provider choices follow by rating,
-highest first; choice metadata breaks ties, so the order is stable.
+highest first; on a season list the season's own images come before the show
+artwork offered as a fallback, each group by rating. Choice metadata breaks
+ties, so the order is stable.
 Continuation binds the content ID, authority, limit and complete choice digest.
 Expiring display URLs are excluded from that digest. A provider choice change
 returns `invalid_cursor` and requires reloading. Each page fetches and resolves
