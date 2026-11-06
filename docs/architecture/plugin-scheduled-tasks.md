@@ -6,7 +6,8 @@ installation is one task in the task manager, keyed
 `plugin_task_bindings` is disabled. `plugins.TaskRegistry`
 (`internal/plugins/task_registry.go`) builds those tasks when an API server
 starts. Every API server runs its own task manager; proxy and transcode nodes
-run none.
+run none. Each scheduled firing still runs on one API server (see "One run per
+firing").
 
 ## Schedule
 
@@ -59,3 +60,62 @@ start. Installing, enabling, disabling, updating or removing a plugin, and a
 binding write, take effect on each API server when it restarts; the binding
 write answers `restart_required: true`. A task-page edit applies to the
 server that takes it and to the others when they restart.
+
+## One run per firing
+
+Every API server registers every plugin task and arms its triggers, so each
+firing happens on every server. A plugin task is a
+`taskmanager.ClusterFiringTask`: before its trigger loop runs a firing, the
+task manager claims it through `taskmanager.FiringClaims`
+(`repository.PgFiringClaims`, table `task_firing_claims`, migrations
+`20261106022808_add_task_firing_claims` and
+`20261106153043_add_task_firing_claim_expiry`). The server that records the claim
+runs the firing; every other server skips it and rearms its triggers from now,
+as after a skipped preflight. Manual runs (Run now) never claim. Core tasks do
+not claim; those that must not run on two servers at once take an advisory
+lock of their own.
+
+A claim is a row keyed by task and slot, inserted under a transaction-scoped
+advisory lock on the task, unless the task already has a claim at that slot or
+one newer than the firing's window. `taskmanager.FiringSlot` gives both, from
+the trigger that fired and the firing time:
+
+| Trigger | Slot | Window |
+| --- | --- | --- |
+| `daily`, `weekly` | the scheduled instant nearest the firing | none |
+| `interval` | firing time truncated to the interval | the interval less a tenth, at most a minute less |
+| `startup` | the firing time | `StartupClaimWindow` (10 minutes) |
+
+Invariants:
+
+- Of the servers that fire one scheduled firing of a plugin task, at most one
+  runs it, whether they fire together or seconds apart. Usually that is
+  exactly one, but a firing can be missed: when the winning server's task is
+  already running (a manual Run now), or the server stops after claiming, no
+  other server runs that firing, and the task runs again at its next one. The lock serializes
+  claims of one task; the row, which outlives the transaction, is what a
+  later server finds. An advisory lock alone would let a server that fires
+  after the winner's run finished run it again.
+- Daily and weekly slots name the scheduled instant, so a late timer, a start
+  spread or a server's clock a few seconds off still names the same firing.
+  Servers must share a time zone, since times of day are read in the process
+  time zone.
+- Interval timers on different servers are not aligned: each counts from the
+  last completed run it read from history, and a server that lost a claim
+  counts from the loss. The window covers timers that straddle a slot
+  boundary, so successive runs of an interval task are at least about one
+  interval apart, wherever they run. Runs of one task on different servers
+  can overlap only if a run lasts longer than its interval.
+- A startup firing runs once per cluster start: a server that starts, or
+  registers the task, within 10 minutes of another's startup claim skips it.
+  A server restarted alone later runs it again.
+- A claim that cannot be recorded fails closed: the server skips the firing
+  and logs a warning, and the next firing tries again. So does a firing with
+  no slot every server would agree on, such as a malformed time of day, an
+  interval that isn't positive, or a schedule change that woke the loop.
+- Each claim records its expiry, the longer of its window and eight days
+  after it was taken. The transaction that takes a claim prunes expired claims
+  of all tasks when no other claim is pruning (a global advisory lock, tried
+  without waiting, so two prunes never deadlock), so a task that stopped firing leaves no claims behind, and a
+  short-interval task never prunes a long-interval task's claim inside that
+  claim's window.

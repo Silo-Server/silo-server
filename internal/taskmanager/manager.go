@@ -26,6 +26,7 @@ type TaskManager struct {
 	logger         *slog.Logger
 	observers      []Observer
 	libraryTypes   LibraryTypesFunc
+	firingClaims   FiringClaims
 }
 
 // New creates a new TaskManager.
@@ -127,7 +128,9 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}
 		}
 
-		merged := make(chan struct{}, 1)
+		// merged carries the trigger that fired, or nil for a schedule
+		// change.
+		merged := make(chan Trigger, 1)
 		done := make(chan struct{})
 
 		for _, tr := range trigs {
@@ -139,7 +142,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				case _, ok := <-tr.C():
 					if ok {
 						select {
-						case merged <- struct{}{}:
+						case merged <- tr:
 						default:
 						}
 					}
@@ -153,20 +156,29 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				return
 			case <-w.triggerUpdate:
 				select {
-				case merged <- struct{}{}:
+				case merged <- nil:
 				default:
 				}
 			}
 		}()
 
+		var fired Trigger
 		select {
 		case <-ctx.Done():
 			close(done)
 			return
-		case <-merged:
+		case fired = <-merged:
 			close(done)
 		}
 
+		// A schedule change only rearms the loop on the new triggers; it
+		// never runs the task. A real firing can clear triggerChanged just
+		// before the change's update arrives, so the update itself must not
+		// fall through to a run.
+		if fired == nil {
+			w.triggerChanged.Store(false)
+			continue
+		}
 		if w.triggerChanged.CompareAndSwap(true, false) {
 			continue
 		}
@@ -184,6 +196,13 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			continue
 		}
 		if !shouldRun {
+			m.rearmTriggersFromNow(w)
+			continue
+		}
+		if !m.claimFiring(ctx, w, fired) {
+			// Another server runs this firing. Rearm from now, as after a
+			// skipped preflight: this server's last result is older than that
+			// run, so an interval would otherwise fire again at once.
 			m.rearmTriggersFromNow(w)
 			continue
 		}
