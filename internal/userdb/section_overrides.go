@@ -141,15 +141,18 @@ func ResetSectionOverrides(db *sql.DB, profileID, scope, libraryID string) error
 // one transaction. Each write checks the row still holds what was read, so a
 // row edited in between keeps the edit.
 func RenameCollectionRows(ctx context.Context, db *sql.DB, kind, collectionID, oldTitle, newTitle string, visibleTo func(profileID string) bool) error {
+	// Read before the transaction: SQLite starts it as a reader, and in WAL
+	// mode upgrading it to a writer fails at once when another write landed
+	// after the read. The conditional updates below keep the edit instead.
+	overrides, err := ListAllSectionOverrides(ctx, db)
+	if err != nil {
+		return err
+	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	overrides, err := ListAllSectionOverrides(ctx, tx)
-	if err != nil {
-		return err
-	}
 	for _, o := range overrides {
 		read := o
 		if visibleTo != nil && !visibleTo(o.ProfileID) {
