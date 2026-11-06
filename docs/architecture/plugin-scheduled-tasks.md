@@ -85,10 +85,14 @@ Each API server syncs:
   which lifecycle changes on other servers publish;
 - every `plugins.TaskSyncInterval` (one minute), and 10 seconds after a
   failed sync, so a server that missed an announcement, a sync that failed, or
-  a task-page edit on another server catches up without a restart.
+  a task-page edit on another server catches up without a restart;
+- right after the task manager starts.
 
 A server that restarts registers from the database at boot, so it sees every
-change made while it was down. Binding writes answer `restart_required: false`
+change made while it was down. At boot plugin tasks register before the task
+manager starts, and `TaskManager.Start` only logs a schedule it can't read,
+leaving that task idle; the sync right after `Start` reloads every plugin
+task's schedule, and if the read still fails, the 10-second retry follows. Binding writes answer `restart_required: false`
 on both the v2 and the frozen v1 route; it is true only on a server with no
 task manager.
 

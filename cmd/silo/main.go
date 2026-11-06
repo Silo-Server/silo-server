@@ -3670,6 +3670,11 @@ func main() {
 			// their provider re-check runs on a schedule.
 			taskMgr.Register(tasks.NewRecheckExternalIdentitiesTask(deps.DB, deps.AuthProviderRecheck))
 		}
+		// Set when plugin tasks are wired. Plugin tasks register before
+		// taskMgr.Start, which logs a schedule it can't read and leaves the
+		// task idle; a sync right after Start reloads every plugin task's
+		// schedule, and a failed one is retried after TaskSyncRetryWait.
+		requestPluginTaskSync := func() {}
 		if pluginInstallationStore != nil && pluginRuntimeConfigStore != nil && pluginService != nil {
 			pluginTasks := plugins.NewTaskRegistryWithTypedResolver(pluginInstallationStore, pluginRuntimeConfigStore, pluginService, taskMgr)
 			if err := pluginTasks.Sync(appCtx); err != nil {
@@ -3690,6 +3695,7 @@ func main() {
 					"resync_interval", plugins.TaskSyncInterval)
 			}
 			go pluginTasks.RunSyncs(appCtx, plugins.TaskSyncInterval, plugins.TaskSyncRetryWait)
+			requestPluginTaskSync = pluginTasks.RequestSync
 			deps.OnPluginTasksChanged = func(ctx context.Context) {
 				pluginTasks.SyncNow(ctx)
 				if err := eventBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventPluginTasksChanged}); err != nil {
@@ -3704,6 +3710,7 @@ func main() {
 		}
 
 		taskMgr.Start(appCtx)
+		requestPluginTaskSync()
 		defer taskMgr.Stop()
 		deps.TaskManager = taskMgr
 		if deps.Backups != nil {
