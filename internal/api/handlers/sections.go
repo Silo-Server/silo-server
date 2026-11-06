@@ -491,6 +491,10 @@ type resolvedSectionResponse struct {
 	IsCustom    bool                  `json:"is_custom"`
 	Customized  bool                  `json:"customized"`
 	Items       []sectionItemResponse `json:"items"`
+	// TitleKey and TitleArgs are the section's; see
+	// sections.ResolvedSection. Only the v2 API carries them.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 	// HasMore reports that a capped Home row read (SectionViewer.ItemLimitCap)
 	// answered fewer cards than the row holds. Only the v2 API carries it.
 	HasMore bool `json:"-"`
@@ -508,6 +512,10 @@ type resolvedSectionLayoutResponse struct {
 	ItemLimit   int    `json:"item_limit"`
 	IsCustom    bool   `json:"is_custom"`
 	Customized  bool   `json:"customized"`
+	// TitleKey and TitleArgs are the section's; see
+	// sections.ResolvedSection. Only the v2 API carries them.
+	TitleKey  string            `json:"-"`
+	TitleArgs map[string]string `json:"-"`
 }
 
 type homeLayoutResponse struct {
@@ -1525,6 +1533,8 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			IsCustom:    s.IsCustom,
 			Customized:  s.Customized,
 			Items:       items,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		})
 	}
 	return resp
@@ -2097,6 +2107,7 @@ func injectNextUpSection(resolved []sections.ResolvedSection) []sections.Resolve
 		ID:          "system-next-up",
 		SectionType: sections.SectionNextUp,
 		Title:       "Next Up",
+		TitleKey:    sections.TitleKeyNextUp,
 		ItemLimit:   20,
 	}
 

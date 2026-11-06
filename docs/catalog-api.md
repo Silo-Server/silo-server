@@ -49,6 +49,27 @@ row is drawn again. A client that shows a capped row reporting `has_more` and
 wants the rest of it in place reads the row again at its own limit
 (`getHomeSectionItems` without `item_limit`) and keeps the cards it already shows.
 
+## Section titles
+
+A `Section` and a `SectionLayoutEntry` (Home and library pages) and each row of
+`getProfileSectionSettings` carry `title_key` and `title_args` while their `title`
+is the server's own text: a built-in row name such as `home.section.continueWatching`,
+a generated library row (`home.section.recentlyAddedIn` with `{"library": "Movies"}`),
+the synthetic Next Up row, a Because You Watched heading that names its title
+(`home.section.becauseYouWatchedTitle` with `title`), and the shared row a For You or
+taste-match section shows a new profile (`home.section.popularOnServer`,
+`home.section.topGenre` with `genre`). The key names a message in the shared translation
+catalog, and `title_args` fills its placeholders by name. A client that has the key shows
+its translation; otherwise, and whenever the fields are absent, it shows `title`.
+
+The fields are absent when an administrator or the profile typed the title, and when the
+server replaced the stored title with one of an item or season (a seasonal row's in-season
+title, an editorial subject). The server records the key with the row it writes, and any
+change to a row's title clears it, so a rename never depends on comparing text. A profile
+title override equal to the administrator's title keeps the key. `getHomeCapabilities`
+reports `section_title_keys: true` on a server that sends them. The frozen `/api/v1` reads
+and the Jellyfin surface do not carry them.
+
 ## People search
 
 `GET /api/v2/catalog/people` (`listPeople`) accepts a name query in `q` and

@@ -27738,6 +27738,11 @@ export interface components {
        */
       section_item_limit_max?: number;
       /**
+       * @description Sections and profile section settings carry title_key and title_args while their title is the server's own text, so a client can translate it. Absent when the home sections service is not configured, and on a server that predates the fields
+       * @example true
+       */
+      section_title_keys?: boolean;
+      /**
        * @description Support and configuration state, not health
        * @enum {string}
        */
@@ -32302,6 +32307,20 @@ export interface components {
        * @example Continue Watching
        */
       title: string;
+      /**
+       * @description Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none
+       * @example {
+       *       "library": "Movies"
+       *     }
+       */
+      title_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title. Sent when getHomeCapabilities reports section_title_keys
+       * @example home.section.recentlyAddedIn
+       */
+      title_key?: string;
     };
     ProfileSectionSettingCollection: {
       /** @description The page's items; empty, never null */
@@ -33486,6 +33505,20 @@ export interface components {
       /** @example Recently Added */
       title: string;
       /**
+       * @description Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none
+       * @example {
+       *       "library": "Movies"
+       *     }
+       */
+      title_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title. Sent when getHomeCapabilities reports section_title_keys
+       * @example home.section.recentlyAddedIn
+       */
+      title_key?: string;
+      /**
        * Format: int64
        * @description Items the section has in total, at least the number returned
        * @example 120
@@ -33524,6 +33557,20 @@ export interface components {
       section_type: string;
       /** @example Recently Added */
       title: string;
+      /**
+       * @description Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none
+       * @example {
+       *       "library": "Movies"
+       *     }
+       */
+      title_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title. Sent when getHomeCapabilities reports section_title_keys
+       * @example home.section.recentlyAddedIn
+       */
+      title_key?: string;
     };
     SectionOverride: {
       /** @description Legacy config override; absent when the profile saved none (the section's own config applies), {} when it saved an empty one */

@@ -348,6 +348,12 @@ func writeSortedInts(b *strings.Builder, values []int) {
 
 // FetchOne runs one section query and returns it with items.
 func (f *Fetcher) FetchOne(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
+	result, err := f.fetchOne(ctx, resolved, libraryID, libraryIDs, userID, profileID, filter)
+	keepTitleKeyForOwnTitle(resolved, &result)
+	return result, err
+}
+
+func (f *Fetcher) fetchOne(ctx context.Context, resolved ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter) (SectionWithItems, error) {
 	start := time.Now()
 	var result SectionWithItems
 	var err error

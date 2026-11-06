@@ -159,6 +159,36 @@ func TestResolveForSettings_KeepsAdminTitleAsDefault(t *testing.T) {
 	}
 }
 
+// A row keeps the admin row's title key while the profile shows the admin
+// title, including an override that saved that same title (older web
+// builds saved it with every override), and loses it under a title of the
+// profile's own. A profile-built row has none.
+func TestResolveKeepsTitleKeyOnlyForTheAdminTitle(t *testing.T) {
+	args := map[string]string{"library": "Films"}
+	admin := []*PageSection{{ID: "1", SectionType: SectionRecentlyAdded, Title: "Recently Added in Films", TitleKey: "home.section.recentlyAddedIn", TitleArgs: args, Config: json.RawMessage(`{}`)}}
+	for _, tc := range []struct {
+		name     string
+		override ProfileSectionOverride
+		wantKey  string
+	}{
+		{"no override", ProfileSectionOverride{SectionID: "other"}, "home.section.recentlyAddedIn"},
+		{"override without title", ProfileSectionOverride{SectionID: "1", Featured: new(true)}, "home.section.recentlyAddedIn"},
+		{"override saving the admin title", ProfileSectionOverride{SectionID: "1", Title: "Recently Added in Films"}, "home.section.recentlyAddedIn"},
+		{"profile title", ProfileSectionOverride{SectionID: "1", Title: "Fresh films"}, ""},
+	} {
+		for name, resolve := range map[string]func([]*PageSection, []ProfileSectionOverride) []ResolvedSection{"Resolve": Resolve, "ResolveForSettings": ResolveForSettings} {
+			got := resolve(admin, []ProfileSectionOverride{tc.override})[0]
+			if got.TitleKey != tc.wantKey || (tc.wantKey != "" && got.TitleArgs["library"] != "Films") {
+				t.Errorf("%s %s: key %q args %v, want key %q", name, tc.name, got.TitleKey, got.TitleArgs, tc.wantKey)
+			}
+		}
+	}
+	custom := Resolve(nil, []ProfileSectionOverride{{ID: "c", IsUserAdded: true, UserSectionType: SectionHiddenGems, UserTitle: "Hidden Gems"}})
+	if custom[0].TitleKey != "" {
+		t.Errorf("profile-built row has key %q", custom[0].TitleKey)
+	}
+}
+
 func TestResolveIncludesUserAddedRecipeFromOverride(t *testing.T) {
 	admin := []*PageSection{}
 	overrides := []ProfileSectionOverride{

@@ -127,6 +127,7 @@ type ProfileSectionSetting struct {
 	Customized   bool          `json:"customized" doc:"An admin section the profile has changed" example:"true"`
 	Position     int           `json:"position" example:"0"`
 	Config       SectionConfig `json:"config,omitzero" doc:"The recipe's effective config; absent when none, {} when explicitly empty"`
+	SectionTitleKey
 }
 
 // ProfileSectionSettingCollection is the getProfileSectionSettings envelope.
@@ -368,6 +369,8 @@ func profileSectionSettingsOf(resolved []sections.ResolvedSection) (*ProfileSect
 			Customized:   s.Customized,
 			Position:     s.Position,
 			Config:       config,
+			// Describes title: absent under a title override of the profile's own.
+			SectionTitleKey: sectionTitleKeyOf(s.TitleKey, s.TitleArgs),
 		})
 	}
 	return &ProfileSectionSettingCollectionOutput{Body: ProfileSectionSettingCollection{Collection: NewCollection(items)}}, nil

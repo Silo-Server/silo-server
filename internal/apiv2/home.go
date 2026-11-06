@@ -109,9 +109,10 @@ type HomeLayoutOutput struct {
 // HomeCapabilities is the getHomeCapabilities body.
 type HomeCapabilities struct {
 	Capability
-	IncludeItemsMax     int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
-	SectionItemLimitMax int `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
-	RowItemLimitMax     int `json:"row_item_limit_max,omitzero" doc:"The largest item_limit getHomeSectionItems and getHomeLayout accept: the section, or each section the layout includes, then answers at most that many cards. Absent when the home sections service is not configured, and on a server whose Home row reads take no item_limit" example:"100"`
+	IncludeItemsMax     int  `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	SectionItemLimitMax int  `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
+	RowItemLimitMax     int  `json:"row_item_limit_max,omitzero" doc:"The largest item_limit getHomeSectionItems and getHomeLayout accept: the section, or each section the layout includes, then answers at most that many cards. Absent when the home sections service is not configured, and on a server whose Home row reads take no item_limit" example:"100"`
+	SectionTitleKeys    bool `json:"section_title_keys,omitzero" doc:"Sections and profile section settings carry title_key and title_args while their title is the server's own text, so a client can translate it. Absent when the home sections service is not configured, and on a server that predates the fields" example:"true"`
 }
 
 // HomeCapabilitiesOutput is the getHomeCapabilities response.
@@ -448,6 +449,7 @@ func (reg *Registry) getHomeCapabilities(_ context.Context, _ *CapabilityInput) 
 		IncludeItemsMax:     handlers.MaxHomeLayoutIncludedSections,
 		SectionItemLimitMax: handlers.MaxSectionItemLimitCap,
 		RowItemLimitMax:     handlers.MaxSectionItemLimitCap,
+		SectionTitleKeys:    true,
 	}}, nil
 }
 

@@ -58,3 +58,22 @@ func (r ForYouRow) Global() bool {
 	}
 	return false
 }
+
+// TitleKey is the translation catalog key of the row's title, and the values
+// of its placeholders, for the rows every profile is offered (see Global)
+// while their title is the one this file words. It is "" for any other row.
+func (r ForYouRow) TitleKey() (string, map[string]string) {
+	switch {
+	case r.Type == RecTypePopular && r.Label == popularLabel:
+		return "home.section.popularOnServer", nil
+	case r.Type == RecTypeRecentlyAdded && r.Label == recentlyAddedLabel:
+		return "home.section.recentlyAdded", nil
+	case r.Type == RecTypeTopRated && r.Label == highlyRatedLabel:
+		return "home.section.highlyRatedInLibrary", nil
+	case r.Type == genreSamplerRowType:
+		if genre, ok := strings.CutPrefix(r.Label, genreRowLabel("")); ok && genre != "" {
+			return "home.section.topGenre", map[string]string{"genre": genre}
+		}
+	}
+	return "", nil
+}
