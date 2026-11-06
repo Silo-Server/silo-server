@@ -131,7 +131,19 @@ func CanAccessLibraryCollection(collection *models.LibraryCollection, filter Acc
 }
 
 func applyAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
-	ApplyMaturityLimits(alias, filter, conditions, args, argIdx)
+	applyAccessFilterKeyed(alias, alias+".content_id", filter, conditions, args, argIdx)
+}
+
+// applyEpisodeRelationAccessFilter is applyAccessFilter for rows of
+// episodeCatalogBaseRelation, whose content_id is the episode's and whose
+// ratings are its series': an episode passes through its series' allowance
+// (episode_series_id).
+func applyEpisodeRelationAccessFilter(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	applyAccessFilterKeyed(alias, alias+".episode_series_id", filter, conditions, args, argIdx)
+}
+
+func applyAccessFilterKeyed(alias, allowedKey string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	applyMaturityLimits(alias, allowedKey, filter.MaturityLimits, conditions, args, argIdx)
 	if len(filter.ExcludedMediaTypes) > 0 {
 		*conditions = append(*conditions, fmt.Sprintf("NOT (%s.type = ANY($%d))", alias, *argIdx))
 		*args = append(*args, filter.ExcludedMediaTypes)
@@ -180,11 +192,50 @@ func advisoryAgeLimitSQL(alias string, hideUnadvised bool, argIdx int) string {
 // content-rating ceiling and the advisory-age limit, ANDed — binding each limit
 // as an argument. It is the single place those limits become SQL, so every
 // catalog read, including query builders outside this package, enforces the
-// same predicates. alias must expose content_rating_age and advisory_age
-// (media_items, or the episode_catalog_entries read model). A filter with no
+// same predicates. alias must expose content_rating_age and advisory_age, and
+// content_id for the profile's allowed titles (media_items). A filter with no
 // limits appends nothing.
+//
+// A title in AllowedTitleIDs passes the limits whatever its rating:
+// "(limits) OR alias.content_id = ANY(allowed)". Episode rows pass through
+// their series' allowance instead: the episode_catalog_entries read model
+// uses ApplyEpisodeMaturityLimits, and episodeCatalogBaseRelation rows use
+// applyEpisodeRelationAccessFilter.
 func ApplyMaturityLimits(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
-	limits := filter.MaturityLimits
+	applyMaturityLimits(alias, alias+".content_id", filter.MaturityLimits, conditions, args, argIdx)
+}
+
+// ApplyEpisodeMaturityLimits is ApplyMaturityLimits for episode rows that
+// carry their own copy of the series' rating and a series_id
+// (episode_catalog_entries): an episode passes through its series' allowance.
+func ApplyEpisodeMaturityLimits(alias string, filter AccessFilter, conditions *[]string, args *[]any, argIdx *int) {
+	applyMaturityLimits(alias, alias+".series_id", filter.MaturityLimits, conditions, args, argIdx)
+}
+
+// matchNothingSQL is the predicate an unusable maturity ceiling renders.
+const matchNothingSQL = "1 = 0"
+
+func applyMaturityLimits(alias, allowedKey string, limits access.MaturityLimits, conditions *[]string, args *[]any, argIdx *int) {
+	limitConds := maturityLimitConditions(alias, limits, args, argIdx)
+	if len(limitConds) == 0 {
+		return
+	}
+	if len(limits.AllowedTitleIDs) == 0 {
+		*conditions = append(*conditions, limitConds...)
+		return
+	}
+	*conditions = append(*conditions, fmt.Sprintf("((%s) OR %s = ANY($%d))",
+		strings.Join(limitConds, " AND "), allowedKey, *argIdx))
+	*args = append(*args, limits.AllowedTitleIDs)
+	*argIdx = *argIdx + 1
+}
+
+// maturityLimitConditions renders the content-rating ceiling and the
+// advisory-age limit for alias, binding each as an argument; together they
+// are ANDed. An unusable ceiling renders matchNothingSQL alone and binds
+// nothing.
+func maturityLimitConditions(alias string, limits access.MaturityLimits, args *[]any, argIdx *int) []string {
+	var conds []string
 	// access.HasCeiling, not a trimmed emptiness test: a stored " " is a set
 	// ceiling nothing resolves under, so it falls through to the fail-closed
 	// branch below instead of silently lifting the ceiling.
@@ -193,18 +244,18 @@ func ApplyMaturityLimits(alias string, filter AccessFilter, conditions *[]string
 		if !ok {
 			// A ceiling that resolves to no age (unrated, or unrecognized) is
 			// unusable, and an unusable parental control fails closed.
-			*conditions = append(*conditions, "1 = 0")
-			return
+			return []string{matchNothingSQL}
 		}
-		*conditions = append(*conditions, contentRatingCeilingSQL(alias, limits.AllowUnratedContent, *argIdx))
+		conds = append(conds, contentRatingCeilingSQL(alias, limits.AllowUnratedContent, *argIdx))
 		*args = append(*args, *ceilingAge)
 		*argIdx = *argIdx + 1
 	}
 	if limits.MaxAdvisoryAge > 0 {
-		*conditions = append(*conditions, advisoryAgeLimitSQL(alias, limits.HidesUnadvised(), *argIdx))
+		conds = append(conds, advisoryAgeLimitSQL(alias, limits.HidesUnadvised(), *argIdx))
 		*args = append(*args, limits.MaxAdvisoryAge)
 		*argIdx = *argIdx + 1
 	}
+	return conds
 }
 
 // libraryAccessConditions returns the per-item library allow/deny predicates

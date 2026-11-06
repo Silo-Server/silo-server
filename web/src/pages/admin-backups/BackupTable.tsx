@@ -147,11 +147,9 @@ function downloadHint(backup: AdminBackup): string {
 function DownloadDialogBody({
   backup,
   links,
-  sqliteUserStore,
 }: {
   backup: AdminBackup;
   links: AdminBackupDownloadLink[];
-  sqliteUserStore: boolean;
 }) {
   const restoreSet = useAdminBackupDownloadLinks();
   const [restoreSetLinks, setRestoreSetLinks] = useState<AdminBackupDownloadLink[]>([]);
@@ -165,7 +163,7 @@ function DownloadDialogBody({
         onSuccess: setRestoreSetLinks,
         onError: (error) =>
           toast.error("Couldn't prepare the restore set", {
-            description: backupErrorMessage(error, { sqliteUserStore }),
+            description: backupErrorMessage(error),
           }),
       },
     );
@@ -238,25 +236,16 @@ function DownloadDialogBody({
 function DownloadDialog({
   backup,
   links,
-  sqliteUserStore,
   onClose,
 }: {
   backup: AdminBackup | null;
   links: AdminBackupDownloadLink[];
-  sqliteUserStore: boolean;
   onClose: () => void;
 }) {
   return (
     <Dialog open={backup !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
-        {backup ? (
-          <DownloadDialogBody
-            key={backup.id}
-            backup={backup}
-            links={links}
-            sqliteUserStore={sqliteUserStore}
-          />
-        ) : null}
+        {backup ? <DownloadDialogBody key={backup.id} backup={backup} links={links} /> : null}
       </DialogContent>
     </Dialog>
   );
@@ -271,8 +260,6 @@ export interface BackupTableProps {
   selectedId: string | null;
   showAll: boolean;
   onShowAllChange: (showAll: boolean) => void;
-  /** The SQLite user store is in use; its conflicts are not "busy" conflicts. */
-  sqliteUserStore: boolean;
   /** The operation holding the backup lock, on any server. */
   active: AdminBackupActive | undefined;
   /** Why deleting is unavailable now, from the lock; null when it is free. */
@@ -286,7 +273,6 @@ export function BackupTable({
   selectedId,
   showAll,
   onShowAllChange,
-  sqliteUserStore,
   active,
   deleteBlocker,
   selectiveRestore,
@@ -319,7 +305,7 @@ export function BackupTable({
         },
         onError: (error) =>
           toast.error("Couldn't prepare the download", {
-            description: backupErrorMessage(error, { sqliteUserStore }),
+            description: backupErrorMessage(error),
           }),
       },
     );
@@ -335,7 +321,7 @@ export function BackupTable({
       onError: (error) => {
         setDeleting(null);
         toast.error("Couldn't delete the backup", {
-          description: backupErrorMessage(error, { sqliteUserStore }),
+          description: backupErrorMessage(error),
         });
       },
     });
@@ -512,12 +498,7 @@ export function BackupTable({
         isPending={deleteBackup.isPending}
         onConfirm={confirmDelete}
       />
-      <DownloadDialog
-        backup={downloading}
-        links={links}
-        sqliteUserStore={sqliteUserStore}
-        onClose={() => setDownloading(null)}
-      />
+      <DownloadDialog backup={downloading} links={links} onClose={() => setDownloading(null)} />
     </div>
   );
 }

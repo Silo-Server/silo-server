@@ -2503,6 +2503,25 @@
       "body_file": "admin_match_apply.json"
     },
     {
+      "name": "admin_match_hints",
+      "operation_id": "getAdminItemMatchHints",
+      "scenario": "Delegated curator reads the title, year, and provider IDs the scanner parsed from the item's folder.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/items/item-1/match/hints",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminMatchHints",
+      "body_file": "admin_match_hints.json"
+    },
+    {
       "name": "admin_match_search",
       "operation_id": "searchAdminItemMatches",
       "scenario": "Delegated curator searches bounded provider candidates.",

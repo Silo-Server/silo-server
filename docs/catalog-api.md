@@ -535,6 +535,54 @@ and the watchlist alone. A change publishes `user_state.changed` with
 clients can update. The frozen v1 surface has no mark and does not show it. See
 [recommendations.md](architecture/recommendations.md#rows).
 
+## Allowed titles
+
+The household's primary profile can let a limited profile watch specific movies
+and series above its rating or advisory-age limit. Detect support with
+`GET /api/v2/capabilities/title-allowances`; it reports `unsupported` on a
+server whose user store is not PostgreSQL. Every operation below needs the
+acting profile to manage the household (the verified primary profile) and
+answers `403` otherwise.
+
+- `GET /api/v2/catalog/items/{id}/title-allowances` lists every other profile
+  on the account with its `state` for the movie or series: `within_limits`,
+  `allowed`, `allowed_by_collection`, `above_limit` (can be allowed), or
+  `no_library_access`.
+- `PUT` and `DELETE /api/v2/profiles/{id}/allowed-titles/{item_id}` add and
+  remove one allowance; both answer `204` and repeat safely. `PUT` answers `422`
+  for an episode or season (allow the series), for a profile with no limit
+  (`no_maturity_limits`), and for a title in a library the profile cannot see
+  (`no_library_access`). `GET /api/v2/profiles/{id}/allowed-titles` lists the
+  profile's own allowances as catalog cards, newest first, paged with `limit`
+  and `cursor`. Cards for titles the acting profile cannot see are left out, so
+  a page can hold fewer cards than its limit while `page.has_more` is true.
+- `PUT` and `DELETE /api/v2/profiles/{id}/allowed-collections/{collection_id}`
+  allow a personal collection as it changes: titles added to it later are
+  allowed too. Only a manual collection the acting primary profile created can
+  be allowed this way; any other answers `422` (`collection_not_live`).
+  `GET /api/v2/profiles/{id}/allowed-collections` lists them, with `live: false`
+  for a collection that no longer qualifies and so allows nothing.
+- `POST /api/v2/profiles/{id}/allowed-titles/copy-collection` with
+  `{"collection_id": ...}` allows the movies and series a personal collection
+  holds now, in libraries the profile can reach (for a smart collection, what its query matches for the acting
+  profile), as individual allowances, and answers how many were new. One copy
+  allows at most 10,000 titles; copying a stored collection again continues
+  with titles the profile is not yet allowed. A stored collection's copy
+  also reads at most 100,000 entries, so titles the acting profile cannot see
+  count toward that bound on every copy. Because a repeated copy continues,
+  the operation is not retryable: after an uncertain response, read the
+  allowed titles before copying again.
+
+A profile sees at most 10,000 of its allowed titles, from its own allowances
+and its live collections together. Past that, which ones it sees is
+unspecified and the rest stay hidden.
+
+An allowed title is visible and playable for the profile everywhere content is
+reached, Jellyfin clients included. A series allowance covers its seasons and
+episodes. Allowances never lift library restrictions, a custom scope policy's
+rating override, or a stricter `MaxOfficialRating` a Jellyfin client sends. See
+[title-allowances.md](architecture/title-allowances.md).
+
 ## Episodes left on a series card
 
 On a series or season card the profile has not finished, v2 `user_state` adds

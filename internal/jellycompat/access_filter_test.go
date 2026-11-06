@@ -55,7 +55,7 @@ func TestScopeAccessFilterMapsScope(t *testing.T) {
 	}
 	// Every maturity limit reaches the Jellyfin surface, so a compat client
 	// cannot see titles the native API hides from the same profile.
-	if want := (access.MaturityLimits{MaxContentRating: "PG-13", AllowUnratedContent: true, MaxAdvisoryAge: 10}); filter.MaturityLimits != want {
+	if want := (access.MaturityLimits{MaxContentRating: "PG-13", AllowUnratedContent: true, MaxAdvisoryAge: 10}); !reflect.DeepEqual(filter.MaturityLimits, want) {
 		t.Fatalf("MaturityLimits = %+v, want %+v", filter.MaturityLimits, want)
 	}
 	if filter.MaxPlaybackQuality != "1080p" {

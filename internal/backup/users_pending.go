@@ -84,8 +84,10 @@ func (p *pendingItems) ResolveAll(ctx context.Context, ids []string) (map[string
 
 // previewUsers plans the users section for a preview in one read-only
 // snapshot transaction, on one connection as every preview query before
-// it, so the pending counts of every account see the same state.
-func (s *Service) previewUsers(ctx context.Context, rs *RestoreSet, serverID string, libMap map[int]int) ([]accountPlan, error) {
+// it, so the pending counts of every account see the same state. Accounts
+// are loaded one at a time and dropped once planned: only their preview
+// items are kept.
+func (s *Service) previewUsers(ctx context.Context, rs *RestoreSet, serverID string, libMap map[int]int) ([]PreviewItem, error) {
 	// Read before the transaction: the setting reader takes its own
 	// connection.
 	allowUnrated := s.opts.AllowUnratedContent != nil && s.opts.AllowUnratedContent(ctx)
@@ -104,16 +106,34 @@ func (s *Service) previewUsers(ctx context.Context, rs *RestoreSet, serverID str
 		return nil, fmt.Errorf("opening a snapshot of the accounts: %w", err)
 	}
 	u := s.newUserPlanner(rs, tx, serverID, libMap)
-	decodes := startPendingDecodes(rs.Users, runtime.GOMAXPROCS(0))
-	defer decodes.stop()
-	u.pending = &pendingCompare{tx: tx, allowUnrated: allowUnrated, now: s.opts.Now(), phases: map[string]time.Duration{}, decodes: decodes,
+	u.pending = &pendingCompare{tx: tx, allowUnrated: allowUnrated, now: s.opts.Now(), phases: map[string]time.Duration{},
 		planner: s.newPlanner(rs, tx), adminCollections: map[string]string{}}
 	started := time.Now()
-	plans, err := u.planAll(ctx, rs.Users)
-	if err == nil {
-		u.pending.log(ctx, len(rs.Users), time.Since(started))
+	items := make([]PreviewItem, 0, len(rs.Users))
+	for _, ref := range rs.Users {
+		item, err := u.previewAccount(ctx, rs, ref)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
 	}
-	return plans, err
+	u.pending.log(ctx, len(rs.Users), time.Since(started))
+	return items, nil
+}
+
+// previewAccount loads and plans one account, decoding its large data
+// documents ahead of their comparison.
+func (u *userPlanner) previewAccount(ctx context.Context, rs *RestoreSet, ref UserRef) (PreviewItem, error) {
+	started := time.Now()
+	doc, err := rs.loadUser(ref)
+	u.pending.time("load", started)
+	if err != nil {
+		return PreviewItem{}, err
+	}
+	u.pending.decodes = startPendingDecodes(doc, runtime.GOMAXPROCS(0))
+	defer u.pending.decodes.stop()
+	plan, err := u.plan(ctx, doc)
+	return plan.item, err
 }
 
 // log writes one line with where the users preview spent its time, so an
