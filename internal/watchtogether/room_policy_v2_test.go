@@ -178,3 +178,25 @@ func TestGuestControlPolicySaveKeepsRoomsLatestPolicyPG(t *testing.T) {
 		t.Fatalf("saves = %v, want the room's latest policy (host_only) saved last", saved)
 	}
 }
+
+func TestProfileLocksWaiterLeavesWhenItsContextEnds(t *testing.T) {
+	var locks profileLocks
+	unlock, err := locks.lock(t.Context(), "7:host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := locks.lock(ctx, "7:host"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiter on a held lock = %v, want context.Canceled", err)
+	}
+	unlock()
+	if len(locks.locks) != 0 {
+		t.Fatalf("entries left after the holder and the waiter left: %v", locks.locks)
+	}
+	if again, err := locks.lock(t.Context(), "7:host"); err != nil {
+		t.Fatal(err)
+	} else {
+		again()
+	}
+}

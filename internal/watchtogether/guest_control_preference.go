@@ -70,9 +70,11 @@ func (s *Service) rememberGuestControlPolicy(ctx context.Context, roomID string,
 		// Queue this server's saves for the profile here, so a burst of
 		// changes waits without each holding a pooled connection on the
 		// profile's advisory lock.
-		unlock := s.guestControlSaveLocks.lock(fmt.Sprintf("%d:%s", userID, profileID))
-		err = repo.saveCommittedGuestControlPolicy(ctx, roomID, userID, profileID, save)
-		unlock()
+		var unlock func()
+		if unlock, err = s.guestControlSaveLocks.lock(ctx, fmt.Sprintf("%d:%s", userID, profileID)); err == nil {
+			err = repo.saveCommittedGuestControlPolicy(ctx, roomID, userID, profileID, save)
+			unlock()
+		}
 	} else {
 		err = save(policy)
 	}
@@ -82,37 +84,45 @@ func (s *Service) rememberGuestControlPolicy(ctx context.Context, roomID string,
 	}
 }
 
-// profileLocks is a mutex per key that frees its entry once nobody holds or
-// waits for it.
+// profileLocks is a lock per key that a waiter can give up on when its
+// context ends, and that frees its entry once nobody holds or waits for it.
 type profileLocks struct {
 	mu    sync.Mutex
 	locks map[string]*profileLock
 }
 
 type profileLock struct {
-	sync.Mutex
+	held  chan struct{}
 	users int
 }
 
-func (l *profileLocks) lock(key string) (unlock func()) {
+func (l *profileLocks) lock(ctx context.Context, key string) (unlock func(), err error) {
 	l.mu.Lock()
 	if l.locks == nil {
 		l.locks = make(map[string]*profileLock)
 	}
-	held := l.locks[key]
-	if held == nil {
-		held = &profileLock{}
-		l.locks[key] = held
+	entry := l.locks[key]
+	if entry == nil {
+		entry = &profileLock{held: make(chan struct{}, 1)}
+		l.locks[key] = entry
 	}
-	held.users++
+	entry.users++
 	l.mu.Unlock()
-	held.Lock()
-	return func() {
-		held.Unlock()
+	release := func() {
 		l.mu.Lock()
-		if held.users--; held.users == 0 {
+		if entry.users--; entry.users == 0 {
 			delete(l.locks, key)
 		}
 		l.mu.Unlock()
+	}
+	select {
+	case entry.held <- struct{}{}:
+		return func() {
+			<-entry.held
+			release()
+		}, nil
+	case <-ctx.Done():
+		release()
+		return nil, ctx.Err()
 	}
 }
