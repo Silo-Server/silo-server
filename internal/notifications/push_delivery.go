@@ -169,11 +169,14 @@ func (r *PushDeviceRepository) EnqueuePushAttempts(ctx context.Context, tx pgx.T
 }
 
 // EnqueueTestAttempt creates a pending diagnostic attempt for one enabled
-// device on the given platform. The attempt carries the device profile's
+// device on the given platform and account. Profile IDs repeat across
+// accounts, so the account is part of the match, and another account's device
+// answers ErrPushDeliveryNotFound like a device that does not exist. The
+// attempt carries the device profile's
 // newest notification, so the device fetches and shows that notification's
 // real text exactly as for an ordinary push. A profile with no notification
 // yet gets a bare test whose push the device can only show as generic text.
-func (r *PushDeviceRepository) EnqueueTestAttempt(ctx context.Context, platform, profileID, serverDeviceID string) (*PushDeliveryAttempt, *PushDevice, error) {
+func (r *PushDeviceRepository) EnqueueTestAttempt(ctx context.Context, platform string, userID int, profileID, serverDeviceID string) (*PushDeliveryAttempt, *PushDevice, error) {
 	if r == nil || r.pool == nil {
 		return nil, nil, ErrPushDeliveryUnavailable
 	}
@@ -190,12 +193,13 @@ func (r *PushDeviceRepository) EnqueueTestAttempt(ctx context.Context, platform,
 
 	query := `SELECT ` + pushDeviceColumns + `
 		FROM push_devices
-		WHERE profile_id = $1
-		  AND platform = $2
-		  AND provider = $3
-		  AND push_mode = $4
+		WHERE user_id = $1
+		  AND profile_id = $2
+		  AND platform = $3
+		  AND provider = $4
+		  AND push_mode = $5
 		  AND enabled`
-	args := []any{profileID, platform, PushProviderSiloRelay, PushModePrivatePush}
+	args := []any{userID, profileID, platform, PushProviderSiloRelay, PushModePrivatePush}
 	if serverDeviceID != "" {
 		args = append(args, serverDeviceID)
 		query += fmt.Sprintf(" AND server_device_id = $%d", len(args))
