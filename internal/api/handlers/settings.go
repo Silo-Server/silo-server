@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -523,9 +524,24 @@ func DeviceMetadataFromHeaders(h http.Header) DeviceMetadata {
 func NewDeviceMetadata(id, name, platform string) DeviceMetadata {
 	return DeviceMetadata{
 		DeviceID:       clampHeaderValue(id, 128),
-		DeviceName:     clampHeaderValue(name, MaxDeviceNameRunes),
-		DevicePlatform: clampHeaderValue(platform, 40),
+		DeviceName:     clampHeaderValue(headerText(name), MaxDeviceNameRunes),
+		DevicePlatform: clampHeaderValue(headerText(platform), 40),
 	}
+}
+
+// headerText returns a display header value as valid UTF-8, which the device
+// registry needs to store it. A value that is not valid UTF-8 is read as
+// ISO-8859-1, the charset HTTP header text historically used: a Tizen TV sends
+// a French name such as "Téléviseur" that way.
+func headerText(value string) string {
+	if utf8.ValidString(value) {
+		return value
+	}
+	runes := make([]rune, len(value))
+	for i := range len(value) {
+		runes[i] = rune(value[i])
+	}
+	return string(runes)
 }
 
 // SetDeviceSetting validates and stores a device-scoped setting for the
