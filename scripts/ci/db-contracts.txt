@@ -240,6 +240,13 @@
 # has no live login, and comes back at the next sign-in.
 ./internal/notifications TestSweepOfUnboundRegistrationsDB
 ./internal/notifications TestSweptPhoneRegistersAgainAtSignInDB
+# Web push stops when the login session that registered the browser ends, however
+# it ended, including for a push already queued; retention removes the keys and
+# subscribing again records the new login.
+./internal/notifications TestWebPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestWebPushResubscribeRecordsTheNewLoginDB
+./internal/notifications TestWebPushSweepOfUnboundSubscriptionsDB
+./internal/notifications TestQueuedWebPushStopsWhenTheRegisteringLoginEndsDB
 
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
