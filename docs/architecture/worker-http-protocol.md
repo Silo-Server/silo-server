@@ -84,8 +84,9 @@ extraction can acquire the GPU admission gate. There is no native API alias.
 the run's `mediasample.Result` as JSON, sheets base64-encoded. A request with
 `sheets.use_input_aspect` uses the execution probe's display geometry and
 returns its actual cell height as `sheet_tile_height`. It passes node
-bearer authentication and approved-input-path authority first, runs one
-request at a time (a second answers `503` with reason `node_busy`), runs at
+bearer authentication and approved-input-path authority first, runs up to
+`playback.trickplay_node_capacity` requests at once (default 1; the next
+answers `503` with reason `node_busy`), runs at
 idle priority, and decodes on the node's own hardware: it drops hardware
 attempts its accelerator cannot run. It takes the GPU admission gate before
 resolving the hardware backend, which can run probes, and holds it for the

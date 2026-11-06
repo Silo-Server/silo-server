@@ -238630,7 +238630,7 @@
           },
           "required": true
         },
-        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, one run at a time, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -238696,7 +238696,7 @@
                 }
               }
             },
-            "description": "Node busy with another trickplay run, re-probing, or unconfigured"
+            "description": "Node at its trickplay run capacity, re-probing, or unconfigured"
           }
         }
       },
