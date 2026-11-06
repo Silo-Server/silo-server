@@ -22,6 +22,14 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
+// committedGuestControlPolicy reads the room's committed guest-control policy
+// from the pool, outside any room operation's transaction.
+func (r *Repository) committedGuestControlPolicy(ctx context.Context, roomID string) (GuestControlPolicy, error) {
+	var policy GuestControlPolicy
+	err := r.pool.QueryRow(ctx, `SELECT guest_control_policy FROM watch_together_rooms WHERE id=$1`, roomID).Scan(&policy)
+	return policy, err
+}
+
 func (r *Repository) CreateRoom(ctx context.Context, room Room) (*Room, error) {
 	if r == nil || r.pool == nil {
 		return nil, fmt.Errorf("watch together repository unavailable")

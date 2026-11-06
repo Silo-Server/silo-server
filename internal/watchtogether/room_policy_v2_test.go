@@ -90,14 +90,18 @@ func TestRoomStartsWithAndSavesHostGuestControlPolicy(t *testing.T) {
 	svc := newServiceForTest(now, repo, nil, nil, nil)
 	saved := &savedGuestControl{}
 	svc.SetGuestControlPreferences(saved)
-	if _, err := svc.UpdatePolicy(t.Context(), "room-1", 8, "guest", GuestControlPolicyGuestPlayPause); !errors.Is(err, ErrRoomForbidden) {
+	if _, err := svc.UpdatePolicyAndRemember(t.Context(), "room-1", 8, "guest", GuestControlPolicyGuestPlayPause); !errors.Is(err, ErrRoomForbidden) {
 		t.Fatalf("guest policy change: %v", err)
 	}
-	if _, err := svc.UpdatePolicy(t.Context(), "room-1", 7, "host", GuestControlPolicyGuestPlayPause); err != nil {
+	// The frozen v1 route changes the room without saving the choice.
+	if _, err := svc.UpdatePolicy(t.Context(), "room-1", 7, "host", GuestControlPolicyHostOnly); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UpdatePolicyAndRemember(t.Context(), "room-1", 7, "host", GuestControlPolicyGuestPlayPause); err != nil {
 		t.Fatal(err)
 	}
 	svc.repo = &competingPolicyRepo{stubRepo: repo}
-	if _, err := svc.UpdatePolicy(t.Context(), "room-1", 7, "host", GuestControlPolicyHostOnly); err != nil {
+	if _, err := svc.UpdatePolicyAndRemember(t.Context(), "room-1", 7, "host", GuestControlPolicyHostOnly); err != nil {
 		t.Fatal(err)
 	}
 	if len(saved.saved) != 1 || saved.saved[0] != GuestControlPolicyGuestPlayPause {

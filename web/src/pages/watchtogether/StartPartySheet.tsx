@@ -193,15 +193,20 @@ export function StartPartySheet({
       if (!active() || !created.room_access_token) return;
       const roomId = created.room.room_id;
       // Make the room match the switch the host saw. An explicit choice is
-      // also saved for the next party unless it already is; an untouched
-      // switch whose saved value could not be read leaves the server's choice.
+      // also saved for the next party unless it already is. An untouched
+      // switch whose saved value could not be read leaves the server's choice
+      // and says what it was.
       const policy = guestsCanPause ? "guest_play_pause" : "host_only";
       const explicit = guestsCanPauseChoice !== null;
       const alreadySaved = savedPolicy.isSuccess && savedPolicy.value === policy;
-      if (
-        (explicit || savedPolicy.isSuccess) &&
-        (created.room.guest_control_policy !== policy || (explicit && !alreadySaved))
-      ) {
+      if (!explicit && !savedPolicy.isSuccess) {
+        if (created.room.guest_control_policy !== policy)
+          toast.info(
+            created.room.guest_control_policy === "guest_play_pause"
+              ? "Guests can pause in this party. Change it from the room."
+              : "Only you control playback in this party. Change it from the room.",
+          );
+      } else if (created.room.guest_control_policy !== policy || (explicit && !alreadySaved)) {
         const notApplied = () =>
           toast.error(
             guestsCanPause

@@ -10,7 +10,7 @@ func (h *WatchTogetherHandler) UpdateWatchTogetherPolicy(ctx context.Context, ro
 	if h == nil || h.Service == nil || h.TokenService == nil {
 		return watchtogether.Snapshot{}, "", apiError(503, "unavailable", "Watch together is unavailable")
 	}
-	snapshot, err := h.Service.UpdatePolicy(ctx, room, user, profile, policy)
+	snapshot, err := h.Service.UpdatePolicyAndRemember(ctx, room, user, profile, policy)
 	if err != nil {
 		return watchtogether.Snapshot{}, "", err
 	}

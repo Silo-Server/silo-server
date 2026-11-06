@@ -3,7 +3,12 @@ package watchtogether
 import (
 	"context"
 	"log/slog"
+	"time"
 )
+
+// guestControlSaveTimeout bounds the settings write that remembers a host's
+// policy after its room change has committed.
+const guestControlSaveTimeout = 5 * time.Second
 
 // GuestControlPreferences stores the guest-control policy a host profile last
 // chose, so the next room it hosts starts with it on every client. The
@@ -39,13 +44,31 @@ func (s *Service) initialGuestControlPolicy(ctx context.Context, userID int, pro
 	return policy
 }
 
-// saveGuestControlPolicy remembers a policy the host just applied to a room.
-// The room change has already succeeded, so a failed save is logged rather
-// than returned: the host keeps the room they asked for and only the next
-// room falls back to the earlier choice.
-func (s *Service) saveGuestControlPolicy(ctx context.Context, userID int, profileID string, policy GuestControlPolicy) {
+// rememberGuestControlPolicy saves the policy the host's room holds after a
+// committed change. The room change has already succeeded, so a failed save is
+// logged rather than returned: the host keeps the room they asked for and only
+// the next room falls back to the earlier choice.
+//
+// It runs detached from the request and the room operation's deadline, so a
+// client that disconnects after the commit still has its choice saved. With
+// the shared repository it saves the room's committed policy rather than the
+// requested one, so when changes to the same room commit on different nodes,
+// a save that lands late still carries the room's latest policy. Only a save
+// whose read comes before another node's whole change can still land last.
+func (s *Service) rememberGuestControlPolicy(ctx context.Context, roomID string, userID int, profileID string, policy GuestControlPolicy) {
 	if s.guestControlPreferences == nil {
 		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), guestControlSaveTimeout)
+	defer cancel()
+	if repo, shared := s.repo.(*Repository); shared {
+		committed, err := repo.committedGuestControlPolicy(ctx, roomID)
+		if err != nil {
+			slog.WarnContext(ctx, "watch together guest control policy not saved for the next room",
+				"component", "watchtogether", "room_id", roomID, "user_id", userID, "profile_id", profileID, "error", err)
+			return
+		}
+		policy = committed
 	}
 	if err := s.guestControlPreferences.SaveGuestControlPolicy(ctx, userID, profileID, policy); err != nil {
 		slog.WarnContext(ctx, "watch together guest control policy not saved for the next room",

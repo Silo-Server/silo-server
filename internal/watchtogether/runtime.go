@@ -575,7 +575,18 @@ func (s *Service) closeIfHostStillDisconnected(roomID string, user int, profile 
 }
 
 func (s *Service) UpdatePolicy(ctx context.Context, roomID string, user int, profile string, policy GuestControlPolicy) (Snapshot, error) {
-	return withRoomOperation(ctx, s, roomID, func(ctx context.Context) (Snapshot, error) { return s.updatePolicy(ctx, roomID, user, profile, policy) })
+	return withRoomOperation(ctx, s, roomID, func(ctx context.Context) (Snapshot, error) {
+		return s.updatePolicy(ctx, roomID, user, profile, policy, false)
+	})
+}
+
+// UpdatePolicyAndRemember is UpdatePolicy that also saves the committed policy
+// as the host profile's choice for its next room. The frozen v1 route keeps
+// UpdatePolicy.
+func (s *Service) UpdatePolicyAndRemember(ctx context.Context, roomID string, user int, profile string, policy GuestControlPolicy) (Snapshot, error) {
+	return withRoomOperation(ctx, s, roomID, func(ctx context.Context) (Snapshot, error) {
+		return s.updatePolicy(ctx, roomID, user, profile, policy, true)
+	})
 }
 
 // StageItem puts content on a host-pick lobby without starting it.
