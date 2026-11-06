@@ -199,6 +199,27 @@ describe("StartPartySheet", () => {
     },
   );
 
+  it("keeps the host's switch choice when the page re-renders the sheet", () => {
+    const sheet = (title: string) => (
+      <QueryClientProvider client={client}>
+        <StartPartySheet
+          open
+          onOpenChange={() => {}}
+          item={movie}
+          initialTarget={{ content_id: "dune", title, subtitle: "2024" }}
+        />
+      </QueryClientProvider>
+    );
+    const client = new QueryClient();
+    const { rerender } = render(sheet("Dune: Part Two"));
+    fireEvent.click(screen.getByRole("switch"));
+    saved.refetch.mockClear();
+    // Detail pages build the target inline, so any page render passes a new object.
+    rerender(sheet("Dune: Part Two"));
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
+    expect(saved.refetch).not.toHaveBeenCalled();
+  });
+
   it("vote mode skips staging and hands the item to the room as the first suggestion", async () => {
     const fetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
       if (url.endsWith("/watch-together/rooms"))

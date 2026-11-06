@@ -165,14 +165,20 @@ export function StartPartySheet({
   useEffect(() => {
     if (open) {
       setTarget(initialTarget);
-      setGuestsCanPause(null);
       setChoosing(false);
       setBusy(false);
+    }
+  }, [open, initialTarget]);
+  // Only on open: detail pages pass a new initialTarget object on every
+  // render, which must not undo the host's switch choice.
+  useEffect(() => {
+    if (open) {
+      setGuestsCanPause(null);
       // Re-read on every open: the cached value can be minutes old, and the
       // sheet writes what it shows back to the room and the profile.
       void refetchSavedPolicy({ cancelRefetch: false });
     }
-  }, [open, initialTarget, refetchSavedPolicy]);
+  }, [open, refetchSavedPolicy]);
 
   const thumbhash = target?.poster_thumbhash
     ? decodeThumbhash(target.poster_thumbhash)
