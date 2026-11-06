@@ -34,13 +34,10 @@ func (t *testTrigger) NextRunTime() time.Time { return time.Time{} }
 func (t *testTrigger) Config() TriggerConfig  { return TriggerConfig{} }
 func (t *testTrigger) C() <-chan struct{}     { return t.ch }
 
-func TestInitialSetTriggersDoesNotMarkTriggerChanged(t *testing.T) {
+func TestInitialSetTriggersDoesNotQueueUpdate(t *testing.T) {
 	worker := newTaskWorker(testTask{}, nil)
 	worker.setTriggers([]TriggerConfig{{Type: TriggerTypeInterval, IntervalMs: 1}}, newTestTrigger, nil, false)
 
-	if worker.triggerChanged.Load() {
-		t.Fatal("initial trigger setup should not mark triggers changed")
-	}
 	select {
 	case <-worker.triggerUpdate:
 		t.Fatal("initial trigger setup should not queue a trigger update")

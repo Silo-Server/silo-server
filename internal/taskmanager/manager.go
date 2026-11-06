@@ -235,6 +235,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 	for {
 		w.mu.RLock()
 		trigs := w.triggers
+		gen := w.triggerGen
 		w.mu.RUnlock()
 
 		if len(trigs) == 0 {
@@ -244,14 +245,11 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			case <-w.retired:
 				return
 			case <-w.triggerUpdate:
-				// The update is handled by re-reading the triggers, so the
-				// first firing of the new ones must not be taken for it.
-				w.triggerChanged.Store(false)
 				continue
 			}
 		}
 
-		merged := make(chan struct{}, 1)
+		fired := make(chan struct{}, 1)
 		done := make(chan struct{})
 
 		for _, tr := range trigs {
@@ -263,25 +261,13 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				case _, ok := <-tr.C():
 					if ok {
 						select {
-						case merged <- struct{}{}:
+						case fired <- struct{}{}:
 						default:
 						}
 					}
 				}
 			}()
 		}
-
-		go func() {
-			select {
-			case <-done:
-				return
-			case <-w.triggerUpdate:
-				select {
-				case merged <- struct{}{}:
-				default:
-				}
-			}
-		}()
 
 		select {
 		case <-ctx.Done():
@@ -290,11 +276,21 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 		case <-w.retired:
 			close(done)
 			return
-		case <-merged:
+		case <-w.triggerUpdate:
+			// Wait on the new triggers. An update never runs the task.
+			close(done)
+			continue
+		case <-fired:
 			close(done)
 		}
 
-		if w.triggerChanged.CompareAndSwap(true, false) {
+		// A trigger replaced since the loop read them fired before it
+		// stopped; the update that replaced it wakes the loop for the new
+		// ones.
+		w.mu.RLock()
+		replaced := w.triggerGen != gen
+		w.mu.RUnlock()
+		if replaced {
 			continue
 		}
 

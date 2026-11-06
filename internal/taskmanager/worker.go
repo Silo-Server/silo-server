@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/telemetry"
@@ -25,10 +24,13 @@ type taskWorker struct {
 	lastResult      *ExecutionResult
 	triggers        []Trigger
 	cancel          context.CancelFunc
-	triggerUpdate   chan struct{}
-	triggerChanged  atomic.Bool
-	mu              sync.RWMutex
-	scheduleMu      sync.Mutex
+	// triggerUpdate wakes the trigger loop after setTriggers replaced the
+	// triggers. triggerGen counts those replacements, so the loop can tell a
+	// firing of the triggers it waits on from one of triggers since replaced.
+	triggerUpdate chan struct{}
+	triggerGen    uint64
+	mu            sync.RWMutex
+	scheduleMu    sync.Mutex
 	// schedule is the normalized configs setTriggers last installed,
 	// including any the trigger factory could not build, so ReloadSchedule
 	// can tell whether the saved schedule differs from the one the worker
@@ -128,6 +130,7 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 	}
 
 	w.triggers = nil
+	w.triggerGen++
 	configs = normalizedTriggers(configs)
 	w.schedule = configs
 	if w.isRetired() {
@@ -147,17 +150,12 @@ func (w *taskWorker) setTriggers(configs []TriggerConfig, factory func(TriggerCo
 
 	w.mu.Unlock()
 
-	if !notify {
-		w.notify()
-		return
+	if notify {
+		select {
+		case w.triggerUpdate <- struct{}{}:
+		default:
+		}
 	}
-
-	w.triggerChanged.Store(true)
-	select {
-	case w.triggerUpdate <- struct{}{}:
-	default:
-	}
-
 	w.notify()
 }
 
