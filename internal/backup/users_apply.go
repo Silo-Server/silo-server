@@ -299,11 +299,12 @@ func accountOutcome(item ReportItem, report *ReportAccount, changed bool) Report
 // documentItems lists the content ids every profile's data names.
 func documentItems(doc *UserDocument) []string {
 	var out []string
-	for _, p := range doc.Profiles {
+	for i := range doc.Profiles {
+		p := &doc.Profiles[i]
 		for _, t := range userDataTypes {
 			if raw, ok := p.Data[t.ID()]; ok {
 				// The reader validated every document.
-				sum, _ := t.Validate(raw)
+				sum, _ := p.summary(t, raw)
 				out = append(out, sum.Items...)
 			}
 		}
