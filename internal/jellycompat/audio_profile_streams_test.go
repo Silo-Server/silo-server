@@ -96,6 +96,46 @@ func TestBuildMediaStreamsJellyfin12LocalizedLabels(t *testing.T) {
 	}
 }
 
+// Jellyfin clients label tracks with DisplayTitle and LocalizedLanguage, so a
+// tag with a region or script needs a readable name, not "Pt BR".
+func TestBuildMediaStreamsNamesRegionalLanguages(t *testing.T) {
+	cases := []struct {
+		language          string
+		wantLanguageName  string
+		wantSubtitleTitle string
+	}{
+		{"pt", "Portuguese", "Portuguese (External, SRT)"},
+		{"pt-BR", "Brazilian Portuguese", "Brazilian Portuguese (External, SRT)"},
+		{"zh-Hant", "Traditional Chinese", "Traditional Chinese (External, SRT)"},
+		{"es-419", "Latin American Spanish", "Latin American Spanish (External, SRT)"},
+		{"pt-AO", "Portuguese (Angola)", "Portuguese (Angola) (External, SRT)"},
+		{"sr-Latn", "Serbian (Latin)", "Serbian (Latin) (External, SRT)"},
+		{"sr-Latn-CS", "Serbian (Latin)", "Serbian (Latin) (External, SRT)"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.language, func(t *testing.T) {
+			version := catalog.FileVersion{
+				AudioTracks:    []models.AudioTrack{{Codec: "aac", Channels: 2, Language: tc.language}},
+				SubtitleTracks: []catalog.VersionSubtitleTrack{{Codec: "subrip", Language: tc.language, External: true}},
+			}
+			streams := buildMediaStreams("item", "source", version)
+			if len(streams) != 2 {
+				t.Fatalf("streams length = %d, want 2", len(streams))
+			}
+			audio, subtitle := streams[0], streams[1]
+			if audio.DisplayTitle != tc.wantLanguageName+" - AAC Stereo" || audio.LocalizedLanguage != tc.wantLanguageName {
+				t.Fatalf("audio labels = %q/%q", audio.DisplayTitle, audio.LocalizedLanguage)
+			}
+			if subtitle.DisplayTitle != tc.wantSubtitleTitle || subtitle.LocalizedLanguage != tc.wantLanguageName {
+				t.Fatalf("subtitle labels = %q/%q", subtitle.DisplayTitle, subtitle.LocalizedLanguage)
+			}
+			if audio.Language != tc.language || subtitle.Language != tc.language {
+				t.Fatalf("wire languages = %q/%q, want %q", audio.Language, subtitle.Language, tc.language)
+			}
+		})
+	}
+}
+
 // The catalog's per-viewer audio choice (language preference, original
 // language, remembered series track) drives DefaultAudioStreamIndex.
 func TestDefaultAudioStreamIndexUsesEffectiveAudioTrack(t *testing.T) {
