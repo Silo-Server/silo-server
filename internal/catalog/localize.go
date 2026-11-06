@@ -7,9 +7,14 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// fieldImagesLocked matches metadata.FieldImages. Catalog cannot import
+// These match metadata.FieldName and its siblings. Catalog cannot import
 // metadata because metadata already depends on catalog.
-const fieldImagesLocked = 10
+const (
+	fieldOverviewLocked     = 1
+	fieldRuntimeLocked      = 7
+	fieldImagesLocked       = 10
+	fieldReleaseDatesLocked = 13
+)
 
 // Machine-translated field names, as MachineTranslatedFields reports them.
 const (
@@ -76,10 +81,10 @@ func applySeasonLocalization(season *models.Season, loc *models.SeasonLocalizati
 	}
 	// The markers describe this localization only, never a previous one.
 	localized.MachineTranslatedFields = nil
-	if loc.Title != "" {
+	if loc.Title != "" && !slices.Contains(season.LockedFields, fieldNameLocked) {
 		localized.Title = loc.Title
 	}
-	if loc.Overview != "" {
+	if loc.Overview != "" && childOverviewApplies(season.LockedFields, loc.OverviewSource) {
 		localized.Overview = loc.Overview
 		if loc.OverviewSource == models.LocalizationSourceAI {
 			localized.MachineTranslatedFields = append(localized.MachineTranslatedFields, MachineTranslatedOverview)
@@ -102,10 +107,10 @@ func applyEpisodeLocalization(episode *models.Episode, loc *models.EpisodeLocali
 	}
 	// The markers describe this localization only, never a previous one.
 	localized.MachineTranslatedFields = nil
-	if loc.Title != "" {
+	if loc.Title != "" && !slices.Contains(episode.LockedFields, fieldNameLocked) {
 		localized.Title = loc.Title
 	}
-	if loc.Overview != "" {
+	if loc.Overview != "" && childOverviewApplies(episode.LockedFields, loc.OverviewSource) {
 		localized.Overview = loc.Overview
 		if loc.OverviewSource == models.LocalizationSourceAI {
 			localized.MachineTranslatedFields = append(localized.MachineTranslatedFields, MachineTranslatedOverview)

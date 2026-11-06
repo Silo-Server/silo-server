@@ -49,6 +49,11 @@
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
+# Locked season and episode fields survive refreshes, seed imports and a change of show.
+./internal/catalog TestSeasonEpisodeLockedFieldsSurviveUpsertsDB
+./internal/catalogseed TestSeedCarriesSeasonEpisodeLocksDB
+./internal/metadata TestIdentify_SeasonEpisodeLocksFollowTheShow
+
 # Movie box sets: grouping by viewer access and the minimum, grouped browse
 # and letters, search, sync bookkeeping, and collection artwork.
 ./internal/catalog TestBoxSetGroupsDB

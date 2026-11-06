@@ -57,7 +57,9 @@ func (s *MetadataService) canonicalizeLocalContentID(
 	if s == nil || !contentid.IsLocal(from) {
 		return from, nil
 	}
-	return s.reanchorContentID(ctx, from, ids, itemType, markIdentity)
+	// A local item never named a show, so its children's edits have nothing to
+	// disagree with.
+	return s.reanchorContentID(ctx, from, ids, itemType, markIdentity, false)
 }
 
 // reanchorContentID moves `from` to the provider-anchored content_id derived
@@ -73,13 +75,17 @@ func (s *MetadataService) canonicalizeLocalContentID(
 // transaction: that row holds the chosen provider IDs, so the mark commits
 // with them even if the identity write that follows fails. A rename moves only
 // the content id, leaving the old provider IDs until that identity write, so
-// the mark waits for it.
+// the mark waits for it. With replacesShow, `from` named a different show, so a
+// rename also clears the edits on its seasons and episodes. A merge needs no
+// clearing: the source's children stay behind and go with the source, and the
+// target's edits are about the target.
 func (s *MetadataService) reanchorContentID(
 	ctx context.Context,
 	from string,
 	ids contentid.ProviderIDs,
 	itemType string,
 	markIdentity bool,
+	replacesShow bool,
 ) (string, error) {
 	if s == nil {
 		return from, nil
@@ -118,7 +124,7 @@ func (s *MetadataService) reanchorContentID(
 	// Target free: pure value-move. A provider-anchored series takes the
 	// season and episode ids composed from its old anchor along with it, so
 	// the show that anchor names can claim them when it is scanned in.
-	if err := s.renameContentID(ctx, from, target, normalizeItemTypeForContentID(itemType) == matchContentTypeSeries); err != nil {
+	if err := s.renameContentID(ctx, from, target, normalizeItemTypeForContentID(itemType) == matchContentTypeSeries, replacesShow); err != nil {
 		return "", err
 	}
 	return target, nil
@@ -129,8 +135,9 @@ func (s *MetadataService) reanchorContentID(
 // series' season and episode ids that were composed from `from` to the same
 // composition under `to` (see seriesChildRenames). FK children follow via ON
 // UPDATE CASCADE; silo_rename_content_ids also sweeps the unconstrained soft
-// references. Everything moves in one transaction.
-func (s *MetadataService) renameContentID(ctx context.Context, from, to string, withSeriesChildren bool) error {
+// references. With clearChildEdits it also clears the season and episode edits
+// under `to`. Everything moves in one transaction.
+func (s *MetadataService) renameContentID(ctx context.Context, from, to string, withSeriesChildren, clearChildEdits bool) error {
 	if s.dbPool == nil {
 		return fmt.Errorf("rename content id requires database pool")
 	}
@@ -174,6 +181,11 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	}
 	if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, sources, targets); err != nil {
 		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)
+	}
+	if clearChildEdits {
+		if err := catalog.ClearSeriesChildEditsTx(ctx, tx, to); err != nil {
+			return err
+		}
 	}
 	if err := catalog.EnqueueSearchIndexRename(ctx, tx, from, to); err != nil {
 		return fmt.Errorf("enqueue catalog search rename %s -> %s: %w", from, to, err)

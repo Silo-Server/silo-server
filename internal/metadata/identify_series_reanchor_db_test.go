@@ -435,7 +435,7 @@ func TestRenameContentIDKeepsUnmarkOnLeftoverCutoffDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := service.renameContentID(ctx, from, to, false); err != nil {
+	if err := service.renameContentID(ctx, from, to, false, false); err != nil {
 		t.Fatal(err)
 	}
 
