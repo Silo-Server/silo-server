@@ -466,6 +466,33 @@ func ListCapabilitiesOfType(ctx context.Context, q interface {
 	return scanCapabilities(rows)
 }
 
+// CapabilityRef names one capability of one plugin.
+type CapabilityRef struct {
+	PluginID     string
+	CapabilityID string
+}
+
+// ListEnabledCapabilityRefsOfType names the capabilities of one type that
+// enabled, non-builtin installations provide. q may be a transaction, so a
+// caller that holds one needs no second pool connection.
+func ListEnabledCapabilityRefsOfType(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, capabilityType string,
+) ([]CapabilityRef, error) {
+	rows, err := q.Query(ctx, `SELECT i.plugin_id, c.capability_id
+		FROM plugin_capabilities c
+		JOIN plugin_installations i ON i.id = c.plugin_installation_id
+		WHERE c.capability_type = $1 AND i.enabled AND i.kind <> $2`, capabilityType, KindBuiltin)
+	if err != nil {
+		return nil, fmt.Errorf("listing enabled plugin capabilities of type %s: %w", capabilityType, err)
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (CapabilityRef, error) {
+		var ref CapabilityRef
+		err := row.Scan(&ref.PluginID, &ref.CapabilityID)
+		return ref, err
+	})
+}
+
 func (s *InstallationStore) SaveArchive(
 	ctx context.Context,
 	installationID int,

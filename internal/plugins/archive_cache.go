@@ -471,6 +471,15 @@ func (e *unreadableArchiveError) Error() string { return e.err.Error() }
 
 func (e *unreadableArchiveError) Unwrap() []error { return []error{ErrArchiveUnreadable, e.err} }
 
+// invalidManifestError is an archive whose manifest.json doesn't load or
+// validate. Its message names what is wrong with the manifest and nothing
+// about the server, so an install shows it to the administrator.
+type invalidManifestError struct{ err error }
+
+func (e *invalidManifestError) Error() string { return e.err.Error() }
+
+func (e *invalidManifestError) Unwrap() error { return e.err }
+
 func unreadableArchivef(format string, args ...any) error {
 	return &unreadableArchiveError{err: fmt.Errorf(format, args...)}
 }
@@ -524,7 +533,7 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 	}
 	manifest, err := LoadManifestBytes(manifestBytes)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, &invalidManifestError{err: err}
 	}
 
 	binaryBytes, err := readZipFile(binaryFile)

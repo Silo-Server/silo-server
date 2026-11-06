@@ -295,6 +295,13 @@ func TestResolvedCatalogInstallArchiveRequestCarriesCatalogIdentity(t *testing.T
 func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 	future := testPluginManifest(t, "silo.metadb", "0.0.36")
 	future.SiloApiVersion = "v2"
+	nestedForm := testPluginManifest(t, "silo.metadb", "0.0.36")
+	nestedForm.Capabilities = append(nestedForm.Capabilities, &pluginv1.CapabilityDescriptor{
+		Type: "notification_channel.v1", Id: "ntfy",
+		NotificationChannel: &pluginv1.NotificationChannelDescriptor{DisplayName: "ntfy", DestinationSchema: &pluginv1.ConfigSchema{
+			Key: "destination", JsonSchema: `{"type":"object","properties":{"auth":{"type":"object"}}}`,
+		}},
+	})
 	for _, tc := range []struct {
 		name  string
 		write func(t *testing.T, path string)
@@ -318,6 +325,11 @@ func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 		}},
 		{name: "unsupported API", want: `needs Silo plugin API "v2"`, write: func(t *testing.T, path string) {
 			writePluginArchive(t, path, future)
+		}},
+		// The admin sees what is wrong with the manifest, not only that the
+		// archive was refused.
+		{name: "invalid manifest", want: `manifest is invalid: plugin capability "ntfy" destination schema`, write: func(t *testing.T, path string) {
+			writePluginArchive(t, path, nestedForm)
 		}},
 		// Extraction writes each entry to its cleaned path, so a second entry
 		// for the same file, on a case- or normalization-insensitive

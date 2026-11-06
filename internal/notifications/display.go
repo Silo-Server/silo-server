@@ -89,6 +89,12 @@ func BuildNotificationDisplay(row DeliveryRow) NotificationDisplay {
 		display.Body = "Open notification settings to fix it."
 		display.ThreadID = "settings:notifications"
 		display.URL = "/settings/notifications"
+	case DeliveryTypePluginDestinationAutoDisabled:
+		display.Category = "plugin_destination_auto_disabled"
+		display.Title = "A notification destination stopped working"
+		display.Body = "Open notification settings to fix it."
+		display.ThreadID = "settings:notifications"
+		display.URL = "/settings/notifications"
 	default:
 		if row.Type != "" {
 			display.Category = strings.ReplaceAll(row.Type, ".", "_")

@@ -623,14 +623,16 @@ func TestConcurrencyMarkingIsRestricted(t *testing.T) {
 // is empty today; the reconcile test refuses an unmapped guarded operation
 // that is not listed here.
 var guardedWithoutLegacyRow = map[string]string{
-	"updateRequestRoute":           "V2-only request routing rule: the rule's revision from request_editor_revision_seq is its ETag.",
-	"deleteRequestRoute":           "V2-only request routing rule: deletion is guarded by the rule's revision.",
-	"updateAdminRequestGroupLimit": "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
-	"updateRequestRouting":         "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
-	"updateRequestDiscoverLayout":  "V2-only Requests Discover layout: the layout's revision from request_editor_revision_seq is its ETag; the default layout, with none stored, is revision zero.",
-	"resetRequestDiscoverLayout":   "V2-only return to the default Discover layout: guarded by the stored layout's revision.",
-	"setStoredSubtitleTiming":      "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
-	"setSubtitleTiming":            "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
+	"updateRequestRoute":                  "V2-only request routing rule: the rule's revision from request_editor_revision_seq is its ETag.",
+	"deleteRequestRoute":                  "V2-only request routing rule: deletion is guarded by the rule's revision.",
+	"updateAdminRequestGroupLimit":        "V2-only access-group request limit: the limit's revision from request_editor_revision_seq is its ETag; a group with none saved is revision zero.",
+	"updateRequestRouting":                "V2-only request routing mode (Standard or Advanced): the mode's revision from request_editor_revision_seq is its ETag.",
+	"updateRequestDiscoverLayout":         "V2-only Requests Discover layout: the layout's revision from request_editor_revision_seq is its ETag; the default layout, with none stored, is revision zero.",
+	"resetRequestDiscoverLayout":          "V2-only return to the default Discover layout: guarded by the stored layout's revision.",
+	"setStoredSubtitleTiming":             "V2-only stored subtitle timing correction: guarded by the viewer subtitle validator, whose revision every subtitle row update bumps.",
+	"setSubtitleTiming":                   "V2-only timing correction of a stored subtitle or a sidecar: guarded by a validator over the stored row's revision, or the sidecar's bytes and its correction's revision.",
+	"updateNotificationPluginDestination": "V2-only plugin notification destination: the row's revision is its ETag.",
+	"deleteNotificationPluginDestination": "V2-only plugin notification destination: deletion is guarded by the row's revision.",
 }
 
 // TestGuardedOperationsAreMarkedIfMatch reconciles the v2 registry with the
@@ -960,6 +962,10 @@ func TestRetrySafetyMismatchesFire(t *testing.T) {
 // mutation that is not listed here, the same rule guardedWithoutLegacyRow
 // applies to concurrency.
 var mutationWithoutLegacyRow = map[string]string{
+	"createNotificationPluginDestination":      "V2-only plugin notification destination (v1 is frozen). Non-retryable: a replay can create a second destination.",
+	"updateNotificationPluginDestination":      "V2-only plugin notification destination update, guarded by the row's revision, so a replay converges or answers 412.",
+	"deleteNotificationPluginDestination":      "V2-only plugin notification destination deletion, guarded by the row's revision; deleting an absent destination answers 404.",
+	"testNotificationPluginDestination":        "V2-only test message to a plugin destination. Non-retryable: a replay sends another test message.",
 	"reportPlaybackBandwidthProbe":             "V2-only connection speed observation; no v1 equivalent.",
 	"resetAdminDeviceLearnedLimit":             "V2-only device connection limit reset; no v1 equivalent.",
 	"resetPlaybackLearnedLimit":                "V2-only buffering-quality connection observation reset; no v1 equivalent.",

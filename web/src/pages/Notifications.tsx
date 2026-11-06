@@ -61,9 +61,23 @@ function notificationTitle(notification: AppNotification): string {
   if (notification.type === "request.approved" || notification.type === "request.declined") {
     return notification.reason_flags?.title || "Media request";
   }
+  // These match the server's display text (internal/notifications/display.go).
+  if (notification.type === "plugin_destination.auto_disabled") {
+    return "A notification destination stopped working";
+  }
+  if (notification.type === "webhook.auto_disabled") {
+    return "A webhook stopped working";
+  }
   // Unknown types render with a generic fallback by design — the type
   // registry is extensible.
   return "Notification";
+}
+
+function isAutoDisabledNotice(notification: AppNotification): boolean {
+  return (
+    notification.type === "plugin_destination.auto_disabled" ||
+    notification.type === "webhook.auto_disabled"
+  );
 }
 
 function notificationDescription(notification: AppNotification): string {
@@ -95,6 +109,9 @@ function notificationDescription(notification: AppNotification): string {
     const reason = notification.reason_flags?.reason;
     return reason ? `Your request was declined — ${reason}` : "Your request was declined";
   }
+  if (isAutoDisabledNotice(notification)) {
+    return "Open notification settings to fix it.";
+  }
   return notification.type;
 }
 
@@ -106,6 +123,7 @@ function notificationDescription(notification: AppNotification): string {
 function notificationHref(notification: AppNotification): string | null {
   if (notification.episode_id) return `/item/${notification.episode_id}`;
   if (notification.series_id) return `/item/${notification.series_id}`;
+  if (isAutoDisabledNotice(notification)) return "/settings/notifications";
   if (notification.type === "request.approved" || notification.type === "request.declined") {
     const { media_type: mediaType, tmdb_id: tmdbID } = notification.reason_flags ?? {};
     if ((mediaType === "movie" || mediaType === "series") && tmdbID && tmdbID > 0) {

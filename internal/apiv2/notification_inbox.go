@@ -227,6 +227,10 @@ func registerNotificationInbox(reg *Registry) {
 		body := notificationCapabilitiesOf(svc.NotificationCapabilities(ctx))
 		body.Series.Available = reg.deps.PersonalLists != nil
 		body.Series.Mute = body.Series.Available
+		if destinations := reg.deps.NotificationPluginDestinations; destinations != nil && destinations.Available() {
+			kinds, err := destinations.Channels(ctx)
+			body.PluginDestinations = NotificationPluginDestinationCapability{Available: err == nil && len(kinds) > 0, MaxPerProfile: notifications.PluginDestinationMaxPerProfile}
+		}
 		return &NotificationCapabilitiesOutput{Body: body}, nil
 	})
 	Register(reg, notificationOperation(http.MethodGet, "", "listNotifications"), func(ctx context.Context, in *NotificationListInput) (*NotificationListOutput, error) {
@@ -434,6 +438,9 @@ type NotificationCapabilities struct {
 	Email       NotificationAccountChannelCapability `json:"email"`
 	Discord     NotificationAccountChannelCapability `json:"discord"`
 	Series      NotificationSeriesCapability         `json:"series"`
+	// PluginDestinations is filled from the plugin destination seam, not
+	// the shared bridge view, so the frozen v1 capability stays unchanged.
+	PluginDestinations NotificationPluginDestinationCapability `json:"plugin_destinations"`
 }
 
 // NotificationSeriesCapability reports listNotificationSeries and the series
@@ -478,5 +485,5 @@ func notificationCapabilitiesOf(v handlers.NotificationCapabilitiesView) Notific
 	}
 }
 func (c NotificationCapabilities) capabilityState() string {
-	return enabledCapabilityState(c.InApp.Enabled || c.ApplePush.Available || c.AndroidPush.Available || c.WebPush.Available || c.Webhooks.Available || c.Email.Available || c.Discord.Available)
+	return enabledCapabilityState(c.InApp.Enabled || c.ApplePush.Available || c.AndroidPush.Available || c.WebPush.Available || c.Webhooks.Available || c.Email.Available || c.Discord.Available || c.PluginDestinations.Available)
 }

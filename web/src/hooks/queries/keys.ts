@@ -259,6 +259,8 @@ export const notificationKeys = {
   discordPreferences: () => ["notifications", "discord-preferences"] as const,
   capability: () => ["notifications", "capability"] as const,
   webhooks: () => ["notifications", "webhooks"] as const,
+  pluginChannels: () => ["notifications", "plugin-channels"] as const,
+  pluginDestinations: () => ["notifications", "plugin-destinations"] as const,
   webPushSubscriptions: () => ["notifications", "web-push-subscriptions"] as const,
 };
 

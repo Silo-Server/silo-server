@@ -156,7 +156,9 @@ Covered: arr (Requests + Autoscan) API keys, S3 keys, all sensitive
 Autoscan webhook endpoint secrets (`autoscan_webhook_endpoints.secret_ref`),
 push device APNs and FCM tokens (`push_devices`), notification webhook and
 server channel URLs and signing secrets (`notification_webhooks`,
-`notification_server_channels`), queued email-verification messages
+`notification_server_channels`), plugin notification destination settings
+(`notification_plugin_destinations.config_ciphertext`, AAD
+`notification_plugin_destination:<id>:config`), queued email-verification messages
 (`notification_email_verifications.payload_ciphertext`), plugin instance state
 (`plugin_instance_state.state_value`),
 history-import admin/session tokens, temporary server-list credentials and

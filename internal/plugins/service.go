@@ -41,6 +41,7 @@ type pluginClient interface {
 	HTTPRoutes(capabilityID string) (*pluginhost.HTTPRoutesClient, error)
 	WatchSyncProvider(capabilityID string) (*pluginhost.WatchSyncProviderClient, error)
 	NetworkAccessProvider(capabilityID string) (*pluginhost.NetworkAccessProviderClient, error)
+	NotificationChannel(capabilityID string) (*pluginhost.NotificationChannelClient, error)
 }
 
 type Host interface {
@@ -796,6 +797,20 @@ func (s *Service) EventConsumerClient(
 		return nil, err
 	}
 	return client.EventConsumer(capabilityID)
+}
+
+// NotificationChannelClient returns the installation's notification_channel.v1
+// client for capabilityID, starting the plugin when needed.
+func (s *Service) NotificationChannelClient(
+	ctx context.Context,
+	installationID int,
+	capabilityID string,
+) (*pluginhost.NotificationChannelClient, error) {
+	client, err := s.ensureClient(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	return client.NotificationChannel(capabilityID)
 }
 
 func (s *Service) AuthProviderClient(

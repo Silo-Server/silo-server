@@ -2910,6 +2910,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		inbox.SetApplePushDisplayTokenIssuer(jwtService)
 		v2deps.NotificationInbox = inbox
 		v2deps.NotificationDestinations = inbox
+		if deps.Notifications.PluginDestinations != nil {
+			v2deps.NotificationPluginDestinations = deps.Notifications.PluginDestinations
+		}
 		v2deps.NotificationDestinationTests = inbox
 		v2deps.NotificationDestinationCreate = inbox
 		v2deps.OrderedAndroidPush = inbox

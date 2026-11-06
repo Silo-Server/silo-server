@@ -39,6 +39,8 @@ var interruptedWork = []struct{ table, sql string }{
 		WHERE outcome IN ('pending', 'retrying')`},
 	{"web_push_delivery_attempts", `UPDATE web_push_delivery_attempts SET outcome = 'failed', failure_message = $1
 		WHERE outcome IN ('pending', 'retrying')`},
+	{"plugin_destination_delivery_attempts", `UPDATE plugin_destination_delivery_attempts SET outcome = 'failed', failure_message = $1
+		WHERE outcome IN ('pending', 'retrying')`},
 	// A storage transition's progress belongs to the transition the live
 	// server has, if any (InterruptWork).
 	{"storage_transition_checkpoints", `DELETE FROM storage_transition_checkpoints WHERE $1 <> ''`},

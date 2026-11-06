@@ -239,6 +239,10 @@ func (f *fakePluginClient) NetworkAccessProvider(string) (*pluginhost.NetworkAcc
 	return nil, nil
 }
 
+func (f *fakePluginClient) NotificationChannel(string) (*pluginhost.NotificationChannelClient, error) {
+	return nil, nil
+}
+
 type fakeServiceInstallationStore struct {
 	byID map[int]*Installation
 	// mu guards every field: the resident supervisor reads the store from

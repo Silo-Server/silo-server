@@ -182,6 +182,9 @@ func otherLine(row DeliveryRow) string {
 	if row.Type == DeliveryTypeWebhookAutoDisabled {
 		return "A webhook stopped working — open notification settings to fix it"
 	}
+	if row.Type == DeliveryTypePluginDestinationAutoDisabled {
+		return "A notification destination stopped working — open notification settings to fix it"
+	}
 	return genericNotificationTitle
 }
 

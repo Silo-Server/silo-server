@@ -548,6 +548,96 @@ This is a non-retryable operation: resubmitting a URL replacement advances the w
 
 The bridge update wire and behavior remain unchanged. No provider delivery is sent by the update, and already-dispatched work cannot be recalled. No attempt table, secret lease, fleet rollout or enrollment guarantee is introduced.
 
+## Plugin destinations
+
+A plugin with a `notification_channel.v1` capability provides a channel,
+such as ntfy or Pushover. A profile adds destinations on that channel next to
+its webhooks, and they receive the same deliveries webhooks do:
+new episodes filtered by the destination's reason flags, and request updates
+when `notify_requests` is on. Plugin destinations exist only when the server
+has an at-rest cipher, because their settings hold credentials.
+`GET /api/v2/notifications/capabilities` reports `plugin_destinations.available`
+(an enabled plugin provides at least one channel) and `max_per_profile` (10).
+
+All operations below are profile-scoped, demo-guarded when mutating, and
+identify the recipient by account and profile together. A destination that
+belongs to another account, including another account's profile with the
+same ID, answers `404`.
+
+### List the channels
+
+`GET /api/v2/notifications/plugin-channels` (`listNotificationPluginChannels`)
+returns the channels enabled plugins provide now, unpaginated. Each names its
+`plugin_id` and `capability_id`, which stay stable across plugin upgrades, a
+`display_name` and `description`, and `settings_form`, the plugin's settings
+schema and form (`PluginSettingsForm`, the shape of an admin plugin config
+schema). The form is flat: its JSON Schema is one object of string, integer,
+number and boolean fields, with no `$ref`, combinators, conditionals, nested
+objects or arrays. The SDK's `manifest.ValidateDestinationSchema` enforces
+this, and the server refuses to install or upgrade a plugin whose form breaks
+it. Settings are write-only when the form marks them `secret` or gives them a
+password control, or when their JSON Schema property is `writeOnly` or has
+`format: password`, as for plugin configuration.
+
+### List destinations
+
+`GET /api/v2/notifications/plugin-destinations` (`listNotificationPluginDestinations`)
+is cursor-paginated in creation order. Each item carries its `etag`, the
+reason flags, the delivery bookkeeping webhooks carry (`consecutive_failures`,
+`disabled_reason`, `last_success_at`, `last_failure_at`,
+`last_failure_message`), `settings`, and `secret_settings_set`, the secret
+fields that have a stored value. `settings` holds only the fields the channel's
+current schema declares and doesn't mark secret: a stored field the schema no
+longer declares, such as a secret a plugin upgrade renamed, is never returned.
+`available`
+is false, `channel_name` empty and `settings` empty while no enabled plugin
+provides the destination's channel; nothing is sent or queued then. Whether
+a channel is available is read in the same transaction that queues the
+notification, so enabling, disabling or removing a plugin takes effect for the
+next notification on every server.
+
+### Create a destination
+
+`POST /api/v2/notifications/plugin-destinations` (`createNotificationPluginDestination`)
+takes `plugin_id`, `capability_id`, `name` (1 to 64 characters, unique per
+account profile), `settings`, and optional reason flags (default on). The
+server accepts only settings the schema or its form declares. It refuses
+keys a schema allows only through `additionalProperties`, which it could
+neither return nor keep secret. It then calls the plugin's
+`ValidateDestination`. A refusal answers `422` with the plugin's
+message in the problem's error detail at `body.settings`. An unknown or
+unreachable channel answers `503 dependency_unavailable` with `Retry-After`; ten
+destinations answer `422`. Success is `201` with the destination and its
+`ETag`. The operation is non-retryable: a replay can create a second
+destination.
+
+### Update a destination
+
+`PUT /api/v2/notifications/plugin-destinations/{id}` (`updateNotificationPluginDestination`)
+requires the original `If-Match` validator, like a webhook update. Omitted
+fields stay unchanged. `settings` merges over the stored settings: a
+non-secret field sent as `null` is removed, a secret field sent blank or left
+out keeps its stored value, and `clear_secrets` removes named secrets. A
+stored setting the channel's current form no longer declares, after a plugin
+update, is dropped on the next update.
+Changed settings are checked by the plugin again and, like a changed webhook
+URL, clear the failure streak and the disable reason; so does re-enabling.
+Missing preconditions answer `428`, stale validators `412`. The validator
+changes on the owner's edits and when the server disables the destination,
+not when a send updates its delivery bookkeeping. The plugin checks
+changed settings before the destination is locked for the write; if the
+destination changes meanwhile, the update answers `412` with the current
+`ETag` and writes nothing, even under `If-Match: *`.
+
+### Delete and test
+
+`DELETE /api/v2/notifications/plugin-destinations/{id}` (`deleteNotificationPluginDestination`)
+requires `If-Match` and removes the destination and its queued attempts.
+`POST /api/v2/notifications/plugin-destinations/{id}/test` (`testNotificationPluginDestination`)
+sends one test message now and answers `200` with `ok`, `message` and
+`duration_ms`; a failed send is `ok: false`, not retried and not counted. It
+is non-retryable.
+
 ## Ordered Apple registration storage
 
 Apple registration ordering uses a separate retained installation record. Its

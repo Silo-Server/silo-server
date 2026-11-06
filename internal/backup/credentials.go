@@ -274,6 +274,11 @@ var secretTables = []secretTable{
 		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,
 		describe: `format('notification webhook %s %L (account %s)', r.id, r.name, r.user_id)`,
 	}},
+	{name: "notification_plugin_destinations", handling: secretCarried, why: "plugin notification destinations", carry: &carrySpec{
+		key: "id", same: []string{"id", columnUserID}, credential: everyRow,
+		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,
+		describe: `format('plugin notification destination %s %L (account %s)', r.id, r.name, r.user_id)`,
+	}},
 	{name: "notification_email_prefs", handling: secretCarried, why: "notification email addresses", carry: &carrySpec{
 		key: columnProfileID, same: []string{columnProfileID, columnUserID}, credential: everyRow,
 		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,
@@ -359,6 +364,7 @@ var secretTables = []secretTable{
 	{name: "idgen_machine_leases", handling: secretRestored, why: workerLease},
 	{name: "web_push_delivery_attempts", handling: secretRestored, why: deliveryHistory},
 	{name: "webhook_delivery_attempts", handling: secretRestored, why: deliveryHistory},
+	{name: "plugin_destination_delivery_attempts", handling: secretRestored, why: deliveryHistory},
 	{name: "download_subscription_exclusions", handling: secretRestored, why: "a download subscription's rules, not a destination"},
 }
 
@@ -386,7 +392,7 @@ func leftOutTables() []string {
 const carriedKinds = "API keys, pending invitations, invite codes, autoscan webhook tokens, audiobook RSS feed links, " +
 	"Plex and Jellyfin webhook sync secrets, external sign-in links and providers, watch-provider connections, " +
 	"plugin configuration and state, and notification destinations " +
-	"(push registrations, webhooks, email addresses, Discord links, server channels)"
+	"(push registrations, webhooks, plugin destinations, email addresses, Discord links, server channels)"
 
 // CarriedCredentials is what DatabaseLoader.CarryCredentials did.
 type CarriedCredentials struct {
