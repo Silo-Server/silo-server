@@ -14,6 +14,7 @@ import {
   describeNodeGPU,
   describeNodeGroups,
   describeNodeJobs,
+  describeNodeGPUBusy,
   describeNodeSystem,
   describeReprobeOutcome,
   describeResourceSample,
@@ -1016,6 +1017,22 @@ describe("resource attribution", () => {
     expect(describeNodeSystem(node, NOW + 30_000).kind).toBe("reported");
     node.last_stats!.sampled_at = new Date(NOW - 20_000).toISOString();
     expect(describeNodeSystem(node, NOW)).toMatchObject({ kind: "unreported", label: "Stale" });
+  });
+
+  it("treats an old GPU reading as stale even when the sample has no system block", () => {
+    const gpu = [{ device: "/dev/dri/renderD128", source: "intel_gpu_top", video_busy_pct: 40 }];
+    const reading = (sampledAt: string) =>
+      describeNodeGPUBusy(
+        makeNode({
+          healthy: true,
+          last_health_check: new Date(NOW).toISOString(),
+          last_stats: { sampled_at: sampledAt, gpu },
+        }),
+        NOW,
+      );
+
+    expect(reading(new Date(NOW).toISOString())?.value).toBe("40%");
+    expect(reading(new Date(NOW - 10 * 60_000).toISOString())).toBeNull();
   });
 });
 

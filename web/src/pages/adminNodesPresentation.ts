@@ -881,14 +881,7 @@ export function describeNodeSystem(node: StreamNode, now = Date.now()): NodeSyst
         "The last health check did not reach this node, so its most recent resource sample is no longer current.",
     };
   }
-  const sampledAt = Date.parse(node.last_stats?.sampled_at ?? "");
-  const checkedAt = Date.parse(node.last_health_check ?? "");
-  const interval = node.last_stats?.attribution?.sample_interval_seconds ?? 5;
-  if (
-    Number.isFinite(sampledAt) &&
-    Number.isFinite(checkedAt) &&
-    (checkedAt - sampledAt > interval * 3000 || now - checkedAt > 90_000)
-  ) {
+  if (nodeSampleIsStale(node, now)) {
     return {
       kind: "unreported",
       label: "Stale",
@@ -899,13 +892,24 @@ export function describeNodeSystem(node: StreamNode, now = Date.now()): NodeSyst
   return describeSystemStats(system, node.last_stats?.attribution);
 }
 
+/** The node is answering, but its sampler or its health checks have stopped moving. */
+function nodeSampleIsStale(node: StreamNode, now: number): boolean {
+  const sampledAt = Date.parse(node.last_stats?.sampled_at ?? "");
+  const checkedAt = Date.parse(node.last_health_check ?? "");
+  const interval = node.last_stats?.attribution?.sample_interval_seconds ?? 5;
+  return (
+    Number.isFinite(sampledAt) &&
+    Number.isFinite(checkedAt) &&
+    (checkedAt - sampledAt > interval * 3000 || now - checkedAt > 90_000)
+  );
+}
+
 /**
  * The busiest GPU from a node's last sample, or null when that sample is not
  * current: a percentage that stopped moving reads as a live one.
  */
 export function describeNodeGPUBusy(node: StreamNode, now = Date.now()): ResourceMetric | null {
-  const system = describeNodeSystem(node, now);
-  if (!node.healthy || (system.kind === "unreported" && system.stale)) {
+  if (!node.healthy || nodeSampleIsStale(node, now)) {
     return null;
   }
   return describeGPUBusy(node.last_stats?.gpu ?? []);
