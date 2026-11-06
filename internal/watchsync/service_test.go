@@ -2118,6 +2118,56 @@ func TestServiceImportWatchedDeduplicatesResolvedLeavesAtNewestTimestamp(t *test
 	}
 }
 
+// A scrobbled play comes back from the provider stamped when the stop arrived,
+// seconds after Silo's own row (#3433). The import treats a watch within ten
+// minutes of a play already in history as that play, and records a later one.
+func TestServiceImportWatchedSkipsProviderCopyOfLocalPlay(t *testing.T) {
+	localPlay := time.Date(2026, 11, 3, 1, 8, 27, 0, time.UTC)
+	tests := []struct {
+		name         string
+		remote       time.Time
+		wantRecorded bool
+	}{
+		{name: "scrobble stamped seconds later", remote: localPlay.Add(4 * time.Second)},
+		{name: "scrobble delivered late by a retry", remote: localPlay.Add(9 * time.Minute)},
+		{name: "a later play", remote: localPlay.Add(11 * time.Minute), wantRecorded: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := openUserDB(t)
+			if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
+				ID: "history-1", ProfileID: "profile-1", MediaItemID: testMovieMediaID,
+				WatchedAt: localPlay.Format(time.RFC3339), DurationSeconds: 7200, Completed: true,
+				Source: userstore.WatchHistorySourcePlayback,
+			}); err != nil {
+				t.Fatalf("AddHistory: %v", err)
+			}
+			remote := tt.remote
+			provider := watchedImporterStub{
+				historyStubBase: historyStubBase{key: "simkl", source: userstore.WatchHistorySourceSimkl},
+				rows: []RemoteWatch{{
+					Provider: "simkl", Kind: historyimport.KindMovie, Title: "Inception", LastWatchedAt: &remote,
+				}},
+			}
+			watchState := &recordingWatchState{}
+			service := NewService(newServiceFakeRepo(), NewRegistry()).
+				WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
+				WithWatchState(watchState).
+				WithUserStoreProvider(staticStoreProvider{store: userdb.NewSQLiteUserStore(db)})
+
+			result, err := service.ImportWatched(context.Background(), Connection{
+				ID: "conn-1", Provider: "simkl", UserID: 7, ProfileID: "profile-1",
+			}, ServerConfig{}, provider)
+			if err != nil {
+				t.Fatalf("ImportWatched: %v", err)
+			}
+			if recorded := len(watchState.targetIDs) == 1; recorded != tt.wantRecorded || result.Imported != len(watchState.targetIDs) {
+				t.Fatalf("recorded %v (result %+v), want recorded = %v", watchState.targetIDs, result, tt.wantRecorded)
+			}
+		})
+	}
+}
+
 func TestServiceSyncConnectionPreservesConnectionUpdatesAcrossFlows(t *testing.T) {
 	db := openUserDB(t)
 	if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{

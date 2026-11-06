@@ -74,6 +74,13 @@ const (
 	// so a second request cannot take over while the first is still valid.
 	confirmedStopDispatchTimeout = 2 * time.Minute
 	confirmedStopLease           = confirmedStopDispatchTimeout + 30*time.Second
+
+	// importedWatchSamePlayWindow is how close a provider's watch time must be
+	// to a play already in the profile's history for a watched import to treat
+	// it as that play. A scrobble carries no watch time, so the provider stamps
+	// its copy of a Silo play when the stop arrives, seconds after Silo's row;
+	// the window also covers a stop delivered late by a retry.
+	importedWatchSamePlayWindow = 10 * time.Minute
 )
 
 var errConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
@@ -1180,10 +1187,28 @@ func (s *Service) ImportWatched(
 		mediaItemIDs = append(mediaItemIDs, mediaItemID)
 	}
 	sort.Strings(mediaItemIDs)
+	var history completedHistoryLister
+	if s.storeProvider != nil && len(mediaItemIDs) > 0 {
+		store, err := s.storeProvider.ForUser(ctx, conn.UserID)
+		if err != nil {
+			return result, fmt.Errorf("open user store: %w", err)
+		}
+		history = store
+	}
 	for _, mediaItemID := range mediaItemIDs {
 		leaf := matchedLeaves[mediaItemID]
-		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
 		watchedAt := leaf.watchedAt
+		if history != nil {
+			// The provider's copy of a play Silo recorded and scrobbled.
+			known, err := hasVisibleCompletedHistoryNear(ctx, history, conn.ProfileID, mediaItemID, watchedAt, importedWatchSamePlayWindow)
+			if err != nil {
+				return result, err
+			}
+			if known {
+				continue
+			}
+		}
+		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
 		created, err := s.watchState.RecordImportedWatchIfNewerWithSource(
 			ctx,
 			conn.UserID,
@@ -1431,6 +1456,28 @@ func visiblePlays(ctx context.Context, store completedHistoryLister, query users
 		}
 	}
 	return kept, nil
+}
+
+// hasVisibleCompletedHistoryNear reports whether the profile has a visible
+// completed play of mediaItemID within window of at, either side.
+func hasVisibleCompletedHistoryNear(ctx context.Context, store completedHistoryLister, profileID, mediaItemID string, at time.Time, window time.Duration) (bool, error) {
+	rows, err := listAllCompletedHistory(ctx, store, userstore.CompletedHistoryQuery{
+		ProfileID:    profileID,
+		MediaItemIDs: []string{mediaItemID},
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		watchedAt, err := time.Parse(time.RFC3339, row.WatchedAt)
+		if err != nil {
+			continue
+		}
+		if gap := watchedAt.Sub(at).Abs(); gap <= window {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func hasVisibleCompletedHistoryAtOrAfter(ctx context.Context, store completedHistoryLister, profileID, mediaItemID string, at time.Time) (bool, error) {
