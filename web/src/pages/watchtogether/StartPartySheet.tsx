@@ -155,7 +155,7 @@ export function StartPartySheet({
     enabled: open,
   });
   // null follows the profile's saved choice, which the server applies to the
-  // new room itself; the switch only overrides it once the host flips it.
+  // new room itself; the switch overrides it once the host flips it.
   const [guestsCanPauseChoice, setGuestsCanPause] = useState<boolean | null>(null);
   const guestsCanPause = guestsCanPauseChoice ?? savedPolicy.value === "guest_play_pause";
   const [target, setTarget] = useState<StartPartyTarget | null>(initialTarget);
@@ -188,16 +188,30 @@ export function StartPartySheet({
       const created = await createWatchTogetherRoom(draft);
       if (!active() || !created.room_access_token) return;
       const roomId = created.room.room_id;
-      const policy = guestsCanPauseChoice ? "guest_play_pause" : "host_only";
-      if (guestsCanPauseChoice !== null && created.room.guest_control_policy !== policy) {
-        await updateRoomPolicy(roomId, policy, authority!).catch((error: unknown) => {
-          if (error instanceof StaleApiRequestContextError) throw error;
+      // Make the room match the switch the host saw. An explicit choice is
+      // also saved for the next party unless it already is; an untouched
+      // switch whose saved value could not be read leaves the server's choice.
+      const policy = guestsCanPause ? "guest_play_pause" : "host_only";
+      const explicit = guestsCanPauseChoice !== null;
+      const alreadySaved = savedPolicy.isSuccess && savedPolicy.value === policy;
+      if (
+        (explicit || savedPolicy.isSuccess) &&
+        (created.room.guest_control_policy !== policy || (explicit && !alreadySaved))
+      ) {
+        const notApplied = () =>
           toast.error(
-            guestsCanPauseChoice
+            guestsCanPause
               ? "Room created, but guests can't pause yet. Change it from the room."
               : "Room created, but guests can still pause. Change it from the room.",
           );
-        });
+        const updated = await updateRoomPolicy(roomId, policy, authority!).catch(
+          (error: unknown) => {
+            if (error instanceof StaleApiRequestContextError) throw error;
+            notApplied();
+            return null;
+          },
+        );
+        if (updated && updated.room.guest_control_policy !== policy) notApplied();
         if (!active()) return;
       }
       if (target && mode === "host_pick") {
@@ -248,7 +262,18 @@ export function StartPartySheet({
     } finally {
       setBusy(false);
     }
-  }, [auth?.profile, auth?.user, guestsCanPauseChoice, mode, navigate, onOpenChange, target]);
+  }, [
+    auth?.profile,
+    auth?.user,
+    guestsCanPause,
+    guestsCanPauseChoice,
+    mode,
+    navigate,
+    onOpenChange,
+    savedPolicy.isSuccess,
+    savedPolicy.value,
+    target,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -365,7 +390,7 @@ export function StartPartySheet({
         <Button
           type="button"
           onClick={() => void create()}
-          disabled={busy || choosing}
+          disabled={busy || choosing || savedPolicy.isPending}
           className="h-11"
         >
           {busy ? "Creating…" : "Create party & copy invite"}

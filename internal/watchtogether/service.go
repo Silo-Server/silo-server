@@ -1634,7 +1634,9 @@ func (s *Service) updatePolicy(
 	s.mu.Unlock()
 
 	s.sendDispatches(ctx, dispatches)
-	s.saveGuestControlPolicy(ctx, userID, profileID, policy)
+	// After the room commit, while the room's operation lock still orders
+	// this host's changes, so a rolled-back change is never remembered.
+	afterRoomCommit(ctx, func() { s.saveGuestControlPolicy(ctx, userID, profileID, policy) })
 	return snapshot, nil
 }
 
