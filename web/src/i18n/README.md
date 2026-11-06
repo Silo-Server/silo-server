@@ -97,5 +97,13 @@ tests that match translated strings.
 
 English is in the main bundle (every message's fallback); other languages are lazy
 chunks, and messages are precompiled, so the ICU parser is aliased away in
-`vite.config.ts`. If `en.json` grows too large once the admin pages convert, split
-`web.admin.*` into a chunk the admin layout loads.
+`vite.config.ts`.
+
+Admin text (`web.admin.*`) is a separate part of every catalog (the `catalogParts`
+plugin in `vite.config.ts`), so the launch bundle doesn't carry it:
+
+- `AdminLayout` and the setup wizard call `useAdminMessages()` and render once the
+  part is loaded; an admin's session asks for it at sign-in.
+- Text that a non-admin can see belongs outside `web.admin.*`, even when an admin
+  component shows it too (`web.common.*`). A `web.admin.*` message formatted before
+  its part loads renders empty and asks for the part.

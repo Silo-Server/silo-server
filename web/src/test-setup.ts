@@ -1,6 +1,12 @@
 import "@testing-library/jest-dom";
 import { vi } from "vitest";
 
+import { loadAdminEnglishForTests } from "@/i18n";
+
+// Tests render admin pages and call admin helpers without the admin layout
+// that would load their text.
+await loadAdminEnglishForTests();
+
 // Components render inside the app's message provider. Tests render them alone,
 // so every render and renderHook gets the English one, which formats from the
 // generated English catalog and throws on a formatting error. A test's own

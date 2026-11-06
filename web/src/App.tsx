@@ -30,6 +30,7 @@ import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { DateTimeFormatProvider, useDateTimeFormat } from "@/hooks/useDateTimeFormat";
 import { LocaleProvider } from "@/hooks/useAppLocale";
+import { requestAdminMessages } from "@/i18n";
 import { BrandingProvider } from "@/contexts/BrandingProvider";
 import { UICustomizationProvider } from "@/contexts/UICustomizationProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -798,6 +799,9 @@ function RealtimeEventChannels() {
 }
 
 function AdminRealtimeEventChannels() {
+  // Admins see admin text outside the admin area too (server activity, item
+  // tools), so fetch its catalog chunk now rather than on first use.
+  useEffect(requestAdminMessages, []);
   useEventChannel("jobs");
   useEventChannel("sessions");
   useEventChannel("tasks");

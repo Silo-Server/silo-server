@@ -151,6 +151,36 @@ function themeBootScript(): Plugin {
   };
 }
 
+/** Messages the admin area shows; src/i18n/catalog.ts loads them only when it asks. */
+const ADMIN_MESSAGE_PREFIX = "web.admin.";
+const CATALOG_PART = /[\\/]src[\\/]locales[\\/][^\\/]+\.json\?part=(app|admin)$/;
+
+/**
+ * Serves one part of a generated catalog: `locales/<tag>.json?part=admin` holds
+ * the `web.admin.*` messages and `?part=app` the rest, so admin text never
+ * rides in the launch bundle. The part is still JSON, so Vite's JSON plugin
+ * turns it into a module as it does the whole file.
+ */
+// Exported for vite.config.test.ts.
+export function catalogParts(): Plugin {
+  return {
+    name: "silo-catalog-parts",
+    enforce: "pre",
+    async load(id) {
+      const match = CATALOG_PART.exec(id);
+      if (!match) return null;
+      const file = id.slice(0, id.indexOf("?"));
+      this.addWatchFile(file);
+      const admin = match[1] === "admin";
+      const messages = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+      const part = Object.fromEntries(
+        Object.entries(messages).filter(([key]) => key.startsWith(ADMIN_MESSAGE_PREFIX) === admin),
+      );
+      return JSON.stringify(part);
+    },
+  };
+}
+
 // The server embeds dist and serves every file in it, and nothing in the app
 // reads the Vite manifest. Only scripts/check-bundle-budget.mjs does, so the
 // manifest moves next to dist instead of shipping.
@@ -202,6 +232,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [
+      catalogParts(),
       react(),
       tailwindcss(),
       themeBootScript(),

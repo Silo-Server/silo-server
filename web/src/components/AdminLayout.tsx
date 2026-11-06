@@ -14,6 +14,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useAdminMessages } from "@/i18n";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
@@ -27,6 +28,11 @@ import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiob
 const ADMIN_DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
 
 export default function AdminLayout() {
+  // Admin text is its own catalog chunk; render once it has loaded.
+  return useAdminMessages() ? <AdminLayoutContent /> : null;
+}
+
+function AdminLayoutContent() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const location = useLocation();

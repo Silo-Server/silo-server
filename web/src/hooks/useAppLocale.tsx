@@ -8,12 +8,16 @@ import {
 } from "@/hooks/queries/settingValues";
 import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
 import {
+  adminMessagesRequested,
   AppIntlProvider,
   appIntl,
   createAppIntl,
+  loadAdminTranslations,
   loadTranslations,
   PSEUDO_LOCALES_ENABLED,
+  setAdminLoadError,
   setAppIntl,
+  subscribeAdminRequest,
   type Messages,
 } from "@/i18n";
 import { browserLocaleInputs, hasCatalog, resolveAppLocale, setAppLocale } from "@/lib/appLocale";
@@ -116,6 +120,13 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }, [apiLoaded, apiLanguage, cacheOwner]);
 
   const [intl, setIntl] = useState(appIntl);
+  // Admin text loads once something asks for it (useAdminMessages), and then
+  // with every later language.
+  const withAdmin = useSyncExternalStore(
+    subscribeAdminRequest,
+    adminMessagesRequested,
+    adminMessagesRequested,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -123,23 +134,33 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
       language === "en"
         ? undefined
         : import("@/lib/languageNames").then((module) => module.loadLanguageNames(language));
+    const admin = withAdmin
+      ? loadAdminTranslations(catalog).catch((error: unknown) => {
+          if (!cancelled) setAdminLoadError(error);
+          return undefined;
+        })
+      : undefined;
     void Promise.all([
       // Without its catalog a language still renders, in English.
       loadTranslations(catalog).catch((): Messages => ({})),
+      admin,
       // Without name data, language names stay English.
       names?.catch(() => undefined),
-    ]).then(([messages]) => {
+    ]).then(([messages, adminMessages]) => {
       if (cancelled) return;
       // The formatter first: helpers that subscribe to the app locale read it.
-      const next = createAppIntl(catalog, messages);
-      setAppIntl(next);
+      const next = createAppIntl(
+        catalog,
+        adminMessages ? { ...messages, ...adminMessages } : messages,
+      );
+      setAppIntl(next, { admin: adminMessages !== undefined });
       setAppLocale({ language, catalog, formatLocale, localizedFormats, dir });
       setIntl(next);
     });
     return () => {
       cancelled = true;
     };
-  }, [language, catalog, formatLocale, localizedFormats, dir]);
+  }, [language, catalog, formatLocale, localizedFormats, dir, withAdmin]);
 
   return <AppIntlProvider intl={intl}>{children}</AppIntlProvider>;
 }
