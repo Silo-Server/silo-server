@@ -14,9 +14,14 @@ vi.mock("@/hooks/queries/episodes", () => ({
   useSeasons: () => ({ data: { seasons: [] } }),
   useSeasonEpisodes: () => ({ data: { episodes: [] }, isLoading: false }),
 }));
-const saved = vi.hoisted(() => ({ policy: "host_only" }));
+const saved = vi.hoisted(() => ({ policy: "host_only", refetch: vi.fn(async () => ({})) }));
 vi.mock("@/hooks/queries/settingValues", () => ({
-  useSettingValue: () => ({ value: saved.policy, isSuccess: true, isPending: false }),
+  useSettingValue: () => ({
+    value: saved.policy,
+    isSuccess: true,
+    isFetching: false,
+    refetch: saved.refetch,
+  }),
 }));
 vi.mock("@/lib/watchTogetherActions", () => ({ copyWatchTogetherInvite: vi.fn(async () => true) }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));

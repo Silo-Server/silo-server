@@ -158,6 +158,7 @@ export function StartPartySheet({
   // new room itself; the switch overrides it once the host flips it.
   const [guestsCanPauseChoice, setGuestsCanPause] = useState<boolean | null>(null);
   const guestsCanPause = guestsCanPauseChoice ?? savedPolicy.value === "guest_play_pause";
+  const refetchSavedPolicy = savedPolicy.refetch;
   const [target, setTarget] = useState<StartPartyTarget | null>(initialTarget);
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -167,8 +168,11 @@ export function StartPartySheet({
       setGuestsCanPause(null);
       setChoosing(false);
       setBusy(false);
+      // Re-read on every open: the cached value can be minutes old, and the
+      // sheet writes what it shows back to the room and the profile.
+      void refetchSavedPolicy({ cancelRefetch: false });
     }
-  }, [open, initialTarget]);
+  }, [open, initialTarget, refetchSavedPolicy]);
 
   const thumbhash = target?.poster_thumbhash
     ? decodeThumbhash(target.poster_thumbhash)
@@ -390,7 +394,7 @@ export function StartPartySheet({
         <Button
           type="button"
           onClick={() => void create()}
-          disabled={busy || choosing || savedPolicy.isPending}
+          disabled={busy || choosing || savedPolicy.isFetching}
           className="h-11"
         >
           {busy ? "Creating…" : "Create party & copy invite"}

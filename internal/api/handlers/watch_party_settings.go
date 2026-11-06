@@ -23,6 +23,8 @@ type watchPartyGuestControlPreferences struct {
 	settings *SettingValuesHandler
 }
 
+// GuestControlPolicy resolves the profile's saved policy, the contract default
+// when it has none.
 func (p watchPartyGuestControlPreferences) GuestControlPolicy(
 	ctx context.Context, userID int, profileID string,
 ) (watchtogether.GuestControlPolicy, error) {
@@ -48,6 +50,7 @@ func (p watchPartyGuestControlPreferences) GuestControlPolicy(
 	return watchtogether.GuestControlPolicyHostOnly, nil
 }
 
+// SaveGuestControlPolicy stores policy at profile scope.
 func (p watchPartyGuestControlPreferences) SaveGuestControlPolicy(
 	ctx context.Context, userID int, profileID string, policy watchtogether.GuestControlPolicy,
 ) error {
