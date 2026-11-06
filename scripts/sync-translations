@@ -16,8 +16,10 @@
 #
 # Downloads use `gh release download` (the repository is private; needs gh auth with read
 # access). Set SILO_TRANSLATIONS_PUBLIC=1 to use plain curl once the repository is public.
-# Nothing in the client changes until the download is verified and unpacked; the
-# .silo-translations file is written last.
+# Nothing in the client changes until the download is verified and unpacked. Then the files are
+# copied in, files the previous install listed in .silo-translations-files and this one doesn't
+# are removed (a language that stopped shipping), the new list is saved, and .silo-translations
+# is written last. No listed path may pass through a symlink in the client.
 set -eu
 
 REPO=Silo-Server/silo-translations
@@ -85,7 +87,61 @@ else
   tar -xzf "$tmp/$asset" -C "$tmp/tree"
 fi
 
+list=.silo-translations-files
+[ -f "$tmp/tree/$list" ] || die "the generated tree has no $list"
+# The new list is set aside and installed only after copying and pruning, so a failed run leaves
+# the old list in place and a retry still knows which files to remove.
+mv "$tmp/tree/$list" "$tmp/new-list"
+
+# A listed path must be relative and stay inside the client.
+unsafe() { grep -E '^/|(^|/)\.\.(/|$)|^$' "$1"; }
+# True when no part of the relative path $1 is a symlink inside the client, so writing or
+# removing it cannot reach outside.
+contained() {
+  rest=$1 cur=$root
+  while [ -n "$rest" ]; do
+    case $rest in */*) part=${rest%%/*} rest=${rest#*/} ;; *) part=$rest rest= ;; esac
+    cur=$cur/$part
+    [ -L "$cur" ] && return 1
+  done
+  return 0
+}
+
+if [ -f "$root/$list" ]; then
+  unsafe "$root/$list" && die "$root/$list has unsafe paths; fix it by hand"
+  cp "$root/$list" "$tmp/old-list"
+else
+  # Installed before file lists existed (or copied by hand): the generated files are the ones
+  # matching this platform's output paths, which clients never edit.
+  ( cd "$root" && case $platform in
+      web) ls web/src/locales/*.json web/src/locales/keys.ts ;;
+      apple) ls iosApp/iosApp/Localizable.xcstrings ;;
+      android) ls android-shared/src/androidMain/res/values*/strings_catalog.xml android-shared/silo-locales.properties ;;
+      roku) ls locale/*/strings.json locale/languages.json i18n-charsets/*.txt source/util/pluralRules.bs ;;
+    esac ) > "$tmp/old-list" 2>/dev/null || true
+fi
+
+unsafe "$tmp/new-list" && die "$list of the new tree has unsafe paths"
+while IFS= read -r path; do
+  contained "$path" || die "$path goes through a symlink in the client; refusing to write there"
+done < "$tmp/new-list"
+sort "$tmp/old-list" > "$tmp/old-sorted"
+sort "$tmp/new-list" > "$tmp/new-sorted"
+comm -23 "$tmp/old-sorted" "$tmp/new-sorted" > "$tmp/remove"
+while IFS= read -r path; do
+  contained "$path" || die "$path goes through a symlink in the client; refusing to remove it"
+done < "$tmp/remove"
+
 cp -R "$tmp/tree/." "$root/"
+
+# Only regular files; leave links and anything else alone.
+while IFS= read -r path; do
+  if [ -f "$root/$path" ] && [ ! -L "$root/$path" ]; then
+    rm -f "$root/$path"
+    rmdir "$(dirname "$root/$path")" 2>/dev/null || true
+  fi
+done < "$tmp/remove"
+cp "$tmp/new-list" "$root/$list"
 printf 'platform=%s\nversion=%s\nsha256=%s\n' "$platform" "$version" "$sha" > "$config.tmp"
 mv "$config.tmp" "$config"
 echo "sync-translations: $platform $version installed" >&2
