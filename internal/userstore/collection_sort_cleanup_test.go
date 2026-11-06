@@ -60,3 +60,44 @@ func TestCollectionSortPreferenceCleanerDeletesAcrossUsers(t *testing.T) {
 		}
 	}
 }
+
+// A server collection's row sweep converges on the collection's final title
+// when a later rename lands between the sweep reading the title and writing
+// the account: the later rename's own sweep has already passed that row,
+// which still carried the first old name.
+func TestCollectionRowRenamerFollowsALaterRename(t *testing.T) {
+	ctx := context.Background()
+	db, err := userdb.NewUserDB(filepath.Join(t.TempDir(), "user.db"), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := userdb.NewSQLiteUserStore(db.DB)
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: "p", Name: "p"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveSectionOverrides(ctx, "p", "home", "", []userstore.SectionOverride{{
+		ID: "row", IsUserAdded: true, UserSectionType: "collection", UserTitle: "A",
+		UserConfig: `{"library_collection_id":"c1"}`,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The A→B sweep reads "B"; the B→C rename commits right after.
+	title := "B"
+	currentTitle := func(context.Context) (string, error) {
+		read := title
+		title = "C"
+		return read, nil
+	}
+	renamer := userstore.NewCollectionRowRenamer(cleanupUserLister{users: []*models.User{{ID: 1}}}, cleanupStoreProvider{stores: map[int]userstore.UserStore{1: store}})
+	renamer.RenameForCollection(ctx, "c1", "A", currentTitle)
+
+	overrides, err := store.ListSectionOverrides(ctx, "p", "home", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overrides) != 1 || overrides[0].UserTitle != "C" {
+		t.Fatalf("rows = %+v, want one row titled C", overrides)
+	}
+}
