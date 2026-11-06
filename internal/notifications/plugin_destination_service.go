@@ -331,13 +331,17 @@ func (s *PluginDestinationService) validate(ctx context.Context, channel PluginC
 // non-secret field is set, or removed when sent as null; a secret field is
 // set only when sent non-empty, so leaving it blank keeps the stored value;
 // clearSecrets removes secrets. Fields the schema doesn't declare are
-// refused.
+// refused in the write and dropped from the stored settings: a plugin update
+// that removed or renamed a setting would otherwise keep sending the old key
+// to validation, which the owner can't see or remove.
 func mergePluginSettings(channel PluginChannel, stored, write map[string]any, clearSecrets []string) (map[string]any, error) {
 	secrets := channel.SecretFields
 	declared := channel.declaredFields()
 	merged := make(map[string]any, len(stored)+len(write))
 	for key, value := range stored {
-		merged[key] = value
+		if _, ok := declared[key]; ok {
+			merged[key] = value
+		}
 	}
 	for key, value := range write {
 		if _, ok := declared[key]; !ok {

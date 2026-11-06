@@ -614,7 +614,9 @@ destination.
 requires the original `If-Match` validator, like a webhook update. Omitted
 fields stay unchanged. `settings` merges over the stored settings: a
 non-secret field sent as `null` is removed, a secret field sent blank or left
-out keeps its stored value, and `clear_secrets` removes named secrets.
+out keeps its stored value, and `clear_secrets` removes named secrets. A
+stored setting the channel's current form no longer declares, after a plugin
+update, is dropped on the next update.
 Changed settings are checked by the plugin again and, like a changed webhook
 URL, clear the failure streak and the disable reason; so does re-enabling.
 Missing preconditions answer `428`, stale validators `412`. The validator

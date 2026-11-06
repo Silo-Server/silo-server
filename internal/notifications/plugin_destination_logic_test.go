@@ -71,6 +71,10 @@ func TestMergePluginSettings(t *testing.T) {
 			want: map[string]any{"topic": "alerts", "token": "s3cret"}},
 		{name: "clear removes a secret", stored: stored, clear: []string{"token"},
 			want: map[string]any{"topic": "alerts", "priority": float64(3)}},
+		// A plugin update dropped "server"; the owner can't see it, so an
+		// edit mustn't keep sending it to validation.
+		{name: "stored field the schema dropped", stored: map[string]any{"topic": "alerts", "server": "old"}, write: map[string]any{"priority": float64(1)},
+			want: map[string]any{"topic": "alerts", "priority": float64(1)}},
 		{name: "undeclared field", write: map[string]any{"server_url": "http://10.0.0.1"}, wantErr: true},
 		{name: "clearing a plain field", stored: stored, clear: []string{"topic"}, wantErr: true},
 	} {
