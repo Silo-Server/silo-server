@@ -287,10 +287,7 @@ export default function StorageTab({
 /** Why deleting untracked files failed. */
 function untrackedDeleteError(t: Translate, error: Error, name: string): ReactNode {
   if (error instanceof V2ProblemError && error.status === 503) {
-    return t("web.admin.downloads.storage.untracked.listFailed", {
-      name,
-      location: (chunks) => chunks,
-    });
+    return t("web.admin.downloads.storage.untracked.listFailed", { name });
   }
   return t("web.admin.downloads.storage.untracked.deleteFailed");
 }

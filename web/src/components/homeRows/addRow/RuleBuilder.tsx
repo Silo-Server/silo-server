@@ -298,8 +298,9 @@ export function RuleBuilder({
                   ),
                   match: () => (
                     <MatchSelect
-                      // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- the catalog validator rejects "}'s", and English must not change; see the i18n README
-                      label={`How group ${index + 1}'s rules combine`}
+                      label={t("web.home.addRow.rules.groupMatchLabel", {
+                        number: String(index + 1),
+                      })}
                       value={group.match}
                       names={RULE_NAMES}
                       onChange={(match) => setGroup(index, { ...group, match })}

@@ -44,7 +44,7 @@ import { useAdminUserCapabilities, useAdminUsers } from "@/hooks/queries/admin/u
 import { useProfiles } from "@/hooks/queries/profiles";
 import { useT } from "@/i18n";
 
-import { formatLastSeen, possessiveText } from "../format";
+import { formatLastSeen } from "../format";
 import { DetailCard, InitialAvatar } from "../ui";
 
 type Editing = { mode: "create" } | { mode: "edit"; id: string };
@@ -365,7 +365,7 @@ function SetPinDialog({
         <DialogHeader>
           <DialogTitle>
             {profile?.has_pin
-              ? possessiveText(t, "web.admin.users.detail.profiles.changePinTitle", {
+              ? t("web.admin.users.detail.profiles.changePinTitle", {
                   name: profile.name,
                 })
               : t("web.admin.users.detail.profiles.setPinTitle", { name: profile?.name ?? "" })}
@@ -470,7 +470,7 @@ function RemovePinDialog({
       onOpenChange={(next) => (next ? undefined : onClose())}
       title={
         profile
-          ? possessiveText(t, "web.admin.users.detail.profiles.removePinTitle", {
+          ? t("web.admin.users.detail.profiles.removePinTitle", {
               name: profile.name,
             })
           : t("web.admin.users.detail.profiles.removePinTitleUnknown")

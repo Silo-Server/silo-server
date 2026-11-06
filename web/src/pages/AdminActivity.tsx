@@ -1492,7 +1492,8 @@ function getDisplayTitle(
     return session.episode_name || `S${session.season_number}E${session.episode_number}`;
   }
   return (
-    session.media_title || t("web.admin.activity.title.file", { id: String(session.media_file_id) })
+    session.media_title ||
+    t("web.common.activity.title.file", { id: String(session.media_file_id) })
   );
 }
 
@@ -1501,8 +1502,8 @@ function getDisplaySubtitle(session: AdminSession, t: Translate): string | null 
     const ep = `S${session.season_number}E${session.episode_number}`;
     return session.series_name ? `${ep} · ${session.series_name}` : ep;
   }
-  if (session.media_type === "movie") return t("web.admin.activity.subtitle.movie");
-  if (session.media_type === "series") return t("web.admin.activity.subtitle.series");
+  if (session.media_type === "movie") return t("web.common.activity.subtitle.movie");
+  if (session.media_type === "series") return t("web.common.activity.subtitle.series");
   return null;
 }
 

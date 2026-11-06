@@ -187,14 +187,20 @@ function RouteAnnouncer() {
   const t = useT();
   const location = useLocation();
   const [announcement, setAnnouncement] = useState("");
+  // Read at announce time, so a language change doesn't announce the page again.
+  const fallbackText = t("web.common.shell.pageLoaded");
+  const fallback = useRef(fallbackText);
+  useEffect(() => {
+    fallback.current = fallbackText;
+  }, [fallbackText]);
 
   useEffect(() => {
     // Small delay so document.title has time to update via useDocumentTitle hooks
     const id = setTimeout(() => {
-      setAnnouncement(document.title || t("web.common.shell.pageLoaded"));
+      setAnnouncement(document.title || fallback.current);
     }, 100);
     return () => clearTimeout(id);
-  }, [location.pathname, t]);
+  }, [location.pathname]);
 
   return (
     <div aria-live="assertive" role="status" className="sr-only">

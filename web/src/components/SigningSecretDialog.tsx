@@ -30,8 +30,8 @@ export function SigningSecretDialog({
     <Dialog open={secret != null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("web.admin.common.signingSecret.title")}</DialogTitle>
-          <DialogDescription>{t("web.admin.common.signingSecret.description")}</DialogDescription>
+          <DialogTitle>{t("web.common.signingSecret.title")}</DialogTitle>
+          <DialogDescription>{t("web.common.signingSecret.description")}</DialogDescription>
         </DialogHeader>
         <div className="bg-muted flex items-center gap-2 rounded-lg p-3 font-mono text-xs break-all">
           <span className="min-w-0 flex-1">{secret}</span>
@@ -40,9 +40,7 @@ export function SigningSecretDialog({
             size="icon"
             className="h-7 w-7 shrink-0"
             aria-label={
-              copied
-                ? t("web.admin.common.signingSecret.copied")
-                : t("web.admin.common.signingSecret.copy")
+              copied ? t("web.common.signingSecret.copied") : t("web.common.signingSecret.copy")
             }
             onClick={async () => {
               if (!secret) return;
@@ -50,7 +48,7 @@ export function SigningSecretDialog({
                 await copyTextToClipboard(secret);
                 setCopied(true);
               } catch {
-                toast.error(t("web.admin.common.signingSecret.copyFailed"));
+                toast.error(t("web.common.signingSecret.copyFailed"));
               }
             }}
           >
@@ -58,7 +56,7 @@ export function SigningSecretDialog({
           </Button>
         </div>
         <DialogFooter>
-          <Button onClick={onClose}>{t("web.admin.common.signingSecret.saved")}</Button>
+          <Button onClick={onClose}>{t("web.common.signingSecret.saved")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

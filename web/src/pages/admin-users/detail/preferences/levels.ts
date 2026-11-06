@@ -13,8 +13,6 @@ import {
 } from "@/lib/inheritedSettingValue";
 import { SETTING_DEFINITIONS, type SettingKey } from "@/lib/settingsContract";
 
-import { possessiveText } from "../format";
-
 /**
  * The Preferences tab's "levels": the places a setting can be stored for an
  * account, in the order Silo resolves them. A profile's settings apply on
@@ -451,7 +449,7 @@ export function levelPlace(level: PreferenceLevel, translate: Translate): string
     case "device":
       return translate("web.admin.users.detail.preferences.place.device", { device: level.name });
     case "client":
-      return possessiveText(translate, "web.admin.users.detail.preferences.place.client", {
+      return translate("web.admin.users.detail.preferences.place.client", {
         profile: level.profileName,
         apps: level.name,
       });

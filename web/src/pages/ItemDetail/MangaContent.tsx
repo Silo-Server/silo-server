@@ -421,7 +421,7 @@ export default function MangaContent({
             {entries.map((entry) =>
               entry.kind === "section" ? (
                 <MangaSection
-                  key={`section-${entry.label}`}
+                  key={`section-${entry.id}`}
                   entry={entry}
                   seriesContentId={item.content_id}
                   libraryId={libraryId}

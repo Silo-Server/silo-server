@@ -1,19 +1,7 @@
-import type { ReactNode } from "react";
-
-import { t, type MessageKey, type TextValues, type Translate } from "@/i18n";
+import { t, type MessageKey } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate, formatTime, preferredDateLocale } from "@/lib/datetime";
 import { activityMethodMeta, formatDecisionLabel } from "@/pages/adminActivityPresentation";
-
-/**
- * A message as plain text whose `<owner>` tag only marks a name that an ASCII
- * apostrophe follows (`<owner>{profile}</owner>'s`): the catalog rejects an
- * apostrophe right after a placeholder.
- */
-export function possessiveText(translate: Translate, id: MessageKey, values: TextValues): string {
-  const node = translate(id, { ...values, owner: (chunks: ReactNode[]) => chunks.join("") });
-  return Array.isArray(node) ? node.join("") : String(node);
-}
 
 function validDate(iso: string | null | undefined): Date | null {
   if (!iso) return null;

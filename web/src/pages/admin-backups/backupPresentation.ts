@@ -210,7 +210,7 @@ function dayValues(date: Date, now: Date): { day: string; date: string } {
  */
 function copyValues(date: Date, now: Date) {
   const days = calendarDays(now, date);
-  const day = () => weekday(date);
+  const day = weekday(date);
   if (days === 0) return { copy: "today", date: "", day };
   if (days === -1) return { copy: "yesterday", date: "", day };
   if (days > -7) return { copy: "weekday", date: "", day };
@@ -302,12 +302,10 @@ export function retentionNote({
   if (oldest) {
     sentences.push(
       doomed.length === 1
-        ? String(
-            t("web.admin.backups.retention.oneDeleted", {
-              ...copyValues(new Date(oldest.created_at), now),
-              when,
-            }),
-          )
+        ? t("web.admin.backups.retention.oneDeleted", {
+            ...copyValues(new Date(oldest.created_at), now),
+            when,
+          })
         : t("web.admin.backups.retention.manyDeleted", {
             count: doomed.length,
             count_text: String(doomed.length),
@@ -318,12 +316,10 @@ export function retentionNote({
   const kept = plan.kept.find((item) => item.id === plan.protectedId);
   if (kept) {
     sentences.push(
-      String(
-        t("web.admin.backups.retention.protected", {
-          ...copyValues(new Date(kept.created_at), now),
-          when,
-        }),
-      ),
+      t("web.admin.backups.retention.protected", {
+        ...copyValues(new Date(kept.created_at), now),
+        when,
+      }),
     );
   }
   return sentences.join(" ");

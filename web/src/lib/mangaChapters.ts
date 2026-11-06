@@ -9,7 +9,13 @@ import { t } from "@/i18n";
 export type MangaListEntry =
   | { kind: "volume"; chapter: MangaChapter; label: string }
   | { kind: "chapter"; chapter: MangaChapter; label: string }
-  | { kind: "section"; label: string; chapters: MangaChapter[] };
+  | {
+      kind: "section";
+      /** The volume's bucket, stable across languages (the label is translated). */
+      id: string;
+      label: string;
+      chapters: MangaChapter[];
+    };
 
 const VOLUME_TOKEN_PATTERN = /^v?(\d+)$/i;
 
@@ -120,7 +126,7 @@ export function buildMangaList(chapters: MangaChapter[]): MangaListEntry[] {
       );
       ranked.push({
         sortKey: minIndex,
-        entry: { kind: "section", label, chapters: ordered },
+        entry: { kind: "section", id: token, label, chapters: ordered },
       });
     }
   }

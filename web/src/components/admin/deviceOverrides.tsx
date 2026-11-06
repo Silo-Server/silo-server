@@ -448,12 +448,9 @@ export function DeviceOverrideRow({
 /** "from Alex's profile", "app default", plus where something else may apply. */
 function inheritedSourceText(t: Translate, inherited: InheritedValue): string {
   const { profileName } = inherited;
-  // The name goes in as a tag, not a placeholder: the catalog keeps an ASCII
-  // apostrophe away from a brace, and "Alex's" keeps its apostrophe. A tag
-  // whose callback returns a string formats to a plain string.
   const source =
     profileName !== null
-      ? String(t("web.admin.common.deviceOverrides.source.profile", { name: () => profileName }))
+      ? t("web.admin.common.deviceOverrides.source.profile", { name: profileName })
       : t("web.admin.common.deviceOverrides.source.appDefault");
   return inherited.orVaries
     ? t("web.admin.common.deviceOverrides.source.orVaries", {
