@@ -839,6 +839,8 @@ export type NodeSystemPresentation =
       kind: "unreported";
       /** Dash, so the column keeps its shape. */
       label: string;
+      /** The node answered, but with a sample too old to count as current. */
+      stale: boolean;
       title: string;
     }
   | {
@@ -864,6 +866,7 @@ export function describeNodeSystem(node: StreamNode, now = Date.now()): NodeSyst
     return {
       kind: "unreported",
       label: DASH,
+      stale: false,
       title: node.healthy
         ? "This node reported no resource sample. Sampling is Linux-only, and a node running a build from before resource sampling reports none."
         : "This node is not answering health checks, so it has no current resource sample.",
@@ -873,6 +876,7 @@ export function describeNodeSystem(node: StreamNode, now = Date.now()): NodeSyst
     return {
       kind: "unreported",
       label: DASH,
+      stale: false,
       title:
         "The last health check did not reach this node, so its most recent resource sample is no longer current.",
     };
@@ -888,10 +892,23 @@ export function describeNodeSystem(node: StreamNode, now = Date.now()): NodeSyst
     return {
       kind: "unreported",
       label: "Stale",
+      stale: true,
       title: "The node is answering with an old resource sample.",
     };
   }
   return describeSystemStats(system, node.last_stats?.attribution);
+}
+
+/**
+ * The busiest GPU from a node's last sample, or null when that sample is not
+ * current: a percentage that stopped moving reads as a live one.
+ */
+export function describeNodeGPUBusy(node: StreamNode, now = Date.now()): ResourceMetric | null {
+  const system = describeNodeSystem(node, now);
+  if (!node.healthy || (system.kind === "unreported" && system.stale)) {
+    return null;
+  }
+  return describeGPUBusy(node.last_stats?.gpu ?? []);
 }
 
 /** Derive the four host readings from one system sample. */
@@ -1186,6 +1203,8 @@ export function describeGPUBusy(gpu: readonly HostGPUStats[]): ResourceMetric | 
 // So "which nodes belong to each other" is the same question as "which nodes
 // fail together", and everything derived here answers both.
 
+export const UNGROUPED_LABEL = "Ungrouped";
+
 /** A node's group bucket: its trimmed label, or "" when it has none. */
 export function nodeGroupOf(node: StreamNode): string {
   return node.group?.trim() ?? "";
@@ -1276,7 +1295,7 @@ function describeNodeGroup(value: string, members: readonly StreamNode[]): NodeG
 
   return {
     value,
-    label: value === "" ? "Ungrouped" : value,
+    label: value === "" ? UNGROUPED_LABEL : value,
     count: members.length,
     proxies,
     transcodes,
@@ -1413,14 +1432,46 @@ export function describeNodeDrain(node: StreamNode): NodeDrainPresentation | nul
   };
 }
 
+/**
+ * Whether a node is in the rotation, and why not when it is out of it.
+ *
+ * Enabled and healthy are two separate facts, but an operator reading the rack
+ * asks one question — can this node take work — so they resolve to one state.
+ * Disabled wins over unhealthy: a node somebody switched off is not a node
+ * that is failing, however its last health check went. A healthy node that is
+ * draining is out of the rotation for new work while it finishes what it has.
+ */
+export type NodeState = "healthy" | "draining" | "drained" | "unhealthy" | "disabled";
+
+export const NODE_STATE_LABEL: Record<NodeState, string> = {
+  healthy: "Healthy",
+  draining: "Draining",
+  drained: "Drained",
+  unhealthy: "Unhealthy",
+  disabled: "Disabled",
+};
+
+export function nodeState(node: StreamNode): NodeState {
+  if (!node.enabled) {
+    return "disabled";
+  }
+  if (!node.healthy) {
+    return "unhealthy";
+  }
+  return describeNodeDrain(node)?.phase ?? "healthy";
+}
+
+/** A configured cap, or null: at or below zero is how the API spells "unlimited". */
+export function positiveCap(value: number | null | undefined): number | null {
+  const cap = finiteNumber(value);
+  return cap != null && cap > 0 ? cap : null;
+}
+
 /** Concurrency: transcodes on a transcode node, relayed streams on a proxy. */
 export function describeNodeJobs(node: StreamNode): ResourceMetric {
   const label = node.type === "proxy" ? "Streams" : "Transcodes";
   const active = Math.max(0, Math.trunc(finiteNumber(node.active_jobs) ?? 0));
-  // A cap at or below zero is how the API spells "unlimited", which is also
-  // what an absent one means.
-  const cap = finiteNumber(node.max_jobs);
-  const capped = cap != null && cap > 0 ? cap : null;
+  const capped = positiveCap(node.max_jobs);
 
   return {
     label,
@@ -1439,8 +1490,7 @@ export function describeNodeJobs(node: StreamNode): ResourceMetric {
 /** Measured egress against a proxy node's bandwidth cap. */
 export function describeNodeEgress(node: StreamNode): ResourceMetric {
   const kbps = Math.max(0, finiteNumber(node.egress_kbps) ?? 0);
-  const cap = finiteNumber(node.max_bandwidth_kbps);
-  const capped = cap != null && cap > 0 ? cap : null;
+  const capped = positiveCap(node.max_bandwidth_kbps);
   const used = formatMbps(kbps);
 
   return {
