@@ -345,15 +345,15 @@ dispatch so a broken webhook cannot loop.
 
 ## Plugin destinations
 
-A plugin's `notification_channel.v1` capability provides a kind of profile
-destination; see the SDK's `docs/notification-channel.md` for the plugin
+A plugin's `notification_channel.v1` capability provides a channel that
+profiles add destinations on; see the SDK's `docs/notification-channel.md` for the plugin
 contract. The host keeps everything except the send: which deliveries a
 destination gets, the outbox, retries, failure counts and auto-disable. The
 code is `internal/notifications/plugin_destination_*.go`; the plugin runtime
 is reached through the `PluginChannelHost` interface, which `cmd/silo` wires
 to the plugin service, so neither package imports the other.
 
-- **Rows.** `notification_plugin_destinations` names a kind by `plugin_id`
+- **Rows.** `notification_plugin_destinations` names a channel by `plugin_id`
   and `capability_id`, which survive plugin upgrades and reinstalls. Settings
   are one `enc:v1:` envelope bound to the row id
   (`notification_plugin_destination:<id>:config`). Secret fields, classified
@@ -361,6 +361,14 @@ to the plugin service, so neither package imports the other.
   returned; a write that leaves one blank keeps the stored value. Only fields
   the current schema classifies as public are returned, so a stored field a
   plugin upgrade stopped declaring stays hidden.
+- **Flat forms.** A destination form is one object of scalar fields; the
+  SDK's `manifest.ValidateDestinationSchema` refuses anything else, and plugin
+  install and upgrade run it through `manifest.Validate`. `NotificationChannels`
+  also skips a stored capability whose form fails it, so a record from before
+  the rule reads as unavailable instead of reaching every client.
+- **Revision.** `revision` guards the owner's edits and backs the ETag. Owner
+  edits and auto-disable bump it; recording a send's success or failure
+  doesn't, so a send finishing never turns an edit in progress into a `412`.
 - **Edits.** The plugin's `ValidateDestination` can take 10 seconds, so an
   update runs it before opening the write transaction, against the revision
   it read. The write then locks the row and applies only while the revision
@@ -370,7 +378,9 @@ to the plugin service, so neither package imports the other.
   transaction, filtered by the destination's reason flags and a per-profile
   limit of 30 a minute, and in `DispatchOperational` when
   `PluginDestinationFilter` selects them (request updates use
-  `notify_requests`). Nothing is enqueued until the plugin runtime is wired.
+  `notify_requests`). Nothing is enqueued until the plugin runtime is wired,
+  or for a destination whose channel no enabled plugin provides: it lists as
+  unavailable and gets nothing until its plugin is back.
 - **Send.** `plugin_destination_delivery_attempts` follows the webhook
   outbox: a claim lease, a sweep for due retries and stranded pending rows,
   and the webhook retry schedule. A claim holds at most 10 attempts and the
@@ -379,15 +389,18 @@ to the plugin service, so neither package imports the other.
   whose lease ran out never overwrites a newer claim's result. The host renders the
   message with `BuildNotificationDisplay`, makes its link absolute with the
   email link base, adds a poster only under the Discord poster mode, and
-  sends the delivery itself in the public `notification.created` shape. The
+  sends the delivery itself in the public `notification.created` shape, with
+  every identifier a string (`events.Notification`). The
   call has 15 seconds. A plugin's `RETRY` (or an error) walks the schedule,
-  honoring `retry_after_seconds` up to 6 hours; `FAILED` drops the message;
+  with `retry_after_seconds` (capped at 6 hours) as a minimum wait that can
+  push an attempt later than the schedule, never earlier; `FAILED` drops the message;
   `DESTINATION_INVALID` drops it and disables the destination at once. An
   exhausted schedule disables it too, unless the plugin was off, removed or
   unreachable for the last attempt: the message is then dropped and the
   destination stays enabled for when the plugin is back. Disabling applies
   only while the destination still has the settings the failed send used,
-  so an owner who fixes them during that send isn't disabled. Disabling
+  so an owner who fixes them during that send isn't disabled; a failure is
+  counted under the same condition. Disabling
   posts a `plugin_destination.auto_disabled` notice that reaches no webhook
   or plugin destination. Plugin messages and errors are masked with
   `logredact.SanitizeText` before they are stored, logged or returned.

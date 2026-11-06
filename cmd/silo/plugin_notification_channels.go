@@ -29,7 +29,6 @@ func (h pluginChannelHost) Channels(ctx context.Context) ([]notifications.Plugin
 		public, secrets := plugins.ConfigSchemaFieldSets(schema)
 		out = append(out, notifications.PluginChannel{
 			PluginChannelRef: notifications.PluginChannelRef{PluginID: channel.PluginID, CapabilityID: channel.CapabilityID},
-			PluginName:       channel.PluginID,
 			DisplayName:      channel.Descriptor.GetDisplayName(),
 			Description:      channel.Descriptor.GetDescription(),
 			Schema:           schema,

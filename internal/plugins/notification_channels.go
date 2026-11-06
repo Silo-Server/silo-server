@@ -7,12 +7,13 @@ import (
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
+	publicmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
 
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 // NotificationChannel is one notification_channel.v1 capability of an
-// enabled installation: a kind of notification destination users can add.
+// enabled installation: a channel profiles can add destinations on.
 type NotificationChannel struct {
 	InstallationID int
 	PluginID       string
@@ -22,7 +23,10 @@ type NotificationChannel struct {
 
 // NotificationChannels lists the notification_channel.v1 capabilities of
 // enabled installations, from their stored capability records, without
-// starting any plugin. A capability whose record doesn't decode is skipped.
+// starting any plugin. A capability whose record doesn't decode is skipped,
+// and so is one whose settings form isn't the flat form the SDK requires:
+// install and upgrade refuse such a form, so only a record stored before
+// that rule can have one.
 func (s *Service) NotificationChannels(ctx context.Context) ([]NotificationChannel, error) {
 	installations, err := s.installations.ListEnabledWithCapabilityTypes(ctx, []string{capability.NotificationChannel})
 	if err != nil {
@@ -44,6 +48,11 @@ func (s *Service) NotificationChannels(ctx context.Context) ([]NotificationChann
 			descriptor, err := DecodeCapability(record)
 			if err != nil || descriptor.GetNotificationChannel() == nil {
 				slog.WarnContext(ctx, "skipping a notification channel whose descriptor doesn't decode", "component", "plugins",
+					"plugin_id", installation.PluginID, "capability_id", record.ID, "error", err)
+				continue
+			}
+			if err := publicmanifest.ValidateDestinationSchema(descriptor.GetNotificationChannel().GetDestinationSchema()); err != nil {
+				slog.WarnContext(ctx, "skipping a notification channel whose settings form isn't flat", "component", "plugins",
 					"plugin_id", installation.PluginID, "capability_id", record.ID, "error", err)
 				continue
 			}

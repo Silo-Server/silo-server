@@ -91,8 +91,8 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 			return nil, err
 		}
 	}
-	if opts.PluginDestinationFilter != nil && s.pluginDestinationSender != nil && s.pluginDestinationSender.host() != nil {
-		byProfile, err := s.pluginDestinationSender.repo.ListEnabledByProfiles(ctx, tx, []profileKey{owner})
+	if opts.PluginDestinationFilter != nil && s.pluginDestinationSender != nil {
+		byProfile, err := s.pluginDestinationSender.enqueueable(ctx, tx, []profileKey{owner})
 		if err != nil {
 			return nil, err
 		}

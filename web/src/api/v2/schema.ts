@@ -9931,7 +9931,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List the kinds of notification destination the enabled plugins provide, with each kind's settings form. */
+    /** List the notification channels the enabled plugins provide, with each channel's destination settings form. */
     get: operations["listNotificationPluginChannels"];
     put?: never;
     post?: never;
@@ -9951,7 +9951,7 @@ export interface paths {
     /** List the acting profile's plugin destinations. A destination whose plugin is disabled or removed reads as unavailable, without its settings. */
     get: operations["listNotificationPluginDestinations"];
     put?: never;
-    /** Add a destination of a plugin-provided kind to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination. */
+    /** Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination. */
     post: operations["createNotificationPluginDestination"];
     delete?: never;
     options?: never;
@@ -29542,16 +29542,16 @@ export interface components {
       capability_id: string;
       description: string;
       display_name: string;
-      /** @description Names the kind together with capability_id; both stay stable across plugin upgrades */
+      /** @description Names the channel together with capability_id; both stay stable across plugin upgrades */
       plugin_id: string;
-      /** @description The destination settings form the plugin declares. Fields marked secret are write-only */
-      settings_form: components["schemas"]["AdminPluginConfigSchema"];
+      /** @description The destination settings form the plugin declares: a flat object of string, integer, number and boolean fields. Fields marked secret are write-only */
+      settings_form: components["schemas"]["PluginSettingsForm"];
     };
     NotificationPluginDestination: {
-      /** @description An enabled plugin provides the destination's kind. False while that plugin is disabled or uninstalled; nothing is sent then */
+      /** @description An enabled plugin provides the destination's channel. False while that plugin is disabled or uninstalled; nothing is sent then */
       available: boolean;
       capability_id: string;
-      /** @description The kind's display name; empty while it is unavailable */
+      /** @description The channel's display name; empty while it is unavailable */
       channel_name: string;
       /** Format: int64 */
       consecutive_failures: number;
@@ -29589,13 +29589,13 @@ export interface components {
       plugin_id: string;
       /** @description Secret settings that have a stored value */
       secret_settings_set: string[];
-      /** @description Stored settings the kind's current schema declares and does not mark secret; empty while the kind is unavailable */
+      /** @description Stored settings the channel's current schema declares and does not mark secret; empty while the channel is unavailable */
       settings: {
         [key: string]: unknown;
       };
     };
     NotificationPluginDestinationCapability: {
-      /** @description At least one enabled plugin provides a destination kind; GET /notifications/plugin-channels lists them */
+      /** @description At least one enabled plugin provides a channel; GET /notifications/plugin-channels lists them */
       available: boolean;
       /** Format: int64 */
       max_per_profile: number;
@@ -31612,6 +31612,14 @@ export interface components {
        * @description Display title; empty when the plugin gives none
        * @example Region
        */
+      title: string;
+    };
+    PluginSettingsForm: {
+      admin_form?: components["schemas"]["AdminPluginForm"];
+      description: string;
+      json_schema: string;
+      key: string;
+      required: boolean;
       title: string;
     };
     PluginSettingsInstallation: {

@@ -49,19 +49,10 @@ func TestMergePluginSettings(t *testing.T) {
 		AdminForm: &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{
 			{Key: "topic"}, {Key: "token", Secret: true}, {Key: "priority"},
 		}},
-	}, PublicFields: []string{"priority", "region", "topic"}, SecretFields: []string{"token"}}
+	}, PublicFields: []string{"priority", "topic"}, SecretFields: []string{"token"}}
 	stored := map[string]any{"topic": "alerts", "token": "s3cret", "priority": float64(3)}
-	// formOnly declares "topic" in its admin form and nothing in its root
-	// properties; the JSON schema's root decides whether other keys pass.
-	formOnly := func(jsonSchema string) *PluginChannel {
-		return &PluginChannel{Schema: &pluginv1.ConfigSchema{
-			JsonSchema: jsonSchema,
-			AdminForm:  &pluginv1.AdminFormDescriptor{Fields: []*pluginv1.AdminFormField{{Key: "topic"}}},
-		}, PublicFields: []string{"topic"}}
-	}
 	for _, tc := range []struct {
 		name    string
-		channel *PluginChannel
 		stored  map[string]any
 		write   map[string]any
 		clear   []string
@@ -81,23 +72,10 @@ func TestMergePluginSettings(t *testing.T) {
 		{name: "clear removes a secret", stored: stored, clear: []string{"token"},
 			want: map[string]any{"topic": "alerts", "priority": float64(3)}},
 		{name: "undeclared field", write: map[string]any{"server_url": "http://10.0.0.1"}, wantErr: true},
-		// "region" comes from an allOf branch, so only the host's field sets know it.
-		{name: "field declared outside the root properties", write: map[string]any{"region": "eu"}, want: map[string]any{"region": "eu"}},
 		{name: "clearing a plain field", stored: stored, clear: []string{"topic"}, wantErr: true},
-		// Keys a schema allows only by pattern can't be returned or kept secret, so they're refused.
-		{name: "patternProperties keys are refused", channel: formOnly(`{"type":"object","patternProperties":{"^x-":{"type":"string"}}}`),
-			write: map[string]any{"x-team": "ops"}, wantErr: true},
-		{name: "additionalProperties keys are refused", channel: formOnly(`{"type":"object","additionalProperties":{"type":"string"}}`),
-			write: map[string]any{"label": "ops"}, wantErr: true},
-		{name: "additionalProperties false keeps the form allowlist", channel: formOnly(`{"type":"object","additionalProperties":false}`),
-			write: map[string]any{"server_url": "http://10.0.0.1"}, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ch := channel
-			if tc.channel != nil {
-				ch = *tc.channel
-			}
-			got, err := mergePluginSettings(ch, tc.stored, tc.write, tc.clear)
+			got, err := mergePluginSettings(channel, tc.stored, tc.write, tc.clear)
 			if tc.wantErr {
 				if !errors.Is(err, ErrPluginDestinationInvalid) {
 					t.Fatalf("mergePluginSettings() error = %v, want ErrPluginDestinationInvalid", err)
@@ -138,7 +116,7 @@ func TestPluginDestinationMessage(t *testing.T) {
 	}
 	// Details carry the event catalog's shape, with the account.
 	details := message.GetDetails().AsMap()
-	if details["user_id"] != float64(7) || details["profile_id"] != "p1" || details["series_title"] != "Severance" {
+	if details["user_id"] != "7" || details["profile_id"] != "p1" || details["series_title"] != "Severance" {
 		t.Fatalf("details = %v", details)
 	}
 

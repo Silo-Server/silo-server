@@ -41188,12 +41188,12 @@
             "type": "string"
           },
           "plugin_id": {
-            "description": "Names the kind together with capability_id; both stay stable across plugin upgrades",
+            "description": "Names the channel together with capability_id; both stay stable across plugin upgrades",
             "type": "string"
           },
           "settings_form": {
-            "$ref": "#/components/schemas/AdminPluginConfigSchema",
-            "description": "The destination settings form the plugin declares. Fields marked secret are write-only"
+            "$ref": "#/components/schemas/PluginSettingsForm",
+            "description": "The destination settings form the plugin declares: a flat object of string, integer, number and boolean fields. Fields marked secret are write-only"
           }
         },
         "required": [
@@ -41209,14 +41209,14 @@
         "additionalProperties": false,
         "properties": {
           "available": {
-            "description": "An enabled plugin provides the destination's kind. False while that plugin is disabled or uninstalled; nothing is sent then",
+            "description": "An enabled plugin provides the destination's channel. False while that plugin is disabled or uninstalled; nothing is sent then",
             "type": "boolean"
           },
           "capability_id": {
             "type": "string"
           },
           "channel_name": {
-            "description": "The kind's display name; empty while it is unavailable",
+            "description": "The channel's display name; empty while it is unavailable",
             "type": "string"
           },
           "consecutive_failures": {
@@ -41307,7 +41307,7 @@
           },
           "settings": {
             "additionalProperties": true,
-            "description": "Stored settings the kind's current schema declares and does not mark secret; empty while the kind is unavailable",
+            "description": "Stored settings the channel's current schema declares and does not mark secret; empty while the channel is unavailable",
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
           }
@@ -41341,7 +41341,7 @@
         "additionalProperties": false,
         "properties": {
           "available": {
-            "description": "At least one enabled plugin provides a destination kind; GET /notifications/plugin-channels lists them",
+            "description": "At least one enabled plugin provides a channel; GET /notifications/plugin-channels lists them",
             "type": "boolean"
           },
           "max_per_profile": {
@@ -46194,6 +46194,37 @@
         "required": [
           "installation",
           "values"
+        ],
+        "type": "object"
+      },
+      "PluginSettingsForm": {
+        "additionalProperties": false,
+        "properties": {
+          "admin_form": {
+            "$ref": "#/components/schemas/AdminPluginForm"
+          },
+          "description": {
+            "type": "string"
+          },
+          "json_schema": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "description",
+          "json_schema",
+          "required"
         ],
         "type": "object"
       },
@@ -191679,7 +191710,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "List the kinds of notification destination the enabled plugins provide, with each kind's settings form.",
+        "summary": "List the notification channels the enabled plugins provide, with each channel's destination settings form.",
         "tags": [
           "notifications"
         ],
@@ -192035,7 +192066,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Add a destination of a plugin-provided kind to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination.",
+        "summary": "Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination.",
         "tags": [
           "notifications"
         ],

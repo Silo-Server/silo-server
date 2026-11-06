@@ -170,6 +170,15 @@ func processTestAttempt(t *testing.T, pool *pgxpool.Pool, sender *pluginDestinat
 	return attempt
 }
 
+// requireRetryingAfter fails unless the attempt waits at least atLeast for
+// its next try.
+func requireRetryingAfter(t *testing.T, attempt DeliveryAttempt, atLeast time.Duration) {
+	t.Helper()
+	if attempt.Outcome != WebhookOutcomeRetrying || attempt.NextRetryAt == nil || time.Until(*attempt.NextRetryAt) < atLeast {
+		t.Fatalf("attempt %+v, want retrying in at least %s", attempt, atLeast)
+	}
+}
+
 // Profile IDs repeat across accounts: account B's "default" profile must
 // never read, change or delete account A's destination.
 func TestPluginDestinationsStayOnTheirAccountDB(t *testing.T) {
@@ -210,7 +219,7 @@ func TestPluginDestinationsStayOnTheirAccountDB(t *testing.T) {
 }
 
 // One attempt through the outbox: a temporary failure is retried on the
-// schedule with the plugin's wait, a send to a broken destination disables
+// schedule, waiting at least as long as the plugin asks, a send to a broken destination disables
 // it and posts a notice, and a delivery resets the failure streak.
 func TestPluginDestinationDeliveryOutcomesDB(t *testing.T) {
 	pool := pluginDestinationDB(t)
@@ -240,20 +249,23 @@ func TestPluginDestinationDeliveryOutcomesDB(t *testing.T) {
 		return processTestAttempt(t, pool, sender, d.ID, 1)
 	}
 
-	retry := send(&pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_RETRY, RetryAfterSeconds: 600, Message: "rate limited"})
-	if retry.Outcome != WebhookOutcomeRetrying || retry.NextRetryAt == nil || time.Until(*retry.NextRetryAt) < 9*time.Minute {
-		t.Fatalf("after RETRY the attempt is %+v, want retrying in about 10 minutes", retry)
-	}
+	requireRetryingAfter(t, send(&pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_RETRY, RetryAfterSeconds: 600, Message: "rate limited"}), 9*time.Minute)
 	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); got.ConsecutiveFailures != 1 || got.LastFailureMessage == nil || *got.LastFailureMessage != "rate limited" {
 		t.Fatalf("after RETRY the destination is %+v", got)
 	}
+	// retry_after_seconds is a minimum: a short wait late in the schedule
+	// doesn't pull the next attempt in from the schedule's 6 hours.
+	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_RETRY, RetryAfterSeconds: 60})
+	requireRetryingAfter(t, processTestAttempt(t, pool, sender, d.ID, 8), 5*time.Hour)
 
 	delivered := send(&pluginv1.SendNotificationResponse{})
 	if delivered.Outcome != WebhookOutcomeDelivered {
 		t.Fatalf("after an empty response the attempt is %s, want delivered", delivered.Outcome)
 	}
-	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); got.ConsecutiveFailures != 0 || got.LastSuccessAt == nil {
-		t.Fatalf("after delivery the destination is %+v, want the streak reset", got)
+	// Delivery bookkeeping leaves the revision, so an owner's edit begun
+	// before these sends isn't refused as stale.
+	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); got.ConsecutiveFailures != 0 || got.LastSuccessAt == nil || got.Revision != d.Revision {
+		t.Fatalf("after delivery the destination is %+v, want the streak reset and revision %d", got, d.Revision)
 	}
 
 	// A plugin that stays off through the whole retry schedule drops the
@@ -355,8 +367,8 @@ func TestPluginDestinationStaleSendsDontWinDB(t *testing.T) {
 	}
 	host.outcomes = append(host.outcomes, &pluginv1.SendNotificationResponse{Outcome: pluginv1.NotificationSendOutcome_NOTIFICATION_SEND_OUTCOME_DESTINATION_INVALID, Message: "token revoked"})
 	sender.processAttempt(ctx, claimed[0])
-	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || got.DisabledReason != nil || notices != 0 {
-		t.Fatalf("after a stale failure: destination %+v, %d notices; want the repaired destination enabled and no notice", got, notices)
+	if got, _ := sender.repo.GetByID(ctx, accountA, sharedID, d.ID); !got.Enabled || got.DisabledReason != nil || got.ConsecutiveFailures != 0 || notices != 0 {
+		t.Fatalf("after a stale failure: destination %+v, %d notices; want the repaired destination enabled, with no failure counted and no notice", got, notices)
 	}
 }
 
@@ -402,5 +414,46 @@ func TestPluginDestinationValidationHoldsNoRowLockDB(t *testing.T) {
 	if got.Name != renamed || conflict.Revision != got.Revision || stored["topic"] != "alerts" {
 		t.Fatalf("after the conflict: name %q, revision %d (conflict names %d), topic %v; want the rename kept and the settings unchanged",
 			got.Name, got.Revision, conflict.Revision, stored["topic"])
+	}
+}
+
+// A destination whose plugin is off or removed gets nothing queued; it still
+// lists, as unavailable.
+func TestPluginDestinationsOfAMissingPluginGetNothingQueuedDB(t *testing.T) {
+	pool := pluginDestinationDB(t)
+	ctx := t.Context()
+	service, sender := newTestPluginDestinationService(t, pool, &scriptedChannelHost{})
+	name := "Phone"
+	working, err := service.Create(ctx, accountA, sharedID, PluginDestinationInput{
+		Channel: PluginChannelRef{PluginID: "example.ntfy", CapabilityID: "ntfy"}, Name: &name,
+		Settings: map[string]any{"topic": "alerts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan := PluginDestination{ID: "orphan", UserID: accountA, ProfileID: sharedID, PluginID: "example.removed",
+		CapabilityID: "pushover", Name: "Old", ConfigCiphertext: working.ConfigCiphertext, Enabled: true}
+	if err := sender.repo.InsertWithLimit(ctx, orphan, PluginDestinationMaxPerProfile); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	owner := profileKey{accountA, sharedID}
+	byProfile, err := sender.enqueueable(ctx, tx, []profileKey{owner})
+	if err != nil || len(byProfile[owner]) != 1 || byProfile[owner][0].ID != working.ID {
+		t.Fatalf("enqueueable = %+v, %v; want only the destination whose plugin is enabled", byProfile[owner], err)
+	}
+	rows, err := service.ListPage(ctx, accountA, sharedID, 10, nil)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("ListPage = %d rows, %v", len(rows), err)
+	}
+	for _, row := range rows {
+		if (row.Channel == nil) != (row.ID == orphan.ID) {
+			t.Fatalf("destination %s channel = %v, want only the removed plugin's unavailable", row.ID, row.Channel)
+		}
 	}
 }

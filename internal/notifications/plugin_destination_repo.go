@@ -279,21 +279,27 @@ func (r *PluginDestinationRepository) DeleteAllForProfile(ctx context.Context, u
 }
 
 // RecordSuccess clears the failure streak after a delivered message.
+//
+// Delivery bookkeeping leaves revision alone: revision guards the owner's
+// edits, and a send finishing must not turn an edit in progress into a 412.
 func (r *PluginDestinationRepository) RecordSuccess(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notification_plugin_destinations
-		SET last_success_at = now(), consecutive_failures = 0, revision = revision + 1, updated_at = now()
+		SET last_success_at = now(), consecutive_failures = 0
 		WHERE id = $1`, id)
 	return err
 }
 
 // RecordFailure extends the failure streak and keeps the plugin's reason.
-func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, id, message string) error {
+// Like Disable it applies only while the destination still has the settings
+// the failed send used (sentConfig): new settings start with a clean streak.
+// It leaves revision alone, as RecordSuccess does.
+func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, id, message, sentConfig string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notification_plugin_destinations
 		SET last_failure_at = now(), last_failure_message = left($2, 256),
-		    consecutive_failures = consecutive_failures + 1, revision = revision + 1, updated_at = now()
-		WHERE id = $1`, id, message)
+		    consecutive_failures = consecutive_failures + 1
+		WHERE id = $1 AND config_ciphertext = $3`, id, message, sentConfig)
 	return err
 }
 
@@ -301,7 +307,9 @@ func (r *PluginDestinationRepository) RecordFailure(ctx context.Context, id, mes
 //
 // It applies only while the destination still has the settings a failed send
 // used (sentConfig) and is enabled, and reports whether it did: an owner who
-// saved new settings during that send keeps them working.
+// saved new settings during that send keeps them working. Unlike the other
+// bookkeeping it bumps revision: it changes enabled, which the owner edits,
+// so an editor that hasn't seen the disable must reload first.
 func (r *PluginDestinationRepository) Disable(ctx context.Context, id, reason, sentConfig string) (bool, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE notification_plugin_destinations

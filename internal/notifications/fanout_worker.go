@@ -45,13 +45,12 @@ type FanoutWorker struct {
 	// subscription.
 	webhooks    *WebhookRepository
 	rateLimiter *profileRateLimiter
-	// pluginDestinations enqueues plugin destination attempts; pluginLimiter
-	// bounds them per profile like rateLimiter does webhooks.
-	pluginDestinations *PluginDestinationRepository
-	pluginSender       *pluginDestinationSender
-	pluginLimiter      *profileRateLimiter
-	webPush            *WebPushRepository
-	pushDevices        *PushDeviceRepository
+	// pluginSender picks and enqueues plugin destination attempts;
+	// pluginLimiter bounds them per profile like rateLimiter does webhooks.
+	pluginSender  *pluginDestinationSender
+	pluginLimiter *profileRateLimiter
+	webPush       *WebPushRepository
+	pushDevices   *PushDeviceRepository
 }
 
 // SetWebhookOutbox wires durable webhook attempt enqueueing into the fanout
@@ -64,7 +63,6 @@ func (w *FanoutWorker) SetWebhookOutbox(webhooks *WebhookRepository, limiter *pr
 // setPluginDestinationOutbox wires plugin destination attempt enqueueing into
 // the fanout transaction.
 func (w *FanoutWorker) setPluginDestinationOutbox(sender *pluginDestinationSender, limiter *profileRateLimiter) {
-	w.pluginDestinations = sender.repo
 	w.pluginSender = sender
 	w.pluginLimiter = limiter
 }
@@ -554,12 +552,13 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 // enqueuePluginDestinationOutbox inserts pending plugin destination attempts
 // for each newly inserted delivery, inside the fanout transaction, with the
 // same per-destination reason filter and per-profile rate limit as webhooks.
-// Nothing is queued until the plugin runtime is wired.
+// Nothing is queued until the plugin runtime is wired, or for a destination
+// whose plugin is off or removed.
 func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
-	if w.pluginDestinations == nil || len(inserted) == 0 || w.pluginSender.host() == nil {
+	if w.pluginSender == nil || len(inserted) == 0 {
 		return nil
 	}
-	byProfile, err := w.pluginDestinations.ListEnabledByProfiles(ctx, tx, insertedProfileKeys(inserted))
+	byProfile, err := w.pluginSender.enqueueable(ctx, tx, insertedProfileKeys(inserted))
 	if err != nil {
 		return err
 	}
@@ -589,7 +588,7 @@ func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pg
 	if rateLimited > 0 {
 		w.logger.WarnContext(ctx, "plugin destination deliveries rate limited", "skipped", rateLimited)
 	}
-	return w.pluginDestinations.EnqueueAttempts(ctx, tx, attempts)
+	return w.pluginSender.repo.EnqueueAttempts(ctx, tx, attempts)
 }
 
 type eventDisplay struct {

@@ -31,19 +31,23 @@ type NotificationPluginDestinationService interface {
 
 // NotificationPluginDestinationCapability reports plugin destinations.
 type NotificationPluginDestinationCapability struct {
-	Available     bool `json:"available" doc:"At least one enabled plugin provides a destination kind; GET /notifications/plugin-channels lists them"`
+	Available     bool `json:"available" doc:"At least one enabled plugin provides a channel; GET /notifications/plugin-channels lists them"`
 	MaxPerProfile int  `json:"max_per_profile"`
 }
 
-// NotificationPluginChannel is a kind of destination an enabled plugin
-// provides, with the form for one destination's settings.
+// NotificationPluginChannel is a channel an enabled plugin provides, with
+// the form for one destination's settings.
 type NotificationPluginChannel struct {
-	PluginID     string                  `json:"plugin_id" doc:"Names the kind together with capability_id; both stay stable across plugin upgrades"`
-	CapabilityID string                  `json:"capability_id"`
-	DisplayName  string                  `json:"display_name"`
-	Description  string                  `json:"description"`
-	SettingsForm AdminPluginConfigSchema `json:"settings_form" doc:"The destination settings form the plugin declares. Fields marked secret are write-only"`
+	PluginID     string             `json:"plugin_id" doc:"Names the channel together with capability_id; both stay stable across plugin upgrades"`
+	CapabilityID string             `json:"capability_id"`
+	DisplayName  string             `json:"display_name"`
+	Description  string             `json:"description"`
+	SettingsForm PluginSettingsForm `json:"settings_form" doc:"The destination settings form the plugin declares: a flat object of string, integer, number and boolean fields. Fields marked secret are write-only"`
 }
+
+// PluginSettingsForm is a plugin-declared settings form outside the admin
+// plugin pages; it has the shape of AdminPluginConfigSchema.
+type PluginSettingsForm AdminPluginConfigSchema
 
 type NotificationPluginChannelListOutput struct {
 	Body Collection[NotificationPluginChannel]
@@ -57,15 +61,15 @@ type NotificationPluginDestination struct {
 	Name                   string          `json:"name"`
 	PluginID               string          `json:"plugin_id"`
 	CapabilityID           string          `json:"capability_id"`
-	ChannelName            string          `json:"channel_name" doc:"The kind's display name; empty while it is unavailable"`
-	Available              bool            `json:"available" doc:"An enabled plugin provides the destination's kind. False while that plugin is disabled or uninstalled; nothing is sent then"`
+	ChannelName            string          `json:"channel_name" doc:"The channel's display name; empty while it is unavailable"`
+	Available              bool            `json:"available" doc:"An enabled plugin provides the destination's channel. False while that plugin is disabled or uninstalled; nothing is sent then"`
 	Enabled                bool            `json:"enabled"`
 	NotifyFavorites        bool            `json:"notify_favorites"`
 	NotifyWatchlist        bool            `json:"notify_watchlist"`
 	NotifyContinueWatching bool            `json:"notify_continue_watching"`
 	NotifyNextUp           bool            `json:"notify_next_up"`
 	NotifyRequests         bool            `json:"notify_requests"`
-	Settings               PluginJSONValue `json:"settings" doc:"Stored settings the kind's current schema declares and does not mark secret; empty while the kind is unavailable"`
+	Settings               PluginJSONValue `json:"settings" doc:"Stored settings the channel's current schema declares and does not mark secret; empty while the channel is unavailable"`
 	SecretSettingsSet      []string        `json:"secret_settings_set" doc:"Secret settings that have a stored value"`
 	ConsecutiveFailures    int             `json:"consecutive_failures"`
 	DisabledReason         *string         `json:"disabled_reason"`
@@ -121,7 +125,7 @@ func notificationPluginChannelOf(channel notifications.PluginChannel) (Notificat
 		Description:  channel.Description,
 	}
 	if len(forms) > 0 {
-		out.SettingsForm = forms[0]
+		out.SettingsForm = PluginSettingsForm(forms[0])
 	}
 	return out, nil
 }
@@ -195,7 +199,7 @@ func notificationPluginDestinationProblem(err error) error {
 		detail := strings.TrimPrefix(err.Error(), notifications.ErrPluginDestinationInvalid.Error()+": ")
 		return validationProblem(locationBody, codeInvalid, detail)
 	case errors.Is(err, notifications.ErrPluginChannelUnavailable):
-		return NewProblem(TypeDependencyUnavailable, "The plugin that provides this kind of destination isn't available.").WithRetryAfter(30)
+		return NewProblem(TypeDependencyUnavailable, "The plugin that provides this channel isn't available.").WithRetryAfter(30)
 	}
 	return serviceProblem(err)
 }
@@ -214,7 +218,7 @@ func registerNotificationPluginDestinations(reg *Registry) {
 
 func registerNotificationPluginDestinationReads(reg *Registry) {
 	channels := notificationOperation(http.MethodGet, "/plugin-channels", "listNotificationPluginChannels")
-	channels.Summary = "List the kinds of notification destination the enabled plugins provide, with each kind's settings form."
+	channels.Summary = "List the notification channels the enabled plugins provide, with each channel's destination settings form."
 	Register(reg, channels, func(ctx context.Context, _ *struct{}) (*NotificationPluginChannelListOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {
@@ -284,7 +288,7 @@ func registerNotificationPluginDestinationWrites(reg *Registry) {
 	create.DefaultStatus = http.StatusCreated
 	create.RetrySafety = RetrySafetyNonRetryable
 	create.MaxBodyBytes = 32768
-	create.Summary = "Add a destination of a plugin-provided kind to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination."
+	create.Summary = "Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. Send once; a replay can create a second destination."
 	Register(reg, create, func(ctx context.Context, in *NotificationPluginDestinationCreateInput) (*NotificationPluginDestinationOutput, error) {
 		svc, p := reg.pluginDestinations()
 		if p != nil {

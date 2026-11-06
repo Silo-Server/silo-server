@@ -1,7 +1,7 @@
 package notifications
 
 // SetPluginChannelHost wires the plugin runtime into plugin destinations.
-// Until it is called they list no kinds, queue nothing and send nothing.
+// Until it is called they list no channels, queue nothing and send nothing.
 func (s *System) SetPluginChannelHost(host PluginChannelHost) {
 	if s == nil || s.pluginDestinationSender == nil || host == nil {
 		return

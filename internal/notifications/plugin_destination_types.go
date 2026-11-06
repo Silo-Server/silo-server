@@ -16,32 +16,30 @@ type PluginChannelRef struct {
 	CapabilityID string
 }
 
-// PluginChannel is a kind of destination an enabled plugin provides.
+// PluginChannel is a channel an enabled plugin provides: a kind of
+// destination profiles can add.
 type PluginChannel struct {
 	PluginChannelRef
-	// PluginName is the plugin's display name, for telling apart two plugins
-	// that offer kinds with the same name.
-	PluginName  string
 	DisplayName string
 	Description string
-	// Schema is the destination settings form the plugin declares.
+	// Schema is the destination settings form the plugin declares: a flat
+	// object of scalar fields (manifest.ValidateDestinationSchema).
 	Schema *pluginv1.ConfigSchema
-	// PublicFields and SecretFields split the top-level settings the schema
-	// declares. The host classifies them by the plugin runtime's rules for
-	// config schemas: a secret or password form control, or a writeOnly or
-	// password-format JSON Schema property, nested ones included, makes a
-	// field secret. Only public fields are ever returned by the API; secret
-	// fields and stored fields the schema no longer declares, such as a
-	// secret a plugin upgrade renamed, are write-only.
+	// PublicFields and SecretFields split the fields the schema declares.
+	// The host classifies them by the plugin runtime's rules for config
+	// schemas: a secret or password form control, or a writeOnly or
+	// password-format JSON Schema property, makes a field secret. Only
+	// public fields are ever returned by the API; secret fields and stored
+	// fields the schema no longer declares, such as a secret a plugin
+	// upgrade renamed, are write-only.
 	PublicFields []string
 	SecretFields []string
 }
 
 // declaredFields returns the only settings a destination may store: the
-// public and secret fields the host classified, which follow allOf, $ref,
-// dependentSchemas and the admin form. A key a schema allows only through
-// patternProperties or additionalProperties is refused: the settings API
-// could neither return it nor keep it secret, and the form can't show it.
+// public and secret fields the host classified. A key the schema lets
+// through only with additionalProperties is refused: the settings API could
+// neither return it nor keep it secret, and the form can't show it.
 func (c PluginChannel) declaredFields() map[string]struct{} {
 	out := make(map[string]struct{}, len(c.PublicFields)+len(c.SecretFields))
 	for _, key := range c.PublicFields {
@@ -57,13 +55,13 @@ func (c PluginChannel) declaredFields() map[string]struct{} {
 // The plugin runtime implements it; the notification system never starts or
 // addresses plugin processes itself.
 type PluginChannelHost interface {
-	// Channels lists the destination kinds the enabled plugins provide.
+	// Channels lists the channels the enabled plugins provide.
 	Channels(ctx context.Context) ([]PluginChannel, error)
 	ValidateDestination(ctx context.Context, ref PluginChannelRef, req *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error)
 	SendNotification(ctx context.Context, ref PluginChannelRef, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error)
 }
 
-// PluginDestination is a profile's destination of a plugin-provided kind.
+// PluginDestination is a profile's destination on a plugin-provided channel.
 // Its settings are stored as an enc:v1: envelope and secret fields never
 // leave the server.
 type PluginDestination struct {
@@ -90,7 +88,7 @@ type PluginDestination struct {
 	UpdatedAt              time.Time
 }
 
-// Ref names the destination's kind.
+// Ref names the destination's channel.
 func (d PluginDestination) Ref() PluginChannelRef {
 	return PluginChannelRef{PluginID: d.PluginID, CapabilityID: d.CapabilityID}
 }
@@ -126,7 +124,7 @@ var (
 	ErrPluginDestinationInvalid  = errors.New("invalid plugin notification destination")
 	ErrPluginDestinationNotFound = errors.New("plugin notification destination not found")
 	ErrPluginDestinationLimit    = errors.New("plugin notification destination limit reached")
-	// ErrPluginChannelUnavailable means no enabled plugin provides the kind
+	// ErrPluginChannelUnavailable means no enabled plugin provides the channel
 	// right now, or its plugin couldn't be reached.
 	ErrPluginChannelUnavailable = errors.New("plugin notification channel unavailable")
 )

@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -45,7 +47,7 @@ type pluginSendResult struct {
 	message    string
 	retryAfter time.Duration
 	duration   time.Duration
-	// unavailable marks a send no plugin took: the kind's plugin is off,
+	// unavailable marks a send no plugin took: the channel's plugin is off,
 	// removed, or couldn't be reached. The destination isn't at fault.
 	unavailable bool
 }
@@ -86,7 +88,7 @@ func pluginSendResultOf(resp *pluginv1.SendNotificationResponse, err error) plug
 type pluginChannelHostBox struct{ host PluginChannelHost }
 
 // pluginDestinationSender delivers claimed attempts through the plugin that
-// provides each destination's kind. The post-commit dispatcher and the retry
+// provides each destination's channel. The post-commit dispatcher and the retry
 // sweep share it, so both apply the same retry and disable rules.
 type pluginDestinationSender struct {
 	repo       *PluginDestinationRepository
@@ -142,6 +144,43 @@ func (s *pluginDestinationSender) encryptConfig(id string, config map[string]any
 		return "", fmt.Errorf("%w: settings are larger than %d bytes", ErrPluginDestinationInvalid, maxPluginDestinationConfigBytes)
 	}
 	return s.cipher.Encrypt(string(raw), pluginDestinationConfigAAD(id))
+}
+
+// enqueueable returns the profiles' enabled destinations that can take a
+// delivery now, read inside the delivery's transaction. A destination whose
+// channel no enabled plugin provides gets nothing: its plugin is off or
+// removed, and queued attempts would only retry for a day. Nothing is
+// enqueued before the plugin runtime is wired.
+func (s *pluginDestinationSender) enqueueable(ctx context.Context, tx pgx.Tx, profiles []profileKey) (map[profileKey][]PluginDestination, error) {
+	host := s.host()
+	if host == nil {
+		return nil, nil
+	}
+	byProfile, err := s.repo.ListEnabledByProfiles(ctx, tx, profiles)
+	if err != nil || len(byProfile) == 0 {
+		return byProfile, err
+	}
+	channels, err := host.Channels(ctx)
+	if err != nil {
+		// Queue them all rather than lose the delivery: a send that finds
+		// the plugin gone retries on the schedule.
+		s.logger.WarnContext(ctx, "plugin channels unavailable while enqueueing", "error", err)
+		return byProfile, nil
+	}
+	available := make(map[PluginChannelRef]struct{}, len(channels))
+	for _, channel := range channels {
+		available[channel.PluginChannelRef] = struct{}{}
+	}
+	for key, destinations := range byProfile {
+		kept := destinations[:0]
+		for _, d := range destinations {
+			if _, ok := available[d.Ref()]; ok {
+				kept = append(kept, d)
+			}
+		}
+		byProfile[key] = kept
+	}
+	return byProfile, nil
 }
 
 // processAttempt delivers one claimed attempt and records the outcome.
@@ -206,9 +245,9 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 
 	delay, more := webhookRetryDelay(attemptNumber)
 	if more {
-		if result.retryAfter > 0 {
-			delay = result.retryAfter
-		}
+		// retry_after_seconds is a minimum wait: it can push the next
+		// attempt later than the schedule, never earlier.
+		delay = max(delay, result.retryAfter)
 		next := time.Now().Add(delay)
 		if finalize(WebhookOutcomeRetrying, result.message, &next) {
 			s.recordFailure(ctx, d, result)
@@ -230,8 +269,11 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 	}
 }
 
+// recordFailure counts a failed send against the destination, unless its
+// owner saved new settings during the send: the failure belongs to the old
+// ones, and the edit already cleared the streak.
 func (s *pluginDestinationSender) recordFailure(ctx context.Context, d *PluginDestination, result pluginSendResult) {
-	if err := s.repo.RecordFailure(ctx, d.ID, result.message); err != nil {
+	if err := s.repo.RecordFailure(ctx, d.ID, result.message, d.ConfigCiphertext); err != nil {
 		s.logger.WarnContext(ctx, "plugin destination failure bookkeeping failed", "destination_id", d.ID, "error", err)
 	}
 }
@@ -297,25 +339,42 @@ func (s *pluginDestinationSender) message(ctx context.Context, row DeliveryRow, 
 
 // details is the delivery in the public events.Notification shape, so a
 // plugin sees the same fields here as in a notification.created event.
+// Every identifier is a string, as the catalog requires.
 func (s *pluginDestinationSender) details(ctx context.Context, row DeliveryRow) *structpb.Struct {
 	payload := PayloadForRow(row)
 	if s.payload != nil {
 		payload = s.payload(ctx, row)
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return nil
+	notification := publicevents.Notification{
+		ID:   payload.ID,
+		Type: payload.Type,
+		// The delivery payload names only the profile; profile IDs repeat
+		// across accounts.
+		UserID:        strconv.Itoa(row.UserID),
+		ProfileID:     payload.ProfileID,
+		SeriesID:      payload.SeriesID,
+		EpisodeID:     payload.EpisodeID,
+		SeriesTitle:   payload.SeriesTitle,
+		EpisodeTitle:  payload.EpisodeTitle,
+		SeasonNumber:  payload.SeasonNumber,
+		EpisodeNumber: payload.EpisodeNumber,
+		PosterPath:    payload.PosterPath,
+		PosterURL:     payload.PosterURL,
+		ReasonFlags:   payload.ReasonFlags,
+		CreatedAt:     payload.CreatedAt,
 	}
-	if raw, err = publicevents.Project(publicevents.NotificationCreated, raw); err != nil {
+	if payload.LibraryID != nil {
+		libraryID := strconv.Itoa(*payload.LibraryID)
+		notification.LibraryID = &libraryID
+	}
+	raw, err := json.Marshal(notification)
+	if err != nil {
 		return nil
 	}
 	var fields map[string]any
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil
 	}
-	// The delivery payload names only the profile; profile IDs repeat
-	// across accounts.
-	fields["user_id"] = row.UserID
 	details, err := structpb.NewStruct(fields)
 	if err != nil {
 		return nil

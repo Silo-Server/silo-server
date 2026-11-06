@@ -18,7 +18,7 @@ import (
 const pluginValidateTimeout = 10 * time.Second
 
 // PluginDestinationService manages profiles' plugin destinations. Settings
-// are checked by the plugin that provides the kind before they are saved,
+// are checked by the plugin that provides the channel before they are saved,
 // stored encrypted, and returned without their secret fields.
 type PluginDestinationService struct {
 	repo   *PluginDestinationRepository
@@ -49,11 +49,11 @@ type PluginDestinationInput struct {
 // PluginDestinationView is a destination as its owner sees it.
 type PluginDestinationView struct {
 	PluginDestination
-	// Channel is the kind's current description, or nil when no enabled
+	// Channel is the channel's current description, or nil when no enabled
 	// plugin provides it now.
 	Channel *PluginChannel
 	// Settings holds the stored settings without secret fields; nil when
-	// the kind is unavailable, since its secret fields are unknown then.
+	// the channel is unavailable, since its secret fields are unknown then.
 	Settings map[string]any
 	// SecretsSet lists the secret fields that have a stored value.
 	SecretsSet []string
@@ -67,12 +67,12 @@ type PluginDestinationTestResult struct {
 }
 
 // Available reports whether plugin destinations can be used on this server:
-// the plugin runtime is wired. Whether any kind exists is Channels' answer.
+// the plugin runtime is wired. Whether any channel exists is Channels' answer.
 func (s *PluginDestinationService) Available() bool {
 	return s != nil && s.sender.host() != nil
 }
 
-// Channels lists the destination kinds the enabled plugins provide.
+// Channels lists the channels the enabled plugins provide.
 func (s *PluginDestinationService) Channels(ctx context.Context) ([]PluginChannel, error) {
 	host := s.sender.host()
 	if host == nil {
@@ -233,7 +233,7 @@ func (s *PluginDestinationService) DeleteGuarded(ctx context.Context, userID int
 	return s.repo.DeleteGuarded(ctx, userID, profileID, id, check)
 }
 
-// ListPage lists the account profile's destinations with their kinds.
+// ListPage lists the account profile's destinations with their channels.
 func (s *PluginDestinationService) ListPage(ctx context.Context, userID int, profileID string, limit int, after *Cursor) ([]PluginDestinationView, error) {
 	rows, err := s.repo.ListPage(ctx, userID, profileID, limit, after)
 	if err != nil {
