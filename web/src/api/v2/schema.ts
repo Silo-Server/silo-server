@@ -22972,6 +22972,8 @@ export interface components {
     AndroidPushRegistrationCapability: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description A registration applied at a new generation records the calling login session, and push to it stops when that session ends. A replay of the current generation records nothing, so an older registration binds only at a newer generation. */
+      binds_login_session: boolean;
       platforms: string[];
       /** @description Local ordered registration storage is configured; does not assert provider delivery availability. */
       registration_available: boolean;
@@ -23784,6 +23786,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
+      imdb_id?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -23899,6 +23906,16 @@ export interface components {
       studios?: string[];
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
+      tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
+      tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
@@ -24024,6 +24041,10 @@ export interface components {
       folder_paths?: string[];
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
       imdb_id?: string;
       intro?: components["schemas"]["Marker"];
       is_specials?: boolean;
@@ -24171,7 +24192,15 @@ export interface components {
       thumb_url?: string;
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
       tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
       tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
@@ -27200,6 +27229,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
+      imdb_id?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -27315,6 +27349,16 @@ export interface components {
       studios?: string[];
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
+      tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
+      tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
@@ -36434,6 +36478,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
+      imdb_id?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -36549,6 +36598,16 @@ export interface components {
       studios?: string[];
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
+      tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
+      tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
@@ -36645,6 +36704,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
+      imdb_id?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -36760,6 +36824,16 @@ export interface components {
       studios?: string[];
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
+      tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
+      tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie

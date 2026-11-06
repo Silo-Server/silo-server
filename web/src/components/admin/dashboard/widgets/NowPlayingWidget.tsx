@@ -39,7 +39,7 @@ export function NowPlayingWidget() {
   const sessions = sessionsQuery.data ?? [];
   const fixedRows = useMediaQuery(FIXED_ROWS_QUERY, true);
   const rendered = sessions.slice(0, fixedRows ? MAX_RENDERED_STREAMS : STACKED_STREAM_LIMIT);
-  const { setViewport, setGrid, visibleCount } = useFittedCardCount(rendered.length);
+  const { setViewport, setGrid, observeCard, visibleCount } = useFittedCardCount(rendered.length);
 
   // Only a successful, genuinely empty load earns the strip. A skeleton or an
   // error keeps its full height: shrinking the widget to announce a failure
@@ -92,12 +92,11 @@ export function NowPlayingWidget() {
           /* The empty case never reaches here — it returned the collapsed strip
              above — so this branch always has at least one stream to show. */
           <>
-            {/* auto-rows-fr gives every row the tallest card's height, so a card
-                whose tags wrap onto an extra line doesn't make its row taller
-                than the others. Hidden cards count toward that height too, so
-                each card's free text stays on one line and only the fixed set
-                of tags can wrap. */}
-            <div ref={setGrid} className="grid auto-rows-fr grid-cols-1 gap-3.5 lg:grid-cols-2">
+            {/* Grid items stretch to their row, so both cards in a row match
+                height. Rows stay sized to their own cards: auto-rows-fr would
+                size every row to the tallest card, hidden ones included, and
+                one wrapped hidden card would push rows out of the fit. */}
+            <div ref={setGrid} className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
               {rendered.map((session, index) => {
                 // Cards past the fit stay laid out, so a taller widget can
                 // measure them, but are hidden from sight, focus, and readers.
@@ -105,6 +104,7 @@ export function NowPlayingWidget() {
                 return (
                   <div
                     key={session.session_id}
+                    ref={observeCard}
                     className={cn("flex", hidden && "invisible")}
                     inert={hidden}
                   >
@@ -141,10 +141,11 @@ export function NowPlayingWidget() {
  * derived. Every card stays laid out (hidden ones are only invisible), so the
  * count can grow again when the widget is resized taller.
  *
- * Adding or removing a card changes the grid's height, which the observer
- * reports. The one change it misses, a card joining a half-full last row, is
- * covered by storing "everything fits" as Infinity rather than a count that
- * would go stale.
+ * Rows size to their own cards, so a refresh can move a tall card between rows
+ * without changing the grid's height; the observer watches every card as well
+ * as the grid to catch that. The one change it still misses, a card joining a
+ * half-full last row, is covered by storing "everything fits" as Infinity
+ * rather than a count that would go stale.
  */
 function useFittedCardCount(cardCount: number) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -180,12 +181,24 @@ function useFittedCardCount(cardCount: number) {
     observerRef.current = null;
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    // The viewport tracks widget resizes; the grid tracks cards growing or
-    // shrinking as their content changes.
+    // The viewport tracks widget resizes; the grid and its cards track cards
+    // growing, shrinking, or trading rows as their content changes.
     if (viewportRef.current) observer.observe(viewportRef.current);
-    if (gridRef.current) observer.observe(gridRef.current);
+    if (gridRef.current) {
+      observer.observe(gridRef.current);
+      for (const card of gridRef.current.children) observer.observe(card);
+    }
     observerRef.current = observer;
   }, [measure]);
+
+  // Cards mounted before the observer exists are picked up by observe() above;
+  // this covers cards that arrive with a later refresh. Always return the
+  // cleanup: a callback ref that returns none is called again with null on
+  // unmount.
+  const observeCard = useCallback((node: HTMLDivElement) => {
+    observerRef.current?.observe(node);
+    return () => observerRef.current?.unobserve(node);
+  }, []);
 
   // Callback refs: the grid mounts only after loading finishes, so an effect
   // keyed on nothing would never see it.
@@ -204,7 +217,7 @@ function useFittedCardCount(cardCount: number) {
     [observe],
   );
 
-  return { setViewport, setGrid, visibleCount: Math.min(visibleCount, cardCount) };
+  return { setViewport, setGrid, observeCard, visibleCount: Math.min(visibleCount, cardCount) };
 }
 
 // A hidden card skips its poster request (the placeholder icon stands in); the

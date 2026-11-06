@@ -231,6 +231,15 @@
 ./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
 ./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
 
+# Push stops when the login session that registered the device ends, however it
+# ended, including for a push already queued, and retention removes the token.
+./internal/notifications TestPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestQueuedPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestAppleRenewalRecordsTheLoginOfAnOlderRegistrationDB
+# An older registration with no recorded login stops only on evidence its device
+# has no live login, and comes back at the next sign-in.
+./internal/notifications TestSweepOfUnboundRegistrationsDB
+./internal/notifications TestSweptPhoneRegistersAgainAtSignInDB
 # Web push stops when the login session that registered the browser ends, however
 # it ended, including for a push already queued; retention removes the keys and
 # subscribing again records the new login.

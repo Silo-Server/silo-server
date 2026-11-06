@@ -1924,9 +1924,11 @@ that holds a bearer secret or a public capability, each one way:
   destinations that receive notifications without a session (browser and
   mobile push registrations, notification webhooks, notification email
   addresses, Discord links, server notification channels): one removed
-  since the backup would receive them again. A browser subscription bound
-  to a login session is carried too, but it names a session the restore does
-  not have, so it receives nothing and retention removes it; the web app
+  since the backup would receive them again. Notification retention then
+  removes a carried mobile registration when its account has no login left
+  and no API key; the phone registers again at sign-in. A browser subscription
+  bound to a login session is carried too, but it names a session the restore
+  does not have, so it receives nothing and retention removes it; the web app
   registers it again at the next sign-in. What this server holds for
   an outside account is carried the same way: watch-provider connections
   with their tokens (one removed since would sync again), and plugins'

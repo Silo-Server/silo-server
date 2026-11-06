@@ -53,11 +53,10 @@ const webPushColumns = `
 // ends because sessions end on many paths, and expiry happens without any code
 // running. A session that no longer exists has ended: backups carry
 // web_push_subscriptions but not auth_sessions. A subscription with no recorded
-// session (an API key, or one older than the column) keeps delivering. Liveness
-// matches auth.SessionRepository.IsValid.
+// session (an API key, or one older than the column) keeps delivering.
 const webPushLoginLive = `(web_push_subscriptions.login_session_id IS NULL OR EXISTS (
 	SELECT 1 FROM auth_sessions s
-	WHERE s.id = web_push_subscriptions.login_session_id AND s.revoked_at IS NULL AND s.expires_at > now()))`
+	WHERE s.id = web_push_subscriptions.login_session_id AND ` + authSessionLive + `))`
 
 // scanWebPushSubscription scans webPushColumns, then any extra selected columns
 // into extra.

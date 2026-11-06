@@ -34,6 +34,7 @@ import {
   buildHWDeviceRows,
   imageExecutionOptions,
   describeDetection,
+  hardwareVerified,
   hasUsableTranscodeNode,
   hasUsableTrickplayNode,
   nodeInventoriesDiverge,
@@ -246,10 +247,7 @@ export default function PlaybackSettings() {
       ? []
       : [
           detectedLabel ? (
-            <SettingFieldStatus
-              key="detected"
-              tone={detection?.resolved && detection.resolved !== "none" ? "ok" : "warn"}
-            >
+            <SettingFieldStatus key="detected" tone={hardwareVerified(detection) ? "ok" : "warn"}>
               {detectedLabel}
             </SettingFieldStatus>
           ) : hwDetection.isLoading ? (

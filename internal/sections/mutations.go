@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -287,6 +288,26 @@ func (r *Repository) DeleteGeneratedTemplateBundleFeaturedSections(ctx context.C
 	m := sectionMutation{where: `section_type=$1 AND config->>'generated_source'='template_bundle_featured' AND config->>'template_bundle'=$2 AND ((scope='library' AND library_id=ANY($3::bigint[])) OR (scope='home' AND config->>'library_id' ~ '^[0-9]+$' AND (config->>'library_id')::bigint=ANY($3::bigint[])))`, args: []any{SectionCollection, bundleID, libraryIDs}}
 	return r.mutate(ctx, m, func(ctx context.Context) error {
 		return r.deleteGeneratedTemplateBundleFeaturedSections(ctx, bundleID, libraryIDs)
+	})
+}
+
+// RenameLibraryCollectionRows gives the admin rows that show a library
+// collection its new name when they still carry the old one. A collection row
+// is titled with the collection's name when it is added, so a title that still
+// equals the old name follows the collection; any other title was typed and
+// stays. The write locks the collection reference like every section writer,
+// which advances the collection's revision when a row matches.
+func (r *Repository) RenameLibraryCollectionRows(ctx context.Context, collectionID, oldTitle, newTitle string) error {
+	oldTitle, newTitle = strings.TrimSpace(oldTitle), strings.TrimSpace(newTitle)
+	if collectionID == "" || oldTitle == "" || newTitle == "" || oldTitle == newTitle {
+		return nil
+	}
+	const where = `section_type=$1 AND config->>'library_collection_id'=$2 AND btrim(title)=$3`
+	m := sectionMutation{where: where, args: []any{SectionCollection, collectionID, oldTitle}}
+	return r.mutate(ctx, m, func(ctx context.Context) error {
+		_, err := r.query(ctx).Exec(ctx, `UPDATE page_sections SET title=$4, updated_at=NOW() WHERE `+where,
+			SectionCollection, collectionID, oldTitle, newTitle)
+		return err
 	})
 }
 func (r *Repository) Reorder(ctx context.Context, entries []ReorderEntry) error {
