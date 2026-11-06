@@ -80,8 +80,12 @@ func checkWebSocketOrigin(r *http.Request) bool {
 	return false
 }
 
-func configureWebSocket(conn *websocket.Conn) {
-	if conn == nil {
+func configureWebSocket(conn interface {
+	SetReadLimit(int64)
+	SetReadDeadline(time.Time) error
+	SetPongHandler(func(string) error)
+}) {
+	if conn == nil || conn == (*websocket.Conn)(nil) {
 		return
 	}
 
@@ -114,8 +118,8 @@ func startWebSocketPingLoop(ctx context.Context, writePing func() error) {
 	}()
 }
 
-func writeWebSocketError(conn *websocket.Conn, code, message string) {
-	if conn == nil {
+func writeWebSocketError(conn interface{ WriteJSON(any) error }, code, message string) {
+	if conn == nil || conn == (*websocket.Conn)(nil) {
 		return
 	}
 	_ = conn.WriteJSON(map[string]string{
@@ -125,8 +129,11 @@ func writeWebSocketError(conn *websocket.Conn, code, message string) {
 	})
 }
 
-func writeWebSocketJSON(conn *websocket.Conn, value any) error {
-	if conn == nil {
+func writeWebSocketJSON(conn interface {
+	SetWriteDeadline(time.Time) error
+	WriteJSON(any) error
+}, value any) error {
+	if conn == nil || conn == (*websocket.Conn)(nil) {
 		return websocket.ErrCloseSent
 	}
 	if err := conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout)); err != nil {
@@ -136,8 +143,10 @@ func writeWebSocketJSON(conn *websocket.Conn, value any) error {
 	return conn.WriteJSON(value)
 }
 
-func writeWebSocketControl(conn *websocket.Conn, messageType int, data []byte) error {
-	if conn == nil {
+func writeWebSocketControl(conn interface {
+	WriteControl(int, []byte, time.Time) error
+}, messageType int, data []byte) error {
+	if conn == nil || conn == (*websocket.Conn)(nil) {
 		return websocket.ErrCloseSent
 	}
 	return conn.WriteControl(messageType, data, time.Now().Add(wsWriteTimeout))

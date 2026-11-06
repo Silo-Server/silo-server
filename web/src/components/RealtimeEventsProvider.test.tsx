@@ -227,6 +227,7 @@ describe("invalidateCatalogState", () => {
 
 describe("RealtimeEventsProvider", () => {
   beforeEach(() => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
     setAccessToken("session-access");
     setProfileId(null);
     setProfileToken(null);
@@ -262,6 +263,7 @@ describe("RealtimeEventsProvider", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -1092,7 +1094,7 @@ describe("RealtimeEventsProvider", () => {
       await show(false);
       await act(async () => {
         FakeWebSocket.instances[0]!.emitClose();
-        vi.advanceTimersByTime(1_000);
+        vi.advanceTimersByTime(5_000);
       });
       // The usual reconnect still runs during the grace period.
       expect(FakeWebSocket.instances).toHaveLength(2);
@@ -1222,7 +1224,7 @@ describe("RealtimeEventsProvider", () => {
       expect(mockState.refreshAccount).not.toHaveBeenCalled();
 
       await act(async () => {
-        vi.advanceTimersByTime(999);
+        vi.advanceTimersByTime(4_999);
       });
       expect(FakeWebSocket.instances).toHaveLength(1);
       await act(async () => {

@@ -105,7 +105,7 @@ func TestPersistentAuthRefusesDeletedOrUnavailableAuthority(t *testing.T) {
 				case "ordinary":
 					handler = (&Authenticator{sessions: replica, now: fixedNow}).RequireSession(refuseHandler)
 				case "socket reconnect":
-					handler = NewSocketHandler(replica, nil)
+					handler = NewSocketHandler(replica, nil, socketTestLifecycle(t))
 					path = "/socket"
 				default:
 					router := chi.NewRouter()
