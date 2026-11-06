@@ -110,8 +110,35 @@ neither does a registration made before the server recorded them. An Apple clien
 fills it in when it renews its display token, which can be weeks later. An Android
 client registers once more at a newer generation when capabilities report
 `binds_login_session`, because a replay of its current generation records nothing.
-A registration stays unbound until then, and one whose session had already ended
-stays unbound until it signs in again.
+A registration stays unbound until then.
+
+A device that is already signed out can never fill it in, so notification retention
+also deletes an unbound registration when the device has no live login. Because
+deleting a working phone's registration stops its push until its next sign-in, it
+does this only when all of these hold:
+
+- The account holds no API key.
+- No live login, on any account, names the device.
+- Either the account has no live login at all, or, for Apple, a login of this account
+  naming the device was live at the registration's last write and has ended, and no
+  live login of the account lacks a device ID.
+
+A full restore carries registrations but no logins, so the first retention run after
+one deletes every unbound registration on an account that has not signed in again and
+holds no API key. Those phones have to sign in again anyway, and that registers them.
+
+Some signed-out phones can't be told apart from working ones, so they stay unbound
+and keep delivering until they sign in again or the conditions above start to hold:
+
+- An Android login does not name its push device, so an Android registration on an
+  account still signed in anywhere else waits until that account's last login ends.
+- The Apple condition needs the ended login's row, which cleanup deletes once the
+  login's expiry passes. An Apple phone on an account signed in elsewhere is not
+  matched if that row is gone or names no device, or if another live login of the
+  account names no device.
+
+The device IDs read here are client-supplied and authorize nothing; this sweep only
+uses them as evidence, and only to stop push to the account's own registrations.
 
 ## Reset after a lost installation key
 

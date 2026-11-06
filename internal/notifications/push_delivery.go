@@ -105,11 +105,14 @@ func scanPushDeliveryAttempts(rows pgx.Rows) ([]PushDeliveryAttempt, error) {
 // because sessions end on many paths, and expiry happens without any code
 // running. A session that no longer exists has ended: backups carry push_devices
 // but not auth_sessions. A device with no recorded session (an API key, or a
-// registration older than the column) keeps delivering. Liveness matches
-// auth.SessionRepository.IsValid.
+// registration older than the column) keeps delivering.
 const pushDeviceLoginLive = `(push_devices.login_session_id IS NULL OR EXISTS (
 	SELECT 1 FROM auth_sessions s
-	WHERE s.id = push_devices.login_session_id AND s.revoked_at IS NULL AND s.expires_at > now()))`
+	WHERE s.id = push_devices.login_session_id AND ` + authSessionLive + `))`
+
+// authSessionLive is true for a session s that has not ended. It matches
+// auth.SessionRepository.IsValid.
+const authSessionLive = `s.revoked_at IS NULL AND s.expires_at > now()`
 
 // ListEnabledPushByProfiles loads delivery-eligible push devices for the
 // admin-enabled platforms, keyed by account and profile: profile IDs repeat
@@ -389,6 +392,46 @@ func (r *PushDeviceRepository) DeleteEndedLoginRegistrations(ctx context.Context
 	tag, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE NOT `+pushDeviceLoginLive)
 	if err != nil {
 		return 0, fmt.Errorf("delete registrations of ended logins: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteRegistrationsWithNoLogin removes registrations with no recorded login
+// whose device has no live login. Such a registration predates login_session_id,
+// and a phone already signed out can never supply one, so it would otherwise
+// receive alerts until someone signs in on it again.
+//
+// Removing a working phone's registration is worse than the alert: its client
+// believes it is registered and sends nothing until a new sign-in. So only the
+// evidence below removes a row, and a signed-out phone it misses keeps delivering.
+// docs/notifications-push-api.md lists what it misses.
+func (r *PushDeviceRepository) DeleteRegistrationsWithNoLogin(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM push_devices d
+		WHERE d.login_session_id IS NULL
+		  -- An API key registers with no session, and it has no revoked state.
+		  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = d.user_id)
+		  -- Only Apple logins name the push device, on whichever account.
+		  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.device_id = d.device_id AND `+authSessionLive+`)
+		  AND (
+		    -- The account has no live login. That includes a row carried through a
+		    -- full restore, which leaves auth_sessions empty: the phone has to sign
+		    -- in again anyway, as for a recorded session the restore dropped.
+		    NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = d.user_id AND `+authSessionLive+`)
+		    OR
+		    -- This Apple device's login was live at that write and has ended, since
+		    -- the check above leaves none live. A live login naming no device could
+		    -- be this phone's.
+		    (d.platform = $1
+		     AND EXISTS (SELECT 1 FROM auth_sessions s
+		                 WHERE s.user_id = d.user_id AND s.device_id = d.device_id
+		                   AND s.created_at <= d.last_seen_at
+		                   AND COALESCE(s.revoked_at, s.expires_at) >= d.last_seen_at)
+		     AND NOT EXISTS (SELECT 1 FROM auth_sessions s
+		                     WHERE s.user_id = d.user_id AND s.device_id IS NULL AND `+authSessionLive+`))
+		  )`, PushPlatformApple)
+	if err != nil {
+		return 0, fmt.Errorf("delete registrations with no login: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

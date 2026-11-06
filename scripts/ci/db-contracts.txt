@@ -234,6 +234,10 @@
 ./internal/notifications TestPushStopsWhenTheRegisteringLoginEndsDB
 ./internal/notifications TestQueuedPushStopsWhenTheRegisteringLoginEndsDB
 ./internal/notifications TestAppleRenewalRecordsTheLoginOfAnOlderRegistrationDB
+# An older registration with no recorded login stops only on evidence its device
+# has no live login, and comes back at the next sign-in.
+./internal/notifications TestSweepOfUnboundRegistrationsDB
+./internal/notifications TestSweptPhoneRegistersAgainAtSignInDB
 
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
