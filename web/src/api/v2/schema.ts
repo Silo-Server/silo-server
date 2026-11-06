@@ -19780,7 +19780,7 @@ export interface components {
        */
       callback_url?: string;
       config_schema: components["schemas"]["AdminPluginConfigSchema"][];
-      /** @description On a scheduled_task.v1 capability: the schedule its manifest declares, which the task runs unless a schedule is saved on its task page or its binding sets a trigger the server can run. Omitted when the manifest declares none the server can run; the task then runs once at server start */
+      /** @description On a scheduled_task.v1 capability: the schedule its manifest declares, which the task runs unless it has a saved schedule or its binding sets a trigger the server can run. Omitted when the manifest declares none the server can run; without a saved schedule or runnable binding trigger, the task then runs once at server start */
       default_schedule?: components["schemas"]["AdminTaskTrigger"];
       description: string;
       display_name: string;
@@ -20106,7 +20106,7 @@ export interface components {
     };
     AdminPluginTaskBindingWrite: {
       enabled: boolean;
-      /** @description The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). The task runs it unless a schedule is saved on its task page; an empty or unrunnable trigger leaves the manifest default_trigger, else one run at server start. Omitted stores an empty object */
+      /** @description The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). The task runs it unless the task has a saved schedule (a task-page edit, or a schedule an earlier server release saved from the binding trigger); an empty or unrunnable trigger leaves the manifest default_trigger, else one run at server start. Omitted stores an empty object */
       trigger?: {
         [key: string]: unknown;
       };

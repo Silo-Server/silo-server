@@ -15,7 +15,9 @@ A plugin task runs the first of these:
 
 1. A schedule saved in `task_schedules`. Only an administrator's edit on the
    task page (`PUT /api/v2/admin/tasks/{key}/triggers`, or the frozen v1
-   route) saves one.
+   route) saves one now; earlier releases also saved a binding's interval,
+   daily or weekly trigger there when the task first registered, and those
+   rows remain.
 2. The binding's `trigger`, when the task manager can run it.
 3. The manifest's `scheduled_task.default_trigger` (SDK
    `docs/scheduled-task.md`), when the task manager can run it and, for an
@@ -38,14 +40,18 @@ saves the first time they register. So:
   task without a saved schedule, and a binding trigger reaches it likewise;
 - a task-page edit stands across restarts, plugin updates and binding writes;
 - `GET .../tasks/{key}/triggers` on a task with no saved schedule answers its
-  defaults at revision zero, and the first `PUT` saves a schedule.
+  defaults at revision zero, under an ETag that also changes with those
+  defaults, and the first `PUT` saves a schedule.
 
 Migration `20261106015045_plugin_tasks_follow_manifest_default` cleared the
 two kinds of stored row that predate this rule and would otherwise outrank the
 manifest default: binding triggers equal to `{"type":"startup"}`, which the
 admin plugin page's switch stored, and saved plugin task schedules of exactly
-one startup trigger, which the task manager seeded. The page's switch now
-resends only a trigger set through the API.
+one startup trigger, which the task manager seeded. A seeded row cannot be
+told apart from an administrator who saved exactly "at startup", so the
+migration cleared those too: such a task now follows its binding and manifest
+default, and still runs once at startup unless the plugin declares a default.
+The page's switch now resends only a trigger set through the API.
 
 ## Applying changes
 
