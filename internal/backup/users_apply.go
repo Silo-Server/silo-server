@@ -122,14 +122,13 @@ func lockPlanned(ctx context.Context, tx pgx.Tx, plan accountPlan) (bool, error)
 // and access stay); only missing profiles are added and chosen data merged.
 func (a *applier) applyAccount(ctx context.Context, tx pgx.Tx, sel UserSelection) (applied, error) {
 	item := ReportItem{Kind: KindAccount, Label: sel.Account}
-	var doc *UserDocument
-	for i := range a.rs.Users {
-		if strconv.Itoa(a.rs.Users[i].Account.ID) == sel.Account {
-			doc = &a.rs.Users[i]
-		}
-	}
-	if doc == nil {
+	ref, ok := a.rs.user(sel.Account)
+	if !ok {
 		return leftOut(item, ReasonNotInBackup, "The backup has no such account."), nil
+	}
+	doc, err := a.rs.loadUser(ref)
+	if err != nil {
+		return applied{}, err
 	}
 	planner := a.s.newUserPlanner(a.rs, tx, a.serverID, a.libraryMap())
 	plan, err := planner.plan(ctx, doc)

@@ -1,9 +1,11 @@
+import { useCallback, useRef, useState } from "react";
 import { Link } from "react-router";
 import { Pause, Play } from "lucide-react";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   activityMethodMeta,
   classifyActivityMethod,
@@ -11,13 +13,33 @@ import {
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
 import { formatRelativeTime } from "@/lib/date";
+import { cn } from "@/lib/utils";
 import { SectionError } from "../feedback";
 import { useReportCollapsed } from "../widgetChrome";
 import { SessionProfilePill } from "./SessionProfilePill";
 
+/**
+ * Most cards the widget mounts at once. The widget shows only what fits, and a
+ * busy server can hold hundreds of sessions; the activity page lists the rest.
+ */
+const MAX_RENDERED_STREAMS = 40;
+
+/**
+ * Cards shown below lg, where dashboard rows size to their content and there is
+ * no widget height to fit against (matches the lg rule in app.css).
+ */
+const STACKED_STREAM_LIMIT = 4;
+const FIXED_ROWS_QUERY = "(min-width: 1024px)";
+
+/** Height kept free under the last visible row for the "+N more" link. */
+const MORE_LINK_HEIGHT_PX = 24;
+
 export function NowPlayingWidget() {
   const sessionsQuery = useAdminSessions();
   const sessions = sessionsQuery.data ?? [];
+  const fixedRows = useMediaQuery(FIXED_ROWS_QUERY, true);
+  const rendered = sessions.slice(0, fixedRows ? MAX_RENDERED_STREAMS : STACKED_STREAM_LIMIT);
+  const { setViewport, setGrid, visibleCount } = useFittedCardCount(rendered.length);
 
   // Only a successful, genuinely empty load earns the strip. A skeleton or an
   // error keeps its full height: shrinking the widget to announce a failure
@@ -55,9 +77,9 @@ export function NowPlayingWidget() {
           </Link>
         )}
       </div>
-      {/* The stream cards scroll inside the widget: a short widget shows two of
-          them rather than spilling out of its row. */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* The widget shows as many whole cards as its height allows; the rest
+          are counted in the "+N more" link instead of half-drawn at the edge. */}
+      <div ref={setViewport} className="relative min-h-0 flex-1 overflow-hidden">
         {sessionsQuery.isLoading ? (
           <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
             {Array.from({ length: 2 }).map((_, i) => (
@@ -70,17 +92,33 @@ export function NowPlayingWidget() {
           /* The empty case never reaches here — it returned the collapsed strip
              above — so this branch always has at least one stream to show. */
           <>
-            <div className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
-              {sessions.slice(0, 4).map((session) => (
-                <StreamCard key={session.session_id} session={session} />
-              ))}
+            <div ref={setGrid} className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+              {rendered.map((session, index) => {
+                // Cards past the fit stay laid out, so a taller widget can
+                // measure them, but are hidden from sight, focus, and readers.
+                const hidden = index >= visibleCount;
+                return (
+                  <div
+                    key={session.session_id}
+                    className={hidden ? "invisible" : undefined}
+                    inert={hidden}
+                  >
+                    <StreamCard session={session} showPoster={!hidden} />
+                  </div>
+                );
+              })}
             </div>
-            {sessions.length > 4 && (
+            {sessions.length > visibleCount && (
               <Link
                 to="/admin/activity"
-                className="text-muted-foreground hover:text-primary mt-2 block text-center text-[12px] transition-colors"
+                className={cn(
+                  "text-muted-foreground hover:text-primary block text-center text-[12px] leading-6 transition-colors",
+                  // In a fixed-height widget the link sits in the strip the
+                  // fit leaves free; a content-sized one just flows after.
+                  fixedRows ? "absolute inset-x-0 bottom-0" : "mt-1",
+                )}
               >
-                +{sessions.length - 4} more active streams
+                +{sessions.length - visibleCount} more active streams
               </Link>
             )}
           </>
@@ -90,7 +128,84 @@ export function NowPlayingWidget() {
   );
 }
 
-function StreamCard({ session }: { session: AdminSession }) {
+/**
+ * How many grid cards fit whole inside the viewport.
+ *
+ * Card height depends on how its tags wrap and the column count on the
+ * breakpoint, so the fit is measured from the laid-out cards rather than
+ * derived. Every card stays laid out (hidden ones are only invisible), so the
+ * count can grow again when the widget is resized taller.
+ *
+ * Adding or removing a card changes the grid's height, which the observer
+ * reports. The one change it misses, a card joining a half-full last row, is
+ * covered by storing "everything fits" as Infinity rather than a count that
+ * would go stale.
+ */
+function useFittedCardCount(cardCount: number) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [visibleCount, setVisibleCount] = useState(Number.POSITIVE_INFINITY);
+
+  const measure = useCallback(() => {
+    const viewport = viewportRef.current;
+    const grid = gridRef.current;
+    if (!viewport || !grid) return;
+    const cards = Array.from(grid.children) as HTMLElement[];
+    const height = viewport.clientHeight;
+    const bottomOf = (card: HTMLElement) => card.offsetTop + card.offsetHeight;
+
+    let next = Number.POSITIVE_INFINITY;
+    const last = cards[cards.length - 1];
+    if (last && bottomOf(last) > height) {
+      // Not everything fits, so the "+N more" link needs its strip too.
+      const limit = height - MORE_LINK_HEIGHT_PX;
+      // Keep one card even in a widget too short for it: a lone link reads as
+      // an error, and the card clips cleanly at the edge.
+      next = Math.max(
+        1,
+        cards.findIndex((card) => bottomOf(card) > limit),
+      );
+    }
+    setVisibleCount(next);
+  }, []);
+
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const observe = useCallback(() => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    // The viewport tracks widget resizes; the grid tracks cards growing or
+    // shrinking as their content changes.
+    if (viewportRef.current) observer.observe(viewportRef.current);
+    if (gridRef.current) observer.observe(gridRef.current);
+    observerRef.current = observer;
+  }, [measure]);
+
+  // Callback refs: the grid mounts only after loading finishes, so an effect
+  // keyed on nothing would never see it.
+  const setViewport = useCallback(
+    (node: HTMLDivElement | null) => {
+      viewportRef.current = node;
+      observe();
+    },
+    [observe],
+  );
+  const setGrid = useCallback(
+    (node: HTMLDivElement | null) => {
+      gridRef.current = node;
+      observe();
+    },
+    [observe],
+  );
+
+  return { setViewport, setGrid, visibleCount: Math.min(visibleCount, cardCount) };
+}
+
+// A hidden card skips its poster request (the placeholder icon stands in); the
+// poster box has a fixed aspect ratio, so the card keeps the height the fit
+// measures either way.
+function StreamCard({ session, showPoster }: { session: AdminSession; showPoster: boolean }) {
   const isEpisode =
     session.series_name && session.season_number != null && session.episode_number != null;
   const title = isEpisode
@@ -112,7 +227,7 @@ function StreamCard({ session }: { session: AdminSession }) {
         className="bg-surface border-border relative flex w-[70px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border"
         style={{ aspectRatio: "2/3" }}
       >
-        {session.poster_url ? (
+        {showPoster && session.poster_url ? (
           <img
             src={session.poster_url}
             alt={session.media_title}

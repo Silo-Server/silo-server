@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,8 +92,9 @@ var eventRetryDelays = []time.Duration{
 // Envelopes the hub relays from other servers are theirs to store. Only the
 // events in the SDK's catalog (pkg/pluginsdk/events) and plugin events reach
 // plugins; plugin events take this path too (RuntimeHostServer.PublishEvent
-// stamps `plugin.<id>.` and writes an envelope on ChannelPlugins). Each
-// payload is rewritten into its catalog shape before it is stored.
+// stamps `plugin.<id>.` and writes an envelope on ChannelPlugins, which the
+// hub keeps on this server). Each payload is rewritten into its catalog
+// shape, with string IDs, before it is stored.
 //
 // Dispatch is fan-out only: every subscriber to event_name receives the event.
 // Plugins wanting to address a single peer should embed a target identifier
@@ -223,6 +226,8 @@ func (d *EventDispatcher) Start(ctx context.Context) error {
 	}
 
 	if d.hub != nil {
+		// Plugin hosts ask the hub before building a plugin event's envelope.
+		d.hub.SetPluginSubscribers(d.mayHaveSubscribers)
 		envCh, unsub := d.hub.Subscribe()
 		d.hubUnsubscribe = unsub
 		d.loops.Go(func() { d.consumeHub(ctx, envCh) })
@@ -286,25 +291,61 @@ func hubEvent(env events.Envelope) producedEvent {
 
 // publicPayload rewrites an envelope's data into the public shape the SDK's
 // event catalog defines, so fields the host adds internally never reach
-// plugins. A notification names only its profile, and profile IDs repeat
-// across accounts, so the account the envelope is addressed to is added.
-// Data that doesn't match the event's catalog type is an error.
+// plugins. Data that doesn't match the event's catalog type is an error.
 func publicPayload(env events.Envelope) (*structpb.Struct, error) {
-	raw := env.Data
-	if env.Event == publicevents.NotificationCreated && env.UserID > 0 {
-		var fields map[string]any
-		if err := json.Unmarshal(raw, &fields); err == nil && fields != nil {
-			fields["user_id"] = env.UserID
-			if withUser, err := json.Marshal(fields); err == nil {
-				raw = withUser
-			}
-		}
+	raw, err := withStringIDs(env)
+	if err != nil {
+		return nil, err
 	}
 	projected, err := publicevents.Project(env.Event, raw)
 	if err != nil {
 		return nil, err
 	}
 	return decodeRawJSON(projected), nil
+}
+
+// withStringIDs makes a catalog event's identifiers JSON strings, as the
+// catalog defines them. The host's payloads are shared with the events
+// socket, which carries numeric IDs as numbers, so the conversion happens
+// here: a top-level `id` or `*_id` field holding a number becomes its
+// decimal string, and zero, which no stored row has, becomes absent (a
+// server-queued job's created_by_user_id). A notification names only its
+// profile, and profile IDs repeat across accounts, so the account the
+// envelope is addressed to is added as user_id. Plugin events pass through.
+func withStringIDs(env events.Envelope) (json.RawMessage, error) {
+	if publicevents.IsPluginEvent(env.Event) || len(env.Data) == 0 {
+		return env.Data, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(env.Data, &fields); err != nil {
+		return nil, fmt.Errorf("decode %s payload: %w", env.Event, err)
+	}
+	if fields == nil {
+		return env.Data, nil
+	}
+	for key, value := range fields {
+		if (key != "id" && !strings.HasSuffix(key, "_id")) || !isJSONNumber(value) {
+			continue
+		}
+		if string(value) == "0" {
+			delete(fields, key)
+			continue
+		}
+		fields[key] = jsonString(string(value))
+	}
+	if env.Event == publicevents.NotificationCreated && env.UserID > 0 {
+		fields["user_id"] = jsonString(strconv.Itoa(env.UserID))
+	}
+	return json.Marshal(fields)
+}
+
+func isJSONNumber(value json.RawMessage) bool {
+	return len(value) > 0 && (value[0] == '-' || (value[0] >= '0' && value[0] <= '9'))
+}
+
+func jsonString(s string) json.RawMessage {
+	encoded, _ := json.Marshal(s)
+	return encoded
 }
 
 // consumeHub reads until Stop unsubscribes, so envelopes published while the

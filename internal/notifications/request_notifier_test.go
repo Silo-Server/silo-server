@@ -5,23 +5,17 @@ import (
 	"log/slog"
 	"testing"
 
-	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/requests"
 )
 
 type fakeFulfillmentBackend struct {
 	disabled    map[string]bool
 	deliveries  []Delivery
-	channelInfo []RequestEventInfo
-	published   []requests.Request
+	channelPost int
 }
 
-func (f *fakeFulfillmentBackend) PostServerChannelRequestEvent(_ context.Context, _ string, info RequestEventInfo) {
-	f.channelInfo = append(f.channelInfo, info)
-}
-
-func (f *fakeFulfillmentBackend) publishRequestEvent(_ context.Context, _ string, req requests.Request) {
-	f.published = append(f.published, req)
+func (f *fakeFulfillmentBackend) PostServerChannelRequestEvent(context.Context, string, RequestEventInfo) {
+	f.channelPost++
 }
 
 func (f *fakeFulfillmentBackend) notificationsEnabled(_ context.Context, _ int, profileID string) (bool, error) {
@@ -71,46 +65,12 @@ func TestNotifyFulfilledTellsRequesterAndFollowers(t *testing.T) {
 	}
 	// The server-wide post waits for AnnounceFulfilled, which the caller runs
 	// once the request is stamped, so a retried delivery never repeats it.
-	if len(backend.channelInfo) != 0 {
-		t.Fatalf("channel posts after NotifyFulfilled = %d, want none", len(backend.channelInfo))
+	if backend.channelPost != 0 {
+		t.Fatalf("channel posts after NotifyFulfilled = %d, want none", backend.channelPost)
 	}
-	announced := fulfilledRequest()
-	announced.RequesterUsername = "bob"
-	notifier.AnnounceFulfilled(context.Background(), announced)
-	if len(backend.channelInfo) != 1 {
-		t.Fatalf("channel posts after AnnounceFulfilled = %d, want 1", len(backend.channelInfo))
-	}
-	// The plugin event names the requester; the server-channel post does not.
-	if len(backend.published) != 1 || RequestEventPayload(backend.published[0]).RequesterName != "bob" {
-		t.Fatalf("published request events = %+v, want one naming bob", backend.published)
-	}
-	if name := backend.channelInfo[0].RequesterName; name != "" {
-		t.Fatalf("server-channel fulfilled post requester = %q, want none", name)
-	}
-}
-
-// One request's plugin events reach the hub in transition order before each
-// publish returns, so an auto-approved request's submission precedes its
-// approval.
-func TestPublishRequestEventKeepsTransitionOrder(t *testing.T) {
-	hub := evt.NewHub("node", nil)
-	envelopes, unsubscribe := hub.Subscribe()
-	defer unsubscribe()
-	system := &System{events: hub, logger: slog.Default()}
-	req := fulfilledRequest()
-
-	system.publishRequestEvent(t.Context(), ServerChannelEventRequestSubmitted, req)
-	system.publishRequestEvent(t.Context(), ServerChannelEventRequestApproved, req)
-
-	for _, want := range []string{ServerChannelEventRequestSubmitted, ServerChannelEventRequestApproved} {
-		select {
-		case env := <-envelopes:
-			if env.Channel != evt.ChannelPlugins || env.Event != want {
-				t.Fatalf("envelope = %s on %s, want %s on the plugin channel", env.Event, env.Channel, want)
-			}
-		default:
-			t.Fatalf("no %s envelope once publishRequestEvent returned", want)
-		}
+	notifier.AnnounceFulfilled(context.Background(), fulfilledRequest())
+	if backend.channelPost != 1 {
+		t.Fatalf("channel posts after AnnounceFulfilled = %d, want 1", backend.channelPost)
 	}
 }
 

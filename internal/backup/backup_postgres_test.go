@@ -1667,7 +1667,7 @@ func TestEncryptedS3RoundTripDB(t *testing.T) {
 	// stored digest. (The seeded account has no email, which the users
 	// section's account reader does not take, so the read stops short of
 	// planning.)
-	if rs, authenticated, err := svc.previewSet(ctx, restoreSource{backupID: result.ID}, false); err != nil || !authenticated || rs.Index.ServerID != serverID {
+	if rs, _, authenticated, err := svc.previewSet(ctx, restoreSource{backupID: result.ID}, false); err != nil || !authenticated || rs.Index.ServerID != serverID {
 		t.Fatalf("reading the encrypted restore set: %v", err)
 	}
 	otherKey, err := NewArchiveKey([]byte("another-servers-key-0123456789abcdefgh"))

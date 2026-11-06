@@ -335,15 +335,15 @@ func TestDispatcher_HubPluginEvent_ReachesConsumer(t *testing.T) {
 }
 
 // A catalog event reaches plugins in its public shape: fields the host adds
-// for its own clients are dropped, and a notification names its account,
-// since profile IDs repeat across accounts.
+// for its own clients are dropped, IDs are strings, and a notification names
+// its account, since profile IDs repeat across accounts.
 func TestDispatcher_NotificationReachesConsumerInItsPublicShape(t *testing.T) {
 	_, hub, client := newFixture(t, []string{"notification.created"}, 1)
 
 	if err := hub.Publish(context.Background(), events.Envelope{
 		Channel:   events.ChannelNotifications,
 		Event:     "notification.created",
-		Data:      json.RawMessage(`{"id":"d1","type":"episode.available","profile_id":"p1","series_title":"Severance","poster_thumbhash":"abc","read_at":null,"created_at":"2026-11-04T10:00:00Z"}`),
+		Data:      json.RawMessage(`{"id":"d1","type":"episode.available","profile_id":"p1","library_id":3,"series_title":"Severance","poster_thumbhash":"abc","read_at":null,"created_at":"2026-11-04T10:00:00Z"}`),
 		UserID:    7,
 		ProfileID: "p1",
 	}); err != nil {
@@ -352,8 +352,8 @@ func TestDispatcher_NotificationReachesConsumerInItsPublicShape(t *testing.T) {
 
 	waitFor(t, client)
 	payload := client.get()[0].GetPayload().AsMap()
-	if payload["user_id"] != float64(7) || payload["profile_id"] != "p1" || payload["series_title"] != "Severance" {
-		t.Fatalf("payload = %v, want the account, profile and title", payload)
+	if payload["user_id"] != "7" || payload["profile_id"] != "p1" || payload["library_id"] != "3" || payload["series_title"] != "Severance" {
+		t.Fatalf("payload = %v, want the account, profile, library and title, IDs as strings", payload)
 	}
 	for _, internal := range []string{"poster_thumbhash", "read_at"} {
 		if _, leaked := payload[internal]; leaked {

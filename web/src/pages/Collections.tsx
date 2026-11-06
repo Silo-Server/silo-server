@@ -1,3 +1,4 @@
+import { useAllowCollectionDialog } from "@/components/profiles/useAllowCollectionDialog";
 import {
   fetchCollectionEditSnapshot,
   fetchCollectionOrderSnapshot,
@@ -343,6 +344,7 @@ function YourCollections({
   const sync = useSyncUserCollection();
   const share = useSetCollectionShared();
   const reorderMutation = useReorderCollections();
+  const allowFor = useAllowCollectionDialog(otherProfileNames.length > 0);
   // A closing dialog stays on screen while it animates out, so it keeps the
   // collection it was about until the next one opens; only `open` resets.
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -428,6 +430,7 @@ function YourCollections({
           setConfirmUnshare({ open: false, collection });
         }}
       />
+      {allowFor.dialog}
       {collections.length === 0 ? (
         <li>
           <NewCollectionCard />
@@ -476,6 +479,7 @@ function YourCollections({
                           }
                         : undefined
                     }
+                    onAllowForProfiles={allowFor.openFor && (() => allowFor.openFor?.(collection))}
                     onDelete={() => {
                       confirmFor.current = collection.id;
                       void fetchCollectionEditSnapshot(collection.id)

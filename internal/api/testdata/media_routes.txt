@@ -195,6 +195,7 @@ GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
 POST /api/v2/admin/items/{id}/images/upload	non-media
 POST /api/v2/admin/items/{id}/match/apply	non-media
+GET /api/v2/admin/items/{id}/match/hints	non-media
 POST /api/v2/admin/items/{id}/match/search	non-media
 POST /api/v2/admin/items/{id}/merge	non-media
 PATCH /api/v2/admin/items/{id}/metadata	non-media
@@ -512,6 +513,7 @@ GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/personal-lists	non-media
 GET /api/v2/capabilities/profile-export	non-media
 GET /api/v2/capabilities/ratings	non-media
+GET /api/v2/capabilities/title-allowances	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -526,6 +528,7 @@ GET /api/v2/catalog/items/{id}/manga-files	non-media
 GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
 HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
 POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
+GET /api/v2/catalog/items/{id}/title-allowances	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
@@ -807,6 +810,13 @@ POST /api/v2/profiles	non-media
 GET /api/v2/profiles/household/sessions	non-media
 DELETE /api/v2/profiles/{id}	non-media
 PATCH /api/v2/profiles/{id}	non-media
+GET /api/v2/profiles/{id}/allowed-collections	non-media
+DELETE /api/v2/profiles/{id}/allowed-collections/{collection_id}	non-media
+PUT /api/v2/profiles/{id}/allowed-collections/{collection_id}	non-media
+GET /api/v2/profiles/{id}/allowed-titles	non-media
+POST /api/v2/profiles/{id}/allowed-titles/copy-collection	non-media
+DELETE /api/v2/profiles/{id}/allowed-titles/{item_id}	non-media
+PUT /api/v2/profiles/{id}/allowed-titles/{item_id}	non-media
 DELETE /api/v2/profiles/{id}/avatar	non-media
 PUT /api/v2/profiles/{id}/avatar	non-media
 POST /api/v2/profiles/{id}/verify-pin	non-media
@@ -1542,6 +1552,7 @@ GET /api/v2/admin/items/{id}/images	non-media
 POST /api/v2/admin/items/{id}/images/apply	non-media
 POST /api/v2/admin/items/{id}/images/upload	non-media
 POST /api/v2/admin/items/{id}/match/apply	non-media
+GET /api/v2/admin/items/{id}/match/hints	non-media
 POST /api/v2/admin/items/{id}/match/search	non-media
 POST /api/v2/admin/items/{id}/merge	non-media
 PATCH /api/v2/admin/items/{id}/metadata	non-media
@@ -1859,6 +1870,7 @@ GET /api/v2/capabilities/password-reset	non-media
 GET /api/v2/capabilities/personal-lists	non-media
 GET /api/v2/capabilities/profile-export	non-media
 GET /api/v2/capabilities/ratings	non-media
+GET /api/v2/capabilities/title-allowances	non-media
 GET /api/v2/capabilities/trailers	non-media
 GET /api/v2/catalog	non-media
 GET /api/v2/catalog/audiobook-groups	non-media
@@ -1873,6 +1885,7 @@ GET /api/v2/catalog/items/{id}/manga-files	non-media
 GET /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
 HEAD /api/v2/catalog/items/{id}/themes/{theme_id}/audio	media	transfer	viewer_egress	false	true
 POST /api/v2/catalog/items/{id}/themes/{theme_id}/playback	non-media
+GET /api/v2/catalog/items/{id}/title-allowances	non-media
 POST /api/v2/catalog/items/{id}/trailers/refresh	non-media
 POST /api/v2/catalog/items/{id}/translate-description	non-media
 GET /api/v2/catalog/items/{id}/versions	non-media
@@ -2154,6 +2167,13 @@ POST /api/v2/profiles	non-media
 GET /api/v2/profiles/household/sessions	non-media
 DELETE /api/v2/profiles/{id}	non-media
 PATCH /api/v2/profiles/{id}	non-media
+GET /api/v2/profiles/{id}/allowed-collections	non-media
+DELETE /api/v2/profiles/{id}/allowed-collections/{collection_id}	non-media
+PUT /api/v2/profiles/{id}/allowed-collections/{collection_id}	non-media
+GET /api/v2/profiles/{id}/allowed-titles	non-media
+POST /api/v2/profiles/{id}/allowed-titles/copy-collection	non-media
+DELETE /api/v2/profiles/{id}/allowed-titles/{item_id}	non-media
+PUT /api/v2/profiles/{id}/allowed-titles/{item_id}	non-media
 DELETE /api/v2/profiles/{id}/avatar	non-media
 PUT /api/v2/profiles/{id}/avatar	non-media
 POST /api/v2/profiles/{id}/verify-pin	non-media

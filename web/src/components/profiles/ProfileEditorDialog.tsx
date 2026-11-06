@@ -51,6 +51,12 @@ import {
   type ProfileDraft,
 } from "@/lib/profile-management";
 import { cn } from "@/lib/utils";
+import { AllowedTitlesSection } from "@/components/profiles/AllowedTitlesSection";
+import {
+  profileHasMaturityLimit,
+  useCanManageTitleAllowances,
+} from "@/hooks/queries/titleAllowances";
+import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 
 /**
  * Where the editor saves instead of the signed-in household's own profile
@@ -204,6 +210,17 @@ function ProfileEditorForm({
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [contentRatingTouched, setContentRatingTouched] = useState(false);
   const [libraryAccessTouched, setLibraryAccessTouched] = useState(false);
+  // Allowances belong to the signed-in household, so not when saving another
+  // account's profiles (save), and only for another profile with a limit.
+  const canManageAllowances = useCanManageTitleAllowances();
+  const { profile: activeProfile } = useCurrentProfile();
+  const showAllowedTitles =
+    canManageAllowances &&
+    mode === "edit" &&
+    !save &&
+    profile !== null &&
+    profile.id !== activeProfile?.id &&
+    profileHasMaturityLimit(profile);
 
   const nameId = useId();
   const pinId = useId();
@@ -764,6 +781,8 @@ function ProfileEditorForm({
           ) : null}
         </div>
       </section>
+
+      {showAllowedTitles && profile ? <AllowedTitlesSection profileId={profile.id} /> : null}
 
       <DialogFooter>
         <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
