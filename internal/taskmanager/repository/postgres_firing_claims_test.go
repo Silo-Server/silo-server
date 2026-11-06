@@ -14,7 +14,8 @@ import (
 // Each scheduled firing of a claiming task runs on exactly one server: of
 // servers claiming at once exactly one wins; a server whose timer fires
 // seconds later loses too, even across an interval slot boundary; a startup
-// firing runs once per cluster start; and a later firing is claimed again.
+// firing runs once per cluster start; a later firing is claimed again; and
+// old claims of a task that stopped firing are pruned by another task's claim.
 func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 	pool := taskHistoryTestPool(t)
 	ctx := context.Background()
@@ -88,6 +89,25 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 		}
 		if !claim(t, key, startup, now.Add(20*time.Minute)) {
 			t.Fatal("a start after the window must run")
+		}
+	})
+
+	t.Run("claims of a task that stopped firing are pruned", func(t *testing.T) {
+		gone, live := newKey("uninstalled"), newKey("live")
+		if _, err := pool.Exec(ctx, `INSERT INTO task_firing_claims (task_key, slot, claimed_at) VALUES ($1, $2, $2)`,
+			gone, now.Add(-9*24*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: time.Hour.Milliseconds()}
+		if !claim(t, live, hourly, now) {
+			t.Fatal("the live task's claim must win")
+		}
+		var left int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM task_firing_claims WHERE task_key = $1`, gone).Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+		if left != 0 {
+			t.Fatalf("%d stale claims of a task that stopped firing remain", left)
 		}
 	})
 }

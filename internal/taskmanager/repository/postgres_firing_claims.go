@@ -27,8 +27,9 @@ func NewPgFiringClaims(pool *pgxpool.Pool) *PgFiringClaims {
 // of one task run one at a time, then inserts the claim unless one exists at
 // slot or within window. The row, not the lock, is what a later firing on
 // another server checks, so firings a few seconds apart are caught as well as
-// concurrent ones. The task's claims older than both the window and
-// firingClaimRetention are pruned in the same transaction.
+// concurrent ones. Claims of every task older than firingClaimRetention,
+// which is longer than any window, are pruned in the same transaction, so a
+// task that stopped firing (an uninstalled plugin's) doesn't keep its claims.
 func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.Time, window time.Duration) (bool, error) {
 	window = max(window, 0)
 	won := false
@@ -55,8 +56,8 @@ func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.
 		}
 		if _, err := tx.Exec(ctx, `
 			DELETE FROM task_firing_claims
-			WHERE task_key = $1 AND claimed_at < clock_timestamp() - $2 * interval '1 microsecond'`,
-			key, max(window, firingClaimRetention).Microseconds()); err != nil {
+			WHERE claimed_at < clock_timestamp() - $1 * interval '1 microsecond'`,
+			max(window, firingClaimRetention).Microseconds()); err != nil {
 			return fmt.Errorf("pruning task firing claims: %w", err)
 		}
 		won = true
