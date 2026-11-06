@@ -999,18 +999,38 @@ func TestCachedVideoToolboxProbeKeepsRelativeAndPathSpellingsDistinct(t *testing
 
 func TestStartupRetryHWAccel(t *testing.T) {
 	// Explicit values bypass ffmpeg probing, keeping this host-independent.
-	if got := StartupRetryHWAccel(TranscodeOpts{HWAccel: "videotoolbox", FFmpegPath: "/does/not/exist"}); got != "none" {
-		t.Fatalf("videotoolbox retry accel = %q, want none (no alternate device to move to)", got)
+	env := setupHWAccelTest(t)
+	tests := []struct {
+		name         string
+		opts         TranscodeOpts
+		renderDevice bool
+		want         string
+	}{
+		{name: "videotoolbox has no alternate device", opts: TranscodeOpts{HWAccel: "videotoolbox"}, want: "none"},
+		{name: "qsv without a render device", opts: TranscodeOpts{HWAccel: "qsv"}, want: "none"},
+		{name: "vaapi without a render device", opts: TranscodeOpts{HWAccel: "vaapi"}, want: "none"},
+		{name: "qsv with a detected render device", opts: TranscodeOpts{HWAccel: "qsv"}, renderDevice: true, want: "qsv"},
+		{name: "vaapi with a detected render device", opts: TranscodeOpts{HWAccel: "vaapi"}, renderDevice: true, want: "vaapi"},
+		{name: "qsv with a configured device", opts: TranscodeOpts{HWAccel: "qsv", HWDevice: "/dev/dri/renderD129"}, want: "qsv"},
+		{name: "nvenc", opts: TranscodeOpts{HWAccel: "nvenc"}, want: "nvenc"},
+		{name: "software", opts: TranscodeOpts{HWAccel: "none"}, want: "none"},
+		{name: "videotoolbox hardware tone-map", opts: TranscodeOpts{HWAccel: "videotoolbox", ToneMapMode: tonemap.ModeHardware}, want: "videotoolbox"},
+		{name: "qsv hardware tone-map without a render device", opts: TranscodeOpts{HWAccel: "qsv", ToneMapMode: tonemap.ModeHardware}, want: "qsv"},
 	}
-	for _, accel := range []string{"qsv", "vaapi", "nvenc", "none"} {
-		if got := StartupRetryHWAccel(TranscodeOpts{HWAccel: accel, FFmpegPath: "/does/not/exist"}); got != accel {
-			t.Fatalf("%s retry accel = %q, want unchanged", accel, got)
-		}
-	}
-	if got := StartupRetryHWAccel(TranscodeOpts{
-		HWAccel: "videotoolbox", FFmpegPath: "/does/not/exist", ToneMapMode: tonemap.ModeHardware,
-	}); got != "videotoolbox" {
-		t.Fatalf("hardware tone-map retry accel = %q, want unchanged frozen executor", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_ = os.RemoveAll(env.driDir)
+			if err := os.MkdirAll(env.driDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.renderDevice {
+				env.addRenderDevice(t, "renderD128", "0x8086")
+			}
+			tt.opts.FFmpegPath = "/does/not/exist"
+			if got := StartupRetryHWAccel(tt.opts); got != tt.want {
+				t.Fatalf("StartupRetryHWAccel() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
