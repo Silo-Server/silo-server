@@ -192,12 +192,12 @@ function useFittedCardCount(cardCount: number) {
   }, [measure]);
 
   // Cards mounted before the observer exists are picked up by observe() above;
-  // this covers cards that arrive with a later refresh.
+  // this covers cards that arrive with a later refresh. Always return the
+  // cleanup: a callback ref that returns none is called again with null on
+  // unmount.
   const observeCard = useCallback((node: HTMLDivElement) => {
-    const observer = observerRef.current;
-    if (!observer) return;
-    observer.observe(node);
-    return () => observer.unobserve(node);
+    observerRef.current?.observe(node);
+    return () => observerRef.current?.unobserve(node);
   }, []);
 
   // Callback refs: the grid mounts only after loading finishes, so an effect
