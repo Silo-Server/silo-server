@@ -582,9 +582,16 @@ func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 			p.unusable(SectionUsers, KindAccount, label, truncateText("It cannot be restored: "+err.Error(), 500))
 			continue
 		}
+		// The keys stay in memory with the account, so they count against
+		// the set's decoded bound as the document no longer does.
+		slices.Sort(blobs)
+		blobs = slices.Compact(blobs)
 		for _, key := range blobs {
 			if err := p.requireReferenced(SectionUsers, key); err != nil {
 				return 0, err
+			}
+			if p.decoded += int64(len(key)) + blobRefCost; p.decoded > maxRestoreSetDecoded {
+				return 0, fmt.Errorf("the accounts' blob references hold more than the %d bytes a restore set may hold", int64(maxRestoreSetDecoded))
 			}
 		}
 		if p.rs.accountBlobs == nil {

@@ -53,6 +53,13 @@ func (s *Service) checkUpload(ctx context.Context, parts *partsReader, declared 
 		return nil, &UploadRejection{Reason: RejectNotRestoreSet, Message: truncateRejection(err.Error())}, nil
 	}
 	rs, err := readStoredRestoreSet(ctx, body, ReadOptions{}, "", "")
+	// A set this check does not return takes its directory with it.
+	returned := false
+	defer func() {
+		if !returned {
+			rs.Cleanup()
+		}
+	}()
 	switch {
 	case parts.err != nil:
 		return nil, nil, parts.err
@@ -68,9 +75,9 @@ func (s *Service) checkUpload(ctx context.Context, parts *partsReader, declared 
 		return nil, &UploadRejection{Reason: RejectNotRestoreSet, Message: truncateRejection(err.Error())}, nil
 	case declared != "" && declared != rs.Digest:
 		// Changed between the hash and the read.
-		rs.Cleanup()
 		return nil, &UploadRejection{Reason: RejectChecksum, Message: msgUploadChecksum}, nil
 	}
+	returned = true
 	return rs, nil, nil
 }
 

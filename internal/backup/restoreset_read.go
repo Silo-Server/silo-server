@@ -80,6 +80,9 @@ const (
 	// its spilled document: its identity, two strings of at most
 	// maxAccountField bytes, and its file name (UserRef).
 	userRefCost = 4 << 10
+	// blobRefCost is what one blob key an account references costs beside
+	// its bytes: its string header in accountBlobs.
+	blobRefCost = 16
 	// maxRestoreSetTrailer bounds the bytes after the tar end marker.
 	maxRestoreSetTrailer = 1 << 20
 )
