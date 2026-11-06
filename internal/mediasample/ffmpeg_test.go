@@ -453,6 +453,68 @@ func TestRunSheetsRejectsPrematureEOFWithRealFFmpeg(t *testing.T) {
 	}
 }
 
+// TestRunSheetsAudioTailWithRealFFmpeg reads sheets from a two-second video
+// with audio, sampled at 1, 3, 5, and 7 s, through a window: MPEG-TS always
+// reads one, and Matroska does with ReadThrough. The video is dark until a
+// light keyframe at 1.5 s. Samples after the video ends but within an audio
+// stream show that last frame and publish, whichever audio stream runs on
+// and however many programs list it, and a declared audio stream without
+// packets does not fail the copy. A file whose audio stops with its video,
+// as a truncated one does, still fails as empty.
+func TestRunSheetsAudioTailWithRealFFmpeg(t *testing.T) {
+	ffmpeg, _ := realFFmpeg(t)
+	tone := func(seconds int) []string {
+		return []string{"-f", "lavfi", "-i", fmt.Sprintf("sine=frequency=440:duration=%d", seconds)}
+	}
+	tests := []struct {
+		name      string
+		container string
+		inputs    [][]string
+		// codec args after the video's; audio inputs follow the video input.
+		audio     []string
+		published bool
+	}{
+		{"ts audio tail", "ts", [][]string{tone(10)}, []string{"-map", "1:a", "-c:a", "aac"}, true},
+		{"mkv audio tail", "mkv", [][]string{tone(10)}, []string{"-map", "1:a", "-c:a", "aac"}, true},
+		{"ts truncated", "ts", [][]string{tone(2)}, []string{"-map", "1:a", "-c:a", "aac"}, false},
+		{"mkv truncated", "mkv", [][]string{tone(2)}, []string{"-map", "1:a", "-c:a", "aac"}, false},
+		{"mkv second audio tail", "mkv", [][]string{tone(2), tone(10)}, []string{"-map", "1:a", "-map", "2:a", "-c:a", "aac"}, true},
+		{"ts multi-program audio tail", "ts", [][]string{tone(2), tone(10)},
+			[]string{"-map", "1:a", "-map", "2:a", "-c:a", "aac", "-program", "st=0:st=1", "-program", "st=0:st=2", "-program", "st=0:st=1"}, true},
+		{"ts audio without packets", "ts", [][]string{tone(10)},
+			[]string{"-filter_complex", "[1:a]asplit[a][b];[a]atrim=end_sample=1[empty]", "-map", "[empty]", "-map", "[b]", "-c:a:0", "ac3", "-c:a:1", "aac"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clip := filepath.Join(t.TempDir(), "clip."+tt.container)
+			args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+				"color=c=0x303030:s=64x36:r=24:d=1.5[a];color=c=0xc0c0c0:s=64x36:r=24:d=0.5[b];[a][b]concat=n=2:v=1:a=0[out0]"}
+			for _, input := range tt.inputs {
+				args = append(args, input...)
+			}
+			args = append(args, "-map", "0:v", "-c:v", "libx264", "-threads", "1", "-g", "240", "-bf", "2", "-force_key_frames", "0,1.5")
+			args = append(append(args, tt.audio...), clip)
+			if output, err := exec.Command(ffmpeg, args...).CombinedOutput(); err != nil {
+				t.Skipf("cannot generate the clip: %v: %s", err, output)
+			}
+			req := Request{Input: clip, Samples: &Samples{Seconds: secondsFrom(1, 2, 4), ReadThrough: tt.container == "mkv"},
+				Sheets: &SheetsOutput{TileWidth: 24, TileHeight: 16, Columns: 2, Rows: 2, Quality: 80}, Threads: 1}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			result, err := (Runner{FFmpegPath: ffmpeg}).Run(ctx, req)
+			if !tt.published {
+				if failure, ok := errors.AsType[*Error](err); !ok || failure.Reason != ReasonEmpty {
+					t.Fatalf("frames %+v error %v, want the truncated file rejected", result.SheetFrames, err)
+				}
+			} else if err != nil || result.SheetFrames != (SheetFrames{Decoded: 4}) {
+				t.Fatalf("frames %+v error %v, want 4 decoded", result.SheetFrames, err)
+			} else if got := sheetLumas(t, result, 2, 2); !near(got[0], []int{48, 192, 192, 192}) {
+				t.Fatalf("cells %v, want the dark first keyframe then the light last one", got)
+			}
+		})
+	}
+}
+
 // TestRunSheetsAVIKeyframeTimesWithRealFFmpeg reads six ten-second gray
 // scenes from AVI files with B-frames, whose packets carry no PTS, sampled
 // three seconds into each scene. MPEG-4 Part 2 (XviD) decodes with low

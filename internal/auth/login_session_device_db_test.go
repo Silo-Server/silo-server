@@ -98,7 +98,7 @@ func TestDeviceLoginSessionRecordsPollingDeviceDB(t *testing.T) {
 	}
 	h := http.Header{}
 	h.Set(ClientDeviceIDHeader, "tv-0c4d2e")
-	poll, err := svc.Poll(WithClientDevice(ctx, h), start.DeviceCode)
+	poll, err := svc.Poll(WithClientDevice(ctx, h), start.DeviceCode, "")
 	if err != nil || poll.TokenPair == nil {
 		t.Fatalf("poll = %+v, %v", poll, err)
 	}

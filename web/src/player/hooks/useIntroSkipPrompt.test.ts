@@ -14,6 +14,7 @@ interface Props {
   currentTime: number;
   playing: boolean;
   enabled: boolean;
+  controlsVisible?: boolean;
 }
 
 describe("useIntroSkipPrompt", () => {
@@ -43,6 +44,7 @@ describe("useIntroSkipPrompt", () => {
       (current: Props) =>
         useIntroSkipPrompt({
           ...current,
+          controlsVisible: current.controlsVisible ?? false,
           intro,
           introKey: "session:file:intro",
           onSeek,
@@ -89,6 +91,34 @@ describe("useIntroSkipPrompt", () => {
     expect(result.current.prompt?.label).toBe("Skip Intro");
   });
 
+  it("brings a timed-out ask back with the controls while the intro plays", () => {
+    const inside = { mode: "ask" as const, currentTime: 12, playing: true, enabled: true };
+    const { result, rerender } = renderPrompt();
+    rerender(inside);
+    act(() => vi.advanceTimersByTime(INTRO_PROMPT_SECONDS * 1_000));
+    expect(result.current.prompt).toBeNull();
+
+    // The viewer brings the controls up: the offer returns without a timer,
+    // and goes away again with the controls.
+    rerender({ ...inside, currentTime: 14, controlsVisible: true });
+    expect(result.current.prompt?.label).toBe("Skip Intro");
+    expect(result.current.prompt?.timer).toBeNull();
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(result.current.prompt?.label).toBe("Skip Intro");
+    rerender({ ...inside, currentTime: 15, controlsVisible: false });
+    expect(result.current.prompt).toBeNull();
+
+    rerender({ ...inside, currentTime: 16, controlsVisible: true });
+    act(() => expect(result.current.select()).toBe(true));
+    expect(onSeek).toHaveBeenCalledWith(20);
+    expect(result.current.prompt).toBeNull();
+
+    // Selected, so resolved: seeking back in offers nothing, controls or not.
+    rerender({ ...inside, currentTime: 21, controlsVisible: true });
+    rerender({ ...inside, currentTime: 12, controlsVisible: true });
+    expect(result.current.prompt).toBeNull();
+  });
+
   it("skips immediately in always mode and makes the pill an undo", () => {
     const { result, rerender } = renderPrompt({ mode: "always" });
 
@@ -129,6 +159,7 @@ describe("useIntroSkipPrompt", () => {
             mode: "always",
             playing: true,
             enabled: true,
+            controlsVisible: false,
             onSeek,
           });
         },
@@ -209,7 +240,7 @@ describe("useIntroSkipPrompt", () => {
     act(() => vi.advanceTimersByTime(10_000));
 
     expect(result.current.prompt?.label).toBe("Skip Intro");
-    expect(result.current.prompt?.remainingMs).toBe(1_000);
+    expect(result.current.prompt?.timer?.remainingMs).toBe(1_000);
 
     rerender({ mode: "ask", currentTime: 12, playing: true, enabled: true });
     act(() => vi.advanceTimersByTime(999));

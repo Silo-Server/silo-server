@@ -53,6 +53,10 @@
 # re-id can rename an item whatever child rows it has (#933).
 ./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
 
+# Schema: every content_id-family reference is COLLATE "C", so a join on it can
+# use the referencing table's index, as the bulk enrichment state check does.
+./migrations TestContentIDFamilyReferencesUseCCollationPostgres
+
 # Watch detail artwork: movies, episodes and extras carry the poster and
 # backdrop clients publish to system media controls (#803).
 ./internal/catalog TestGetWatchDetailArtwork
@@ -70,8 +74,10 @@
 # once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
 
-# Seek previews: one availability lookup per item or episode page.
+# Seek previews: one availability lookup per item or episode page, and none
+# for a detail that leaves previews out.
 ./internal/catalog TestTrickplayAvailabilityBatchesItemDetails
+./internal/catalog TestItemDetailSkipsPlaybackPreviewsOnlyWhenAsked
 ./internal/catalog TestTrickplayAvailabilityBatchesEpisodeDetails
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
@@ -111,13 +117,21 @@
 ./internal/catalog TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres
 
 # Card play targets: leaf cards and a validated anchor hint resolve without a
-# watch-progress query, and the PostgreSQL path picks what the general path
-# picks.
+# watch-progress query, a page of cards reads the profile's resumable progress
+# once, and the PostgreSQL path picks what the general path picks.
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
 ./internal/catalog TestPlayableTargetResolverResumesDeepInsideLongSeries
 ./internal/catalog TestPlayableTargetResolverStaleCompletedProgressPlan
 ./internal/catalog TestCatalogOverlaySummariesPreserveLegacyWinners
 ./internal/catalog TestPlayableTargetsPostgresMatchesGeneral
+
+# One series' watch rollup runs on a generic plan that looks up each episode's
+# completed history instead of hashing a heavy profile's whole history.
+./internal/userstore/pgstore TestOneSeriesWatchCountsLooksUpHistoryPerEpisode
+
+# Home Recently Added TV: the newest cards take one round trip for the cutoff
+# and one for the window, with the JIT guard in the same batches.
+./internal/catalog TestRecentTVListNewestRoundTrips
 
 # Continue Watching: only an in-progress episode sets how far back the
 # superseded walk reads the profile's completed rows.
@@ -139,6 +153,10 @@
 # Shared personal collections: a listing resolves each other owner's access
 # once, and a profile's own collections resolve nobody.
 ./internal/api/handlers TestPersonalCollectionOwnerLookupBudgetDB
+
+# Viewer access: the account, its access group, the profile and its viewer
+# preferences cost one batch, and answer what reading each on its own does.
+./internal/policy TestViewerResolverBatchedReadsMatchEachDB
 
 # Metadata refresh: season and episode writes cost the same number of
 # statements for 1 and 100 episodes; episode refresh debt the same for 1, 100

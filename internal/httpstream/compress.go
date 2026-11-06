@@ -2,10 +2,14 @@ package httpstream
 
 import (
 	"bufio"
+	"bytes"
+	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // defaultCompressibleTypes are the media types the compressor encodes when a
@@ -52,7 +56,9 @@ func CompressExcept(skip func(*http.Request) bool, types ...string) func(http.Ha
 // once the response header is known: a response it reports reaches the wire
 // identity-encoded with no Content-Encoding or Vary added. Either exclusion
 // may be nil. Responses that already declare a content coding or a
-// Content-Range, and 204, 206 and 304 responses, are never negotiated.
+// Content-Range, and 204, 206 and 304 responses, are never negotiated. An
+// encoded response keeps a Content-Length, of the encoded body, when its
+// handler declared one of at most maxHeldLength and did not flush.
 func CompressWithExclusions(skipRequest func(*http.Request) bool, skipResponse func(*http.Request, http.Header) bool, types ...string) func(http.Handler) http.Handler {
 	if len(types) == 0 {
 		types = defaultCompressibleTypes
@@ -116,6 +122,33 @@ func (w *compressWriter) encodes(h http.Header) bool {
 // encodes. Playback progress replies (about 80 bytes) grew by a fifth under
 // gzip before the headers were counted.
 const minEncodedLength = 256
+
+// maxHeldLength is the largest declared Content-Length whose encoded body the
+// compressor holds until the handler returns, so it can go out in one write
+// with its encoded length. Without a length, net/http sends a body that
+// outgrows its 2 KiB buffer chunked, and closes the connection after it for an
+// HTTP/1.0 client. A longer body, or one whose handler flushes, streams.
+const maxHeldLength = 8 << 20
+
+// maxPooledHeld is the largest held-body buffer kept for reuse, so a
+// rare large response does not pin its buffer for the small ones after it.
+const maxPooledHeld = 64 << 10
+
+var heldBodies sync.Pool
+
+// heldBody is where a held response's encoder writes: into buf until the
+// response streams, then to out.
+type heldBody struct {
+	buf bytes.Buffer
+	out io.Writer
+}
+
+func (b *heldBody) Write(p []byte) (int, error) {
+	if b.out != nil {
+		return b.out.Write(p)
+	}
+	return b.buf.Write(p)
+}
 
 // negotiate returns the coding to apply for the Accept-Encoding field lines,
 // or nil for identity: the offered coding with the highest weight, ties going
@@ -191,7 +224,9 @@ func qValue(params string) (float64, bool) {
 
 // compressWriter decides on the first final status whether the response is
 // encoded, and takes an encoder from the coding's pool only then, so a
-// response that stays identity never touches one.
+// response that stays identity never touches one. An encoded response with a
+// declared length of at most maxHeldLength is held: its status, header and
+// encoded body reach the ResponseWriter only at close, or when it streams.
 type compressWriter struct {
 	http.ResponseWriter
 	r       *http.Request
@@ -201,6 +236,12 @@ type compressWriter struct {
 	decided bool
 	// identityRefused lets a short body be encoded (see compressor.encodes).
 	identityRefused bool
+	// held is a held response's encoder destination, and status and header
+	// are what it was written with; remaining counts down its declared length.
+	held      *heldBody
+	status    int
+	header    http.Header
+	remaining int64
 }
 
 func (w *compressWriter) WriteHeader(status int) {
@@ -213,12 +254,62 @@ func (w *compressWriter) WriteHeader(status int) {
 			h.Add("Vary", "Accept-Encoding")
 			if w.encodes(h) {
 				h.Set("Content-Encoding", w.coding.name)
+				if n, err := strconv.ParseInt(h.Get("Content-Length"), 10, 64); err == nil && n >= 0 && n <= maxHeldLength {
+					w.hold(status, n)
+					return
+				}
 				h.Del("Content-Length")
 				w.enc = w.coding.get(w.ResponseWriter)
 			}
 		}
+	} else if w.holding() {
+		// net/http would keep the first final status too.
+		return
 	}
 	w.ResponseWriter.WriteHeader(status)
+}
+
+// hold defers the response to close. The header is copied now so that, as
+// with net/http, a change the handler makes after WriteHeader is not sent.
+func (w *compressWriter) hold(status int, declared int64) {
+	b, ok := heldBodies.Get().(*heldBody)
+	if !ok {
+		b = new(heldBody)
+	}
+	w.held, w.status, w.header, w.remaining = b, status, w.Header().Clone(), declared
+	w.enc = w.coding.get(b)
+}
+
+func (w *compressWriter) holding() bool { return w.held != nil && w.held.out == nil }
+
+// writeHeldHeader writes the held status and header, with Content-Length set
+// to length, or removed when length is negative.
+func (w *compressWriter) writeHeldHeader(length int) {
+	h := w.Header()
+	clear(h)
+	maps.Copy(h, w.header)
+	if length < 0 {
+		h.Del("Content-Length")
+	} else {
+		h.Set("Content-Length", strconv.Itoa(length))
+	}
+	w.ResponseWriter.WriteHeader(w.status)
+}
+
+// stream ends a hold early: the header goes out without a length, then what
+// the encoder has produced so far, and the rest passes straight through.
+func (w *compressWriter) stream() error {
+	if !w.holding() {
+		return nil
+	}
+	w.writeHeldHeader(-1)
+	w.held.out = w.ResponseWriter
+	if w.held.buf.Len() == 0 {
+		return nil
+	}
+	_, err := w.ResponseWriter.Write(w.held.buf.Bytes())
+	w.held.buf.Reset()
+	return err
 }
 
 func (w *compressWriter) Write(p []byte) (int, error) {
@@ -226,18 +317,29 @@ func (w *compressWriter) Write(p []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	if w.enc != nil {
+		if w.holding() {
+			// A body longer than its declared length streams, so the hold
+			// stays bounded by maxHeldLength.
+			if int64(len(p)) > w.remaining {
+				if err := w.stream(); err != nil {
+					return 0, err
+				}
+			}
+			w.remaining -= int64(len(p))
+		}
 		return w.enc.Write(p)
 	}
 	return w.ResponseWriter.Write(p)
 }
 
-// Flush pushes what the encoder holds to the client. Like net/http, a flush
-// before any write commits a 200.
+// Flush pushes what the encoder holds to the client, which ends a hold. Like
+// net/http, a flush before any write commits a 200.
 func (w *compressWriter) Flush() {
 	if !w.decided {
 		w.WriteHeader(http.StatusOK)
 	}
 	if w.enc != nil {
+		_ = w.stream()
 		_ = w.enc.Flush()
 	}
 	_ = http.NewResponseController(w.ResponseWriter).Flush()
@@ -262,8 +364,9 @@ func (w *compressWriter) Push(target string, opts *http.PushOptions) error {
 // Unwrap lets http.ResponseController reach the connection's deadlines.
 func (w *compressWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// close ends the encoded body and returns the encoder to its pool. A client
-// that has gone makes the final write fail, which nobody can act on.
+// close ends the encoded body, returns the encoder to its pool, and sends a
+// held response with its encoded length. A client that has gone makes the
+// final write fail, which nobody can act on.
 func (w *compressWriter) close() {
 	if w.enc == nil {
 		return
@@ -271,4 +374,22 @@ func (w *compressWriter) close() {
 	_ = w.enc.Close()
 	w.coding.put(w.enc)
 	w.enc = nil
+	b := w.held
+	if b == nil {
+		return
+	}
+	if b.out == nil {
+		w.writeHeldHeader(b.buf.Len())
+		_, _ = w.ResponseWriter.Write(b.buf.Bytes())
+	}
+	w.held, w.header = nil, nil
+	// The pooled encoder still points at b until its next Reset, so a large
+	// buffer is dropped rather than left reachable through it.
+	if b.buf.Cap() > maxPooledHeld {
+		b.buf = bytes.Buffer{}
+	} else {
+		b.buf.Reset()
+	}
+	b.out = nil
+	heldBodies.Put(b)
 }

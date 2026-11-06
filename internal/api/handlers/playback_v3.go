@@ -7934,8 +7934,9 @@ func remuxDVModeForPlanV3(plan *playback.PlanV3) playback.RemuxDVMode {
 	if plan.Source.DVProfile == 7 {
 		// Without the strip transformation a P7 remux would drop the
 		// enhancement layer and leave dangling RPUs. A P7 plan claiming Dolby
-		// Vision is a client-side transform of the original bytes, so any
-		// remux attempt against this session must still be rejected.
+		// Vision is a client-side transform of the original bytes or the
+		// server's HLS-only 8.1 conversion, so any progressive remux attempt
+		// against this session must still be rejected.
 		return playback.RemuxDVRejectP7V3
 	}
 	if plan.Claims.Video.DolbyVision {
@@ -7956,6 +7957,9 @@ func videoBitstreamFilterForPlanV3(plan *playback.PlanV3) string {
 	for _, transformation := range plan.Transformations {
 		if transformation.Executor == playback.ExecutorServerV3 && transformation.Name == playback.TransformationServerDV7HDR10V3 {
 			return playback.DV7ToHDR10BitstreamFilter
+		}
+		if transformation.Executor == playback.ExecutorServerV3 && transformation.Name == playback.TransformationServerDV7DV81V3 {
+			return playback.DV7ToDV81BitstreamFilter
 		}
 	}
 	return ""
@@ -7981,7 +7985,7 @@ func videoSampleEntryForPlanV3(plan *playback.PlanV3) string {
 		return plan.EffectiveRecipe.VideoSampleEntry
 	}
 	for _, transformation := range plan.Transformations {
-		if transformation.Name == playback.TransformationServerDV7HDR10V3 {
+		if transformation.Name == playback.TransformationServerDV7HDR10V3 || transformation.Name == playback.TransformationServerDV7DV81V3 {
 			return playback.VideoSampleEntryHVC1
 		}
 	}

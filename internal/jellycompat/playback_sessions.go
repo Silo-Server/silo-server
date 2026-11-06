@@ -173,6 +173,10 @@ type PlaybackMediaSource struct {
 	// hlsRemuxInTS marks a copy the client accepts only as MPEG-TS. PlaybackInfo
 	// reads it once the route is final, so it is not stored.
 	hlsRemuxInTS bool
+	// progressiveRemuxFallback marks a progressive remux the client could
+	// direct stream, offered only if PlaybackInfo leaves no TranscodingUrl.
+	// It is read once the route is final, so it is not stored.
+	progressiveRemuxFallback bool
 
 	// preservedJSON carries fields written by a newer binary through this
 	// binary's durable read-modify-write cycle. See playback_sessions_json.go.

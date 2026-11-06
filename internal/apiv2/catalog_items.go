@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 // Section catalog-items: the profile-scoped catalog browse, facet documents,
@@ -719,6 +720,7 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, ar
 		}
 		opts.PresentationLibraryID = &n
 		opts.ScopeFilesToLibrary = reg.versionsScopedToLibrary(ctx)
+		opts.SeriesLibraryCoversEpisodes = true
 	}
 	if fileID != "" {
 		n, p := fileID.positive("query.file_id")
@@ -1228,7 +1230,9 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 	}
 	out := catalogItemDetailOf(detail, reg.ratingSelection(ctx))
 	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
-		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
+		// The detail authorized the item under the same filter and carries
+		// its owner fields, so the theme lookup repeats neither.
+		themes, err := reg.deps.ThemeSongs.Discover(ctx, themeItemOf(detail), true, viewer.Access)
 		if err != nil {
 			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "catalog theme lookup failed", "component", "apiv2", "item_id", in.ID, "error", err)
 			return &CatalogItemDetailOutput{Body: out}, nil
@@ -1239,6 +1243,19 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 		}
 	}
 	return &CatalogItemDetailOutput{Body: out}, nil
+}
+
+// themeItemOf is the theme owner a movie, series, season, or episode detail
+// describes. A movie or series is its own series.
+func themeItemOf(d *catalogpkg.ItemDetail) themesongs.Item {
+	item := themesongs.Item{ID: d.ContentID, Type: d.Type, SeriesID: d.SeriesID, SeasonID: d.SeasonID}
+	if d.Type == themeOwnerMovie || d.Type == themeOwnerSeries {
+		item.SeriesID = d.ContentID
+	}
+	if d.SeasonNumber != nil {
+		item.SeasonNumber = *d.SeasonNumber
+	}
+	return item
 }
 
 func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogItemDeviceInput) (*FileVersionCollectionOutput, error) {

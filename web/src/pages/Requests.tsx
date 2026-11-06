@@ -3,6 +3,8 @@ import { Navigate, useSearchParams } from "react-router";
 import { Film, Info, Library, RefreshCw, Tv } from "lucide-react";
 import BrandCarousel from "@/components/BrandCarousel";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import LibraryItemLink from "@/components/LibraryItemLink";
 import MediaCarousel from "@/components/MediaCarousel";
 import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import RequestPosterCard from "@/components/RequestPosterCard";
@@ -20,6 +22,7 @@ import {
   useDiscoverNetworks,
   useDiscoverStudios,
   useMyMediaRequests,
+  useRemoveFailedMediaRequest,
   useRequestDiscovery,
 } from "@/hooks/queries/useRequests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -29,6 +32,7 @@ import { formatRelativeTime } from "@/lib/date";
 import { formatDate } from "@/lib/datetime";
 import {
   canCancelOwnRequest,
+  canRemoveOwnRequest,
   formatMediaType,
   formatRequestDate,
   formatSeasonList,
@@ -78,7 +82,11 @@ const STATUS_HELP: Array<{ state: RequestDisplayState; description: string }> = 
   { state: "available", description: "In your library and ready to watch." },
   { state: "declined", description: "An admin declined it." },
   { state: "cancelled", description: "Withdrawn before it was sent to the download automation." },
-  { state: "failed", description: "Silo or the download automation hit an error." },
+  {
+    state: "failed",
+    description:
+      "Silo or the download automation hit an error. You can remove it if nothing was delivered.",
+  },
 ];
 
 /**
@@ -295,6 +303,9 @@ function YoursTab({
   const cancelRequest = useCancelMediaRequest();
   const [cancelTarget, setCancelTarget] = useState<MediaRequest | null>(null);
   const cancellingID = cancelRequest.isPending ? cancelRequest.variables : undefined;
+  const removeRequest = useRemoveFailedMediaRequest();
+  const [removeTarget, setRemoveTarget] = useState<MediaRequest | null>(null);
+  const removingID = removeRequest.isPending ? removeRequest.variables : undefined;
   const groups = useMemo(() => groupRequests(requests), [requests]);
 
   let body;
@@ -352,6 +363,10 @@ function YoursTab({
                       canCancelOwnRequest(request) ? () => setCancelTarget(request) : undefined
                     }
                     isCancelling={cancellingID === request.id}
+                    onRemove={
+                      canRemoveOwnRequest(request) ? () => setRemoveTarget(request) : undefined
+                    }
+                    isRemoving={removingID === request.id}
                   />
                 ))}
               </ul>
@@ -382,6 +397,21 @@ function YoursTab({
         }}
         isPending={cancelRequest.isPending}
       />
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(null);
+        }}
+        title="Remove this request?"
+        description={`Your failed request for "${removeTarget?.title ?? ""}" will be deleted. You can request the title again later.`}
+        confirmLabel="Remove request"
+        cancelLabel="Keep request"
+        variant="destructive"
+        onConfirm={() => {
+          if (removeTarget) removeRequest.mutate(removeTarget.id);
+        }}
+        isPending={removeRequest.isPending}
+      />
     </div>
   );
 }
@@ -390,11 +420,16 @@ function RequestRow({
   request,
   onCancel,
   isCancelling,
+  onRemove,
+  isRemoving,
 }: {
   request: MediaRequest;
   /** Offered only while the request can still be withdrawn. */
   onCancel?: () => void;
   isCancelling: boolean;
+  /** Offered only on a failed request that delivered nothing. */
+  onRemove?: () => void;
+  isRemoving: boolean;
 }) {
   const state = requestDisplayState(request.status, request.outcome, request.state);
   const href = requestDetailHref(request.media_type, request.tmdb_id);
@@ -473,17 +508,17 @@ function RequestRow({
           ) : null}
         </div>
 
-        {onCancel || request.library_content_id ? (
+        {onCancel || onRemove || request.library_content_id ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {request.library_content_id ? (
               <Button asChild variant="outline" size="sm">
-                <ViewTransitionLink
-                  to={`/item/${encodeURIComponent(request.library_content_id)}`}
+                <LibraryItemLink
+                  contentId={request.library_content_id}
                   aria-label={`Open ${request.title} in library`}
                 >
                   <Library className="h-3.5 w-3.5" aria-hidden />
                   Open in library
-                </ViewTransitionLink>
+                </LibraryItemLink>
               </Button>
             ) : null}
             {onCancel ? (
@@ -496,6 +531,18 @@ function RequestRow({
                 aria-label={`Cancel request for ${request.title}`}
               >
                 Cancel request
+              </Button>
+            ) : null}
+            {onRemove ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onRemove}
+                disabled={isRemoving}
+                aria-label={`Remove request for ${request.title}`}
+              >
+                Remove request
               </Button>
             ) : null}
           </div>

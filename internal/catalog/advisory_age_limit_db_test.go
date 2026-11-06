@@ -57,3 +57,44 @@ func TestApplyMaturityLimitsAdvisoryAge(t *testing.T) {
 		t.Fatalf("blocked ceiling: %v %v %d", conditions, args, next)
 	}
 }
+
+// TestApplyMaturityLimitsAllowedTitles pins the allowance shape: allowed
+// titles pass every limit, including a blocked ceiling, keyed by content_id
+// for items and by series_id for episode rows; with no limit they bind
+// nothing.
+func TestApplyMaturityLimitsAllowedTitles(t *testing.T) {
+	allowed := []string{"m1", "s1"}
+	apply := func(episode bool, limits access.MaturityLimits) ([]string, []any, int) {
+		var conditions []string
+		var args []any
+		argIdx := 3
+		if episode {
+			ApplyEpisodeMaturityLimits("ece", AccessFilter{MaturityLimits: limits}, &conditions, &args, &argIdx)
+		} else {
+			ApplyMaturityLimits("mi", AccessFilter{MaturityLimits: limits}, &conditions, &args, &argIdx)
+		}
+		return conditions, args, argIdx
+	}
+
+	conditions, args, next := apply(false, access.MaturityLimits{MaxContentRating: "PG", MaxAdvisoryAge: 10, AllowedTitleIDs: allowed})
+	want := "(((mi.content_rating_age IS NOT NULL AND mi.content_rating_age <= $3) AND (mi.advisory_age IS NULL OR mi.advisory_age <= $4)) OR mi.content_id = ANY($5))"
+	if !slices.Equal(conditions, []string{want}) || len(args) != 3 || !slices.Equal(args[2].([]string), allowed) || next != 6 {
+		t.Fatalf("item allowance: %v %v %d", conditions, args, next)
+	}
+
+	conditions, _, _ = apply(true, access.MaturityLimits{MaxContentRating: "PG", AllowedTitleIDs: allowed})
+	want = "(((ece.content_rating_age IS NOT NULL AND ece.content_rating_age <= $3)) OR ece.series_id = ANY($4))"
+	if !slices.Equal(conditions, []string{want}) {
+		t.Fatalf("episode allowance: %v", conditions)
+	}
+
+	conditions, args, next = apply(false, access.MaturityLimits{MaxContentRating: "NR", AllowedTitleIDs: allowed})
+	if !slices.Equal(conditions, []string{"((1 = 0) OR mi.content_id = ANY($3))"}) || len(args) != 1 || next != 4 {
+		t.Fatalf("blocked ceiling with allowance: %v %v %d", conditions, args, next)
+	}
+
+	conditions, args, next = apply(false, access.MaturityLimits{AllowedTitleIDs: allowed})
+	if len(conditions) != 0 || len(args) != 0 || next != 3 {
+		t.Fatalf("allowance without a limit: %v %v %d", conditions, args, next)
+	}
+}

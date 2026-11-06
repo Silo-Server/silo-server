@@ -3,6 +3,7 @@ import { Copy, Info } from "lucide-react";
 import { toast } from "sonner";
 import type { FileVersion } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { resolutionScore } from "@/pages/ItemDetail/components/versionRankingUtils";
 import { buildQualitySummary } from "@/pages/ItemDetail/components/VersionFlyout";
@@ -82,7 +83,7 @@ function deriveMediaLocationsWithSummary(
 
 async function copyText(text: string, successMessage: string) {
   try {
-    await navigator.clipboard.writeText(text);
+    await copyTextToClipboard(text);
     toast.success(successMessage);
   } catch {
     toast.error("Failed to copy path");

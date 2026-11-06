@@ -447,6 +447,26 @@ export function useSearchItemMatchCandidates(contentId: string) {
   });
 }
 
+/**
+ * The title, year, and provider IDs the scanner read from the item's folder
+ * and file names in the given library: what Match Item suggests searching
+ * instead of the item's current, possibly wrong, match.
+ */
+export function useItemMatchHints(contentId: string | undefined, libraryId: number | undefined) {
+  return useQuery({
+    queryKey: itemKeys.matchHints(contentId ?? "", libraryId),
+    queryFn: ({ signal }) =>
+      v2("GET /api/v2/admin/items/{id}/match/hints", {
+        path: { id: contentId ?? "" },
+        query: { library_id: libraryId == null ? undefined : String(libraryId) },
+        signal,
+      }),
+    enabled: Boolean(contentId),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
 type ApplyMatchItem = Pick<ItemDetail, "content_id" | "series_id" | "season_number"> & {
   type: string;
   library_id?: number;

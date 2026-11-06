@@ -57,7 +57,7 @@ func TestDirectUserDataServiceCompletedListsReportPlayDate(t *testing.T) {
 	service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
 	session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 	played := time.Date(2019, 3, 14, 20, 15, 0, 0, time.UTC)
-	if err := service.MarkPlayedBatchAt(t.Context(), session, []string{"movie-1"}, played); err != nil {
+	if err := service.MarkPlayedBatchAt(t.Context(), session, []string{"movie-1"}, played, false); err != nil {
 		t.Fatal(err)
 	}
 

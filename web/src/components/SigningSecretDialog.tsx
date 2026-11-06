@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
  * One-time reveal of a webhook signing secret (profile webhooks and admin
@@ -39,10 +41,14 @@ export function SigningSecretDialog({
             variant="ghost"
             size="icon"
             className="h-7 w-7 shrink-0"
-            onClick={() => {
-              if (secret) {
-                void navigator.clipboard.writeText(secret);
+            aria-label={copied ? "Signing secret copied" : "Copy signing secret"}
+            onClick={async () => {
+              if (!secret) return;
+              try {
+                await copyTextToClipboard(secret);
                 setCopied(true);
+              } catch {
+                toast.error("Failed to copy to clipboard");
               }
             }}
           >

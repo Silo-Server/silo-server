@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -279,22 +278,9 @@ func (h *UserCollectionImportHandler) createImportedCollection(
 
 	syncResult, updated, syncErr := h.sync.RunSync(ctx, userID, store, collection)
 	if syncErr != nil {
-		// Persist failure state inline so the UI shows the error and the user
-		// can retry; the row is intentionally kept around for that retry path.
-		_ = store.UpdateCollectionSyncState(ctx, userstore.UpdateCollectionSyncStateInput{
-			ID:         collection.ID,
-			Status:     "failed",
-			Message:    syncErr.Error(),
-			LastSyncAt: time.Now().UTC(),
-			NextSyncAt: usercollections.InitialNextSyncAt(schedule),
-
-			// The sync started on the schedule and next run the collection was
-			// created with.
-			ScheduleAtStart:   collection.SyncSchedule,
-			NextSyncAtAtStart: collection.NextSyncAt,
-		})
-		// Render what was stored, as a successful sync does; a schedule
-		// edited while the sync ran kept its own next run.
+		// RunSync recorded the failure, and the row is kept so the user can
+		// retry. Render what was stored, as a successful sync does; a
+		// schedule edited while the sync ran kept its own next run.
 		if updated, err = store.GetCollection(ctx, collection.ID); err != nil {
 			updated = collection
 			updated.LastSyncStatus = "failed"
@@ -501,7 +487,10 @@ func (h *UserCollectionImportHandler) SyncPersonalCollection(ctx context.Context
 		if errors.Is(err, usercollections.ErrSyncUnsupported) {
 			return nil, apiError(http.StatusBadRequest, "bad_request", "This collection does not support sync")
 		}
-		return nil, apiError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Sync failed: %v", err))
+		// RunSync recorded the failure on the collection. The frozen v1 route
+		// keeps answering 500; the cause lets v2 answer a source that refused
+		// or did not answer as dependency_unavailable with the reason.
+		return nil, apiError(http.StatusInternalServerError, "internal_error", fmt.Sprintf("Sync failed: %v", err)).WithCause(err)
 	}
 	return result, nil
 }

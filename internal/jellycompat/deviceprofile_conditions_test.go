@@ -401,11 +401,13 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 				HDR10Plus:      true,
 				VideoRangeType: "HDR10Plus",
 			}, "2160p"),
-			codecProfiles:      []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus|HDR10Plus")},
-			wantDirectPlay:     false,
+			codecProfiles:  []CodecProfile{unsupportedRangeProfile("hevc", "DOVIInvalid|DOVIWithEL|DOVIWithELHDR10Plus|HDR10Plus")},
+			wantDirectPlay: false,
+			// An HLS copy still accepts the HDR10 base (hlsRemuxHDR10PlusConditionMatches),
+			// so the video is copied and only the TrueHD audio is encoded.
 			wantDirectStream:   false,
 			wantTranscoding:    true,
-			wantTranscodeAudio: false,
+			wantTranscodeAudio: true,
 		},
 		{
 			name: "audio channel limit preserves video copy and transcodes audio",
@@ -482,6 +484,83 @@ func TestBuildPlaybackSourceCodecProfiles(t *testing.T) {
 			}
 			if source.TranscodeAudio != tt.wantTranscodeAudio {
 				t.Fatalf("TranscodeAudio = %v, want %v", source.TranscodeAudio, tt.wantTranscodeAudio)
+			}
+		})
+	}
+}
+
+// Jellyfin applies a direct-play profile's audio conditions only when the
+// source has an audio stream, and clients write their profiles against that.
+func TestBuildPlaybackSourceVideoOnlyFileIgnoresAudioRequirements(t *testing.T) {
+	h := &PlaybackHandler{codec: NewResourceIDCodec()}
+	videoOnly := catalog.FileVersion{
+		FileID:      1,
+		Resolution:  "1080p",
+		Container:   "mp4",
+		CodecVideo:  "hevc",
+		Bitrate:     8000,
+		VideoTracks: []models.VideoTrack{{Codec: "hevc", Profile: "Main", Level: 120, Width: 1920, Height: 1080, BitDepth: 8}},
+	}
+	withRejectedAudio := videoOnly
+	withRejectedAudio.CodecAudio = "truehd"
+	withRejectedAudio.AudioTracks = []models.AudioTrack{{Codec: "truehd", Channels: 8, Default: true}}
+	profile := DeviceProfile{
+		DirectPlayProfiles: []DirectPlayProfile{{Type: "Video", Container: "mp4", VideoCodec: "h264,hevc", AudioCodec: "aac"}},
+		TranscodingProfiles: []TranscodingProfile{
+			{Type: "Video", Protocol: "hls", Container: "ts", VideoCodec: "h264", AudioCodec: "aac"},
+			{Type: "Video", Protocol: "hls", Container: "mp4", VideoCodec: "h264,hevc", AudioCodec: "aac", MaxAudioChannels: "6"},
+		},
+	}
+
+	tests := []struct {
+		name               string
+		version            catalog.FileVersion
+		req                playbackInfoRequest
+		codecProfiles      []CodecProfile
+		wantDirectPlay     bool
+		wantDirectStream   bool
+		wantHLSRemux       bool
+		wantTranscodeAudio bool
+	}{
+		{name: "video only file direct plays", version: videoOnly, wantDirectPlay: true, wantDirectStream: true},
+		{
+			name:    "channel ceiling does not apply without audio",
+			version: videoOnly, req: playbackInfoRequest{MaxAudioChannels: 2},
+			wantDirectPlay: true, wantDirectStream: true,
+		},
+		{
+			name:    "audio codec profiles do not apply without audio",
+			version: videoOnly,
+			codecProfiles: []CodecProfile{{
+				Type:       "VideoAudio",
+				Conditions: []ProfileCondition{{Condition: "LessThanEqual", Property: "AudioChannels", Value: "2", IsRequired: true}},
+			}},
+			wantDirectPlay: true, wantDirectStream: true,
+		},
+		{
+			name:    "hls copies video only file without an audio encode",
+			version: videoOnly, req: playbackInfoRequest{EnableDirectPlay: boolPtr(false)},
+			wantHLSRemux: true,
+		},
+		{
+			name:    "rejected audio track still blocks direct play",
+			version: withRejectedAudio, wantHLSRemux: true, wantTranscodeAudio: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile := profile
+			profile.CodecProfiles = tt.codecProfiles
+			source := h.buildPlaybackSource("item", "play", tt.version, profile, tt.req, true)
+			if source.SupportsDirectPlay != tt.wantDirectPlay {
+				t.Fatalf("SupportsDirectPlay = %v, want %v", source.SupportsDirectPlay, tt.wantDirectPlay)
+			}
+			if source.SupportsDirectStream != tt.wantDirectStream {
+				t.Fatalf("SupportsDirectStream = %v, want %v", source.SupportsDirectStream, tt.wantDirectStream)
+			}
+			if source.HLSRemux != tt.wantHLSRemux || source.TranscodeAudio != tt.wantTranscodeAudio {
+				t.Fatalf("HLSRemux, TranscodeAudio = %v, %v, want %v, %v", source.HLSRemux, source.TranscodeAudio, tt.wantHLSRemux, tt.wantTranscodeAudio)
 			}
 		})
 	}

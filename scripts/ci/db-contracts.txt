@@ -4,6 +4,7 @@
 
 # Library visibility, rating ceilings, mixed catalogs, and section results.
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
+./internal/catalog TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
@@ -11,6 +12,8 @@
 ./internal/catalog TestCatalogManualCollectionCursorDB
 ./internal/catalog TestMixedCatalogMangaCounts
 ./internal/catalog TestContentRatingCeilingAcrossSystemsDB
+./internal/catalog TestRatingsPageFollowsAccessDB
+./internal/userstore/pgstore TestTitleAllowancesLiftProfileLimitsDB
 ./internal/catalog TestJellyfinPersonReadsMatchNativeVisibilityPostgres
 ./internal/recommendations TestRecentCompletedItemIDsGroupsSeriesBeforeLimit
 ./internal/sections TestCompatibilityRecentlyAddedReturnsFlatDistinctSeries
@@ -20,11 +23,14 @@
 ./internal/catalog TestCountsAndListingsLeaveOutItemsHeldByRemovalGraceDB
 ./internal/catalog TestSearchLeavesOutItemsInNoLibraryPostgres
 ./internal/api/handlers TestUnmatchedItemsLeaveOutItemsInNoLibraryDB
+./internal/api/handlers TestPersonalListPagesKeepVisibleEpisodesDB
+./internal/catalog TestPersonalListPageFollowsAccessDB
 ./internal/audiobooks TestABSListsLeaveOutBooksInNoLibraryDB
 ./internal/api/handlers TestAdminStatsLeaveOutFilesAndItemsHeldByRemovalGraceDB
 ./internal/sections TestRuleRowsReadTheViewersWatchStatePostgres
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
+./internal/scanner TestScannedGroupForItemDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
 ./internal/scanner TestMatroskaTrackBackfillStopsOnIntermittentStalls
@@ -57,6 +63,9 @@
 # A finished regular episode does not push a half-watched special off Continue Watching.
 ./internal/catalog TestSupersededSpecialsNeedALaterSpecialPostgres
 
+# A failed play-target read returns its error and the pool reuses its connection.
+./internal/catalog TestPlayableTargetQueryFailureKeepsConnection
+
 # Series air-date sort keys advance when a known episode airs. The latest
 # available episode air date counts only episodes with a file in a library:
 # files the bulk episode link attaches count, also when an air-date correction
@@ -86,6 +95,10 @@
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB
+
+# Web-only hero rows: the web_only column keeps a page's hero banner off every
+# caller but the web on Home and library pages, and clears with the hero.
+./internal/api/handlers TestWebOnlyHeroRowsDB
 
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
@@ -137,12 +150,15 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
+./internal/auth TestSignupPolicySerializationDB
+./internal/apiv2 TestSignupCommitPolicyErrorsDB
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
 ./internal/jellycompat TestDurableCompatPlaybackStoreUpdateRejectionAcrossReplicas
 ./internal/jellycompat TestDurableCompatPlaybackStoreDropsRejectedPendingUpdate
+./internal/jellycompat TestPseudoUserOwnerAcrossReplicasPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
 ./internal/invitations TestInvitationServiceCommittedOutcomesDB
@@ -308,6 +324,7 @@
 ./internal/markers TestProviderConfigEnsureDefaultSharingDB
 ./internal/markers TestProviderConfigPatchKeepsConcurrentOptOutDB
 ./cmd/silo TestStopDefaultMarkerSharingInTxDB
+./cmd/silo TestBackupCommandsReadS3DB
 ./internal/markers TestContributionStoreAmendResubmitsChangedMarkers
 ./internal/markers TestContributionStoreAmendSendsAnUnsentManualCorrection
 ./internal/markers TestContributionStoreAmendSendsManualClears
@@ -356,12 +373,14 @@
 
 # Request cleanup, prepared downloads and user-store transactions.
 ./internal/requests TestReplaceFailedIsScopedToRequesterDatabase
+./internal/requests TestDeleteFailedRequestDatabase
 ./internal/requests TestListDownloadingRequestsOrderDatabase
 ./internal/downloads TestConcurrentArtifactCreatesCannotBypassQuotaDB
 ./internal/downloads TestSubscriptionSyncPagePostgres
 ./internal/downloads TestMonitorSyncKeepsDeletedEpisodesDeletedPostgres
 ./internal/downloads TestMonitorSyncSkipsWatchedEpisodesPostgres
 ./internal/downloads TestDownloadCreatePagesPostgres
+./internal/downloads TestSeriesPageFollowsTheVersionTemplatePostgres
 ./internal/downloads TestArtifactRecoveryDeletesWrongSizedRemoteBeforeRequeue
 ./internal/downloads TestArtifactEnsureQueuedRoundTripsToneMapRecipe
 ./internal/downloads TestSubscriptionQualityPostgres
@@ -377,6 +396,7 @@
 ./internal/downloads TestDownloadLinkedToCanceledPreparationFails
 ./internal/userstore/pgstore TestPostgresClearResumePosition
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
+./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult
 ./internal/userstore/pgstore TestPostgresDeleteProfileCoversEveryProfileTable
 ./internal/userstore/pgstore TestPostgresDeleteProfileRemovesProfileState
 ./internal/userstore/pgstore TestPostgresConcurrentSectionOverrideSaves
@@ -390,6 +410,7 @@
 ./internal/userstore/pgstore TestPostgresAtomicJellycompatProgress
 ./internal/userstore/pgstore TestPostgresPersonalListPage
 ./internal/userstore/pgstore TestPostgresReplaceCollectionItemsWritesOnlyTheDifference
+./internal/userstore/pgstore TestPostgresItemUserFlagsMatchesPerTableReads
 
 # Intro analysis state timestamps and config-hash isolation.
 ./internal/intromarkers TestSeasonStateIsKeyedByAnalysisHashPostgres
@@ -406,6 +427,12 @@
 # Login sessions record the device that signed in.
 ./internal/auth TestLoginSessionRecordsReportedDeviceDB
 ./internal/auth TestDeviceLoginSessionRecordsPollingDeviceDB
+
+# A bound device sign-in is collected only with its secret, on this release
+# and, through the schema, on an older one; one TV signs in to two accounts.
+./internal/auth TestDeviceLoginSessionBindingDB
+./internal/auth TestDeviceLoginCopiedBindingDB
+./internal/auth TestDeviceLoginTwoAccountsOneDeviceDB
 
 # Admin top-activity leaderboards count playback, not marked-watched rows.
 ./internal/api/handlers TestAdminTopActivityCountsFinishedPlayback
@@ -456,6 +483,9 @@
 
 # The Postgres auto-tuning restart warning lists only settings a restart would change.
 ./internal/database TestPostgresSettingsPendingRestartPostgres
+
+# The omnibus image's startup tuning file holds exactly the restart-only settings it can size.
+./internal/database TestPostgresStartupSettingsMatchServerPostgres
 
 # Online partitioned audit indexes preserve writers and resume canceled builds.
 ./internal/partman TestOnlinePartitionIndexesKeepWritersAvailableDB
@@ -568,7 +598,7 @@
 ./internal/recommendations TestTasteProfileSubjectsReadTheSQLiteStorePostgres
 ./internal/recommendations TestTasteProfileSubjectsSkipDeletedProfilesPostgres
 ./internal/recommendations TestTasteSeedCandidatesHonourAccessPostgres
-./internal/recommendations TestWatchedItemIDSetQueryMatchesStoreWalkPostgres
+./internal/recommendations TestProgressReadsMatchStoreWalkPostgres
 ./internal/sections TestRecommendationSectionsFillFromTheWholePoolPostgres
 ./internal/webhooksync TestWebhookEventsReportSignalChangesPostgres
 ./migrations TestPurgeOrphanedRecommendationRowsPostgres
@@ -596,6 +626,7 @@
 ./internal/recommendations TestRelevanceRubricLeakagePostgres
 ./internal/recommendations TestRelevanceRubricNewProfileGetsRowsPostgres
 ./internal/recommendations TestRelevanceRubricProfilesOnOneAccountDifferPostgres
+./internal/recommendations TestSimilarItemsValidateEveryCandidatePostgres
 ./internal/recommendations TestTasteProfileSummaryGenresComeFromTheClustersPostgres
 ./internal/recommendations TestTasteSeedPickerInterleavesGenresPostgres
 ./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres
@@ -692,6 +723,11 @@
 # The household profile limit holds under concurrent creates (issue #2423).
 ./internal/api/handlers TestCreateProfileLimitConcurrentDB
 
+# A scan request for a scope with an active run joins that run without a
+# duplicate-key ERROR, and queues a new run if that one finished meanwhile
+# (issue #3441).
+./internal/scanqueue TestCreateOnClaimedScopeJoinsTheActiveRunDB
+
 # A scan cut short by shutdown goes back to the queue with its owed follow-up;
 # an admin cancel still ends it cancelled, and a late requeue never takes back
 # another worker's claim.
@@ -705,6 +741,9 @@
 # again, and a stale worker never heartbeats or ends another worker's claim.
 ./internal/scanqueue TestRunningScanStopsWhenItsClaimEndsElsewhereDB
 ./internal/scanqueue TestStaleWorkerLeavesALaterClaimRunningDB
+
+# A run requeued as stale drops the abandoned attempt's progress.
+./internal/scanqueue TestStaleRequeueClearsTheAbandonedProgressDB
 
 # Password sign-in spends one attempt budget per name on every surface.
 ./internal/auth TestSignInNameBudgetDB
@@ -782,3 +821,134 @@
 # Local artwork in a title folder linked out of the library is vouched for by
 # present cataloged files of the same title under that folder.
 ./internal/catalog TestCatalogedFilesUnderListsPresentFilesOfTheTitleDB
+
+# Theme lookup reads only the folders that hold themes, and an item whose
+# versions span folders still finds the themes of the one that has them.
+./internal/themesongs TestResolveFindsThemesInOneOfAnItemsFoldersDB
+
+# Item detail reads the viewer's per-item state in one batch: each part equals
+# its single-item read, and a promotable watchlist title still reports
+# in_watchlist after the batch read the watchlist first.
+./internal/userstore/pgstore TestQueueItemViewerStateMatchesSingleReads
+./internal/api/handlers TestItemDetailViewerStateBatchDB
+
+# Watch-sync admission commits one manual reservation across repository instances.
+./internal/watchsync TestSyncRunAdmissionDB
+
+# Backups: the full restore round trip (needs the PostgreSQL 18 client), the
+# manifest written last and the sweep, the cluster-wide subsystem lock, the
+# published status of the operation holding it, and every table classified
+# for backup and restore. Selective restore: the
+# restore round trip with re-run after interruption, idempotency and digest
+# refusal; plugins never installed from a backup, only reconfigured; restore job fencing;
+# a restored library whose setup partly failed, or whose provider placement
+# could not be read, reports it so it is retried without a fallback chain.
+./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestEncryptedS3RoundTripDB
+./internal/backup TestFullRestoresAreSerializedDB
+./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB
+./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
+./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
+./internal/backup TestBackupWritesManifestLastDB
+./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
+./internal/backup TestLostLockSessionCancelsWorkDB
+./internal/backup TestListReportsThePublishedOperationDB
+./internal/backup TestStatusBelongsToTheOperationHoldingTheLockDB
+./internal/backup TestStatusRecordsTheLastSuccessDB
+./internal/backup TestBackupAndDeleteWithOnePoolConnectionDB
+./internal/backup TestEveryTableIsClassifiedDB
+./internal/backup TestSelectiveRestoreDB
+./internal/backup TestRestoreRechecksAccessSettingsUnderTheLockDB
+./internal/backup TestRestoreNeverSendsLiveSecretsToARestoredAddressDB
+./internal/backup TestTemplateCollectionsAndHomeSectionsDB
+./internal/backup TestRestoredLibrarySectionsWaitForTheRestoreDB
+./internal/backup TestManagedSectionPointedElsewhereIsRestoredDB
+./internal/backup TestSelectiveRestoreOnOneConnectionDB
+./internal/backup TestUnverifiedRestoreLeavesCostlyWorkOffDB
+./internal/backup TestRestoreItemWritesDoNotGrowDB
+./internal/backup TestUnverifiedSectionCollectionHasNoScheduleDB
+./internal/backup TestRestoreRefusesCollectionSourcesTheEditorWouldDB
+./internal/backup TestManagedCollectionKeysMapLibrariesDB
+./internal/api/handlers TestRestoredRateLimitsUseTheirWritePathDB
+./internal/backup TestIdentityTwinsRestoreOneToOneDB
+./internal/backup TestLayoutCollectionsMapAcrossServersDB
+./internal/plugins TestRestoreInstallationDB
+./internal/plugins TestRestoreInstallationOnOneConnectionDB
+./internal/adminjob TestBackupRestoreFencingDB
+./internal/adminjob TestRestoreOutcomeRowsLastUntilTheFinalReportDB
+./internal/catalog TestGroupingWaitsForTheEditorDB
+./internal/api/handlers TestLibraryRestoredReportsFailedSetupDB
+./internal/api/handlers TestRestoredLibraryChainNeedsItsProviderLookupDB
+./internal/api/handlers TestRestoredPluginJoinsChainsOnlyFromItsManifestDB
+
+# Users restore: accounts and profiles restored on another server with every
+# data type, access never loosening, existing accounts unchanged, merge rules,
+# target revalidation, and an idempotent re-run; matching with exactly one
+# candidate and the policy comparison per group branch; every per-user table
+# claimed or excluded; profile export and import scoped to the profile and
+# its libraries and maturity limits; an account the restore set cannot carry
+# is reported; history hides keep -infinity and merge each cutoff; a
+# heartbeat during a progress merge wins; collection rules are remapped and
+# never widened; both import entrypoints take account locks before history
+# locks, as profile deletion does, and create and lock every watchlist title
+# before any watchlist row; provider-id matching reads in the importing
+# transaction, so it finishes on a one-connection pool; an expired upload is
+# swept only under the backup lock and kept while a queued restore names it.
+./internal/backup TestUserRestoreDB
+./internal/backup TestUserRestoreSameServerDB
+./internal/backup TestUserMatchingDB
+./internal/backup TestUserTablesCoveredDB
+./internal/backup TestProfileTransferDB
+./internal/backup TestOmittedAccountIsReportedDB
+./internal/backup TestEmailLessAccountRestoreDB
+./internal/backup TestItemMatchingInATransactionWithOnePoolConnectionDB
+./internal/backup TestPluginInstallationMapDB
+./internal/backup TestMatchedAccountPendingDB
+./internal/backup TestFreshBackupComparesSameDB
+./internal/backup TestProfileImportLockOrderDB
+./internal/backup TestRestoreLockOrderDB
+./internal/backup TestProfileImportAndDeleteLockOrderDB
+./internal/backup TestUploadSessionsDB
+./internal/backup TestUploadEncryptedOnABucketDB
+./internal/backup TestUploadLimitAndSweepDB
+./internal/backup TestUploadRejectsHostileArchivesDB
+./internal/backup TestRestoreFromUploadDB
+./internal/backup TestUploadReservesSpaceDB
+./internal/backup TestUploadPartAttemptsDB
+./internal/backup TestUploadCompletionClosesPartsDB
+./internal/backup TestUploadCompletionDeadlineDB
+./internal/backup TestUploadPartWriteDeadlineDB
+./internal/watchlist TestPrepareCreatesAndLocksTitlesDB
+./internal/watchlist TestExportLeavesOutTitlesAboveTheCeilingDB
+./internal/watchstate TestHistoryHideMergeDB
+./internal/watchstate TestProgressMergeKeepsHeartbeatDB
+./internal/watchstate TestPluginSourcedPlaysDB
+./internal/usercollections TestCollectionImportRemapsLibrariesDB
+./internal/usercollections TestCarriedCollectionsMapToTheImportingProfileDB
+
+# Accounts and profile imports: one connection, and statements that do not grow with a document.
+./internal/backup TestAccountsAndImportOnOneConnectionDB
+./internal/backup TestImportsReadInBatchesDB
+./internal/historyimport TestMatchAllAgreesWithMatchDB
+./internal/historyimport TestEnqueuePersonalRunAllowsOneActiveRunPerAccount
+./internal/backup TestCollectionImportKeepsTheProfileQuotaDB
+./internal/backup TestNewAccountNeedsItsPrimaryProfileDB
+
+# Startup migrations: the legacy bootstrap runs before the pending check, a
+# new database migrates with no backup, a failing backup stops startup with
+# nothing migrated, servers queue on the wrapper lock and then find nothing
+# pending, and a lost wrapper or backup lock session cancels the work. The
+# backup before migrations, through the server's wiring, reads a schema from
+# before plugins and every backup table with default settings and a minted
+# identity, holds the database alone, restores, and keeps the backup lock
+# through goose Up. It fails closed, also on a setting it cannot read, and
+# skips only for the listed reasons; waits behind a nightly backup up to its
+# limit; and writes an encrypted dump to a confirmed S3 bucket.
+./internal/database TestStartupMigrationSequenceDB
+./internal/database TestStartupMigrationsSerializeServersDB
+./internal/database TestStartupMigrationsStopWhenALockSessionEndsDB
+./cmd/silo TestBeforeMigrateBackupOnAnOldSchemaDB
+./internal/backup TestBeforeUpgradeFailsClosedOrSkipsDB
+./internal/backup TestBeforeUpgradeWaitsForANightlyBackupDB
+./internal/backup TestBeforeUpgradeDestinationsDB
+./internal/backup TestBeforeUpgradeRetriesDB

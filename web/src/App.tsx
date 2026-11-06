@@ -92,6 +92,7 @@ const Notifications = lazy(() => import("@/pages/Notifications"));
 const DeviceSettings = lazy(() => import("@/pages/settings/DeviceSettings"));
 const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"));
 const NotificationsSettings = lazy(() => import("@/pages/settings/NotificationsSettings"));
+const YourDataSettings = lazy(() => import("@/pages/settings/YourDataSettings"));
 const Requests = lazy(() => import("@/pages/Requests"));
 const RequestBrowse = lazy(() => import("@/pages/RequestBrowse"));
 const RequestDiscoverSection = lazy(() => import("@/pages/RequestDiscoverSection"));
@@ -116,6 +117,8 @@ const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
 const AdminMaintenance = lazy(() => import("@/pages/AdminMaintenance"));
+const AdminBackups = lazy(() => import("@/pages/AdminBackups"));
+const AdminBackupRestore = lazy(() => import("@/pages/AdminBackupRestore"));
 const AdminApiKeys = lazy(() => import("@/pages/AdminApiKeys"));
 const AdminSubtitles = lazy(() => import("@/pages/AdminSubtitles"));
 const AdminUserDetail = lazy(() => import("@/pages/AdminUserDetail"));
@@ -492,6 +495,12 @@ function AppRoutes() {
                   <Route path="diagnostics" element={<AdminDiagnostics />} />
                   <Route path="libraries" element={<AdminLibraries />} />
                   <Route path="maintenance" element={<AdminMaintenance />} />
+                  <Route path="backups" element={<AdminBackups />} />
+                  <Route path="backups/:id/restore" element={<AdminBackupRestore />} />
+                  <Route
+                    path="backups/uploads/:uploadId/restore"
+                    element={<AdminBackupRestore />}
+                  />
                   <Route path="collections" element={<AdminCollections />} />
                   {/* One page from /new to /:id/edit, so Create keeps the editor mounted. */}
                   <Route element={<CollectionEditorPage scope="server" />}>
@@ -602,6 +611,7 @@ function AppRoutes() {
                   <Route path="requests" element={<RequestsSettings />} />
                   <Route path="devices" element={<DeviceSettings />} />
                   <Route path="notifications" element={<NotificationsSettings />} />
+                  <Route path="your-data" element={<YourDataSettings />} />
                   <Route path="connect-apps" element={<ConnectAppsSettings />} />
                   <Route path="*" element={<Navigate to="/settings/playback" replace />} />
                 </Route>

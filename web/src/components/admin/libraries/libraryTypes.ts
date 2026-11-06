@@ -10,8 +10,27 @@ export const LIBRARY_TYPES = [
   { value: "podcasts", label: "Podcasts", icon: Podcast },
 ] as const;
 
+// Other spellings internal/librarykind accepts for each library type; the
+// server stores the type as free text.
+const LIBRARY_TYPE_ALIASES: Readonly<Record<string, string>> = {
+  movie: "movies",
+  tv: "series",
+  show: "series",
+  tvshows: "series",
+  audiobook: "audiobooks",
+  ebook: "ebooks",
+  podcast: "podcasts",
+};
+
+/** The library type a stored type string means, or undefined for an unknown type. */
+export function findLibraryType(type: string) {
+  const kind = type.trim().toLowerCase();
+  const value = LIBRARY_TYPE_ALIASES[kind] ?? kind;
+  return LIBRARY_TYPES.find((t) => t.value === value);
+}
+
 export function libraryTypeMeta(type: string) {
-  return LIBRARY_TYPES.find((t) => t.value === type) ?? LIBRARY_TYPES[0];
+  return findLibraryType(type) ?? LIBRARY_TYPES[0];
 }
 
 // Keep these aligned with the video scanner and intro-marker library filters.

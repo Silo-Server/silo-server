@@ -60,6 +60,34 @@ func TestRecommendPostgresOLTPSettings(t *testing.T) {
 	}
 }
 
+// The startup settings are written before the database exists, so they must
+// not change with its size, and they must leave out io_method, which would
+// stop the server from starting if PostgreSQL rejected it.
+func TestRecommendPostgresStartupSettings(t *testing.T) {
+	opts := PostgresTuneOptions{
+		Enabled:           true,
+		Profile:           postgresTuneProfileOLTP,
+		MemoryBudgetBytes: 16 * sizeGB,
+		CPUs:              8,
+		Connections:       300,
+		Storage:           postgresTuneStorageNVMe,
+		OSType:            "linux",
+		IOMethod:          "io_uring",
+	}
+	want := []PostgresTuneSetting{
+		{Name: "shared_buffers", Value: "4GB", RequiresRestart: true},
+		{Name: "wal_buffers", Value: "16MB", RequiresRestart: true},
+		{Name: "huge_pages", Value: "try", RequiresRestart: true},
+		{Name: "max_worker_processes", Value: "8", RequiresRestart: true},
+	}
+	for _, dbSize := range []string{postgresTuneDBSizeAuto, postgresTuneDBSizeLessRAM, postgresTuneDBSizeMidRAM, postgresTuneDBSizeGreaterRAM} {
+		opts.DBSize = dbSize
+		if got := RecommendPostgresStartupSettings(opts, 18); !slices.Equal(got, want) {
+			t.Fatalf("DBSize %s: startup settings = %v, want %v", dbSize, got, want)
+		}
+	}
+}
+
 func TestLoadPostgresTuneOptionsFromEnv(t *testing.T) {
 	t.Setenv("POSTGRES_TUNE", "auto")
 	t.Setenv("POSTGRES_TUNE_MEMORY", "8GB")
@@ -164,6 +192,53 @@ func TestClassifyPostgresTuneDBSize(t *testing.T) {
 func TestParsePostgresTuneByteSizeRequiresUnit(t *testing.T) {
 	if _, err := parsePostgresTuneByteSize("16"); err == nil {
 		t.Fatal("expected bare memory value to be rejected")
+	}
+}
+
+// postgresStartupTuneSetting mirrors which tuned settings PostgreSQL reads
+// only at start. A new major version can move a setting either way: a
+// reloadable one in the startup file is wasted, and a restart-only one left
+// out brings back the restart a new cluster needs.
+func TestPostgresStartupSettingsMatchServerPostgres(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	major, err := postgresMajorVersion(ctx, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Enough memory and CPUs that every tuned setting is recommended.
+	opts := PostgresTuneOptions{
+		Enabled:           true,
+		MemoryBudgetBytes: 64 * sizeGB,
+		CPUs:              32,
+		Connections:       100,
+		Storage:           postgresTuneStorageSSD,
+		DBSize:            postgresTuneDBSizeMidRAM,
+		OSType:            "linux",
+		IOMethod:          "worker",
+	}
+	for _, setting := range RecommendPostgresOLTPSettings(opts, major) {
+		atStart, err := postgresSettingRequiresRestart(ctx, pool, setting.Name)
+		if err != nil {
+			t.Fatalf("%s: %v", setting.Name, err)
+		}
+		startup := postgresStartupTuneSetting(setting.Name, major)
+		leftOut := setting.Name == "max_connections" || setting.Name == "io_method"
+		if startup && !atStart {
+			t.Errorf("%s is reloadable on PostgreSQL %d; drop it from the startup settings", setting.Name, major)
+		}
+		if atStart && !startup && !leftOut {
+			t.Errorf("%s needs a restart on PostgreSQL %d; add it to the startup settings", setting.Name, major)
+		}
 	}
 }
 

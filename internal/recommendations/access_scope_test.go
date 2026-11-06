@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -54,7 +55,7 @@ func TestProfileAccessFilterUsesTheResolvedScope(t *testing.T) {
 	if !slices.Equal(filter.AllowedLibraryIDs, []int{3, 8}) || !slices.Equal(filter.DisabledLibraryIDs, []int{5}) {
 		t.Fatalf("libraries = allowed %v disabled %v, want [3 8] and [5]", filter.AllowedLibraryIDs, filter.DisabledLibraryIDs)
 	}
-	if filter.MaturityLimits != resolver.scope.MaturityLimits {
+	if !reflect.DeepEqual(filter.MaturityLimits, resolver.scope.MaturityLimits) {
 		t.Fatalf("maturity limits = %+v, want %+v", filter.MaturityLimits, resolver.scope.MaturityLimits)
 	}
 	if filter.MaxPlaybackQuality != "" {

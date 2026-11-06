@@ -1,25 +1,3 @@
 {
-  "approvals": [
-    {
-      "operation_id": "listCatalogItems",
-      "change_id": "request-parameter-enum-value-removed",
-      "fingerprint": "c6e33bb3dce9c11f8904afcb8c92f1da74e5e9304baef169397a1edcfc6d77a7",
-      "reason": "Box sets stay out of library browse by maintainer decision; group=box_set is removed while box set search, the box set page and the movie page row stay. Web, silo-apple and silo-android stop sending it in the same coordinated change.",
-      "approved_in": "#3434"
-    },
-    {
-      "operation_id": "queryCatalogItems",
-      "change_id": "request-property-enum-value-removed",
-      "fingerprint": "283931e29971c8538983dc9bc734e0a366958585db0e3a044e4059c57c2fb1f5",
-      "reason": "Box sets stay out of library browse by maintainer decision; group=box_set is removed while box set search, the box set page and the movie page row stay. Web, silo-apple and silo-android stop sending it in the same coordinated change.",
-      "approved_in": "#3434"
-    },
-    {
-      "operation_id": "queryCatalogLetters",
-      "change_id": "request-property-removed",
-      "fingerprint": "a7857fb603a33a19fbe9cf8266d243429b13c3cd94f6614e7028fc3d9d343bb9",
-      "reason": "Box sets stay out of library browse by maintainer decision; group=box_set is removed while box set search, the box set page and the movie page row stay. Web, silo-apple and silo-android stop sending it in the same coordinated change.",
-      "approved_in": "#3434"
-    }
-  ]
+  "approvals": []
 }

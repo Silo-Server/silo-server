@@ -381,6 +381,9 @@ func (reg *Registry) translateCatalogItemDescription(ctx context.Context, in *Tr
 	if p != nil {
 		return nil, p
 	}
+	// The request names no library, but the native episode pages it translates
+	// for open under a library that holds only the series.
+	viewer.Access.SeriesLibraryCoversEpisodes = true
 	job, err := reg.deps.MetadataAI.TranslateOnView(ctx, viewer.Access, in.ID, in.Body.TargetLanguage, requestedBy)
 	if err != nil {
 		return nil, catalogActionProblem(err)

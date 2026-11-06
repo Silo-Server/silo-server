@@ -91,24 +91,7 @@ func (h *LibraryHandler) ListLibraries(ctx context.Context) ([]LibraryView, erro
 // CreateLibrary creates a library, seeds its sections and provider chain,
 // and queues its first scan.
 func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateRequest) (LibraryView, error) {
-	if len(req.Paths) == 0 || req.Type == "" || req.Name == "" {
-		return LibraryView{}, apiError(http.StatusBadRequest, "bad_request", "Paths, type, and name are required")
-	}
-	paths, err := normalizeLibraryPaths(req.Paths)
-	if err != nil {
-		return LibraryView{}, err
-	}
-	req.Paths = paths
-	if req.MetadataLanguage != "" && !validMetadataLanguages[req.MetadataLanguage] {
-		return LibraryView{}, fieldError("metadata_language", "Invalid metadata_language; must be a valid ISO 639-1 code")
-	}
-	if req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
-		return LibraryView{}, fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
-	}
-	if req.TrickplayEnabled && h.ArtworkStore == nil {
-		return LibraryView{}, fieldError("trickplay_enabled", "Seek previews require configured artwork storage")
-	}
-	if err := validateBoxSetSettings(req.Type, &req.BoxSetsEnabled, &req.BoxSetMinMovies); err != nil {
+	if err := h.normalizeNewLibrary(&req); err != nil {
 		return LibraryView{}, err
 	}
 
@@ -133,8 +116,44 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 		slog.ErrorContext(ctx, "creating library", "component", "api", "error", err)
 		return LibraryView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to create library")
 	}
+	h.afterLibraryCreated(ctx, folder, req.Type)
+	return h.toLibraryResponseWithPoster(ctx, folder), nil
+}
+
+// LibraryRestored runs the library editor's follow-ups for a library a
+// backup restore created and committed: real-time monitoring, seek
+// previews, box sets, default sections, the provider chain, and the first
+// scan. It returns an error when any of them failed, so the restore keeps
+// its follow-up row and runs them again; every step is safe to repeat.
+// Sections are seeded only where none exist, and a provider chain already
+// set is left alone.
+func (h *LibraryHandler) LibraryRestored(ctx context.Context, id int) error {
+	folder, err := h.folderRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return h.setUpNewLibrary(ctx, folder)
+}
+
+// LibrarySectionsRestored seeds a restored library's default and home
+// sections where none exist. A restore runs it after it wrote the saved
+// sections it carries, so a default renamed before the backup is not
+// seeded again beside it.
+func (h *LibraryHandler) LibrarySectionsRestored(ctx context.Context, id int) error {
+	folder, err := h.folderRepo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	return errors.Join(h.seedSections(ctx, folder)...)
+}
+
+// afterLibraryCreated is the work that follows a new library in the editor,
+// as it always was: each step is best effort and its failure is logged. A
+// restore uses setUpNewLibrary instead, which returns failures so they are
+// retried.
+func (h *LibraryHandler) afterLibraryCreated(ctx context.Context, folder *models.MediaFolder, libraryType string) {
 	h.pokeRealtimeMonitor()
-	if req.TrickplayEnabled {
+	if folder.TrickplayEnabled {
 		h.reconcileTrickplay()
 	}
 	if folder.BoxSetsEnabled {
@@ -158,7 +177,7 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 
 	// Seed default provider chain from plugin manifest defaults.
 	if h.ChainRepo != nil {
-		entries := h.seedDefaultChain(ctx, req.Type)
+		entries := h.seedDefaultChain(ctx, libraryType)
 		if len(entries) > 0 {
 			if seedErr := h.ChainRepo.SetChain(ctx, folder.ID, entries); seedErr != nil {
 				slog.WarnContext(ctx, "seed default chain failed", "component", "api", "folder_id", folder.ID, "error", seedErr)
@@ -167,21 +186,97 @@ func (h *LibraryHandler) CreateLibrary(ctx context.Context, req LibraryCreateReq
 	}
 
 	// Kick off an initial scan so content appears immediately.
+	_ = h.queueInitialScan(ctx, folder) // logged; the editor treats it as best effort
+}
+
+// queueInitialScan queues a new library's first scan, or runs it here when
+// this node has no scan queue.
+func (h *LibraryHandler) queueInitialScan(ctx context.Context, folder *models.MediaFolder) error {
 	if h.ScanQueue != nil {
 		if _, err := h.ScanQueue.EnqueueLibraryScan(ctx, folder.ID, "library_created"); err != nil {
 			slog.WarnContext(ctx, "queue initial library scan failed", "component", "api", "library_id", folder.ID, "error", err)
+			return fmt.Errorf("queue initial library scan: %w", err)
 		}
-	} else {
-		initialScanID := ulid.Make().String()
-		h.recordAcceptedScan(initialScanID, &scantrigger.Target{
-			Folder:  folder,
-			Mode:    scantrigger.ModeLibrary,
-			Trigger: "library_created",
-		})
-		h.runFolderScanAsync(initialScanID, folder, "library_created")
+		return nil
+	}
+	initialScanID := ulid.Make().String()
+	h.recordAcceptedScan(initialScanID, &scantrigger.Target{
+		Folder:  folder,
+		Mode:    scantrigger.ModeLibrary,
+		Trigger: "library_created",
+	})
+	h.runFolderScanAsync(initialScanID, folder, "library_created")
+	return nil
+}
+
+// setUpNewLibrary runs every step that follows a restored library but its
+// sections (LibrarySectionsRestored) and returns the steps that failed,
+// joined. A failed step does not stop the others. A provider chain already
+// set is left alone.
+func (h *LibraryHandler) setUpNewLibrary(ctx context.Context, folder *models.MediaFolder) error {
+	var errs []error
+	h.pokeRealtimeMonitor()
+	if folder.TrickplayEnabled {
+		h.reconcileTrickplay()
+	}
+	if folder.BoxSetsEnabled {
+		h.syncBoxSets()
 	}
 
-	return h.toLibraryResponseWithPoster(ctx, folder), nil
+	if err := h.seedChain(ctx, folder.ID, folder.Type); err != nil {
+		errs = append(errs, err)
+	}
+	if err := h.queueInitialScan(ctx, folder); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// seedSections seeds a restored library's default and home sections where
+// none exist, returning the steps that failed.
+func (h *LibraryHandler) seedSections(ctx context.Context, folder *models.MediaFolder) []error {
+	if h.SectionRepo == nil {
+		return nil
+	}
+	var errs []error
+	if err := h.SectionRepo.SeedDefaults(ctx, "library", &folder.ID, sections.DefaultLibrarySectionsForType(&folder.ID, folder.Type)); err != nil {
+		errs = append(errs, fmt.Errorf("seed default sections: %w", err))
+	}
+	if sections.IsAudiobookLibraryType(folder.Type) {
+		if _, err := h.SectionRepo.EnsureHomeContinueListeningSection(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("ensure home continue listening section: %w", err))
+		}
+	}
+	if _, err := h.SectionRepo.CreateGeneratedHomeLibraryRecentSections(ctx, folder.ID, folder.Name, folder.Type); err != nil {
+		errs = append(errs, fmt.Errorf("seed generated home sections: %w", err))
+	}
+	return errs
+}
+
+// seedChain sets a restored library's default provider chain, unless a
+// chain is already set.
+func (h *LibraryHandler) seedChain(ctx context.Context, folderID int, libraryType string) error {
+	if h.ChainRepo == nil {
+		return nil
+	}
+	existing, err := h.ChainRepo.GetAllChainEntries(ctx, folderID)
+	if err != nil {
+		return fmt.Errorf("read provider chain: %w", err)
+	}
+	if len(existing) > 0 {
+		return nil
+	}
+	entries, err := h.defaultChain(ctx, libraryType)
+	if err != nil {
+		return fmt.Errorf("build default provider chain: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	if err := h.ChainRepo.SetChain(ctx, folderID, entries); err != nil {
+		return fmt.Errorf("seed default chain: %w", err)
+	}
+	return nil
 }
 
 // UpdateLibrary applies a partial update and triggers the follow-up work a
@@ -1123,6 +1218,42 @@ type RawMatchBacklogEntryView = libraryRawMatchBacklogEntryResponse
 
 // ProviderChainEntryInput is one entry of a set-chain command.
 type ProviderChainEntryInput = chainEntryInput
+
+// normalizeNewLibrary validates and normalizes a library the create command
+// takes: its required fields, folders, metadata language, the features that
+// need artwork storage, and box set settings.
+func (h *LibraryHandler) normalizeNewLibrary(req *LibraryCreateRequest) error {
+	if len(req.Paths) == 0 || req.Type == "" || req.Name == "" {
+		return apiError(http.StatusBadRequest, "bad_request", "Paths, type, and name are required")
+	}
+	paths, err := normalizeLibraryPaths(req.Paths)
+	if err != nil {
+		return err
+	}
+	req.Paths = paths
+	if req.MetadataLanguage != "" && !validMetadataLanguages[req.MetadataLanguage] {
+		return fieldError("metadata_language", "Invalid metadata_language; must be a valid ISO 639-1 code")
+	}
+	if req.ChapterThumbnailsEnabled && h.ArtworkStore == nil {
+		return fieldError("chapter_thumbnails_enabled", "Chapter thumbnails require configured artwork storage")
+	}
+	if req.TrickplayEnabled && h.ArtworkStore == nil {
+		return fieldError("trickplay_enabled", "Seek previews require configured artwork storage")
+	}
+	return validateBoxSetSettings(req.Type, &req.BoxSetsEnabled, &req.BoxSetMinMovies)
+}
+
+// CheckRestoredLibrary applies the library create command's checks
+// (normalizeNewLibrary) to a library a backup restore creates, so a restore
+// stores nothing the editor would refuse.
+func (h *LibraryHandler) CheckRestoredLibrary(in catalog.CreateFolderInput) error {
+	return restoreCheckError(h.normalizeNewLibrary(&LibraryCreateRequest{
+		Paths: in.Paths, Type: in.Type, Name: in.Name, MetadataLanguage: in.MetadataLanguage,
+		ChapterThumbnailsEnabled: in.ChapterThumbnailsEnabled, IntroDetectionEnabled: in.IntroDetectionEnabled,
+		TrailerKinds: in.TrailerKinds, RealtimeMonitoring: in.RealtimeMonitoring, TrickplayEnabled: in.TrickplayEnabled,
+		BoxSetsEnabled: in.BoxSetsEnabled, BoxSetMinMovies: in.BoxSetMinMovies, BoxSetsInSearch: in.BoxSetsInSearch,
+	}))
+}
 
 // maxLibraryPosterBytes caps a poster upload.
 const maxLibraryPosterBytes = 10 << 20
