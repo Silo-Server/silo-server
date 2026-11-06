@@ -102,11 +102,12 @@ const maxExtractedFiles = 50_000
 // directory's file system.
 const inodeMargin = 10_000
 
-// checkTempSpace requires the bytes of the blobs keep, plus freeSpaceMargin,
-// free in dir, where the restore extracts them, and a free inode for each
-// file plus inodeMargin; and at most maxExtractedFiles files.
+// checkTempSpace requires the bytes of the blobs keep and of the set's
+// account documents, plus freeSpaceMargin, free in dir, where the restore
+// writes them, and a free inode for each file plus inodeMargin; and at most
+// maxExtractedFiles extracted blobs.
 func checkTempSpace(dir string, rs *RestoreSet, keep map[string]bool) error {
-	if len(keep) == 0 {
+	if len(keep) == 0 && rs.userBytes == 0 {
 		return nil
 	}
 	if len(keep) > maxExtractedFiles {
@@ -117,7 +118,8 @@ func checkTempSpace(dir string, rs *RestoreSet, keep map[string]bool) error {
 	for key := range keep {
 		need += uint64(rs.blobSizes[key]) //nolint:gosec // G115: a tar header size the read checked is not negative
 	}
-	need += freeSpaceMargin
+	// The read writes every account document there too (UserRef).
+	need += uint64(rs.userBytes) + freeSpaceMargin //nolint:gosec // G115: tar header sizes the read checked are not negative
 	var st unix.Statfs_t
 	if err := unix.Statfs(dir, &st); err != nil {
 		return fmt.Errorf("reading free space in the temporary directory: %w", err)
@@ -128,7 +130,7 @@ func checkTempSpace(dir string, rs *RestoreSet, keep map[string]bool) error {
 	}
 	// A file system that reports no inodes (st.Files 0) allocates them as
 	// it needs them.
-	if inodes := uint64(len(keep)) + inodeMargin; st.Files > 0 && st.Ffree < inodes {
+	if inodes := uint64(len(keep)+len(rs.Users)) + inodeMargin; st.Files > 0 && st.Ffree < inodes {
 		return fmt.Errorf("%w: %d files can be created there, %d needed (the selected items' files plus %d); free space or select fewer items",
 			ErrNotEnoughTempSpace, st.Ffree, inodes, inodeMargin)
 	}

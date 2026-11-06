@@ -418,6 +418,10 @@ type Dependencies struct {
 	// NotInterested reads and edits a profile's Not interested marks
 	// (*handlers.PersonalDataHandler).
 	NotInterested NotInterestedService
+	// TitleAllowances keeps the movies, series and collections a household's
+	// primary profile allowed limited profiles above their maturity limits
+	// (*handlers.TitleAllowanceHandler).
+	TitleAllowances TitleAllowanceService
 	// WatchlistTitles keeps a profile's watchlist entries for titles the
 	// library doesn't have (*handlers.PersonalDataHandler).
 	WatchlistTitles WatchlistTitleService

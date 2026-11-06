@@ -561,13 +561,13 @@ const (
 func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 	for _, id := range p.itemIDs(spec) {
 		name := spec.itemDir + id + spec.itemExt
-		var doc UserDocument
-		ok, err := p.document(name, &doc)
-		if err != nil {
-			return 0, err
-		}
+		file, ok := p.userFiles[name]
 		if !ok {
 			return 0, fmt.Errorf("%s is missing", name)
+		}
+		doc, err := decodeUserFile(file, p.files[name].SHA256)
+		if err != nil {
+			return 0, fmt.Errorf("%s: %w", name, err)
 		}
 		label := doc.Account.Username
 		if label == "" {
@@ -577,26 +577,32 @@ func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 			p.unusable(SectionUsers, KindAccount, label, "Its document names another account than its file.")
 			continue
 		}
-		// Bounds first: validation may clear what it locks.
-		err = userdata.CheckBounds(&doc)
-		var blobs []string
-		if err == nil {
-			blobs, err = validateUserDocument(&doc)
-		}
+		blobs, err := checkUserDocument(doc)
 		if err != nil {
 			p.unusable(SectionUsers, KindAccount, label, truncateText("It cannot be restored: "+err.Error(), 500))
 			continue
 		}
+		// The keys stay in memory with the account, so they count against
+		// the set's decoded bound as the document no longer does.
+		slices.Sort(blobs)
+		blobs = slices.Compact(blobs)
 		for _, key := range blobs {
 			if err := p.requireReferenced(SectionUsers, key); err != nil {
 				return 0, err
+			}
+			if p.decoded += int64(len(key)) + blobRefCost; p.decoded > maxRestoreSetDecoded {
+				return 0, fmt.Errorf("the accounts' blob references hold more than the %d bytes a restore set may hold", int64(maxRestoreSetDecoded))
 			}
 		}
 		if p.rs.accountBlobs == nil {
 			p.rs.accountBlobs = map[string][]string{}
 		}
 		p.rs.accountBlobs[id] = blobs
-		p.rs.Users = append(p.rs.Users, doc)
+		// Only what matching reads stays in memory: the policy lists can be
+		// large, and the whole entry is in the document.
+		identity := AccountEntry{ID: doc.Account.ID, Username: doc.Account.Username, Email: doc.Account.Email}
+		p.rs.Users = append(p.rs.Users, UserRef{Account: identity, file: file, sha256: p.files[name].SHA256})
+		p.rs.metadataBytes += userRefCost
 	}
 	return len(p.itemIDs(spec)), nil
 }

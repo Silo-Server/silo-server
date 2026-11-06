@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -115,6 +116,43 @@ func TestAdminMatchSearch_FallsBackToItemMetadata(t *testing.T) {
 	}
 	if capturedQuery.Year != 2010 {
 		t.Errorf("expected year fallback to 2010, got %d", capturedQuery.Year)
+	}
+}
+
+// The stored year belongs to the current match, which is usually the wrong
+// one when an admin opens Match Item, so a search without a year must not
+// quietly reuse it. Only the frozen /api/v1 route keeps that fallback.
+func TestSearchAdminItemMatches_SearchesWithoutYearWhenNoneGiven(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"item-2": {ContentID: "item-2", Title: "Parasite", Year: 1982, Type: "movie"},
+		},
+	}
+	captureSvc := &capturingMetadataService{inner: &fakeMatchMetadataService{}}
+	h := NewAdminMatchHandler(items, nil, captureSvc)
+
+	for _, req := range []AdminMatchSearchRequest{{Title: "Parasite"}, {}} {
+		if _, err := h.SearchAdminItemMatches(context.Background(), "item-2", req); err != nil {
+			t.Fatalf("search %+v: %v", req, err)
+		}
+		if captureSvc.lastQuery.Year != 0 || captureSvc.lastQuery.Title != "Parasite" {
+			t.Fatalf("search %+v queried %q (%d), want Parasite with no year", req, captureSvc.lastQuery.Title, captureSvc.lastQuery.Year)
+		}
+	}
+}
+
+// A failed folder lookup is the server's fault, not the caller's library
+// choice, so it must not come back as an invalid library_id.
+func TestAdminItemMatchHints_FolderLookupFailureIsInternal(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{"item-2": {ContentID: "item-2", Title: "Parasite", Type: "movie"}},
+	}
+	h := NewAdminMatchHandler(items, &fakeMatchFolderLookup{}, &fakeMatchMetadataService{})
+
+	_, err := h.AdminItemMatchHints(context.Background(), "item-2", nil)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusInternalServerError {
+		t.Fatalf("AdminItemMatchHints error = %v, want a 500", err)
 	}
 }
 

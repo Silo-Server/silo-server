@@ -781,17 +781,32 @@ limits on entries (200,000), document size (64 MiB for the collections and
 account documents, 32 MiB for the index, 8 MiB for `libraries.json` and
 `home-sections.json`, 4 MiB for `settings.json` and each `plugin.json`), the
 documents one read holds together (256 MiB, checked from the index's listed
-sizes before any document is read), plugin archive and blob size (256 MiB),
+sizes before any document is read; account documents are not held, see
+below), plugin archive and blob size (256 MiB),
 total bytes (32 GiB), and JSON nesting (32). What a document decodes to is
 bounded too, before it is decoded: `internal/backup/jsonsize` walks the
 document beside its Go type and adds up what `encoding/json` would allocate
 (each array element at its type's size, doubled for slice growth; map
 entries, pointers, strings, raw values). A document is refused when that is
-over 8 times its size plus 64 KiB, when the set's documents together would
-decode to over 256 MiB, or when one array or object holds over 1,000,000
-elements. A short document of empty elements (`[{},{},…]`) would otherwise
+over 8 times its size plus 64 KiB, when the set's other documents together
+would decode to over 256 MiB, or when one array or object holds over
+1,000,000 elements. A short document of empty elements (`[{},{},…]`) would otherwise
 decode to a whole struct per three bytes; documents Silo writes decode to
-about their size. Every entry a restore writes (a setting, a library, a
+about their size.
+
+Account documents grow with a server's households and watch history: a large
+server's add up to gigabytes, far past what one read may hold. The read
+writes each to the set's temporary directory (`TMPDIR`, a 0600 file checked
+against its digest as it is written), after checking from the index that
+their listed sizes plus 1 GB fit there (`ErrNotEnoughTempSpace` otherwise).
+Once the archive is verified it decodes and validates them one at a time,
+keeping only each account's entry and file (`UserRef`). The preview and a
+restore load one account's document when they plan or apply it
+(`RestoreSet.loadUser`), checking its digest and validating it again, so
+memory follows the largest account rather than their sum. `Cleanup` removes
+the directory.
+
+Every entry a restore writes (a setting, a library, a
 plugin configuration, a collection, a template collection, an item artwork,
 a branding asset, a page section, and each account's profiles) is left out
 as unusable when it encodes to more than 1 MiB, the v2 API's request body
@@ -873,9 +888,11 @@ taken; the preview and the report list it with the item.
 Previews of a backup share one validated copy of its restore set, keyed by
 the archive's SHA-256 from the manifest (at most 4 sets and 256 MiB of
 documents and blob keys, least recently used evicted), and concurrent
-previews of the same archive read it once. Only the parsed documents and
-index are kept, never blobs or archives; comparisons with this server run on
-every request. Applying a restore never uses the cache: the job reads and
+previews of the same archive read it once. Only the parsed documents, the
+index, and the account documents on disk are kept, never blobs or archives;
+comparisons with this server run on every request. Each preview holds a
+reference to the set it reads, and an evicted set's directory is removed
+when its last reference is released. Applying a restore never uses the cache: the job reads and
 verifies the whole archive again.
 
 ## Selective restore
@@ -1185,8 +1202,8 @@ the exact keys the apply step reads (a library's poster, a branding asset,
 an item artwork's family, a collection's uploaded poster and backdrop with
 their families), never a prefix. It sizes them from the preview's read of the
 same restore set, and refuses to start (`ErrNotEnoughTempSpace`) for more
-than 50,000 files, or unless the temporary directory has their size plus
-1 GB free and a free inode for each plus 10,000. The rest of the archive is
+than 50,000 files, or unless the temporary directory has their size and the
+account documents' plus 1 GB free and a free inode for each plus 10,000. The rest of the archive is
 read, checked, and discarded. Reading the set and extracting stop when the
 job is canceled; once the first item runs, a cancel stops between items.
 

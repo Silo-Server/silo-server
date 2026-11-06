@@ -360,7 +360,7 @@ func restoreRequestOf(body AdminBackupRestoreBody) backup.RestoreRequest {
 // points at its job.
 func restoreProblem(err error) error {
 	if conflict, ok := errors.AsType[*adminjob.ActiveJobConflictError](err); ok {
-		p := NewProblem(TypeConflict, "A restore is already queued or running.")
+		p := NewProblem(TypeConflict, "A restore is already queued or running. Try again when it finishes.")
 		if conflict.Job != nil {
 			p = p.WithHeader("Location", Prefix+"/admin/jobs/"+conflict.Job.ID)
 		}
