@@ -36,6 +36,25 @@ type UserRef struct {
 	sha256  string
 }
 
+// tempStorageError is a failure of the temporary directory a read writes
+// to, not of the archive: openRestoreSet passes it on as the server's own
+// error rather than calling the restore set unreadable.
+type tempStorageError struct{ err error }
+
+func (e *tempStorageError) Error() string { return "temporary directory: " + e.err.Error() }
+func (e *tempStorageError) Unwrap() error { return e.err }
+
+// storageWriter marks the errors of writes to the temporary directory.
+type storageWriter struct{ w io.Writer }
+
+func (s storageWriter) Write(b []byte) (int, error) {
+	n, err := s.w.Write(b)
+	if err != nil {
+		err = &tempStorageError{err}
+	}
+	return n, err
+}
+
 // isUserDocument reports whether an archive path is an account document.
 func isUserDocument(name string) bool {
 	return strings.HasPrefix(name, restoreSetUsersDir) && strings.HasSuffix(name, ".json")
@@ -73,12 +92,12 @@ const (
 func (rs *RestoreSet) makeDir(parent string) error {
 	dir, err := os.MkdirTemp(parent, setDirPrefix)
 	if err != nil {
-		return err
+		return &tempStorageError{err}
 	}
 	owner, err := lockedOwner(dir)
 	if err != nil {
 		_ = os.RemoveAll(dir)
-		return fmt.Errorf("locking the restore set's directory: %w", err)
+		return &tempStorageError{fmt.Errorf("locking the restore set's directory: %w", err)}
 	}
 	rs.dir, rs.owner = dir, owner
 	return nil
@@ -156,7 +175,7 @@ func (p *restoreSetParser) userDocument(h *tar.Header, tr io.Reader, want FileDi
 func checkSpillSpace(dir string, need int64) error {
 	var st unix.Statfs_t
 	if err := unix.Statfs(dir, &st); err != nil {
-		return fmt.Errorf("reading free space in the temporary directory: %w", err)
+		return &tempStorageError{fmt.Errorf("reading its free space: %w", err)}
 	}
 	free := blockBytes(st.Bavail, st.Bsize)
 	if want := uint64(need) + freeSpaceMargin; free < want { //nolint:gosec // G115: sizes the index check made non-negative
@@ -172,7 +191,7 @@ func checkSpillSpace(dir string, need int64) error {
 func decodeUserFile(file, wantSHA string) (*UserDocument, error) {
 	data, err := os.ReadFile(file) //nolint:gosec // G304: a file this read created
 	if err != nil {
-		return nil, err
+		return nil, &tempStorageError{err}
 	}
 	if sum := sha256.Sum256(data); hex.EncodeToString(sum[:]) != wantSHA {
 		return nil, fmt.Errorf("%s no longer matches its digest", file)

@@ -368,7 +368,7 @@ func (s *Service) openRestoreSet(ctx context.Context, located locatedSource, ext
 	}
 	rs, err := readStoredRestoreSet(ctx, body, opts, located.digest, mismatch)
 	if err != nil {
-		if errors.Is(err, ErrRestoreSetTooNew) || errors.Is(err, ErrNotEnoughTempSpace) || ctx.Err() != nil {
+		if errors.Is(err, ErrRestoreSetTooNew) || errors.Is(err, ErrNotEnoughTempSpace) || errors.As(err, new(*tempStorageError)) || ctx.Err() != nil {
 			return nil, err
 		}
 		return nil, &InvalidRestoreSetError{Err: err}
@@ -408,6 +408,10 @@ func (s *Service) locateConfirmed(ctx context.Context, src restoreSource, accept
 func (s *Service) cachedSet(ctx context.Context, located locatedSource) (*RestoreSet, func(), error) {
 	return s.restoreSets.get(ctx, located.digest, func(ctx context.Context) (*RestoreSet, error) {
 		rs, err := s.openRestoreSet(ctx, located, nil)
+		if errors.Is(err, ErrNotEnoughTempSpace) && s.restoreSets.evictIdle() {
+			// Sets no preview holds were taking the room.
+			rs, err = s.openRestoreSet(ctx, located, nil)
+		}
 		if rs != nil {
 			rs.fromUnverified = !located.authenticated
 		}

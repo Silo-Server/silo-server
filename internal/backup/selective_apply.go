@@ -206,8 +206,12 @@ func (s *Service) readSelected(ctx, work context.Context, req RestoreRequest, wa
 		return nil, located, ErrDigestMismatch
 	}
 	keep := wanted(planned)
-	err = checkTempSpace(os.TempDir(), planned, keep)
 	release()
+	err = checkTempSpace(os.TempDir(), planned, keep)
+	if errors.Is(err, ErrNotEnoughTempSpace) && s.restoreSets.evictIdle() {
+		// Previews' sets no one holds were taking the room.
+		err = checkTempSpace(os.TempDir(), planned, keep)
+	}
 	if err != nil {
 		return nil, located, err
 	}

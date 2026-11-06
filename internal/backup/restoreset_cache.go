@@ -204,6 +204,22 @@ func (c *restoreSetCache) storeLocked(digest string, rs *RestoreSet) bool {
 	return true
 }
 
+// evictIdle drops every cached set no caller holds, freeing their account
+// documents' disk for a read that needs it, and reports whether it dropped
+// any.
+func (c *restoreSetCache) evictIdle() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	evicted := false
+	for _, digest := range slices.Clone(c.order) {
+		if c.entries[digest].cache.refs == 0 {
+			c.evictLocked(digest)
+			evicted = true
+		}
+	}
+	return evicted
+}
+
 // evictLocked drops the set with digest, removing its directory unless a
 // caller still holds it (releaser). c.mu is held.
 func (c *restoreSetCache) evictLocked(digest string) {

@@ -619,10 +619,10 @@ func (p *restoreSetParser) copyEntry(dir, kind string, h *tar.Header, tr io.Read
 	if dir != "" {
 		var err error
 		if file, err = os.CreateTemp(dir, kind+"-"); err != nil {
-			return "", err
+			return "", &tempStorageError{err}
 		}
 		defer func() { _ = file.Close() }()
-		w = io.MultiWriter(file, sum)
+		w = io.MultiWriter(storageWriter{file}, sum)
 	}
 	n, err := io.Copy(w, io.LimitReader(tr, h.Size))
 	if err != nil {
@@ -638,7 +638,7 @@ func (p *restoreSetParser) copyEntry(dir, kind string, h *tar.Header, tr io.Read
 		return "", nil
 	}
 	if err := file.Close(); err != nil {
-		return "", err
+		return "", &tempStorageError{err}
 	}
 	return file.Name(), nil
 }

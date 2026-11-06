@@ -209,7 +209,7 @@ func TestCachedSetIsChargedWhatItHolds(t *testing.T) {
 
 // TestEvictedSetKeepsItsFilesWhileHeld: a set the cache drops keeps its
 // account documents until the last preview holding it releases it, and one
-// no one holds loses them at once.
+// no one holds loses them at once, as do idle sets dropped for disk space.
 func TestEvictedSetKeepsItsFilesWhileHeld(t *testing.T) {
 	index, entries := testRestoreSet()
 	data := buildTar(t, index, entries)
@@ -239,6 +239,20 @@ func TestEvictedSetKeepsItsFilesWhileHeld(t *testing.T) {
 	if _, err := held.loadUser(held.Users[0]); err != nil {
 		t.Fatalf("an evicted set lost its files while a preview held it: %v", err)
 	}
+	// Short of disk, the cache drops what no preview holds and nothing else.
+	cachedHeld, releaseCached := read("cached-held")
+	cachedIdle, releaseCachedIdle := read("cached-idle")
+	releaseCachedIdle()
+	if !c.evictIdle() {
+		t.Fatal("evictIdle dropped nothing")
+	}
+	if _, err := os.Stat(cachedIdle.dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an idle cached set kept its files: %v", err)
+	}
+	if _, err := cachedHeld.loadUser(cachedHeld.Users[0]); err != nil {
+		t.Fatalf("a held cached set lost its files: %v", err)
+	}
+	releaseCached()
 	release()
 	release() // a second release is a no-op
 	if _, err := os.Stat(held.dir); !errors.Is(err, os.ErrNotExist) {
