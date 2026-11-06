@@ -230,28 +230,45 @@ func TestTaskRegistrySyncAppliesChangesLive(t *testing.T) {
 	setBinding(true, map[string]any{})
 	resync()
 	runs(edited...)
-	enabled := installations.installations
 	installations.installations = nil
 	resync()
 	if got := registered(); len(got) != 0 {
 		t.Fatalf("disabled plugin left %v registered", got)
 	}
+}
 
-	// A task whose schedule cannot be read fails the sync and stays
-	// unregistered, so the retry registers it.
-	installations.installations = enabled
-	store.mu.Lock()
-	store.err = errors.New("database unavailable")
-	store.mu.Unlock()
+// A new task whose schedule cannot be read fails the sync and stays
+// unregistered, so the retry after the failed sync registers it.
+func TestTaskRegistryRetriesTaskWhoseScheduleFailedToLoad(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const key = "plugin:1:sync"
+	installations := &fakeInstallationStore{
+		installations: []*Installation{{ID: 1, PluginID: "example"}},
+		capabilities:  map[int][]*Capability{1: {scheduledTaskCapability(t, "sync", "Sync", nil)}},
+	}
+	hourly := []taskmanager.TriggerConfig{{Type: taskmanager.TriggerTypeInterval, IntervalMs: 3_600_000}}
+	store := &memoryTriggerStore{saved: map[string][]taskmanager.TriggerConfig{key: hourly}, err: errors.New("database unavailable")}
+	manager := taskmanager.New(store, noExecutions{}, func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+		return idleTrigger{cfg: cfg}
+	}, slog.New(slog.DiscardHandler))
+	defer manager.Stop()
+	manager.Start(ctx)
+	registry := NewTaskRegistry(installations, &fakeTaskBindingStore{}, nil, manager)
+
 	if err := registry.Sync(ctx); err == nil {
 		t.Fatal("a schedule that could not be read must fail the sync")
 	}
-	if got := registered(); len(got) != 0 {
-		t.Fatalf("a task with an unread schedule is registered: %v", got)
+	if got := manager.ListTasks(true); len(got) != 0 {
+		t.Fatalf("a task with an unread schedule is registered: %+v", got)
 	}
 	store.mu.Lock()
 	store.err = nil
 	store.mu.Unlock()
-	resync()
-	runs(edited...)
+	if err := registry.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := manager.GetTaskInfo(key).Triggers; !slices.Equal(got, hourly) {
+		t.Fatalf("retried task runs %+v, want the saved schedule", got)
+	}
 }
