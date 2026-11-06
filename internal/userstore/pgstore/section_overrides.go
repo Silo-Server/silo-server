@@ -164,6 +164,17 @@ func (s *PostgresUserStore) listAllSectionOverrides(ctx context.Context, scope, 
 // still carry its old name (see userstore.RenameCollectionRowTitle), in one
 // transaction under lockSectionOverrides.
 func (s *PostgresUserStore) RenameCollectionRows(ctx context.Context, kind, collectionID, oldTitle, newTitle string) error {
+	// A server collection's rename visits every account; most hold no row
+	// for it, so skip the lock and the decode when no setting names it.
+	var mentioned bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM user_settings WHERE user_id = $1 AND key LIKE 'section\_overrides:%' AND strpos(value, $2) > 0)`,
+		s.userID, collectionID).Scan(&mentioned); err != nil {
+		return fmt.Errorf("checking section overrides for collection %s: %w", collectionID, err)
+	}
+	if !mentioned {
+		return nil
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning collection row rename: %w", err)

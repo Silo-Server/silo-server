@@ -171,9 +171,10 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to update collection")
 	}
-	// Rows titled with the old name follow the rename; a failure leaves them on it.
+	// Rows titled with the old name follow the rename; a failure leaves them on
+	// it. The rename has committed, so a dropped request must not cut this short.
 	if oldName := strings.TrimSpace(existing.Name); req.Name != nil && oldName != "" && strings.TrimSpace(*req.Name) != oldName {
-		if err := store.RenameCollectionRows(ctx, userstore.CollectionKindUser, collectionID, existing.Name, *req.Name); err != nil {
+		if err := store.RenameCollectionRows(context.WithoutCancel(ctx), userstore.CollectionKindUser, collectionID, existing.Name, *req.Name); err != nil {
 			slog.WarnContext(ctx, "collection rename: retitling rows failed", "component", "api",
 				"collection_id", collectionID, "error", err)
 		}

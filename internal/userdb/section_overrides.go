@@ -133,8 +133,8 @@ func ResetSectionOverrides(db *sql.DB, profileID, scope, libraryID string) error
 
 // RenameCollectionRows retitles the profile-built rows for one collection
 // that still carry its old name (see userstore.RenameCollectionRowTitle), in
-// one transaction. Each write checks the titles it read, so a row edited in
-// between keeps the edit.
+// one transaction. Each write checks the row still holds what was read, so a
+// row edited in between keeps the edit.
 func RenameCollectionRows(ctx context.Context, db *sql.DB, kind, collectionID, oldTitle, newTitle string) error {
 	overrides, err := ListAllSectionOverrides(db)
 	if err != nil {
@@ -146,14 +146,17 @@ func RenameCollectionRows(ctx context.Context, db *sql.DB, kind, collectionID, o
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, o := range overrides {
-		readTitle, readUserTitle := o.Title, o.UserTitle
+		read := o
 		if !userstore.RenameCollectionRowTitle(&o, kind, collectionID, oldTitle, newTitle) {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE profile_section_overrides SET title = NULLIF(?,''), user_title = NULLIF(?,''), updated_at = ?
-			WHERE id = ? AND COALESCE(title,'') = ? AND COALESCE(user_title,'') = ?`,
-			o.Title, o.UserTitle, nowUTC(), o.ID, readTitle, readUserTitle,
+			WHERE id = ? AND COALESCE(title,'') = ? AND COALESCE(user_title,'') = ?
+			AND COALESCE(section_type,'') = ? AND COALESCE(config,'') = ?
+			AND COALESCE(user_section_type,'') = ? AND COALESCE(user_config,'') = ?`,
+			o.Title, o.UserTitle, nowUTC(), o.ID, read.Title, read.UserTitle,
+			read.SectionType, read.Config, read.UserSectionType, read.UserConfig,
 		); err != nil {
 			return err
 		}

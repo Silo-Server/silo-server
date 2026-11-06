@@ -771,7 +771,8 @@ func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, col
 		return
 	}
 	if h.SectionRepo != nil {
-		if err := h.SectionRepo.RenameLibraryCollectionRows(ctx, collectionID, oldTitle, newTitle); err != nil {
+		// The rename has committed, so a dropped request must not cut this short.
+		if err := h.SectionRepo.RenameLibraryCollectionRows(context.WithoutCancel(ctx), collectionID, oldTitle, newTitle); err != nil {
 			slog.WarnContext(ctx, "collection rename: retitling admin rows failed", "component", "api",
 				"collection_id", collectionID, "error", err)
 		}
