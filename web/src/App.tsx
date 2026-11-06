@@ -18,6 +18,10 @@ import { RouterProvider } from "react-router/dom";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { captureProfileRequestContext } from "@/api/client";
+import { notificationScope } from "@/api/v2/notifications";
+import { notificationKeys } from "@/hooks/queries/keys";
+import { syncWebPushSubscription } from "@/lib/webPush";
 import { CHANGE_PASSWORD_PATH } from "@/hooks/usePostSignInNavigation";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -296,6 +300,39 @@ function RequireRequestsEnabled({ children }: { children: ReactNode }) {
   }
   if (status.data?.requests_enabled !== true) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+/**
+ * Puts this browser's push subscription on the current login once per sign-in
+ * and profile, after the page's first content. A browser with no subscription
+ * makes no request. Impersonation is skipped: its session is not the account
+ * holder's, and the subscription would stop with it.
+ */
+function WebPushSubscriptionSync() {
+  const { user, profile } = useAuth();
+  const queryClient = useQueryClient();
+  const contentLoaded = useCriticalContentLoaded();
+  const userId = user && !user.impersonation ? user.id : null;
+  const scope = notificationScope();
+  const syncedScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (userId == null || !profile || !contentLoaded) return;
+    if (syncedScope.current === scope) return;
+    syncedScope.current = scope;
+    const authority = captureProfileRequestContext();
+    if (!authority) return;
+    syncWebPushSubscription(userId, authority)
+      .then((registered) => {
+        if (registered)
+          void queryClient.invalidateQueries({
+            queryKey: [...notificationKeys.webPushSubscriptions(), scope],
+            exact: true,
+          });
+      })
+      // Nothing to show: the next page load tries again.
+      .catch(() => undefined);
+  }, [userId, profile, contentLoaded, scope, queryClient]);
+  return null;
 }
 
 /**
@@ -874,6 +911,7 @@ function AppShell() {
                       <RouteChunkPrewarmer />
                       <BandwidthProbePrewarmer />
                       <ArtworkCapabilityReader />
+                      <WebPushSubscriptionSync />
                       <RealtimeEventChannels />
                       <ScrollRestorationManager />
                       <NavigationDirectionManager />

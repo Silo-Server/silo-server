@@ -80,6 +80,7 @@ import {
 } from "@/hooks/queries/notificationWebhooks";
 import { notificationKeys } from "@/hooks/queries/keys";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useOptionalAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { formatRelativeTime } from "@/lib/date";
 import {
@@ -572,6 +573,7 @@ function webPushSubtitle(sub: WebPushSubscriptionView): { text: string; failing:
 function WebPushSection() {
   const queryClient = useQueryClient();
   const capability = useNotificationCapability();
+  const userId = useOptionalAuth()?.user?.id;
   const webPushCap = capability.data?.web_push;
   const available = webPushCap?.available ?? false;
   const { data: subscriptions } = useWebPushSubscriptions(available);
@@ -592,14 +594,14 @@ function WebPushSection() {
   const thisHealth = thisSub ? webPushHealth(thisSub) : null;
 
   const enable = async () => {
-    if (!webPushCap?.public_key) {
+    if (!webPushCap?.public_key || userId == null) {
       toast.error("Web push is not available on this server");
       return;
     }
     const authority = captureNotificationAuthority();
     setBusy(true);
     try {
-      await enableWebPush(webPushCap.public_key, authority);
+      await enableWebPush(webPushCap.public_key, userId, authority);
       requireNotificationAuthority(authority);
       const sub = await currentWebPushSubscription();
       requireNotificationAuthority(authority);

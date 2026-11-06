@@ -23,6 +23,7 @@ const STORAGE_KEYS = {
   BANDWIDTH_ESTIMATE: "silo-bandwidth-estimate",
   BUFFERING_MODES: "silo-buffering-modes",
   IMAGE_CAPABILITIES: "silo-image-capabilities",
+  WEB_PUSH_OWNER: "silo-web-push-owner",
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];

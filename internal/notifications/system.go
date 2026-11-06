@@ -807,6 +807,7 @@ type RetentionStats struct {
 	InterestPruned           int64
 	WebhookAttemptsDeleted   int64
 	WebPushAttemptsDeleted   int64
+	WebPushSubsDeleted       int64
 	DiscordLinkStatesDeleted int64
 	// Email verification outbox: payloads dropped from terminal rows whose
 	// link expired, and receipt rows deleted past the retention window.
@@ -817,7 +818,7 @@ type RetentionStats struct {
 // RunRetention applies the retention policy: read deliveries past the read
 // window, unread past the unread window, processed release events past the
 // debug window, unprocessed release events past the fanout staleness horizon,
-// and inert interest rows.
+// inert interest rows, and web push subscriptions whose login session ended.
 func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 	var stats RetentionStats
 	now := time.Now().UTC()
@@ -865,6 +866,11 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 			return stats, fmt.Errorf("prune web push attempts: %w", err)
 		}
 		stats.WebPushAttemptsDeleted = attempts
+		subscriptions, err := s.webPushRepo.DeleteEndedLoginSubscriptions(ctx)
+		if err != nil {
+			return stats, fmt.Errorf("prune web push subscriptions of ended logins: %w", err)
+		}
+		stats.WebPushSubsDeleted = subscriptions
 	}
 	if s.DiscordPrefs != nil {
 		states, err := s.DiscordPrefs.DeleteExpiredLinkStates(ctx)
