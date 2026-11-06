@@ -763,7 +763,9 @@ func (h *LibraryCollectionHandler) DeleteAdminCollection(ctx context.Context, id
 // revision and the caller's next If-Match needs the new one. The rows profiles
 // built, in every account, are retitled after the response, detached from the
 // request: that sweep leaves the revision alone and grows with the number of
-// accounts. A failure is logged and leaves those rows on the old name.
+// accounts. It writes the collection's title as it reads it at each account,
+// so an earlier rename's sweep that is still running cannot undo a later one.
+// A failure is logged and leaves those rows on the old name.
 func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, collectionID, oldTitle, newTitle string) {
 	if strings.TrimSpace(oldTitle) == strings.TrimSpace(newTitle) {
 		return
@@ -775,6 +777,13 @@ func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, col
 		}
 	}
 	if h.CollectionRowRenamer != nil {
-		go h.CollectionRowRenamer.RenameForCollection(context.WithoutCancel(ctx), collectionID, oldTitle, newTitle)
+		currentTitle := func(ctx context.Context) (string, error) {
+			collection, err := h.repo.GetByID(ctx, collectionID)
+			if err != nil {
+				return "", err
+			}
+			return collection.Title, nil
+		}
+		go h.CollectionRowRenamer.RenameForCollection(context.WithoutCancel(ctx), collectionID, oldTitle, currentTitle)
 	}
 }

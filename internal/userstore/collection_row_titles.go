@@ -3,6 +3,7 @@ package userstore
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 )
@@ -72,14 +73,22 @@ func NewCollectionRowRenamer(users UserLister, stores UserStoreProvider) *Collec
 	}
 }
 
-// RenameForCollection renames every account's rows for one library
-// collection. Failures are logged per account and do not undo the rename; a
-// row left behind keeps its old title, as before this sweep existed.
-func (r *CollectionRowRenamer) RenameForCollection(ctx context.Context, collectionID, oldTitle, newTitle string) {
+// RenameForCollection gives every account's rows still titled oldTitle the
+// collection's current title, read by currentTitle just before each account
+// is written. Reading it then, rather than taking the name the rename set,
+// keeps a sweep that finishes after a later rename's sweep from writing a
+// name the collection no longer has. Failures are logged per account and do
+// not undo the rename; a row left behind keeps its old title, as before this
+// sweep existed.
+func (r *CollectionRowRenamer) RenameForCollection(ctx context.Context, collectionID, oldTitle string, currentTitle func(context.Context) (string, error)) {
 	if r == nil || r.users == nil || r.stores == nil {
 		return
 	}
 	forEachUserStore(ctx, r.users, r.stores, r.logger, "collection row rename", []any{"collection_id", collectionID}, func(_ int, store UserStore) error {
-		return store.RenameCollectionRows(ctx, CollectionKindLibrary, collectionID, oldTitle, newTitle)
+		title, err := currentTitle(ctx)
+		if err != nil {
+			return fmt.Errorf("reading the collection's title: %w", err)
+		}
+		return store.RenameCollectionRows(ctx, CollectionKindLibrary, collectionID, oldTitle, title)
 	})
 }
