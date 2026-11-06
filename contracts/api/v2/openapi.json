@@ -17461,7 +17461,7 @@
         "additionalProperties": false,
         "properties": {
           "restart_required": {
-            "description": "Always true: bindings load at server start",
+            "description": "False when the binding applies without a restart: this server attempts a plugin task sync before answering and retries a failed one, and every other API server applies it at its next successful sync. True only on a server with no task scheduler, where it applies at the next start",
             "type": "boolean"
           }
         },
@@ -110143,7 +110143,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the scheduled task binding for one capability and mark a server restart required. The whole row is assigned, so repeating the request converges on one stored binding.",
+        "summary": "Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding.",
         "tags": [
           "admin-plugins"
         ],

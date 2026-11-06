@@ -86,7 +86,10 @@ trigger, which `GET` reports with its nonzero revision
 ([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)).
 
 Successful edits apply to the responding process. Other running processes load
-the persisted configuration when they restart. Runtime state and persisted
+the persisted configuration when they restart, except for plugin tasks: every
+API server installs a plugin task's saved schedule at its next successful plugin
+task sync, which runs at least every minute and sooner on a change announcement
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Runtime state and persisted
 schedule state are separate reads. The web editor captures the persisted schedule
 when editing begins, keeps the draft and original validator after conflicts, and
 requires explicit review and revision adoption before another submission. It

@@ -181,7 +181,7 @@ export function PluginSettingsPanels({
       {taskCapabilities.length > 0 ? (
         <DetailPanel
           title="Scheduled tasks"
-          description="Tasks are registered when the server starts, so turning one on or off takes effect after a restart. Once a task exists, change its schedule on its task page."
+          description="Turning a task on or off applies without a restart, though other servers can take a moment to pick it up. Change a task's schedule on its task page."
         >
           <ul className="divide-y rounded-xl border">
             {taskCapabilities.map((capability) => {

@@ -41,10 +41,10 @@ func (f *fakePluginConfiguration) SetAdminPluginAuthBinding(_ context.Context, i
 	f.lastID, f.lastAuth = id, in
 	return f.err
 }
-func (f *fakePluginConfiguration) SetAdminPluginTaskBinding(_ context.Context, id int, capabilityID string, in handlers.PluginTaskBindingInput) error {
+func (f *fakePluginConfiguration) SetAdminPluginTaskBinding(_ context.Context, id int, capabilityID string, in handlers.PluginTaskBindingInput) (bool, error) {
 	f.calls++
 	f.lastID, f.lastTaskCap, f.lastTask = id, capabilityID, in
-	return f.err
+	return false, f.err
 }
 
 func pluginConfigurationHandler(f *fakePluginConfiguration) (http.Handler, Dependencies) {
@@ -153,7 +153,7 @@ func TestAdminPluginBindingWrites(t *testing.T) {
 	f.err = nil
 	f.calls = 0
 	rec = do(t, h, "PUT", base+"task-bindings/sync", `{"enabled":false,"trigger":{"type":"cron","expression":"0 * * * *"}}`, actingRequestAdmin)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"restart_required":true`) || f.lastTaskCap != "sync" || f.lastTask.Enabled || f.lastTask.Trigger["expression"] != "0 * * * *" {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"restart_required":false`) || f.lastTaskCap != "sync" || f.lastTask.Enabled || f.lastTask.Trigger["expression"] != "0 * * * *" {
 		t.Fatal(rec.Code, rec.Body.String(), f.lastTask)
 	}
 	rec = do(t, h, "PUT", base+"task-bindings/sync", `{"enabled":true}`, actingRequestAdmin)

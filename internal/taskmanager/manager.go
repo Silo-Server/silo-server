@@ -26,6 +26,9 @@ type TaskManager struct {
 	logger         *slog.Logger
 	observers      []Observer
 	libraryTypes   LibraryTypesFunc
+	// startCtx is the context Start ran under, nil before Start. A task
+	// registered later runs its trigger loop under it.
+	startCtx context.Context //nolint:containedctx // Start's context outlives the call: tasks registered after Start run under it
 }
 
 // New creates a new TaskManager.
@@ -61,53 +64,169 @@ func (m *TaskManager) SetLibraryTypes(fn LibraryTypesFunc) {
 	m.libraryTypes = fn
 }
 
-// Register adds a task to the manager. Must be called before Start.
+// Register adds a task, replacing one registered under the same key as
+// Unregister does. A task registered before Start starts with the others; one
+// registered after Start loads its schedule and starts its trigger loop
+// before Register returns. If that schedule cannot be read, the task is
+// registered with no automatic runs until ReloadSchedule or an edit installs
+// one; RegisterLive reports the failure instead.
 func (m *TaskManager) Register(task Task) {
+	w, ctx := m.add(task)
+	if ctx == nil {
+		return
+	}
+	if err := m.startWorker(ctx, w); err != nil {
+		m.logger.ErrorContext(ctx, "failed to load triggers", "task", task.Key(), "error", err)
+	}
+}
+
+// RegisterLive is Register for a caller that retries, such as the plugin
+// task registry: when Start has run and the task's schedule cannot be read,
+// it leaves no task under the key and returns the error.
+func (m *TaskManager) RegisterLive(task Task) error {
+	w, ctx := m.add(task)
+	if ctx == nil {
+		return nil
+	}
+	err := m.startWorker(ctx, w)
+	if err != nil {
+		m.mu.Lock()
+		if m.tasks[task.Key()] == w {
+			delete(m.tasks, task.Key())
+		}
+		m.mu.Unlock()
+		w.retire()
+	}
+	return err
+}
+
+// add installs a worker for task, retiring the one it replaces, and returns
+// Start's context, nil before Start.
+func (m *TaskManager) add(task Task) (*taskWorker, context.Context) {
+	w := newTaskWorker(task, m)
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.tasks[task.Key()] = newTaskWorker(task, m)
+	replaced := m.tasks[task.Key()]
+	m.tasks[task.Key()] = w
+	ctx := m.startCtx
+	m.mu.Unlock()
+	if replaced != nil {
+		replaced.retire()
+	}
+	return w, ctx
+}
+
+// Unregister removes a task: its triggers stop, its trigger loop ends and a
+// run in progress is canceled. Its saved schedule and history stay, so
+// registering the key again resumes that schedule. An unknown key is ignored.
+func (m *TaskManager) Unregister(key string) {
+	m.mu.Lock()
+	w := m.tasks[key]
+	delete(m.tasks, key)
+	m.mu.Unlock()
+	if w != nil {
+		w.retire()
+	}
 }
 
 // Start loads triggers from the repository and begins all scheduling loops.
 func (m *TaskManager) Start(ctx context.Context) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	m.startCtx = ctx //nolint:fatcontext // set once, by Start
+	workers := make([]*taskWorker, 0, len(m.tasks))
+	for _, w := range m.tasks {
+		workers = append(workers, w)
+	}
+	m.mu.Unlock()
 
-	for key, w := range m.tasks {
-		if latest, err := m.historyRepo.GetLatest(ctx, key); err == nil && latest != nil {
-			w.mu.Lock()
-			w.lastResult = latest
-			w.mu.Unlock()
+	for _, w := range workers {
+		if err := m.startWorker(ctx, w); err != nil {
+			m.logger.ErrorContext(ctx, "failed to load triggers", "task", w.task.Key(), "error", err)
 		}
+	}
+	m.logger.InfoContext(ctx, "task manager started", "tasks", len(workers))
+}
 
-		configs, err := m.triggerRepo.GetTriggers(ctx, key)
-		if err == nil && configs == nil {
-			if followsDefaultTriggers(w.task) {
-				configs = w.task.DefaultTriggers()
-			} else {
-				// Default providers may read settings. Resolve them only for new
-				// schedules, outside the repository transaction. Initialization
-				// rechecks saved state so a concurrent edit still takes precedence.
-				configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
-			}
-		}
-		if err != nil {
-			m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
-			// Keep automatic runs idle on storage failure. The trigger loop
-			// still starts so a later administrator edit can recover the task.
-			configs = nil
-		}
-		if isManualOnly(w.task) {
-			// A schedule saved before the task became manual-only must not run it.
-			configs = nil
-		}
-
-		w.setTriggers(configs, m.triggerFactory, w.lastResult, false)
-
-		go m.triggerLoop(ctx, w)
+// startWorker loads a task's last result and schedule (savedSchedule) and
+// starts its trigger loop. It returns a schedule read failure.
+func (m *TaskManager) startWorker(ctx context.Context, w *taskWorker) error {
+	key := w.task.Key()
+	latest, err := m.historyRepo.GetLatest(ctx, key)
+	if err == nil && latest != nil {
+		w.mu.Lock()
+		w.lastResult = latest
+		w.mu.Unlock()
+	} else {
+		latest = nil
 	}
 
-	m.logger.InfoContext(ctx, "task manager started", "tasks", len(m.tasks))
+	// An administrator edit made while the task registers waits, so the
+	// schedule read here cannot replace it.
+	w.scheduleMu.Lock()
+	configs, err := m.savedSchedule(ctx, w)
+	// On a storage failure configs is nil, so automatic runs stay idle. The
+	// trigger loop still starts so a later administrator edit or
+	// ReloadSchedule can recover the task.
+	w.setTriggers(configs, m.triggerFactory, latest, false)
+	w.scheduleMu.Unlock()
+
+	go m.triggerLoop(ctx, w)
+	return err
+}
+
+// savedSchedule reads a task's saved schedule. With none, it is the task's
+// DefaultTriggers, saved first unless the task is a DefaultFollowingTask.
+// Callers hold w.scheduleMu.
+func (m *TaskManager) savedSchedule(ctx context.Context, w *taskWorker) ([]TriggerConfig, error) {
+	key := w.task.Key()
+	configs, err := m.triggerRepo.GetTriggers(ctx, key)
+	if err == nil && configs == nil {
+		if followsDefaultTriggers(w.task) {
+			configs = w.task.DefaultTriggers()
+		} else {
+			// Default providers may read settings. Resolve them only for new
+			// schedules, outside the repository transaction. Initialization
+			// rechecks saved state so a concurrent edit still takes precedence.
+			configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if isManualOnly(w.task) {
+		// A schedule saved before the task became manual-only must not run it.
+		return nil, nil
+	}
+	return configs, nil
+}
+
+// ReloadSchedule installs a task's schedule (savedSchedule) when it differs
+// from the one the task runs, so a schedule another process saved, or a
+// DefaultFollowingTask's changed defaults, apply without a restart. Like an
+// edit, a changed schedule's interval starts from now. It never writes a
+// saved schedule, except to seed DefaultTriggers for a task that has none and
+// does not follow them. Before Start it does nothing: Start loads every
+// schedule.
+func (m *TaskManager) ReloadSchedule(ctx context.Context, key string) error {
+	w, err := m.getWorker(key)
+	if err != nil {
+		return err
+	}
+	m.mu.RLock()
+	started := m.startCtx != nil
+	m.mu.RUnlock()
+	if !started {
+		return nil
+	}
+	w.scheduleMu.Lock()
+	defer w.scheduleMu.Unlock()
+	configs, err := m.savedSchedule(ctx, w)
+	if err != nil {
+		return err
+	}
+	if !w.runsSchedule(configs) {
+		w.setTriggers(configs, m.triggerFactory, nil, true)
+	}
+	return nil
 }
 
 // triggerLoop listens on all trigger channels for a worker and runs the task
@@ -116,18 +235,21 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 	for {
 		w.mu.RLock()
 		trigs := w.triggers
+		gen := w.triggerGen
 		w.mu.RUnlock()
 
 		if len(trigs) == 0 {
 			select {
 			case <-ctx.Done():
 				return
+			case <-w.retired:
+				return
 			case <-w.triggerUpdate:
 				continue
 			}
 		}
 
-		merged := make(chan struct{}, 1)
+		fired := make(chan struct{}, 1)
 		done := make(chan struct{})
 
 		for _, tr := range trigs {
@@ -139,7 +261,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				case _, ok := <-tr.C():
 					if ok {
 						select {
-						case merged <- struct{}{}:
+						case fired <- struct{}{}:
 						default:
 						}
 					}
@@ -147,27 +269,28 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}()
 		}
 
-		go func() {
-			select {
-			case <-done:
-				return
-			case <-w.triggerUpdate:
-				select {
-				case merged <- struct{}{}:
-				default:
-				}
-			}
-		}()
-
 		select {
 		case <-ctx.Done():
 			close(done)
 			return
-		case <-merged:
+		case <-w.retired:
+			close(done)
+			return
+		case <-w.triggerUpdate:
+			// Wait on the new triggers. An update never runs the task.
+			close(done)
+			continue
+		case <-fired:
 			close(done)
 		}
 
-		if w.triggerChanged.CompareAndSwap(true, false) {
+		// A trigger replaced since the loop read them fired before it
+		// stopped; the update that replaced it wakes the loop for the new
+		// ones.
+		w.mu.RLock()
+		replaced := w.triggerGen != gen
+		w.mu.RUnlock()
+		if replaced {
 			continue
 		}
 
@@ -189,6 +312,10 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 		}
 
 		result, err := w.run(ctx)
+		if errors.Is(err, ErrTaskNotFound) {
+			// Unregistered while this firing waited: the worker is retired.
+			return
+		}
 		if err != nil {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.
