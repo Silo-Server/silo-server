@@ -72,7 +72,7 @@ type AdminPluginTaskBindingInput struct {
 	Body         AdminPluginTaskBindingWrite
 }
 type AdminPluginTaskBindingResult struct {
-	RestartRequired bool `json:"restart_required" doc:"False when the binding applies without a restart: this server syncs its tasks before answering, and every other API server at its next plugin task sync. True only on a server with no task scheduler, where it applies at the next start"`
+	RestartRequired bool `json:"restart_required" doc:"False when the binding applies without a restart: this server attempts a plugin task sync before answering and retries a failed one, and every other API server applies it at its next successful sync. True only on a server with no task scheduler, where it applies at the next start"`
 }
 type AdminPluginTaskBindingOutput struct{ Body AdminPluginTaskBindingResult }
 
@@ -187,7 +187,7 @@ func registerAdminPluginConfiguration(reg *Registry) {
 		}
 		return &AdminPluginAuthBindingOutput{RestartRequired: authBindingRestartRequired}, nil
 	})
-	task := op("PUT", "task-bindings/{capability_id}", "updateAdminPluginTaskBinding", "Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
+	task := op("PUT", "task-bindings/{capability_id}", "updateAdminPluginTaskBinding", "Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
 	Register(reg, task, func(ctx context.Context, in *AdminPluginTaskBindingInput) (*AdminPluginTaskBindingOutput, error) {
 		if reg.deps.AdminPluginConfiguration == nil {
 			return nil, unavailable("plugin configuration")

@@ -3986,7 +3986,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding. */
+    /** Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding. */
     put: operations["updateAdminPluginTaskBinding"];
     post?: never;
     delete?: never;
@@ -20101,7 +20101,7 @@ export interface components {
       updated_at: string;
     };
     AdminPluginTaskBindingResult: {
-      /** @description False when the binding applies without a restart: this server syncs its tasks before answering, and every other API server at its next plugin task sync. True only on a server with no task scheduler, where it applies at the next start */
+      /** @description False when the binding applies without a restart: this server attempts a plugin task sync before answering and retries a failed one, and every other API server applies it at its next successful sync. True only on a server with no task scheduler, where it applies at the next start */
       restart_required: boolean;
     };
     AdminPluginTaskBindingWrite: {
