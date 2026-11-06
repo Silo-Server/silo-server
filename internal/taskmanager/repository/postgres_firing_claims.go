@@ -29,7 +29,7 @@ func NewPgFiringClaims(pool *pgxpool.Pool) *PgFiringClaims {
 // another server checks, so firings a few seconds apart are caught as well as
 // concurrent ones. Each claim records when it expires, after the longer of
 // its window and firingClaimRetention, and expired claims of every task are
-// pruned in the same transaction: a task that stopped firing (an uninstalled
+// pruned in the same transaction, by one claim at a time: a task that stopped firing (an uninstalled
 // plugin's) doesn't keep its claims, and a short-interval task never prunes
 // a long-interval task's claim inside that claim's window.
 func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.Time, window time.Duration) (bool, error) {
@@ -57,9 +57,18 @@ func (r *PgFiringClaims) ClaimFiring(ctx context.Context, key string, slot time.
 			key, slot, max(window, firingClaimRetention).Microseconds()); err != nil {
 			return fmt.Errorf("claiming task firing: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `
-			DELETE FROM task_firing_claims WHERE expires_at < clock_timestamp()`); err != nil {
-			return fmt.Errorf("pruning task firing claims: %w", err)
+		// Pruning touches every task's rows, so claims of different tasks
+		// could delete overlapping rows in different orders and deadlock.
+		// One claim at a time prunes; the others leave it for a later claim.
+		var pruning bool
+		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended('task_firing_claims:prune', 0))`).Scan(&pruning); err != nil {
+			return fmt.Errorf("locking task firing claim pruning: %w", err)
+		}
+		if pruning {
+			if _, err := tx.Exec(ctx, `
+				DELETE FROM task_firing_claims WHERE expires_at < clock_timestamp()`); err != nil {
+				return fmt.Errorf("pruning task firing claims: %w", err)
+			}
 		}
 		won = true
 		return nil

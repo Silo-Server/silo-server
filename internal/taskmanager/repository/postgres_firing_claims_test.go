@@ -30,7 +30,7 @@ func TestPgFiringClaimsRunEachFiringOnceDB(t *testing.T) {
 	}
 	claim := func(t *testing.T, key string, trigger taskmanager.TriggerConfig, firedAt time.Time) bool {
 		t.Helper()
-		slot, window := taskmanager.FiringSlot(trigger, firedAt)
+		slot, window, _ := taskmanager.FiringSlot(trigger, firedAt) // every trigger here names a slot
 		won, err := claims.ClaimFiring(ctx, key, slot, window)
 		if err != nil {
 			t.Error(err) // also called off the test goroutine

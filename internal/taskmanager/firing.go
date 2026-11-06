@@ -30,7 +30,10 @@ const StartupClaimWindow = 10 * time.Minute
 
 // FiringSlot is the cluster-wide identity of a firing of trigger at firedAt,
 // the same on every server whose clock and time zone agree, and the window in
-// which an earlier claim of the task also covers it.
+// which an earlier claim of the task also covers it. ok is false when the
+// trigger names no slot every server would agree on (a malformed time of day,
+// an interval that isn't positive, an unknown type, or no trigger at all): a
+// claim keyed on firedAt alone could be won on several servers.
 //
 //   - daily and weekly: the scheduled instant nearest firedAt, so a start
 //     spread or a late timer still names the firing it serves; no window.
@@ -39,31 +42,34 @@ const StartupClaimWindow = 10 * time.Minute
 //     servers whose timers straddle a slot boundary still run once, and a
 //     server that lost a claim and rearmed waits a whole interval.
 //   - startup: firedAt, with StartupClaimWindow.
-func FiringSlot(trigger TriggerConfig, firedAt time.Time) (time.Time, time.Duration) {
+func FiringSlot(trigger TriggerConfig, firedAt time.Time) (slot time.Time, window time.Duration, ok bool) {
 	switch trigger.Type {
 	case TriggerTypeDaily:
-		return nearestSlot(firedAt, trigger.TimeOfDay, 1, firedAt.Weekday()), 0
+		slot, ok = nearestSlot(firedAt, trigger.TimeOfDay, 1, firedAt.Weekday())
+		return slot, 0, ok
 	case TriggerTypeWeekly:
-		return nearestSlot(firedAt, trigger.TimeOfDay, 7, time.Weekday(trigger.DayOfWeek)), 0
+		slot, ok = nearestSlot(firedAt, trigger.TimeOfDay, 7, time.Weekday(trigger.DayOfWeek))
+		return slot, 0, ok
 	case TriggerTypeInterval:
 		interval := time.Duration(trigger.IntervalMs) * time.Millisecond
 		if interval <= 0 {
-			return firedAt, 0
+			return time.Time{}, 0, false
 		}
-		return firedAt.Truncate(interval), interval - min(interval/10, time.Minute)
+		return firedAt.Truncate(interval), interval - min(interval/10, time.Minute), true
 	case TriggerTypeStartup:
-		return firedAt, StartupClaimWindow
+		return firedAt, StartupClaimWindow, true
 	default:
-		return firedAt, 0
+		return time.Time{}, 0, false
 	}
 }
 
 // nearestSlot is the instant at timeOfDay on weekday nearest at, in at's
-// location, for a schedule that repeats every periodDays days.
-func nearestSlot(at time.Time, timeOfDay string, periodDays int, weekday time.Weekday) time.Time {
+// location, for a schedule that repeats every periodDays days. ok is false
+// for a time of day that doesn't parse.
+func nearestSlot(at time.Time, timeOfDay string, periodDays int, weekday time.Weekday) (time.Time, bool) {
 	clock, err := time.Parse("15:04", timeOfDay)
 	if err != nil {
-		return at
+		return time.Time{}, false
 	}
 	day := at.AddDate(0, 0, int(weekday)-int(at.Weekday()))
 	candidate := time.Date(day.Year(), day.Month(), day.Day(), clock.Hour(), clock.Minute(), 0, 0, at.Location())
@@ -74,7 +80,7 @@ func nearestSlot(at time.Time, timeOfDay string, periodDays int, weekday time.We
 			best = other
 		}
 	}
-	return best
+	return best, true
 }
 
 func claimsFirings(task Task) bool {
@@ -107,7 +113,15 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 	if fired != nil {
 		trigger = fired.Config()
 	}
-	slot, window := FiringSlot(trigger, time.Now())
+	slot, window, ok := FiringSlot(trigger, time.Now())
+	if !ok {
+		// No trigger fired (a schedule change woke the loop), or its slot
+		// isn't one every server would compute: running here could repeat on
+		// another server, so skip.
+		m.logger.WarnContext(ctx, "scheduled task firing has no cluster-wide slot; skipping it",
+			"task", w.task.Key(), "trigger", trigger.Type)
+		return false
+	}
 	won, err := claims.ClaimFiring(ctx, w.task.Key(), slot, window)
 	if err != nil {
 		m.logger.WarnContext(ctx, "claiming scheduled task firing failed; skipping it",

@@ -88,8 +88,11 @@ the trigger that fired and the firing time:
 
 Invariants:
 
-- Of the servers that fire one scheduled firing of a plugin task, exactly one
-  runs it, whether they fire together or seconds apart. The lock serializes
+- Of the servers that fire one scheduled firing of a plugin task, at most one
+  runs it, whether they fire together or seconds apart. Usually that is
+  exactly one, but a firing can be missed: when the winning server's task is
+  already running (a manual Run now), or the server stops after claiming, no
+  other server runs that firing, and the task runs again at its next one. The lock serializes
   claims of one task; the row, which outlives the transaction, is what a
   later server finds. An advisory lock alone would let a server that fires
   after the winner's run finished run it again.
@@ -107,9 +110,12 @@ Invariants:
   registers the task, within 10 minutes of another's startup claim skips it.
   A server restarted alone later runs it again.
 - A claim that cannot be recorded fails closed: the server skips the firing
-  and logs a warning, and the next firing tries again.
+  and logs a warning, and the next firing tries again. So does a firing with
+  no slot every server would agree on, such as a malformed time of day, an
+  interval that isn't positive, or a schedule change that woke the loop.
 - Each claim records its expiry, the longer of its window and eight days
   after it was taken. The transaction that takes a claim prunes expired claims
-  of all tasks, so a task that stopped firing leaves no claims behind, and a
+  of all tasks when no other claim is pruning (a global advisory lock, tried
+  without waiting, so two prunes never deadlock), so a task that stopped firing leaves no claims behind, and a
   short-interval task never prunes a long-interval task's claim inside that
   claim's window.

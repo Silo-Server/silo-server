@@ -21,21 +21,26 @@ func TestFiringSlot(t *testing.T) {
 		firedAt time.Time
 		slot    time.Time
 		window  time.Duration
+		noSlot  bool
 	}{
-		{"daily on time", daily, at(6, 3, 0, 0), at(6, 3, 0, 0), 0},
-		{"daily timer late", daily, at(6, 3, 4, 10), at(6, 3, 0, 0), 0},
-		{"daily clock slightly behind the slot", daily, at(6, 2, 59, 58), at(6, 3, 0, 0), 0},
-		{"weekly late into Monday", sunday, at(9, 0, 10, 0), at(8, 23, 30, 0), 0},
-		{"weekly on the day", sunday, at(8, 23, 30, 5), at(8, 23, 30, 0), 0},
-		{"interval", hourly, at(6, 10, 59, 59), at(6, 10, 0, 0), 59 * time.Minute},
-		{"interval after the boundary", hourly, at(6, 11, 0, 2), at(6, 11, 0, 0), 59 * time.Minute},
-		{"short interval", TriggerConfig{Type: TriggerTypeInterval, IntervalMs: 60_000}, at(6, 10, 0, 30), at(6, 10, 0, 0), 54 * time.Second},
-		{"startup", TriggerConfig{Type: TriggerTypeStartup}, at(6, 10, 0, 30), at(6, 10, 0, 30), StartupClaimWindow},
+		{"daily on time", daily, at(6, 3, 0, 0), at(6, 3, 0, 0), 0, false},
+		{"daily timer late", daily, at(6, 3, 4, 10), at(6, 3, 0, 0), 0, false},
+		{"daily clock slightly behind the slot", daily, at(6, 2, 59, 58), at(6, 3, 0, 0), 0, false},
+		{"weekly late into Monday", sunday, at(9, 0, 10, 0), at(8, 23, 30, 0), 0, false},
+		{"weekly on the day", sunday, at(8, 23, 30, 5), at(8, 23, 30, 0), 0, false},
+		{"interval", hourly, at(6, 10, 59, 59), at(6, 10, 0, 0), 59 * time.Minute, false},
+		{"interval after the boundary", hourly, at(6, 11, 0, 2), at(6, 11, 0, 0), 59 * time.Minute, false},
+		{"short interval", TriggerConfig{Type: TriggerTypeInterval, IntervalMs: 60_000}, at(6, 10, 0, 30), at(6, 10, 0, 0), 54 * time.Second, false},
+		{"startup", TriggerConfig{Type: TriggerTypeStartup}, at(6, 10, 0, 30), at(6, 10, 0, 30), StartupClaimWindow, false},
+		// Servers would each claim their own firing time: no slot.
+		{"malformed time of day", TriggerConfig{Type: TriggerTypeDaily, TimeOfDay: "3am"}, at(6, 3, 0, 0), time.Time{}, 0, true},
+		{"interval not positive", TriggerConfig{Type: TriggerTypeInterval}, at(6, 3, 0, 0), time.Time{}, 0, true},
+		{"no trigger", TriggerConfig{}, at(6, 3, 0, 0), time.Time{}, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			slot, window := FiringSlot(tc.trigger, tc.firedAt)
-			if !slot.Equal(tc.slot) || window != tc.window {
-				t.Fatalf("FiringSlot = %s, %s; want %s, %s", slot, window, tc.slot, tc.window)
+			slot, window, ok := FiringSlot(tc.trigger, tc.firedAt)
+			if ok == tc.noSlot || !slot.Equal(tc.slot) || window != tc.window {
+				t.Fatalf("FiringSlot = %s, %s, %v; want %s, %s, %v", slot, window, ok, tc.slot, tc.window, !tc.noSlot)
 			}
 		})
 	}
@@ -74,6 +79,15 @@ func (c *recordingClaims) ClaimFiring(_ context.Context, _ string, slot time.Tim
 	return c.win, nil
 }
 
+// configuredTrigger is a test trigger that reports its config, which a
+// firing claim reads to name the slot.
+type configuredTrigger struct {
+	*testTrigger
+	cfg TriggerConfig
+}
+
+func (t configuredTrigger) Config() TriggerConfig { return t.cfg }
+
 type claimingTask struct {
 	testTask
 	ran chan struct{}
@@ -99,7 +113,10 @@ func TestTriggerLoopRunsOnlyClaimedFirings(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	w.setTriggers([]TriggerConfig{{Type: TriggerTypeInterval, IntervalMs: 20}}, newTestTrigger, nil, false)
+	configured := func(cfg TriggerConfig) Trigger {
+		return configuredTrigger{testTrigger: newTestTrigger(cfg).(*testTrigger), cfg: cfg}
+	}
+	w.setTriggers([]TriggerConfig{{Type: TriggerTypeInterval, IntervalMs: 20}}, configured, nil, false)
 	go m.triggerLoop(ctx, w)
 
 	deadline := time.After(time.Second)
