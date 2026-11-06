@@ -413,6 +413,7 @@ type Service struct {
 	// guestControlPreferences is the host's saved guest-control policy; nil
 	// starts every room host-only.
 	guestControlPreferences GuestControlPreferences
+	guestControlSaveLocks   profileLocks
 
 	janitorStop chan struct{}
 

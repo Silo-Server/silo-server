@@ -141,7 +141,13 @@ func TestGuestControlPolicySaveKeepsRoomsLatestPolicyPG(t *testing.T) {
 			return nil
 		})
 	}()
-	<-aRead
+	select {
+	case <-aRead:
+	case err := <-aDone:
+		t.Fatalf("first save returned before reading the room: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("first save did not read the room")
+	}
 	// Server B commits host_only and saves while A is still pending.
 	if _, err := pool.Exec(t.Context(), `UPDATE watch_together_rooms SET guest_control_policy='host_only' WHERE id=$1`, room.ID); err != nil {
 		t.Fatal(err)
