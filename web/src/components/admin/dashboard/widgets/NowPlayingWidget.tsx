@@ -92,7 +92,10 @@ export function NowPlayingWidget() {
           /* The empty case never reaches here — it returned the collapsed strip
              above — so this branch always has at least one stream to show. */
           <>
-            <div ref={setGrid} className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
+            {/* auto-rows-fr gives every row the tallest card's height, so a card
+                whose tags wrap onto an extra line doesn't make its row taller
+                than the others. */}
+            <div ref={setGrid} className="grid auto-rows-fr grid-cols-1 gap-3.5 lg:grid-cols-2">
               {rendered.map((session, index) => {
                 // Cards past the fit stay laid out, so a taller widget can
                 // measure them, but are hidden from sight, focus, and readers.
@@ -100,7 +103,7 @@ export function NowPlayingWidget() {
                 return (
                   <div
                     key={session.session_id}
-                    className={hidden ? "invisible" : undefined}
+                    className={cn("flex", hidden && "invisible")}
                     inert={hidden}
                   >
                     <StreamCard session={session} showPoster={!hidden} />
@@ -221,10 +224,10 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
   const methodMeta = activityMethodMeta(method);
 
   return (
-    <div className="surface-panel flex gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
+    <div className="surface-panel flex flex-1 gap-3.5 rounded-2xl border-0 p-3.5 transition-colors duration-150">
       {/* Poster */}
       <div
-        className="bg-surface border-border relative flex w-[70px] flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border"
+        className="bg-surface border-border relative flex w-[60px] flex-shrink-0 items-center justify-center self-start overflow-hidden rounded-lg border"
         style={{ aspectRatio: "2/3" }}
       >
         {showPoster && session.poster_url ? (
