@@ -41,7 +41,7 @@ func TestOrderedAndroidPushTransport(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if receipt.Generation != "9007199254740993" || receipt.ServerID != fixtureServerID || f.cmd.UserID != 1 || f.cmd.ProfileID != "p-owner" || f.cmd.DeviceID != "install" || f.cmd.Remove {
+	if receipt.Generation != "9007199254740993" || receipt.ServerID != fixtureServerID || f.cmd.UserID != 1 || f.cmd.ProfileID != "p-owner" || f.cmd.DeviceID != "install" || f.cmd.LoginSessionID != "s1" || f.cmd.Remove {
 		t.Fatalf("receipt=%+v", receipt)
 	}
 	if strings.Contains(rec.Body.String(), headers["X-Push-Installation-Key"]) || strings.Contains(rec.Body.String(), strings.Repeat("a", 64)) {

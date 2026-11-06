@@ -229,6 +229,12 @@
 ./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
 ./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
 
+# Push stops when the login session that registered the device ends, however it
+# ended, including for a push already queued, and retention removes the token.
+./internal/notifications TestPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestQueuedPushStopsWhenTheRegisteringLoginEndsDB
+./internal/notifications TestAppleRenewalRecordsTheLoginOfAnOlderRegistrationDB
+
 # Session-less Android push retirement is ordered against registration by generation.
 ./internal/notifications TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB
 

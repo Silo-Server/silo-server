@@ -91,7 +91,7 @@ func (reg *Registry) androidPushCommand(ctx context.Context, authority AndroidPu
 	if err != nil {
 		return notifications.AndroidPushCommand{}, err
 	}
-	return notifications.AndroidPushCommand{UserID: user, ProfileID: profile, DeviceID: device, InstallationKey: authority.InstallationKey, Generation: generation}, nil
+	return notifications.AndroidPushCommand{UserID: user, ProfileID: profile, DeviceID: device, InstallationKey: authority.InstallationKey, Generation: generation, LoginSessionID: claimsFrom(ctx).SessionID}, nil
 }
 func registerOrderedAndroidPush(reg *Registry) {
 	capOp := notificationOperation(http.MethodGet, "/push/devices/capabilities", "getPushRegistrationCapabilities")
