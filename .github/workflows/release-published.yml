@@ -1,0 +1,110 @@
+name: Release published
+run-name: Tag the image for ${{ github.event.release.tag_name || inputs.tag }}
+
+# Tags the image CI already built and tested for a release's commit with the
+# release version (see scripts/release/release_version.py for which tags).
+# The only change to that image is one added file, /usr/share/silo/version,
+# which the server reads to report its version. See docs/release-versioning.md.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release to tag the image for again, for example v0.24.0"
+        required: true
+        type: string
+
+concurrency:
+  group: release-published
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  tag-image:
+    name: Tag the release image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Check out the release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # every tag
+          persist-credentials: false
+
+      - name: Choose the tags
+        id: tags
+        run: |
+          commit="$(git rev-list -n 1 "refs/tags/${TAG}")"
+          version="${TAG#v}"
+          image="${REGISTRY}/${IMAGE_NAME,,}"
+          python3 scripts/release/release_version.py docker-tags "$TAG" > "$RUNNER_TEMP/tags.txt"
+          {
+            echo "commit=${commit}"
+            echo "version=${version}"
+            echo "image=${image}"
+            echo "list<<EOF"
+            sed "s|^|${image}:|" "$RUNNER_TEMP/tags.txt"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Tags for ${TAG} (commit ${commit::9}):"
+          cat "$RUNNER_TEMP/tags.txt"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Pin the commit's image by digest so a later push of the same tag can't
+      # change what this release is built on. The layer only copies a file, so
+      # both platforms build without emulation.
+      - name: Write the version layer
+        env:
+          COMMIT: ${{ steps.tags.outputs.commit }}
+          IMAGE: ${{ steps.tags.outputs.image }}
+          VERSION: ${{ steps.tags.outputs.version }}
+        run: |
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${COMMIT}" --format '{{json .Manifest}}' | jq -r .digest)"
+          if [[ -z "$digest" || "$digest" == null ]]; then
+            echo "::error::${IMAGE}:${COMMIT} doesn't exist. The Docker Image workflow must have published this commit."
+            exit 1
+          fi
+          context="$RUNNER_TEMP/version-layer"
+          mkdir -p "$context"
+          printf '%s\n' "$VERSION" > "$context/version"
+          printf 'FROM %s@%s\nCOPY version /usr/share/silo/version\n' "$IMAGE" "$digest" > "$context/Dockerfile"
+          echo "CONTEXT=$context" >> "$GITHUB_ENV"
+
+      - name: Build and push the release image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ env.CONTEXT }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: ${{ steps.tags.outputs.list }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.tags.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.tags.outputs.commit }}
+
+      - name: Check the published image
+        env:
+          IMAGE: ${{ steps.tags.outputs.image }}
+          VERSION: ${{ steps.tags.outputs.version }}
+        run: docker buildx imagetools inspect "${IMAGE}:${VERSION}"
