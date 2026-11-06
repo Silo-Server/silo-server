@@ -67,7 +67,9 @@ a new manifest default applies here. Both sides are compared normalized
 only on weekly triggers; otherwise a daily trigger carrying a weekday would
 look changed on every sync and restart its timer. As after an edit, a
 reloaded interval starts from now. A failed read changes nothing, so a
-database error never unregisters a task. Unregistering stops the task's
+database error never unregisters a task. A new task whose schedule cannot be
+read is not registered (`TaskManager.RegisterLive`) and fails the sync, so the
+retry registers it. Unregistering stops the task's
 triggers and cancels a run in progress; a saved schedule and the history stay.
 A sync never writes a schedule.
 

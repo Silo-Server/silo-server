@@ -92,11 +92,15 @@ func (s *fakeTaskBindingStore) ListTaskBindings(context.Context) ([]*TaskBinding
 type memoryTriggerStore struct {
 	mu    sync.Mutex
 	saved map[string][]taskmanager.TriggerConfig
+	err   error
 }
 
 func (s *memoryTriggerStore) GetTriggers(_ context.Context, key string) ([]taskmanager.TriggerConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.err != nil {
+		return nil, s.err
+	}
 	return slices.Clone(s.saved[key]), nil
 }
 
@@ -226,9 +230,28 @@ func TestTaskRegistrySyncAppliesChangesLive(t *testing.T) {
 	setBinding(true, map[string]any{})
 	resync()
 	runs(edited...)
+	enabled := installations.installations
 	installations.installations = nil
 	resync()
 	if got := registered(); len(got) != 0 {
 		t.Fatalf("disabled plugin left %v registered", got)
 	}
+
+	// A task whose schedule cannot be read fails the sync and stays
+	// unregistered, so the retry registers it.
+	installations.installations = enabled
+	store.mu.Lock()
+	store.err = errors.New("database unavailable")
+	store.mu.Unlock()
+	if err := registry.Sync(ctx); err == nil {
+		t.Fatal("a schedule that could not be read must fail the sync")
+	}
+	if got := registered(); len(got) != 0 {
+		t.Fatalf("a task with an unread schedule is registered: %v", got)
+	}
+	store.mu.Lock()
+	store.err = nil
+	store.mu.Unlock()
+	resync()
+	runs(edited...)
 }

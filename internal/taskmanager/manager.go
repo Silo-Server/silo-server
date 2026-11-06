@@ -67,8 +67,42 @@ func (m *TaskManager) SetLibraryTypes(fn LibraryTypesFunc) {
 // Register adds a task, replacing one registered under the same key as
 // Unregister does. A task registered before Start starts with the others; one
 // registered after Start loads its schedule and starts its trigger loop
-// before Register returns.
+// before Register returns. If that schedule cannot be read, the task is
+// registered with no automatic runs until ReloadSchedule or an edit installs
+// one; RegisterLive reports the failure instead.
 func (m *TaskManager) Register(task Task) {
+	w, ctx := m.add(task)
+	if ctx == nil {
+		return
+	}
+	if err := m.startWorker(ctx, w); err != nil {
+		m.logger.ErrorContext(ctx, "failed to load triggers", "task", task.Key(), "error", err)
+	}
+}
+
+// RegisterLive is Register for a caller that retries, such as the plugin
+// task registry: when Start has run and the task's schedule cannot be read,
+// it leaves no task under the key and returns the error.
+func (m *TaskManager) RegisterLive(task Task) error {
+	w, ctx := m.add(task)
+	if ctx == nil {
+		return nil
+	}
+	err := m.startWorker(ctx, w)
+	if err != nil {
+		m.mu.Lock()
+		if m.tasks[task.Key()] == w {
+			delete(m.tasks, task.Key())
+		}
+		m.mu.Unlock()
+		w.retire()
+	}
+	return err
+}
+
+// add installs a worker for task, retiring the one it replaces, and returns
+// Start's context, nil before Start.
+func (m *TaskManager) add(task Task) (*taskWorker, context.Context) {
 	w := newTaskWorker(task, m)
 	m.mu.Lock()
 	replaced := m.tasks[task.Key()]
@@ -78,9 +112,7 @@ func (m *TaskManager) Register(task Task) {
 	if replaced != nil {
 		replaced.retire()
 	}
-	if ctx != nil {
-		m.startWorker(ctx, w)
-	}
+	return w, ctx
 }
 
 // Unregister removes a task: its triggers stop, its trigger loop ends and a
@@ -107,14 +139,16 @@ func (m *TaskManager) Start(ctx context.Context) {
 	m.mu.Unlock()
 
 	for _, w := range workers {
-		m.startWorker(ctx, w)
+		if err := m.startWorker(ctx, w); err != nil {
+			m.logger.ErrorContext(ctx, "failed to load triggers", "task", w.task.Key(), "error", err)
+		}
 	}
 	m.logger.InfoContext(ctx, "task manager started", "tasks", len(workers))
 }
 
 // startWorker loads a task's last result and schedule (savedSchedule) and
-// starts its trigger loop.
-func (m *TaskManager) startWorker(ctx context.Context, w *taskWorker) {
+// starts its trigger loop. It returns a schedule read failure.
+func (m *TaskManager) startWorker(ctx context.Context, w *taskWorker) error {
 	key := w.task.Key()
 	latest, err := m.historyRepo.GetLatest(ctx, key)
 	if err == nil && latest != nil {
@@ -129,16 +163,14 @@ func (m *TaskManager) startWorker(ctx context.Context, w *taskWorker) {
 	// schedule read here cannot replace it.
 	w.scheduleMu.Lock()
 	configs, err := m.savedSchedule(ctx, w)
-	if err != nil {
-		// Keep automatic runs idle on storage failure. The trigger loop
-		// still starts so a later administrator edit or ReloadSchedule can
-		// recover the task.
-		m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
-	}
+	// On a storage failure configs is nil, so automatic runs stay idle. The
+	// trigger loop still starts so a later administrator edit or
+	// ReloadSchedule can recover the task.
 	w.setTriggers(configs, m.triggerFactory, latest, false)
 	w.scheduleMu.Unlock()
 
 	go m.triggerLoop(ctx, w)
+	return err
 }
 
 // savedSchedule reads a task's saved schedule. With none, it is the task's

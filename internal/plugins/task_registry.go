@@ -37,7 +37,7 @@ type taskBindingStore interface {
 
 // taskScheduler is the part of the task manager the registry drives.
 type taskScheduler interface {
-	Register(task taskmanager.Task)
+	RegisterLive(task taskmanager.Task) error
 	Unregister(key string)
 	ReloadSchedule(ctx context.Context, key string) error
 }
@@ -129,10 +129,14 @@ func (r *TaskRegistry) Sync(ctx context.Context) error {
 			continue
 		}
 		// Registering loads a saved schedule, else the defaults the scan
-		// just read.
+		// just read. A task whose schedule cannot be read is left
+		// unregistered, so the retry after the failed sync registers it.
 		task := &pluginTask{installationID: spec.installationID, capabilityID: spec.capabilityID, resolver: r.host}
 		task.update(spec)
-		r.scheduler.Register(task)
+		if err := r.scheduler.RegisterLive(task); err != nil {
+			errs = append(errs, fmt.Errorf("register plugin task %s: %w", spec.key, err))
+			continue
+		}
 		r.registered[spec.key] = task
 	}
 	for key := range r.registered {
