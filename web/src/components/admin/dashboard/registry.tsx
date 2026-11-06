@@ -177,13 +177,13 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
   {
     id: "server-resources",
     title: "Server resources",
-    description: "CPU, memory, disk, network, and GPU usage on the API host",
+    description: "CPU, memory, and GPU usage on the API host",
     minSpan: 6,
     maxSpan: 12,
     defaultSpan: 6,
     minRows: 2,
     maxRows: 4,
-    defaultRows: 3,
+    defaultRows: 2,
     Component: ServerResourcesWidget,
   },
   {
