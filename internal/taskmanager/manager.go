@@ -171,6 +171,14 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			close(done)
 		}
 
+		// A schedule change only rearms the loop on the new triggers; it
+		// never runs the task. A real firing can clear triggerChanged just
+		// before the change's update arrives, so the update itself must not
+		// fall through to a run.
+		if fired == nil {
+			w.triggerChanged.Store(false)
+			continue
+		}
 		if w.triggerChanged.CompareAndSwap(true, false) {
 			continue
 		}
