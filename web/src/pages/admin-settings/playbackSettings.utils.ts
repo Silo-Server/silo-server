@@ -79,6 +79,25 @@ export function nodeInventoriesDiverge(detection: HWAccelInfo | undefined): bool
 
 export const IMAGE_EXECUTION_DEFAULT = "local";
 
+export const TRICKPLAY_NODE_CAPACITY_KEY = "playback.trickplay_node_capacity";
+
+/**
+ * Whether a Preview images advanced key is on screen. A node's seek preview
+ * capacity matters only once previews may run on one; an unsaved edit keeps it
+ * shown so a hidden field never holds back the save.
+ */
+export function showsPreviewKey(
+  key: string,
+  execution: string,
+  isDirty: (key: string) => boolean,
+): boolean {
+  return (
+    key !== TRICKPLAY_NODE_CAPACITY_KEY ||
+    execution !== IMAGE_EXECUTION_DEFAULT ||
+    isDirty(TRICKPLAY_NODE_CAPACITY_KEY)
+  );
+}
+
 const NODE_BACKED_IMAGE_MODES = ["prefer_transcode_nodes", "transcode_nodes_only"];
 
 /**
