@@ -37,7 +37,7 @@ func (r *PgTriggerRepository) GetSchedule(ctx context.Context, taskKey string) (
 		return taskmanager.Schedule{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	snapshot, err := readSchedule(ctx, tx, taskKey, false)
+	snapshot, err := readSchedule(ctx, tx, taskKey)
 	if err != nil {
 		return taskmanager.Schedule{}, err
 	}
@@ -57,22 +57,10 @@ func (r *PgTriggerRepository) GetOrCreateTriggers(ctx context.Context, taskKey s
 	return saved.Triggers, nil
 }
 
-// LockScheduleInTx reads a task's saved schedule inside the caller's
-// transaction and locks it until that transaction ends, so a replacement the
-// caller derives from it cannot overwrite an edit saved in between. Revision
-// zero means the task has no saved schedule; nothing is locked then.
-func LockScheduleInTx(ctx context.Context, tx pgx.Tx, taskKey string) (taskmanager.Schedule, error) {
-	return readSchedule(ctx, tx, taskKey, true)
-}
-
-func readSchedule(ctx context.Context, tx pgx.Tx, taskKey string, lock bool) (taskmanager.Schedule, error) {
+func readSchedule(ctx context.Context, tx pgx.Tx, taskKey string) (taskmanager.Schedule, error) {
 	var snapshot taskmanager.Schedule
 	snapshot.Triggers = []taskmanager.TriggerConfig{}
-	query := `SELECT revision FROM task_schedules WHERE task_key=$1`
-	if lock {
-		query += ` FOR UPDATE`
-	}
-	err := tx.QueryRow(ctx, query, taskKey).Scan(&snapshot.Revision)
+	err := tx.QueryRow(ctx, `SELECT revision FROM task_schedules WHERE task_key=$1`, taskKey).Scan(&snapshot.Revision)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return snapshot, nil
 	}
@@ -128,33 +116,7 @@ func (r *PgTriggerRepository) ReplaceSchedule(ctx context.Context, taskKey strin
 		return taskmanager.Schedule{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	saved, err := replaceSchedule(ctx, tx, taskKey, expected, triggers)
-	if err != nil {
-		return taskmanager.Schedule{}, err
-	}
-	return saved, tx.Commit(ctx)
-}
 
-// ReplaceScheduleInTx replaces a task's saved schedule inside the caller's
-// transaction, so the schedule commits or rolls back with the change that
-// implies it. Each process running the task installs it through
-// TaskManager.ReloadSchedule.
-func ReplaceScheduleInTx(ctx context.Context, tx pgx.Tx, taskKey string, triggers []taskmanager.TriggerConfig) error {
-	_, err := replaceSchedule(ctx, tx, taskKey, -1, triggers)
-	return err
-}
-
-// ReplaceScheduleIfInTx is ReplaceScheduleInTx guarded by the revision the
-// caller read (zero: no saved schedule). When the saved schedule has another
-// revision it changes nothing and returns *taskmanager.ScheduleConflict; the
-// schedule is then locked until the caller's transaction ends. A schedule
-// another transaction is creating is waited for, not missed.
-func ReplaceScheduleIfInTx(ctx context.Context, tx pgx.Tx, taskKey string, expected int64, triggers []taskmanager.TriggerConfig) error {
-	_, err := replaceSchedule(ctx, tx, taskKey, expected, triggers)
-	return err
-}
-
-func replaceSchedule(ctx context.Context, tx pgx.Tx, taskKey string, expected int64, triggers []taskmanager.TriggerConfig) (taskmanager.Schedule, error) {
 	inserted, err := tx.Exec(ctx, `INSERT INTO task_schedules (task_key) VALUES ($1) ON CONFLICT DO NOTHING`, taskKey)
 	if err != nil {
 		return taskmanager.Schedule{}, err
@@ -208,5 +170,5 @@ func replaceSchedule(ctx context.Context, tx pgx.Tx, taskKey string, expected in
 	if triggers == nil {
 		triggers = []taskmanager.TriggerConfig{}
 	}
-	return taskmanager.Schedule{Revision: revision, Triggers: triggers}, nil
+	return taskmanager.Schedule{Revision: revision, Triggers: triggers}, tx.Commit(ctx)
 }

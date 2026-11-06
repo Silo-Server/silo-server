@@ -48,10 +48,6 @@ type PluginHandler struct {
 	// authProvidersChanged rebuilds the sign-in provider registry on every
 	// node after an auth binding write; nil when sign-in is not wired.
 	authProvidersChanged func(context.Context)
-	// pluginTasksChanged re-syncs plugin tasks on every API server after a
-	// task binding write; nil when no task manager is wired, and then a
-	// binding applies at the next restart.
-	pluginTasksChanged func(context.Context)
 	// seedPlacement resolves a provider's chain placement; nil uses
 	// metadata.LookupSeedPlacementChecked. Tests replace it.
 	seedPlacement seedPlacementLookup
@@ -69,25 +65,6 @@ func (h *PluginHandler) notifyAuthProvidersChanged(ctx context.Context) {
 	if h != nil && h.authProvidersChanged != nil {
 		h.authProvidersChanged(ctx)
 	}
-}
-
-// SetPluginTasksChanged registers the callback a task binding write runs so
-// the binding applies without a restart.
-func (h *PluginHandler) SetPluginTasksChanged(fn func(context.Context)) {
-	if h != nil {
-		h.pluginTasksChanged = fn
-	}
-}
-
-// applyTaskBinding applies a stored task binding and reports whether a
-// restart is still needed for it to take effect.
-func (h *PluginHandler) applyTaskBinding(ctx context.Context) (restartRequired bool) {
-	if h.pluginTasksChanged == nil {
-		h.restartStatus.MarkRequired("plugin_task_binding")
-		return true
-	}
-	h.pluginTasksChanged(ctx)
-	return false
 }
 
 func NewPluginHandler(
@@ -1019,7 +996,8 @@ func (h *PluginHandler) HandlePutTaskBinding(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, pluginTaskBindingUpdateResponse{RestartRequired: h.applyTaskBinding(r.Context())})
+	h.restartStatus.MarkRequired("plugin_task_binding")
+	writeJSON(w, http.StatusOK, pluginTaskBindingUpdateResponse{RestartRequired: true})
 }
 
 // rejectBuiltinInstallation writes a 409 and returns true when the target
@@ -1162,20 +1140,20 @@ func (h *PluginHandler) TestAdminPluginAuthConnection(ctx context.Context, id in
 	return h.service.TestAuthProviderConnection(ctx, id, capabilityID, staged)
 }
 
-// SetAdminPluginTaskBinding replaces one task binding row and applies it to
-// the task manager of every API server, reporting whether a restart is still
-// needed instead. Errors as SetAdminPluginAuthBinding.
-func (h *PluginHandler) SetAdminPluginTaskBinding(ctx context.Context, id int, capabilityID string, in PluginTaskBindingInput) (restartRequired bool, err error) {
+// SetAdminPluginTaskBinding replaces one task binding row and marks a
+// server restart required. Errors as SetAdminPluginAuthBinding.
+func (h *PluginHandler) SetAdminPluginTaskBinding(ctx context.Context, id int, capabilityID string, in PluginTaskBindingInput) error {
 	if h == nil || h.configs == nil {
-		return false, apiError(http.StatusServiceUnavailable, "unavailable", "Plugin stores not configured")
+		return apiError(http.StatusServiceUnavailable, "unavailable", "Plugin stores not configured")
 	}
 	if err := h.pluginMutationTarget(ctx, id); err != nil {
-		return false, err
+		return err
 	}
 	if err := h.configs.UpsertTaskBinding(ctx, plugins.TaskBinding{InstallationID: id, CapabilityID: capabilityID, Enabled: in.Enabled, Trigger: in.Trigger}); err != nil {
-		return false, err
+		return err
 	}
-	return h.applyTaskBinding(ctx), nil
+	h.restartStatus.MarkRequired("plugin_task_binding")
+	return nil
 }
 
 func (h *PluginHandler) HandleDeleteInstallation(w http.ResponseWriter, r *http.Request) {

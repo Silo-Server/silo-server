@@ -26,9 +26,6 @@ type TaskManager struct {
 	logger         *slog.Logger
 	observers      []Observer
 	libraryTypes   LibraryTypesFunc
-	// startCtx is the context Start ran under, nil before Start. A task
-	// registered later runs its trigger loop under it.
-	startCtx context.Context //nolint:containedctx // Start's context outlives the call: tasks registered after Start run under it
 }
 
 // New creates a new TaskManager.
@@ -64,130 +61,53 @@ func (m *TaskManager) SetLibraryTypes(fn LibraryTypesFunc) {
 	m.libraryTypes = fn
 }
 
-// Register adds a task, replacing one registered under the same key as
-// Unregister does. A task registered before Start starts with the others; one
-// registered after Start loads its schedule and starts its trigger loop
-// before Register returns.
+// Register adds a task to the manager. Must be called before Start.
 func (m *TaskManager) Register(task Task) {
-	w := newTaskWorker(task, m)
 	m.mu.Lock()
-	replaced := m.tasks[task.Key()]
-	m.tasks[task.Key()] = w
-	ctx := m.startCtx
-	m.mu.Unlock()
-	if replaced != nil {
-		replaced.retire()
-	}
-	if ctx != nil {
-		m.startWorker(ctx, w)
-	}
-}
-
-// Unregister removes a task: its triggers stop, its trigger loop ends and a
-// run in progress is canceled. Its saved schedule and history stay, so
-// registering the key again resumes that schedule. An unknown key is ignored.
-func (m *TaskManager) Unregister(key string) {
-	m.mu.Lock()
-	w := m.tasks[key]
-	delete(m.tasks, key)
-	m.mu.Unlock()
-	if w != nil {
-		w.retire()
-	}
+	defer m.mu.Unlock()
+	m.tasks[task.Key()] = newTaskWorker(task, m)
 }
 
 // Start loads triggers from the repository and begins all scheduling loops.
 func (m *TaskManager) Start(ctx context.Context) {
-	m.mu.Lock()
-	m.startCtx = ctx //nolint:fatcontext // set once, by Start
-	workers := make([]*taskWorker, 0, len(m.tasks))
-	for _, w := range m.tasks {
-		workers = append(workers, w)
-	}
-	m.mu.Unlock()
-
-	for _, w := range workers {
-		m.startWorker(ctx, w)
-	}
-	m.logger.InfoContext(ctx, "task manager started", "tasks", len(workers))
-}
-
-// startWorker loads a task's last result and saved schedule, saving the
-// task's DefaultTriggers when it has none, and starts its trigger loop.
-func (m *TaskManager) startWorker(ctx context.Context, w *taskWorker) {
-	key := w.task.Key()
-	latest, err := m.historyRepo.GetLatest(ctx, key)
-	if err == nil && latest != nil {
-		w.mu.Lock()
-		w.lastResult = latest
-		w.mu.Unlock()
-	} else {
-		latest = nil
-	}
-
-	// An administrator edit made while the task registers waits, so the
-	// schedule read here cannot replace it.
-	w.scheduleMu.Lock()
-	configs, err := m.savedSchedule(ctx, w)
-	if err != nil {
-		// Keep automatic runs idle on storage failure. The trigger loop
-		// still starts so a later administrator edit or ReloadSchedule can
-		// recover the task.
-		m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
-	}
-	w.setTriggers(configs, m.triggerFactory, latest, false)
-	w.scheduleMu.Unlock()
-
-	go m.triggerLoop(ctx, w)
-}
-
-// savedSchedule reads a task's saved schedule, saving its DefaultTriggers when
-// it has none. Callers hold w.scheduleMu.
-func (m *TaskManager) savedSchedule(ctx context.Context, w *taskWorker) ([]TriggerConfig, error) {
-	key := w.task.Key()
-	configs, err := m.triggerRepo.GetTriggers(ctx, key)
-	if err == nil && configs == nil {
-		// Default providers may read settings. Resolve them only for new
-		// schedules, outside the repository transaction. Initialization
-		// rechecks saved state so a concurrent edit still takes precedence.
-		configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
-	}
-	if err != nil {
-		return nil, err
-	}
-	if isManualOnly(w.task) {
-		// A schedule saved before the task became manual-only must not run it.
-		return nil, nil
-	}
-	return configs, nil
-}
-
-// ReloadSchedule installs a task's saved schedule when it differs from the one
-// the task runs, so a schedule another process saved applies on this one
-// without a restart. Like an edit, a changed schedule's interval starts from
-// now. It never writes a saved schedule, except to seed DefaultTriggers for a
-// task that has none. Before Start it does nothing: Start loads every schedule.
-func (m *TaskManager) ReloadSchedule(ctx context.Context, key string) error {
-	w, err := m.getWorker(key)
-	if err != nil {
-		return err
-	}
 	m.mu.RLock()
-	started := m.startCtx != nil
-	m.mu.RUnlock()
-	if !started {
-		return nil
+	defer m.mu.RUnlock()
+
+	for key, w := range m.tasks {
+		if latest, err := m.historyRepo.GetLatest(ctx, key); err == nil && latest != nil {
+			w.mu.Lock()
+			w.lastResult = latest
+			w.mu.Unlock()
+		}
+
+		configs, err := m.triggerRepo.GetTriggers(ctx, key)
+		if err == nil && configs == nil {
+			if followsDefaultTriggers(w.task) {
+				configs = w.task.DefaultTriggers()
+			} else {
+				// Default providers may read settings. Resolve them only for new
+				// schedules, outside the repository transaction. Initialization
+				// rechecks saved state so a concurrent edit still takes precedence.
+				configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
+			}
+		}
+		if err != nil {
+			m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
+			// Keep automatic runs idle on storage failure. The trigger loop
+			// still starts so a later administrator edit can recover the task.
+			configs = nil
+		}
+		if isManualOnly(w.task) {
+			// A schedule saved before the task became manual-only must not run it.
+			configs = nil
+		}
+
+		w.setTriggers(configs, m.triggerFactory, w.lastResult, false)
+
+		go m.triggerLoop(ctx, w)
 	}
-	w.scheduleMu.Lock()
-	defer w.scheduleMu.Unlock()
-	configs, err := m.savedSchedule(ctx, w)
-	if err != nil {
-		return err
-	}
-	if !w.runsSchedule(configs) {
-		w.setTriggers(configs, m.triggerFactory, nil, true)
-	}
-	return nil
+
+	m.logger.InfoContext(ctx, "task manager started", "tasks", len(m.tasks))
 }
 
 // triggerLoop listens on all trigger channels for a worker and runs the task
@@ -201,8 +121,6 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 		if len(trigs) == 0 {
 			select {
 			case <-ctx.Done():
-				return
-			case <-w.retired:
 				return
 			case <-w.triggerUpdate:
 				continue
@@ -245,9 +163,6 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 		case <-ctx.Done():
 			close(done)
 			return
-		case <-w.retired:
-			close(done)
-			return
 		case <-merged:
 			close(done)
 		}
@@ -274,10 +189,6 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 		}
 
 		result, err := w.run(ctx)
-		if errors.Is(err, ErrTaskNotFound) {
-			// Unregistered while this firing waited: the worker is retired.
-			return
-		}
 		if err != nil {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.
@@ -471,6 +382,11 @@ func isManualOnly(task Task) bool {
 	return ok && manual.ManualOnly()
 }
 
+func followsDefaultTriggers(task Task) bool {
+	follower, ok := task.(DefaultFollowingTask)
+	return ok && follower.FollowsDefaultTriggers()
+}
+
 func startSpread(task Task) time.Duration {
 	spreader, ok := task.(StartSpreader)
 	if !ok {
@@ -514,15 +430,22 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 }
 
 // GetSchedule reads the durable editor state rather than a live trigger snapshot.
+// A DefaultFollowingTask with no saved schedule reports its DefaultTriggers at
+// revision zero, the schedule it runs until one is saved.
 func (m *TaskManager) GetSchedule(ctx context.Context, key string) (Schedule, error) {
-	if _, err := m.getWorker(key); err != nil {
+	w, err := m.getWorker(key)
+	if err != nil {
 		return Schedule{}, err
 	}
 	repo, ok := m.triggerRepo.(GuardedTriggerRepository)
 	if !ok {
 		return Schedule{}, fmt.Errorf("guarded task schedules unavailable")
 	}
-	return repo.GetSchedule(ctx, key)
+	schedule, err := repo.GetSchedule(ctx, key)
+	if err == nil && schedule.Revision == 0 && followsDefaultTriggers(w.task) {
+		schedule.Triggers = w.task.DefaultTriggers()
+	}
+	return schedule, err
 }
 
 // UpdateSchedule persists under the original revision and installs that schedule

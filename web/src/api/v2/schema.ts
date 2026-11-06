@@ -3986,7 +3986,7 @@ export interface paths {
       cookie?: never;
     };
     get?: never;
-    /** Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it, and a changed trigger replaces its saved schedule. The whole row is assigned, so repeating the request converges on one stored binding. */
+    /** Replace the scheduled task binding for one capability and mark a server restart required. The whole row is assigned, so repeating the request converges on one stored binding. */
     put: operations["updateAdminPluginTaskBinding"];
     post?: never;
     delete?: never;
@@ -19780,7 +19780,7 @@ export interface components {
        */
       callback_url?: string;
       config_schema: components["schemas"]["AdminPluginConfigSchema"][];
-      /** @description On a scheduled_task.v1 capability: the schedule its manifest declares, the task's default until a binding or a task-page edit saves another. Omitted when the manifest declares none the server can run; the default is then one run at server start */
+      /** @description On a scheduled_task.v1 capability: the schedule its manifest declares, which the task runs unless a schedule is saved on its task page or its binding sets a trigger the server can run. Omitted when the manifest declares none the server can run; the task then runs once at server start */
       default_schedule?: components["schemas"]["AdminTaskTrigger"];
       description: string;
       display_name: string;
@@ -20101,12 +20101,12 @@ export interface components {
       updated_at: string;
     };
     AdminPluginTaskBindingResult: {
-      /** @description False when the binding applies without a restart: this server syncs its tasks before answering, and every other API server at its next plugin task sync. True only on a server with no task scheduler, where it applies at the next start */
+      /** @description Always true: bindings load at server start */
       restart_required: boolean;
     };
     AdminPluginTaskBindingWrite: {
       enabled: boolean;
-      /** @description The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). A change to a trigger the task manager can run, or from one to none, replaces the task's saved schedule; a change between two unrunnable triggers keeps it. Omitted stores an empty object. When it replaces the saved schedule, an empty or unrunnable trigger saves the manifest default_trigger, else one run at server start */
+      /** @description The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). The task runs it unless a schedule is saved on its task page; an empty or unrunnable trigger leaves the manifest default_trigger, else one run at server start. Omitted stores an empty object */
       trigger?: {
         [key: string]: unknown;
       };

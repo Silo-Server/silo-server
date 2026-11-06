@@ -18,7 +18,7 @@ type AdminPluginConfigurationService interface {
 	SetAdminPluginConfig(context.Context, int, handlers.PluginConfigInput) error
 	TestAdminPluginConfig(context.Context, int, handlers.PluginConfigInput) (handlers.PluginConnectionCheckResult, error)
 	SetAdminPluginAuthBinding(context.Context, int, handlers.PluginAuthBindingInput) error
-	SetAdminPluginTaskBinding(context.Context, int, string, handlers.PluginTaskBindingInput) (restartRequired bool, err error)
+	SetAdminPluginTaskBinding(context.Context, int, string, handlers.PluginTaskBindingInput) error
 }
 
 // AdminPluginConfigWrite is one global configuration entry as the operator
@@ -63,7 +63,7 @@ type AdminPluginAuthBindingOutput struct {
 // AdminPluginTaskBindingWrite is the whole-row task binding assignment.
 type AdminPluginTaskBindingWrite struct {
 	Enabled bool            `json:"enabled"`
-	Trigger PluginJSONValue `json:"trigger,omitempty" doc:"The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). A change to a trigger the task manager can run, or from one to none, replaces the task's saved schedule; a change between two unrunnable triggers keeps it. Omitted stores an empty object. When it replaces the saved schedule, an empty or unrunnable trigger saves the manifest default_trigger, else one run at server start"`
+	Trigger PluginJSONValue `json:"trigger,omitempty" doc:"The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). The task runs it unless a schedule is saved on its task page; an empty or unrunnable trigger leaves the manifest default_trigger, else one run at server start. Omitted stores an empty object"`
 }
 type AdminPluginTaskBindingInput struct {
 	ID           ID     `path:"id" pattern:"^[1-9][0-9]*$"`
@@ -72,7 +72,7 @@ type AdminPluginTaskBindingInput struct {
 	Body         AdminPluginTaskBindingWrite
 }
 type AdminPluginTaskBindingResult struct {
-	RestartRequired bool `json:"restart_required" doc:"False when the binding applies without a restart: this server syncs its tasks before answering, and every other API server at its next plugin task sync. True only on a server with no task scheduler, where it applies at the next start"`
+	RestartRequired bool `json:"restart_required" doc:"Always true: bindings load at server start"`
 }
 type AdminPluginTaskBindingOutput struct{ Body AdminPluginTaskBindingResult }
 
@@ -187,7 +187,7 @@ func registerAdminPluginConfiguration(reg *Registry) {
 		}
 		return &AdminPluginAuthBindingOutput{RestartRequired: authBindingRestartRequired}, nil
 	})
-	task := op("PUT", "task-bindings/{capability_id}", "updateAdminPluginTaskBinding", "Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task, an enabled one registers it, and a changed trigger replaces its saved schedule. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
+	task := op("PUT", "task-bindings/{capability_id}", "updateAdminPluginTaskBinding", "Replace the scheduled task binding for one capability and mark a server restart required. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
 	Register(reg, task, func(ctx context.Context, in *AdminPluginTaskBindingInput) (*AdminPluginTaskBindingOutput, error) {
 		if reg.deps.AdminPluginConfiguration == nil {
 			return nil, unavailable("plugin configuration")
@@ -202,10 +202,9 @@ func registerAdminPluginConfiguration(reg *Registry) {
 		if strings.TrimSpace(in.CapabilityID) == "" {
 			return nil, validationProblem("path.capability_id", codeInvalid, "A capability ID is required.")
 		}
-		restartRequired, err := reg.deps.AdminPluginConfiguration.SetAdminPluginTaskBinding(ctx, id, in.CapabilityID, handlers.PluginTaskBindingInput{Enabled: in.Body.Enabled, Trigger: map[string]any(in.Body.Trigger)})
-		if err != nil {
+		if err := reg.deps.AdminPluginConfiguration.SetAdminPluginTaskBinding(ctx, id, in.CapabilityID, handlers.PluginTaskBindingInput{Enabled: in.Body.Enabled, Trigger: map[string]any(in.Body.Trigger)}); err != nil {
 			return nil, adminPluginMutationProblem(err)
 		}
-		return &AdminPluginTaskBindingOutput{Body: AdminPluginTaskBindingResult{RestartRequired: restartRequired}}, nil
+		return &AdminPluginTaskBindingOutput{Body: AdminPluginTaskBindingResult{RestartRequired: true}}, nil
 	})
 }

@@ -76,18 +76,18 @@ and a strong caller-bound ETag. `PUT` on that resource requires `If-Match` and a
 compares the original revision under the schedule parent lock. Legacy writers
 use that same lock and advance the revision. A mismatch returns 412 with the
 observed validator, without rereading or retrying the write. An empty schedule
-remains configured across restarts rather than restoring task defaults.
+remains configured across restarts rather than restoring task defaults. A plugin
+task has no persisted schedule until an administrator saves one: `GET` reports
+the default it runs (binding trigger, else manifest default, else startup) with
+the revision-zero validator, and the first `PUT` saves a schedule that then
+outranks that default
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)).
 
 Successful edits apply to the responding process. Other running processes load
-the persisted configuration when they restart. Plugin tasks are the exception:
-every API server installs a plugin task's saved schedule at its next plugin task
-sync: right after a binding write or plugin change is announced, else within a minute,
-with a failed sync retried after 10 seconds. A plugin task binding write that changes the binding's
-trigger saves the new schedule with the binding
-([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)).
-Runtime state and persisted schedule state are separate reads. The web editor
-captures the persisted schedule when editing begins, keeps the draft and
-original validator after conflicts, and requires explicit review and revision adoption before another submission. It
+the persisted configuration when they restart. Runtime state and persisted
+schedule state are separate reads. The web editor captures the persisted schedule
+when editing begins, keeps the draft and original validator after conflicts, and
+requires explicit review and revision adoption before another submission. It
 disables both mutation retries and authentication-refresh replay. The inherited
 `max_runtime_ms` setting is stored but is not enforced by the task runner; the
 editor labels that limitation rather than promising a timeout.
