@@ -66,24 +66,38 @@ const (
 	unlockedSetDirAge = time.Hour
 )
 
-// makeDir creates the set's directory in parent and locks it.
+// makeDir creates the set's directory in parent and locks it. The owner
+// file is locked under another name and renamed into place, so the sweep
+// never finds an owner file it can lock while the directory is in use: the
+// lock belongs to the file and moves with it.
 func (rs *RestoreSet) makeDir(parent string) error {
 	dir, err := os.MkdirTemp(parent, setDirPrefix)
 	if err != nil {
 		return err
 	}
-	owner, err := os.OpenFile(filepath.Join(dir, setDirOwner), os.O_CREATE|os.O_RDWR|os.O_EXCL, 0o600) //nolint:gosec // G304: a file in a directory this read created
-	if err == nil {
-		if err = unix.Flock(int(owner.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-			_ = owner.Close()
-		}
-	}
+	owner, err := lockedOwner(dir)
 	if err != nil {
 		_ = os.RemoveAll(dir)
 		return fmt.Errorf("locking the restore set's directory: %w", err)
 	}
 	rs.dir, rs.owner = dir, owner
 	return nil
+}
+
+func lockedOwner(dir string) (*os.File, error) {
+	owner, err := os.CreateTemp(dir, setDirOwner+"-")
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(owner.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = owner.Close()
+		return nil, err
+	}
+	if err := os.Rename(owner.Name(), filepath.Join(dir, setDirOwner)); err != nil {
+		_ = owner.Close()
+		return nil, err
+	}
+	return owner, nil
 }
 
 var sweepSetDirsOnce sync.Once
