@@ -8,6 +8,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
@@ -17,33 +18,36 @@ import (
 )
 
 type fakeInstanceState struct {
-	values  map[string][]byte
-	scopeOf map[string]int
-	err     error
+	values   map[string][]byte
+	versions map[string]int64
+	scopeOf  map[string]int
+	err      error
 }
 
-func (f *fakeInstanceState) ReadInstanceState(_ context.Context, installationID int, key string) ([]byte, bool, error) {
+func (f *fakeInstanceState) ReadInstanceState(_ context.Context, installationID int, key string) ([]byte, int64, error) {
 	if f.err != nil {
-		return nil, false, f.err
+		return nil, 0, f.err
 	}
 	v, ok := f.values[key]
-	if ok && f.scopeOf[key] != installationID {
-		return nil, false, nil
+	if !ok || f.scopeOf[key] != installationID {
+		return nil, 0, nil
 	}
-	return v, ok, nil
+	return v, f.versions[key], nil
 }
 
-func (f *fakeInstanceState) WriteInstanceState(_ context.Context, installationID int, key string, value []byte) error {
+func (f *fakeInstanceState) WriteInstanceState(_ context.Context, installationID int, key string, value []byte, _ *int64) (int64, error) {
 	if f.err != nil {
-		return f.err
+		return 0, f.err
 	}
 	if f.values == nil {
 		f.values = map[string][]byte{}
+		f.versions = map[string]int64{}
 		f.scopeOf = map[string]int{}
 	}
 	f.values[key] = value
+	f.versions[key]++
 	f.scopeOf[key] = installationID
-	return nil
+	return f.versions[key], nil
 }
 
 func apiHostInfo(listeners ...pluginhost.HostListener) pluginhost.HostInfoFunc {
@@ -144,18 +148,21 @@ func TestRuntimeHostServer_InstanceState_RoundTripAndLimits(t *testing.T) {
 	srv := pluginhost.NewRuntimeHostServerWithOptions(pluginhost.RuntimeHostOptions{InstanceState: state, InstallationID: 4})
 	ctx := context.Background()
 
+	// Versioned tells the SDK this host honors expected_version, so it is set
+	// whether or not the key exists.
 	read, err := srv.ReadInstanceState(ctx, &pluginv1.ReadInstanceStateRequest{Key: "_machinekey"})
-	if err != nil || read.GetFound() {
+	if err != nil || read.GetFound() || read.GetVersion() != 0 || !read.GetVersioned() {
 		t.Fatalf("read before write = %v, %v", read, err)
 	}
-	if _, err := srv.WriteInstanceState(ctx, &pluginv1.WriteInstanceStateRequest{Key: "_machinekey", Value: []byte("k")}); err != nil {
-		t.Fatalf("write: %v", err)
+	written, err := srv.WriteInstanceState(ctx, &pluginv1.WriteInstanceStateRequest{Key: "_machinekey", Value: []byte("k")})
+	if err != nil || written.GetVersion() != 1 {
+		t.Fatalf("write = %v, %v", written, err)
 	}
 	if state.scopeOf["_machinekey"] != 4 {
 		t.Fatalf("store called with installation %d, want 4", state.scopeOf["_machinekey"])
 	}
 	read, err = srv.ReadInstanceState(ctx, &pluginv1.ReadInstanceStateRequest{Key: "_machinekey"})
-	if err != nil || !read.GetFound() || string(read.GetValue()) != "k" {
+	if err != nil || !read.GetFound() || string(read.GetValue()) != "k" || read.GetVersion() != 1 || !read.GetVersioned() {
 		t.Fatalf("read = %v, %v", read, err)
 	}
 
@@ -169,6 +176,10 @@ func TestRuntimeHostServer_InstanceState_RoundTripAndLimits(t *testing.T) {
 	state.err = pluginhost.ErrInstanceStateTooManyKeys
 	if _, err := srv.WriteInstanceState(ctx, &pluginv1.WriteInstanceStateRequest{Key: "k", Value: []byte("v")}); status.Code(err) != codes.ResourceExhausted {
 		t.Fatalf("too many keys: %v", err)
+	}
+	state.err = pluginhost.ErrInstanceStateVersionConflict
+	if _, err := srv.WriteInstanceState(ctx, &pluginv1.WriteInstanceStateRequest{Key: "k", Value: []byte("v"), ExpectedVersion: proto.Int64(3)}); status.Code(err) != codes.Aborted {
+		t.Fatalf("version conflict: %v", err)
 	}
 	state.err = errors.New("db down")
 	if _, err := srv.ReadInstanceState(ctx, &pluginv1.ReadInstanceStateRequest{Key: "k"}); err == nil || status.Code(err) != codes.Unknown {

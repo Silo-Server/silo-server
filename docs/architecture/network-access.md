@@ -129,6 +129,25 @@ admin API reports, so the two never disagree. Limits: key ≤ 256 bytes, value
 state. Empty values also use an encrypted, row-bound envelope; a plaintext
 empty marker is rejected.
 
+Each key carries a `version` column: 1 after the first write, one more after
+each later write. `ReadInstanceState` returns it with `versioned = true`, and
+version 0 means the key is absent. Every API server runs its own process of a
+plugin against the one `api` scope, so a read-modify-write passes the version
+it read as `WriteInstanceState.expected_version`: the write lands only while
+the key is still at that version (0: the key must not exist), and otherwise
+fails with `ABORTED` and changes nothing. Without `expected_version` a write
+is unconditional. `WriteInstanceStateResponse.version` is the version just
+written. The version check is part of the write statement and runs under
+the scope's advisory lock, so two servers cannot both land at one version;
+a create-only write fails with `ABORTED` when the key exists, and with
+`RESOURCE_EXHAUSTED` when it does not and the scope is full. The version is
+not part of the AAD. A database trigger, not the write statement, advances
+the version on every update, so a write from a server on an older release
+during a rolling deploy still moves it and a conditional write cannot land
+over it. An update that sets the version higher keeps that value, so a full
+restore, which carries the live server's rows with their versions, never
+moves a key back to a version a running plugin already read.
+
 ## Proxy nodes
 
 Every enabled proxy node runs the same provider installations as the API
