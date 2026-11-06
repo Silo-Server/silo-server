@@ -667,20 +667,28 @@ func (r *Repository) syncGeneratedHomeLibraryRecentTitles(ctx context.Context, l
 		return fmt.Errorf("listing generated home sections: %w", err)
 	}
 
+	// A row keyed as a generated library row still holds the server's
+	// title, whatever English wrote it, so it takes the library's current
+	// name. Reading that name here, rather than trusting this rename's,
+	// keeps a rename that lost a race from undoing a newer one, and lets
+	// the next rename repair a row an earlier sync missed. Other rows keep
+	// the text check against the old name.
+	var currentName string
+	if err := r.query(ctx).QueryRow(ctx, `SELECT name FROM media_folders WHERE id = $1`, libraryID).Scan(&currentName); err != nil {
+		return fmt.Errorf("reading library %d name: %w", libraryID, err)
+	}
 	for _, section := range sections {
-		// A row keyed as a generated library row still holds the server's
-		// title, whatever English wrote it, so it follows the library's
-		// name, unless it already names another one: a rename that lost a
-		// race with a newer one. A row an admin titled with another
-		// default's text keeps the text check.
 		keyed := section.TitleKey != "" && section.TitleKey == generatedHomeLibraryRecentTitleKey(section)
-		if keyed && section.TitleArgs[titleArgLibrary] != oldLibraryName {
+		name := newLibraryName
+		switch {
+		case keyed && section.TitleArgs[titleArgLibrary] == currentName:
+			continue
+		case keyed:
+			name = currentName
+		case !ShouldSyncGeneratedHomeLibraryRecentTitle(section, oldLibraryName):
 			continue
 		}
-		if !keyed && !ShouldSyncGeneratedHomeLibraryRecentTitle(section, oldLibraryName) {
-			continue
-		}
-		section.Title = GeneratedHomeLibraryRecentSyncedTitle(section, newLibraryName)
+		section.Title = GeneratedHomeLibraryRecentSyncedTitle(section, name)
 		if err := r.Update(ctx, section); err != nil {
 			return fmt.Errorf("updating generated home section %s: %w", section.ID, err)
 		}
@@ -690,7 +698,7 @@ func (r *Repository) syncGeneratedHomeLibraryRecentTitles(ctx context.Context, l
 		// The update changed the title, so the table's trigger cleared the
 		// key; the new title is still the server's, with the new name.
 		if _, err := r.query(ctx).Exec(ctx, `UPDATE page_sections SET title_key = $2, title_args = $3 WHERE id = $1`,
-			section.ID, section.TitleKey, map[string]string{titleArgLibrary: newLibraryName}); err != nil {
+			section.ID, section.TitleKey, map[string]string{titleArgLibrary: name}); err != nil {
 			return fmt.Errorf("keying generated home section %s: %w", section.ID, err)
 		}
 	}

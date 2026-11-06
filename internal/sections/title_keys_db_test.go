@@ -74,17 +74,27 @@ func TestSectionTitleKeysFollowServerTitlesPostgres(t *testing.T) {
 		if row.TitleKey != "home.section.recentlyAddedIn" || row.TitleArgs["library"] != name {
 			t.Fatalf("generated row key %q args %v", row.TitleKey, row.TitleArgs)
 		}
-		renamed := name + "-renamed"
-		if err := repo.SyncGeneratedHomeLibraryRecentTitles(ctx, library, name, renamed); err != nil {
-			t.Fatal(err)
-		}
-		// A rename that lost a race arrives naming an old name: no change.
-		if err := repo.SyncGeneratedHomeLibraryRecentTitles(ctx, library, name, name+"-stale"); err != nil {
-			t.Fatal(err)
-		}
-		row = find("home", nil, SectionRecentlyAdded)
-		if row.Title != "Recently Added in "+renamed || row.TitleKey != "home.section.recentlyAddedIn" || row.TitleArgs["library"] != renamed {
-			t.Fatalf("after library renames: title %q key %q args %v", row.Title, row.TitleKey, row.TitleArgs)
+		// Renames sync after the library row commits, in any order, and a
+		// sync can fail: the row takes the library's current name.
+		renamed, final := name+"-renamed", name+"-final"
+		for _, step := range []struct{ folder, oldName, newName, want string }{
+			{renamed, name, renamed, renamed},        // a rename
+			{renamed, name, name + "-late", renamed}, // a rename that lost a race
+			{name + "-missed", "", "", renamed},      // a rename whose sync failed
+			{final, name + "-missed", final, final},  // the next rename repairs it
+		} {
+			if _, err := pool.Exec(ctx, `UPDATE media_folders SET name = $2 WHERE id = $1`, library, step.folder); err != nil {
+				t.Fatal(err)
+			}
+			if step.newName != "" {
+				if err := repo.SyncGeneratedHomeLibraryRecentTitles(ctx, library, step.oldName, step.newName); err != nil {
+					t.Fatal(err)
+				}
+			}
+			row = find("home", nil, SectionRecentlyAdded)
+			if row.Title != "Recently Added in "+step.want || row.TitleKey != "home.section.recentlyAddedIn" || row.TitleArgs["library"] != step.want {
+				t.Fatalf("sync %q -> %q: title %q key %q args %v", step.oldName, step.newName, row.Title, row.TitleKey, row.TitleArgs)
+			}
 		}
 		row.Title = "New audiobooks"
 		if err := repo.Update(ctx, row); err != nil {
@@ -99,7 +109,7 @@ func TestSectionTitleKeysFollowServerTitlesPostgres(t *testing.T) {
 		if _, err := pool.Exec(ctx, `UPDATE page_sections SET title = $2, title_key = $3 WHERE id = $1`, row.ID, titleRecentlyAdded, defaultTitleKeys[titleRecentlyAdded]); err != nil {
 			t.Fatal(err)
 		}
-		if err := repo.SyncGeneratedHomeLibraryRecentTitles(ctx, library, renamed, name); err != nil {
+		if err := repo.SyncGeneratedHomeLibraryRecentTitles(ctx, library, final, name); err != nil {
 			t.Fatal(err)
 		}
 		if row = find("home", nil, SectionRecentlyAdded); row.Title != titleRecentlyAdded || row.TitleKey != defaultTitleKeys[titleRecentlyAdded] {
