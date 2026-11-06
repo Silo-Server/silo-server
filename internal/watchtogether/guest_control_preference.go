@@ -56,32 +56,49 @@ func (s *Service) initialGuestControlPolicy(ctx context.Context, userID int, pro
 // the shared repository it saves the room's committed policy under a
 // cluster-wide lock on the profile's choice, so changes to the same room
 // committed on different servers leave the room's latest policy saved.
+//
+// With the shared repository the save also runs on its own goroutine. Room
+// operations call this after their commit but before they release the room
+// and publish the change to other servers, so a slow settings store must not
+// hold the host's request, the room's next command, or other servers' copies
+// of the room. Reading the committed policy at save time keeps the outcome
+// independent of the order the goroutines run in.
 func (s *Service) rememberGuestControlPolicy(ctx context.Context, roomID string, userID int, profileID string, policy GuestControlPolicy) {
 	if s.guestControlPreferences == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), guestControlSaveTimeout)
-	defer cancel()
-	save := func(policy GuestControlPolicy) error {
+	detached := context.WithoutCancel(ctx)
+	save := func(ctx context.Context, policy GuestControlPolicy) error {
 		return s.guestControlPreferences.SaveGuestControlPolicy(ctx, userID, profileID, policy)
 	}
-	var err error
-	if repo, shared := s.repo.(*Repository); shared {
+	logFailure := func(ctx context.Context, err error) {
+		if err != nil {
+			slog.WarnContext(ctx, "watch together guest control policy not saved for the next room",
+				"component", "watchtogether", "room_id", roomID, "user_id", userID, "profile_id", profileID, "error", err)
+		}
+	}
+	repo, shared := s.repo.(*Repository)
+	if !shared {
+		ctx, cancel := context.WithTimeout(detached, guestControlSaveTimeout)
+		defer cancel()
+		logFailure(ctx, save(ctx, policy))
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(detached, guestControlSaveTimeout)
+		defer cancel()
 		// Queue this server's saves for the profile here, so a burst of
 		// changes waits without each holding a pooled connection on the
 		// profile's advisory lock.
-		var unlock func()
-		if unlock, err = s.guestControlSaveLocks.lock(ctx, fmt.Sprintf("%d:%s", userID, profileID)); err == nil {
-			err = repo.saveCommittedGuestControlPolicy(ctx, roomID, userID, profileID, save)
+		unlock, err := s.guestControlSaveLocks.lock(ctx, fmt.Sprintf("%d:%s", userID, profileID))
+		if err == nil {
+			err = repo.saveCommittedGuestControlPolicy(ctx, roomID, userID, profileID, func(policy GuestControlPolicy) error {
+				return save(ctx, policy)
+			})
 			unlock()
 		}
-	} else {
-		err = save(policy)
-	}
-	if err != nil {
-		slog.WarnContext(ctx, "watch together guest control policy not saved for the next room",
-			"component", "watchtogether", "room_id", roomID, "user_id", userID, "profile_id", profileID, "error", err)
-	}
+		logFailure(ctx, err)
+	}()
 }
 
 // profileLocks is a lock per key that a waiter can give up on when its

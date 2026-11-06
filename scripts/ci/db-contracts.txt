@@ -767,6 +767,8 @@
 # A host's saved Watch Party playback choice ends at the room's latest policy
 # when saves from two API servers interleave.
 ./internal/watchtogether TestGuestControlPolicySaveKeepsRoomsLatestPolicyPG
+# A stuck settings store does not hold the host's policy request or the room.
+./internal/watchtogether TestSlowGuestControlSaveDoesNotHoldTheRoomPG
 
 # The catalog item change outbox: what each membership and file write queues
 # (and what routine scan writes do not), key moves, coalescing, the cluster-wide
