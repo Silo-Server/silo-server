@@ -616,7 +616,9 @@ export default function PlaybackSettings() {
                 restartRequired={restartKeys.has("playback.trickplay_workers")}
               />
             )}
-            <TrickplayNodeCapacityField form={form} execution={trickplayExecution} />
+            {supportsTrickplay && (
+              <TrickplayNodeCapacityField form={form} execution={trickplayExecution} />
+            )}
             {!showPreviewPlacement && trickplayExecutionField}
             {/* internal/trickplay tone-maps every HDR seek preview, in
                 software when it has to; these two settings are read only by
