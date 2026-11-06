@@ -232,6 +232,23 @@ func TestCreateRequestAutoApprovesWithoutRouter(t *testing.T) {
 	}
 }
 
+// The library never completes a 4K request, so an approved one with no
+// server to go to records why and retries instead of waiting for the library.
+func TestApproved4KRequestWithoutRouterRetries(t *testing.T) {
+	store := newFakeStore()
+	service := newTestService(store)
+	req := Request{ID: "r1", MediaType: MediaTypeMovie, Status: StatusApproved, Outcome: OutcomeActive, RequestedByUserID: 7, Is4K: true}
+	store.requests["r1"] = &req
+
+	got, err := service.submitApprovedRequest(context.Background(), req, Viewer{UserID: 7, IsAdmin: true}, nil)
+	if err != nil {
+		t.Fatalf("submitApprovedRequest: %v", err)
+	}
+	if got.LastError != "no download server takes 4K movies" || got.SubmitAttempts != 1 {
+		t.Fatalf("request = %+v, want a recorded attempt saying no server takes 4K", got)
+	}
+}
+
 // A keyless connection is a setup problem: the auto-approved request keeps its
 // approval and records why it could not be sent, instead of failing, so it goes
 // through once an admin adds the key.

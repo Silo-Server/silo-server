@@ -875,7 +875,7 @@ describe("Where requests go: try a title", () => {
   });
 
   it("says why there is no HD version when Everything else has no HD server", async () => {
-    const note = "Everything else sends no HD version; requests from users without 4K fail.";
+    const note = "Everything else sends no HD version; regular requests fail.";
     serve({
       servers: allServers,
       routes: ready,

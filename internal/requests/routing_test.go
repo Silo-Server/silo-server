@@ -124,24 +124,36 @@ func TestEnsureUHDRequestableReadsTheTitlesRoute(t *testing.T) {
 	ctx := context.Background()
 	allowed := EffectivePolicy{AllowUHD: true}
 
-	if err := svc.ensureUHDRequestable(ctx, allowed, MediaTypeMovie, capturedFacts(RoutingFacts{})); !errors.Is(err, ErrUHDUnavailable) {
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, capturedFacts(RoutingFacts{})); !errors.Is(err, ErrUHDUnavailable) {
 		t.Fatalf("a title no 4K rule takes: error = %v, want ErrUHDUnavailable", err)
 	}
 	anime := capturedFacts(RoutingFacts{Anime: true})
-	if err := svc.ensureUHDRequestable(ctx, allowed, MediaTypeMovie, anime); err != nil {
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, anime); err != nil {
 		t.Fatalf("an anime title: %v, want it accepted", err)
 	}
-	if err := svc.ensureUHDRequestable(ctx, EffectivePolicy{}, MediaTypeMovie, anime); !errors.Is(err, ErrUHDNotAllowed) {
+	if err := svc.ensureUHDRequestable(ctx, EffectivePolicy{}, 7, MediaTypeMovie, anime); !errors.Is(err, ErrUHDNotAllowed) {
 		t.Fatalf("without permission: error = %v, want ErrUHDNotAllowed", err)
 	}
 	store.integrations[1].Enabled = false // radarr-4k
-	if err := svc.ensureUHDRequestable(ctx, allowed, MediaTypeMovie, anime); !errors.Is(err, ErrUHDUnavailable) {
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, anime); !errors.Is(err, ErrUHDUnavailable) {
 		t.Fatalf("the 4K server disabled: error = %v, want ErrUHDUnavailable", err)
 	}
 	// Another rule's 4K server is enabled, but not the one this title gets.
 	store.routes[0].UHD = RouteDestination{IntegrationID: "radarr-hd"}
-	if err := svc.ensureUHDRequestable(ctx, allowed, MediaTypeMovie, anime); !errors.Is(err, ErrUHDUnavailable) {
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, anime); !errors.Is(err, ErrUHDUnavailable) {
 		t.Fatalf("the title's 4K server disabled, another enabled: error = %v, want ErrUHDUnavailable", err)
+	}
+
+	// A 4K rule for one requester counts for that requester alone.
+	store.integrations[1].Enabled = true
+	store.routes[0].UHD = RouteDestination{}
+	store.routes[1].Conditions = RouteConditions{RequesterUserIDs: []int{7}}
+	plain := capturedFacts(RoutingFacts{})
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, plain); err != nil {
+		t.Fatalf("the rule's requester: %v, want it accepted", err)
+	}
+	if err := svc.ensureUHDRequestable(ctx, allowed, 8, MediaTypeMovie, plain); !errors.Is(err, ErrUHDUnavailable) {
+		t.Fatalf("another requester: error = %v, want ErrUHDUnavailable", err)
 	}
 }
 

@@ -374,7 +374,8 @@ func TestRequestState(t *testing.T) {
 		// The library's copy says nothing about a 4K request's progress.
 		{"4K, downloading, its seasons in the library in HD", Request{Is4K: true, Status: StatusDownloading, Outcome: OutcomeActive,
 			Seasons: []int{1}, SeasonProgress: []SeasonProgress{{Season: 1, SeasonCounts: SeasonCounts{Aired: 9, Have: 9}}}, LibraryContentID: "series-1"}, StateProcessing},
-		{"4K, its 4K copy done", Request{Is4K: true, Status: StatusCompleted, Outcome: OutcomeActive, Seasons: []int{1}}, StateAvailable},
+		{"4K, its 4K copy done, title not scanned in yet", Request{Is4K: true, Status: StatusCompleted, Outcome: OutcomeActive, Seasons: []int{1}}, StateProcessing},
+		{"4K, its 4K copy done, title in the library", Request{Is4K: true, Status: StatusCompleted, Outcome: OutcomeActive, Seasons: []int{1}, LibraryContentID: "series-1"}, StateAvailable},
 	} {
 		if got := tc.req.State(); got != tc.want {
 			t.Errorf("%s: State() = %q, want %q", tc.name, got, tc.want)

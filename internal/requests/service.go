@@ -149,11 +149,10 @@ func (s *Service) populateRequesterIdentity(ctx context.Context, req *Request) {
 }
 
 // viewerContentCeiling resolves the viewer's parental rating ceiling. Empty
-// string means unrestricted. Unlike the quality ceiling this is a safety
-// filter, so a resolver error propagates instead of degrading: silently
-// treating a failed lookup as "unrestricted" would leak adult content to a
-// kid profile, and treating it as "restricted" would render every carousel
-// empty with no visible cause.
+// string means unrestricted. This is a safety filter, so a resolver error
+// propagates instead of degrading: silently treating a failed lookup as
+// "unrestricted" would leak adult content to a kid profile, and treating it as
+// "restricted" would render every carousel empty with no visible cause.
 //
 // access.unrated_content does not apply here. It governs titles already in
 // the library; a TMDB title with no US certification stays hidden from a
@@ -836,7 +835,7 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		return nil, err
 	}
 	if normalized.Is4K {
-		if err := s.ensureUHDRequestable(ctx, policy, normalized.MediaType, facts); err != nil {
+		if err := s.ensureUHDRequestable(ctx, policy, viewer.UserID, normalized.MediaType, facts); err != nil {
 			return nil, err
 		}
 	}
@@ -1331,9 +1330,9 @@ func (s *Service) viewerMayRequestUHD(ctx context.Context, viewer Viewer) (bool,
 // ensureUHDRequestable refuses a 4K request the account may not make
 // (ErrUHDNotAllowed) or no download server would take (ErrUHDUnavailable).
 // With the title's routing facts captured, it decides the 4K tier the way
-// submission will, so a rule's conditions count; without them it asks only
-// whether some route sends 4K for the media type.
-func (s *Service) ensureUHDRequestable(ctx context.Context, policy EffectivePolicy, mediaType MediaType, facts RoutingFacts) error {
+// submission will for this requester, so a rule's conditions count; without
+// them it asks only whether some route sends 4K for the media type.
+func (s *Service) ensureUHDRequestable(ctx context.Context, policy EffectivePolicy, requesterID int, mediaType MediaType, facts RoutingFacts) error {
 	if !policy.AllowUHD {
 		return ErrUHDNotAllowed
 	}
@@ -1344,17 +1343,18 @@ func (s *Service) ensureUHDRequestable(ctx context.Context, policy EffectivePoli
 	if err != nil {
 		return err
 	}
-	if !uhdTitleDeliverable(fc, mediaType, facts) {
+	if !uhdTitleDeliverable(fc, requesterID, mediaType, facts) {
 		return ErrUHDUnavailable
 	}
 	return nil
 }
 
-// uhdTitleDeliverable reports whether a title can get a 4K copy. With its
-// routing facts captured, the 4K tier is decided as submission will decide
-// it, and the chosen server must be enabled; without them, some route has to
-// send 4K for the media type (see uhdDeliverableIn).
-func uhdTitleDeliverable(fc *fulfillContext, mediaType MediaType, facts RoutingFacts) bool {
+// uhdTitleDeliverable reports whether a title can get a 4K copy for a
+// requester. With its routing facts captured, the 4K tier is decided as
+// submission will decide it, requester conditions included, and the chosen
+// server must be enabled; without them, some route has to send 4K for the
+// media type (see uhdDeliverableIn).
+func uhdTitleDeliverable(fc *fulfillContext, requesterID int, mediaType MediaType, facts RoutingFacts) bool {
 	if !uhdDeliverableIn(fc, mediaType) {
 		return false
 	}
@@ -1362,7 +1362,7 @@ func uhdTitleDeliverable(fc *fulfillContext, mediaType MediaType, facts RoutingF
 	if len(routes) == 0 || !facts.Captured() {
 		return true
 	}
-	req := Request{MediaType: mediaType, RoutingFacts: facts, IsAnime: facts.Anime}
+	req := Request{MediaType: mediaType, RoutingFacts: facts, IsAnime: facts.Anime, RequestedByUserID: requesterID}
 	decision, ok := decideRoutes(routes, req, []Quality{Quality2160p})[Quality2160p]
 	if !ok || decision.Skip {
 		return false
@@ -1435,7 +1435,7 @@ func (s *Service) uhdRequestState(ctx context.Context, viewer Viewer, policy Eff
 		return RequestState{Reason: ReasonUHDUnavailable}, nil
 	}
 	// The same per-title answer creating the request gives.
-	if !uhdTitleDeliverable(fc, mediaType, s.routingFacts(ctx, detail)) {
+	if !uhdTitleDeliverable(fc, viewer.UserID, mediaType, s.routingFacts(ctx, detail)) {
 		return RequestState{Reason: ReasonUHDUnavailable}, nil
 	}
 	return state, nil
@@ -2281,7 +2281,8 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 		}
 		fc = built
 	}
-	if s.router == nil || !routerConfiguredFor(fc, req.MediaType) {
+	noRouter := s.router == nil || !routerConfiguredFor(fc, req.MediaType)
+	if noRouter && !req.Is4K {
 		// No router serves this media type: the request stays approved and
 		// the reconcile pass completes it when the title reaches the library.
 		return &req, nil
@@ -2311,7 +2312,16 @@ func (s *Service) submitApprovedRequest(ctx context.Context, req Request, actor 
 	// The claim reloads the row; keep this call's external-ID lookup result.
 	claimed.externalIDsResolved = req.externalIDsResolved
 	claimed.tvdbLookupFailed = req.tvdbLookupFailed
-	submitted, submitErr := s.submitClaimed(ctx, *claimed, actor, fc, missingSeasons)
+	var submitted *Request
+	var submitErr error
+	if noRouter {
+		// The library never completes a 4K request (see presentRequests), so
+		// one with no server to go to retries like an unusable connection and
+		// then fails, instead of staying approved for good.
+		submitErr = fmt.Errorf("no download server takes 4K %s", mediaTypePlural(req.MediaType))
+	} else {
+		submitted, submitErr = s.submitClaimed(ctx, *claimed, actor, fc, missingSeasons)
+	}
 	if submitErr == nil {
 		return submitted, nil
 	}

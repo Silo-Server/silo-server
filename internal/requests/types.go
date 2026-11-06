@@ -393,8 +393,7 @@ const (
 	StateFailed             State = "failed"
 )
 
-// State derives the request's user-facing state. A completed 4K request is
-// available; a completed regular request is
+// State derives the request's user-facing state. A completed request is
 // available once its title is in the library (LibraryContentID attached);
 // until the scan finds it, it is still processing. A season request is
 // available when every requested season is complete (SeasonProgress
@@ -414,12 +413,15 @@ func (r *Request) State() State {
 	}
 	if r.Is4K {
 		// The library cannot tell a 4K copy from an HD one, so a 4K request
-		// is done when its 4K target is.
+		// is done when its 4K target is and the title is in the library.
 		switch r.Status {
 		case StatusApproved:
 			return StateApproved
 		case StatusCompleted:
-			return StateAvailable
+			if r.LibraryContentID != "" {
+				return StateAvailable
+			}
+			return StateProcessing
 		default:
 			return StateProcessing
 		}
