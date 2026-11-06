@@ -229,6 +229,14 @@ describe("describeDetection", () => {
       },
       "Intel Quick Sync (QSV) failed its hardware check",
     ],
+    [
+      "a skipped probe",
+      {
+        resolved: "vaapi",
+        detected_backends: [{ backend: "vaapi", verified: false, skipped: true }],
+      },
+      "VA-API devices aren't accessible to this server",
+    ],
   ])("warns instead of claiming detection for %s", (_, fields, text) => {
     const detection = {
       render_devices: [],

@@ -235,6 +235,8 @@ export function describeDetection(detection: HWAccelInfo | undefined): string | 
     const device = probe.device || detection.render_devices?.[0];
     return `Detected ${label}${device ? ` on ${device}` : ""}${onNode}`;
   }
+  // Skipped: none of the configured devices is accessible, so nothing ran.
+  if (probe?.skipped) return `${label} devices aren't accessible to this server${onNode}`;
   if (probe) return `${label} failed its hardware check${onNode}`;
   // macOS always reports a VideoToolbox probe, so no entry means the server
   // is not running natively on a Mac (Docker on macOS runs a Linux VM).
