@@ -73,6 +73,17 @@ func (h *Handler) handleOpenItemFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "item not found", http.StatusNotFound)
 		return
 	}
+	// A public feed hands its files to any podcast app, so opening one is a
+	// download. resolvePublicFeed rechecks the owner on every fetch.
+	if err := h.checkDownload(r.Context(), a.UserID); err != nil {
+		if downloadRefused(err) {
+			http.Error(w, "download not allowed", http.StatusForbidden)
+		} else {
+			slog.ErrorContext(r.Context(), "abs feed download check failed", "component", "audiobooks", "err", err, "user", a.UserID)
+			http.Error(w, "feed persist failed", http.StatusInternalServerError)
+		}
+		return
+	}
 
 	var body feedOpenBody
 	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body)
@@ -179,10 +190,11 @@ func (h *Handler) handlePublicFeed(w http.ResponseWriter, r *http.Request) {
 
 // resolvePublicFeed loads the open feed for slug and its owner's current
 // access. The slug grants no access of its own: the feed serves only what its
-// stored owner and profile could fetch through the authenticated routes today.
-// A closed or unknown feed, an unavailable owner, and an item the owner can no
-// longer see all answer the same 404, so the response does not reveal which
-// applies. On false the response is written.
+// stored owner and profile could fetch through the authenticated routes today,
+// and only while the owner may download. A closed or unknown feed, an
+// unavailable owner, an owner who may no longer download, and an item the
+// owner can no longer see all answer the same 404, so the response does not
+// reveal which applies. On false the response is written.
 func (h *Handler) resolvePublicFeed(w http.ResponseWriter, r *http.Request, slug string) (RSSFeed, catalog.AccessFilter, bool) {
 	ctx := r.Context()
 	if h.deps.RSSFeedStore == nil || h.deps.AccessResolver == nil {
@@ -208,6 +220,15 @@ func (h *Handler) resolvePublicFeed(w http.ResponseWriter, r *http.Request, slug
 	if err != nil {
 		slog.ErrorContext(ctx, "abs public feed owner access failed", "component", "audiobooks", "err", err, "feed", f.ID)
 		http.Error(w, "feed get failed", http.StatusInternalServerError)
+		return RSSFeed{}, catalog.AccessFilter{}, false
+	}
+	if err := h.checkDownload(ctx, f.UserID); err != nil {
+		if downloadRefused(err) {
+			http.Error(w, "feed not found", http.StatusNotFound)
+		} else {
+			slog.ErrorContext(ctx, "abs public feed owner download check failed", "component", "audiobooks", "err", err, "feed", f.ID)
+			http.Error(w, "feed get failed", http.StatusInternalServerError)
+		}
 		return RSSFeed{}, catalog.AccessFilter{}, false
 	}
 	return f, access, true
