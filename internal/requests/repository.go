@@ -497,9 +497,7 @@ func (r *Repository) ListLibraryWaitCandidates(ctx context.Context, limit int) (
 		WHERE (outcome = 'active' AND status = 'pending')
 		   OR (outcome = 'failed'
 		       AND updated_at > now() - interval '30 days'
-		       AND NOT EXISTS (
-		         SELECT 1 FROM media_request_targets t
-		         WHERE t.request_id = media_requests.id AND t.status = 'completed'))
+		       AND `+deliveredNothing+`)
 		ORDER BY last_reconciled_at ASC NULLS FIRST, id
 		LIMIT $1
 	`, limit)
@@ -787,6 +785,32 @@ func (r *Repository) ReopenFailed(ctx context.Context, id string, actor Viewer) 
 	return req, nil
 }
 
+// deliveredNothing matches a media_requests row none of whose targets
+// completed. A failed request that delivered one quality keeps its failure for
+// an admin to retry: the library does not complete it, and its requester
+// cannot remove it.
+const deliveredNothing = `NOT EXISTS (
+		SELECT 1 FROM media_request_targets t
+		WHERE t.request_id = media_requests.id AND t.status = 'completed')`
+
+// DeleteFailed removes a failed request with its targets, events and follows.
+// The guard sits on the DELETE itself, so a retry or a library completion that
+// commits first leaves the row in place.
+func (r *Repository) DeleteFailed(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM media_requests
+		WHERE id = $1
+		  AND outcome = 'failed'
+		  AND `+deliveredNothing, id)
+	if err != nil {
+		return fmt.Errorf("delete failed request: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return guardMiss(ctx, r.pool, id)
+	}
+	return nil
+}
+
 func (r *Repository) ClaimSubmission(ctx context.Context, id string, lease time.Duration) (*Request, bool, error) {
 	req, err := scanRequest(r.pool.QueryRow(ctx, `
 		UPDATE media_requests
@@ -897,9 +921,7 @@ func (r *Repository) MarkAvailable(ctx context.Context, id string, actor Viewer)
 		    -- A failed request is complete only when the title came from
 		    -- elsewhere. One that failed after delivering some quality keeps
 		    -- its failure visible for an admin to retry.
-		    OR (outcome = 'failed' AND NOT EXISTS (
-		      SELECT 1 FROM media_request_targets t
-		      WHERE t.request_id = media_requests.id AND t.status = 'completed'))
+		    OR (outcome = 'failed' AND `+deliveredNothing+`)
 		  )
 		  -- The title arriving completes only a request with nothing still on
 		  -- its way; a submission that queued a target since the caller looked

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -104,18 +105,38 @@ func (r *RatingsRepo) DeleteIfUnchanged(ctx context.Context, userID int, profile
 
 // Get retrieves a user's rating for an item. Returns nil if not rated.
 func (r *RatingsRepo) Get(ctx context.Context, userID int, profileID, mediaItemID string) (*UserRating, error) {
-	var ur UserRating
-	err := r.pool.QueryRow(ctx, `
+	ur, err := scanUserRating(r.pool.QueryRow(ctx, userRatingSQL, userID, profileID, mediaItemID))
+	if err != nil {
+		return nil, fmt.Errorf("get rating: %w", err)
+	}
+	return ur, nil
+}
+
+// QueueUserRating queues Get's read on b, for a caller batching it with
+// other reads of the same database. Closing the sent batch's results without
+// error sets *rating, nil when the item is not rated.
+func QueueUserRating(b *pgx.Batch, userID int, profileID, mediaItemID string, rating **UserRating) {
+	b.Queue(userRatingSQL, userID, profileID, mediaItemID).QueryRow(func(row pgx.Row) error {
+		ur, err := scanUserRating(row)
+		*rating = ur
+		return err
+	})
+}
+
+const userRatingSQL = `
 		SELECT user_id, profile_id, media_item_id, rating, rated_at
 		FROM user_ratings
-		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		userID, profileID, mediaItemID,
-	).Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Rating, &ur.RatedAt)
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`
+
+// scanUserRating reads the row userRatingSQL selects, nil when there is none.
+func scanUserRating(row pgx.Row) (*UserRating, error) {
+	var ur UserRating
+	err := row.Scan(&ur.UserID, &ur.ProfileID, &ur.MediaItemID, &ur.Rating, &ur.RatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get rating: %w", err)
+		return nil, err
 	}
 	return &ur, nil
 }
@@ -134,26 +155,21 @@ func (r *RatingsRepo) Delete(ctx context.Context, userID int, profileID, mediaIt
 }
 
 // List returns all ratings for a user+profile with pagination.
-// ListPage is the keyset form of List: ordered by (rated_at DESC,
-// media_item_id DESC), at most limit rows strictly after the key in that
-// order (nil = from the most recently rated row). rated_at keeps the
-// column's own precision, so a key read back from a row compares equal to
-// the stored value.
-func (r *RatingsRepo) ListPage(ctx context.Context, userID int, profileID string, after *RatingKey, limit int) ([]UserRating, error) {
-	args := []any{userID, profileID}
-	query := `
-		SELECT user_id, profile_id, media_item_id, rating, rated_at
-		FROM user_ratings
-		WHERE user_id = $1 AND profile_id = $2`
-	if after != nil {
-		args = append(args, after.RatedAt, after.MediaItemID)
-		query += fmt.Sprintf(`
-		  AND (rated_at, media_item_id) < ($%d::timestamptz, $%d)`, len(args)-1, len(args))
+// ListPage is the keyset form of List for a viewer: the profile's ratings of
+// items the access filter admits, ordered by (rated_at DESC, media_item_id
+// DESC), at most limit rows strictly after the key in that order (nil = from
+// the most recently rated row). The filter is applied in the page query with
+// the predicates EnsureAccessibleIDs uses, so a page of visible ratings is one
+// index-ordered read however many hidden ratings come before it, and a rating
+// of an item the catalog no longer has is left out. rated_at keeps the
+// column's own precision, so a key read back from a row compares equal to the
+// stored value.
+func (r *RatingsRepo) ListPage(ctx context.Context, userID int, profileID string, filter AccessFilter, after *RatingKey, limit int) ([]UserRating, error) {
+	// An empty (non-nil) allowlist means "no libraries allowed".
+	if filter.AllowedLibraryIDs != nil && len(filter.AllowedLibraryIDs) == 0 {
+		return nil, nil
 	}
-	args = append(args, limit)
-	query += fmt.Sprintf(`
-		ORDER BY rated_at DESC, media_item_id DESC
-		LIMIT $%d`, len(args))
+	query, args := ratingsPageSQL(userID, profileID, filter, after, limit)
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list ratings page: %w", err)
@@ -169,6 +185,27 @@ func (r *RatingsRepo) ListPage(ctx context.Context, userID int, profileID string
 		ratings = append(ratings, ur)
 	}
 	return ratings, rows.Err()
+}
+
+func ratingsPageSQL(userID int, profileID string, filter AccessFilter, after *RatingKey, limit int) (string, []any) {
+	conditions := []string{"ur.user_id = $1", "ur.profile_id = $2"}
+	args := []any{userID, profileID}
+	argIdx := 3
+	if after != nil {
+		conditions = append(conditions, fmt.Sprintf("(ur.rated_at, ur.media_item_id) < ($%d::timestamptz, $%d)", argIdx, argIdx+1))
+		args = append(args, after.RatedAt, after.MediaItemID)
+		argIdx += 2
+	}
+	appendLibraryAccessConditions("mi.content_id", filter, &conditions, &args, &argIdx)
+	applyAccessFilter("mi", AccessFilter{MaturityLimits: filter.MaturityLimits, ExcludedMediaTypes: filter.ExcludedMediaTypes}, &conditions, &args, &argIdx)
+	args = append(args, limit)
+	return fmt.Sprintf(`
+		SELECT ur.user_id, ur.profile_id, ur.media_item_id, ur.rating, ur.rated_at
+		FROM user_ratings ur
+		JOIN media_items mi ON mi.content_id = ur.media_item_id
+		WHERE %s
+		ORDER BY ur.rated_at DESC, ur.media_item_id DESC
+		LIMIT $%d`, strings.Join(conditions, " AND "), argIdx), args
 }
 
 func (r *RatingsRepo) List(ctx context.Context, userID int, profileID string, limit, offset int) ([]UserRating, error) {

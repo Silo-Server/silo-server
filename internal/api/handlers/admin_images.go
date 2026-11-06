@@ -115,6 +115,9 @@ type itemImageEntry struct {
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Rating      float64 `json:"rating"`
+	// Fallback marks show artwork a season list offers after the season's own
+	// images. It is set only on season lists and is left out of JSON.
+	Fallback bool `json:"-"`
 }
 
 type getItemImagesResponse struct {
@@ -233,6 +236,10 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 	return h.listItemImages(ctx, contentID, true)
 }
 
+// listItemImages fetches the image choices for a movie, series, season or
+// episode, with display URLs resolved. A season list marks show artwork as a
+// fallback. includeLocal adds sidecar artwork for a movie or series and the
+// uploaded images the item shows.
 func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string, includeLocal bool) (AdminItemImagesView, error) {
 	resolved, err := h.resolveContentID(ctx, contentID)
 	if err != nil {
@@ -343,6 +350,7 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 			Width:       img.Width,
 			Height:      img.Height,
 			Rating:      img.Rating,
+			Fallback:    resolved.season != nil && img.SeasonNumber == nil,
 		})
 	}
 
@@ -359,10 +367,12 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 		BackdropURL: resolved.parentItem.BackdropPath,
 		LogoURL:     resolved.parentItem.LogoPath,
 	}
-	// A season owns its poster independently of the parent series. Preserve an
-	// empty value too so the UI cannot label the series poster as current.
+	// A season owns its poster and backdrop independently of the parent
+	// series. Preserve empty values too so the UI cannot label the series
+	// artwork as current.
 	if resolved.season != nil {
 		current.PosterURL = resolved.season.PosterPath
+		current.BackdropURL = resolved.season.BackdropPath
 	}
 
 	return AdminItemImagesView{
@@ -447,7 +457,7 @@ func (h *AdminImageHandler) applyItemImage(ctx context.Context, contentID string
 
 // UploadAdminItemImage caches an image an admin uploaded and applies it like
 // a chosen image, with the images lock: a poster, backdrop or logo of a movie
-// or series, or a season's poster. It is stored beside the item's local
+// or series, or a season's poster or backdrop. It is stored beside the item's local
 // sidecar artwork, and the list offers it as a local choice while the item
 // shows it.
 func (h *AdminImageHandler) UploadAdminItemImage(ctx context.Context, contentID, imageTypeName string, data []byte) (AdminItemImageResult, error) {
@@ -640,8 +650,11 @@ func (h *AdminImageHandler) cacheLocalItemImage(ctx context.Context, contentID s
 // imageType the target shows. Episodes have none here.
 func shownArtwork(resolved *resolvedItem, imageType metadata.ImageType) (storedPath, sourcePath, thumbhash string) {
 	if resolved.season != nil {
-		if imageType == metadata.ImagePoster {
+		switch imageType {
+		case metadata.ImagePoster:
 			return resolved.season.PosterPath, resolved.season.PosterSourcePath, resolved.season.PosterThumbhash
+		case metadata.ImageBackdrop:
+			return resolved.season.BackdropPath, resolved.season.BackdropSourcePath, resolved.season.BackdropThumbhash
 		}
 		return "", "", ""
 	}
@@ -754,3 +767,13 @@ func findBestContentID(item *models.MediaItem, providerID string) string {
 
 type AdminImageEntryView = itemImageEntry
 type AdminCurrentImagesView = currentImages
+
+// ArtworkRestored announces artwork a backup restore published for
+// contentID (a season's parentContentID is its series), as an upload does.
+func (h *AdminImageHandler) ArtworkRestored(ctx context.Context, contentID, parentContentID string) {
+	publishCatalogItemChanged(ctx, h.EventBus, contentID, parentContentID)
+	publishEventMetadataUpdate(ctx, h.EventsHub, 0, contentID)
+	if parentContentID != "" && parentContentID != contentID {
+		publishEventMetadataUpdate(ctx, h.EventsHub, 0, parentContentID)
+	}
+}

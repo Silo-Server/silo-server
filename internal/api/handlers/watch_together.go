@@ -19,6 +19,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
+
+	"github.com/Silo-Server/silo-server/internal/wsconn"
 )
 
 type WatchTogetherScopeResolver interface {
@@ -894,7 +896,7 @@ func (h *WatchTogetherHandler) serveRoomConnection(parent context.Context, conn 
 	_ = realtimeConn.WritePing()
 
 	for {
-		_, data, err := conn.ReadMessage()
+		_, data, err := wsconn.ReadMessage(conn, wsMaxClientMessageBytes)
 		if err != nil {
 			return
 		}

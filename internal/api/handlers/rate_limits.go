@@ -3,11 +3,15 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"math"
 	"net/http"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -42,6 +46,8 @@ type AdminRateLimitConfigView struct {
 	IPReqPerMinute     float64                               `json:"ip_requests_per_minute"`
 	IPBurst            int                                   `json:"ip_burst"`
 	AuthEndpoints      map[string]authEndpointConfigResponse `json:"auth_endpoints"`
+	// SessionQuota is served on /api/v2 only; the frozen v1 handlers drop it.
+	SessionQuota *AdminRateLimitSessionQuotaView `json:"session_quota,omitempty"`
 	// Active reports whether a limiter is running in this process. The
 	// limiter is constructed at startup, so config saved while it is absent
 	// (or a backend change while it is running) needs a restart to apply.
@@ -53,6 +59,13 @@ type AdminRateLimitConfigView struct {
 	// using the same rule the save path enforces. REDIS_URL deployments have
 	// no persisted redis.url row, so admins cannot derive this client-side.
 	RedisAvailable bool `json:"redis_available"`
+}
+
+// AdminRateLimitSessionQuotaView is the hourly quota each sign-in session gets.
+type AdminRateLimitSessionQuotaView struct {
+	Mode            string  `json:"mode"`
+	RequestsPerHour float64 `json:"requests_per_hour"`
+	Burst           int     `json:"burst"`
 }
 
 type tierConfigResponse struct {
@@ -77,6 +90,15 @@ type AdminRateLimitUpdate struct {
 	IPReqPerMinute     *float64                             `json:"ip_requests_per_minute,omitempty"`
 	IPBurst            *int                                 `json:"ip_burst,omitempty"`
 	AuthEndpoints      map[string]authEndpointConfigRequest `json:"auth_endpoints,omitempty"`
+	SessionQuota       *AdminRateLimitSessionQuotaUpdate    `json:"session_quota,omitempty"`
+}
+
+// AdminRateLimitSessionQuotaUpdate merges into the session quota; omitted
+// fields keep their values.
+type AdminRateLimitSessionQuotaUpdate struct {
+	Mode            *string  `json:"mode,omitempty"`
+	RequestsPerHour *float64 `json:"requests_per_hour,omitempty"`
+	Burst           *int     `json:"burst,omitempty"`
 }
 
 type tierConfigRequest = AdminRateLimitTierUpdate
@@ -101,6 +123,7 @@ func (h *RateLimitHandler) HandleGetConfig(w http.ResponseWriter, r *http.Reques
 		writeAPIError(w, err)
 		return
 	}
+	resp.SessionQuota = nil // v1 is frozen; the session quota is a v2 setting
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -133,8 +156,11 @@ func (h *RateLimitHandler) adminRateLimitConfigView(values map[string]string) Ad
 		IPReqPerMinute:     cfg.IPReqPerMinute,
 		IPBurst:            cfg.IPBurst,
 		AuthEndpoints:      make(map[string]authEndpointConfigResponse),
-		Active:             h.mw != nil,
-		RedisAvailable:     redisConfiguredSettings(values, h.redisBootstrapAvailable),
+		SessionQuota: &AdminRateLimitSessionQuotaView{
+			Mode: cfg.Session.Mode, RequestsPerHour: cfg.Session.RequestsPerHour, Burst: cfg.Session.Burst,
+		},
+		Active:         h.mw != nil,
+		RedisAvailable: redisConfiguredSettings(values, h.redisBootstrapAvailable),
 	}
 	if h.mw != nil {
 		resp.ActiveBackend = h.mw.ActiveBackend()
@@ -163,6 +189,7 @@ func (h *RateLimitHandler) HandleUpdateConfig(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
+	req.SessionQuota = nil // v1 is frozen; the session quota is a v2 setting
 
 	result, err := h.UpdateAdminRateLimitConfig(r.Context(), req, nil)
 	if err != nil {
@@ -245,13 +272,22 @@ func (h *RateLimitHandler) UpdateAdminRateLimitConfig(ctx context.Context, req A
 	if !changed {
 		return AdminRateLimitUpdateResult{Status: "ok"}, nil
 	}
+	restartRequired, err := h.rateLimitsChanged(ctx)
+	if err != nil {
+		return AdminRateLimitUpdateResult{}, err
+	}
+	return AdminRateLimitUpdateResult{Status: "ok", RestartRequired: restartRequired}, nil
+}
 
+// rateLimitsChanged applies a committed rate-limit change: it reloads the
+// limiter, flags a restart the change needs, and tells other servers.
+func (h *RateLimitHandler) rateLimitsChanged(ctx context.Context) (bool, error) {
 	// Another process may have committed a newer settings mutation after this
 	// request released the mutation lock. Base post-commit behavior on a fresh
 	// snapshot so reordered requests converge on the latest durable state.
 	latest, err := h.store.GetAll(ctx)
 	if err != nil {
-		return AdminRateLimitUpdateResult{}, apiError(http.StatusInternalServerError, "internal_error", "Config saved but latest settings could not be loaded")
+		return false, apiError(http.StatusInternalServerError, "internal_error", "Config saved but latest settings could not be loaded")
 	}
 	latestConfig := ratelimit.ConfigFromSettings(latest)
 	latestBackend := strings.TrimSpace(strings.ToLower(latest["ratelimit.backend"]))
@@ -272,7 +308,7 @@ func (h *RateLimitHandler) UpdateAdminRateLimitConfig(ctx context.Context, req A
 		// Reload reads the store again rather than applying the request-local
 		// merge, ensuring the middleware receives the latest committed config.
 		if err := h.mw.Reload(ctx); err != nil {
-			return AdminRateLimitUpdateResult{}, apiError(http.StatusInternalServerError, "internal_error", "Config saved but reload failed")
+			return false, apiError(http.StatusInternalServerError, "internal_error", "Config saved but reload failed")
 		}
 	}
 	if restartRequired {
@@ -286,7 +322,59 @@ func (h *RateLimitHandler) UpdateAdminRateLimitConfig(ctx context.Context, req A
 		})
 	}
 
-	return AdminRateLimitUpdateResult{Status: "ok", RestartRequired: restartRequired}, nil
+	return restartRequired, nil
+}
+
+// serverSettingsTxUpdater writes settings in the caller's transaction.
+type serverSettingsTxUpdater interface {
+	UpdateAtomicWithTx(ctx context.Context, tx pgx.Tx, update func(current map[string]string, tx pgx.Tx) (map[string]string, error)) error
+}
+
+// ApplyRateLimitSettingsInTx writes restored rate-limit settings (ratelimit.*)
+// in the caller's transaction with the checks UpdateAdminRateLimitConfig
+// applies: the limits as a whole must validate, the backend must be memory
+// or redis, and redis needs a configured Redis. check sees the settings as
+// stored under the lock first. The returned func runs once the transaction
+// commits.
+func (h *RateLimitHandler) ApplyRateLimitSettingsInTx(ctx context.Context, tx pgx.Tx, values map[string]string, check func(map[string]string) error) (func(context.Context), error) {
+	updater, ok := h.store.(serverSettingsTxUpdater)
+	if !ok || tx == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Settings store does not support caller transactions")
+	}
+	err := updater.UpdateAtomicWithTx(ctx, tx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		if check != nil {
+			if err := check(current); err != nil {
+				return nil, err
+			}
+		}
+		next := maps.Clone(current)
+		maps.Copy(next, values)
+		cfg := ratelimit.ConfigFromSettings(next)
+		if err := validateRateLimitConfig(cfg); err != nil {
+			return nil, apiError(http.StatusBadRequest, "invalid_rate_limit_config", err.Error())
+		}
+		backend := strings.TrimSpace(strings.ToLower(next["ratelimit.backend"]))
+		if backend == "" {
+			backend = "memory"
+		}
+		if backend != "memory" && backend != "redis" {
+			return nil, apiError(http.StatusBadRequest, "invalid_rate_limit_config", "backend must be memory or redis")
+		}
+		if backend == "redis" && !redisConfiguredSettings(current, h.redisBootstrapAvailable) {
+			return nil, apiError(http.StatusBadRequest, "redis_not_configured", "configure a Redis URL before selecting the Redis rate-limit backend")
+		}
+		out := ratelimit.ConfigSettings(cfg)
+		out["ratelimit.backend"] = backend
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) {
+		if _, err := h.rateLimitsChanged(ctx); err != nil {
+			slog.WarnContext(ctx, "applying restored rate limits failed", "component", "ratelimit", "error", err)
+		}
+	}, nil
 }
 
 func mergeRateLimitConfig(existing ratelimit.Config, req rateLimitConfigRequest) (ratelimit.Config, error) {
@@ -314,6 +402,17 @@ func mergeRateLimitConfig(existing ratelimit.Config, req rateLimitConfigRequest)
 	}
 	if req.IPBurst != nil {
 		cfg.IPBurst = *req.IPBurst
+	}
+	if q := req.SessionQuota; q != nil {
+		if q.Mode != nil {
+			cfg.Session.Mode = strings.TrimSpace(strings.ToLower(*q.Mode))
+		}
+		if q.RequestsPerHour != nil {
+			cfg.Session.RequestsPerHour = *q.RequestsPerHour
+		}
+		if q.Burst != nil {
+			cfg.Session.Burst = *q.Burst
+		}
 	}
 
 	for name, update := range req.Tiers {
@@ -365,6 +464,18 @@ func validateRateLimitConfig(cfg ratelimit.Config) error {
 	}
 	if err := boundedBurst("ip_burst", cfg.IPBurst); err != nil {
 		return err
+	}
+	if !ratelimit.ValidSessionQuotaMode(cfg.Session.Mode) {
+		return errors.New("session_quota.mode must be off, log or enforce")
+	}
+	if err := boundedRate("session_quota.requests_per_hour", cfg.Session.RequestsPerHour, ratelimit.MaxRequestsPerWindow); err != nil {
+		return err
+	}
+	if err := boundedBurst("session_quota.burst", cfg.Session.Burst); err != nil {
+		return err
+	}
+	if !ratelimit.SessionQuotaRefillsInTime(cfg.Session) {
+		return errors.New("session_quota.burst must refill within a week: at most 168 times requests_per_hour")
 	}
 	for name, tier := range cfg.Tiers {
 		if err := boundedRate("tier."+name+".requests_per_second", tier.RequestsPerSecond, ratelimit.MaxRequestsPerWindow); err != nil {

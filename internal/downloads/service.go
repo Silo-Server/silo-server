@@ -416,6 +416,11 @@ type CreateRequest struct {
 	// resolved per episode. Native requests set it; the frozen v1 bridge keeps
 	// batches original-only.
 	BulkQuality bool
+	// VersionTemplateFileID names an episode file of the series whose version
+	// every episode of a season/series batch follows (see templatePreference).
+	// Only native requests set it; the v1 bridge's FileID stays ignored on
+	// batches.
+	VersionTemplateFileID int
 }
 
 // Create creates a download for a single item (movie or episode). When the
@@ -432,7 +437,11 @@ func (s *Service) Create(ctx context.Context, userID int, req CreateRequest, fil
 	if err != nil {
 		return nil, err
 	}
-	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && file.EpisodeID != req.EpisodeID)) {
+	// A lookup by episode also returns a multi-episode file linked to an
+	// earlier episode of its range. That file serves the requested episode,
+	// and its download is registered under the file's first episode, as a
+	// season download registers it.
+	if req.StrictIdentity && (file.ContentID != req.ContentID || (req.EpisodeID != "" && req.FileID > 0 && file.EpisodeID != req.EpisodeID)) {
 		return nil, catalog.ErrItemNotFound
 	}
 	if err := s.itemAccess.EnsureAccessible(ctx, file.ContentID, filter); err != nil {
@@ -713,13 +722,28 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 	if err := s.itemAccess.EnsureAccessible(ctx, req.ContentID, filter); err != nil {
 		return nil, "", nil, err
 	}
+	var template *models.MediaFile
+	if req.VersionTemplateFileID > 0 {
+		template, err = s.resolveFile(ctx, userID, CreateRequest{FileID: req.VersionTemplateFileID}, filter)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		// The template must be a file of this series in a library the viewer
+		// can open. The quality ceiling is left out: a preset can still bring
+		// a larger version under it.
+		libraries := filter
+		libraries.MaxPlaybackQuality = ""
+		if template.ContentID != req.ContentID || template.EpisodeID == "" || !catalog.FileAllowedByAccess(template, libraries) {
+			return nil, "", nil, catalog.ErrItemNotFound
+		}
+	}
 
 	episodes, err := listEpisodes(ctx)
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("listing episodes: %w", err)
 	}
 
-	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, filter)
+	items, skipped, err := s.episodeItemsWithSkipped(ctx, userID, req.historyProfile(), req.ContentID, episodes, template, filter)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -802,11 +826,13 @@ func (s *Service) createSeriesScoped(ctx context.Context, userID int, req Create
 // preserves episode order. Shared by series/season downloads and subscription
 // backfill so file selection stays identical.
 func (s *Service) episodeItems(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, error) {
-	items, _, err := s.episodeItemsWithSkipped(ctx, userID, profileID, seriesID, episodes, filter)
+	items, _, err := s.episodeItemsWithSkipped(ctx, userID, profileID, seriesID, episodes, nil, filter)
 	return items, err
 }
 
-func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, filter catalog.AccessFilter) ([]managedItem, []SkippedDownload, error) {
+// episodeItemsWithSkipped picks a file per episode: the version closest to
+// template when one is set, otherwise the profile's watch-history preference.
+func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profileID, seriesID string, episodes []*models.Episode, template *models.MediaFile, filter catalog.AccessFilter) ([]managedItem, []SkippedDownload, error) {
 	if len(episodes) == 0 {
 		return nil, nil, nil
 	}
@@ -819,21 +845,38 @@ func (s *Service) episodeItemsWithSkipped(ctx context.Context, userID int, profi
 		return nil, nil, fmt.Errorf("resolving files for %d episodes: %w", len(episodes), err)
 	}
 	var pref versionPreference
-	for _, files := range filesByEpisode {
-		if len(files) > 1 {
-			pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, episodeIDs)
-			break
+	if template != nil {
+		pref = templatePreference(template)
+	} else {
+		for _, files := range filesByEpisode {
+			if len(files) > 1 {
+				pref = s.loadVersionPreference(ctx, userID, profileID, seriesID, episodeIDs)
+				break
+			}
 		}
 	}
 	items := make([]managedItem, 0, len(episodes))
 	skipped := make([]SkippedDownload, 0)
+	queued := make(map[int]bool, len(episodes))
 	for _, ep := range episodes {
 		files := filesByEpisode[ep.ContentID]
 		if len(files) == 0 {
 			skipped = append(skipped, SkippedDownload{EpisodeID: ep.ContentID, Reason: "no_file"})
 			continue
 		}
-		items = append(items, managedItem{file: pref.pick(ep.ContentID, allowedCandidates(files, filter)), contentID: seriesID, episodeID: ep.ContentID})
+		file := pref.pick(ep.ContentID, allowedCandidates(files, filter))
+		episodeID := ep.ContentID
+		// A multi-episode file serves each episode it spans; download it once,
+		// keyed on its first episode, so a later page of the same batch finds
+		// the entry an earlier page registered.
+		if file != nil && file.MultiEpisodeEnd > file.MultiEpisodeStart {
+			if queued[file.ID] {
+				continue
+			}
+			queued[file.ID] = true
+			episodeID = file.EpisodeID
+		}
+		items = append(items, managedItem{file: file, contentID: seriesID, episodeID: episodeID})
 	}
 	return items, skipped, nil
 }
@@ -1510,9 +1553,9 @@ func (s *Service) resolveDownloadBytesTarget(ctx context.Context, dl *Download, 
 	return &FileTarget{Path: file.FilePath, DownloadID: dl.ID, MediaFileID: file.ID, ProxyEligible: sourceProxyEligible}, nil
 }
 
-// Download bandwidth settings are aggregate guarantees enforced by the API
-// process. Until proxy nodes share a distributed limiter, keep capped transfers
-// local rather than silently multiplying the configured limit per proxy node.
+// Capped transfers remain on the API egress path until proxy capability
+// negotiation can prove every selected worker shares the cluster byte budget.
+// This preserves correctness during rolling upgrades with older workers.
 func proxyDeliveryAllowed(cfg config.DownloadConfig) bool {
 	return cfg.ServerBandwidthBPS <= 0 && cfg.UserBandwidthBPS <= 0
 }

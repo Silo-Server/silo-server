@@ -160,6 +160,40 @@ export function buildAreaPath(points: readonly LinePathPoint[], baselineY: numbe
     .join(" ");
 }
 
+/**
+ * `d` for the wash between two lines on the same x grid, such as one band of a
+ * stacked chart: `upper` left to right, then back along `lower`. An index where
+ * either line has no sample breaks the band, so gaps stay empty.
+ */
+export function buildBandPath(
+  upper: readonly LinePathPoint[],
+  lower: readonly LinePathPoint[],
+): string {
+  const runs: { x: number; top: number; bottom: number }[][] = [];
+  let current: { x: number; top: number; bottom: number }[] = [];
+  upper.forEach((point, index) => {
+    const base = lower[index];
+    if (isPlotted(point) && base && isPlotted(base)) {
+      current.push({ x: point.x, top: point.y, bottom: base.y });
+      return;
+    }
+    if (current.length > 0) {
+      runs.push(current);
+      current = [];
+    }
+  });
+  if (current.length > 0) {
+    runs.push(current);
+  }
+  return runs
+    .map((run) => {
+      const forward = run.map((p, i) => `${i === 0 ? "M" : "L"} ${round(p.x)} ${round(p.top)}`);
+      const back = [...run].reverse().map((p) => `L ${round(p.x)} ${round(p.bottom)}`);
+      return `${forward.join(" ")} ${back.join(" ")} Z`;
+    })
+    .join(" ");
+}
+
 export interface StackSegment {
   /** Series index the segment belongs to. */
   index: number;

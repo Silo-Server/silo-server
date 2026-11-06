@@ -67,7 +67,7 @@ func registerAdminBrandingAssets(reg *Registry) {
 			form := in.RawBody.Data()
 			if form == nil || !form.File.IsSet {
 				return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-					WithErrors(ProblemError{Location: "body.file", Code: codeRequired, Detail: "an image file is required"})
+					WithErrors(ProblemError{Location: locationBodyFile, Code: codeRequired, Detail: detailImageFileRequired})
 			}
 			limit := branding.MaxUploadBytes(branding.AssetKind(in.Kind))
 			tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds the maximum size for this asset.")

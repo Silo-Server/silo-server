@@ -98,6 +98,8 @@ func registerAdminHistoryImportRuns(reg *Registry, op func(string, string, strin
 	create := op(http.MethodPost, "/admin/history-imports/mappings/{id}/run", "createAdminHistoryImportRun", false)
 	create.DefaultStatus = http.StatusAccepted
 	create.BlankBodyIsAbsent = true
+	// An active run, a disabled source or a source without an admin token is 409.
+	create.Errors = append(create.Errors, http.StatusConflict)
 	Register(reg, create, func(ctx context.Context, in *AdminHistoryImportRunCreateInput) (*AdminHistoryImportRunOutput, error) {
 		s, p := reg.adminHistoryImports()
 		if p != nil {
@@ -139,6 +141,8 @@ func registerAdminHistoryImportRuns(reg *Registry, op func(string, string, strin
 	cancel := op(http.MethodPost, "/admin/history-imports/runs/{id}/cancel", "cancelAdminHistoryImportRun", false)
 	cancel.DefaultStatus = http.StatusAccepted
 	cancel.Responses = map[string]*huma.Response{"200": {Description: "The run is already canceled.", Content: map[string]*huma.MediaType{mediaTypeJSON: {Schema: &huma.Schema{Ref: "#/components/schemas/AdminHistoryImportRun"}}}}}
+	// A run that no longer accepts cancellation is 409 job_not_cancelable.
+	cancel.Errors = append(cancel.Errors, http.StatusConflict)
 	Register(reg, cancel, func(ctx context.Context, in *HistoryImportRunIDInput) (*AdminHistoryImportRunOutput, error) {
 		s, p := reg.adminHistoryImports()
 		if p != nil {

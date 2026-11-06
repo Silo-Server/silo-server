@@ -25,7 +25,7 @@ const ANY = "__any__";
 const toIDs = (ids: string[]) => (ids.length ? ids.map(Number) : undefined);
 
 /** A labelled control with an optional line of help under it, as the row form lays them out. */
-function Field({
+export function Field({
   label,
   help,
   children,
@@ -46,7 +46,7 @@ function Field({
   );
 }
 
-function OptionSelect({
+export function OptionSelect({
   label,
   value,
   options,

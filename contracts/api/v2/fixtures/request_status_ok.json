@@ -1,5 +1,5 @@
 {
-  "revision": "db798654e2641e96b2d72f76a715563ca59a108e98d3321b61a7a235bb97337d",
+  "revision": "49577edd24c0726aed1ccef382fa5214c85b3a94fd5f39201ec041cc57ea0505",
   "state": "available",
   "allowed": true,
   "requests_enabled": true,
@@ -12,5 +12,6 @@
   "watchlist_requests": false,
   "requests_4k_supported": true,
   "requests_4k_allowed": false,
-  "discover_rows_supported": true
+  "discover_rows_supported": true,
+  "remove_failed_supported": true
 }

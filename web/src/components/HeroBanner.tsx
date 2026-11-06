@@ -6,6 +6,7 @@ import {
   useEffect,
   useCallback,
   useMemo,
+  useRef,
   type MouseEvent,
 } from "react";
 import { Link } from "react-router";
@@ -13,6 +14,7 @@ import { Info, ChevronLeft, ChevronRight, Play, Pause, BookOpen } from "lucide-r
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { HERO_BANNER_SIZE } from "@/lib/design-system";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { usePageActivity } from "@/hooks/usePageActivity";
 import { HeroOverviewText } from "./HeroOverviewText";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
@@ -62,7 +64,7 @@ interface HeroBannerProps {
 }
 
 /**
- * Alternating slow pan/zoom for consecutive hero slides.
+ * Alternating slow pans for consecutive hero slides.
  *
  * These must be written out literally. Tailwind only keeps a theme variable
  * whose name it can find in the scanned source, and assembling the name from a
@@ -74,8 +76,28 @@ interface HeroBannerProps {
 const KEN_BURNS_ANIMATIONS = ["var(--animate-ken-burns-a)", "var(--animate-ken-burns-b)"] as const;
 const HERO_BACKDROP_FADE_MS = 1000;
 
-function shouldKeepOutgoingBackdropMotion(): boolean {
-  return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** A slide still fading out. `id` tells two fades of the same slide apart. */
+interface OutgoingBackdrop {
+  index: number;
+  id: number;
+}
+
+let nextOutgoingBackdropId = 0;
+
+/**
+ * The fading slides after switching from `from` to `to`. Every slide keeps its
+ * motion until its own fade ends: dropping the animation of a slide that is
+ * still visible (say, after two quick clicks) would snap it back to its
+ * unscaled, unpanned frame.
+ */
+function withOutgoingBackdrop(
+  outgoing: OutgoingBackdrop[],
+  from: number,
+  to: number,
+): OutgoingBackdrop[] {
+  const rest = outgoing.filter((entry) => entry.index !== from && entry.index !== to);
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return rest;
+  return [...rest, { index: from, id: nextOutgoingBackdropId++ }];
 }
 
 const HeroBackdropSlide = memo(function HeroBackdropSlide({
@@ -181,11 +203,19 @@ export default function HeroBanner({
       ),
     [slides],
   );
-  const [{ activeIndex, outgoingIndex }, setBackdropState] = useState({
+  const [{ activeIndex, outgoing }, setBackdropState] = useState({
     activeIndex: 0,
-    outgoingIndex: null as number | null,
+    outgoing: [] as OutgoingBackdrop[],
   });
   const [paused, setPaused] = useState(false);
+  const { isVisible: pageVisible } = usePageActivity();
+  const sectionRef = useRef<HTMLElement>(null);
+  // Unknown until the observer first reports, so a hero mounted below the
+  // fold preloads nothing; without IntersectionObserver it counts as shown.
+  const [onScreen, setOnScreen] = useState(() => typeof IntersectionObserver === "undefined");
+  // A hero scrolled out of view or in a background tab neither advances nor
+  // downloads the next slide's backdrop.
+  const shown = pageVisible && onScreen;
   const audiobookPlayback = useAudiobookPlaybackController();
   // Bumped whenever auto-advance restarts a fresh 8s cycle — after the slide
   // changes, or after the user unpauses. Used as part of the progress-rail key
@@ -196,28 +226,49 @@ export default function HeroBanner({
   const [playCycle, setPlayCycle] = useState(0);
 
   const next = useCallback(() => {
-    setBackdropState(({ activeIndex: current }) => ({
-      activeIndex: (current + 1) % slides.length,
-      outgoingIndex: shouldKeepOutgoingBackdropMotion() ? current : null,
-    }));
+    setBackdropState(({ activeIndex: current, outgoing }) => {
+      const target = (current + 1) % slides.length;
+      return { activeIndex: target, outgoing: withOutgoingBackdrop(outgoing, current, target) };
+    });
   }, [slides.length]);
 
   const prev = useCallback(() => {
-    setBackdropState(({ activeIndex: current }) => ({
-      activeIndex: (current - 1 + slides.length) % slides.length,
-      outgoingIndex: shouldKeepOutgoingBackdropMotion() ? current : null,
-    }));
+    setBackdropState(({ activeIndex: current, outgoing }) => {
+      const target = (current - 1 + slides.length) % slides.length;
+      return { activeIndex: target, outgoing: withOutgoingBackdrop(outgoing, current, target) };
+    });
   }, [slides.length]);
 
+  // Release each fading slide's motion when its own fade ends. Each fade gets
+  // one timer; a fade cut short (its slide became active again) drops its own.
+  const fadeTimers = useRef(new Map<number, number>());
   useEffect(() => {
-    if (outgoingIndex === null) return;
-    const timer = window.setTimeout(() => {
-      setBackdropState((current) =>
-        current.outgoingIndex === outgoingIndex ? { ...current, outgoingIndex: null } : current,
-      );
-    }, HERO_BACKDROP_FADE_MS);
-    return () => window.clearTimeout(timer);
-  }, [outgoingIndex]);
+    const timers = fadeTimers.current;
+    const live = new Set(outgoing.map((entry) => entry.id));
+    for (const [id, timer] of timers) {
+      if (live.has(id)) continue;
+      window.clearTimeout(timer);
+      timers.delete(id);
+    }
+    for (const { id } of outgoing) {
+      if (timers.has(id)) continue;
+      const timer = window.setTimeout(() => {
+        timers.delete(id);
+        setBackdropState((current) => ({
+          ...current,
+          outgoing: current.outgoing.filter((entry) => entry.id !== id),
+        }));
+      }, HERO_BACKDROP_FADE_MS);
+      timers.set(id, timer);
+    }
+  }, [outgoing]);
+  useEffect(() => {
+    const timers = fadeTimers.current;
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
   // Pause/play helpers. Unpausing bumps playCycle so the rail animation
   // restarts at scaleX(0) in sync with the fresh 8s interval started below.
@@ -240,12 +291,22 @@ export default function HeroBanner({
   // t=5s the auto-advance would still fire at t=8 instead of t=13, desyncing
   // with the progress rail that restarts on slide change.
   useEffect(() => {
-    if (slides.length <= 1 || paused) return;
+    if (slides.length <= 1 || paused || !shown) return;
     const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (prefersReducedMotion) return;
     const timer = setInterval(next, 8000);
     return () => clearInterval(timer);
-  }, [next, slides.length, paused, activeIndex]);
+  }, [next, slides.length, paused, shown, activeIndex]);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry) setOnScreen(entry.isIntersecting);
+    });
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [slides.length]);
 
   const current = slides[activeIndex] ?? slides[0];
   useAmbientColor(current?.backdrop_thumbhash);
@@ -294,6 +355,7 @@ export default function HeroBanner({
 
   return (
     <section
+      ref={sectionRef}
       className={cn(
         "home-hero group relative w-full overflow-hidden",
         heightClassName,
@@ -308,7 +370,9 @@ export default function HeroBanner({
         if (!e.currentTarget.contains(e.relatedTarget)) resume();
       }}
     >
-      {/* Preload neighbors in both directions; retain loaded backdrops for crossfades. */}
+      {/* Preload the slide that comes next while the hero is shown; retain
+          loaded backdrops for crossfades. Going back fades in from the
+          thumbhash. */}
       {slides.map((slide, i) => (
         <HeroBackdropSlide
           key={slide.content_id ?? i}
@@ -324,12 +388,11 @@ export default function HeroBanner({
           }
           index={i}
           isActive={i === activeIndex}
-          keepsMotion={i === activeIndex || i === outgoingIndex}
+          keepsMotion={i === activeIndex || outgoing.some((entry) => entry.index === i)}
           shouldLoad={
             i === activeIndex ||
-            i === outgoingIndex ||
-            i === (activeIndex + 1) % slideCount ||
-            i === (activeIndex - 1 + slideCount) % slideCount
+            i === outgoing.at(-1)?.index ||
+            (shown && i === (activeIndex + 1) % slideCount)
           }
         />
       ))}

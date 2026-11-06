@@ -75,13 +75,19 @@ func TestLogPartitionsMatchPartmanOnNonUTCServer(t *testing.T) {
 				}
 			}
 
+			// Partman covers whole UTC periods, so both windows are fixed
+			// lengths in hours (8 days and 8 weeks). In this session's zone
+			// '8 days' follows the local calendar and runs 193 hours when
+			// daylight saving ends inside it; in the last UTC hour of a day
+			// (or of a week, for activity_log) that reaches past partman's
+			// last partition.
 			if _, err := pool.Exec(ctx, `
 INSERT INTO operational_logs ("timestamp", level, component, message)
 SELECT ts, 'info', 'test', 'partition coverage'
-FROM generate_series(now(), now() + interval '8 days', interval '1 hour') ts;
+FROM generate_series(now(), now() + interval '192 hours', interval '1 hour') ts;
 INSERT INTO activity_log ("timestamp", client_ip, method, path)
 SELECT ts, '127.0.0.1', 'GET', '/'
-FROM generate_series(now(), now() + interval '8 weeks', interval '1 hour') ts;`); err != nil {
+FROM generate_series(now(), now() + interval '1344 hours', interval '1 hour') ts;`); err != nil {
 				t.Fatal(err)
 			}
 			for _, table := range []string{"operational_logs_default", "activity_log_default"} {

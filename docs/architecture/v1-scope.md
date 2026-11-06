@@ -5,9 +5,9 @@ by [the native API contract](api-contract.md).**
 
 This file governs v1 **capability** scope: which user-facing capabilities Silo 1.0 ships. It no
 longer decides the API contract. Silo 1.0's stable native API is `/api/v2`; `/api/v1` is a frozen
-alpha contract carried through the pre-1.0 bridge window and then retired behind a `410 Gone`
-tombstone. The removals table below remains the authoritative record of the v1 removals taken
-during alpha.
+alpha contract carried through at least two published pre-1.0 bridge releases. Retiring it behind
+a `410 Gone` tombstone is a separate maintainer decision (#886). The removals table below remains
+the authoritative record of the v1 removals taken during alpha.
 
 Propose capabilities with the **v1 capability proposal** issue template; triage happens on the
 [Silo v1 project](https://github.com/orgs/Silo-Server/projects/5).
@@ -18,14 +18,15 @@ When the scope locks, this file becomes the source of truth and will contain:
 2. **API policy** — superseded by [the native API contract](api-contract.md). The additive-only
    rules (no field renames/removals, no type changes, no status-code repurposing; removals only
    via the Deprecation/Sunset header flow; capability endpoints for feature detection) bind
-   `/api/v2` at the 1.0 lock. `/api/v1` never locks: it is frozen and retired after the bridge
-   release. Contract tooling: #135.
+   `/api/v2` at the 1.0 lock. `/api/v1` never locks: it is frozen, carried through at least two
+   published bridge releases, and retired only by a separate maintainer decision (#886).
+   Contract tooling: #135.
 3. **Amendment rules** — after lock, this file changes only via PR with code-owner review.
    An amendment PR is the exception process: it must say what changes, why it cannot wait
    for v1.1, and what it displaces.
 
 Until lock: treat any capability not tracked as `Proposed`/`Locked` on the project as out of scope
-for feature PRs (see the scope gate in `CLAUDE.md`).
+for feature PRs.
 
 ## Library scope: Books deferred
 
@@ -98,6 +99,7 @@ migration ledger.
 | Trakt on every v1 route: the collection import routes `POST /api/v1/admin/collections/import/trakt` and `POST /api/v1/collections/import/trakt`, Trakt-backed collections and home rows, and the `trakt` watch provider under `/api/v1/watch-providers/trakt/*` | Trakt retired, 2026-10-16 | Silo no longer supports Trakt. The two import routes had refused new Trakt collections with `410 unsupported_source` since Trakt collection creation was turned off, and keep that answer on the bridge surface until the retirement tombstone; the v2 `importAdminTrakt` and `importTraktCollection` operations were removed before the v2 lock. Existing Trakt collections became manual collections that keep their titles, Trakt trending rows became TMDB weekly trending and were turned off, and `trakt` connections were deleted, so v1 responses no longer report `collection_type: "trakt"`, a Trakt trending source, or a `trakt` provider, and the watch-provider routes answer for `trakt` as for any unknown provider. No first-party native client used any of them. |
 | Writes of the retired AI endpoint settings through `PUT /api/v1/admin/settings` and `PUT /api/v1/admin/settings/{key}`: `ai.base_url`, `ai.api_key`, `ai.asr_base_url`, `ai.asr_api_key`, `subtitle_ai.base_url`, `subtitle_ai.api_key`, `recommendations.embedding_base_url`, `recommendations.embedding_auth_token`, `recommendations.openai_model`, `recommendations.openai_api_key`, `recommendations.embedding_provider`. They now return `400` | AI provider registry, #3082 | AI endpoints and keys moved into one provider list that each AI job selects from (`ai.text_provider_id`, `ai.speech_provider_id`, `recommendations.embedding_provider_id`), so a key is entered once and a rotation reaches every job. The server converts the stored values on first start and no longer reads these keys; accepting a write that changes nothing would leave an admin believing a key was rotated. The routes and their other keys are unchanged. No first-party native client writes these settings, and the web admin uses v2. |
 | The `reattribution.ambiguous_history` samples on `POST /api/v1/admin/items/{id}/split` for a caller that is not the acting admin (a delegated metadata curator, or a non-primary profile on an admin account that holds the curation permission). The split still runs and reports every count, including `history_ambiguous`; only the sample rows are omitted, as they already are when none exist | v1 bridge critical fix, 2026-10-26, [contract](../admin-catalog-api.md#file-grouping-repair) | Each sample names another account's user ID, profile ID and watch time. Curation grants metadata repair over assigned libraries, not other accounts' watch history, and v2 split is admin-only. |
+| Ratings of titles the acting profile may not see (a library restriction, disabled library, or rating or advisory-age limit) on `GET /api/v1/ratings` and `GET /api/v1/ratings/{item_id}`. The list now leaves them out, so an offset page can hold fewer rows than its limit while more follow, and reading one answers `404` whether or not it was rated, as the catalog does. The response shapes are unchanged, and the stored rating is kept, so it shows again once the restriction is lifted. `PUT /api/v1/ratings/{item_id}` already refused such a title, and `DELETE` stays unchecked: its `204` is the same whether or not a rating existed | v1 bridge critical fix, 2026-11-05, #3530 | A restricted profile could list and read its earlier ratings of titles hidden from it, and the item IDs name each title's source, so it could tell which hidden titles it had rated. Favorites and the watchlist already filtered by the viewer's access. v2 `listRatings` and `getRating` share these handlers and change with v1. |
 
 Feature-detection precedent: clients discover which metadata providers (including the
 built-in NFO provider, #216) apply to a library type via

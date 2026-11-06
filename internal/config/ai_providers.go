@@ -26,6 +26,7 @@ const (
 	// encrypted value. Do not rename it: the ciphertext is bound to this name.
 	AIProvidersSettingKey      = "ai.providers"
 	AITextProviderSettingKey   = "ai.text_provider_id"
+	AIServiceTierSettingKey    = "ai.service_tier"
 	AISpeechProviderSettingKey = "ai.speech_provider_id"
 	// EmbeddingProviderSettingKey is read once at startup, like every
 	// recommendations.* setting: the engine and its embedding lock are built
@@ -45,6 +46,9 @@ const (
 
 // aiAuthModeChatGPT is the ai.auth_mode that serves text from a ChatGPT plan.
 const aiAuthModeChatGPT = "chatgpt"
+
+// AIAuthModeSettingKey says how this server signs in to its text AI provider.
+const AIAuthModeSettingKey = "ai.auth_mode"
 
 // aiProvidersVersion is the newest legacy conversion PlanAIProviderConversion
 // knows. Version 1 moved the text and speech endpoints into the registry;
@@ -240,6 +244,24 @@ func ResolveAIEndpoint(values map[string]string, bindingKey string, capability A
 	return baseURL, apiKey
 }
 
+// ResolveAIServiceTier applies the saved tier only to an OpenAI API-key text
+// provider. Keeping the setting when switching providers must not send it to
+// another provider or consume a ChatGPT plan at an API billing tier.
+func ResolveAIServiceTier(values map[string]string) string {
+	if values[AIAuthModeSettingKey] == aiAuthModeChatGPT {
+		return ""
+	}
+	registry, err := ParseAIProviderRegistry(values[AIProvidersSettingKey])
+	if err != nil {
+		return ""
+	}
+	provider, ok := registry.Find(strings.TrimSpace(values[AITextProviderSettingKey]))
+	if !ok || provider.Type != AIProviderOpenAI || !provider.Supports(AICapabilityChat) {
+		return ""
+	}
+	return values[AIServiceTierSettingKey]
+}
+
 var aiProviderIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 // NewAIProviderID returns a fresh id for a provider of type t.
@@ -360,6 +382,17 @@ func (j AIJob) Label() string {
 	return string(j)
 }
 
+// AIConnectionSettingKeys lists every setting that says which AI services
+// this server reaches and how it signs in: the provider registry with its
+// keys, the jobs' bindings, the sign-in mode, and the legacy endpoint
+// settings a conversion (PlanAIProviderConversion) still reads.
+func AIConnectionSettingKeys() []string {
+	keys := append([]string{AIProvidersSettingKey, AIAuthModeSettingKey}, AIProviderBindingKeys()...)
+	return append(keys, legacyAITextURLSetting, legacyAITextKeySetting, legacyAISpeechURLSetting, legacyAISpeechKeySetting,
+		legacySubtitleURLSetting, legacySubtitleKeySetting, legacyEmbeddingURLSetting, legacyEmbeddingTokenSetting,
+		legacyEmbeddingModelSetting, legacyOpenAIEmbeddingModel, legacyOpenAIEmbeddingToken, legacyEmbeddingProviderSetting)
+}
+
 // AIProviderBindingKeys lists the settings that select a provider by id.
 func AIProviderBindingKeys() []string {
 	keys := make([]string, len(aiProviderBindings))
@@ -400,7 +433,7 @@ func AIProviderUsers(values map[string]string, id string) []AIJob {
 		if id == "" || strings.TrimSpace(values[binding.key]) != id {
 			continue
 		}
-		if binding.job == AIJobText && strings.TrimSpace(values["ai.auth_mode"]) == aiAuthModeChatGPT {
+		if binding.job == AIJobText && strings.TrimSpace(values[AIAuthModeSettingKey]) == aiAuthModeChatGPT {
 			continue
 		}
 		users = append(users, binding.job)

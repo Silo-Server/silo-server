@@ -49,6 +49,7 @@ describe("ImageSelectorTab", () => {
   it.each([
     ["series", "poster"],
     ["season", "poster"],
+    ["season", "backdrop"],
   ] as const)("reports a successful %s %s selection to the metadata editor", (itemType, type) => {
     mocks.useItemImages.mockReturnValue({
       data: {

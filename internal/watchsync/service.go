@@ -296,61 +296,24 @@ func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID st
 }
 
 func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID string, providerKey string) (ManualSyncResult, error) {
-	conn, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
-	if err != nil {
-		return ManualSyncResult{}, err
-	}
-	if !ok {
+	admitted, err := s.repo.AdmitSyncRun(ctx, Connection{
+		Provider: providerKey, UserID: userID, ProfileID: profileID,
+	}, SyncRun{Trigger: manualSyncTrigger, StartedAt: s.now()})
+	if errors.Is(err, ErrConnectionNotFound) {
+		// Preserve the frozen v1 handler's existing error message as well as
+		// the sentinel used by v2's problem mapping.
 		return ManualSyncResult{}, ErrConnectionNotFound
 	}
-	// A manual sync against a rate-limited provider would fail immediately
-	// while still spending the account's request quota, so honor the deferral.
-	if conn.RateLimitedUntil != nil {
-		if remaining := conn.RateLimitedUntil.Sub(s.now()); remaining > 0 {
-			return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: ceilSeconds(remaining)}
-		}
-	}
-
-	for {
-		active, ok, err := s.repo.GetActiveSyncRun(ctx, conn.ID)
-		if err != nil {
-			return ManualSyncResult{}, err
-		}
-		if !ok {
-			break
-		}
-		if !active.StartedAt.IsZero() && s.now().Sub(active.StartedAt) <= manualSyncTimeout {
-			return ManualSyncResult{Run: active}, nil
-		}
-		active.Status = string(SyncRunStatusFailed)
-		active.Error = "watch provider sync timed out before completion"
-		if _, err := s.completeSyncRun(ctx, active); err != nil {
-			return ManualSyncResult{}, err
-		}
-	}
-
-	if latest, ok, err := s.repo.GetLatestSyncRun(ctx, conn.ID); err != nil {
-		return ManualSyncResult{}, err
-	} else if ok {
-		reference := latest.StartedAt
-		if latest.CompletedAt != nil {
-			reference = *latest.CompletedAt
-		}
-		if retryAfter := retryAfterSeconds(s.now(), reference, manualSyncCooldown); retryAfter > 0 {
-			return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: retryAfter}
-		}
-	}
-
-	run, err := s.repo.CreateSyncRun(ctx, SyncRun{
-		ConnectionID: conn.ID,
-		Trigger:      "manual",
-		Status:       string(SyncRunStatusRunning),
-		Provider:     conn.Provider,
-		StartedAt:    s.now(),
-	})
 	if err != nil {
 		return ManualSyncResult{}, err
 	}
+	if admitted.RetryAfterSeconds > 0 {
+		return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: admitted.RetryAfterSeconds}
+	}
+	if !admitted.Created {
+		return ManualSyncResult{Run: admitted.Run}, nil
+	}
+	conn, run := admitted.Connection, admitted.Run
 
 	go func() {
 		runCtx, cancel := context.WithTimeout(context.Background(), manualSyncTimeout)
@@ -745,28 +708,21 @@ func (s *Service) SyncDueConnections(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) SyncConnection(ctx context.Context, conn Connection, trigger string) (err error) {
-	run := SyncRun{
-		ConnectionID: conn.ID,
-		Trigger:      trigger,
-		Status:       string(SyncRunStatusRunning),
-		Provider:     conn.Provider,
-		StartedAt:    s.now(),
-	}
+func (s *Service) SyncConnection(ctx context.Context, conn Connection, trigger string) error {
 	if conn.ID == "" {
 		return fmt.Errorf("connection id is required")
 	}
-	unlock, ok := s.tryLock(conn.ID)
-	if !ok {
-		return fmt.Errorf("watch provider sync already running for connection %s", conn.ID)
-	}
-	defer unlock()
-
-	run, err = s.repo.CreateSyncRun(ctx, run)
+	admitted, err := s.repo.AdmitSyncRun(ctx, conn, SyncRun{Trigger: trigger, StartedAt: s.now()})
 	if err != nil {
 		return err
 	}
-	_, err = s.executeSyncRun(ctx, conn, run)
+	if !admitted.Created {
+		return nil
+	}
+	// Both producers reserve before taking the local execution guard. Taking
+	// the guard first could make the manual worker and scheduled admission
+	// each skip in favor of the other, leaving neither to perform the sync.
+	_, err = s.syncConnectionWithRun(ctx, admitted.Connection, admitted.Run)
 	return err
 }
 
@@ -1077,7 +1033,11 @@ func providerSyncNeedsAccessToken(caps Capabilities) bool {
 func (s *Service) completeSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
 	completedAt := s.now()
 	run.CompletedAt = &completedAt
-	return s.repo.CompleteSyncRun(ctx, run)
+	// Persist terminal state even after a manual deadline or task cancellation.
+	// Provider work continues to use its original context.
+	completeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signalsNotifyTimeout)
+	defer cancel()
+	return s.repo.CompleteSyncRun(completeCtx, run)
 }
 
 func retryAfterSeconds(now time.Time, reference time.Time, cooldown time.Duration) int {
@@ -2163,6 +2123,8 @@ func (s *Service) ScrobbleStop(ctx context.Context, event ScrobbleEvent) error {
 // ScrobbleStopConfirmed waits for each provider dispatch and reports provider
 // or persistence failures to the caller. It is used when the caller owns a
 // durable terminal event that must not be acknowledged after a mere enqueue.
+// Connections whose provider is unregistered or cannot scrobble are skipped,
+// not reported.
 func (s *Service) ScrobbleStopConfirmed(ctx context.Context, event ScrobbleEvent) error {
 	return s.scrobble(ctx, event, scrobbleActionStop, true)
 }
@@ -2191,30 +2153,26 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 	var dispatchErrors []error
 	var confirmedTargets []confirmedScrobbleTarget
 	for _, conn := range conns {
+		// A connection whose provider cannot take a scrobble is skipped, even
+		// for a confirmed stop. Failing the stop would make its caller retry
+		// the whole event, and the dispatch to every other provider, until the
+		// session expires: an unregistered provider may never come back, as
+		// when its plugin was removed or now registers under another key. On a
+		// connection that exports watched history, a completed play still
+		// reaches the provider once it is registered: the history-export sync
+		// reconciles all completed local history, not only scrobbled plays.
 		provider, ok := s.registry.Get(conn.Provider)
 		if !ok {
 			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q is not registered", conn.Provider,
-				))
+				slog.WarnContext(ctx, "skipped scrobble stop for unregistered watch provider", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "user_id", conn.UserID, "profile_id", conn.ProfileID)
 			}
 			continue
 		}
 		if !provider.Capabilities().ScrobblePlayback {
-			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q does not support playback scrobbling", conn.Provider,
-				))
-			}
 			continue
 		}
 		scrobbler, ok := provider.(Scrobbler)
 		if !ok {
-			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q has no scrobble dispatcher", conn.Provider,
-				))
-			}
 			continue
 		}
 		connAction := action

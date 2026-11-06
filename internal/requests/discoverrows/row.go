@@ -92,7 +92,20 @@ type DiscoverSpec struct {
 // an mdblist.com list page for mdblist. Normalize stores it canonical.
 type ListSpec struct {
 	URL string `json:"url"`
+	// Order is how an mdblist row orders the list: "" (or ListOrderList) for
+	// the list's own rank order, or one of the newest-first orders. A
+	// tmdb_list row takes no order. Normalize stores list order as "".
+	Order string `json:"order,omitempty"`
 }
+
+// The orders an mdblist row may take. MDBList's public feed returns a list in
+// rank order unless asked for another, whatever sort its owner saved for the
+// list page, and the feed does not report that saved sort.
+const (
+	ListOrderList           = "list"
+	ListOrderNewestAdded    = "newest_added"
+	ListOrderNewestReleased = "newest_released"
+)
 
 // FieldErrors maps a field path such as "rows[2].discover.sort_by" to what
 // is wrong with it.

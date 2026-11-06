@@ -41,6 +41,10 @@ type CollectionHandler struct {
 	// uploaded or imported poster shows; nil when artwork storage is not
 	// configured.
 	Collages *catalog.PersonalCollectionCollages
+	// MemberCounts counts the members a viewer sees in hand-picked and
+	// imported collections and remembers the counts between reads; nil
+	// counts on every read.
+	MemberCounts *catalog.PersonalCollectionMemberCounts
 }
 
 // itemPosterSigner resolves item poster paths to delivery URLs in one batch;
@@ -528,43 +532,11 @@ func defaultJSON(raw []byte) json.RawMessage {
 }
 
 func normalizeQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
-	var def catalog.QueryDefinition
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &def); err != nil {
-			return nil, err
-		}
-	}
-	def = def.Normalize()
-	if err := def.ValidateWithOptions(allowPersonalizedSorts, allowPersonalizedFields); err != nil {
-		return nil, err
-	}
-	if v1Rules {
-		if err := catalog.ValidateV1Rules(def); err != nil {
-			return nil, err
-		}
-	}
-	normalized, err := json.Marshal(def)
-	if err != nil {
-		return nil, err
-	}
-	return normalized, nil
+	return catalog.NormalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields, v1Rules)
 }
 
 func normalizeSmartCollectionQueryDefinitionJSON(raw []byte, allowPersonalizedSorts, allowPersonalizedFields, v1Rules bool) (json.RawMessage, error) {
-	normalized, err := normalizeQueryDefinitionJSON(raw, allowPersonalizedSorts, allowPersonalizedFields, v1Rules)
-	if err != nil {
-		return nil, err
-	}
-	var def catalog.QueryDefinition
-	if err := json.Unmarshal(normalized, &def); err != nil {
-		return nil, err
-	}
-	def = catalog.ApplySmartCollectionItemLimit(def)
-	out, err := json.Marshal(def)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
+	return catalog.NormalizeSmartCollectionQueryJSON(raw, allowPersonalizedSorts, allowPersonalizedFields, v1Rules)
 }
 
 func firstNonEmptyCollection(values ...string) string {

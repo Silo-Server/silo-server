@@ -483,7 +483,7 @@ func TestPrepareSubtitleFilterInputCreatesParserSafeAlias(t *testing.T) {
 		TargetCodecAudio:   "aac",
 	}
 
-	if err := prepareSubtitleFilterInput(&opts); err != nil {
+	if err := prepareSubtitleFilterInput(t.Context(), &opts); err != nil {
 		t.Fatalf("prepareSubtitleFilterInput() error = %v", err)
 	}
 	wantAlias := filepath.Join(outputDir, subtitleFilterAliasName)
@@ -1515,7 +1515,7 @@ func TestPrepareSubtitleFilterInputLinksDecodedNonUTF8Path(t *testing.T) {
 	}
 
 	for attempt := range 2 {
-		if err := prepareSubtitleFilterInput(&opts); err != nil {
+		if err := prepareSubtitleFilterInput(t.Context(), &opts); err != nil {
 			t.Fatalf("prepareSubtitleFilterInput() attempt %d error = %v", attempt, err)
 		}
 	}

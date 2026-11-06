@@ -8,6 +8,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
+	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
@@ -20,11 +21,30 @@ type LibraryViewInput struct {
 	ID ID `path:"id" doc:"Library identifier" example:"1"`
 }
 
+// SectionClient is the client family a viewer section read declares. It
+// decides whether a featured section an administrator kept off the apps is
+// part of the answer.
+type SectionClient struct {
+	ClientFamily string `header:"X-Silo-Client-Family" doc:"The caller's client family: tv, mobile, tablet, desktop or web. Only web receives a featured section an administrator limited to the web app (an admin section's web_only). For any other value, or none, layouts and lists leave that section out and reading it alone answers 404" example:"tv"`
+}
+
+// web reports whether the caller declared the web client family.
+func (c SectionClient) web() bool {
+	return handlers.IsWebClientFamily(c.ClientFamily)
+}
+
+// LibraryLayoutInput is the getLibraryLayout query.
+type LibraryLayoutInput struct {
+	ID ID `path:"id" doc:"Library identifier" example:"1"`
+	SectionClient
+}
+
 // LibrarySectionsInput is the listLibrarySections query.
 type LibrarySectionsInput struct {
 	ID ID `path:"id" doc:"Library identifier" example:"1"`
 	SectionItemLimitQuery
 	ArtworkQuery
+	SectionClient
 }
 
 // SectionItemLimitQuery is the optional per-row cap the aggregate section
@@ -36,8 +56,8 @@ type SectionItemLimitQuery struct {
 }
 
 // sectionViewerCapped is sectionViewer with the request's per-row cap.
-func sectionViewerCapped(ctx context.Context, art imagesize.Request, itemLimit int) handlers.SectionViewer {
-	viewer := sectionViewer(ctx, art)
+func sectionViewerCapped(ctx context.Context, art imagesize.Request, client SectionClient, itemLimit int) handlers.SectionViewer {
+	viewer := sectionViewer(ctx, art, client)
 	viewer.ItemLimitCap = itemLimit
 	return viewer
 }
@@ -47,6 +67,7 @@ type LibrarySectionItemsInput struct {
 	ID        ID     `path:"id" doc:"Library identifier" example:"1"`
 	SectionID string `path:"section_id" minLength:"1" doc:"Section identifier from the layout" example:"recently_added"`
 	ArtworkQuery
+	SectionClient
 }
 
 // SectionLayoutEntry is one section of a page layout, without items.
@@ -81,6 +102,7 @@ type Section struct {
 	IsCustom    bool          `json:"is_custom" example:"false"`
 	Customized  bool          `json:"customized" example:"false"`
 	Items       []CatalogItem `json:"items" doc:"Empty, never null"`
+	HasMore     bool          `json:"has_more,omitzero" doc:"The section holds more cards than items: reading it again without item_limit answers more. Sent only by getHomeSectionItems and getHomeLayout's included_sections when the request carried item_limit, and absent when false" example:"true"`
 }
 
 // SectionCollection is a page's sections with their cards.
@@ -235,8 +257,8 @@ func viewerIdentity(ctx context.Context) (int, string, *Problem) {
 // sectionViewer is what the section seams need beyond the context. The v2
 // listener does not read a device header, so the access filter carries no
 // device id.
-func sectionViewer(ctx context.Context, art imagesize.Request) handlers.SectionViewer {
-	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths}
+func sectionViewer(ctx context.Context, art imagesize.Request, client SectionClient) handlers.SectionViewer {
+	return handlers.SectionViewer{Access: handlers.AccessFilterFromContext(ctx, ""), ImageSize: art.Size, ImageWidths: art.Widths, Web: client.web()}
 }
 
 func (reg *Registry) librarySections() (LibrarySectionService, *Problem) {
@@ -253,7 +275,7 @@ func (reg *Registry) libraryCollections() (LibraryCollectionService, *Problem) {
 	return reg.deps.LibraryCollections, nil
 }
 
-func (reg *Registry) getLibraryLayout(ctx context.Context, in *LibraryViewInput) (*SectionLayoutOutput, error) {
+func (reg *Registry) getLibraryLayout(ctx context.Context, in *LibraryLayoutInput) (*SectionLayoutOutput, error) {
 	svc, p := reg.librarySections()
 	if p != nil {
 		return nil, p
@@ -265,7 +287,7 @@ func (reg *Registry) getLibraryLayout(ctx context.Context, in *LibraryViewInput)
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibraryLayout(ctx, id)
+	view, err := svc.LibraryLayout(ctx, id, handlers.SectionViewer{Web: in.web()})
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -281,11 +303,16 @@ func sectionLayoutOf(view handlers.SectionLayoutView) SectionLayout {
 }
 
 func sectionOf(v handlers.SectionView, sel ratingsources.Selection) Section {
+	resumeRow := v.SectionType == string(sections.SectionContinueWatching) || v.SectionType == string(sections.SectionNextUp)
 	items := make([]CatalogItem, 0, len(v.Items))
 	for _, item := range v.Items {
-		items = append(items, catalogItemOfSection(item, sel))
+		card := catalogItemOfSection(item, sel)
+		if resumeRow {
+			withResumeEpisodeBackdrop(&card, item)
+		}
+		items = append(items, card)
 	}
-	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items}
+	return Section{ID: v.ID, SectionType: v.SectionType, Title: v.Title, Featured: v.Featured, ItemLimit: v.ItemLimit, TotalCount: v.TotalCount, IsCustom: v.IsCustom, Customized: v.Customized, Items: items, HasMore: v.HasMore}
 }
 
 func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySectionsInput) (*SectionCollectionOutput, error) {
@@ -300,7 +327,7 @@ func (reg *Registry) listLibrarySections(ctx context.Context, in *LibrarySection
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySections(ctx, id, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
+	view, err := svc.LibrarySections(ctx, id, sectionViewerCapped(ctx, in.Artwork(), in.SectionClient, in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -324,7 +351,7 @@ func (reg *Registry) getLibrarySectionItems(ctx context.Context, in *LibrarySect
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.LibrarySectionItems(ctx, id, in.SectionID, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.LibrarySectionItems(ctx, id, in.SectionID, sectionViewer(ctx, in.Artwork(), in.SectionClient))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

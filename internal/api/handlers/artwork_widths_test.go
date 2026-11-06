@@ -206,11 +206,12 @@ func TestEpisodeParentArtworkSignsAtTheCardsSlotSizes(t *testing.T) {
 		SeriesPosterPath:   "tmdb/series/2/poster/original.r1.webp",
 		SeriesBackdropPath: "tmdb/series/2/backdrop/original.r1.webp",
 		SeasonPosterPath:   "tmdb/series/2/seasons/1/poster/original.r1.webp",
+		SeasonBackdropPath: "tmdb/series/2/seasons/1/backdrop/original.r1.webp",
 	}
 	episode := &models.MediaItem{ContentID: "episode", Type: "episode", BackdropPath: "tmdb/series/2/seasons/1/episodes/3/still/original.r2.webp", ParentArtwork: parent}
 	// Titles whose own slots hold the same files give the sizes to match.
 	series := &models.MediaItem{ContentID: "series", Type: "series", PosterPath: parent.SeriesPosterPath, BackdropPath: parent.SeriesBackdropPath}
-	season := &models.MediaItem{ContentID: "season", Type: "season", PosterPath: parent.SeasonPosterPath}
+	season := &models.MediaItem{ContentID: "season", Type: "season", PosterPath: parent.SeasonPosterPath, BackdropPath: parent.SeasonBackdropPath}
 
 	cards := []featuredArtworkCard[string]{
 		{key: "episode", item: episode, sectionType: sections.SectionContinueWatching},
@@ -225,8 +226,9 @@ func TestEpisodeParentArtworkSignsAtTheCardsSlotSizes(t *testing.T) {
 		map[string]episodeBrowseMetadata{"episode": {ParentArtwork: parent}}, tvHomeArtwork)
 
 	for name, got := range map[string][2]episodeParentImageURLs{
-		"featured": {featured["episode"].parents, {featured["series"].posterURL, featured["series"].backdropURL, featured["season"].posterURL}},
-		"listing":  {listing["episode"].parents, {listing["series"].posterURL, listing["series"].backdropURL, listing["season"].posterURL}},
+		"featured": {featured["episode"].parents, {featured["series"].posterURL, featured["series"].backdropURL, featured["season"].posterURL, featured["season"].backdropURL}},
+		// Listing cards draw no season backdrop.
+		"listing": {listing["episode"].parents, {listing["series"].posterURL, listing["series"].backdropURL, listing["season"].posterURL, ""}},
 	} {
 		if got[0] != got[1] || got[0].seriesBackdropURL == "" {
 			t.Errorf("%s parent artwork = %+v, want %+v", name, got[0], got[1])

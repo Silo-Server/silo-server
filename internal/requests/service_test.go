@@ -2,6 +2,7 @@ package requests
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -731,6 +732,9 @@ func TestDisabledRequestsBlockUserSurfaces(t *testing.T) {
 			_, err := service.Cancel(context.Background(), viewer, "req-1", "")
 			return err
 		}},
+		{"remove failed", func() error {
+			return service.RemoveFailed(context.Background(), viewer, "req-1")
+		}},
 		{"studios", func() error {
 			_, err := service.ListStudios(context.Background(), viewer)
 			return err
@@ -1080,6 +1084,39 @@ func TestCancelPendingRequestAuthority(t *testing.T) {
 			}
 			if tc.wantCancelled && req.Outcome != OutcomeCancelled {
 				t.Fatalf("Outcome = %q, want canceled", req.Outcome)
+			}
+		})
+	}
+}
+
+func TestRemoveFailedRequestAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		viewer      Viewer
+		wantErr     error
+		wantRemoved bool
+	}{
+		{"owner", Viewer{UserID: 7, ProfileID: "profile-1"}, nil, true},
+		{"non-owner", Viewer{UserID: 8, ProfileID: "profile-2"}, ErrForbidden, false},
+		{"admin", Viewer{UserID: 99, IsAdmin: true}, nil, true},
+		{"no account", Viewer{}, ErrForbidden, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			store.requests["req-failed"] = &Request{
+				ID:                "req-failed",
+				MediaType:         MediaTypeMovie,
+				TMDBID:            550,
+				Status:            StatusApproved,
+				Outcome:           OutcomeFailed,
+				RequestedByUserID: 7,
+			}
+			err := newTestService(store).RemoveFailed(context.Background(), tc.viewer, "req-failed")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if _, kept := store.requests["req-failed"]; kept == tc.wantRemoved {
+				t.Fatalf("request kept = %v, want removed = %v", kept, tc.wantRemoved)
 			}
 		})
 	}
@@ -1728,6 +1765,20 @@ func (f *fakeStore) SetOutcome(_ context.Context, id string, from StateGuard, ou
 	return &copy, nil
 }
 
+func (f *fakeStore) DeleteFailed(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req := f.lookupLocked(id)
+	if req == nil {
+		return ErrNotFound
+	}
+	if req.Outcome != OutcomeFailed {
+		return ErrInvalidState
+	}
+	delete(f.requests, req.ID)
+	return nil
+}
+
 func (f *fakeStore) ReopenFailed(_ context.Context, id string, _ Viewer) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -2061,6 +2112,10 @@ func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingF
 	if req == nil {
 		return nil, ErrNotFound
 	}
+	if req.RoutingFacts.Captured() {
+		out := *req
+		return &out, nil
+	}
 	if f.factsSet == nil {
 		f.factsSet = map[string]RoutingFacts{}
 	}
@@ -2069,6 +2124,51 @@ func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingF
 	req.IsAnime = facts.Anime
 	copy := *req
 	return &copy, nil
+}
+
+func (f *fakeStore) UpdateRoutingFacts(_ context.Context, id string, facts RoutingFacts) (*Request, error) {
+	return f.mergeRoutingFacts(id, facts, false)
+}
+
+func (f *fakeStore) FillRoutingFacts(_ context.Context, id string, facts RoutingFacts) (*Request, error) {
+	return f.mergeRoutingFacts(id, facts, true)
+}
+
+// mergeRoutingFacts merges facts into the stored ones key by key, as the
+// repository's jsonb concatenation does; keepStored keeps a key both hold.
+func (f *fakeStore) mergeRoutingFacts(id string, facts RoutingFacts, keepStored bool) (*Request, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req := f.lookupLocked(id)
+	if req == nil {
+		return nil, ErrNotFound
+	}
+	stored, patch := map[string]json.RawMessage{}, map[string]json.RawMessage{}
+	for target, from := range map[*map[string]json.RawMessage]RoutingFacts{&stored: req.RoutingFacts, &patch: facts} {
+		raw, err := json.Marshal(from)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, target); err != nil {
+			return nil, err
+		}
+	}
+	for key, value := range patch {
+		if _, held := stored[key]; !held || !keepStored {
+			stored[key] = value
+		}
+	}
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return nil, err
+	}
+	var merged RoutingFacts
+	if err := json.Unmarshal(raw, &merged); err != nil {
+		return nil, err
+	}
+	req.RoutingFacts = merged
+	out := *req
+	return &out, nil
 }
 
 func (f *fakeStore) ListTargets(_ context.Context, requestID string) ([]Target, error) {
@@ -2399,6 +2499,7 @@ type fakeTMDBClient struct {
 	externalIDCalls   []int
 	detail            *tmdb.MediaDetail
 	detailErr         error
+	detailCalls       int
 	discoverPage      *tmdb.MediaPage
 	discoverErr       error
 	searchMediaType   string
@@ -2441,6 +2542,9 @@ func (f *fakeTMDBClient) GetExternalIDs(_ context.Context, _ string, id int) (*t
 }
 
 func (f *fakeTMDBClient) GetMediaDetail(context.Context, string, int) (*tmdb.MediaDetail, error) {
+	f.mu.Lock()
+	f.detailCalls++
+	f.mu.Unlock()
 	return f.detail, f.detailErr
 }
 
@@ -2541,6 +2645,14 @@ type fakeRouterProvider struct {
 	optionsErr     error
 	gotOptionsConn ResolvedRouterConnection
 
+	// TestConnection behavior: testFails answers not ok with testMessage;
+	// testErr fails the call itself.
+	testFails   bool
+	testMessage string
+	testErr     error
+	testCalls   int
+	gotTestConn ResolvedRouterConnection
+
 	// Validate behavior (default empty = valid).
 	validateFieldErrors   map[string]string
 	validateFormError     string
@@ -2632,8 +2744,15 @@ func (f *fakeRouterProvider) ListConfigOptions(_ context.Context, _ int, _ strin
 	return f.options, nil
 }
 
-func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, _ ResolvedRouterConnection) (bool, string, error) {
-	return true, "", nil
+func (f *fakeRouterProvider) TestConnection(_ context.Context, _ int, _ string, conn ResolvedRouterConnection) (bool, string, error) {
+	f.mu.Lock()
+	f.testCalls++
+	f.gotTestConn = conn
+	f.mu.Unlock()
+	if f.testErr != nil {
+		return false, "", f.testErr
+	}
+	return !f.testFails, f.testMessage, nil
 }
 
 func (f *fakeRouterProvider) Validate(_ context.Context, _ int, capabilityID string, conn ResolvedRouterConnection, siblings []ResolvedRouterConnection) (map[string]string, string, error) {

@@ -76,6 +76,26 @@ func TestValidateSubtitleContentRejectsUnreadableFiles(t *testing.T) {
 	}
 }
 
+func TestSUBDemuxerNamesTheFFmpegFormat(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		data []byte
+		want string
+	}{
+		{"microdvd with BOM after frame rate", []byte("\xef\xbb\xbf{1}{1}25\n{25}{50}Hello\n"), "microdvd"},
+		{"subviewer", []byte("[INFORMATION]\n00:00:01.00,00:00:02.00\nHello\n"), "subviewer"},
+		{"subviewer cue text shaped like microdvd", []byte("00:00:01.00,00:00:02.00\n{25}{50}Hello\n"), "subviewer"},
+		// FFmpeg's microdvd demuxer reads UTF-16 as a file with no cues.
+		{"microdvd in UTF-16", utf16LEWithBOM("{25}{50}Hello\r\n"), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SUBDemuxer(tc.data); got != tc.want {
+				t.Fatalf("SUBDemuxer = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestManagerUploadRejectsUnreadableContentBeforeStoring(t *testing.T) {
 	repo := newMockSubtitleRepo()
 	blobs := newMockBlobStore()

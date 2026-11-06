@@ -69,7 +69,8 @@ type AdminPlaybackHistoryEntry struct {
 	ClientVersion        *string  `json:"client_version" nullable:"true" doc:"App version the client reported; null when unknown"`
 	VideoDecision        *string  `json:"video_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the video stream was delivered when the play ended: direct, remux (copied into a new container), or transcode. Null when unknown"`
 	AudioDecision        *string  `json:"audio_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown"`
-	EndReason            *string  `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, or aborted by the server. Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
+	EndReason            *string  `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted,replaced" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
+	LifecycleSeq         *int64   `json:"lifecycle_seq" nullable:"true" doc:"Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed"`
 }
 
 // TransformSchema admits null in the nullable enums: JSON Schema applies the
@@ -113,6 +114,7 @@ type AdminPlaybackHistoryCapabilities struct {
 	StreamDecisions  bool     `json:"stream_decisions" doc:"Entries carry video_decision and audio_decision"`
 	EndReason        bool     `json:"end_reason" doc:"Entries carry end_reason"`
 	EndReasonValues  []string `json:"end_reason_values" doc:"Values end_reason may take"`
+	LifecycleSeq     bool     `json:"lifecycle_seq" doc:"Entries carry lifecycle_seq"`
 }
 
 const opListAdminPlaybackHistory = "listAdminPlaybackHistory"
@@ -138,6 +140,7 @@ func registerAdminPlaybackHistory(reg *Registry) {
 		out.Body.ClientIdentity = available
 		out.Body.StreamDecisions = available
 		out.Body.EndReason = available
+		out.Body.LifecycleSeq = available
 		out.Body.EndReasonValues = make([]string, len(handlers.PlaybackEndReasons))
 		for i, reason := range handlers.PlaybackEndReasons {
 			out.Body.EndReasonValues[i] = string(reason)
@@ -189,19 +192,7 @@ func registerAdminPlaybackHistory(reg *Registry) {
 		}
 		items := make([]AdminPlaybackHistoryEntry, 0, len(result.Items))
 		for _, row := range result.Items {
-			items = append(items, AdminPlaybackHistoryEntry{
-				SessionID: row.SessionID, UserID: IDFromInt(int64(row.UserID)), Username: row.Username,
-				ProfileID: row.ProfileID, ProfileName: row.ProfileName, MediaItemID: row.MediaItemID,
-				MediaFileID: IDFromInt(int64(row.MediaFileID)), MediaTitle: row.MediaTitle, MediaType: row.MediaType,
-				PlayMethod: row.PlayMethod, StartedAt: NewInstant(row.StartedAt), EndedAt: NewInstant(row.EndedAt),
-				WatchedSeconds: row.WatchedSeconds, DurationSeconds: row.DurationSeconds, Completed: row.Completed, PlayedSeconds: row.PlayedSeconds,
-				SeriesTitle: row.SeriesTitle, SeasonNumber: row.SeasonNumber, EpisodeNumber: row.EpisodeNumber,
-				Measured: row.Measured, StartPositionSeconds: row.StartPositionSeconds, PausedSeconds: row.PausedSeconds,
-				MeasuredSince: instantPtr(row.MeasuredSince), MeasuredUntil: instantPtr(row.MeasuredUntil),
-				ClientIP: row.ClientIP, DeviceID: row.DeviceID, DevicePlatform: row.DevicePlatform,
-				ClientName: row.ClientName, ClientVersion: row.ClientVersion,
-				VideoDecision: row.VideoDecision, AudioDecision: row.AudioDecision, EndReason: row.EndReason,
-			})
+			items = append(items, adminPlaybackHistoryEntryOf(row))
 		}
 		next := ""
 		if result.HasMore {
@@ -230,4 +221,21 @@ func adminPlaybackHistoryInstant(raw, name string) (*time.Time, *Problem) {
 		return nil, NewProblem(TypeValidationFailed, "Invalid "+name+".")
 	}
 	return new(at.UTC()), nil
+}
+
+func adminPlaybackHistoryEntryOf(row handlers.AdminPlaybackHistoryRow) AdminPlaybackHistoryEntry {
+	return AdminPlaybackHistoryEntry{
+		SessionID: row.SessionID, UserID: IDFromInt(int64(row.UserID)), Username: row.Username,
+		ProfileID: row.ProfileID, ProfileName: row.ProfileName, MediaItemID: row.MediaItemID,
+		MediaFileID: IDFromInt(int64(row.MediaFileID)), MediaTitle: row.MediaTitle, MediaType: row.MediaType,
+		PlayMethod: row.PlayMethod, StartedAt: NewInstant(row.StartedAt), EndedAt: NewInstant(row.EndedAt),
+		WatchedSeconds: row.WatchedSeconds, DurationSeconds: row.DurationSeconds, Completed: row.Completed, PlayedSeconds: row.PlayedSeconds,
+		SeriesTitle: row.SeriesTitle, SeasonNumber: row.SeasonNumber, EpisodeNumber: row.EpisodeNumber,
+		Measured: row.Measured, StartPositionSeconds: row.StartPositionSeconds, PausedSeconds: row.PausedSeconds,
+		MeasuredSince: instantPtr(row.MeasuredSince), MeasuredUntil: instantPtr(row.MeasuredUntil),
+		ClientIP: row.ClientIP, DeviceID: row.DeviceID, DevicePlatform: row.DevicePlatform,
+		ClientName: row.ClientName, ClientVersion: row.ClientVersion,
+		VideoDecision: row.VideoDecision, AudioDecision: row.AudioDecision, EndReason: row.EndReason,
+		LifecycleSeq: row.LifecycleSeq,
+	}
 }

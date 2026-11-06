@@ -37,6 +37,7 @@ type AdminAccountView struct {
 type AdminProfileView struct {
 	ID, Name                        string
 	Avatar, AvatarURL, AvatarSource string
+	HasPIN, IsPrimary, IsChild      bool
 	LastSeenAt                      *time.Time
 }
 
@@ -356,7 +357,7 @@ func (h *AdminHandler) ImpersonateAdminAccount(ctx context.Context, id int, devi
 	if err != nil {
 		return TokenPairView{}, err
 	}
-	return TokenPairView(buildLoginResponse(pair, user, effectiveDownloadAllowed(ctx, user, h.groupPolicyProvider()), actor)), nil
+	return TokenPairView(buildLoginResponse(pair, user, effectiveAccountPolicy(ctx, user, h.groupPolicyProvider()), actor)), nil
 }
 
 // ownershipTransferrer moves the server Owner role. *auth.UserRepository
@@ -407,7 +408,7 @@ func (h *AdminHandler) ListAdminAccountProfiles(ctx context.Context, id int) ([]
 	lastSeen := profileLastSeen(devices)
 	result := make([]AdminProfileView, 0, len(rows))
 	for _, row := range rows {
-		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name), Avatar: row.Avatar}
+		view := AdminProfileView{ID: row.ID, Name: strings.TrimSpace(row.Name), Avatar: row.Avatar, HasPIN: row.PINHash != "", IsPrimary: row.IsPrimary, IsChild: row.IsChild}
 		view.AvatarSource, view.AvatarURL = h.resolveProfileAvatar(ctx, row.Avatar)
 		if at, ok := lastSeen[row.ID]; ok {
 			view.LastSeenAt = &at

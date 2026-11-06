@@ -17,10 +17,19 @@ does not expose the secrets.
 - **Envelope:** every ciphertext is stored as `enc:v1:<base64url(nonce‖sealed)>`.
   The `enc:v1:` prefix is the version marker (see *Key rotation* below).
 - **Row binding (AAD):** each ciphertext is GCM-bound to its logical row via
-  additional-authenticated data — `table:column:<pk>` for per-row columns,
+  additional-authenticated data: `table:column:<row key>` for most per-row columns,
   `server_settings:<key>` for settings. A DB-write attacker therefore cannot move
   a credential blob from one row/column to another: decrypting under a different
-  binding fails authentication.
+  binding fails authentication. The row key is usually the primary key; a few
+  columns bind a business key instead: watch-sync tokens and device codes bind
+  `provider:user_id:profile_id`, plugin runtime configuration binds
+  `installation:config_key`, history-import Connect server-list entries bind the
+  session, entry index and `server.ID`, and Plex server-list entries bind the
+  session, entry index and `ClientIdentifier`. Notification webhook, server channel
+  and email-verification outbox ciphertexts use their own prefixes
+  (`notification_webhook:<id>:…`, `server_channel:<id>:…`,
+  `notification-email-verification:<id>`). Changing a bound key in SQL makes its
+  value undecryptable.
 - **Read path:** an empty value stays empty; a non-`enc:v1:` value is treated as
   legacy plaintext and passed through unchanged (so a not-yet-migrated row keeps
   working); an `enc:v1:` value is decrypted and **any** failure (wrong key,
@@ -66,6 +75,13 @@ affected credentials:
 - `auth.jwt_secret` becomes unreadable, so all existing sessions are invalid and
   users must log in again (a new secret is generated on next boot if the row is
   cleared — see below).
+- **Backups in an S3 bucket are lost too.** Every object of an S3 backup is
+  encrypted with a key derived from `SECRET_KEY` (HKDF-SHA256, info
+  `silo/backup-encryption/v1`; see
+  [backups.md](backups.md#encryption)), and nothing else can decrypt it. That
+  is why the Backups page asks the admin to confirm an off-server copy of the
+  key before S3 backups start. Local backups are not encrypted beyond the
+  values inside the database, which are lost as above.
 
 ## Rollout (automatic backfill)
 
@@ -107,9 +123,10 @@ example:
 - Decrypt the sensitive `server_settings` back to plaintext (run a one-off that
   reads each via the encrypting repo and writes the plaintext via the raw repo),
   **or**
-- At minimum, clear `auth.jwt_secret` so the older binary regenerates a fresh
-  plaintext one (this still logs everyone out), and re-enter any integration
-  credentials as plaintext.
+- At minimum, clear the `auth.jwt_secret` and `audiobooks.abs.jwt_secret` rows
+  in `server_settings` (the admin settings API refuses these keys) so the older
+  binary regenerates fresh plaintext keys. This logs everyone out and invalidates
+  existing ABS tokens. Re-enter any integration credentials as plaintext.
 
 There is no automatic "decrypt everything" downgrade path in this release; plan
 downgrades accordingly.
@@ -122,11 +139,28 @@ on the version, returning an explicit error for an unknown version). Rotation is
 out of scope for this release; the versioning exists so it can be added without a
 data migration of the envelope format.
 
+A rotation must keep old backups restorable. Each backup manifest records the
+check value of the key it was taken with (`silo/backup-key-check/v1`), and
+encrypted backups need that key's archive passphrase
+(`silo/backup-encryption/v1`). A rotation therefore has to keep the old key
+available to decrypt backups whose manifest names its check value (or
+re-encrypt them), and record the new key's check value in new manifests; the
+S3 destination's key confirmation (`backup.s3.key_acknowledged`) asks the admin
+to confirm the new key before backups resume.
+
 ## Scope and known gaps
 
 Covered: arr (Requests + Autoscan) API keys, S3 keys, all sensitive
-`server_settings`, watch-sync tokens, webhook-sync `access_token`,
-history-import admin/session tokens and temporary server-list credentials,
+`server_settings`, watch-sync tokens and device codes
+(`watch_provider_auth_sessions.device_code`), webhook-sync `access_token`,
+Autoscan webhook endpoint secrets (`autoscan_webhook_endpoints.secret_ref`),
+push device APNs and FCM tokens (`push_devices`), notification webhook and
+server channel URLs and signing secrets (`notification_webhooks`,
+`notification_server_channels`), queued email-verification messages
+(`notification_email_verifications.payload_ciphertext`), plugin instance state
+(`plugin_instance_state.state_value`),
+history-import admin/session tokens, temporary server-list credentials and
+personal run credentials (`history_import_run_credentials.payload`),
 subtitle provider `api_key`/`password`,
 the Jellyfin-compat session's bridged Silo access/refresh tokens
 (`jellycompat_sessions.streamapp_access_token` / `streamapp_refresh_token`),

@@ -1,3 +1,4 @@
+import { useAllowCollectionDialog } from "@/components/profiles/useAllowCollectionDialog";
 import {
   fetchCollectionEditSnapshot,
   fetchCollectionOrderSnapshot,
@@ -12,7 +13,7 @@ import {
   type KeyboardEventHandler,
   type ReactNode,
 } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { GripVertical, Plus, Users } from "lucide-react";
 import {
   DndContext,
@@ -36,8 +37,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 
 import type { Collection, LibraryTabCollection, ServerCollectionsLibrary } from "@/api/types";
-import { CalmPage } from "@/components/calm/CalmPage";
-import { PillSwitcher } from "@/components/calm/PillSwitcher";
+import { PillSwitcher, type PillOption } from "@/components/calm/PillSwitcher";
+import { PageHeader } from "@/components/page/PageHeader";
 import { CollectionActionsMenu } from "@/components/collections/CollectionActionsMenu";
 import { NewCollectionPicker } from "@/components/collections/NewCollectionPicker";
 import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
@@ -66,28 +67,49 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { useLoadMoreFocus } from "@/hooks/useLoadMoreFocus";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useUICustomization } from "@/hooks/useUICustomization";
 import { personalDeleteDescription, unshareConsequence } from "@/lib/collections/copy";
 import { NEW_COLLECTION_DIALOG } from "@/lib/collections/dialogs";
 import { partitionPersonalCollections } from "@/lib/collections/personalOwnership";
 import { addToMyHomePath } from "@/lib/collections/rows";
 import { PERSONAL_SCOPE } from "@/lib/collections/scope";
 import { COLLECTION_KIND_LABEL, collectionKindOf } from "@/lib/collections/types";
+import { cardGridClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 
-/** Seven posters a row on desktop, five on medium widths, three on phones. */
-const POSTER_GRID = "grid grid-cols-3 gap-x-3.5 gap-y-5 sm:grid-cols-5 lg:grid-cols-7";
-/** One POSTER_GRID column, for cards laid out in a flex row inside an `@container`. */
-const GRID_COLUMN_WIDTH =
-  "w-[calc((100cqw-2*0.875rem)/3)] sm:w-[calc((100cqw-4*0.875rem)/5)] lg:w-[calc((100cqw-6*0.875rem)/7)]";
 /** Under this width New collection moves to a bar docked at the bottom. */
 const NARROW_QUERY = "(max-width: 1023px)";
+
+/** The wall's poster grid, sized by the viewer's poster size setting. */
+function usePosterGrid() {
+  const { cardPresentation } = useUICustomization();
+  return cardGridClasses(cardPresentation.poster_size);
+}
+
+/**
+ * What the wall shows: everything, the profile's own collections, the ones
+ * other profiles share, every server collection, or one library's. It lives
+ * in the URL (`?show=mine`, `?library=2`) so a reload or a link keeps it.
+ */
+type Show = "all" | "mine" | "shared" | "server" | `library:${string}`;
+
+const WALL_LABEL: Partial<Record<Show, string>> = {
+  mine: "Your collections",
+  shared: "Shared with me",
+  server: "Server collections",
+};
+
+const SHOW_PARAM = "show";
+const LIBRARY_PARAM = "library";
 
 export default function Collections() {
   useDocumentTitle("Collections");
   const { data, isLoading } = useCollections();
   const { data: capabilities } = useCollectionCapabilities();
-  const { data: profiles = [] } = useProfiles();
+  const { data: profiles = [], isLoading: profilesLoading } = useProfiles();
   const { profile } = useCurrentProfile();
+  const server = useServerCollections();
+  const libraries = server.data ?? [];
   const { own, shared } = useMemo(
     () => partitionPersonalCollections(data ?? [], profile?.id, profiles),
     [data, profile?.id, profiles],
@@ -95,10 +117,78 @@ export default function Collections() {
   const otherProfileNames = profiles
     .filter((entry) => entry.id !== profile?.id)
     .map((entry) => entry.name);
-  // A one-profile account has nobody to share with: no sharing switch, no Shared with me.
+  // A one-profile account has nobody to share with: no sharing switch, no Shared.
   const multiProfile = otherProfileNames.length > 0;
+  const sharedCards = multiProfile
+    ? shared.flatMap((group) =>
+        group.collections.map((collection) => ({ collection, owner: group.owner.name })),
+      )
+    : [];
+  // Totals are per library and a collection can be in several, so only a lone
+  // library's total counts the server's collections.
+  const serverCount = libraries.length > 1 ? undefined : (libraries[0]?.total_count ?? 0);
   const narrow = useMediaQuery(NARROW_QUERY);
   const [pickerOpen, setPickerOpen] = useDialogSearchParam(NEW_COLLECTION_DIALOG);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // A filter the account has nothing for falls back to All. A filter in the
+  // URL is kept while what it needs loads, so a reload doesn't flash All. A
+  // lone library has no pill of its own and shows as Server.
+  const libraryParam = searchParams.get(LIBRARY_PARAM);
+  const showParam = searchParams.get(SHOW_PARAM);
+  const libraryMatch = libraries.find((entry) => String(entry.library_id) === libraryParam);
+  let show: Show = "all";
+  if (libraryParam && server.isLoading) show = `library:${libraryParam}`;
+  else if (libraryMatch) show = libraries.length > 1 ? `library:${libraryParam}` : "server";
+  else if (showParam === "mine") show = "mine";
+  else if (showParam === "shared" && (sharedCards.length > 0 || isLoading || profilesLoading))
+    show = "shared";
+  else if (showParam === "server" && (libraries.length > 0 || server.isLoading)) show = "server";
+  const picked = show.startsWith("library:") ? libraryMatch : undefined;
+  const showMine = show === "all" || show === "mine";
+  const showShared = sharedCards.length > 0 && (show === "all" || show === "shared");
+  const showServer = show !== "mine" && show !== "shared";
+  const canReorder = capabilities?.item_reorder === true;
+  const wallLabel =
+    WALL_LABEL[show] ?? (picked ? `${picked.library_name} collections` : "All collections");
+  const personalLoading = (showMine || show === "shared") && isLoading;
+  const serverLoading = showServer && server.isLoading;
+
+  function changeShow(next: string) {
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current);
+        params.delete(SHOW_PARAM);
+        params.delete(LIBRARY_PARAM);
+        if (next.startsWith("library:")) params.set(LIBRARY_PARAM, next.slice("library:".length));
+        else if (next !== "all") params.set(SHOW_PARAM, next);
+        return params;
+      },
+      { replace: true },
+    );
+  }
+
+  const filterOptions: PillOption[] = [
+    {
+      value: "all",
+      label: "All",
+      count: serverCount === undefined ? undefined : own.length + sharedCards.length + serverCount,
+    },
+    { value: "mine", label: "Mine", count: own.length },
+  ];
+  if (sharedCards.length > 0)
+    filterOptions.push({ value: "shared", label: "Shared", count: sharedCards.length });
+  if (libraries.length > 0)
+    filterOptions.push({ value: "server", label: "Server", count: serverCount });
+  if (libraries.length > 1)
+    libraries.forEach((library, index) =>
+      filterOptions.push({
+        value: `library:${library.library_id}`,
+        label: library.library_name,
+        count: library.total_count,
+        separated: index === 0,
+      }),
+    );
 
   const newCollection = (
     <Button
@@ -112,8 +202,9 @@ export default function Collections() {
   );
 
   return (
-    <div className="page-shell py-4 sm:py-6">
-      <CalmPage
+    <div className={cn("py-4 sm:py-6", narrow && "pb-24")}>
+      <PageHeader
+        className="mb-5"
         title="Collections"
         subtitle={
           multiProfile
@@ -121,55 +212,42 @@ export default function Collections() {
             : "Yours and the server's."
         }
         actions={narrow ? null : newCollection}
-        padBottom={narrow}
-      >
-        {isLoading ? (
-          <PosterGridSkeleton />
-        ) : (
-          <YourCollections
-            collections={own}
-            canReorder={capabilities?.item_reorder === true}
-            canSync={capabilities?.imports === true}
-            otherProfileNames={otherProfileNames}
-          />
-        )}
-        {multiProfile && shared.length > 0 ? (
-          <CollectionsSection
-            id="shared-with-me"
-            title="Shared with me"
-            count={shared.reduce((total, group) => total + group.collections.length, 0)}
-            note="Read-only. Other profiles on this account made these."
-          >
-            {/* Owners sit side by side, each card one grid column wide. */}
-            <div className="@container">
-              <div className="flex flex-wrap gap-x-3.5 gap-y-5">
-                {shared.map((group) => (
-                  <div key={group.owner.id} className="grid max-w-full min-w-0 content-start gap-3">
-                    <div className="text-muted-foreground flex items-center gap-2 text-sm">
-                      <OwnerInitial name={group.owner.name} />
-                      <h3>
-                        by <span className="text-foreground font-semibold">{group.owner.name}</span>
-                      </h3>
-                    </div>
-                    <ul className="flex flex-wrap gap-x-3.5 gap-y-5">
-                      {group.collections.map((collection) => (
-                        <li key={collection.id} className={GRID_COLUMN_WIDTH}>
-                          <CollectionPosterCard
-                            collection={posterOf(collection)}
-                            kind="user_collections"
-                            meta={<CardMeta collection={collection} />}
-                          />
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </CollectionsSection>
+      />
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
+        {sharedCards.length > 0 || libraries.length > 0 ? (
+          <PillSwitcher label="Show" options={filterOptions} value={show} onChange={changeShow} />
         ) : null}
-        <ServerCollectionsSection />
-      </CalmPage>
+        {/* The personal cards' place while they load; the server's don't wait for them. */}
+        {personalLoading ? <PosterGridSkeleton /> : null}
+        <Wall
+          label={wallLabel}
+          before={
+            personalLoading ? null : (
+              <>
+                {showMine ? (
+                  <YourCollections
+                    collections={own}
+                    canReorder={canReorder}
+                    canSync={capabilities?.imports === true}
+                    otherProfileNames={otherProfileNames}
+                  />
+                ) : null}
+                {showShared ? <SharedCards cards={sharedCards} /> : null}
+              </>
+            )
+          }
+          libraries={showServer ? (picked ? [picked] : libraries) : []}
+          loadOnScroll={picked === undefined}
+        />
+        {serverLoading && !personalLoading ? <PosterGridSkeleton /> : null}
+        {show === "mine" && canReorder && own.length > 1 ? (
+          <p className="text-muted-foreground flex items-center gap-2 text-[13px]">
+            <GripVertical aria-hidden className="size-3.5" />
+            Drag a poster to change the order, or focus its handle and press Space, then the arrow
+            keys.
+          </p>
+        ) : null}
+      </div>
       {narrow ? (
         // Docked above whichever background playback bar shows, as SaveBar is.
         <div
@@ -187,56 +265,25 @@ export default function Collections() {
   );
 }
 
-/** One section of the page: a heading with its count, a note at the right, and its cards. */
-function CollectionsSection({
-  id,
-  title,
-  count,
-  note,
-  action,
-  children,
-}: {
-  id: string;
-  title: string;
-  count?: number;
-  note?: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section aria-labelledby={id} className="grid gap-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <div className="flex items-baseline gap-2">
-          <h2 id={id} className="text-xl font-semibold tracking-tight sm:text-2xl">
-            {title}
-          </h2>
-          {count !== undefined ? (
-            <span className="text-muted-foreground text-sm">{count}</span>
-          ) : null}
-        </div>
-        {note ? <p className="text-muted-foreground text-[13px]">{note}</p> : null}
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function OwnerInitial({ name }: { name: string }) {
-  return (
-    <span
-      aria-hidden
-      className="bg-primary/20 text-primary inline-flex size-5 items-center justify-center rounded-full text-[11px] font-semibold"
-    >
-      {name.charAt(0).toUpperCase()}
-    </span>
-  );
+/** Other profiles' shared collections, read-only, each naming its owner. */
+function SharedCards({ cards }: { cards: Array<{ collection: Collection; owner: string }> }) {
+  return cards.map(({ collection, owner }) => (
+    <li key={collection.id}>
+      <CollectionPosterCard
+        collection={posterOf(collection)}
+        kind="user_collections"
+        ownerName={owner}
+        meta={<CardMeta collection={collection} />}
+      />
+    </li>
+  ));
 }
 
 function PosterGridSkeleton() {
+  const grid = usePosterGrid();
   return (
-    <div className={POSTER_GRID} aria-hidden>
-      {Array.from({ length: 7 }, (_, index) => (
+    <div className={grid} aria-hidden>
+      {Array.from({ length: 8 }, (_, index) => (
         <div key={index}>
           <Skeleton className="aspect-[2/3] rounded-xl" />
           <Skeleton className="mt-2.5 h-4 w-3/4" />
@@ -297,6 +344,7 @@ function YourCollections({
   const sync = useSyncUserCollection();
   const share = useSetCollectionShared();
   const reorderMutation = useReorderCollections();
+  const allowFor = useAllowCollectionDialog(otherProfileNames.length > 0);
   // A closing dialog stays on screen while it animates out, so it keeps the
   // collection it was about until the next one opens; only `open` resets.
   const [confirmDelete, setConfirmDelete] = useState<{
@@ -348,12 +396,7 @@ function YourCollections({
   }
 
   return (
-    <CollectionsSection
-      id="your-collections"
-      title="Your collections"
-      count={collections.length}
-      note={collections.length > 0 ? "Only you can change these" : undefined}
-    >
+    <>
       <ConfirmDialog
         open={confirmDelete.open}
         onOpenChange={(open) => {
@@ -387,79 +430,70 @@ function YourCollections({
           setConfirmUnshare({ open: false, collection });
         }}
       />
+      {allowFor.dialog}
       {collections.length === 0 ? (
-        <ul className={POSTER_GRID}>
-          <li>
-            <NewCollectionCard />
-          </li>
-        </ul>
+        <li>
+          <NewCollectionCard />
+        </li>
       ) : (
-        <>
-          <SortableCollectionGrid
-            collections={collections}
-            disabled={!canReorder}
-            onBeginDrag={beginDrag}
-            onReorder={reorder}
-          >
-            {collections.map((collection) => {
-              const syncing = sync.isPending && sync.variables === collection.id;
-              const synced = collectionKindOf(collection.collection_type) === "synced";
-              return (
-                <SortableCollectionCard
-                  key={collection.id}
-                  collection={collection}
-                  canReorder={canReorder}
-                  syncing={syncing}
-                  menu={
-                    <CollectionActionsMenu
-                      name={collection.name}
-                      triggerRef={(node) => {
-                        if (node) menuTriggers.current.set(collection.id, node);
-                        else menuTriggers.current.delete(collection.id);
-                      }}
-                      onEdit={() => navigate(PERSONAL_SCOPE.paths.edit(collection.id))}
-                      sync={
-                        canSync && synced
-                          ? { syncing, onSync: () => sync.mutate(collection.id) }
-                          : undefined
-                      }
-                      addRow={{
-                        mine: true,
-                        libraries: [],
-                        onAdd: (page) =>
-                          navigate(addToMyHomePath({ source: "user", id: collection.id }, page)),
-                      }}
-                      share={
-                        otherProfileNames.length > 0
-                          ? {
-                              shared: collection.is_shared,
-                              disabled: share.isPending,
-                              onChange: (shared) => setShared(collection, shared),
-                            }
-                          : undefined
-                      }
-                      onDelete={() => {
-                        confirmFor.current = collection.id;
-                        void fetchCollectionEditSnapshot(collection.id)
-                          .then((snapshot) => setConfirmDelete({ open: true, snapshot }))
-                          .catch((error) => toast.error(error.message));
-                      }}
-                    />
-                  }
-                />
-              );
-            })}
-          </SortableCollectionGrid>
-          {canReorder && collections.length > 1 ? (
-            <p className="text-muted-foreground flex items-center gap-2 text-[13px]">
-              <GripVertical aria-hidden className="size-3.5" />
-              Drag a poster to change the order, or focus its handle and press Space, then the arrow
-              keys.
-            </p>
-          ) : null}
-        </>
+        <SortableCollectionGrid
+          collections={collections}
+          disabled={!canReorder}
+          onBeginDrag={beginDrag}
+          onReorder={reorder}
+        >
+          {collections.map((collection) => {
+            const syncing = sync.isPending && sync.variables === collection.id;
+            const synced = collectionKindOf(collection.collection_type) === "synced";
+            return (
+              <SortableCollectionCard
+                key={collection.id}
+                collection={collection}
+                canReorder={canReorder}
+                syncing={syncing}
+                menu={
+                  <CollectionActionsMenu
+                    name={collection.name}
+                    triggerRef={(node) => {
+                      if (node) menuTriggers.current.set(collection.id, node);
+                      else menuTriggers.current.delete(collection.id);
+                    }}
+                    onEdit={() => navigate(PERSONAL_SCOPE.paths.edit(collection.id))}
+                    sync={
+                      canSync && synced
+                        ? { syncing, onSync: () => sync.mutate(collection.id) }
+                        : undefined
+                    }
+                    addRow={{
+                      mine: true,
+                      libraries: [],
+                      onAdd: (page) =>
+                        navigate(addToMyHomePath({ source: "user", id: collection.id }, page)),
+                    }}
+                    share={
+                      otherProfileNames.length > 0
+                        ? {
+                            shared: collection.is_shared,
+                            disabled: share.isPending,
+                            onChange: (shared) => setShared(collection, shared),
+                          }
+                        : undefined
+                    }
+                    onAllowForProfiles={allowFor.openFor && (() => allowFor.openFor?.(collection))}
+                    onDelete={() => {
+                      confirmFor.current = collection.id;
+                      void fetchCollectionEditSnapshot(collection.id)
+                        .then((snapshot) => setConfirmDelete({ open: true, snapshot }))
+                        .catch((error) => toast.error(error.message));
+                    }}
+                  />
+                }
+              />
+            );
+          })}
+        </SortableCollectionGrid>
       )}
-    </CollectionsSection>
+    </>
   );
 }
 
@@ -498,8 +532,9 @@ function moveAnnouncements(collections: Collection[]): Announcements {
   };
 }
 
-// SortableCollectionGrid is the profile's own collections as one flat,
-// drag-sortable grid. It reports the new full order of ids.
+// SortableCollectionGrid makes the profile's own collections drag-sortable
+// inside the wall's list, which may go on with other cards after them. It
+// reports the new full order of ids.
 function SortableCollectionGrid({
   collections,
   disabled,
@@ -535,13 +570,14 @@ function SortableCollectionGrid({
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
-      accessibility={{ announcements: moveAnnouncements(collections) }}
+      // In the body, not inline: inline it would put divs inside the wall's list.
+      accessibility={{ announcements: moveAnnouncements(collections), container: document.body }}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragCancel={blockClicks.settle}
     >
       <SortableContext items={ids} strategy={rectSortingStrategy} disabled={disabled}>
-        <ul className={POSTER_GRID}>{children}</ul>
+        {children}
       </SortableContext>
     </DndContext>
   );
@@ -653,54 +689,10 @@ function SortableCollectionCard({
   );
 }
 
-const ALL_LIBRARIES = "all";
-
 /**
- * Server collections: library pills, then every collection of the chosen
- * library, or of every library mixed together under All. Hidden only when no
- * library has any, so one-profile accounts see it too.
- */
-function ServerCollectionsSection() {
-  const { data, isLoading } = useServerCollections();
-  const [selected, setSelected] = useState(ALL_LIBRARIES);
-  const libraries = data ?? [];
-
-  if (isLoading)
-    return (
-      <CollectionsSection id="server-collections" title="Server collections">
-        <PosterGridSkeleton />
-      </CollectionsSection>
-    );
-  if (libraries.length === 0) return null;
-
-  const picked = libraries.find((entry) => String(entry.library_id) === selected);
-  const library = libraries.length === 1 ? libraries[0] : picked;
-  return (
-    <CollectionsSection id="server-collections" title="Server collections">
-      {libraries.length > 1 ? (
-        <PillSwitcher
-          label="Library"
-          options={[
-            { value: ALL_LIBRARIES, label: "All" },
-            ...libraries.map((entry) => ({
-              value: String(entry.library_id),
-              label: entry.library_name,
-            })),
-          ]}
-          value={library ? String(library.library_id) : ALL_LIBRARIES}
-          onChange={setSelected}
-        />
-      ) : null}
-      <ServerCollectionsGrid
-        libraries={library ? [library] : libraries}
-        loadOnScroll={picked === undefined}
-      />
-    </CollectionsSection>
-  );
-}
-
-/**
- * Every server collection of these libraries in one grid. The aggregated
+ * The wall: one poster grid named for what the filter shows. Personal cards
+ * (`before`) come first, then every server collection of `libraries`, so all
+ * the cards flow on in the same rows. The aggregated
  * answer carries only each library's first 20, so the rest come from the
  * libraries' Collections tabs, which list the same collections in the same
  * order. A picked library loads its rest straight away. The page's default
@@ -713,10 +705,14 @@ function ServerCollectionsSection() {
  * again. Pressing Load more moves focus to the first card it added, or to
  * the library's link when its list failed and nothing is left to load.
  */
-function ServerCollectionsGrid({
+function Wall({
+  label,
+  before,
   libraries,
   loadOnScroll,
 }: {
+  label: string;
+  before: ReactNode;
   libraries: ServerCollectionsLibrary[];
   loadOnScroll: boolean;
 }) {
@@ -728,17 +724,15 @@ function ServerCollectionsGrid({
     onIntersect: loadNext,
     enabled: loadOnScroll && !loading && next !== undefined,
   });
-  const { listRef, buttonRef, fallbackRef, press } = useLoadMoreFocus<HTMLUListElement>(
-    loading,
-    cards.length,
-  );
+  const grid = usePosterGrid();
+  const { listRef, buttonRef, fallbackRef, press } = useLoadMoreFocus<HTMLUListElement>(loading);
   const pressLoadMore = () => {
     if (loading || !next) return;
     press();
     loadNext();
   };
   return (
-    <>
+    <section aria-label={label} className="grid gap-4">
       {refreshFailed.map(({ library, error, retry, retrying }) => (
         <RefreshFailedNotice
           key={library.library_id}
@@ -748,7 +742,8 @@ function ServerCollectionsGrid({
           retrying={retrying}
         />
       ))}
-      <ul ref={listRef} className={POSTER_GRID}>
+      <ul ref={listRef} className={grid}>
+        {before}
         {cards.map(({ collection, libraryId }) => (
           <li key={collection.id}>
             <CollectionPosterCard
@@ -792,6 +787,6 @@ function ServerCollectionsGrid({
           ))}
         </div>
       ) : null}
-    </>
+    </section>
   );
 }

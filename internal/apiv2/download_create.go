@@ -25,7 +25,7 @@ type DownloadEntryExpectation struct {
 type DownloadCreateBody struct {
 	ContentID          string                              `json:"content_id" minLength:"1" maxLength:"128"`
 	EpisodeID          string                              `json:"episode_id,omitempty" maxLength:"128"`
-	MediaFileID        ID                                  `json:"media_file_id,omitempty"`
+	MediaFileID        ID                                  `json:"media_file_id,omitempty" doc:"The file to download. On a series or season page (with batch_version), a version template: each episode the page registers gets its version closest to this file; existing managed entries keep their file unless expected_entries names them."`
 	Quality            string                              `json:"quality,omitempty" enum:"original,20mbps,10mbps,5mbps,2mbps,1mbps"`
 	Series             bool                                `json:"series,omitzero"`
 	SeasonNumber       *int                                `json:"season_number,omitempty" minimum:"0" maximum:"9999"`
@@ -143,13 +143,17 @@ func (reg *Registry) createDownloads(ctx context.Context, cursors *Cursors, in *
 		out.Items = append(out.Items, downloadEntryOf(row))
 		return &DownloadCreateOutput{Body: out}, nil
 	}
-	if body.BatchID == "" || len(body.BatchID) > 128 || body.EpisodeID != "" || body.MediaFileID != "" || body.ExpectedRevision != nil {
-		return nil, NewProblem(TypeMalformedRequest, "Series pages require batch_id and cannot select one file, episode or revision.")
+	if body.BatchID == "" || len(body.BatchID) > 128 || body.EpisodeID != "" || body.ExpectedRevision != nil {
+		return nil, NewProblem(TypeMalformedRequest, "Series pages require batch_id and cannot select one episode or revision.")
 	}
+	// On a series page media_file_id is a version template: each episode
+	// gets its version closest to that file.
+	req.VersionTemplateFileID, req.FileID = req.FileID, 0
 	filter, _ := json.Marshal(struct {
 		Device, Batch, Series, Quality string
 		Season                         *int
-	}{in.DeviceID, string(body.BatchID), body.ContentID, body.Quality, body.SeasonNumber})
+		Version                        string `json:",omitempty"`
+	}{in.DeviceID, string(body.BatchID), body.ContentID, body.Quality, body.SeasonNumber, string(body.MediaFileID)})
 	scope := CursorScope{OperationID: "createDownloads", Security: strconv.Itoa(user) + "/" + profile + "/" + viewerScopeDigest(ctx), Filter: string(filter), Sort: "season,episode,id", Tiebreaker: "id"}
 	var after *catalogpkg.EpisodePagePosition
 	if in.Cursor != "" {

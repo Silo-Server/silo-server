@@ -402,6 +402,20 @@ must use the returned height and reject chunks whose geometry differs.
   bound the final keyframe's coverage without decoding extra frames or
   reading the file again. Samples beyond that observed extent remain missing, so
   premature EOF cannot turn every trailing cell into a decoded preview.
+  The timing file also holds the packets of every audio stream the probe
+  found a sample rate for; the muxer refuses a stream without one, such as
+  an MPEG-TS track that is declared but never carried. A file whose audio
+  runs on after its video ends has packets past the video's extent, while a
+  truncated file's streams stop together, so samples after the video but
+  within the audio show the window's last decoded keyframe and count as
+  decoded, as samples between keyframes do. That keyframe can come before
+  the video's final frame. A window counts a cell as filled when it has no
+  frame of its own or, after a dropped keyframe (below), shows an earlier
+  keyframe than its own; a tail sample's own frame is the last keyframe at
+  or before its time, as for any other sample. A file's duration follows
+  its longest track, so without this the samples of such an audio tail
+  failed every run; counting them as filled would still fail a short last
+  chunk made mostly of tail samples.
 - A packet without a PTS counts by its DTS only when the decoder runs in
   low delay (MPEG-4 Part 2, above). A DTS never runs ahead of its PTS, so
   the extent can only shrink, by the reorder delay. Without a PTS the decoder
@@ -448,7 +462,11 @@ must use the returned height and reject chunks whose geometry differs.
   with `-skip_frame:v noref` and `select=key` ahead of the sheets chain:
   the decoder sees every reference picture, so its state stays whole, and
   the chain still gets only the keyframes. That read costs several
-  keyframes-only reads and runs only for files that fail without it. If the
+  keyframes-only reads and runs only for files that fail without it. Its
+  cost follows the span it decodes, not the sample count attempt timeouts
+  are sized for, so it runs on the attempt's deadline plus the sampled
+  span's playing time; `Request.AttemptSeconds` is that longest attempt,
+  which a caller waiting on another node adds up. If the
   window fails for any reason, the attempt reports the window's failure,
   whose reason and log describe the latest read, and after a list fallback
   its error names the list run's.
@@ -643,6 +661,14 @@ part took effect (there, nice 19 without the idle I/O class) and the first
 failure is logged. Deadlines and the limiter still
 bound background work. If the idle I/O class is seen to starve it on a disk
 that is never idle, switch to the lowest best-effort level (7) instead.
+
+On Unix every ffmpeg run, background or not, starts in a process group of
+its own through `internal/procgroup`, which every other ffmpeg and ffprobe
+run in Silo uses too (`fspath.CommandContext`, which runs the tools on media
+paths, builds its commands with it). A timeout or cancellation kills the whole group, so
+when the ffmpeg path is a wrapper script that runs the real ffmpeg as a
+child, the child dies with the wrapper instead of running on outside the
+limiter. Other platforms kill only the process Silo started.
 
 ## Artifact storage
 

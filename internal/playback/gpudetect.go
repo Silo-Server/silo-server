@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -46,6 +47,7 @@ var (
 	defaultDRIDir              = "/dev/dri"
 	defaultNVIDIAControlDevice = "/dev/nvidiactl"
 	defaultNVIDIADeviceGlob    = "/dev/nvidia[0-9]*"
+	defaultDXGDevice           = "/dev/dxg"
 	sysClassDRMDir             = "/sys/class/drm"
 	procBootIDPath             = "/proc/sys/kernel/random/boot_id"
 	currentGOOS                = runtime.GOOS
@@ -1521,7 +1523,7 @@ func runFFmpegProbe(ctx context.Context, timeout time.Duration, ffmpegPath strin
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
+	return procgroup.CommandContext(ctx, ffmpegPath, args...).CombinedOutput()
 }
 
 func ffmpegOutputHasToken(output []byte, token string) bool {
@@ -1590,8 +1592,8 @@ func isNVIDIADevice(renderDevPath string) bool {
 }
 
 func hasNVIDIADevice() bool {
-	if file, err := os.Open(defaultNVIDIAControlDevice); err == nil {
-		file.Close()
+	// WSL exposes GPUs through dxg; the FFmpeg probe still verifies NVENC.
+	if deviceOpenable(defaultNVIDIAControlDevice) || deviceOpenable(defaultDXGDevice) {
 		return true
 	}
 	matches, err := filepath.Glob(defaultNVIDIADeviceGlob)
@@ -1599,8 +1601,7 @@ func hasNVIDIADevice() bool {
 		return false
 	}
 	for _, dev := range matches {
-		if file, err := os.Open(dev); err == nil {
-			file.Close()
+		if deviceOpenable(dev) {
 			return true
 		}
 	}

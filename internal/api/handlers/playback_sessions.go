@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -57,8 +58,11 @@ type playbackSessionRow struct {
 	ClientUserAgent      string    `json:"client_user_agent,omitempty"`
 	// DeviceID and DevicePlatform are native-only: the frozen v1 projection
 	// does not carry them.
-	DeviceID          string `json:"-"`
-	DevicePlatform    string `json:"-"`
+	DeviceID       string `json:"-"`
+	DevicePlatform string `json:"-"`
+	// LifecycleSeq is the sequence number of the session's last lifecycle
+	// transition, in the native projection; nil before it had one.
+	LifecycleSeq      *int64 `json:"-"`
 	AudioTrackIndex   int    `json:"audio_track_index"`
 	TranscodeAudio    bool   `json:"transcode_audio"`
 	StreamBitrateKbps *int   `json:"stream_bitrate_kbps"`
@@ -187,7 +191,43 @@ func AdminPlaybackRoutingCapabilities() playbackRoutingCapabilitiesResponse {
 type PlaybackSessionsQuery struct {
 	// UserID, when positive, limits results to sessions owned by that account.
 	UserID int
+	// Lifecycle projects the native read: each row's pause state and
+	// lifecycle_seq come from the session's lifecycle row, sessions that row
+	// says stopped are left out, and a native session no server holds in
+	// memory is listed from its lifecycle row and attempt. The frozen v1
+	// projection leaves it unset.
+	Lifecycle bool
+	// SessionID, when set, limits results to one session.
+	SessionID string
+	// Detached reads one session from this playback_sessions_sync row,
+	// rendered by worker.SessionSyncRowJSON, instead of the table.
+	Detached json.RawMessage
 }
+
+// lifecycleIDParam is a session id as the lifecycle table keys it (a UUID),
+// or nil for an id that is not one, which has no lifecycle row.
+func lifecycleIDParam(sessionID string) any {
+	if id, err := uuid.Parse(sessionID); err == nil {
+		return id.String()
+	}
+	return nil
+}
+
+// lifecycleOnlySessions lists native sessions whose lifecycle row is live
+// and whose attempt is live, but that no server has a live row for: one a
+// node still serves while no API server holds it in memory. The row is the
+// one recorded when the session started, at the attempt's latest position.
+const lifecycleOnlySessions = `
+	SELECT (jsonb_populate_record(NULL::playback_sessions_sync, lc.start_facts || jsonb_build_object(
+		'reporting_node', '',
+		'updated_at', a.updated_at,
+		'last_sync_at', a.updated_at,
+		'is_paused', lc.state = 'paused',
+		'position_seconds', COALESCE((a.last_sample->>'position')::double precision, (lc.start_facts->>'position_seconds')::double precision, 0)))).*
+	FROM playback_session_lifecycle lc
+	JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.stopped_at IS NULL AND a.expires_at > NOW()
+	WHERE lc.state <> 'stopped' AND lc.start_facts <> '{}'::jsonb
+	  AND NOT EXISTS (SELECT 1 FROM playback_sessions_sync live WHERE live.session_id = lc.session_id::text)`
 
 type playbackSessionsReader interface {
 	Load(ctx context.Context, query PlaybackSessionsQuery) ([]playbackSessionRow, error)
@@ -269,6 +309,27 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 	if summary {
 		totalColumn = "count(*) OVER ()"
 	}
+	var args []any
+	source := "playback_sessions_sync"
+	switch {
+	case len(query.Detached) > 0:
+		args = append(args, string(query.Detached))
+		source = "jsonb_populate_record(NULL::playback_sessions_sync, $1::jsonb)"
+	case query.Lifecycle && query.SessionID != "":
+		// One session: filter both branches before the fallback renders its
+		// record, so neither scans other sessions.
+		args = append(args, query.SessionID, lifecycleIDParam(query.SessionID))
+		source = fmt.Sprintf("(SELECT * FROM playback_sessions_sync WHERE session_id = $%d UNION ALL %s AND lc.session_id = $%d::uuid)",
+			len(args)-1, lifecycleOnlySessions, len(args))
+	case query.Lifecycle:
+		source = "(SELECT * FROM playback_sessions_sync UNION ALL " + lifecycleOnlySessions + ")"
+	}
+	lifecycleColumns, lifecycleJoin, pausedColumn := "NULL::bigint", "", "COALESCE(s.is_paused, FALSE)"
+	if query.Lifecycle {
+		lifecycleColumns = "lc.seq"
+		lifecycleJoin = " LEFT JOIN playback_session_lifecycle lc ON lc.session_id::text = s.session_id"
+		pausedColumn = "CASE WHEN lc.state IN ('playing', 'paused') THEN lc.state = 'paused' ELSE COALESCE(s.is_paused, FALSE) END"
+	}
 	sql := `
 		SELECT ` + totalColumn + `,
 			s.session_id,
@@ -292,7 +353,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			s.started_at,
 			s.updated_at,
 			COALESCE(s.position_seconds, 0),
-			COALESCE(s.is_paused, FALSE),
+			` + pausedColumn + `,
 			COALESCE(s.has_websocket, FALSE),
 			COALESCE(HOST(s.client_ip), ''),
 			COALESCE(s.client_name, ''),
@@ -334,8 +395,9 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(s.output_protocol, ''),
 			COALESCE(s.stream_location, ''),
 			COALESCE(s.device_id, ''),
-			COALESCE(s.device_platform, '')
-		 FROM playback_sessions_sync s
+			COALESCE(s.device_platform, ''),
+			` + lifecycleColumns + `
+		 FROM ` + source + ` s
 		 LEFT JOIN users u ON u.id = s.user_id
 		 LEFT JOIN media_files mf ON mf.id = s.media_file_id
 		 LEFT JOIN media_files requested_mf ON requested_mf.id = COALESCE(s.requested_media_file_id, s.media_file_id)
@@ -344,13 +406,19 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 		 LEFT JOIN media_items series_mi ON series_mi.content_id = e.series_id
 		 LEFT JOIN stream_nodes remote_node ON remote_node.url = s.transcode_node_url
 		 LEFT JOIN stream_nodes execution_node ON execution_node.id = s.routing_execution_node_id
-		 LEFT JOIN stream_nodes egress_node ON egress_node.id = s.routing_egress_node_id`
+		 LEFT JOIN stream_nodes egress_node ON egress_node.id = s.routing_egress_node_id` + lifecycleJoin
 
-	var args []any
 	var predicates []string
 	if query.UserID > 0 {
 		args = append(args, query.UserID)
-		predicates = append(predicates, "s.user_id = $1")
+		predicates = append(predicates, fmt.Sprintf("s.user_id = $%d", len(args)))
+	}
+	if query.SessionID != "" {
+		args = append(args, query.SessionID)
+		predicates = append(predicates, fmt.Sprintf("s.session_id = $%d", len(args)))
+	}
+	if query.Lifecycle {
+		predicates = append(predicates, "lc.state IS DISTINCT FROM 'stopped'")
 	}
 	if limit > 0 && !summary {
 		args = append(args, after)
@@ -406,7 +474,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
-			&s.DeviceID, &s.DevicePlatform,
+			&s.DeviceID, &s.DevicePlatform, &s.LifecycleSeq,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}
@@ -912,6 +980,7 @@ func (h *AdminHandler) ReadAdminPlaybackSessions(ctx context.Context, query Play
 	if err != nil {
 		return nil, err
 	}
+	query.Lifecycle = true
 	return loader.LoadPage(ctx, query, after, limit)
 }
 
@@ -920,5 +989,6 @@ func (h *AdminHandler) ReadAdminPlaybackSummary(ctx context.Context, query Playb
 	if err != nil {
 		return nil, 0, err
 	}
+	query.Lifecycle = true
 	return loader.LoadSummary(ctx, query, limit)
 }

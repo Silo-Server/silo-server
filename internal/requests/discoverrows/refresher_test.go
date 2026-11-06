@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"testing"
 	"time"
 
@@ -158,7 +159,7 @@ func TestRefresherKeepsTheLastGoodListAndRetriesOnSchedule(t *testing.T) {
 			client := &fakeListTMDB{cardErr: tt.cardErr}
 			r := &Refresher{
 				Layout: fakeLayout{row}, Snapshots: snapshots, TMDB: client,
-				FetchMDBList: func(context.Context, string, int) ([]MDBListEntry, error) { return tt.entries, tt.fetch },
+				FetchMDBList: func(context.Context, string, int, url.Values) ([]MDBListEntry, error) { return tt.entries, tt.fetch },
 				Now:          func() time.Time { return now },
 				logger:       discardLogger(),
 			}
@@ -180,16 +181,19 @@ func TestRefresherRunOnceSharesAListAndDropsUnusedOnes(t *testing.T) {
 	list := func(id string, enabled bool) Row {
 		return Row{ID: id, Type: TypeMDBList, Title: id, Enabled: enabled, List: &ListSpec{URL: "https://mdblist.com/lists/u/shared"}}
 	}
+	// The same list newest first is its own copy, read with the feed's sort.
+	newest := list("r_new", true)
+	newest.List.Order = ListOrderNewestAdded
 	disabled := Row{ID: "r_off", Type: TypeTMDBList, Title: "Off", List: &ListSpec{URL: "https://www.themoviedb.org/list/42"}}
 	snapshots := newFakeSnapshots()
 	snapshots.rows["tmdb_list:42"] = &Snapshot{Key: "tmdb_list:42", LastStatus: snapshotOK}
 	snapshots.rows["mdblist:https://mdblist.com/lists/u/gone/json"] = &Snapshot{LastStatus: snapshotOK}
-	fetches := 0
+	var queries []string
 	r := &Refresher{
-		Layout:    fakeLayout{list("r_a", true), list("r_b", true), disabled},
+		Layout:    fakeLayout{list("r_a", true), list("r_b", true), newest, disabled},
 		Snapshots: snapshots, TMDB: &fakeListTMDB{},
-		FetchMDBList: func(context.Context, string, int) ([]MDBListEntry, error) {
-			fetches++
+		FetchMDBList: func(_ context.Context, _ string, _ int, query url.Values) ([]MDBListEntry, error) {
+			queries = append(queries, query.Encode())
 			return []MDBListEntry{{ID: "1", MediaType: "movie"}}, nil
 		},
 		Now: time.Now, logger: discardLogger(),
@@ -200,8 +204,11 @@ func TestRefresherRunOnceSharesAListAndDropsUnusedOnes(t *testing.T) {
 	}
 	var result RefreshResult
 	_ = json.Unmarshal(raw, &result)
-	if fetches != 1 || result.Lists != 1 || result.Refreshed != 1 || result.Removed != 1 {
-		t.Fatalf("fetches %d, result %+v: want one shared fetch and one removal", fetches, result)
+	if fmt.Sprint(queries) != "[ sort=added&sortorder=asc]" || result.Lists != 2 || result.Refreshed != 2 || result.Removed != 1 {
+		t.Fatalf("fetch queries %q, result %+v: want one shared fetch, one newest-added fetch and one removal", queries, result)
+	}
+	if _, stored := snapshots.rows[SourceKey(newest)]; !stored {
+		t.Fatal("the newest-added copy was not stored apart")
 	}
 	if _, kept := snapshots.rows["tmdb_list:42"]; !kept {
 		t.Fatal("a disabled row's list was removed")

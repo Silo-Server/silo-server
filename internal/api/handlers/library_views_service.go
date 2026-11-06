@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 )
 
@@ -28,10 +29,15 @@ type SectionViewer struct {
 	// ImageWidths are per-slot target widths overriding ImageSize; only the
 	// native v2 API carries them.
 	ImageWidths imagesize.Widths
+	// Web is true when the caller declared the web client family
+	// (X-Silo-Client-Family: web). Only the web app receives a hero row an
+	// admin kept off the apps (sections.ForClient).
+	Web bool
 	// ItemLimitCap lowers every row's item limit to at most this many items
-	// on the aggregate section reads (HomeSections, LibrarySections). Zero
-	// leaves each row at its own limit; only the native v2 API sets it, at
-	// most MaxSectionItemLimitCap.
+	// on the aggregate section reads (HomeSections, LibrarySections) and on
+	// the Home row reads (HomeSectionItems, HomeLayoutWithItems' included
+	// rows). Zero leaves each row at its own limit; only the native v2 API
+	// sets it, at most MaxSectionItemLimitCap.
 	ItemLimitCap int
 }
 
@@ -40,8 +46,8 @@ func (v SectionViewer) Artwork() imagesize.Request {
 	return imagesize.Request{Size: v.ImageSize, Widths: v.ImageWidths}
 }
 
-// MaxSectionItemLimitCap is the largest ItemLimitCap the v2 aggregate
-// section reads accept, advertised by getHomeCapabilities.
+// MaxSectionItemLimitCap is the largest ItemLimitCap the v2 section reads
+// accept, advertised by getHomeCapabilities.
 const MaxSectionItemLimitCap = 100
 
 // capSectionItemLimits returns resolved with each row's effective item limit
@@ -55,15 +61,45 @@ func capSectionItemLimits(resolved []sections.ResolvedSection, limit int) []sect
 	}
 	out := slices.Clone(resolved)
 	for i := range out {
-		if effectiveHomeItemLimit(out[i].ItemLimit) > limit {
-			out[i].ItemLimit = limit
-		}
+		out[i] = capSectionItemLimit(out[i], limit)
 	}
 	return out
 }
 
+// capSectionItemLimit is capSectionItemLimits for one row.
+func capSectionItemLimit(s sections.ResolvedSection, limit int) sections.ResolvedSection {
+	if limit > 0 && effectiveHomeItemLimit(s.ItemLimit) > limit {
+		s.ItemLimit = limit
+	}
+	return s
+}
+
+// cutCappedSectionItems cuts each fetched row of a capped read back to its
+// effective item limit, as homeSectionRow does for one row. Most fetchers
+// stop at the row's limit already, but an admin curated list returns every
+// configured item, so without the cut a capped aggregate read would answer
+// more cards than item_limit allows. A non-positive limit (an uncapped read,
+// including every /api/v1 read) returns withItems as is.
+func cutCappedSectionItems(withItems []sections.SectionWithItems, limit int) []sections.SectionWithItems {
+	if limit <= 0 {
+		return withItems
+	}
+	for i := range withItems {
+		if rowLimit := effectiveHomeItemLimit(withItems[i].ItemLimit); len(withItems[i].Items) > rowLimit {
+			withItems[i].Items = withItems[i].Items[:rowLimit]
+		}
+	}
+	return withItems
+}
+
 func sectionViewerFromRequest(r *http.Request) SectionViewer {
-	return SectionViewer{Access: requestAccessFilter(r), ImageSize: requestImageSize(r)}
+	return SectionViewer{Access: requestAccessFilter(r), ImageSize: requestImageSize(r), Web: IsWebClientFamily(r.Header.Get(clientFamilyHeader))}
+}
+
+// IsWebClientFamily reports whether an X-Silo-Client-Family value names the
+// web app. Any other value, or none, is a client that is not the web app.
+func IsWebClientFamily(family string) bool {
+	return settingscontract.ClientFamily(family) == settingscontract.ClientFamilyWeb
 }
 
 // SectionLayoutView is a page's section layout without items.
@@ -107,8 +143,8 @@ type LibraryCollectionTabUngroupedView = libraryTabUngrouped
 
 // HomeLayout answers the home page's section layout for the profile on the
 // context.
-func (h *SectionHandler) HomeLayout(ctx context.Context) (SectionLayoutView, error) {
-	view, err := h.HomeLayoutWithItems(ctx, SectionViewer{}, 0)
+func (h *SectionHandler) HomeLayout(ctx context.Context, viewer SectionViewer) (SectionLayoutView, error) {
+	view, err := h.HomeLayoutWithItems(ctx, viewer, 0)
 	return view.Layout, err
 }
 
@@ -152,8 +188,8 @@ func requireEnabledLibrary(ctx context.Context, folders *catalog.FolderRepositor
 }
 
 // LibraryLayout answers the library's section layout for the profile on
-// the context.
-func (h *SectionHandler) LibraryLayout(ctx context.Context, libraryID int) (SectionLayoutView, error) {
+// the context. Only the viewer's client family is read from viewer.
+func (h *SectionHandler) LibraryLayout(ctx context.Context, libraryID int, viewer SectionViewer) (SectionLayoutView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return SectionLayoutView{}, err
 	}
@@ -161,7 +197,7 @@ func (h *SectionHandler) LibraryLayout(ctx context.Context, libraryID int) (Sect
 	if err != nil {
 		return SectionLayoutView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
-	return sectionLayoutOf(resolved), nil
+	return sectionLayoutOf(sections.ForClient(resolved, viewer.Web)), nil
 }
 
 func sectionLayoutOf(resolved []sections.ResolvedSection) SectionLayoutView {
@@ -190,9 +226,11 @@ func (h *SectionHandler) LibrarySections(ctx context.Context, libraryID int, vie
 	if err != nil {
 		return SectionsView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
+	resolved = sections.ForClient(resolved, viewer.Web)
 	resolved = capSectionItemLimits(resolved, viewer.ItemLimitCap)
 	userID := viewer.Access.UserID
 	withItems := h.fetcher.FetchAll(ctx, resolved, &libraryID, nil, userID, profileID, accessFilter)
+	withItems = cutCappedSectionItems(withItems, viewer.ItemLimitCap)
 	withItems = applyDiversityFilter(withItems)
 	withItems = dropEmptySeasonalSections(withItems)
 	return h.buildSections(ctx, withItems, &libraryID, viewer.Access, viewer.Artwork()), nil
@@ -215,6 +253,8 @@ func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int,
 	if err != nil {
 		return SectionView{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
 	}
+	// A row the viewer's client does not receive is not found.
+	resolved = sections.ForClient(resolved, viewer.Web)
 	userID := viewer.Access.UserID
 	for _, s := range resolved {
 		if s.ID != sectionID {
@@ -298,7 +338,7 @@ func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, us
 			WantsCollage:                 strings.TrimSpace(c.PosterPath) == "",
 		})
 	}
-	reads := ownerScopedCollectionReads(ctx, h.Executor, h.CollectionOwners, collagesForRead(ctx, h.PersonalCollages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
+	reads := ownerScopedCollectionReads(ctx, h.Executor, memberCountsForRead(ctx, h.PersonalMemberCounts), h.CollectionOwners, collagesForRead(ctx, h.PersonalCollages), userID, profileID, sources, AccessFilterFromContext(ctx, ""))
 	out := collections[:0]
 	for _, c := range collections {
 		if reads.unavailable[c.ID] {

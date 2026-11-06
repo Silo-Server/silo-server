@@ -73,11 +73,14 @@ func TestViewerResolverParityWithLegacyResolver(t *testing.T) {
 				MaxPlaybackQuality:   ptr("any"),
 				AccessPolicyRevision: 5,
 			},
+			// A nonzero PIN revision makes the scope comparison below cover
+			// ProfilePINRevision on both resolvers.
 			profile: &userstore.Profile{
 				ID:                        "prof-1",
 				MaxContentRating:          "PG-13",
 				MaxPlaybackQuality:        "4k",
 				PreferredMetadataLanguage: "fr",
+				PINRevision:               4,
 			},
 			input:          access.ResolveInput{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1"},
 			wantNilAllowed: true,
@@ -767,5 +770,24 @@ func TestViewerResolverContentAccessOnlyIgnoresHiddenLibraries(t *testing.T) {
 				t.Fatalf("MaxContentRating = %q, want PG", policyScope.MaxContentRating)
 			}
 		})
+	}
+}
+
+// A household's allowances lift only the profile's own limits: a custom scope
+// policy that sets a rating override or a different advisory-age limit wins.
+func TestMaturityOverriddenRejectsAllowancesUnderPolicyLimits(t *testing.T) {
+	profile := &userstore.Profile{MaxContentRating: "PG", MaxAdvisoryAge: 10}
+	for _, tc := range []struct {
+		name     string
+		decision ScopeDecision
+		want     bool
+	}{
+		{"profile limits only", ScopeDecision{MaxContentRating: "PG", MaxAdvisoryAge: 10}, false},
+		{"rating override", ScopeDecision{MaxContentRating: "PG", MaxContentRatingOverride: "G", MaxAdvisoryAge: 10}, true},
+		{"advisory age lowered", ScopeDecision{MaxContentRating: "PG", MaxAdvisoryAge: 7}, true},
+	} {
+		if got := maturityOverridden(tc.decision, profile); got != tc.want {
+			t.Errorf("%s: maturityOverridden = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

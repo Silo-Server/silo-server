@@ -87,6 +87,7 @@ type AdminPlaybackSession struct {
 	RoutingEgress            string  `json:"routing_egress,omitempty"`
 	RoutingEgressNodeID      *ID     `json:"routing_egress_node_id,omitempty"`
 	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
+	LifecycleSeq             *int64  `json:"lifecycle_seq,omitempty" doc:"Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions."`
 }
 
 // directStreamPlayMethod is the native bucket for copied video with converted
@@ -187,6 +188,7 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		RoutingEgress:            v.RoutingEgress,
 		RoutingEgressNodeID:      adminSessionNodeID(v.RoutingEgressNodeID),
 		RoutingEgressNodeName:    v.RoutingEgressNodeName,
+		LifecycleSeq:             v.LifecycleSeq,
 	}
 }
 
@@ -226,6 +228,7 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	OutputFormat              bool     `json:"output_format" doc:"Rows may carry output_container and output_protocol"`
 	SourceVideoHeight         bool     `json:"source_video_height" doc:"Rows may carry source_video_height"`
 	DeviceIdentity            bool     `json:"device_identity" doc:"Rows may carry device_id and device_platform"`
+	LifecycleEvents           bool     `json:"lifecycle_events" doc:"The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq"`
 }
 
 const opListAdminPlaybackSessions = "listAdminPlaybackSessions"
@@ -260,6 +263,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.OutputFormat = true
 		out.Body.SourceVideoHeight = true
 		out.Body.DeviceIdentity = true
+		out.Body.LifecycleEvents = out.Body.Available && reg.deps.PlaybackLifecycleEvents
 		return out, nil
 	})
 	Register(reg, op("", opListAdminPlaybackSessions), func(ctx context.Context, in *AdminPlaybackSessionsInput) (*AdminPlaybackSessionsOutput, error) {

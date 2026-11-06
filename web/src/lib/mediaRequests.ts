@@ -119,6 +119,18 @@ export function canCancelOwnRequest(
 }
 
 /**
+ * Mirrors the server's rule for removing a failed request: it failed and
+ * delivered nothing. One that delivered a quality before failing stays for an
+ * admin to retry. Callers must already know the viewer owns the request.
+ */
+export function canRemoveOwnRequest(request: Pick<MediaRequest, "outcome" | "targets">): boolean {
+  return (
+    request.outcome === "failed" &&
+    !(request.targets ?? []).some((target) => target.status === "completed")
+  );
+}
+
+/**
  * The detail page of a TMDB title. It serves titles outside the library; one
  * the viewer can open in the library redirects to its item page.
  */

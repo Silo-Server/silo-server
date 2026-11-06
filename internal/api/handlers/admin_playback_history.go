@@ -25,6 +25,9 @@ type AdminPlaybackHistoryFilter struct {
 	// adjacent windows sharing a bound never list an attempt twice; nil keeps
 	// every attempt.
 	EndedBefore *time.Time `json:",omitempty"`
+	// SessionID limits the page to one session's row. Internal: a lifecycle
+	// event reads the row its end recorded.
+	SessionID string `json:",omitempty"`
 }
 
 // AdminPlaybackHistoryPageKey is the keyset position of the last row a page
@@ -71,6 +74,9 @@ type AdminPlaybackHistoryRow struct {
 	ClientName, ClientVersion    *string
 	VideoDecision, AudioDecision *string
 	EndReason                    *string
+	// LifecycleSeq is the sequence number of the end the row records; nil
+	// on rows recorded before lifecycle numbers existed.
+	LifecycleSeq *int64
 	// SeriesTitle, SeasonNumber and EpisodeNumber describe an episode's
 	// place in its series; empty and nil for anything else.
 	SeriesTitle   string
@@ -119,6 +125,9 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 	if filter.EndedBefore != nil {
 		add("h.ended_at < ", *filter.EndedBefore)
 	}
+	if filter.SessionID != "" {
+		add("h.session_id = ", filter.SessionID)
+	}
 	if after != nil {
 		args = append(args, after.EndedAt, after.SessionID)
 		conditions = append(conditions, fmt.Sprintf("(h.ended_at, h.session_id) < ($%d, $%d)", len(args)-1, len(args)))
@@ -155,6 +164,7 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			h.video_decision,
 			h.audio_decision,
 			h.end_reason,
+			h.lifecycle_seq,
 			COALESCE(sm.title, ''),
 			ep.season_number,
 			ep.episode_number
@@ -187,7 +197,7 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 			&row.PlayedSeconds, &row.Measured, &row.StartPositionSeconds, &row.PausedSeconds,
 			&row.MeasuredSince, &row.MeasuredUntil, &row.ClientIP,
 			&row.DeviceID, &row.DevicePlatform, &row.ClientName, &row.ClientVersion,
-			&row.VideoDecision, &row.AudioDecision, &row.EndReason,
+			&row.VideoDecision, &row.AudioDecision, &row.EndReason, &row.LifecycleSeq,
 			&row.SeriesTitle, &row.SeasonNumber, &row.EpisodeNumber,
 		); err != nil {
 			rows.Close()
@@ -208,4 +218,14 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 		return AdminPlaybackHistoryPage{}, err
 	}
 	return out, nil
+}
+
+// ReadAdminPlaybackHistoryEntry reads one session's admin history row as the
+// history list projects it; nil when the session has none.
+func (h *AdminHandler) ReadAdminPlaybackHistoryEntry(ctx context.Context, sessionID string) (*AdminPlaybackHistoryRow, error) {
+	page, err := h.ListAdminPlaybackHistoryPage(ctx, AdminPlaybackHistoryFilter{SessionID: sessionID}, nil, 1)
+	if err != nil || len(page.Items) == 0 {
+		return nil, err
+	}
+	return &page.Items[0], nil
 }

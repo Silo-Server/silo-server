@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
 import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
+import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
 import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
@@ -50,14 +51,24 @@ import {
   canEditMarkers as canEditMarkersForUser,
 } from "@/lib/permissions";
 import { isEpisodeUnwatched } from "@/lib/episodeSpoilers";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { hasMachineTranslation } from "./components/machineTranslation";
 
-export default function EpisodeContent({ item }: { item: ItemDetail & { type: "episode" } }) {
-  const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
-    useOnViewTranslation(item);
+export default function EpisodeContent({
+  item,
+  libraryId,
+}: {
+  item: ItemDetail & { type: "episode" };
+  /**
+   * The page's ?libraryId= scope. Series, season and episode links keep it;
+   * Play does not, because playback always sees every version. The series
+   * overview fallback resolves its language in it.
+   */
+  libraryId?: number;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   useAmbientColor(item.backdrop_thumbhash);
@@ -95,8 +106,23 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   // Keyed by episode so a reveal survives an on-view translation of the same
   // episode but not navigation to the next one.
   const [revealedOverviewId, setRevealedOverviewId] = useState<string | null>(null);
+  // An episode without a description shows its series' overview, in the
+  // language the series page shows in this library, and on-view translation
+  // follows it. It reveals nothing about the episode, so spoiler protection leaves it
+  // visible.
+  const hasOwnOverview = !!item.overview?.trim();
+  const { data: series } = useCatalogItemDetail(
+    hasOwnOverview ? undefined : item.series_id,
+    libraryId,
+  );
+  const overviewSource = hasOwnOverview ? item : series;
+  const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
+    useOnViewTranslation(overviewSource);
   const overviewHidden =
-    hideOverviews && isEpisodeUnwatched(item.user_data) && revealedOverviewId !== item.content_id;
+    hasOwnOverview &&
+    hideOverviews &&
+    isEpisodeUnwatched(item.user_data) &&
+    revealedOverviewId !== item.content_id;
   const defaultSelectedVersion = useMemo(
     () =>
       selectDefaultPlaybackVariantVersion(
@@ -249,12 +275,14 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
   const { data: currentSeason } = useSeasonDetail(
     siblingSeason?.seriesId,
     siblingSeason?.seasonNumber ?? -1,
+    libraryId,
   );
 
   // Sibling episodes now come from the season collection, not the current episode ID.
   const { data: episodesData, isLoading: siblingsLoading } = useSeasonEpisodes(
     siblingSeason?.seriesId,
     siblingSeason?.seasonNumber ?? -1,
+    libraryId,
   );
   const siblingEpisodes = episodesData?.episodes ?? [];
   const seasonLabel =
@@ -268,7 +296,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
           : "Season");
   const seasonHref =
     navigationState?.parentSeasonHref ??
-    (currentSeason ? `/item/${currentSeason.content_id}` : undefined);
+    (currentSeason ? buildItemHref({ contentId: currentSeason.content_id, libraryId }) : undefined);
   const episodeLinkState =
     seasonHref || seasonLabel
       ? {
@@ -279,7 +307,10 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
 
   // Build breadcrumb segments
   const breadcrumbSegments = [
-    { label: seriesTitle, href: seriesId ? `/item/${seriesId}` : "/" },
+    {
+      label: seriesTitle,
+      href: seriesId ? buildItemHref({ contentId: seriesId, libraryId }) : "/",
+    },
   ] as Array<{ label: string; href?: string }>;
   if (seasonNum != null) {
     breadcrumbSegments.push({ label: seasonLabel, href: seasonHref });
@@ -314,10 +345,12 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
             </div>
           }
           scoreRow={<ScoreRow ratings={item.ratings} />}
-          overview={item.overview}
+          overview={overviewSource?.overview}
           overviewTranslating={overviewTranslating}
           onTranslateOverview={onTranslateOverview}
-          overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
+          overviewMachineTranslated={hasMachineTranslation(
+            overviewSource?.machine_translated_fields,
+          )}
           overviewHidden={overviewHidden}
           onRevealOverview={() => setRevealedOverviewId(item.content_id)}
           crewLine={<HeroCrewLine crew={item.crew ?? []} />}
@@ -361,7 +394,9 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                         item,
                         mode,
                         onReplaced: (contentID) =>
-                          navigate(`/item/${contentID}`, { replace: true }),
+                          navigate(buildItemHref({ contentId: contentID, libraryId }), {
+                            replace: true,
+                          }),
                       })
                   : undefined
               }
@@ -430,6 +465,7 @@ export default function EpisodeContent({ item }: { item: ItemDetail & { type: "e
                   episodes={siblingEpisodes}
                   currentEpisodeNumber={episodeNum ?? -1}
                   episodeLinkState={episodeLinkState}
+                  libraryId={libraryId}
                 />
               </div>
             )}

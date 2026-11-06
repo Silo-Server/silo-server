@@ -1,5 +1,5 @@
 {
-  "revision": "9c404b1d866d11bffed8323b62a96f34395eb8b14029d99638782cc111bdad4b",
+  "revision": "1966162d2977d6d9b3adbd4bf5e7af19e29a0e73c17f58f9d4cf71d7f9d62c56",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -14,6 +14,8 @@
     "stopped",
     "terminated",
     "expired",
-    "aborted"
-  ]
+    "aborted",
+    "replaced"
+  ],
+  "lifecycle_seq": true
 }

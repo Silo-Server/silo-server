@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -59,16 +59,32 @@ describe("CardOverlays", () => {
     expect(badgeTexts(container)).toEqual(["4K"]);
   });
 
-  it("suppresses standalone resolution and hdr when the combined badge is enabled", () => {
-    const prefs = buildDefaultPrefs();
-    prefs.items.resolution_hdr = { ...prefs.items.resolution_hdr, enabled: true };
-    const texts = badgeTexts(
-      render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container,
-    );
-    expect(texts).toContain("4K DV");
-    expect(texts).not.toContain("4K");
-    expect(texts).not.toContain("DV HDR10");
-  });
+  // The defaults enable resolution, hdr and audio; each combined badge hides
+  // the badges it repeats, and the wider one also hides the narrower.
+  it.each([
+    { on: ["resolution_hdr"], shown: ["4K DV", "Atmos"], hidden: ["4K", "DV HDR10"] },
+    {
+      on: ["resolution_hdr_audio"],
+      shown: ["4K DV Atmos"],
+      hidden: ["4K", "DV HDR10", "Atmos"],
+    },
+    {
+      on: ["resolution_hdr", "resolution_hdr_audio"],
+      shown: ["4K DV Atmos"],
+      hidden: ["4K", "DV HDR10", "Atmos", "4K DV"],
+    },
+  ] as { on: OverlayId[]; shown: string[]; hidden: string[] }[])(
+    "hides the badges $on already shows",
+    ({ on, shown, hidden }) => {
+      const prefs = buildDefaultPrefs();
+      for (const id of on) prefs.items[id] = { ...prefs.items[id], enabled: true };
+      const texts = badgeTexts(
+        render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container,
+      );
+      for (const text of shown) expect(texts).toContain(text);
+      for (const text of hidden) expect(texts).not.toContain(text);
+    },
+  );
 
   it("honors prefs.order within a corner", () => {
     const prefs = buildDefaultPrefs(); // resolution, hdr, audio all top-left
@@ -143,6 +159,25 @@ describe("CardOverlays", () => {
     expect(disconnect).toHaveBeenCalledOnce();
   });
 
+  // jsdom resolves no CSS variables, so this reads where the radius comes from.
+  it.each([
+    { shape: undefined, themed: true },
+    { shape: "rounded", themed: false },
+    { shape: "square", themed: false },
+  ] as const)(
+    "takes badge corners from the theme unless the style picks a shape: $shape",
+    ({ shape, themed }) => {
+      const prefs = {
+        ...prefsWithOnly("resolution", "minimal"),
+        style: shape ? { shape } : undefined,
+      };
+      const badge = render(
+        <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />,
+      ).container.querySelector<HTMLElement>("span.inline-flex");
+      expect(badge?.style.borderRadius.includes("--radius-")).toBe(themed);
+    },
+  );
+
   it("scales legacy browsers from the measured poster width", () => {
     vi.stubGlobal("CSS", { supports: () => false });
     const disconnect = observePosterWidth(92.5);
@@ -160,6 +195,28 @@ describe("CardOverlays", () => {
     unmount();
     expect(disconnect).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    { id: "resolution", fill: "#FFFFFFE6", framed: true, color: "rgb(0, 0, 0)" },
+    { id: "resolution", fill: "#000000B3", framed: true, color: "rgb(255, 255, 255)" },
+    { id: "resolution", fill: "#00000000", framed: false, color: "white" },
+    // IMDb gold stays as text where it reads and gives way where it doesn't.
+    { id: "rating_imdb", fill: "#000000B3", framed: true, color: "rgb(245, 197, 24)" },
+    { id: "rating_imdb", fill: "#FFFFFFE6", framed: true, color: "rgb(0, 0, 0)" },
+  ] as const)(
+    "gives bare band text room and a readable colour: $id on $fill",
+    ({ id, fill, framed, color }) => {
+      const prefs = { ...prefsWithOnly(id, "band"), style: { background: fill } };
+      const badge = render(
+        <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} variant="wide" />,
+      ).container.querySelector<HTMLElement>("span.inline-flex");
+
+      const padding = Number.parseFloat(badge?.style.paddingInline ?? "");
+      expect(padding > 0).toBe(framed);
+      expect(badge?.style.color).toBe(color);
+      expect(badge?.style.textShadow === "").toBe(framed);
+    },
+  );
 
   it("keeps the badge layer beneath card actions and non-interactive", () => {
     // MediaItemMenu renders its quick actions at z-20 in the card wrapper's
@@ -218,5 +275,39 @@ describe("CardOverlays", () => {
         badgeStyle({ ...attention, request_status_attention: false }, custom),
       );
     });
+  });
+
+  it("replaces a badge with the uploaded image for its value, and falls back to text without it", () => {
+    const ref = `${"ab".repeat(32)}.webp`;
+    const prefs = prefsWithOnly("resolution");
+    prefs.items.resolution = { ...prefs.items.resolution, valueImages: { "2160p": ref } };
+    const { container } = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />);
+    const image = container.querySelector<HTMLImageElement>("[data-overlay-badge] img");
+
+    expect(image?.getAttribute("src")).toBe(`/api/v2/overlay-images/${ref}`);
+    expect(image?.alt).toBe("4K");
+
+    // A deleted image answers 404; the badge goes back to its label.
+    fireEvent.error(image as HTMLImageElement);
+    expect(container.querySelector("[data-overlay-badge] img")).toBeNull();
+    expect(badgeTexts(container)).toEqual(["4K"]);
+  });
+
+  it("shows a rating's score beside its source chip or uploaded logo, not the mark twice", () => {
+    const chip = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefsWithOnly("rating_imdb", "plate")} />,
+    ).container;
+    expect(badgeTexts(chip)).toEqual(["IMDb8.7"]);
+
+    const prefs = prefsWithOnly("rating_imdb");
+    prefs.items.rating_imdb = { ...prefs.items.rating_imdb, image: `${"cd".repeat(32)}.webp` };
+    const logo = render(<CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefs} />).container;
+    expect(badgeTexts(logo)).toEqual(["8.7"]);
+    expect(logo.querySelector("[data-overlay-badge] img")).not.toBeNull();
+
+    const plain = render(
+      <CardOverlays data={SAMPLE_MOVIE_DATA} prefs={prefsWithOnly("rating_imdb")} />,
+    ).container;
+    expect(badgeTexts(plain)).toEqual(["IMDb 8.7"]);
   });
 });

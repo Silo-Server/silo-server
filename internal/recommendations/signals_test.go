@@ -657,6 +657,40 @@ func TestWatchedSetReadsTheRepoUnlessTheStoreIsOutsidePostgres(t *testing.T) {
 	}
 }
 
+// On the Postgres user store a profile's progress rows are one repo query and
+// the store's progress is never paged; a store outside Postgres is walked.
+// Ebook reading progress is added either way. The query's times are cut to
+// the store's whole seconds.
+func TestWatchProgressReadsTheRepoUnlessTheStoreIsOutsidePostgres(t *testing.T) {
+	second := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	for _, outside := range []bool{false, true} {
+		store := &fakeSignalStore{progress: []userstore.WatchProgress{{ProfileID: "p1", MediaItemID: "in-store", Completed: true, UpdatedAt: second.Format(time.RFC3339)}}}
+		repo := &fakeSignalRepo{
+			fallbackProgress: []WatchProgressRow{{MediaItemID: "in-postgres", Completed: true, UpdatedAt: second.Add(700 * time.Millisecond)}},
+			ebookProgress:    []WatchProgressRow{{MediaItemID: "ebook", PositionSeconds: 1, DurationSeconds: 1, Completed: true}},
+		}
+		rows, err := NewSignalReader(repo, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(outside).WatchProgressForUser(t.Context(), 7, "p1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, row := range rows {
+			ids = append(ids, row.MediaItemID)
+		}
+		want, wantWalks := []string{"in-postgres", "ebook"}, 0
+		if outside {
+			want, wantWalks = []string{"in-store", "ebook"}, 1
+		}
+		if !slices.Equal(ids, want) || store.progressPages["all"] != wantWalks {
+			t.Fatalf("outside postgres %v: rows = %v, progress pages walked = %d; want %v and %d",
+				outside, ids, store.progressPages["all"], want, wantWalks)
+		}
+		if !rows[0].UpdatedAt.Equal(second) {
+			t.Fatalf("outside postgres %v: %s updated at %v, want %v", outside, ids[0], rows[0].UpdatedAt, second)
+		}
+	}
+}
+
 // fakeRatedItems lists a profile's ratings from memory.
 type fakeRatedItems []string
 

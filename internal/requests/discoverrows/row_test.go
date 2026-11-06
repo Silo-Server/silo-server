@@ -88,9 +88,10 @@ func TestNormalizeLayoutSpecs(t *testing.T) {
 	discover := func(d DiscoverSpec) Row {
 		return Row{Type: TypeTMDBDiscover, Title: "Filter", Enabled: true, Discover: &d}
 	}
-	list := func(rowType Type, url string) Row {
-		return Row{Type: rowType, Title: "List", Enabled: true, List: &ListSpec{URL: url}}
+	ordered := func(rowType Type, url, order string) Row {
+		return Row{Type: rowType, Title: "List", Enabled: true, List: &ListSpec{URL: url, Order: order}}
 	}
+	list := func(rowType Type, url string) Row { return ordered(rowType, url, "") }
 	runLayoutCases(t, []layoutCase{
 		{name: "chart needs its spec", rows: []Row{{Type: TypeTMDBChart, Title: "x"}}, wantErr: "rows[0].chart"},
 		{name: "chart with a second spec", rows: []Row{{Type: TypeTMDBChart, Title: "x", Chart: &ChartSpec{Preset: "popular", MediaType: "movie"}, List: &ListSpec{URL: "1"}}}, wantErr: "rows[0].list"},
@@ -134,6 +135,20 @@ func TestNormalizeLayoutSpecs(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "mdblist order: list order stored absent, another order keyed apart",
+			rows: []Row{ordered(TypeMDBList, "https://mdblist.com/lists/u/l", " list "), ordered(TypeMDBList, "https://mdblist.com/lists/u/l", "newest_added")},
+			check: func(t *testing.T, rows []Row) {
+				if rows[0].List.Order != "" || rows[1].List.Order != ListOrderNewestAdded {
+					t.Fatalf("orders = %q, %q", rows[0].List.Order, rows[1].List.Order)
+				}
+				if got := SourceKey(rows[1]); got == SourceKey(rows[0]) || got != "mdblist:https://mdblist.com/lists/u/l/json?order=newest_added" {
+					t.Fatalf("source keys = %q, %q", SourceKey(rows[0]), got)
+				}
+			},
+		},
+		{name: "mdblist unknown order", rows: []Row{ordered(TypeMDBList, "https://mdblist.com/lists/u/l", "random")}, wantErr: "rows[0].list.order"},
+		{name: "tmdb list takes no order", rows: []Row{ordered(TypeTMDBList, "https://www.themoviedb.org/list/7", "newest_added")}, wantErr: "rows[0].list.order"},
 		{name: "mdblist url on another host", rows: []Row{list(TypeMDBList, "https://169.254.169.254/lists/a/b")}, wantErr: "rows[0].list.url"},
 		{name: "mdblist url outside lists", rows: []Row{list(TypeMDBList, "https://mdblist.com/admin")}, wantErr: "rows[0].list.url"},
 		{

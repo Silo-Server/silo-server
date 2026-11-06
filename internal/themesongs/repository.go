@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/pathscope"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -95,15 +96,14 @@ type owner struct {
 }
 
 func (r *Repository) Resolve(ctx context.Context, id string, inherit bool, filter catalog.AccessFilter) (string, []File, error) {
-	var kind, series, season string
-	var number int
+	item := Item{ID: id}
 	err := r.pool.QueryRow(ctx, `SELECT type, content_id, '', 0 FROM media_items WHERE content_id=$1
 		UNION ALL SELECT 'season', series_id, content_id, season_number FROM seasons WHERE content_id=$1
-		UNION ALL SELECT 'episode', series_id, COALESCE(season_id,''), season_number FROM episodes WHERE content_id=$1`, id).Scan(&kind, &series, &season, &number)
+		UNION ALL SELECT 'episode', series_id, COALESCE(season_id,''), season_number FROM episodes WHERE content_id=$1`, id).Scan(&item.Type, &item.SeriesID, &item.SeasonID, &item.SeasonNumber)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if seriesID, seasonNumber, ok := catalog.ParseSyntheticSeasonID(id); ok {
 			err = r.pool.QueryRow(ctx, `SELECT 'season', series_id, COALESCE(season_id,''), season_number FROM episodes
-				WHERE series_id=$1 AND season_number=$2 LIMIT 1`, seriesID, seasonNumber).Scan(&kind, &series, &season, &number)
+				WHERE series_id=$1 AND season_number=$2 LIMIT 1`, seriesID, seasonNumber).Scan(&item.Type, &item.SeriesID, &item.SeasonID, &item.SeasonNumber)
 		}
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -112,9 +112,16 @@ func (r *Repository) Resolve(ctx context.Context, id string, inherit bool, filte
 	if err != nil {
 		return "", nil, err
 	}
-	if err := catalog.NewItemRepository(r.pool).EnsureAccessible(ctx, series, filter); err != nil {
+	if err := catalog.NewItemRepository(r.pool).EnsureAccessible(ctx, item.SeriesID, filter); err != nil {
 		return "", nil, err
 	}
+	return r.ResolveItem(ctx, item, inherit, filter)
+}
+
+// ResolveItem is Resolve for an item the caller already looked up and
+// authorized under filter, as item detail has: it repeats neither.
+func (r *Repository) ResolveItem(ctx context.Context, item Item, inherit bool, filter catalog.AccessFilter) (string, []File, error) {
+	id, kind, series, number := item.ID, item.Type, item.SeriesID, item.SeasonNumber
 	owners := []owner{}
 	switch kind {
 	case "movie", ownerSeries:
@@ -126,6 +133,7 @@ func (r *Repository) Resolve(ctx context.Context, id string, inherit bool, filte
 		}
 	case "episode":
 		if inherit {
+			season := item.SeasonID
 			if season == "" {
 				season = fmt.Sprintf("%s-S%02d", series, number)
 			}
@@ -150,7 +158,10 @@ func (r *Repository) Resolve(ctx context.Context, id string, inherit bool, filte
 
 func (r *Repository) files(ctx context.Context, target owner, filter catalog.AccessFilter) ([]File, error) {
 	conditions, args := catalog.MediaFileAccessSQL("mf", filter, []any{target.series, target.kind, target.seasonNumber})
-	conditions = append(conditions, `mf.content_id=$1`, `mf.missing_since IS NULL`, `mf.extra_id IS NULL`)
+	conditions = append(conditions, `mf.content_id=$1`, `mf.missing_since IS NULL`, `mf.extra_id IS NULL`,
+		// A theme matches only candidates in its own folder, so files in a
+		// folder without themes cannot contribute; most folders have none.
+		`EXISTS (SELECT 1 FROM item_theme_songs ts WHERE ts.media_folder_id=mf.media_folder_id)`)
 	// Collapse episodes and versions to owner directories before checking ambiguity.
 	// Flat episode roots name the video file; themes belong to its directory,
 	// subject to the same access and ambiguity checks as directory-valued roots.
@@ -197,17 +208,58 @@ func (r *Repository) files(ctx context.Context, target owner, filter catalog.Acc
 	return files, rows.Err()
 }
 
+// scopeRootsQuery keeps the strict ancestors of a subtree scope that are the
+// canonical root of a live video. Each ancestor is one probe of the
+// (media_folder_id, canonical_root_path) index.
+const scopeRootsQuery = `SELECT root FROM unnest($2::text[]) AS root WHERE EXISTS (
+        SELECT 1 FROM media_files WHERE media_folder_id=$1 AND canonical_root_path=root AND missing_since IS NULL AND extra_id IS NULL)`
+
+// directoriesQuery bounds a subtree scope with file_path range conditions, so
+// the read stays on the (media_folder_id, file_path text_pattern_ops) index
+// under a generic plan instead of reading every file in the folder.
+func directoriesQuery(folderID int, scope string) (string, []any) {
+	query := `SELECT DISTINCT regexp_replace(file_path, '/[^/]+$', ''), canonical_root_path FROM media_files
+        WHERE media_folder_id=$1 AND missing_since IS NULL AND extra_id IS NULL`
+	if scope == "" {
+		return query, []any{folderID}
+	}
+	clauses, args := pathscope.RangeCoverageClauses("file_path", []string{scope}, 2)
+	return query + ` AND ` + clauses[0], append([]any{folderID}, args...)
+}
+
 // Directories includes unmatched video files: ownership is resolved at read time
 // so metadata matching and rematching cannot strand a theme on an old item.
+// A subtree scope also yields its ancestors up to a canonical root that still
+// holds a live video, so a season rescan observes its series directory even
+// when the season itself no longer has videos.
 func (r *Repository) Directories(ctx context.Context, folderID int, scope string) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `SELECT DISTINCT regexp_replace(file_path, '/[^/]+$', ''), canonical_root_path FROM media_files
-        WHERE media_folder_id=$1 AND missing_since IS NULL AND extra_id IS NULL
-        AND ($2='' OR starts_with(file_path,$2||'/') OR (canonical_root_path<>'' AND starts_with($2,canonical_root_path||'/')))`, folderID, scope)
+	seen := map[string]bool{}
+	if scope != "" {
+		var ancestors []string
+		for dir := filepath.Dir(scope); ; dir = filepath.Dir(dir) {
+			ancestors = append(ancestors, dir)
+			if filepath.Dir(dir) == dir {
+				break
+			}
+		}
+		rows, err := r.pool.Query(ctx, scopeRootsQuery, folderID, ancestors)
+		if err != nil {
+			return nil, err
+		}
+		roots, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return nil, err
+		}
+		for _, root := range roots {
+			addDirectoryChain(seen, filepath.Dir(scope), root)
+		}
+	}
+	query, args := directoriesQuery(folderID, scope)
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	seen := map[string]bool{}
 	for rows.Next() {
 		var path, root string
 		if err := rows.Scan(&path, &root); err != nil {
@@ -223,12 +275,7 @@ func (r *Repository) Directories(ctx context.Context, folderID int, scope string
 			root = filepath.Clean(root)
 		}
 		if rel, err := filepath.Rel(root, path); root != "" && err == nil && (rel == "." || filepath.IsLocal(rel)) {
-			for dir := path; ; dir = filepath.Dir(dir) {
-				seen[dir] = true
-				if dir == root || filepath.Dir(dir) == dir {
-					break
-				}
-			}
+			addDirectoryChain(seen, path, root)
 		}
 	}
 	paths := make([]string, 0, len(seen))
@@ -237,6 +284,16 @@ func (r *Repository) Directories(ctx context.Context, folderID int, scope string
 	}
 	sort.Strings(paths)
 	return paths, rows.Err()
+}
+
+// addDirectoryChain marks dir and each of its parents up to and including root.
+func addDirectoryChain(seen map[string]bool, dir, root string) {
+	for ; ; dir = filepath.Dir(dir) {
+		seen[dir] = true
+		if dir == root || filepath.Dir(dir) == dir {
+			return
+		}
+	}
 }
 
 // Replace updates only a completely observed directory. Unreadable directories

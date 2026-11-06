@@ -72,8 +72,9 @@ type CatalogItem struct {
 	WorkTitle                  string              `json:"work_title,omitempty"`
 	WorkFormats                []CatalogWorkFormat `json:"work_formats,omitempty" doc:"Sibling editions of the same work"`
 	// An episode card's parent artwork, so a client can draw a hero from the
-	// series backdrop without fetching the episode's detail. Seasons store no
-	// backdrop, so there is no season backdrop member.
+	// series backdrop without fetching the episode's detail. There is no
+	// season backdrop member; Continue Watching and Next Up rows carry it as
+	// backdrop_url (withResumeEpisodeBackdrop).
 	SeriesPosterURL         string `json:"series_poster_url,omitempty" format:"uri-reference" doc:"On an episode card: the series poster, at poster_url's size. Presigned, short-lived; absent when the series has none or the surface does not load it"`
 	SeriesPosterThumbhash   string `json:"series_poster_thumbhash,omitempty" doc:"On an episode card: the series poster's ThumbHash"`
 	SeriesBackdropURL       string `json:"series_backdrop_url,omitempty" format:"uri-reference" doc:"On an episode card: the series backdrop, at backdrop_url's size. Unlike backdrop_url it is never the episode still. Presigned, short-lived; absent when the series has none or the surface does not load it"`
@@ -103,6 +104,8 @@ type CatalogItemUserState struct {
 	IsFavorite    bool `json:"is_favorite" example:"false"`
 	InWatchlist   bool `json:"in_watchlist" example:"false"`
 	NotInterested bool `json:"not_interested" doc:"The profile marked the movie or series Not interested: recommendations leave it out and rank similar titles lower" example:"false"`
+	WatchedCount  *int `json:"watched_count,omitempty" doc:"Episodes the profile has watched; present on a series or season the profile has not finished" example:"4"`
+	UnplayedCount *int `json:"unplayed_count,omitempty" doc:"Available episodes the profile has not watched; present on a series or season the profile has not finished" example:"6"`
 }
 
 // CatalogItemUpcomingEvent is the next airing a card announces.
@@ -113,7 +116,7 @@ type CatalogItemUpcomingEvent struct {
 	EpisodeTitle  *string  `json:"episode_title,omitempty"`
 	SeasonNumber  *int     `json:"season_number,omitempty"`
 	EpisodeNumber *int     `json:"episode_number,omitempty"`
-	Badges        []string `json:"badges" doc:"Empty, never null"`
+	Badges        []string `json:"badges" doc:"The calendar event's badges: series_premiere, season_premiere, finale; on a movie, digital or physical. Empty, never null"`
 }
 
 // CatalogItemSortMetrics is what a sorted listing sorted on.
@@ -149,7 +152,7 @@ func catalogUserStateOf(s *handlers.ItemUserStateView) *CatalogItemUserState {
 	if s == nil {
 		return nil
 	}
-	return &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist, NotInterested: s.NotInterested}
+	return &CatalogItemUserState{Played: s.Played, IsFavorite: s.IsFavorite, InWatchlist: s.InWatchlist, NotInterested: s.NotInterested, WatchedCount: s.WatchedCount, UnplayedCount: s.UnplayedCount}
 }
 
 // instantOfRFC3339 parses a stored RFC 3339 stamp; an unparseable one is
@@ -216,6 +219,26 @@ func catalogItemOfSection(v handlers.SectionItemView, sel ratingsources.Selectio
 		item.RatingTMDB = v.EpisodeRatingTMDB
 	}
 	return withShownRatings(item, sel)
+}
+
+// withResumeEpisodeBackdrop gives an episode card in a Continue Watching or
+// Next Up row the season backdrop, else the series backdrop, in place of the
+// episode still. A card with neither keeps the backdrop its section chose.
+// Frozen /api/v1 keeps the still.
+func withResumeEpisodeBackdrop(item *CatalogItem, v handlers.SectionItemView) {
+	if v.Type != themeOwnerEpisode {
+		return
+	}
+	p := v.ParentArtwork
+	switch {
+	case p.SeasonBackdropURL != "":
+		item.BackdropURL, item.BackdropThumbhash = p.SeasonBackdropURL, p.SeasonBackdropThumbhash
+	case p.SeriesBackdropURL != "":
+		item.BackdropURL, item.BackdropThumbhash = p.SeriesBackdropURL, p.SeriesBackdropThumbhash
+	default:
+		return
+	}
+	item.BackdropIsEpisodeStill = new(false)
 }
 
 // catalogItemOfListing renders a listing (collection, browse) card.

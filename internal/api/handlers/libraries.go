@@ -74,6 +74,23 @@ type LibraryHandler struct {
 	// Trickplay, when set, queues or removes seek previews right after a
 	// library's trickplay setting changes on this node.
 	Trickplay libraryTrickplayReconciler
+	// BoxSets, when set, looks up the TMDB collections of a library's
+	// movies right after box sets are turned on for it.
+	BoxSets libraryBoxSetSyncer
+	// seedPlacement resolves a provider's default chain placement; nil uses
+	// metadata.LookupSeedPlacementChecked. Tests replace it.
+	seedPlacement seedPlacementLookup
+}
+
+// libraryBoxSetSyncer starts the box set sync task.
+type libraryBoxSetSyncer interface {
+	SyncBoxSetsSoon()
+}
+
+func (h *LibraryHandler) syncBoxSets() {
+	if h.BoxSets != nil {
+		h.BoxSets.SyncBoxSetsSoon()
+	}
 }
 
 // libraryTrickplayReconciler is the slice of *trickplay.Service the library
@@ -223,6 +240,10 @@ type createLibraryRequest struct {
 	RealtimeMonitoring *bool `json:"-"`
 	// TrickplayEnabled is set only by the v2 createLibrary operation.
 	TrickplayEnabled bool `json:"-"`
+	// The box set settings are set only by the v2 createLibrary operation.
+	BoxSetsEnabled  bool  `json:"-"`
+	BoxSetMinMovies int   `json:"-"`
+	BoxSetsInSearch *bool `json:"-"`
 }
 
 // updateLibraryRequest represents the JSON body for PUT /libraries/{id}.
@@ -243,6 +264,10 @@ type updateLibraryRequest struct {
 	RealtimeMonitoring *bool `json:"-"`
 	// TrickplayEnabled is set only by the v2 updateLibrary operation.
 	TrickplayEnabled *bool `json:"-"`
+	// The box set settings are set only by the v2 updateLibrary operation.
+	BoxSetsEnabled  *bool `json:"-"`
+	BoxSetMinMovies *int  `json:"-"`
+	BoxSetsInSearch *bool `json:"-"`
 }
 
 // affectsTrickplay reports whether the update can change which of the
@@ -306,6 +331,10 @@ type libraryResponse struct {
 	// view only.
 	TrickplayEnabled   bool `json:"-"`
 	TrickplaySupported bool `json:"-"`
+	// The box set settings are read by the v2 library view only.
+	BoxSetsEnabled  bool `json:"-"`
+	BoxSetMinMovies int  `json:"-"`
+	BoxSetsInSearch bool `json:"-"`
 }
 
 type libraryMountCheckRootResponse struct {
@@ -447,6 +476,9 @@ func toLibraryResponse(f *models.MediaFolder) libraryResponse {
 		ScanWarningAt:              f.ScanWarningAt,
 		RealtimeMonitoring:         f.RealtimeMonitoring,
 		TrickplayEnabled:           f.TrickplayEnabled,
+		BoxSetsEnabled:             f.BoxSetsEnabled,
+		BoxSetMinMovies:            f.BoxSetMinMovies,
+		BoxSetsInSearch:            f.BoxSetsInSearch,
 	}
 }
 
@@ -1613,26 +1645,52 @@ func (h *LibraryHandler) wakeMetadataMatcher(ctx context.Context, libraryID int)
 // seedDefaultChain builds a default provider chain from plugin manifest defaults
 // for the given library type. Returns entries for all applicable content levels.
 func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType string) []metadata.ChainEntry {
-	if h.ChainRepo == nil {
-		return nil
-	}
-
-	caps, err := metadata.ListEnabledMetadataCapabilities(ctx, h.ChainRepo.Pool())
+	entries, err := h.buildDefaultChain(ctx, libraryType, func(ctx context.Context, pool *pgxpool.Pool, installationID int, capabilityID, level string) (metadata.SeedPlacement, error) {
+		return metadata.LookupSeedPlacement(ctx, pool, installationID, capabilityID, level), nil
+	})
 	if err != nil {
 		slog.WarnContext(ctx, "seed chain: failed to list metadata capabilities", "component", "api", "error", err)
 		return nil
 	}
+	return entries
+}
+
+// defaultChain is the restore's default chain: unlike the editor's
+// seedDefaultChain, a provider whose placement cannot be read fails it, so
+// no chain computed from a fallback placement is saved.
+func (h *LibraryHandler) defaultChain(ctx context.Context, libraryType string) ([]metadata.ChainEntry, error) {
+	lookup := h.seedPlacement
+	if lookup == nil {
+		lookup = metadata.LookupSeedPlacementChecked
+	}
+	return h.buildDefaultChain(ctx, libraryType, lookup)
+}
+
+// buildDefaultChain builds a library type's default provider chain from the
+// enabled metadata providers, placing each with lookup.
+func (h *LibraryHandler) buildDefaultChain(ctx context.Context, libraryType string, lookup seedPlacementLookup) ([]metadata.ChainEntry, error) {
+	if h.ChainRepo == nil {
+		return nil, nil
+	}
+
+	caps, err := metadata.ListEnabledMetadataCapabilities(ctx, h.ChainRepo.Pool())
+	if err != nil {
+		return nil, err
+	}
 
 	levels := metadataContentLevelsForLibraryType(libraryType)
 	if len(levels) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	var entries []metadata.ChainEntry
 	for _, level := range levels {
 		candidates := make([]seedCandidate, 0, len(caps))
 		for _, c := range caps {
-			p := metadata.LookupSeedPlacement(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, c.CapabilityID, level)
+			p, err := lookup(ctx, h.ChainRepo.Pool(), c.PluginInstallationID, c.CapabilityID, level)
+			if err != nil {
+				return nil, err
+			}
 			candidates = append(candidates, seedCandidate{
 				installationID:   c.PluginInstallationID,
 				capabilityID:     c.CapabilityID,
@@ -1645,8 +1703,12 @@ func (h *LibraryHandler) seedDefaultChain(ctx context.Context, libraryType strin
 		entries = append(entries, buildSeededChainEntries(level, candidates)...)
 	}
 
-	return entries
+	return entries, nil
 }
+
+// seedPlacementLookup resolves where a provider sits in a freshly seeded
+// chain at one content level, failing when its manifest cannot be read.
+type seedPlacementLookup func(ctx context.Context, pool *pgxpool.Pool, pluginInstallationID int, capabilityID, contentLevel string) (metadata.SeedPlacement, error)
 
 // seedCandidate is a metadata provider under consideration for a freshly seeded
 // chain at one content level, carrying the manifest-declared values that decide

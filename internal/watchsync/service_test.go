@@ -294,9 +294,73 @@ func (r *serviceFakeRepo) ListConnectionsDueForSync(
 	return out, nil
 }
 
+func (r *serviceFakeRepo) AdmitSyncRun(ctx context.Context, expected Connection, run SyncRun) (syncRunAdmission, error) {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return syncRunAdmission{}, err
+	}
+	conn, ok := r.connections[connectionKey(expected.Provider, expected.UserID, expected.ProfileID)]
+	if !ok || (expected.ID != "" && expected.ID != conn.ID) {
+		return syncRunAdmission{}, ErrConnectionNotFound
+	}
+	admitted := syncRunAdmission{Connection: cloneConnectionForTest(conn)}
+	now := run.StartedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if conn.RateLimitedUntil != nil && conn.RateLimitedUntil.After(now) {
+		admitted.RetryAfterSeconds = ceilSeconds(conn.RateLimitedUntil.Sub(now))
+		return admitted, nil
+	}
+	for i := len(r.syncRuns) - 1; i >= 0; i-- {
+		active := &r.syncRuns[i]
+		if active.ConnectionID != conn.ID ||
+			(active.Status != string(SyncRunStatusQueued) && active.Status != string(SyncRunStatusRunning)) ||
+			(run.Trigger != "manual" && active.Trigger != "manual") {
+			continue
+		}
+		if !active.StartedAt.IsZero() && now.Sub(active.StartedAt) <= manualSyncTimeout {
+			admitted.Run = *active
+			return admitted, nil
+		}
+		if run.Trigger == "manual" {
+			active.Status = string(SyncRunStatusFailed)
+			active.Error = "watch provider sync timed out before completion"
+			active.CompletedAt = new(now)
+		}
+	}
+	if run.Trigger == "manual" {
+		for i := len(r.syncRuns) - 1; i >= 0; i-- {
+			latest := r.syncRuns[i]
+			if latest.ConnectionID != conn.ID {
+				continue
+			}
+			reference := latest.StartedAt
+			if latest.CompletedAt != nil {
+				reference = *latest.CompletedAt
+			}
+			admitted.RetryAfterSeconds = retryAfterSeconds(now, reference, manualSyncCooldown)
+			if admitted.RetryAfterSeconds > 0 {
+				return admitted, nil
+			}
+			break
+		}
+	}
+	run.ConnectionID, run.Provider, run.StartedAt = conn.ID, conn.Provider, now
+	admitted.Run = r.createSyncRunLocked(run)
+	admitted.Created = true
+	return admitted, nil
+}
+
+// CreateSyncRun is retained only for synthetic fixtures in tests.
 func (r *serviceFakeRepo) CreateSyncRun(_ context.Context, run SyncRun) (SyncRun, error) {
 	r.syncRunMu.Lock()
 	defer r.syncRunMu.Unlock()
+	return r.createSyncRunLocked(run), nil
+}
+
+func (r *serviceFakeRepo) createSyncRunLocked(run SyncRun) SyncRun {
 	if run.ID == "" {
 		run.ID = "run-" + strconv.Itoa(len(r.syncRuns)+1)
 	}
@@ -310,7 +374,7 @@ func (r *serviceFakeRepo) CreateSyncRun(_ context.Context, run SyncRun) (SyncRun
 		run.CreatedAt = run.StartedAt
 	}
 	r.syncRuns = append(r.syncRuns, run)
-	return run, nil
+	return run
 }
 
 func (r *serviceFakeRepo) CompleteSyncRun(_ context.Context, run SyncRun) (SyncRun, error) {
@@ -342,19 +406,6 @@ func (r *serviceFakeRepo) GetLatestSyncRun(_ context.Context, connectionID strin
 	return SyncRun{}, false, nil
 }
 
-func (r *serviceFakeRepo) GetActiveSyncRun(_ context.Context, connectionID string) (SyncRun, bool, error) {
-	r.syncRunMu.Lock()
-	defer r.syncRunMu.Unlock()
-	for i := len(r.syncRuns) - 1; i >= 0; i-- {
-		run := r.syncRuns[i]
-		if run.ConnectionID == connectionID &&
-			(run.Status == string(SyncRunStatusQueued) || run.Status == string(SyncRunStatusRunning)) {
-			return run, true, nil
-		}
-	}
-	return SyncRun{}, false, nil
-}
-
 func (r *serviceFakeRepo) ListSyncRuns(_ context.Context, connectionID string, limit int) ([]SyncRun, error) {
 	r.syncRunMu.Lock()
 	defer r.syncRunMu.Unlock()
@@ -368,6 +419,12 @@ func (r *serviceFakeRepo) ListSyncRuns(_ context.Context, connectionID string, l
 		}
 	}
 	return runs, nil
+}
+
+func (r *serviceFakeRepo) syncRunsSnapshot() []SyncRun {
+	r.syncRunMu.Lock()
+	defer r.syncRunMu.Unlock()
+	return append([]SyncRun(nil), r.syncRuns...)
 }
 
 func (r *serviceFakeRepo) ListLocalWatchEventConnections(_ context.Context, userID int, profileID string, kind LocalWatchEventKind) ([]Connection, error) {
@@ -2215,6 +2272,8 @@ func TestServiceSyncConnectionMarksRunFailedWhenExportTransportFails(t *testing.
 		ExportWatchedEnabled: true,
 	}
 
+	repo.connections[connectionKey(conn.Provider, conn.UserID, conn.ProfileID)] = conn
+
 	err := service.SyncConnection(context.Background(), conn, "scheduled")
 	if err == nil {
 		t.Fatal("SyncConnection error = nil, want export transport failure")
@@ -2591,6 +2650,59 @@ func TestServiceConfirmedStopWaitsForProviderAndReopensFailedReplacement(t *test
 		if update.stopSentAt != nil {
 			t.Fatalf("failed confirmed stop marked session closed: %+v", updates)
 		}
+	}
+}
+
+// scrobbleCapableNonScrobbler claims playback scrobbling without implementing
+// Scrobbler.
+type scrobbleCapableNonScrobbler struct{ emptyPluginAPIKeyProvider }
+
+func (scrobbleCapableNonScrobbler) Capabilities() Capabilities {
+	return Capabilities{ScrobblePlayback: true}
+}
+
+// nonPlaybackScrobbler implements Scrobbler but does not claim playback
+// scrobbling, so only the capability check can skip it.
+type nonPlaybackScrobbler struct{ keyedScrobblerStub }
+
+func (nonPlaybackScrobbler) Capabilities() Capabilities { return Capabilities{} }
+
+// A connection whose provider cannot take the stop does not fail a confirmed
+// stop, and the profile's other providers still get it once.
+func TestServiceConfirmedStopSkipsConnectionsThatCannotScrobble(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		provider func(events chan ScrobbleEvent) Provider
+	}{
+		{"unregistered provider", nil},
+		{"provider without playback scrobbling", func(events chan ScrobbleEvent) Provider {
+			return nonPlaybackScrobbler{keyedScrobblerStub{scrobblerStub{stopEvents: events}, "plugin:1:tracker"}}
+		}},
+		{"provider without a scrobbler", func(chan ScrobbleEvent) Provider { return scrobbleCapableNonScrobbler{} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newServiceFakeRepo()
+			repo.scrobbleConnections = []Connection{
+				{ID: "conn-1", Provider: "plugin:1:tracker", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true},
+				{ID: "conn-2", Provider: "trakt", UserID: 7, ProfileID: "profile-1", ScrobbleEnabled: true},
+			}
+			events := make(chan ScrobbleEvent, 2)
+			reg := registryWith(t, scrobblerStub{stopEvents: events})
+			if tc.provider != nil {
+				if err := reg.Register(tc.provider(events)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := NewService(repo, reg).ScrobbleStopConfirmed(context.Background(), ScrobbleEvent{
+				PlaybackSessionID: testPlaybackSessionID, UserID: 7, ProfileID: "profile-1",
+				MediaItemID: testMovieMediaID, Kind: historyimport.KindMovie,
+			}); err != nil {
+				t.Fatalf("ScrobbleStopConfirmed = %v, want nil", err)
+			}
+			if len(events) != 1 {
+				t.Fatalf("stops sent to the scrobbling provider = %d, want 1", len(events))
+			}
+		})
 	}
 }
 

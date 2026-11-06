@@ -491,7 +491,18 @@ function DiscordSetupGuide() {
   return (
     <AdvancedSection id="notifications.discord.setup-guide" title="Setup guide">
       <div className="text-muted-foreground space-y-1.5 py-3 text-xs leading-relaxed">
-        <p>Set up at discord.com/developers/applications:</p>
+        <p>
+          Set up at{" "}
+          <a
+            href="https://discord.com/developers/applications"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            discord.com/developers/applications
+          </a>
+          :
+        </p>
         <ol className="list-decimal space-y-1.5 pl-4">
           <li>Create an application (or open an existing one).</li>
           <li>

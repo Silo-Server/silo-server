@@ -45,6 +45,7 @@ const SETTINGS_TITLES: Record<string, string> = {
   personalize: "Personalize",
   "watch-providers": "Watch Provider Settings",
   notifications: "Notification Settings",
+  "your-data": "Your Data",
 };
 
 const ADMIN_TITLES: Record<string, string> = {
@@ -52,6 +53,7 @@ const ADMIN_TITLES: Record<string, string> = {
   activity: "Admin Activity",
   "api-keys": "Admin API Keys",
   autoscan: "Admin Autoscan",
+  backups: "Admin Backups",
   collections: "Admin Collections",
   devices: "Admin Devices",
   diagnostics: "Admin Client Diagnostics",

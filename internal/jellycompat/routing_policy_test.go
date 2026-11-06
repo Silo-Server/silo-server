@@ -2,6 +2,7 @@ package jellycompat
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,6 +82,8 @@ func TestCompatWorkerHLSRouteAllowedHonorsHardExecutionBoundaries(t *testing.T) 
 	}
 }
 
+// A progressive remux is the last resort, offered only when a source that
+// needs a remux has no TranscodingUrl (#2645).
 func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
 	version := catalog.FileVersion{
 		FileID: 1, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac",
@@ -113,7 +116,7 @@ func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
 			wantDirectStream: true,
 		},
 		{
-			name:      "worker execution with API egress falls back to HLS",
+			name:      "worker execution with API egress offers no progressive remux",
 			execution: config.PlaybackExecutionWorkerOnly, egress: config.PlaybackEgressAPIOnly,
 			wantDirectStream: false,
 		},
@@ -131,23 +134,17 @@ func TestBuildPlaybackSourceHonorsProgressiveRemuxRoutingPolicy(t *testing.T) {
 				},
 			}
 
-			source := handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{}, true)
+			source := handler.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{EnableTranscoding: new(false)}, true)
 			if source.SupportsDirectPlay {
 				t.Fatal("SupportsDirectPlay = true, want false for MKV source and MP4 profile")
 			}
 			if source.SupportsDirectStream != test.wantDirectStream {
 				t.Fatalf("SupportsDirectStream = %v, want %v", source.SupportsDirectStream, test.wantDirectStream)
 			}
-			if !source.SupportsTranscoding {
-				t.Fatal("SupportsTranscoding = false, want negotiated HLS fallback")
-			}
 
-			dto := handler.mediaSourceDTO("item", "play", "token", source)
+			dto := handler.mediaSourceDTO("item", "play", source)
 			if (dto.DirectStreamURL != "") != test.wantDirectStream {
 				t.Fatalf("DirectStreamURL = %q, advertised direct stream = %v", dto.DirectStreamURL, test.wantDirectStream)
-			}
-			if dto.TranscodingURL == "" {
-				t.Fatal("TranscodingURL is empty, want HLS fallback")
 			}
 		})
 	}
@@ -295,6 +292,58 @@ func TestEnsureUpstreamPlaybackClearsStaleHLSRouteOnMethodSwitch(t *testing.T) {
 						t.Fatalf("upstream starts = %d, want only the method-switch start", manager.startCalls)
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestMethodSwitchEndsTheReplacedSession covers the session a Jellyfin
+// method switch leaves behind: whether this replica held its copy or not,
+// the switch records it as replaced once the play has moved to the new
+// session, and a copy held elsewhere is recorded from its identity.
+func TestMethodSwitchEndsTheReplacedSession(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		held       bool
+		startFails bool
+	}{
+		{name: "copy held here", held: true},
+		{name: "copy held elsewhere"},
+		{name: "replacement fails to start", held: true, startFails: true},
+	} {
+		held := tc.held
+		t.Run(tc.name, func(t *testing.T) {
+			source := testCompatSource(NewResourceIDCodec(), testCompatVersion())
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{
+				ID: "play-1", CompatToken: "compat-token", RouteItemID: "item-1",
+				UpstreamSessionID: "old-upstream", UpstreamPlayMethod: "transcode", UpstreamMediaFileID: source.FileID,
+				MediaSources: []PlaybackMediaSource{source},
+			})
+			manager := &testCompatSessionManager{sessions: map[string]*playback.Session{}}
+			if tc.startFails {
+				manager.startErr = errors.New("start failed")
+			}
+			if held {
+				manager.sessions["old-upstream"] = &playback.Session{ID: "old-upstream", UserID: 7, ProfileID: "profile-1", MediaFileID: source.FileID, PlayMethod: playback.PlayTranscode, Position: 600}
+			}
+			handler := &PlaybackHandler{playbackStore: store, sessionMgr: manager, tm: playback.NewTranscodeManager()}
+			updated, err := handler.ensureUpstreamPlayback(t.Context(),
+				&Session{Token: "compat-token", StreamAppUserID: 7, ProfileID: "profile-1"}, "play-1", source, "direct")
+			if tc.startFails != (err != nil) || (err == nil && updated.UpstreamSessionID == "old-upstream") {
+				t.Fatalf("switch = %+v, %v", updated, err)
+			}
+			if len(manager.detached) != 1 {
+				t.Fatalf("detached ends = %+v, want the replaced session once", manager.detached)
+			}
+			end := manager.detached[0]
+			wantPosition := float64(playback.PositionUnknown)
+			if held {
+				wantPosition = 600
+			}
+			if end.reason != playback.EndReasonReplaced || end.session.ID != "old-upstream" || end.session.UserID != 7 ||
+				!end.session.IsJellyfinCompat || end.session.Position != wantPosition {
+				t.Fatalf("replaced end = %+v reason %q", end.session, end.reason)
 			}
 		})
 	}

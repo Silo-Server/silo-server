@@ -605,6 +605,16 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
     );
+  // The two marker-provenance keys arrived together, so one gate covers both.
+  // They are read only where the server defines them: an older server rejects
+  // the whole batch for a key it does not know, which would take the skip-mode
+  // read down with it.
+  const supportsMarkerProvenance =
+    capabilitiesKnown &&
+    settingsCapabilitiesSupportKey(
+      settingsCapabilities.data,
+      SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
+    );
   // Resolved through the contract, so a device override winning over the
   // profile's own choice is the manifest's resolution order rather than a
   // precedence rule spelled out here.
@@ -640,6 +650,11 @@ function WatchPlaybackHostContent() {
             SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
             SETTING_KEYS.PLAYBACK_CELLULAR_MAX_BITRATE_KBPS,
           ]
+        : []),
+      // Whether the skip prompt says where the marker came from, and how much
+      // the source trusted it.
+      ...(supportsMarkerProvenance
+        ? [SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE, SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE]
         : []),
     ],
     enabled: signedIn,
@@ -1205,6 +1220,11 @@ function WatchPlaybackHostContent() {
     SETTING_KEYS.PLAYBACK_AUTO_PLAY_NEXT_PREVIEW,
     watchPageProps.autoPlayNextPreview,
   );
+  // Opt-in, and both default off: an untouched profile's prompt is unchanged.
+  // A server that cannot answer either key leaves them false, which is the same
+  // shape it would show if the viewer had turned them off.
+  const showMarkerConfidence = resolvedBool(SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE, false);
+  const showMarkerSource = resolvedBool(SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE, false);
 
   const playerDisplayMode =
     state.mode === "foreground" ? "foreground" : isPostRoll ? "postroll" : "detached";
@@ -1217,6 +1237,8 @@ function WatchPlaybackHostContent() {
           {...watchPageProps}
           maxBitrateKbps={maxBitrateKbps ?? null}
           introSkipMode={introSkipMode}
+          showMarkerConfidence={showMarkerConfidence}
+          showMarkerSource={showMarkerSource}
           bufferingMode={bufferingMode}
           autoSkipRecap={autoSkipRecap}
           autoPlayNextPreview={autoPlayNextPreview}

@@ -178,6 +178,57 @@ func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
 	}
 }
 
+// A movie whose markers were invalidated after its tail was stored gets its
+// credits placed again from that tail, which is stored again with the
+// file's invalidation time so the scheduled run settles it. Once stored
+// with that time, the tail is not stored again.
+func TestAnalyzeMovieResettlesATailStoredBeforeAnInvalidation(t *testing.T) {
+	ctx := context.Background()
+	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+	sampler := &fakeMovieSampler{}
+	analyzer := movieAnalyzer(repo, sampler)
+	if _, err := analyzer.AnalyzeMovie(ctx, "movie"); err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	slot := artifactSlot{10, ArtifactKindCreditsTail}
+	if stamp := repo.artifacts[slot].MarkersInvalidatedAt; stamp != nil {
+		t.Fatalf("first tail stored with invalidation time %v, want none", stamp)
+	}
+	tails := sampler.tailCount()
+	invalidated := time.Date(2026, 10, 25, 21, 0, 0, 0, time.UTC)
+	repo.movieCandidates[0].MarkersInvalidatedAt = &invalidated
+	for _, tc := range []struct {
+		name       string
+		wantStored bool
+	}{
+		{name: "tail stored before the invalidation", wantStored: true},
+		{name: "tail stored with the invalidation", wantStored: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := repo.artifacts[slot]
+			before.UpdatedAt = time.Time{}
+			repo.artifacts[slot] = before
+			repo.patches = nil
+			repo.movieCandidates[0].CreditsStart, repo.movieCandidates[0].CreditsEnd = nil, nil
+
+			summary, err := analyzer.AnalyzeMovie(ctx, "movie")
+			if err != nil {
+				t.Fatalf("AnalyzeMovie: %v", err)
+			}
+			if summary.MovieCreditsMarkersWritten != 1 || sampler.tailCount() != tails {
+				t.Fatalf("summary %+v, %d new tail passes; want credits placed from the stored tail", summary, sampler.tailCount()-tails)
+			}
+			after := repo.artifacts[slot]
+			if stored := !after.UpdatedAt.IsZero(); stored != tc.wantStored {
+				t.Fatalf("tail stored again = %v, want %v", stored, tc.wantStored)
+			}
+			if after.MarkersInvalidatedAt == nil || !after.MarkersInvalidatedAt.Equal(invalidated) {
+				t.Fatalf("tail invalidation time %v, want %v", after.MarkersInvalidatedAt, invalidated)
+			}
+		})
+	}
+}
+
 // A silence pass killed at its deadline keeps the video start but leaves
 // the movie unsettled: its tail is recorded as failed with a backoff, not
 // stored complete, so the scheduled run takes it up again. A silence pass
@@ -216,6 +267,22 @@ func TestAnalyzeMovieSilenceTimeoutLeavesTheMovieUnsettled(t *testing.T) {
 	}
 	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete {
 		t.Fatalf("movie tail artifact status %q after a failed silence pass, want complete", artifact.Status)
+	}
+
+	// A cached tail an invalidation left stale settles on the video start
+	// when its silence pass times out: a failure would not replace the
+	// complete row, so the movie would come back on every run.
+	invalidated := time.Date(2026, 10, 25, 21, 0, 0, 0, time.UTC)
+	repo.movieCandidates[0].MarkersInvalidatedAt = &invalidated
+	sampler.silenceErr = fmt.Errorf("ffmpeg did not finish within its 2m12s deadline: %w", timeout)
+	if _, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie"); err != nil {
+		t.Fatalf("AnalyzeMovie: %v", err)
+	}
+	artifact = repo.artifact(10, ArtifactKindCreditsTail)
+	if artifact.Status != mediaartifact.StatusComplete || artifact.MarkersInvalidatedAt == nil || !artifact.MarkersInvalidatedAt.Equal(invalidated) ||
+		len(repo.artifactFailures) != 0 || sampler.tailCount() != 1 {
+		t.Fatalf("stale tail after a timed out silence pass: status %q, invalidation time %v, %d failures, %d tail passes; want it stored again with the file's time",
+			artifact.Status, artifact.MarkersInvalidatedAt, len(repo.artifactFailures), sampler.tailCount())
 	}
 }
 

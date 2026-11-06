@@ -65,9 +65,10 @@ var remotePlaybackRoutes = []scopeRoute{
 }
 
 // remotePlaybackAllowsRoute reports whether a remote-playback session may
-// call method on urlPath. Unlike API key scopes it never cleans the path: a
-// `..` or doubled-slash spelling could clean to a listed route while the
-// router serves another, so any path that is not already clean is refused.
+// call method on urlPath. It never cleans the path: a `..` or doubled-slash
+// spelling could clean to a listed route while the router serves another, so
+// any path that is not already clean is refused. RevalidateCurrent calls it
+// directly, without unambiguousRequestPath, so the check stays here too.
 func remotePlaybackAllowsRoute(method, urlPath string) bool {
 	if urlPath == "" || path.Clean(urlPath) != urlPath {
 		return false
@@ -88,10 +89,8 @@ func remotePlaybackAllowsRoute(method, urlPath string) bool {
 // resolves that profile and its PIN proof) and the claims carry the account
 // role "user" and are not the account's own login session.
 func narrowRemotePlayback(r *http.Request, claims *auth.Claims, authority auth.SessionAuthority) bool {
-	// The router matches the escaped path when it differs from the default
-	// encoding (an encoded slash, say), so such a path is refused rather
-	// than judged by its decoded form.
-	if r.URL.RawPath != "" || !remotePlaybackAllowsRoute(r.Method, r.URL.Path) {
+	urlPath, ok := unambiguousRequestPath(r)
+	if !ok || !remotePlaybackAllowsRoute(r.Method, urlPath) {
 		return false
 	}
 	switch r.Header.Get("X-Profile-Id") {

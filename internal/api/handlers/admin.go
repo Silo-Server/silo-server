@@ -93,6 +93,26 @@ func updateServerSettingsAtomically(
 	})
 }
 
+// updateServerSettingsWithTx runs update in tx when it is set, under the
+// settings lock taken there, and in a transaction of its own otherwise.
+func updateServerSettingsWithTx(
+	ctx context.Context,
+	store ServerSettingsStore,
+	tx pgx.Tx,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	if tx == nil {
+		return updateServerSettingsInTransaction(ctx, store, update)
+	}
+	updater, ok := store.(interface {
+		UpdateAtomicWithTx(context.Context, pgx.Tx, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	})
+	if !ok {
+		return errors.New("settings store does not support caller transactions")
+	}
+	return updater.UpdateAtomicWithTx(ctx, tx, update)
+}
+
 func updateServerSettingsInTransaction(
 	ctx context.Context,
 	store ServerSettingsStore,
@@ -179,6 +199,10 @@ type AdminHandler struct {
 	// setting whose effective value changes. An error rolls the save back. tx
 	// is nil when the settings store has no transactional update.
 	BeforeServerSettingCommit func(ctx context.Context, tx pgx.Tx, key, value string) error
+	// BackupKeyCheck is this server's SECRET_KEY check value. A save that
+	// switches backup.destination to s3 needs backup.s3.key_acknowledged to
+	// hold it; empty refuses that switch.
+	BackupKeyCheck string
 	// WatchlistTitlesSweeper deletes watchlist titles no entry references.
 	// Deleting an account drops its entries through the users foreign key,
 	// which can leave such titles behind. Nil skips the sweep.
@@ -486,7 +510,7 @@ func toAdminUserResponse(u *models.User, group *access.GroupPolicy) AdminUserVie
 			DownloadAllowed:            effective.DownloadAllowed,
 			DownloadTranscodeAllowed:   effective.DownloadTranscodeAllowed,
 			RequestsAllowed:            effective.RequestsAllowed,
-			Permissions:                append([]string{}, effective.Permissions...),
+			Permissions:                auth.PolicyPermissions(effective),
 		},
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,
@@ -709,10 +733,9 @@ func (h *AdminHandler) loadUserLastActiveAt(ctx context.Context, userIDs []int) 
 	}
 
 	rows, err := h.pool.Query(ctx, `
-		SELECT user_id, MAX("timestamp") AS last_active_at
-		FROM activity_log
-		WHERE user_id = ANY($1::bigint[])
-		GROUP BY user_id`, userIDs)
+		SELECT user_id, last_active_at
+		FROM user_last_activity
+		WHERE user_id = ANY($1::bigint[])`, userIDs)
 	if err != nil {
 		return lastActive, fmt.Errorf("loading user last activity: %w", err)
 	}
@@ -1283,7 +1306,7 @@ func (h *AdminHandler) HandleImpersonateUser(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, buildLoginResponse(pair, effectiveUser, effectiveDownloadAllowed(r.Context(), effectiveUser, h.groupPolicyProvider()), impersonator))
+	writeJSON(w, http.StatusOK, buildLoginResponse(pair, effectiveUser, effectiveAccountPolicy(r.Context(), effectiveUser, h.groupPolicyProvider()), impersonator))
 }
 
 // HandleListSessions handles GET /admin/sessions.
@@ -1762,7 +1785,11 @@ var sensitiveSettingKeys = catalog.SensitiveSettingKeys
 
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
+// The server generates the signing keys itself. An administrator who could set
+// one could mint tokens for any account, the Owner included, after a restart.
 var machineManagedSettingKeys = map[string]bool{
+	"auth.jwt_secret":                           true,
+	"audiobooks.abs.jwt_secret":                 true,
 	chatgpt.CredentialsKey:                      true,
 	config.AIProvidersSettingKey:                true,
 	config.ArtworkStorageReconcileCheckpointKey: true,
@@ -1772,6 +1799,9 @@ var machineManagedSettingKeys = map[string]bool{
 	blobstore.IdentitySettingKey:                true,
 	blobstore.OperationalIdentitySettingKey:     true,
 	config.StorageTransitionTargetKey:           true,
+	// Written only by POST /api/v2/admin/backups/s3/acknowledge-key, which
+	// records this server's check value.
+	config.BackupS3KeyAcknowledgedSettingKey: true,
 }
 
 // Setting keys that decide where artwork lives. The s3 keys are the canonical
@@ -2629,6 +2659,38 @@ func (h *AdminHandler) checkLocalLoginSetting(ctx context.Context, tx pgx.Tx, be
 	return breakGlassError(auth.CheckLocalLoginSettingChange(ctx, h.pool, before[key], after[key]))
 }
 
+// errBackupKeyNotConfirmed refuses switching backups to S3 before the admin
+// confirmed keeping a copy of this server's SECRET_KEY.
+var errBackupKeyNotConfirmed = &APIError{
+	Status:  http.StatusConflict,
+	Code:    "backup_key_not_confirmed",
+	Message: "Confirm that you keep a copy of this server's SECRET_KEY before keeping backups in S3 (POST /api/v2/admin/backups/s3/acknowledge-key)",
+}
+
+// checkBackupDestination refuses a save that switches backup.destination to
+// s3 unless the confirmed key check value is this server's, and one that
+// leaves the S3 destination without a bucket. A destination already on s3
+// stays saveable after SECRET_KEY changes; the backups pause instead.
+func (h *AdminHandler) checkBackupDestination(changed, before, after map[string]string) error {
+	if after[config.BackupDestinationSettingKey] != config.BackupDestinationS3 {
+		return nil
+	}
+	_, destination := changed[config.BackupDestinationSettingKey]
+	_, bucket := changed[config.BackupS3BucketSettingKey]
+	_, endpoint := changed[config.BackupS3EndpointSettingKey]
+	if (destination || bucket || endpoint) &&
+		(strings.TrimSpace(after[config.BackupS3BucketSettingKey]) == "" || strings.TrimSpace(after[config.BackupS3EndpointSettingKey]) == "") {
+		return &APIError{Status: http.StatusBadRequest, Code: adminInvalidSettingsCode, Message: "backups in S3 need backup.s3.endpoint and backup.s3.bucket"}
+	}
+	if before[config.BackupDestinationSettingKey] == config.BackupDestinationS3 {
+		return nil
+	}
+	if h.BackupKeyCheck == "" || strings.TrimSpace(after[config.BackupS3KeyAcknowledgedSettingKey]) != h.BackupKeyCheck {
+		return errBackupKeyNotConfirmed
+	}
+	return nil
+}
+
 func (h *AdminHandler) beforeServerSettingCommit(ctx context.Context, tx pgx.Tx, key, value string) error {
 	if h.BeforeServerSettingCommit == nil {
 		return nil
@@ -2661,38 +2723,71 @@ func (h *AdminHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, error) {
+	result, publish, err := h.updateAdminSettings(ctx, nil, values, guard)
+	if err != nil {
+		return AdminSettingsUpdateResult{}, err
+	}
+	publish(ctx)
+	return result, nil
+}
+
+// codeInternalError is the API error code of a server-side failure.
+const codeInternalError = "internal_error"
+
+// ApplyAdminSettingsInTx writes values through the admin settings write path
+// (the same normalization, validation, and settings lock) inside the caller's
+// transaction. Nothing is published until the caller runs publish after its
+// transaction commits; a rollback leaves nothing to announce. A non-nil
+// guard runs only under the settings lock, with the stored values read
+// there: a read outside the caller's transaction could wait on it.
+func (h *AdminHandler) ApplyAdminSettingsInTx(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, func(context.Context), error) {
+	if tx == nil {
+		return AdminSettingsUpdateResult{}, nil, errors.New("a transaction is required")
+	}
+	return h.updateAdminSettings(ctx, tx, values, guard)
+}
+
+// updateAdminSettings validates and writes values, in tx when it is set and
+// in a transaction of its own otherwise. publish announces the committed
+// changes: events, the settings hook, and restart flags.
+//
+//nolint:funlen,gocyclo // UpdateAdminSettings' body, moved as is behind the caller-transaction entry points
+func (h *AdminHandler) updateAdminSettings(ctx context.Context, tx pgx.Tx, values map[string]string, guard func(AdminSettingsSnapshot) error) (AdminSettingsUpdateResult, func(context.Context), error) {
+	fail := func(err error) (AdminSettingsUpdateResult, func(context.Context), error) {
+		return AdminSettingsUpdateResult{}, nil, err
+	}
 	if h.SettingsRepo == nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: 500, Code: "internal_error", Message: "Settings store not configured"}
+		return fail(&APIError{Status: 500, Code: codeInternalError, Message: "Settings store not configured"})
 	}
 	req := updateSettingsRequest{Values: values}
 
 	if len(req.Values) == 0 {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "At least one setting is required"}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "At least one setting is required"})
 	}
 	if len(req.Values) > 250 {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "A settings update may contain at most 250 values"})
 	}
 
-	if guard != nil {
+	if guard != nil && tx == nil {
 		stored, err := h.SettingsRepo.GetAll(ctx)
 		if err != nil {
-			return AdminSettingsUpdateResult{}, err
+			return fail(err)
 		}
 		if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
-			return AdminSettingsUpdateResult{}, err
+			return fail(err)
 		}
 	}
 
 	keys := make([]string, 0, len(req.Values))
 	for key := range req.Values {
 		if strings.TrimSpace(key) == "" {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Setting key is required"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: "Setting key is required"})
 		}
 		if machineManagedSettingKeys[key] {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "bad_request", Message: key + " is managed internally"})
 		}
 		if h.environmentRefusesSave(key, req.Values[key]) {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: "managed_by_environment", Message: key + " is managed by an environment variable"})
 		}
 		keys = append(keys, key)
 	}
@@ -2702,18 +2797,18 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	for _, key := range keys {
 		value, code, err := h.normalizeBatchSetting(ctx, key, req.Values[key])
 		if err != nil {
-			return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: code, Message: err.Error()}
+			return fail(&APIError{Status: http.StatusBadRequest, Code: code, Message: err.Error()})
 		}
 		normalized[key] = value
 	}
 	checkedRedis, err := h.checkRedisSave(ctx, normalized)
 	if err != nil {
-		return AdminSettingsUpdateResult{}, err
+		return fail(err)
 	}
 
 	modelValidation, err := h.prepareAIModelValidation(ctx, normalized)
 	if err != nil {
-		return AdminSettingsUpdateResult{}, err
+		return fail(err)
 	}
 
 	var (
@@ -2724,7 +2819,7 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 	)
 	var preconditionErr error
 	var committedSnapshot *AdminSettingsSnapshot
-	err = updateServerSettingsInTransaction(ctx, h.SettingsRepo,
+	err = updateServerSettingsWithTx(ctx, h.SettingsRepo, tx,
 		func(stored map[string]string, tx pgx.Tx) (map[string]string, error) {
 			if guard != nil {
 				if err := guard(h.adminSettingsSnapshot(stored)); err != nil {
@@ -2754,6 +2849,10 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
 			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkBackupDestination(normalized, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}
@@ -2796,17 +2895,18 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 			return writes, nil
 		})
 	if preconditionErr != nil {
-		return AdminSettingsUpdateResult{}, preconditionErr
+		return fail(preconditionErr)
 	}
 	if validationErr != nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusBadRequest, Code: validationCode, Message: validationErr.Error()}
+		return fail(&APIError{Status: http.StatusBadRequest, Code: validationCode, Message: validationErr.Error()})
 	}
 	if err != nil {
-		return AdminSettingsUpdateResult{}, &APIError{Status: http.StatusInternalServerError, Code: "internal_error", Message: "Failed to update settings"}
+		return fail(&APIError{Status: http.StatusInternalServerError, Code: codeInternalError, Message: "Failed to update settings"})
 	}
 
 	responseValues := make(map[string]string, len(normalized))
 	restartKeys := make([]string, 0, len(normalized))
+	var changed []string
 	for _, key := range keys {
 		if !sensitiveSettingKeys[key] {
 			responseValues[key] = after[key]
@@ -2814,30 +2914,35 @@ func (h *AdminHandler) UpdateAdminSettings(ctx context.Context, values map[strin
 		if !effectiveChanges[key] {
 			continue
 		}
-		if h.EventBus != nil {
-			_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
-				cache.Event{Type: cache.EventSettingsChanged, Payload: key})
-		}
-		if h.OnServerSettingUpdated != nil {
-			h.OnServerSettingUpdated(ctx, key, after[key])
-		}
-		publishAdminDefaultEvent(ctx, h.EventsHub, key)
+		changed = append(changed, key)
 		if config.RestartRequired(key) {
 			restartKeys = append(restartKeys, key)
 		}
 	}
-	// Per-key reasons ("setting:<key>") so the admin UI can scope a pending
-	// restart to the subsystem the key belongs to instead of warning on every
-	// tile for any settings save.
-	for _, restartKey := range restartKeys {
-		h.markServerRestartRequired("setting:" + restartKey)
+	publish := func(ctx context.Context) {
+		for _, key := range changed {
+			if h.EventBus != nil {
+				_ = h.EventBus.Publish(ctx, cache.ChannelAdmin,
+					cache.Event{Type: cache.EventSettingsChanged, Payload: key})
+			}
+			if h.OnServerSettingUpdated != nil {
+				h.OnServerSettingUpdated(ctx, key, after[key])
+			}
+			publishAdminDefaultEvent(ctx, h.EventsHub, key)
+		}
+		// Per-key reasons ("setting:<key>") so the admin UI can scope a
+		// pending restart to the subsystem the key belongs to instead of
+		// warning on every tile for any settings save.
+		for _, restartKey := range restartKeys {
+			h.markServerRestartRequired("setting:" + restartKey)
+		}
 	}
 	return updateSettingsResponse{
 		CommittedSnapshot:   committedSnapshot,
 		Values:              responseValues,
 		RestartRequired:     len(restartKeys) > 0,
 		RestartRequiredKeys: restartKeys,
-	}, nil
+	}, publish, nil
 }
 
 // HandleUpdateSetting handles PUT /admin/settings/{key}.
@@ -3188,6 +3293,10 @@ func (h *AdminHandler) UpdateAdminSetting(ctx context.Context, key, value string
 			before := h.effectiveAdminSettings(stored)
 			after = h.effectiveAdminSettings(prospective)
 			if err := h.checkLocalLoginSetting(ctx, tx, before, after); err != nil {
+				preconditionErr = err
+				return nil, err
+			}
+			if err := h.checkBackupDestination(change, before, after); err != nil {
 				preconditionErr = err
 				return nil, err
 			}

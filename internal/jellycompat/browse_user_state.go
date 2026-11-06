@@ -38,7 +38,15 @@ func (s *directContentService) browseConfiguredUserState(ctx context.Context, se
 		if err != nil {
 			return nil, err
 		}
-		matches, err := s.matchConfiguredUserState(ctx, store, session.ProfileID, items, filters)
+		// Without a total, the scan ends one match past the page, so the rest
+		// of the batch needn't be checked: a series costs episode reads.
+		want := len(items)
+		if !includeTotal {
+			if remaining := pageFetchLimit(filters.Offset, filters.Limit) - result.Total; remaining < want-1 {
+				want = remaining + 1
+			}
+		}
+		matches, err := s.matchConfiguredUserState(ctx, store, session.ProfileID, items, filters, want)
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +97,9 @@ func configuredPlayed(ctx context.Context, store userstore.UserStore, profileID 
 	return progress, played, nil
 }
 
-func (s *directContentService) matchConfiguredUserState(ctx context.Context, store userstore.UserStore, profileID string, items []upstreamListItem, filters catalog.BrowseFilters) ([]bool, error) {
+// matchConfiguredUserState reports which items match the state filters. It
+// stops after want matches; the items after the last one checked don't match.
+func (s *directContentService) matchConfiguredUserState(ctx context.Context, store userstore.UserStore, profileID string, items []upstreamListItem, filters catalog.BrowseFilters, want int) ([]bool, error) {
 	matches := make([]bool, len(items))
 	if len(items) == 0 {
 		return matches, nil
@@ -113,7 +123,11 @@ func (s *directContentService) matchConfiguredUserState(ctx context.Context, sto
 	if err != nil {
 		return nil, err
 	}
+	found := 0
 	for i, item := range items {
+		if found == want {
+			break
+		}
 		if filters.IsFavorite && !favorites[item.ContentID] {
 			continue
 		}
@@ -136,6 +150,7 @@ func (s *directContentService) matchConfiguredUserState(ctx context.Context, sto
 			}
 		}
 		matches[i] = true
+		found++
 	}
 	return matches, nil
 }

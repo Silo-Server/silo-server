@@ -23,6 +23,7 @@ const opUpdateWatchProviderConnection = "updateWatchProviderConnection"
 // RequestLifecycleService preserves the domain's viewer checks for cancellation.
 type RequestLifecycleService interface {
 	Cancel(context.Context, mediarequests.Viewer, string, string) (*mediarequests.Request, error)
+	RemoveFailed(context.Context, mediarequests.Viewer, string) error
 	GetFeatureStatus(context.Context, mediarequests.Viewer) (mediarequests.FeatureStatus, error)
 	RequestCapabilityAllowed(context.Context, mediarequests.Viewer) (bool, error)
 }
@@ -34,6 +35,9 @@ type RequestCancelInput struct {
 	Body struct {
 		Reason string `json:"reason,omitempty" maxLength:"2000"`
 	}
+}
+type RequestRemoveInput struct {
+	ID ID `path:"id"`
 }
 type FeatureStatus struct {
 	Capability
@@ -65,6 +69,8 @@ type FeatureStatus struct {
 	Requests4KAllowed   bool `json:"requests_4k_allowed" doc:"Whether the viewer may make 4K requests now: their account may, and a download server takes 4K for movies or for series. request_4k on the title detail says which"`
 	// DiscoverRowsSupported advertises the admin-defined Discover layout.
 	DiscoverRowsSupported bool `json:"discover_rows_supported" doc:"Whether the Discover page follows an admin-defined layout: listDiscoverSections may hold rows beyond the six built-in ones, in any order, and lists every row in row_order; getDiscoverRow pages any title row."`
+	// RemoveFailedSupported advertises DELETE /requests/{id}.
+	RemoveFailedSupported bool `json:"remove_failed_supported" doc:"Whether removeFailedRequest is available: a requester can delete their own failed request that delivered nothing."`
 }
 type RequestFeatureStatusOutput struct {
 	Status       int
@@ -231,7 +237,7 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 				return nil, requestProblem(err)
 			}
 		}
-		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true, DiscoverRowsSupported: true,
+		return &RequestFeatureStatusOutput{Body: FeatureStatus{Capability: Capability{State: enabledCapabilityState(status.RequestsEnabled), Allowed: &allowed}, RequestsEnabled: status.RequestsEnabled, RatingRestrictionsEnforced: status.RatingRestrictionsEnforced, FollowSupported: true, SeasonRequestsSupported: true, MissingSeasonsRequestable: status.MissingSeasonsRequestable, DownloadProgressSupported: true, DiscoverRowsSupported: true, RemoveFailedSupported: true,
 			WatchlistTitlesSupported: status.RequestsEnabled && reg.deps.WatchlistTitles != nil && reg.deps.WatchlistRequests != nil, WatchlistRequests: status.WatchlistRequests && allowed, Requests4KSupported: true, Requests4KAllowed: status.UHDRequestsAllowed && allowed}}, nil
 	})
 	Register(reg, op(http.MethodPost, "/requests/{id}/cancel", "cancelRequest", "Cancel an accessible request."), func(ctx context.Context, in *RequestCancelInput) (*MediaRequestOutput, error) {
@@ -247,6 +253,21 @@ func registerRequestLifecycle(reg *Registry, requests RequestLifecycleService, p
 			return nil, requestProblem(err)
 		}
 		return &MediaRequestOutput{Body: mediaRequestOf(result, viewer)}, nil
+	})
+	remove := op(http.MethodDelete, "/requests/{id}", "removeFailedRequest", "Delete an accessible failed request that delivered nothing. Answers 409 when the request is no longer failed (an admin retried it, or the library completed it) or delivered a copy before failing.")
+	remove.DefaultStatus = http.StatusNoContent
+	Register(reg, remove, func(ctx context.Context, in *RequestRemoveInput) (*struct{}, error) {
+		if requests == nil {
+			return nil, unavailable("requests")
+		}
+		viewer, p := lifecycleViewer(ctx)
+		if p != nil {
+			return nil, p
+		}
+		if err := requests.RemoveFailed(ctx, viewer, string(in.ID)); err != nil {
+			return nil, requestProblem(err)
+		}
+		return nil, nil
 	})
 	scope := func(ctx context.Context) (int, string, error) {
 		if providers == nil {

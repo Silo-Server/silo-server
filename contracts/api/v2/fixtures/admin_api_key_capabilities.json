@@ -1,5 +1,5 @@
 {
-  "revision": "e4a8b6275617f6ca49567679e466180e9e79c6ae062f0f2936b05cbe8592e9f0",
+  "revision": "7afa7757a884269d917fd645c012e2734b8f2168a9f31eda8aaf1e0231eb54c3",
   "state": "available",
   "allowed": true,
   "available": true,
@@ -23,7 +23,7 @@
     },
     {
       "name": "admin:monitor:read",
-      "description": "Monitor the server read-only: live sessions, playback history, activity stats, accounts, devices, downloads, and node and host health. Never exposes filesystem paths, node addresses, storage keys, setting values or credentials."
+      "description": "Monitor the server read-only: live sessions, playback history, activity stats, accounts, devices, downloads, node and host health, and the catalog listing. Never exposes filesystem paths, node addresses, storage keys, setting values or credentials."
     },
     {
       "name": "admin:sessions:control",

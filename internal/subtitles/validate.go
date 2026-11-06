@@ -22,6 +22,12 @@ var (
 	subViewerCue = regexp.MustCompile(`(?m)^[ \t]*\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}[ \t]*,[ \t]*\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}[ \t]*(?:\r\n?|\n)[^\r\n]*\S`)
 )
 
+// FFmpeg's demuxers for the two text formats a .sub can hold.
+const (
+	microDVDDemuxer  = "microdvd"
+	subViewerDemuxer = "subviewer"
+)
+
 // ValidateSubtitleContent checks that data holds at least one subtitle cue in
 // format. Text in legacy single-byte encodings parses as-is, and UTF-16 files
 // with a byte-order mark are decoded for the check.
@@ -33,7 +39,7 @@ func ValidateSubtitleContent(format SubtitleFormat, data []byte) error {
 		cues, err := ParseCuesForFormat(format, text)
 		ok = err == nil && len(cues) > 0
 	case FormatSUB:
-		ok = hasMicroDVDCue(text) || subViewerCue.Match(text)
+		ok = subDemuxer(text) != ""
 	}
 	if !ok {
 		return ErrUnreadableSubtitle
@@ -41,12 +47,42 @@ func ValidateSubtitleContent(format SubtitleFormat, data []byte) error {
 	return nil
 }
 
-// hasMicroDVDCue reports a MicroDVD line with displayed text. A line such as
+// SUBDemuxer returns the FFmpeg input format for .sub subtitle data, which
+// FFmpeg has no "sub" demuxer for: "microdvd" or "subviewer", read from the
+// cues as ValidateSubtitleContent reads them, or "" when data holds neither,
+// such as a binary VobSub .sub. Like those demuxers, it reads UTF-8 with or
+// without a BOM and not UTF-16, which they turn into no cues or an error;
+// DeliveryBytes hands over UTF-8.
+func SUBDemuxer(data []byte) string {
+	return subDemuxer(bytes.TrimPrefix(data, utf8BOM))
+}
+
+// subDemuxer names the format of the first cue in text. A SubViewer cue whose
+// text looks like a MicroDVD line starts before that line, so SubViewer is
+// looked for only up to the end of the first MicroDVD cue.
+func subDemuxer(text []byte) string {
+	end := microDVDCueEnd(text)
+	searched := text
+	if end >= 0 {
+		searched = text[:end]
+	}
+	switch {
+	case subViewerCue.Match(searched):
+		return subViewerDemuxer
+	case end >= 0:
+		return microDVDDemuxer
+	}
+	return ""
+}
+
+// microDVDCueEnd returns the offset just past the first MicroDVD line with
+// displayed text, or -1 when there is none. A line such as
 // {1}{1}25.000 or {0}{0}23.976 in the first three non-empty lines declares
 // the frame rate and is not a cue; like FFmpeg, that is a start frame of 0 or
 // 1 with a rate between 3 and 100, and empty lines are skipped before
 // counting. Later lines like it are cues FFmpeg displays.
-func hasMicroDVDCue(text []byte) bool {
+func microDVDCueEnd(text []byte) int {
+	size := len(text)
 	for lineNo := 0; len(text) > 0; {
 		// A line ends in LF, CRLF or a bare CR.
 		end := bytes.IndexAny(text, "\r\n")
@@ -73,9 +109,9 @@ func hasMicroDVDCue(text []byte) bool {
 				continue
 			}
 		}
-		return true
+		return size - len(text)
 	}
-	return false
+	return -1
 }
 
 // decodeUTF16WithBOM returns UTF-16 data with a byte-order mark as UTF-8

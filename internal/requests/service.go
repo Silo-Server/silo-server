@@ -14,6 +14,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/idgen"
@@ -1139,7 +1141,10 @@ func (s *Service) AdminCancel(ctx context.Context, viewer Viewer, id, reason str
 	return s.cancel(ctx, viewer, id, reason, true)
 }
 
-func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, closeFailed bool) (*Request, error) {
+// ownedRequest loads a request the viewer may withdraw or remove: its own
+// account's, or any for an admin. Requesters are refused while requests are
+// turned off; admins are not.
+func (s *Service) ownedRequest(ctx context.Context, viewer Viewer, id string) (*Request, error) {
 	if viewer.UserID == 0 {
 		return nil, ErrForbidden
 	}
@@ -1155,6 +1160,14 @@ func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, 
 	if !viewer.IsAdmin && req.RequestedByUserID != viewer.UserID {
 		return nil, ErrForbidden
 	}
+	return req, nil
+}
+
+func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, closeFailed bool) (*Request, error) {
+	req, err := s.ownedRequest(ctx, viewer, id)
+	if err != nil {
+		return nil, err
+	}
 	guard := guardWithdrawable
 	if closeFailed && req.Outcome == OutcomeFailed {
 		// Closing a failed request moves it out of the admin's failed view;
@@ -1166,6 +1179,18 @@ func (s *Service) cancel(ctx context.Context, viewer Viewer, id, reason string, 
 		return nil, err
 	}
 	return withdrawn, nil
+}
+
+// RemoveFailed deletes a failed request for good. Owners can remove their
+// own; admins can remove any. Nothing is sent downstream: a failed request has
+// nothing in flight, and the guarded delete refuses one an admin is retrying
+// or one that delivered a copy before failing.
+func (s *Service) RemoveFailed(ctx context.Context, viewer Viewer, id string) error {
+	req, err := s.ownedRequest(ctx, viewer, id)
+	if err != nil {
+		return err
+	}
+	return s.store.DeleteFailed(ctx, req.ID)
 }
 
 func (s *Service) Retry(ctx context.Context, viewer Viewer, id string) (*Request, error) {
@@ -1701,11 +1726,41 @@ func (s *Service) LoadIntegrationOptions(ctx context.Context, viewer Viewer, int
 		return nil, fmt.Errorf("no fulfillment backend configured")
 	}
 	conn := ResolvedRouterConnection{ID: integration.ID, BaseURL: integration.BaseURL, APIKey: strings.TrimSpace(integration.APIKeyRef), Config: integration.PluginConfig}
+	if integration.TestConnection {
+		if err := s.testIntegrationConnection(ctx, integration, conn); err != nil {
+			return nil, err
+		}
+	}
 	options, err := s.router.ListConfigOptions(ctx, *integration.InstallationID, integration.CapabilityID, conn)
 	if err != nil {
 		return nil, classifyIntegrationError(err, integration.CapabilityID)
 	}
 	return options, nil
+}
+
+// testIntegrationConnection asks the router whether it can reach and sign in
+// to the server, since a router may answer an empty option list for a server
+// it cannot reach. The test is sent without the plugin config: the options
+// probe runs while that config is being edited, and a stale choice in it (a
+// server the router no longer lists) must not stop the options that replace
+// it from loading; save-time validation checks the config. A router that does
+// not implement the test is judged by its options. A failed test is
+// classified like a failed options load.
+func (s *Service) testIntegrationConnection(ctx context.Context, integration Integration, conn ResolvedRouterConnection) error {
+	conn.Config = nil
+	ok, message, err := s.router.TestConnection(ctx, *integration.InstallationID, integration.CapabilityID, conn)
+	switch {
+	case status.Code(err) == codes.Unimplemented:
+		return nil
+	case err != nil:
+		return classifyIntegrationError(err, integration.CapabilityID)
+	case !ok:
+		if strings.TrimSpace(message) == "" {
+			message = "connection test failed"
+		}
+		return classifyIntegrationError(errors.New(message), integration.CapabilityID)
+	}
+	return nil
 }
 
 func (s *Service) EffectivePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
@@ -1743,27 +1798,18 @@ func withPolicyCache(ctx context.Context) context.Context {
 	return context.WithValue(ctx, policyCacheKey{}, &policyCache{byUser: map[int]EffectivePolicy{}})
 }
 
-func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
-	settings, err := s.store.GetSettings(ctx)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-	limit, err := s.store.GetUserLimit(ctx, userID)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-	viewerAccess, err := s.viewerRequestAccess(ctx, userID)
-	if err != nil {
-		return EffectivePolicy{}, err
-	}
-
+// LayeredPolicy is the request policy an account gets, without its usage:
+// the server's settings, then its access group's limits, then its own, a
+// layer set to inherit deferring to the next; allowed is the account's
+// requests switch. Every reader of an account's request authority uses it.
+func LayeredPolicy(settings Settings, allowed bool, group *GroupLimit, limit *UserLimit) EffectivePolicy {
 	policy := EffectivePolicy{
 		RequestsEnabled: settings.RequestsEnabled,
 		MaxRequests:     settings.GlobalMaxRequests,
 		WindowDays:      settings.GlobalWindowDays,
 		AutoApprove:     settings.GlobalAutoApprovalEnabled,
 		AllowUHD:        settings.UHDRequestsAllowed,
-		Blocked:         !viewerAccess.allowed,
+		Blocked:         !allowed,
 	}
 	if policy.WindowDays <= 0 {
 		policy.WindowDays = 7
@@ -1773,7 +1819,7 @@ func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolic
 	limitMode, maxRequests, windowDays := LimitModeInherit, (*int)(nil), (*int)(nil)
 	approval := ApprovalModeInherit
 	layers := []*UserLimit{}
-	if g := viewerAccess.group; g != nil {
+	if g := group; g != nil {
 		layers = append(layers, &UserLimit{LimitMode: g.LimitMode, MaxRequests: g.MaxRequests, WindowDays: g.WindowDays, ApprovalMode: g.ApprovalMode, UHDMode: g.UHDMode})
 	}
 	if limit != nil {
@@ -1815,6 +1861,28 @@ func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolic
 		policy.AutoApprove = true
 	}
 
+	return policy
+}
+
+func (s *Service) resolvePolicy(ctx context.Context, userID int) (EffectivePolicy, error) {
+	settings, err := s.store.GetSettings(ctx)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+	limit, err := s.store.GetUserLimit(ctx, userID)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+	viewerAccess, err := s.viewerRequestAccess(ctx, userID)
+	if err != nil {
+		return EffectivePolicy{}, err
+	}
+
+	var group *GroupLimit
+	if viewerAccess.group != nil {
+		group = viewerAccess.group
+	}
+	policy := LayeredPolicy(settings, viewerAccess.allowed, group, limit)
 	policy.WindowStart = s.now().AddDate(0, 0, -policy.WindowDays)
 	if !policy.Unlimited {
 		used, err := s.store.CountUserRequestsSince(ctx, userID, policy.WindowStart)
@@ -2506,29 +2574,11 @@ func (s *Service) routingRatingOf(ctx context.Context, req Request) (string, err
 // they were captured, or while TMDB was unreachable, and stores them. Routing
 // without them could send a title to the wrong server, so a TMDB failure is a
 // submission error and the submission retries. A request captured before its
-// rating was is given one, only when an enabled route checks ratings.
+// rating (or, for a series, its status) was is given one, only when an
+// enabled route checks it.
 func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes []Route) error {
 	if req.RoutingFacts.Captured() {
-		// A title TMDB had not rated yet (unreleased) is asked again a day
-		// later, so a rating route can still match it once it is rated.
-		stored := req.RoutingFacts.ContentRating
-		known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
-		if known || !routesCheckRating(routes, req.MediaType) {
-			return nil
-		}
-		rating, err := s.routingRatingOf(ctx, *req)
-		if err != nil {
-			return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
-		}
-		facts := req.RoutingFacts
-		now := s.now()
-		facts.ContentRating, facts.CapturedAt = &rating, &now
-		updated, err := s.store.SetRoutingFacts(ctx, req.ID, facts)
-		if err != nil {
-			return err
-		}
-		req.RoutingFacts = updated.RoutingFacts
-		return nil
+		return s.recheckCapturedFacts(ctx, req, routes)
 	}
 	detail := s.requestDetail(ctx, req.MediaType, req.TMDBID)
 	if detail == nil {
@@ -2550,6 +2600,72 @@ func (s *Service) ensureRoutingFacts(ctx context.Context, req *Request, routes [
 		return err
 	}
 	req.RoutingFacts, req.IsAnime = updated.RoutingFacts, updated.IsAnime
+	// Another API server may have stored its capture first, without what
+	// this one reads (a server not yet upgraded has no series status).
+	return s.recheckCapturedFacts(ctx, req, routes)
+}
+
+// recheckCapturedFacts gives captured facts what an enabled route needs and
+// they lack: a rating TMDB had not given yet, or a series' status.
+func (s *Service) recheckCapturedFacts(ctx context.Context, req *Request, routes []Route) error {
+	if err := s.recheckRoutingRating(ctx, req, routes); err != nil {
+		return err
+	}
+	return s.ensureSeriesStatus(ctx, req, routes)
+}
+
+// recheckRoutingRating reads a captured request's rating again when it has
+// none and an enabled route checks ratings: a title TMDB had not rated yet
+// (unreleased) is asked again a day later, so a rating route can still match
+// it once it is rated. Only the rating and its capture time are written, so
+// the read never replaces a fact another API server stored meanwhile.
+func (s *Service) recheckRoutingRating(ctx context.Context, req *Request, routes []Route) error {
+	stored := req.RoutingFacts.ContentRating
+	known := stored != nil && (*stored != "" || s.now().Sub(*req.RoutingFacts.CapturedAt) < unratedRecheck)
+	if known || !routesCheckRating(routes, req.MediaType) {
+		return nil
+	}
+	rating, err := s.routingRatingOf(ctx, *req)
+	if err != nil {
+		return fmt.Errorf("could not read the title's rating from TMDB to route it: %w", err)
+	}
+	now := s.now()
+	updated, err := s.store.UpdateRoutingFacts(ctx, req.ID, RoutingFacts{ContentRating: &rating, CapturedAt: &now})
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts = updated.RoutingFacts
+	return nil
+}
+
+// ensureSeriesStatus gives a series captured before status was one, only
+// when an enabled route checks status. It is read once, like the facts
+// captured with the request: a status TMDB has none for is not asked again,
+// and the capture time is left alone, since it times the rating's recheck.
+// A series TMDB no longer lists has no status, rather than a request that
+// can never be sent. The first status any API server stores wins, so every
+// server routes the request on the same one.
+func (s *Service) ensureSeriesStatus(ctx context.Context, req *Request, routes []Route) error {
+	if req.RoutingFacts.SeriesStatus != nil || !routesCheckSeriesStatus(routes, req.MediaType) {
+		return nil
+	}
+	if s.tmdb == nil {
+		return errors.New("could not read the series' status from TMDB to route it")
+	}
+	var status *string
+	switch detail, err := s.tmdb.GetMediaDetail(ctx, tmdbMediaType(req.MediaType), req.TMDBID); {
+	case errors.Is(err, tmdb.ErrNotFound):
+		status = new("")
+	case err != nil || detail == nil:
+		return fmt.Errorf("could not read the series' status from TMDB to route it: %w", err)
+	default:
+		status = seriesStatusOf(detail)
+	}
+	updated, err := s.store.FillRoutingFacts(ctx, req.ID, RoutingFacts{SeriesStatus: status})
+	if err != nil {
+		return err
+	}
+	req.RoutingFacts = updated.RoutingFacts
 	return nil
 }
 

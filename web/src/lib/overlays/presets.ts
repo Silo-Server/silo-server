@@ -11,6 +11,10 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     id: "minimal",
     label: "Minimal",
     description: "Near-invisible. Tiny text, no background.",
+    layout: "stack",
+    sourceChips: false,
+    fontWeight: 600,
+    uppercase: true,
     badgeClass:
       "rounded-sm px-1 py-0 text-[0.5625rem] font-semibold tracking-widest uppercase leading-none",
     badgeStyle: (accent) => ({
@@ -35,6 +39,10 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     id: "classic",
     label: "Classic",
     description: "Semi-transparent dark pill with a white border. The default.",
+    layout: "stack",
+    sourceChips: false,
+    fontWeight: 600,
+    uppercase: true,
     badgeClass:
       "rounded-full border border-white/15 px-2 py-0.5 text-[0.625rem] font-semibold tracking-wide uppercase leading-none",
     badgeStyle: (accent) => ({
@@ -57,6 +65,10 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     id: "vibrant",
     label: "Vibrant",
     description: "Opaque, accent-colored badges. High contrast.",
+    layout: "stack",
+    sourceChips: false,
+    fontWeight: 700,
+    uppercase: true,
     badgeClass:
       "rounded-md px-2 py-0.5 text-[0.625rem] font-bold tracking-wide uppercase leading-none shadow-sm",
     badgeStyle: (accent) => ({
@@ -80,6 +92,10 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     id: "pill",
     label: "Pill",
     description: "Larger pill with more padding. Works well with icons.",
+    layout: "stack",
+    sourceChips: false,
+    fontWeight: 600,
+    uppercase: true,
     badgeClass:
       "rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-wide uppercase leading-none",
     badgeStyle: (accent) => ({
@@ -104,6 +120,10 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     id: "square",
     label: "Square",
     description: "Blocky, high-density. Plex-inspired.",
+    layout: "stack",
+    sourceChips: false,
+    fontWeight: 700,
+    uppercase: true,
     badgeClass:
       "rounded-sm px-1.5 py-0.5 text-[0.5625rem] font-bold tracking-widest uppercase leading-none",
     badgeStyle: (accent) => ({
@@ -126,6 +146,60 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
     stackGap: 2,
     accentStrategy: "border",
   },
+  plate: {
+    id: "plate",
+    label: "Plate",
+    description: "Large dark plates with heavy type. Ratings lead with a coloured source chip.",
+    layout: "stack",
+    sourceChips: true,
+    fontWeight: 800,
+    uppercase: true,
+    badgeClass:
+      "rounded-md border border-white/10 px-2.5 py-1 text-xs font-extrabold tracking-wide uppercase leading-none",
+    badgeStyle: (accent) => ({
+      background: "rgba(0,0,0,0.72)",
+      color: "white",
+      borderColor: accent ? `color-mix(in srgb, ${accent} 45%, transparent)` : undefined,
+    }),
+    fontSize: 12,
+    paddingInline: 7,
+    paddingBlock: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    boxShadow: { x: 0, y: 2, blur: 6, spread: 0, color: "rgb(0 0 0 / 0.35)" },
+    iconSize: 13,
+    iconGap: 5,
+    preferIcon: true,
+    gapClass: "gap-1",
+    stackGap: 4,
+    accentStrategy: "border",
+  },
+  band: {
+    id: "band",
+    label: "Edge band",
+    description: "Each edge's badges in one strip of marks over a soft scrim.",
+    layout: "band",
+    sourceChips: false,
+    fontWeight: 800,
+    uppercase: true,
+    badgeClass: "px-0 py-0 text-xs font-extrabold tracking-wide uppercase leading-none",
+    badgeStyle: (accent) => ({
+      background: "transparent",
+      color: accent ?? "white",
+      textShadow: "0 1px 3px rgba(0,0,0,0.75)",
+    }),
+    fontSize: 12.5,
+    paddingInline: 0,
+    paddingBlock: 1,
+    borderRadius: 0,
+    textShadow: { x: 0, y: 1, blur: 3, color: "rgba(0,0,0,0.75)" },
+    iconSize: 13,
+    iconGap: 3,
+    preferIcon: false,
+    gapClass: "gap-1",
+    stackGap: 7,
+    accentStrategy: "text",
+  },
 };
 
 export const PRESET_IDS = [
@@ -134,6 +208,8 @@ export const PRESET_IDS = [
   "vibrant",
   "pill",
   "square",
+  "plate",
+  "band",
 ] as const satisfies readonly PresetId[];
 
 export function getPreset(id: PresetId): OverlayPreset {

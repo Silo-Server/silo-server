@@ -21,9 +21,12 @@ itself and its invariants.
   by the server; `internal/settingscontract` loads and validates it.
 - Object-valued settings reference a named JSON Schema under
   `contracts/settings/v1/schemas/`.
-- The canonical bytes of the manifest are its RFC 8785 (JCS) canonicalization.
-  The manifest endpoint's `ETag` is the SHA-256 of those bytes, and
-  generated-code reproducibility is defined over the same bytes.
+- The canonical bytes of the manifest are its RFC 8785 (JCS) canonicalization,
+  and generated-code reproducibility is defined over those bytes. The manifest
+  endpoint serves the public projection: the canonical bytes with each
+  definition's `notes` removed. Its `ETag` is the SHA-256 of that projection
+  together with every value schema under `schemas/`, so a schema change changes
+  the tag even when `manifest.json` does not.
 
 Clients vendor a pinned copy of the manifest and generate bindings from it
 (key constants, typed values, scope enums, defaults). Handwritten raw remote

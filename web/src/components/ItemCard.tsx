@@ -10,6 +10,7 @@ import type { BrowseItem } from "@/api/types";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
+import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { buildEpisodeCardLabels } from "@/lib/episodeCardLabels";
 import { formatDate as formatPreferredDate } from "@/lib/datetime";
@@ -220,6 +221,7 @@ export default function ItemCard({
             thumbhash={item.poster_thumbhash}
             square={item.type === "audiobook"}
             scrim="background"
+            lazy
           >
             {item.status === "pending" && (
               <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
@@ -240,6 +242,9 @@ export default function ItemCard({
                 corners; generic overlays would render underneath them. */}
             {item.status === "matched" && item.type !== "manga" && overlayPrefs && (
               <CardOverlays data={overlayDataFromBrowseItem(item)} prefs={overlayPrefs} />
+            )}
+            {item.status === "matched" && item.type !== "manga" && (
+              <CardWatchStatus userState={item.user_state} />
             )}
             {(mangaStatus || mangaCountLabel) && (
               /* One shared row so the two chips split the card width and

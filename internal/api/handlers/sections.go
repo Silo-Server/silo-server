@@ -134,6 +134,10 @@ type createSectionRequest struct {
 	ItemLimit   int             `json:"item_limit"`
 	Config      json.RawMessage `json:"config"`
 	Enabled     bool            `json:"enabled"`
+	// WebOnly keeps a featured row on the web app alone; it is dropped when
+	// Featured is false. Only /api/v2 sets it; the frozen /api/v1 body has
+	// no such member.
+	WebOnly bool `json:"-"`
 	// ValidateRecipe runs the section type's own config check. Only /api/v2
 	// sets it; the frozen /api/v1 routes keep accepting what they always did.
 	ValidateRecipe bool `json:"-"`
@@ -150,6 +154,9 @@ type updateSectionRequest struct {
 	ItemLimit   *int            `json:"item_limit"`
 	Config      json.RawMessage `json:"config,omitempty"`
 	Enabled     *bool           `json:"enabled"`
+	// WebOnly: see createSectionRequest. Nil keeps the stored value, which
+	// is cleared when the saved row is not featured.
+	WebOnly *bool `json:"-"`
 	// ValidateRecipe: see createSectionRequest.
 	ValidateRecipe bool `json:"-"`
 	// V1Rules: see createSectionRequest.
@@ -179,6 +186,9 @@ type sectionResponse struct {
 	Enabled     bool            `json:"enabled"`
 	CreatedAt   string          `json:"created_at"`
 	UpdatedAt   string          `json:"updated_at"`
+	// WebOnly is answered by /api/v2 only; the frozen /api/v1 body has no
+	// such member.
+	WebOnly bool `json:"-"`
 }
 
 type sectionListResponse struct {
@@ -199,6 +209,7 @@ func toSectionResponse(s *sections.PageSection) sectionResponse {
 		Enabled:     s.Enabled,
 		CreatedAt:   s.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt:   s.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		WebOnly:     s.WebOnly,
 	}
 }
 
@@ -480,6 +491,9 @@ type resolvedSectionResponse struct {
 	IsCustom    bool                  `json:"is_custom"`
 	Customized  bool                  `json:"customized"`
 	Items       []sectionItemResponse `json:"items"`
+	// HasMore reports that a capped Home row read (SectionViewer.ItemLimitCap)
+	// answered fewer cards than the row holds. Only the v2 API carries it.
+	HasMore bool `json:"-"`
 }
 
 type homeSectionsResponse struct {
@@ -506,7 +520,7 @@ type homeSectionItemsResponse struct {
 
 // HandleHomeLayout handles GET /home/layout
 func (h *SectionHandler) HandleHomeLayout(w http.ResponseWriter, r *http.Request) {
-	resp, err := h.HomeLayout(r.Context())
+	resp, err := h.HomeLayout(r.Context(), sectionViewerFromRequest(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -523,7 +537,7 @@ func (h *SectionHandler) HandleLibraryLayout(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	resp, err := h.LibraryLayout(r.Context(), libraryID)
+	resp, err := h.LibraryLayout(r.Context(), libraryID, sectionViewerFromRequest(r))
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -1371,11 +1385,13 @@ type sectionItemImageURLs struct {
 }
 
 // episodeParentImageURLs are an episode card's signed season poster and
-// series poster and backdrop, each at the size of the card's own slot.
+// backdrop and series poster and backdrop, each at the size of the card's own
+// slot.
 type episodeParentImageURLs struct {
 	seriesPosterURL   string
 	seriesBackdropURL string
 	seasonPosterURL   string
+	seasonBackdropURL string
 }
 
 // buildSectionsResponse renders resolved sections. libraryID carries the
@@ -1791,6 +1807,7 @@ func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.Artwo
 		batch.Add(pending[i].seriesPosterPath, posterHint)
 		batch.Add(pending[i].seriesBackdropPath, backdropHint)
 		batch.Add(pending[i].seasonPosterPath, posterHint)
+		batch.Add(pending[i].seasonBackdropPath, backdropHint)
 	}
 	resolved := batch.Resolve(ctx, svc, requestVariantHint("featured", art.Size))
 	result := make(map[K]sectionItemImageURLs, len(cards))
@@ -1803,18 +1820,23 @@ func resolveFeaturedArtwork[K comparable](ctx context.Context, svc catalog.Artwo
 				seriesPosterURL:   resolved.Get(pending[i].seriesPosterPath, posterHint).URL,
 				seriesBackdropURL: resolved.Get(pending[i].seriesBackdropPath, backdropHint).URL,
 				seasonPosterURL:   resolved.Get(pending[i].seasonPosterPath, posterHint).URL,
+				seasonBackdropURL: resolved.Get(pending[i].seasonBackdropPath, backdropHint).URL,
 			},
 		}
 	}
 	return result
 }
 
-func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType, item *models.MediaItem, meta *sections.SectionItemMeta, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse, imageURLs sectionItemImageURLs, resolvedPlayContentID string) sectionItemResponse {
+// sectionItemFromMediaItem maps an item's own catalog fields onto a card.
+// Home and library sections, recommendations and Watch Tonight all start from
+// it, so their cards carry the same catalog fields and poster badges. It copies
+// the item as given: only Home and library rows localize their items first.
+// Callers add the per-request parts: artwork URLs, overlay summary, user state
+// and row metadata. The frozen v1 recommendation and Watch Tonight routes drop
+// the badge fields again (v1RecommendationCard).
+func sectionItemFromMediaItem(item *models.MediaItem) sectionItemResponse {
 	resp := sectionItemResponse{
-		ContentID: item.ContentID,
-		// The resolver validated the item's own hint against this profile, so
-		// its answer replaces the unvalidated one carried by the item.
-		PlayContentID:          resolvedPlayContentID,
+		ContentID:              item.ContentID,
 		Type:                   item.Type,
 		Title:                  item.Title,
 		Year:                   item.Year,
@@ -1840,11 +1862,25 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		BackdropThumbhash:      item.BackdropThumbhash,
 		PosterIsEpisodeStill:   item.PosterIsEpisodeStill,
 		BackdropIsEpisodeStill: item.BackdropIsEpisodeStill,
-		OverlaySummary:         overlaySummary,
-		UserState:              userState,
 
 		MachineTranslatedFields: item.MachineTranslatedFields,
 	}
+	if resp.Genres == nil {
+		resp.Genres = []string{}
+	}
+	if resp.Keywords == nil {
+		resp.Keywords = []string{}
+	}
+	return resp
+}
+
+func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType, item *models.MediaItem, meta *sections.SectionItemMeta, overlaySummary *models.OverlaySummary, userState *itemUserStateResponse, imageURLs sectionItemImageURLs, resolvedPlayContentID string) sectionItemResponse {
+	resp := sectionItemFromMediaItem(item)
+	// The resolver validated the item's own hint against this profile, so
+	// its answer replaces the unvalidated one carried by the item.
+	resp.PlayContentID = resolvedPlayContentID
+	resp.OverlaySummary = overlaySummary
+	resp.UserState = userState
 	if meta != nil {
 		if item.Type == "episode" && item.PosterIsEpisodeStill == nil && meta.EpisodeStillPath != nil {
 			// Items from queries that don't mark provenance compare their
@@ -1865,13 +1901,6 @@ func (h *SectionHandler) toSectionItemResponse(sectionType sections.SectionType,
 		resp.ProgressUpdatedAt = meta.ProgressUpdatedAt
 		resp.ItemSource = meta.ItemSource
 		resp.applyEpisodeCardMeta(meta)
-	}
-
-	if resp.Genres == nil {
-		resp.Genres = []string{}
-	}
-	if resp.Keywords == nil {
-		resp.Keywords = []string{}
 	}
 
 	resp.PosterURL = imageURLs.posterURL
@@ -1895,6 +1924,8 @@ type EpisodeParentArtworkView struct {
 	SeriesBackdropThumbhash string
 	SeasonPosterURL         string
 	SeasonPosterThumbhash   string
+	SeasonBackdropURL       string
+	SeasonBackdropThumbhash string
 }
 
 // episodeParentArtworkView pairs an episode's parent artwork with its signed
@@ -1908,6 +1939,7 @@ func episodeParentArtworkView(p *models.EpisodeParentArtwork, urls episodeParent
 		SeriesPosterURL: urls.seriesPosterURL, SeriesPosterThumbhash: p.SeriesPosterThumbhash,
 		SeriesBackdropURL: urls.seriesBackdropURL, SeriesBackdropThumbhash: p.SeriesBackdropThumbhash,
 		SeasonPosterURL: urls.seasonPosterURL, SeasonPosterThumbhash: p.SeasonPosterThumbhash,
+		SeasonBackdropURL: urls.seasonBackdropURL, SeasonBackdropThumbhash: p.SeasonBackdropThumbhash,
 	}
 }
 
@@ -1957,6 +1989,7 @@ type featuredArtworkPaths struct {
 	seriesPosterPath   string
 	seriesBackdropPath string
 	seasonPosterPath   string
+	seasonBackdropPath string
 }
 
 // featuredItemArtworkPaths sizes an item card's artwork for a featured surface,
@@ -1972,6 +2005,7 @@ func featuredItemArtworkPaths(item *models.MediaItem, sectionType sections.Secti
 		paths.seriesPosterPath = sizedPosterPath(p.SeriesPosterPath, art.For(imagesize.SlotPoster))
 		paths.seriesBackdropPath = sizedSectionBackdropPath(sectionType, p.SeriesBackdropPath, art.For(imagesize.SlotBackdrop))
 		paths.seasonPosterPath = sizedPosterPath(p.SeasonPosterPath, art.For(imagesize.SlotPoster))
+		paths.seasonBackdropPath = sizedSectionBackdropPath(sectionType, p.SeasonBackdropPath, art.For(imagesize.SlotBackdrop))
 	}
 	return paths
 }
