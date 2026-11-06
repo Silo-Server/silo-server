@@ -84,7 +84,10 @@ outranks that default
 ([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)).
 
 Successful edits apply to the responding process. Other running processes load
-the persisted configuration when they restart. Runtime state and persisted
+the persisted configuration when they restart, except for plugin tasks: every
+API server installs a plugin task's saved schedule at its next plugin task sync,
+within a minute
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Runtime state and persisted
 schedule state are separate reads. The web editor captures the persisted schedule
 when editing begins, keeps the draft and original validator after conflicts, and
 requires explicit review and revision adoption before another submission. It
