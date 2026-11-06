@@ -45,10 +45,6 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 			return nil, err
 		}
 	}
-	if opts.PluginDestinationFilter != nil {
-		// Like the resolver above, the channel listing reads through the pool.
-		s.pluginDestinationSender.refreshChannels(ctx)
-	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin operational dispatch tx: %w", err)

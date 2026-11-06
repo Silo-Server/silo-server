@@ -591,12 +591,10 @@ current schema declares and doesn't mark secret: a stored field the schema no
 longer declares, such as a secret a plugin upgrade renamed, is never returned.
 `available`
 is false, `channel_name` empty and `settings` empty while no enabled plugin
-provides the destination's channel; nothing is sent then. Each server checks
-which channels are available at most every 30 seconds, before it queues a
-notification, so for that long after a plugin is disabled or removed its
-destinations can still get an attempt queued. If the check itself fails,
-every enabled destination is queued rather than dropping the notification.
-Either way the send finds no plugin and retries on the usual schedule.
+provides the destination's channel; nothing is sent or queued then. Whether
+a channel is available is read in the same transaction that queues the
+notification, so enabling, disabling or removing a plugin takes effect for the
+next notification on every server.
 
 ### Create a destination
 

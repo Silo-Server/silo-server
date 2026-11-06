@@ -164,9 +164,6 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	settle := w.settings.SettleDelay(ctx)
 	maxBurst := w.settings.MaxSeriesBurst(ctx)
 
-	// The channel listing reads through the pool, so refresh it before the
-	// transaction holds a connection.
-	w.pluginSender.refreshChannels(ctx)
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("begin fanout tx: %w", err)
@@ -556,8 +553,7 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 // for each newly inserted delivery, inside the fanout transaction, with the
 // same per-destination reason filter and per-profile rate limit as webhooks.
 // Nothing is queued until the plugin runtime is wired, or for a destination
-// whose plugin is off or removed, as of the channel set refreshChannels
-// cached before the transaction.
+// whose plugin is off or removed.
 func (w *FanoutWorker) enqueuePluginDestinationOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
 	if w.pluginSender == nil || len(inserted) == 0 {
 		return nil

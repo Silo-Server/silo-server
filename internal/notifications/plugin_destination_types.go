@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 )
 
@@ -57,6 +59,10 @@ func (c PluginChannel) declaredFields() map[string]struct{} {
 type PluginChannelHost interface {
 	// Channels lists the channels the enabled plugins provide.
 	Channels(ctx context.Context) ([]PluginChannel, error)
+	// AvailableChannels names the channels enabled plugins provide, read
+	// through tx so a caller holding a transaction needs no second
+	// connection.
+	AvailableChannels(ctx context.Context, tx pgx.Tx) ([]PluginChannelRef, error)
 	ValidateDestination(ctx context.Context, ref PluginChannelRef, req *pluginv1.ValidateNotificationDestinationRequest) (*pluginv1.ValidateNotificationDestinationResponse, error)
 	SendNotification(ctx context.Context, ref PluginChannelRef, req *pluginv1.SendNotificationRequest) (*pluginv1.SendNotificationResponse, error)
 }

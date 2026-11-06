@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -28,6 +29,15 @@ type scriptedChannelHost struct {
 	validating func()
 	// unavailable makes sends fail as if the plugin were turned off.
 	unavailable bool
+}
+
+func (h *scriptedChannelHost) AvailableChannels(ctx context.Context, _ pgx.Tx) ([]PluginChannelRef, error) {
+	channels, err := h.Channels(ctx)
+	refs := make([]PluginChannelRef, 0, len(channels))
+	for _, channel := range channels {
+		refs = append(refs, channel.PluginChannelRef)
+	}
+	return refs, err
 }
 
 func (h *scriptedChannelHost) Channels(context.Context) ([]PluginChannel, error) {
@@ -437,7 +447,6 @@ func TestPluginDestinationsOfAMissingPluginGetNothingQueuedDB(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sender.refreshChannels(ctx)
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)

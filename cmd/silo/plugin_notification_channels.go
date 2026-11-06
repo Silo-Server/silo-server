@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
@@ -35,6 +37,18 @@ func (h pluginChannelHost) Channels(ctx context.Context) ([]notifications.Plugin
 			PublicFields:     public,
 			SecretFields:     secrets,
 		})
+	}
+	return out, nil
+}
+
+func (h pluginChannelHost) AvailableChannels(ctx context.Context, tx pgx.Tx) ([]notifications.PluginChannelRef, error) {
+	refs, err := plugins.ListEnabledCapabilityRefsOfType(ctx, tx, capability.NotificationChannel)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]notifications.PluginChannelRef, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, notifications.PluginChannelRef{PluginID: ref.PluginID, CapabilityID: ref.CapabilityID})
 	}
 	return out, nil
 }
