@@ -11,18 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Email notification modes. The channel is profile-level: each profile owns
-// its mode, dispatch watermark, and verified destination address. There is
-// deliberately no fallback to the login account's email — without it, every
-// profile of a household would funnel mail to the account holder. A profile
-// receives nothing until its own address is verified. The values are the
-// shared account-channel modes.
-const (
-	EmailModeOff         = ChannelModeOff
-	EmailModePerEpisode  = ChannelModePerEpisode
-	EmailModeDailyDigest = ChannelModeDailyDigest
-)
-
 // Verification-send rate limits: a minimum gap between sends plus a daily
 // cap, so the server cannot be used to spray arbitrary addresses.
 const (
@@ -47,7 +35,12 @@ type EmailPrefs struct {
 	ConsecutiveFailures int
 }
 
-// EmailPrefsRepository owns notification_email_prefs.
+// EmailPrefsRepository owns notification_email_prefs. The email channel is
+// profile-level: each profile owns its mode (one of the ChannelMode values),
+// dispatch watermark, and verified destination address. There is
+// deliberately no fallback to the login account's email — without it, every
+// profile of a household would funnel mail to the account holder. A profile
+// receives nothing until its own address is verified.
 type EmailPrefsRepository struct {
 	pool *pgxpool.Pool
 }
@@ -59,7 +52,7 @@ func NewEmailPrefsRepository(pool *pgxpool.Pool) *EmailPrefsRepository {
 
 // Get returns the profile's email prefs; missing rows default to mode off.
 func (r *EmailPrefsRepository) Get(ctx context.Context, profileID string) (EmailPrefs, error) {
-	prefs := EmailPrefs{ProfileID: profileID, Mode: EmailModeOff}
+	prefs := EmailPrefs{ProfileID: profileID, Mode: ChannelModeOff}
 	err := r.pool.QueryRow(ctx, `
 		SELECT user_id, mode, custom_email, pending_email, pending_expires_at,
 		       watermark_created_at, watermark_id, last_digest_at,

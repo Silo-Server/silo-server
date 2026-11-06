@@ -192,33 +192,6 @@ func (r *WebhookRepository) InsertWithLimit(ctx context.Context, hook Webhook, m
 	return nil
 }
 
-// Update persists the mutable fields of a webhook (name, URL, flags,
-// enabled state, secret) and bumps updated_at.
-func (r *WebhookRepository) Update(ctx context.Context, hook Webhook) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE notification_webhooks SET
-			name = $2, type = $3, url_ciphertext = $4, url_host = $5,
-			signing_secret_ciphertext = $6, enabled = $7,
-			notify_favorites = $8, notify_watchlist = $9,
-			notify_continue_watching = $10, notify_next_up = $11,
-			notify_requests = $12,
-			consecutive_failures = $13, disabled_reason = $14,
-			updated_at = now()
-		WHERE id = $1`,
-		hook.ID, hook.Name, hook.Type, hook.URLCiphertext, hook.URLHost,
-		hook.SigningSecretCiphertext, hook.Enabled,
-		hook.NotifyFavorites, hook.NotifyWatchlist, hook.NotifyContinueWatching, hook.NotifyNextUp,
-		hook.NotifyRequests,
-		hook.ConsecutiveFailures, hook.DisabledReason)
-	if err != nil {
-		if isWebhookNameViolation(err) {
-			return ErrWebhookNameTaken
-		}
-		return fmt.Errorf("update webhook: %w", err)
-	}
-	return nil
-}
-
 // Delete removes an account profile's webhook; attempts cascade. Idempotent.
 func (r *WebhookRepository) Delete(ctx context.Context, userID int, profileID, id string) error {
 	_, err := r.pool.Exec(ctx,
@@ -233,52 +206,91 @@ func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int,
 	return err
 }
 
-// RecordSuccess resets the failure streak after a delivered attempt.
-func (r *WebhookRepository) RecordSuccess(ctx context.Context, webhookID string) error {
-	_, err := r.pool.Exec(ctx, `
+// WebhookAttemptOutcome is how one send of a webhook attempt ended.
+type WebhookAttemptOutcome struct {
+	AttemptID     string
+	Outcome       string
+	AttemptNumber int
+	HTTPStatus    *int
+	Message       string
+	NextRetryAt   *time.Time
+}
+
+// finalizeAttemptCTE writes a WebhookAttemptOutcome ($1-$6) in the same
+// statement as the webhook's streak update, so a crash between the two
+// cannot leave the streaks disagreeing with the attempt history. Claims do
+// not change attempt_number, so it fences the write: when a lease expired
+// mid-send and another worker already finished this send, the row has moved
+// on and neither the attempt nor the streaks change.
+const finalizeAttemptCTE = `
+	WITH finalized AS (
+		UPDATE webhook_delivery_attempts
+		SET outcome = $2, attempt_number = $3, attempted_at = now(),
+		    http_status = $4, failure_message = left($5, 256), next_retry_at = $6
+		WHERE id = $1 AND attempt_number = $3 - 1
+		RETURNING 1
+	)`
+
+// errAttemptSuperseded reports that another worker already finished the send.
+var errAttemptSuperseded = errors.New("webhook attempt already finalized")
+
+func (o WebhookAttemptOutcome) args() []any {
+	var message *string
+	if o.Message != "" {
+		message = &o.Message
+	}
+	return []any{o.AttemptID, o.Outcome, o.AttemptNumber, o.HTTPStatus, message, o.NextRetryAt}
+}
+
+// RecordSuccess finalizes a delivered attempt and resets both streaks. It
+// returns errAttemptSuperseded when another worker already finished the send.
+func (r *WebhookRepository) RecordSuccess(ctx context.Context, webhookID string, done WebhookAttemptOutcome) error {
+	tag, err := r.pool.Exec(ctx, finalizeAttemptCTE+`
 		UPDATE notification_webhooks
-		SET last_success_at = now(), consecutive_failures = 0, updated_at = now()
-		WHERE id = $1`, webhookID)
+		SET last_success_at = now(), consecutive_failures = 0, consecutive_rejections = 0,
+		    updated_at = now()
+		WHERE id = $7 AND EXISTS (SELECT 1 FROM finalized)`, append(done.args(), webhookID)...)
+	if err == nil && tag.RowsAffected() == 0 {
+		return errAttemptSuperseded
+	}
 	return err
 }
 
-// RecordFailure increments the failure streak and stores the diagnostic.
-func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string, httpStatus *int, message string) error {
-	_, err := r.pool.Exec(ctx, `
+// RecordFailure finalizes a failed attempt, increments the failure streak,
+// and stores the diagnostic. A rejected delivery (a non-retryable 4xx) also
+// extends the rejection streak, whose new length is returned. Success,
+// re-enabling, and a URL change reset both streaks. It returns
+// errAttemptSuperseded when another worker already finished the send.
+func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string, done WebhookAttemptOutcome, rejected bool) (int, error) {
+	var rejections int
+	err := r.pool.QueryRow(ctx, finalizeAttemptCTE+`
 		UPDATE notification_webhooks
 		SET last_failure_at = now(),
-		    last_failure_status = $2,
-		    last_failure_message = left($3, 256),
+		    last_failure_status = $4,
+		    last_failure_message = left($5, 256),
 		    consecutive_failures = consecutive_failures + 1,
+		    consecutive_rejections = consecutive_rejections + CASE WHEN $8 THEN 1 ELSE 0 END,
 		    updated_at = now()
-		WHERE id = $1`, webhookID, httpStatus, message)
-	return err
+		WHERE id = $7 AND EXISTS (SELECT 1 FROM finalized)
+		RETURNING consecutive_rejections`, append(done.args(), webhookID, rejected)...).Scan(&rejections)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, errAttemptSuperseded
+	}
+	return rejections, err
 }
 
-// Disable auto-disables a webhook with a profile-visible reason.
-func (r *WebhookRepository) Disable(ctx context.Context, webhookID, reason string) error {
-	_, err := r.pool.Exec(ctx, `
+// Disable auto-disables an enabled webhook with a profile-visible reason. It
+// reports whether this call disabled it, so concurrent failures post one
+// notice.
+func (r *WebhookRepository) Disable(ctx context.Context, webhookID, reason string) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
 		UPDATE notification_webhooks
 		SET enabled = false, disabled_reason = left($2, 256), updated_at = now()
-		WHERE id = $1`, webhookID, reason)
-	return err
-}
-
-// RecentFinalOutcomes returns the most recent terminal attempt outcomes
-// (delivered/failed/auto_disabled) for a webhook, newest first. Used for the
-// 3-consecutive-non-retryable-4xx auto-disable rule.
-func (r *WebhookRepository) RecentFinalOutcomes(ctx context.Context, webhookID string, limit int) ([]DeliveryAttempt, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, notification_delivery_id, webhook_id, attempt_number, attempted_at,
-		       next_retry_at, http_status, outcome, failure_message
-		FROM webhook_delivery_attempts
-		WHERE webhook_id = $1 AND outcome IN ('delivered', 'failed', 'auto_disabled')
-		ORDER BY attempted_at DESC
-		LIMIT $2`, webhookID, limit)
+		WHERE id = $1 AND enabled`, webhookID, reason)
 	if err != nil {
-		return nil, fmt.Errorf("list final webhook outcomes: %w", err)
+		return false, err
 	}
-	return scanDeliveryAttempts(rows)
+	return tag.RowsAffected() == 1, nil
 }
 
 func scanDeliveryAttempts(rows pgx.Rows) ([]DeliveryAttempt, error) {
@@ -482,6 +494,7 @@ func (r *WebhookRepository) UpdateGuarded(ctx context.Context, userID int, profi
  name=$4, url_ciphertext=$5, url_host=$6, enabled=$7,
  notify_favorites=$8, notify_watchlist=$9, notify_continue_watching=$10,
  notify_next_up=$11, notify_requests=$12, consecutive_failures=$13,
+ consecutive_rejections=LEAST(consecutive_rejections, $13),
  disabled_reason=$14, updated_at=now()
  WHERE user_id=$1 AND profile_id=$2 AND id=$3 RETURNING `+webhookColumns,
 		userID, profile, id, hook.Name, hook.URLCiphertext, hook.URLHost, hook.Enabled,

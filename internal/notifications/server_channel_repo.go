@@ -147,53 +147,6 @@ func (r *ServerChannelRepository) InsertWithLimit(ctx context.Context, ch Server
 	return nil
 }
 
-// Update persists the admin-mutable fields (name, URL, secret, enabled state,
-// event toggles) and bumps updated_at. Watermark and failure bookkeeping are
-// owned by the sweep/send paths; the service resets them explicitly through
-// ResetDispatchState on enable transitions.
-func (r *ServerChannelRepository) Update(ctx context.Context, ch ServerChannel) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE notification_server_channels SET
-			name = $2, url_ciphertext = $3, url_host = $4,
-			signing_secret_ciphertext = $5, enabled = $6,
-			notify_new_movies = $7, notify_new_episodes = $8,
-			notify_new_audiobooks = $9, notify_new_ebooks = $10,
-			notify_request_submitted = $11, notify_request_approved = $12,
-			notify_request_declined = $13, notify_request_fulfilled = $14,
-			updated_at = now()
-		WHERE id = $1`,
-		ch.ID, ch.Name, ch.URLCiphertext, ch.URLHost,
-		ch.SigningSecretCiphertext, ch.Enabled,
-		ch.NotifyNewMovies, ch.NotifyNewEpisodes,
-		ch.NotifyNewAudiobooks, ch.NotifyNewEbooks,
-		ch.NotifyRequestSubmitted, ch.NotifyRequestApproved,
-		ch.NotifyRequestDeclined, ch.NotifyRequestFulfilled)
-	if err != nil {
-		if isServerChannelNameViolation(err) {
-			return ErrServerChannelNameTaken
-		}
-		return fmt.Errorf("update server channel: %w", err)
-	}
-	return nil
-}
-
-// ResetDispatchState clears failure backoff/auto-disable state and
-// fast-forwards the content watermark to now. Called when a channel is
-// (re-)enabled or its URL is replaced: a channel that was dead for days must
-// resume from the present, not replay the gap.
-func (r *ServerChannelRepository) ResetDispatchState(ctx context.Context, id string) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE notification_server_channels SET
-			consecutive_failures = 0, disabled_reason = NULL, last_attempt_at = NULL,
-			watermark_created_at = now(), watermark_id = '',
-			updated_at = now()
-		WHERE id = $1`, id)
-	if err != nil {
-		return fmt.Errorf("reset server channel dispatch state: %w", err)
-	}
-	return nil
-}
-
 // Delete removes a server channel. Idempotent.
 func (r *ServerChannelRepository) Delete(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx,

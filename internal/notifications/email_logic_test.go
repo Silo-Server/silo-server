@@ -142,7 +142,7 @@ func TestCollateEmailItemsKeepsLifecycleAndFulfilledForSameRequest(t *testing.T)
 func TestComposeNotificationEmailEscapesHTML(t *testing.T) {
 	row := emailEpisodeRow("01A", "p1", "ep-1", 2, 3)
 	row.SeriesTitle = `<script>alert("x")</script>`
-	content := composeNotificationEmail(EmailModePerEpisode, []DeliveryRow{row}, emailComposeOptions{})
+	content := composeNotificationEmail(ChannelModePerEpisode, []DeliveryRow{row}, emailComposeOptions{})
 	if strings.Contains(content.HTML, "<script>") {
 		t.Fatalf("series title not escaped:\n%s", content.HTML)
 	}
@@ -155,7 +155,7 @@ func TestComposeNotificationEmailProfileAndUnsubscribe(t *testing.T) {
 		ProfileName:    "Emma & <Kids>",
 		UnsubscribeURL: "https://silo.example.com/api/v2/notifications/email/unsubscribe?token=tok",
 	}
-	content := composeNotificationEmail(EmailModePerEpisode, rows, opts)
+	content := composeNotificationEmail(ChannelModePerEpisode, rows, opts)
 	if !strings.Contains(content.Subject, "(for Emma & <Kids>)") {
 		t.Fatalf("subject missing profile label: %q", content.Subject)
 	}
@@ -169,7 +169,7 @@ func TestComposeNotificationEmailProfileAndUnsubscribe(t *testing.T) {
 		t.Fatalf("unsubscribe link missing from text:\n%s", content.Text)
 	}
 
-	plain := composeNotificationEmail(EmailModePerEpisode, rows, emailComposeOptions{})
+	plain := composeNotificationEmail(ChannelModePerEpisode, rows, emailComposeOptions{})
 	if strings.Contains(plain.Subject, "(for") || strings.Contains(plain.Text, "To stop these emails") {
 		t.Fatalf("profile/unsubscribe copy leaked into unconfigured email: %q", plain.Subject)
 	}

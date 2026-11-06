@@ -44,7 +44,7 @@ func (r *ReleaseRepository) MarkLibrarySeeded(ctx context.Context, libraryID int
 	return err
 }
 
-// availabilityInsertColumns is shared by the library-wide and path-scoped
+// availabilityReturning is shared by the library-wide and path-scoped
 // availability inserts.
 const availabilityReturning = ` RETURNING episode_id, series_id, season_number, episode_number, episode_key, available_at`
 
@@ -514,19 +514,21 @@ func insertReleaseEvents(ctx context.Context, tx pgx.Tx, libraryID int, rows []n
 	return total, nil
 }
 
-// ClaimUnprocessed locks and returns up to limit unprocessed release events
-// older than the settle delay. Must run inside the caller's transaction;
-// FOR UPDATE SKIP LOCKED keeps multiple nodes from double-processing.
-func (r *ReleaseRepository) ClaimUnprocessed(ctx context.Context, tx pgx.Tx, settle time.Duration, limit int) ([]ReleaseEvent, error) {
+// ClaimUnprocessed locks and returns up to limit unprocessed release events,
+// oldest first. Must run inside the caller's transaction; FOR UPDATE SKIP
+// LOCKED keeps multiple nodes from double-processing.
+func (r *ReleaseRepository) ClaimUnprocessed(ctx context.Context, tx pgx.Tx, limit int) ([]ReleaseEvent, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT `+releaseEventColumns+`
 		FROM release_events
 		WHERE processed_at IS NULL
-		  AND created_at <= now() - ($1 * interval '1 second')
-		ORDER BY created_at
-		LIMIT $2
+		-- One ingest's events share created_at. Breaking the tie by episode
+		-- keeps a season that spans two batches ascending, so the second
+		-- batch is not behind the notified cursor.
+		ORDER BY created_at, library_id, series_id, episode_key
+		LIMIT $1
 		FOR UPDATE SKIP LOCKED`,
-		settle.Seconds(), limit)
+		limit)
 	if err != nil {
 		return nil, fmt.Errorf("claim release events: %w", err)
 	}

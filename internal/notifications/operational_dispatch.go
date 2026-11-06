@@ -3,8 +3,6 @@ package notifications
 import (
 	"context"
 	"fmt"
-
-	"github.com/oklog/ulid/v2"
 )
 
 // OperationalDispatch describes how one operational delivery (a non-fanout
@@ -66,56 +64,12 @@ func (s *System) DispatchOperational(ctx context.Context, delivery Delivery, opt
 		return nil, nil
 	}
 	row := inserted[0]
-	owner := profileKey{delivery.UserID, delivery.ProfileID}
-
-	if opts.WebhookFilter != nil && s.webhookRepo != nil && s.Settings.WebhooksEnabled(ctx) {
-		hooksByProfile, err := s.webhookRepo.ListEnabledByProfiles(ctx, tx, []profileKey{owner})
-		if err != nil {
-			return nil, err
-		}
-		attempts := make([]DeliveryAttempt, 0, 2)
-		for _, hook := range hooksByProfile[owner] {
-			if !opts.WebhookFilter(hook) {
-				continue
-			}
-			attempts = append(attempts, DeliveryAttempt{
-				ID:                     ulid.Make().String(),
-				NotificationDeliveryID: row.ID,
-				TargetID:               hook.ID,
-			})
-		}
-		if err := s.webhookRepo.EnqueueAttempts(ctx, tx, attempts); err != nil {
-			return nil, err
-		}
+	var webhookAllowed func(InsertedDelivery, Webhook) bool
+	if opts.WebhookFilter != nil {
+		webhookAllowed = func(_ InsertedDelivery, hook Webhook) bool { return opts.WebhookFilter(hook) }
 	}
-	if s.webPushRepo != nil && s.Settings.WebPushEnabled(ctx) {
-		subsByProfile, err := s.webPushRepo.ListEnabledByProfiles(ctx, tx, []profileKey{owner})
-		if err != nil {
-			return nil, err
-		}
-		attempts := make([]DeliveryAttempt, 0, 2)
-		for _, sub := range subsByProfile[owner] {
-			attempts = append(attempts, DeliveryAttempt{
-				ID:                     ulid.Make().String(),
-				NotificationDeliveryID: row.ID,
-				TargetID:               sub.ID,
-			})
-		}
-		if err := s.webPushRepo.EnqueueAttempts(ctx, tx, attempts); err != nil {
-			return nil, err
-		}
-	}
-	if s.pushDeviceRepo != nil {
-		if platforms := s.Settings.EnabledPushPlatforms(ctx); len(platforms) > 0 {
-			devicesByProfile, err := s.pushDeviceRepo.ListEnabledPushByProfiles(ctx, tx, []profileKey{owner}, platforms)
-			if err != nil {
-				return nil, err
-			}
-			attempts := newPushDeliveryAttempts(row.ID, devicesByProfile[owner])
-			if err := s.pushDeviceRepo.EnqueuePushAttempts(ctx, tx, attempts); err != nil {
-				return nil, err
-			}
-		}
+	if err := s.outbox.enqueue(ctx, tx, inserted, inserted, webhookAllowed); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit operational dispatch: %w", err)
