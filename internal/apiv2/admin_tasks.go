@@ -324,14 +324,16 @@ func (reg *Registry) updateAdminTaskSchedule(ctx context.Context, in *AdminTaskS
 	}
 	saved, err := reg.deps.AdminTasks.UpdateSchedule(ctx, in.Key, expected, configs)
 	if mismatch, ok := errors.AsType[*taskmanager.ScheduleConflict](err); ok {
-		observed := taskmanager.Schedule{Revision: mismatch.Actual}
-		if observed.Revision == 0 {
-			// Only an unsaved schedule's tag depends on its triggers.
-			if current, readErr := reg.deps.AdminTasks.GetSchedule(ctx, in.Key); readErr == nil {
-				observed = current
-			}
+		if mismatch.Actual != 0 {
+			return nil, StaleVersionProblem(taskScheduleTag(ctx, in.Key, taskmanager.Schedule{Revision: mismatch.Actual}))
 		}
-		return nil, StaleVersionProblem(taskScheduleTag(ctx, in.Key, observed))
+		// Only an unsaved schedule's tag depends on its triggers. Without
+		// them the tag would match no later read, so send none.
+		current, readErr := reg.deps.AdminTasks.GetSchedule(ctx, in.Key)
+		if readErr != nil {
+			return nil, StaleVersionProblem(EntityTag{})
+		}
+		return nil, StaleVersionProblem(taskScheduleTag(ctx, in.Key, current))
 	}
 	if err != nil {
 		return nil, taskProblem(err)
