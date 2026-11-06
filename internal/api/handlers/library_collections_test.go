@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -364,5 +365,33 @@ func TestAllCollectionLibrariesSelected(t *testing.T) {
 	}
 	if allCollectionLibrariesSelected(&models.LibraryCollection{LibraryIDs: []int{1, 3}}, selected) {
 		t.Fatal("collection shared with unselected libraries should not be deletable")
+	}
+}
+
+// keyEchoResolver resolves each artwork key to itself, so a test reads which
+// variant was asked for.
+type keyEchoResolver struct{}
+
+func (keyEchoResolver) ResolveURLs(_ context.Context, keys []string) map[string]catalog.ResolvedImageURL {
+	out := make(map[string]catalog.ResolvedImageURL, len(keys))
+	for _, key := range keys {
+		out[key] = catalog.ResolvedImageURL{URL: "resolved:" + key}
+	}
+	return out
+}
+
+// A collection page draws the backdrop across the page, so it gets the widest
+// variant an upload stores while the poster stays a card thumbnail.
+func TestLibraryCollectionResponseArtworkWidths(t *testing.T) {
+	h := &LibraryCollectionHandler{ArtworkResolver: keyEchoResolver{}}
+	got := h.libraryCollectionResponseOf(t.Context(), &models.LibraryCollection{
+		PosterURL:   "collection-images/c1/poster/original.r1.webp",
+		BackdropURL: "collection-images/c1/backdrop/original.r2.webp",
+	})
+	if want := "resolved:collection-images/c1/poster/w300.r1.webp"; got.PosterURL != want {
+		t.Errorf("poster = %q, want %q", got.PosterURL, want)
+	}
+	if want := "resolved:collection-images/c1/backdrop/w1280.r2.webp"; got.BackdropURL != want {
+		t.Errorf("backdrop = %q, want %q", got.BackdropURL, want)
 	}
 }
