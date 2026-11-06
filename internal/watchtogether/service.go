@@ -413,7 +413,6 @@ type Service struct {
 	// guestControlPreferences is the host's saved guest-control policy; nil
 	// starts every room host-only.
 	guestControlPreferences GuestControlPreferences
-	guestControlSaveLocks   profileLocks
 
 	janitorStop chan struct{}
 
@@ -1602,7 +1601,6 @@ func (s *Service) updatePolicy(
 	userID int,
 	profileID string,
 	policy GuestControlPolicy,
-	remember bool,
 ) (Snapshot, error) {
 	if policy != GuestControlPolicyHostOnly && policy != GuestControlPolicyGuestPlayPause {
 		return Snapshot{}, ErrTransportNotAllowed
@@ -1636,10 +1634,6 @@ func (s *Service) updatePolicy(
 	s.mu.Unlock()
 
 	s.sendDispatches(ctx, dispatches)
-	if remember {
-		// Only after the room commits, so a rolled-back change is never saved.
-		afterRoomCommit(ctx, func() { s.rememberGuestControlPolicy(ctx, roomID, userID, profileID, policy) })
-	}
 	return snapshot, nil
 }
 

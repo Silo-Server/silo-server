@@ -101,8 +101,9 @@ func TestRoomStartsWithAndSavesHostGuestControlPolicy(t *testing.T) {
 	if _, err := svc.UpdatePolicyAndRemember(t.Context(), "room-1", 7, "host", GuestControlPolicyGuestPlayPause); err != nil {
 		t.Fatal(err)
 	}
+	// A write that loses to a competing one saves nothing.
 	svc.repo = &competingPolicyRepo{stubRepo: repo}
-	if _, err := svc.UpdatePolicyAndRemember(t.Context(), "room-1", 7, "host", GuestControlPolicyHostOnly); err != nil {
+	if _, err := svc.UpdatePolicyAndRemember(t.Context(), "room-1", 7, "host", GuestControlPolicyGuestPlayPause); err != nil {
 		t.Fatal(err)
 	}
 	if len(saved.saved) != 1 || saved.saved[0] != GuestControlPolicyGuestPlayPause {
@@ -110,101 +111,13 @@ func TestRoomStartsWithAndSavesHostGuestControlPolicy(t *testing.T) {
 	}
 }
 
-func TestGuestControlPolicySaveKeepsRoomsLatestPolicyPG(t *testing.T) {
-	pool := selectionPG(t)
-	repo := NewRepository(pool)
-	room := baseRoom(time.Now().UTC())
-	room.GuestControlPolicy = GuestControlPolicyGuestPlayPause
-	if _, err := repo.CreateRoom(t.Context(), room); err != nil {
-		t.Fatal(err)
-	}
-	var mu sync.Mutex
-	var saved []GuestControlPolicy
-	record := func(policy GuestControlPolicy) {
-		mu.Lock()
-		saved = append(saved, policy)
-		mu.Unlock()
-	}
-
-	// Server A has read guest_play_pause and is slow to save it.
-	aRead, releaseA, aDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-	var releaseOnce sync.Once
-	release := func() { releaseOnce.Do(func() { close(releaseA) }) }
-	// Runs before the pool closes, so a failed wait cannot leave A's
-	// transaction holding the pool open.
-	t.Cleanup(release)
-	go func() {
-		aDone <- repo.saveCommittedGuestControlPolicy(t.Context(), room.ID, 7, "host", func(policy GuestControlPolicy) error {
-			close(aRead)
-			<-releaseA
-			record(policy)
-			return nil
-		})
-	}()
-	select {
-	case <-aRead:
-	case err := <-aDone:
-		t.Fatalf("first save returned before reading the room: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("first save did not read the room")
-	}
-	// Server B commits host_only and saves while A is still pending.
-	if _, err := pool.Exec(t.Context(), `UPDATE watch_together_rooms SET guest_control_policy='host_only' WHERE id=$1`, room.ID); err != nil {
-		t.Fatal(err)
-	}
-	bDone := make(chan error, 1)
-	go func() {
-		bDone <- repo.saveCommittedGuestControlPolicy(t.Context(), room.ID, 7, "host", func(policy GuestControlPolicy) error {
-			record(policy)
-			return nil
-		})
-	}()
-	// B waits on the profile's lock rather than reading ahead of A's save.
-	deadline := time.Now().Add(5 * time.Second)
-	for waiting := 0; waiting == 0; {
-		if time.Now().After(deadline) {
-			t.Fatal("second save did not wait for the first")
-		}
-		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM pg_stat_activity
- WHERE application_name = current_setting('application_name') AND wait_event_type = 'Lock' AND wait_event = 'advisory'`).Scan(&waiting); err != nil {
-			t.Fatal(err)
-		}
-	}
-	release()
-	if err := errors.Join(<-aDone, <-bDone); err != nil {
-		t.Fatal(err)
-	}
-	if len(saved) != 2 || saved[1] != GuestControlPolicyHostOnly {
-		t.Fatalf("saves = %v, want the room's latest policy (host_only) saved last", saved)
-	}
-}
-
-func TestProfileLocksWaiterLeavesWhenItsContextEnds(t *testing.T) {
-	var locks profileLocks
-	unlock, err := locks.lock(t.Context(), "7:host")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := locks.lock(ctx, "7:host"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("waiter on a held lock = %v, want context.Canceled", err)
-	}
-	unlock()
-	if len(locks.locks) != 0 {
-		t.Fatalf("entries left after the holder and the waiter left: %v", locks.locks)
-	}
-	if again, err := locks.lock(t.Context(), "7:host"); err != nil {
-		t.Fatal(err)
-	} else {
-		again()
-	}
-}
-
 type blockingGuestControl struct {
 	entered chan struct{}
 	release chan struct{}
+	once    sync.Once
 }
+
+func (p *blockingGuestControl) unblock() { p.once.Do(func() { close(p.release) }) }
 
 func (p *blockingGuestControl) GuestControlPolicy(context.Context, int, string) (GuestControlPolicy, error) {
 	return GuestControlPolicyHostOnly, nil
@@ -234,7 +147,7 @@ func TestSlowGuestControlSaveDoesNotHoldTheRoomPG(t *testing.T) {
 	s.now = func() time.Time { return now }
 	t.Cleanup(s.Close)
 	prefs := &blockingGuestControl{entered: make(chan struct{}, 1), release: make(chan struct{})}
-	t.Cleanup(func() { close(prefs.release) })
+	t.Cleanup(prefs.unblock)
 	s.SetGuestControlPreferences(prefs)
 
 	done := make(chan error, 1)
@@ -247,16 +160,8 @@ func TestSlowGuestControlSaveDoesNotHoldTheRoomPG(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("save never started")
 	}
-	// The settings store is stuck. The host's request and the next room
-	// operation must not wait on it.
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("policy request waited on the settings save")
-	}
+	// The settings store is stuck. The room's next operation must not wait on
+	// it; only the request that is saving does.
 	other := make(chan error, 1)
 	go func() {
 		_, err := s.UpdatePolicy(t.Context(), room.ID, 7, "host", GuestControlPolicyHostOnly)
@@ -269,5 +174,14 @@ func TestSlowGuestControlSaveDoesNotHoldTheRoomPG(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("next room operation waited on the settings save")
+	}
+	prefs.unblock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("policy request did not return after the save")
 	}
 }

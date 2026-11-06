@@ -16,55 +16,10 @@ var ErrRoomStateConflict = errors.New("watch together room state conflict")
 
 type Repository struct {
 	pool *pgxpool.Pool
-	// guestControlSaveSlots bounds the guest-control saves this process runs
-	// at once. Each one holds a pooled connection for its lock while the
-	// settings write takes another.
-	guestControlSaveSlots chan struct{}
 }
 
 func NewRepository(pool *pgxpool.Pool) *Repository {
-	return &Repository{
-		pool:                  pool,
-		guestControlSaveSlots: make(chan struct{}, min(4, max(1, int(pool.Config().MaxConns)/4))),
-	}
-}
-
-// saveCommittedGuestControlPolicy hands the room's committed guest-control
-// policy to save while holding a cluster-wide lock on the host profile's saved
-// choice. Every save reads the room after its own change committed, and the
-// lock orders the reads with the saves, so the save that runs last always
-// carries the room's latest policy whichever server ran it.
-//
-// save writes through the settings store, which takes its own connection from
-// the same pool. A share of the pool bounds how many saves hold a lock
-// connection at once, so saves for different profiles cannot take every
-// connection and then all wait for a second one.
-func (r *Repository) saveCommittedGuestControlPolicy(
-	ctx context.Context, roomID string, userID int, profileID string, save func(GuestControlPolicy) error,
-) error {
-	select {
-	case r.guestControlSaveSlots <- struct{}{}:
-		defer func() { <-r.guestControlSaveSlots }()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	lock := fmt.Sprintf("watch_together.guest_control_policy:%d:%s", userID, profileID)
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lock); err != nil {
-		return err
-	}
-	var policy GuestControlPolicy
-	if err := tx.QueryRow(ctx, `SELECT guest_control_policy FROM watch_together_rooms WHERE id=$1`, roomID).Scan(&policy); err != nil {
-		return err
-	}
-	if err := save(policy); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return &Repository{pool: pool}
 }
 
 func (r *Repository) CreateRoom(ctx context.Context, room Room) (*Room, error) {
