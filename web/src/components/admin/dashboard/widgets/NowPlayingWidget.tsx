@@ -39,7 +39,7 @@ export function NowPlayingWidget() {
   const sessions = sessionsQuery.data ?? [];
   const fixedRows = useMediaQuery(FIXED_ROWS_QUERY, true);
   const rendered = sessions.slice(0, fixedRows ? MAX_RENDERED_STREAMS : STACKED_STREAM_LIMIT);
-  const { setViewport, setGrid, visibleCount } = useFittedCardCount(rendered.length);
+  const { setViewport, setGrid, observeCard, visibleCount } = useFittedCardCount(rendered.length);
 
   // Only a successful, genuinely empty load earns the strip. A skeleton or an
   // error keeps its full height: shrinking the widget to announce a failure
@@ -104,6 +104,7 @@ export function NowPlayingWidget() {
                 return (
                   <div
                     key={session.session_id}
+                    ref={observeCard}
                     className={cn("flex", hidden && "invisible")}
                     inert={hidden}
                   >
@@ -140,10 +141,11 @@ export function NowPlayingWidget() {
  * derived. Every card stays laid out (hidden ones are only invisible), so the
  * count can grow again when the widget is resized taller.
  *
- * Adding or removing a card changes the grid's height, which the observer
- * reports. The one change it misses, a card joining a half-full last row, is
- * covered by storing "everything fits" as Infinity rather than a count that
- * would go stale.
+ * Rows size to their own cards, so a refresh can move a tall card between rows
+ * without changing the grid's height; the observer watches every card as well
+ * as the grid to catch that. The one change it still misses, a card joining a
+ * half-full last row, is covered by storing "everything fits" as Infinity
+ * rather than a count that would go stale.
  */
 function useFittedCardCount(cardCount: number) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -179,12 +181,24 @@ function useFittedCardCount(cardCount: number) {
     observerRef.current = null;
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
-    // The viewport tracks widget resizes; the grid tracks cards growing or
-    // shrinking as their content changes.
+    // The viewport tracks widget resizes; the grid and its cards track cards
+    // growing, shrinking, or trading rows as their content changes.
     if (viewportRef.current) observer.observe(viewportRef.current);
-    if (gridRef.current) observer.observe(gridRef.current);
+    if (gridRef.current) {
+      observer.observe(gridRef.current);
+      for (const card of gridRef.current.children) observer.observe(card);
+    }
     observerRef.current = observer;
   }, [measure]);
+
+  // Cards mounted before the observer exists are picked up by observe() above;
+  // this covers cards that arrive with a later refresh.
+  const observeCard = useCallback((node: HTMLDivElement) => {
+    const observer = observerRef.current;
+    if (!observer) return;
+    observer.observe(node);
+    return () => observer.unobserve(node);
+  }, []);
 
   // Callback refs: the grid mounts only after loading finishes, so an effect
   // keyed on nothing would never see it.
@@ -203,7 +217,7 @@ function useFittedCardCount(cardCount: number) {
     [observe],
   );
 
-  return { setViewport, setGrid, visibleCount: Math.min(visibleCount, cardCount) };
+  return { setViewport, setGrid, observeCard, visibleCount: Math.min(visibleCount, cardCount) };
 }
 
 // A hidden card skips its poster request (the placeholder icon stands in); the
