@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { PluginInstallation } from "@/api/types";
+import type { PluginInstallation, TriggerConfig } from "@/api/types";
 
 import { capabilityListLabel, catalogJobs } from "./pluginCapabilities";
 import { parsePluginMarkdown } from "./pluginMarkdown";
@@ -269,22 +269,23 @@ describe("taskTrigger", () => {
     expect(describeTrigger({ type: "interval", interval_ms: 90_000 }, "short")).toBe("Every 90s");
   });
 
-  it("defaults a missing or unreadable plugin trigger to startup, like the server", () => {
+  it("picks a plugin task's schedule like the server", () => {
+    const manifest: TriggerConfig = { type: "interval", interval_ms: 300_000 };
     expect(pluginTaskTrigger(undefined)).toEqual({ type: "startup" });
-    expect(pluginTaskTrigger({ type: "" })).toEqual({ type: "startup" });
-    // The server builds no live trigger for an unknown type, so don't claim startup.
-    expect(pluginTaskTrigger({ type: "sometimes" })).toEqual({ type: "sometimes" });
+    expect(pluginTaskTrigger(undefined, manifest)).toEqual(manifest);
+    expect(pluginTaskTrigger({ type: "" }, manifest)).toEqual(manifest);
+    // A trigger the server cannot run falls through to the manifest default.
+    expect(pluginTaskTrigger({ type: "sometimes" }, manifest)).toEqual(manifest);
     expect(pluginTaskTrigger({ type: "interval", interval_ms: "60000" })).toEqual({
       type: "startup",
     });
-    expect(describeTrigger(pluginTaskTrigger({ type: "sometimes" }))).toBe("sometimes");
-    expect(describeTrigger({ type: "weekly", day_of_week: 7, time_of_day: "02:00" })).toBe(
-      "Day 7 at 02:00",
-    );
-    expect(pluginTaskTrigger({ type: "daily", time_of_day: "02:00" })).toEqual({
+    expect(pluginTaskTrigger({ type: "daily", time_of_day: "02:00" }, manifest)).toEqual({
       type: "daily",
       time_of_day: "02:00",
     });
+    expect(describeTrigger({ type: "weekly", day_of_week: 7, time_of_day: "02:00" })).toBe(
+      "Day 7 at 02:00",
+    );
     expect(pluginTaskPath(7, "refresh")).toBe("/admin/tasks/plugin%3A7%3Arefresh");
   });
 });

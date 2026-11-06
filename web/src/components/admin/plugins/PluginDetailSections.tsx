@@ -187,7 +187,7 @@ export function PluginSettingsPanels({
             {taskCapabilities.map((capability) => {
               const binding = taskBindings.find((e) => e.capability_id === capability.id);
               const label = capability.display_name || capability.id;
-              const trigger = pluginTaskTrigger(binding?.trigger);
+              const trigger = pluginTaskTrigger(binding?.trigger, capability.default_schedule);
               const registered = installation.enabled && (binding?.enabled ?? true);
               return (
                 <li key={capability.id} className="flex items-center justify-between gap-4 p-3.5">
@@ -216,10 +216,9 @@ export function PluginSettingsPanels({
                       saveTaskBinding.mutate({
                         id: installation.id,
                         capabilityId: capability.id,
-                        body: {
-                          enabled: checked,
-                          trigger: binding?.trigger ?? { type: "startup" },
-                        },
+                        // Resend a trigger set through the API; with none,
+                        // the task follows its manifest default.
+                        body: { enabled: checked, trigger: binding?.trigger ?? {} },
                       })
                     }
                   />

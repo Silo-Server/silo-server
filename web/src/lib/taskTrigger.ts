@@ -44,24 +44,50 @@ export function describeTrigger(t: TriggerConfig, style: "long" | "short" = "lon
   }
 }
 
-/**
- * The default trigger a plugin task binding asks for. Mirrors the server's
- * defaultPluginTaskTriggers: only a missing or typeless trigger means the task
- * runs at startup. A type the server doesn't know is kept as-is (the server
- * builds no live trigger for it), so the page shows it rather than claiming
- * startup. Once the task exists, its schedule on the Tasks page wins.
- */
-export function pluginTaskTrigger(raw?: Record<string, unknown> | null): TriggerConfig {
-  const startup = { type: "startup" } as TriggerConfig;
-  if (!raw || typeof raw.type !== "string" || raw.type === "") return startup;
-  // The server unmarshals this map into TriggerConfig and falls back to startup
-  // if a known field has the wrong JSON type.
+const TIME_OF_DAY = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+/** Whether the server's task manager can schedule this trigger. */
+function runnable(t: TriggerConfig): boolean {
+  switch (t.type) {
+    case "startup":
+      return true;
+    case "interval":
+      return (t.interval_ms ?? 0) > 0;
+    case "daily":
+      return TIME_OF_DAY.test(t.time_of_day ?? "");
+    case "weekly": {
+      const day = t.day_of_week ?? 0;
+      return TIME_OF_DAY.test(t.time_of_day ?? "") && day >= 0 && day <= 6;
+    }
+    default:
+      return false;
+  }
+}
+
+function bindingTrigger(raw?: Record<string, unknown> | null): TriggerConfig | undefined {
+  if (!raw || typeof raw.type !== "string") return undefined;
+  // The server unmarshals this map into TriggerConfig and ignores it if a
+  // known field has the wrong JSON type.
   for (const field of ["interval_ms", "day_of_week", "max_runtime_ms"]) {
     const value = raw[field];
-    if (value != null && !Number.isSafeInteger(value)) return startup;
+    if (value != null && !Number.isSafeInteger(value)) return undefined;
   }
-  if (raw.time_of_day != null && typeof raw.time_of_day !== "string") return startup;
-  return raw as unknown as TriggerConfig;
+  if (raw.time_of_day != null && typeof raw.time_of_day !== "string") return undefined;
+  const trigger = raw as unknown as TriggerConfig;
+  return runnable(trigger) ? trigger : undefined;
+}
+
+/**
+ * The schedule a plugin task runs on, as the server picks it: a binding
+ * trigger it can run, else the capability's manifest default (the server
+ * reports it only when it can run it), else once at each server start. Once
+ * the task exists, its schedule on the Tasks page wins.
+ */
+export function pluginTaskTrigger(
+  binding?: Record<string, unknown> | null,
+  defaultSchedule?: TriggerConfig | null,
+): TriggerConfig {
+  return bindingTrigger(binding) ?? defaultSchedule ?? ({ type: "startup" } as TriggerConfig);
 }
 
 /** Task-page path for a plugin's scheduled task (`plugin:<installation>:<capability>`). */
