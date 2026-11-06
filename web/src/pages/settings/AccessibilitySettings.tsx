@@ -1,5 +1,6 @@
 import { useId } from "react";
 import { toast } from "sonner";
+import { captureProfileRequestContext, isProfileRequestContextCurrent } from "@/api/client";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  isSettingValueMissing,
   settingsCapabilitiesSupportKey,
+  useClearSettingValue,
   useSetSettingValue,
   useSettingsCapabilities,
   useStoredSettingValues,
@@ -41,13 +44,16 @@ const TIME_FORMAT_CHOICES: ReadonlyArray<{ value: TimeFormatPreference; labelKey
 
 const APP_LANGUAGE_KEYS = [SETTING_KEYS.UI_APP_LANGUAGE] as const;
 const PROFILE_SCOPE = { scope: "profile" } as const;
+/** This browser's own value; the server reads the device from X-Silo-Device-Id. */
+const THIS_DEVICE_SCOPE = { scope: "profile_device" } as const;
 const MATCH_DEVICE = "device";
 
 /**
- * The profile's app language. It edits the profile's own value, which a
- * per-device value set elsewhere can override on that device. A stored tag the
- * web app doesn't ship stays selected under its name, so saving here never
- * clears what another app chose.
+ * The profile's app language. It edits the profile's own value and then
+ * clears this browser's per-device value, so the choice follows the person
+ * across devices (a per-device value set elsewhere still wins on its device).
+ * A stored tag the web app doesn't ship stays selected under its name, so
+ * saving here never clears what another app chose.
  */
 function AppLanguageSetting() {
   const t = useT();
@@ -57,6 +63,55 @@ function AppLanguageSetting() {
     identity: PROFILE_SCOPE,
   });
   const mutation = useSetSettingValue();
+  const clearDevice = useClearSettingValue();
+  // mutateAsync, not mutate: the clear must still run if the page closes first.
+  async function save(next: string) {
+    // One save at a time: two in flight could land in either order and
+    // leave the earlier choice stored. The select shows the pending one.
+    if (mutation.isPending || clearDevice.isPending) return;
+    // The clear runs later; skip it if the person switched profile meanwhile.
+    const requestContext = captureProfileRequestContext();
+    try {
+      await mutation.mutateAsync({
+        key: SETTING_KEYS.UI_APP_LANGUAGE,
+        value: next === MATCH_DEVICE ? null : next,
+        identity: PROFILE_SCOPE,
+      });
+    } catch {
+      toast.error(t("web.settings.accessibility.appLanguageSaveFailed"));
+      return;
+    }
+    await clearThisBrowser(requestContext);
+  }
+  // Deletes this browser's own value so the profile's applies here. Skipped if
+  // the profile or session changed since the save; a failure offers a retry,
+  // since picking the same language again changes nothing.
+  async function clearThisBrowser(requestContext: ReturnType<typeof captureProfileRequestContext>) {
+    const current = captureProfileRequestContext();
+    if (
+      !requestContext ||
+      !isProfileRequestContextCurrent(requestContext) ||
+      current?.profileId !== requestContext.profileId
+    ) {
+      return;
+    }
+    try {
+      await clearDevice.mutateAsync({
+        key: SETTING_KEYS.UI_APP_LANGUAGE,
+        identity: THIS_DEVICE_SCOPE,
+      });
+    } catch (error) {
+      // No per-device value is the usual case.
+      if (!isSettingValueMissing(error)) {
+        toast.error(t("web.settings.accessibility.appLanguageDeviceClearFailed"), {
+          action: {
+            label: t("common.tryAgain"),
+            onClick: () => void clearThisBrowser(requestContext),
+          },
+        });
+      }
+    }
+  }
   const savedValue = stored?.[SETTING_KEYS.UI_APP_LANGUAGE];
   const shownValue = mutation.isPending ? mutation.variables.value : savedValue;
   const tag = typeof shownValue === "string" ? shownValue : null;
@@ -71,19 +126,7 @@ function AppLanguageSetting() {
       <Select
         value={tag ?? MATCH_DEVICE}
         disabled={stored === undefined}
-        onValueChange={(next) => {
-          // One save at a time: two in flight could land in either order and
-          // leave the earlier choice stored. The select shows the pending one.
-          if (mutation.isPending) return;
-          mutation.mutate(
-            {
-              key: SETTING_KEYS.UI_APP_LANGUAGE,
-              value: next === MATCH_DEVICE ? null : next,
-              identity: PROFILE_SCOPE,
-            },
-            { onError: () => toast.error(t("web.settings.accessibility.appLanguageSaveFailed")) },
-          );
-        }}
+        onValueChange={(next) => void save(next)}
       >
         <SelectTrigger aria-labelledby={labelId} className="w-full sm:w-64">
           <SelectValue />
