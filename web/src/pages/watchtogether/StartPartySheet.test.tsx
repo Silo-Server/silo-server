@@ -14,17 +14,22 @@ vi.mock("@/hooks/queries/episodes", () => ({
   useSeasons: () => ({ data: { seasons: [] } }),
   useSeasonEpisodes: () => ({ data: { episodes: [] }, isLoading: false }),
 }));
-const saved = vi.hoisted(() => ({ policy: "host_only", refetch: vi.fn(async () => ({})) }));
+const saved = vi.hoisted(() => ({
+  policy: "host_only",
+  readOk: true,
+  refetch: vi.fn(async () => ({})),
+}));
 vi.mock("@/hooks/queries/settingValues", () => ({
   useSettingValue: () => ({
-    value: saved.policy,
-    isSuccess: true,
+    value: saved.readOk ? saved.policy : "host_only",
+    isSuccess: saved.readOk,
     isFetching: false,
     refetch: saved.refetch,
   }),
 }));
 vi.mock("@/lib/watchTogetherActions", () => ({ copyWatchTogetherInvite: vi.fn(async () => true) }));
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
+vi.mock("sonner", () => ({ toast }));
 
 const roomBody = (id: string, over: object = {}) => ({
   room: {
@@ -70,6 +75,8 @@ beforeEach(() => {
   setProfileId("p1");
   setProfileToken(null);
   saved.policy = "host_only";
+  saved.readOk = true;
+  toast.info.mockClear();
   nav.navigate.mockClear();
 });
 afterEach(() => {
@@ -148,39 +155,49 @@ describe("StartPartySheet", () => {
   it.each([
     // Untouched switch, room already matches the saved choice: nothing to send.
     { room: "guest_play_pause", flip: false, sent: null },
+    // The sheet could not read the saved choice and showed the default; the
+    // server's saved choice stands and the host is told, not overwritten.
+    { room: "guest_play_pause", flip: false, sent: null, readFails: true },
     // Host turns it off: the room is corrected and the choice saved.
     { room: "guest_play_pause", flip: true, sent: "host_only" },
     // The server could not read the saved choice and started host-only; the
     // host's explicit host-only choice still has to be saved.
     { room: "host_only", flip: true, sent: "host_only" },
-  ])("starts from the saved policy (room $room, flipped $flip)", async ({ room, flip, sent }) => {
-    saved.policy = "guest_play_pause";
-    const fetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
-      if (url.endsWith("/watch-together/rooms"))
-        return json(
-          roomBody(draftRoomId(init), { selection_mode: "vote", guest_control_policy: room }),
-          201,
-        );
-      if (url.endsWith("/policy"))
-        return json(
-          roomBody(url.split("/").at(-2)!, { guest_control_policy: sent, generation: 2 }),
-        );
-      throw new Error(`unexpected ${url}`);
-    });
-    vi.stubGlobal("fetch", fetch);
-    renderSheet();
-    fireEvent.click(screen.getByRole("radio", { name: /Everyone votes/ }));
-    expect(screen.getByRole("switch")).toBeChecked();
-    if (flip) fireEvent.click(screen.getByRole("switch"));
-    fireEvent.click(screen.getByRole("button", { name: "Create party & copy invite" }));
-    await waitFor(() => expect(nav.navigate).toHaveBeenCalledTimes(1));
-    if (sent === null) {
-      expect(fetch).toHaveBeenCalledTimes(1);
-    } else {
-      expect(String(fetch.mock.calls[1]![0])).toMatch(/\/policy$/);
-      expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual({ guest_control_policy: sent });
-    }
-  });
+  ])(
+    "starts from the saved policy (room $room, flipped $flip)",
+    async ({ room, flip, sent, readFails }) => {
+      saved.policy = "guest_play_pause";
+      saved.readOk = !readFails;
+      const fetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
+        if (url.endsWith("/watch-together/rooms"))
+          return json(
+            roomBody(draftRoomId(init), { selection_mode: "vote", guest_control_policy: room }),
+            201,
+          );
+        if (url.endsWith("/policy"))
+          return json(
+            roomBody(url.split("/").at(-2)!, { guest_control_policy: sent, generation: 2 }),
+          );
+        throw new Error(`unexpected ${url}`);
+      });
+      vi.stubGlobal("fetch", fetch);
+      renderSheet();
+      fireEvent.click(screen.getByRole("radio", { name: /Everyone votes/ }));
+      expect((screen.getByRole("switch") as HTMLButtonElement).getAttribute("aria-checked")).toBe(
+        String(!readFails),
+      );
+      if (flip) fireEvent.click(screen.getByRole("switch"));
+      fireEvent.click(screen.getByRole("button", { name: "Create party & copy invite" }));
+      await waitFor(() => expect(nav.navigate).toHaveBeenCalledTimes(1));
+      if (sent === null) {
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(toast.info).toHaveBeenCalledTimes(readFails ? 1 : 0);
+      } else {
+        expect(String(fetch.mock.calls[1]![0])).toMatch(/\/policy$/);
+        expect(JSON.parse(fetch.mock.calls[1]![1].body)).toEqual({ guest_control_policy: sent });
+      }
+    },
+  );
 
   it("vote mode skips staging and hands the item to the room as the first suggestion", async () => {
     const fetch = vi.fn().mockImplementation(async (url: string, init: RequestInit) => {
