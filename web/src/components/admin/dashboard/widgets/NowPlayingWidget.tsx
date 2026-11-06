@@ -92,12 +92,11 @@ export function NowPlayingWidget() {
           /* The empty case never reaches here — it returned the collapsed strip
              above — so this branch always has at least one stream to show. */
           <>
-            {/* auto-rows-fr gives every row the tallest card's height, so a card
-                whose tags wrap onto an extra line doesn't make its row taller
-                than the others. Hidden cards count toward that height too, so
-                each card's free text stays on one line and only the fixed set
-                of tags can wrap. */}
-            <div ref={setGrid} className="grid auto-rows-fr grid-cols-1 gap-3.5 lg:grid-cols-2">
+            {/* Grid items stretch to their row, so both cards in a row match
+                height. Rows stay sized to their own cards: auto-rows-fr would
+                size every row to the tallest card, hidden ones included, and
+                one wrapped hidden card would push rows out of the fit. */}
+            <div ref={setGrid} className="grid grid-cols-1 gap-3.5 lg:grid-cols-2">
               {rendered.map((session, index) => {
                 // Cards past the fit stay laid out, so a taller widget can
                 // measure them, but are hidden from sight, focus, and readers.
