@@ -6,6 +6,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 	"github.com/Silo-Server/silo-server/internal/proxy"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
@@ -36,6 +37,7 @@ func describeWorkerProtocols() workerProtocolRegistry {
 	operations := append(proxy.ProtocolReads(schemas), transcodenode.ProtocolReads(schemas)...)
 	operations = append(operations, proxy.ProtocolControls(schemas)...)
 	operations = append(operations, transcodenode.ProtocolControls(schemas)...)
+	operations = append(operations, nodeenrollment.ProtocolEnrollment(schemas))
 	operations = append(operations, transcodenode.ProtocolChapterExtraction(schemas))
 	operations = append(operations, transcodenode.ProtocolTrickplayExtraction(schemas))
 	operations = append(operations, transcodenode.ProtocolMediaSample(schemas))

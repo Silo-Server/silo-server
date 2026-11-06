@@ -555,6 +555,38 @@ class AggregateResultTests(unittest.TestCase):
 class WorkflowGateTests(unittest.TestCase):
     root = SCRIPT.parents[3]
 
+    def test_v1_freeze_keeps_worker_protocols_separate_from_native_routes(self):
+        def route(listener, path, method="GET"):
+            return {"listener": listener, "namespace": "api_v1", "method": method, "path": path}
+
+        native = route("api", "/api/v1/library")
+        worker = route("transcode_node", "/api/v1/node/enrollment")
+        before = [native, worker]
+        cases = [
+            ("unchanged", before, 0),
+            ("native addition with a worker path", before + [route("api", worker["path"])], 2),
+            ("native removal", [worker], 2),
+            ("native method change", [route("api", native["path"], "POST"), worker], 2),
+            ("unclassified listener", before + [route("other", worker["path"])], 2),
+        ]
+        for listener in ("proxy", "transcode_node", "node_enrollment"):
+            cases.append((listener, before + [route(listener, "/api/v1/node/enroll", "POST")], 0))
+        for name, after, expected in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                repo = Repository(Path(directory) / "repo")
+                inventory = "contracts/api/v2/route-inventory.json"
+                repo.write(inventory, json.dumps({"routes": before}))
+                base = repo.commit()
+                repo.write(inventory, json.dumps({"routes": after}))
+                run = subprocess.run(
+                    ["make", "-s", "-f", str(self.root / "Makefile"),
+                     "verify-v1-route-freeze", "BASE_REF=" + base],
+                    cwd=repo.path, capture_output=True, text=True,
+                )
+                self.assertEqual(run.returncode, expected, run.stdout + run.stderr)
+                if expected:
+                    self.assertIn("v1 routes changed", run.stdout + run.stderr)
+
     def pin_script(self):
         workflow = (self.root / ".github/workflows/trusted-linux-ci.yml").read_text()
         marker = "      - name: Check action SHA pins\n"

@@ -132,6 +132,11 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 	start := time.Now()
 	wait, err := startSubtitleCommand(extractCtx, cmd, opts.Packets)
 	if err != nil {
+		// Admission can fail before exec.Start closes its owned pipe ends.
+		_ = stdout.Close()
+		if pipe, ok := cmd.Stdout.(io.Closer); ok {
+			_ = pipe.Close()
+		}
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 

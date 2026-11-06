@@ -2,11 +2,13 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -35,7 +37,11 @@ func resolveHEVCTranscodeEncoder(ctx context.Context, opts TranscodeOpts) (Trans
 	var hardwareOK bool
 	switch backend {
 	case transcodeHWVideoToolbox:
-		hardwareOK, _ = videoToolboxSupportsTargetCodecContext(ctx, opts.FFmpegPath, transcodeCodecHEVC)
+		result := cachedVideoToolboxProbeContext(ctx, opts.FFmpegPath)
+		if result.transient {
+			return opts, encodinglimit.ErrAtCapacity
+		}
+		hardwareOK = result.hevcAvailable
 	case transcodeHWQSV, transcodeHWVAAPI, transcodeHWNVENC:
 		probe := hwBackendProbe{commandCount: 1, run: func(ctx context.Context, path, device string, timeout time.Duration) hwProbeResult {
 			args := hardwareSmokeEncodeArgs(backend, device)
@@ -46,11 +52,15 @@ func resolveHEVCTranscodeEncoder(ctx context.Context, opts TranscodeOpts) (Trans
 			}
 			output, err := runFFmpegProbe(ctx, timeout, path, args...)
 			if err != nil {
-				return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output)}
+				return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 			}
 			return hwProbeResult{available: true}
 		}}
-		hardwareOK, _ = cachedHardwareProbeContext(ctx, backend+":hevc", opts.FFmpegPath, opts.HWDevice, probe)
+		result := cachedHardwareProbeResultContext(ctx, backend+":hevc", opts.FFmpegPath, opts.HWDevice, probe)
+		if result.transient {
+			return opts, encodinglimit.ErrAtCapacity
+		}
+		hardwareOK = result.available
 	}
 	if err := ctx.Err(); err != nil {
 		return opts, err
@@ -85,16 +95,19 @@ func requireSoftwareEncoder(ctx context.Context, ffmpegPath, codec string) error
 	probe := hwBackendProbe{commandCount: 1, run: func(ctx context.Context, path, _ string, timeout time.Duration) hwProbeResult {
 		output, err := runFFmpegProbe(ctx, timeout, path, args...)
 		if err != nil {
-			return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output)}
+			return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 		}
 		return hwProbeResult{available: true}
 	}}
-	available, reason := cachedHardwareProbeContext(ctx, key, ffmpegPath, "", probe)
+	result := cachedHardwareProbeResultContext(ctx, key, ffmpegPath, "", probe)
+	if result.transient {
+		return encodinglimit.ErrAtCapacity
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !available {
-		return fmt.Errorf("%s encoder unavailable: %s", name, reason)
+	if !result.available {
+		return fmt.Errorf("%s encoder unavailable: %s", name, result.reason)
 	}
 	return nil
 }

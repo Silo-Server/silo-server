@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/danielgtaylor/huma/v2"
+
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
-	"github.com/danielgtaylor/huma/v2"
 )
 
 // handleMediaSample runs one media sampling request with this node's ffmpeg,
@@ -66,6 +68,11 @@ func (s *Server) handleMediaSample(w http.ResponseWriter, r *http.Request) {
 	runner := mediasample.Runner{FFmpegPath: cfg.Playback.FFmpegPath, Workload: processmetrics.Analysis}
 	result, err := runner.Run(r.Context(), req)
 	if err != nil {
+		if errors.Is(err, encodinglimit.ErrAtCapacity) {
+			w.Header().Set("Retry-After", "1")
+			writeMediaSampleError(w, http.StatusServiceUnavailable, mediasample.ReasonNodeUnavailable, "node is at encoding capacity")
+			return
+		}
 		var runErr *mediasample.Error
 		if !errors.As(err, &runErr) {
 			writeMediaSampleError(w, http.StatusBadRequest, mediasample.ReasonInvalidRequest, err.Error())

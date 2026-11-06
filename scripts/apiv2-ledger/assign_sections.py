@@ -19,7 +19,7 @@ from collections import OrderedDict
 LEDGER = "contracts/api/v2/migration.json"
 
 # Sections whose rows live outside /api/v1 on the API listener.
-NODE_SECTIONS = {"proxy": "node-proxy", "transcode_node": "node-transcode"}
+NODE_SECTIONS = {"proxy": "node-proxy", "transcode_node": "node-transcode", "node_enrollment": "node-enrollment"}
 
 # /api/v1/admin/<b> -> section
 ADMIN = {

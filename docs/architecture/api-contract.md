@@ -229,6 +229,11 @@ names its v2 operation completely. Because these fields are decisions
 rather than derivations, the ledger is gated, not regenerated: CI checks the committed file, and
 nothing rewrites it.
 
+The v1 route-freeze gate compares routes by listener, method, and path. The `proxy`,
+`transcode_node`, and `node_enrollment` listeners own separate worker protocols described by the
+ledger and `x-silo-worker-protocols`, so their `/api/v1` paths do not enter that comparison.
+The same path on the main API listener remains frozen; an unclassified listener is also checked.
+
 `section` is the one scheduling field with a generator: it names the Phase 4 delivery unit (one
 section PR per value, at most 40 rows each) and is a pure function of listener, namespace and
 path in `scripts/apiv2-ledger/assign_sections.py`. `make verify-migration-ledger` fails when the

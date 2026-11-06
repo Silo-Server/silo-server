@@ -17,7 +17,7 @@ func TestWorkerDeliveryInventoryDescriptionCoverage(t *testing.T) {
 	}
 	count := 0
 	for _, route := range inventory.Routes {
-		if route.Listener != "proxy" && route.Listener != "transcode_node" {
+		if route.Listener != "proxy" && route.Listener != "transcode_node" && route.Listener != "node_enrollment" {
 			continue
 		}
 		switch route.Path {
@@ -29,7 +29,7 @@ func TestWorkerDeliveryInventoryDescriptionCoverage(t *testing.T) {
 			t.Fatal("undescribed worker registration", route.Listener, route.Method, route.Path)
 		}
 	}
-	if count != 51 || len(described) != 51 {
+	if count != 53 || len(described) != 53 {
 		t.Fatal("retained inventory drift", count, len(described))
 	}
 }

@@ -391,6 +391,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 	h.tm.StartThrottler = func(ctx context.Context, ts *playback.TranscodeSession) {
 		h.maybeStartThrottler(ctx, ts)
 	}
+	// The exit monitor holds this session's lifecycle lock through the callback.
 	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
 		// ffmpeg crash — tear the session down; a client holding a valid stream
 		// token can reconstruct it on the next request.
@@ -417,10 +418,10 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		// dead transcode. When it returns false a successor owns the session — do
 		// nothing further, or finalizeSessionStop's unconditional CloseTranscodeSession
 		// would reap the live successor's output dir mid-serve.
-		if !h.tm.CloseTranscodeSessionIf(sessionID, dead, nodeURL) {
+		if !h.tm.CloseTranscodeSessionIfUnderLifecycle(sessionID, dead, nodeURL) {
 			return
 		}
-		if err := h.stopPlaybackSessionByID(ctx, sessionID, ""); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+		if err := h.stopPlaybackSessionByIDUnderLifecycle(ctx, sessionID, ""); err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
 			slog.ErrorContext(ctx, "failed to stop playback after local transcode exit", "component", "api", "session", sessionID, "error", err, "playback_session_id", sessionID)
 		}
 	}
@@ -911,10 +912,23 @@ func (h *PlaybackHandler) closeTranscodeForSession(session *playback.Session) {
 	if session == nil {
 		return
 	}
+	h.closeTranscodeForSessionWith(session, h.tm.CloseTranscodeSession)
+}
+
+// closeTranscodeForSessionUnderLifecycle requires the caller to hold the
+// transcode manager's lifecycle lock for session.ID.
+func (h *PlaybackHandler) closeTranscodeForSessionUnderLifecycle(session *playback.Session) {
+	if session == nil {
+		return
+	}
+	h.closeTranscodeForSessionWith(session, h.tm.CloseTranscodeSessionUnderLifecycle)
+}
+
+func (h *PlaybackHandler) closeTranscodeForSessionWith(session *playback.Session, closeLocal func(string, string)) {
 	// Local sessions remain keyed by the public playback session. Remote v3
 	// processes use a plan-scoped transport identity so a prepared successor can
 	// coexist with its predecessor until commit.
-	h.tm.CloseTranscodeSession(session.ID, "")
+	closeLocal(session.ID, "")
 	if session.TranscodeNodeURL != "" {
 		h.tm.StopRemoteTranscode(remoteTransportID(session), session.TranscodeNodeURL)
 	}
@@ -1291,6 +1305,16 @@ func (h *PlaybackHandler) finalizeSessionStop(ctx context.Context, session *play
 // attempt ended; a system teardown the client can rebuild under the same id
 // passes none.
 func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, reason PlaybackEndReason) watchstate.PlaybackStopResult {
+	return h.finalizeSessionStopWithClose(ctx, session, syncNow, syncReason, reason, h.closeTranscodeForSession)
+}
+
+// finalizeSessionStopWithResultUnderLifecycle requires the caller to hold the
+// transcode manager's lifecycle lock for session.ID through authority cleanup.
+func (h *PlaybackHandler) finalizeSessionStopWithResultUnderLifecycle(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, reason PlaybackEndReason) watchstate.PlaybackStopResult {
+	return h.finalizeSessionStopWithClose(ctx, session, syncNow, syncReason, reason, h.closeTranscodeForSessionUnderLifecycle)
+}
+
+func (h *PlaybackHandler) finalizeSessionStopWithClose(ctx context.Context, session *playback.Session, syncNow bool, syncReason string, reason PlaybackEndReason, closeTranscode func(*playback.Session)) watchstate.PlaybackStopResult {
 	if h == nil || session == nil || session.ID == "" {
 		return watchstate.PlaybackStopResult{}
 	}
@@ -1298,7 +1322,7 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 		ctx = context.Background()
 	}
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
-	h.cleanupStoppedSessionTransport(ctx, session)
+	h.cleanupStoppedSessionTransport(ctx, session, closeTranscode)
 	if reason.userInitiated() || session.TranscodeNodeURL != "" {
 		// A system teardown (an FFmpeg exit, a copy-safety stop) leaves the
 		// attempt live for the client's next request to rebuild, as a stream
@@ -1346,8 +1370,9 @@ func (h *PlaybackHandler) notifyStoppedSession(ctx context.Context, session *pla
 	}
 }
 
-func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, session *playback.Session) {
-	h.closeTranscodeForSession(session)
+// closeTranscode must match the caller's ownership of the lifecycle lock.
+func (h *PlaybackHandler) cleanupStoppedSessionTransport(ctx context.Context, session *playback.Session, closeTranscode func(*playback.Session)) {
+	closeTranscode(session)
 	// A session that ends must stop egressing everywhere, not just here: the
 	// grant is a proxy's whole authority to serve these bytes, and unlike the
 	// recipe card it is never a reconstruction aid, so it is revoked on every

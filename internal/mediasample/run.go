@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
@@ -60,10 +61,10 @@ func execFFmpeg(ctx context.Context, background bool, name string, args []string
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	if err := startCommand(cmd, background); err != nil {
+	if err := encodinglimit.StartWith(cmd, func() error { return startCommand(cmd, background) }); err != nil {
 		return nil, err
 	}
-	err := cmd.Wait()
+	err := encodinglimit.Wait(cmd)
 	return cmd.ProcessState, err
 }
 
@@ -124,7 +125,7 @@ func (r Runner) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		failure.Attempts = append(failure.Attempts, *attemptErr)
 		failure.Reason = attemptErr.Reason
-		if ctx.Err() != nil || (r.Fallback != nil && !r.Fallback(attempt, *attemptErr)) {
+		if errors.Is(attemptErr.Err, encodinglimit.ErrAtCapacity) || ctx.Err() != nil || (r.Fallback != nil && !r.Fallback(attempt, *attemptErr)) {
 			break
 		}
 	}

@@ -1415,7 +1415,20 @@ export function describeNodeDrain(node: StreamNode): NodeDrainPresentation | nul
 /** Concurrency: transcodes on a transcode node, relayed streams on a proxy. */
 export function describeNodeJobs(node: StreamNode): ResourceMetric {
   const label = node.type === "proxy" ? "Streams" : "Transcodes";
-  const active = Math.max(0, Math.trunc(finiteNumber(node.active_jobs) ?? 0));
+  // A finite worker counts live media processes. Completed playback sessions
+  // may still exist, so use the same count as placement after reconciliation.
+  const encoding = node.type === "transcode" ? node.last_stats?.encoding_capacity : null;
+  const reportedLimit = finiteNumber(encoding?.max_jobs);
+  const reportedActive = finiteNumber(encoding?.active_jobs);
+  const jobs =
+    reportedLimit != null &&
+    reportedLimit > 0 &&
+    reportedLimit <= 2147483647 &&
+    reportedActive != null &&
+    reportedActive >= 0
+      ? reportedActive
+      : node.active_jobs;
+  const active = Math.max(0, Math.trunc(finiteNumber(jobs) ?? 0));
   // A cap at or below zero is how the API spells "unlimited", which is also
   // what an absent one means.
   const cap = finiteNumber(node.max_jobs);
@@ -1432,6 +1445,30 @@ export function describeNodeJobs(node: StreamNode): ResourceMetric {
     muted: false,
     warning: capped != null && active >= capped,
     fill: capacityFill(active, capped),
+  };
+}
+
+/** Worker-owned encoding slots, including background media work. */
+export function describeNodeEncodingCapacity(node: StreamNode): ResourceMetric | null {
+  const capacity = node.last_stats?.encoding_capacity;
+  if (node.type === "proxy" || capacity == null) return null;
+  const limit = finiteNumber(capacity.max_jobs);
+  const used = finiteNumber(capacity.active_jobs);
+  if (limit == null || used == null || limit < 0 || used < 0) return null;
+  const cap = limit > 0 ? Math.trunc(limit) : null;
+  const active = Math.trunc(used);
+  const available = cap == null ? null : Math.max(0, cap - active);
+  return {
+    label: "Encoding",
+    value: cap == null ? `${active}` : `${active} / ${cap}`,
+    detail: available == null ? "unlimited" : `${available} available`,
+    title:
+      cap == null
+        ? "The node operator has set no encoding ceiling."
+        : `The node operator allows ${cap} concurrent encoding jobs across playback, downloads and background work. Customer settings can lower this ceiling. Reported at the last health check.`,
+    muted: false,
+    warning: cap != null && active >= cap,
+    fill: capacityFill(active, cap),
   };
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
@@ -83,7 +84,7 @@ func ExtractTextSubtitlesToFiles(ctx context.Context, inputPath string, outputs 
 	cmd := fspath.CommandContext(ctx, ffmpegPath, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := encodinglimit.Run(cmd); err != nil {
 		return fmt.Errorf("ffmpeg subtitle batch extraction failed: %w (stderr: %s)", err, truncateStderr(stderr.String()))
 	}
 	return nil

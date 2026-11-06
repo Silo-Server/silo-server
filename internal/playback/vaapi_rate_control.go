@@ -2,10 +2,12 @@ package playback
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -45,15 +47,18 @@ func resolveVAAPIRateControl(ctx context.Context, opts TranscodeOpts) (Transcode
 		probe := hwBackendProbe{commandCount: 1, run: func(ctx context.Context, path, device string, timeout time.Duration) hwProbeResult {
 			output, err := runFFmpegProbe(ctx, timeout, path, vaapiRateControlSmokeArgs(device, encoder, mode)...)
 			if err != nil {
-				return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output)}
+				return hwProbeResult{reason: FormatFFmpegProbeFailure(err, output), transient: errors.Is(err, encodinglimit.ErrAtCapacity)}
 			}
 			return hwProbeResult{available: true}
 		}}
-		available, _ := cachedHardwareProbeContext(ctx, key+":"+strings.ToLower(mode), opts.FFmpegPath, opts.HWDevice, probe)
+		result := cachedHardwareProbeResultContext(ctx, key+":"+strings.ToLower(mode), opts.FFmpegPath, opts.HWDevice, probe)
+		if result.transient {
+			return opts, encodinglimit.ErrAtCapacity
+		}
 		if err := ctx.Err(); err != nil {
 			return opts, err
 		}
-		if available {
+		if result.available {
 			opts.vaapiRateControl = mode
 			return opts, nil
 		}

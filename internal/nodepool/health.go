@@ -21,9 +21,10 @@ import (
 
 // healthResponse is the JSON response from a node's /health endpoint.
 type healthResponse struct {
-	Status     string `json:"status"`
-	ActiveJobs int    `json:"active_jobs"`
-	EgressKbps int    `json:"egress_kbps"`
+	Status           string          `json:"status"`
+	ActiveJobs       int             `json:"active_jobs"`
+	EgressKbps       int             `json:"egress_kbps"`
+	EncodingCapacity json.RawMessage `json:"encoding_capacity"`
 	// CapabilitiesHash identifies the node's current hardware capability
 	// snapshot. A node that predates capability snapshots reports none, which
 	// is how the sweep tells "nothing changed" from "cannot say".
@@ -165,17 +166,19 @@ func marshalLastStats(ctx context.Context, n *Node, hr healthResponse) []byte {
 	sampledAt := trimJSONNull(hr.SampledAt)
 	build := trimJSONNull(hr.Build)
 	artifacts := trimJSONNull(hr.Artifacts)
-	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil {
+	encodingCapacity := trimJSONNull(hr.EncodingCapacity)
+	if system == nil && gpu == nil && attribution == nil && build == nil && artifacts == nil && encodingCapacity == nil {
 		return nil
 	}
 	payload := struct {
-		System      json.RawMessage `json:"system,omitempty"`
-		GPU         json.RawMessage `json:"gpu,omitempty"`
-		Attribution json.RawMessage `json:"attribution,omitempty"`
-		SampledAt   json.RawMessage `json:"sampled_at,omitempty"`
-		Build       json.RawMessage `json:"build,omitempty"`
-		Artifacts   json.RawMessage `json:"artifacts,omitempty"`
-	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts}
+		System           json.RawMessage `json:"system,omitempty"`
+		GPU              json.RawMessage `json:"gpu,omitempty"`
+		Attribution      json.RawMessage `json:"attribution,omitempty"`
+		SampledAt        json.RawMessage `json:"sampled_at,omitempty"`
+		Build            json.RawMessage `json:"build,omitempty"`
+		Artifacts        json.RawMessage `json:"artifacts,omitempty"`
+		EncodingCapacity json.RawMessage `json:"encoding_capacity,omitempty"`
+	}{System: system, GPU: gpu, Attribution: attribution, SampledAt: sampledAt, Build: build, Artifacts: artifacts, EncodingCapacity: encodingCapacity}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return nil

@@ -31,15 +31,14 @@ import (
 	"syscall"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
-
-	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	sdkcapability "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/capability"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/activitylog"
@@ -74,6 +73,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/diagnostics"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/ebooks"
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/extrastills"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
@@ -105,6 +105,7 @@ import (
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodeenrollment"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -156,7 +157,10 @@ import (
 	siloweb "github.com/Silo-Server/silo-server/web"
 )
 
-const serverModeTranscode = "transcode"
+const (
+	serverModeTranscode = "transcode"
+	serverModeProxy     = "proxy"
+)
 
 // resolveNodeIdentity returns a stable node identifier used by the
 // heartbeat writer, reconciler, and shutdown cleanup. Resolution order:
@@ -849,9 +853,21 @@ func main() {
 		"etag", contractETag)
 
 	// Step 1: Bootstrap from .env
-	bc, err := config.LoadBootstrap(*envFile)
+	bc, err := config.LoadStartupBootstrap(*envFile, !*migrateOnly && !*migrateStatus && *migrateDownTo < 0)
 	if err != nil {
 		log.Fatalf("bootstrap: %v", err)
+	}
+	if bc.Mode == serverModeTranscode {
+		encodinglimit.Configure(bc.TranscodeMaxJobs)
+		bindingCtx, stopBinding := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+		err = completeNodeBootstrap(bindingCtx, bc)
+		stopBinding()
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		if err != nil {
+			log.Fatalf("node enrollment: %v", err)
+		}
 	}
 	stopDebugListener, err := startBootstrapDebugListener(!*migrateOnly && !*migrateStatus && *migrateDownTo < 0)
 	if err != nil {
@@ -1209,7 +1225,8 @@ func main() {
 	}
 
 	// Proxy and transcode modes run with DB + Redis for hot-reload.
-	if mode == "proxy" || mode == "transcode" {
+	switch mode {
+	case serverModeProxy, serverModeTranscode:
 		// Delivery writes run in the background with a short deadline. Honor it
 		// on the sockets too, so a stalled Redis cannot retain their connections.
 		redisClient, err := cache.NewDeadlineRedisClientForRole(cfg.Redis, "worker")
@@ -1223,9 +1240,13 @@ func main() {
 		// Resolved before the watcher starts: NODE_URL is this process's
 		// stream_nodes identity, and the watcher needs it on its very first
 		// load to overlay the node's own acceleration overrides.
-		// config.LoadBootstrap refuses these modes without it.
-		nodeURL := os.Getenv("NODE_URL")
-		nodeName := os.Getenv("NODE_NAME")
+		// config.LoadStartupBootstrap refuses these modes without NODE_URL,
+		// except an enrolled transcode worker, whose saved binding carries it.
+		nodeURL := bc.NodeURL
+		nodeName := bc.NodeName
+		if nodeURL == "" {
+			log.Fatalf("MODE=%s needs NODE_URL, this node's own URL, which matches it to its entry on the main server", mode)
+		}
 		if nodeName == "" {
 			nodeName = mode
 		}
@@ -1264,7 +1285,7 @@ func main() {
 		var handler http.Handler
 		var shutdownStandalone func(context.Context) error
 		var standaloneHooks standaloneServerHooks
-		if mode == "proxy" {
+		if mode == serverModeProxy {
 			srv := proxy.NewServer(watcher, tracker)
 			srv.SetDownloadBandwidth(pool, redisClient)
 			proxyIPResolver, resolverErr := clientIPResolverFromConfig(watcher.Config())
@@ -1322,6 +1343,7 @@ func main() {
 			// Consult the session-deny marker central writes on stop, expiry,
 			// and admin terminate before serving or reconstructing a session,
 			// so a revoked stream token stops here instead of at its 24h TTL.
+			srv.SetEnrollmentIdentity(nodeenrollment.Identity(string(bc.SecretKey)))
 			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
 			srv.SetFFmpegLogSink(playback.NewSlogFFmpegLogSink(slog.Default(), nodeID))
 			// Read jellycompat reconstruction recipes central wrote at transcode
@@ -1488,6 +1510,7 @@ func main() {
 		ShuttingDown:                 shuttingDown.Load,
 		AdminDefaults:                adminDefaults,
 		SubtitlePlaySync:             subtitlePlaySync,
+		NodeEnrollment:               nodeEnrollmentClient(bc, configWatcher.Config),
 		Config:                       cfg,
 		LiveConfig:                   configWatcher.Config,
 		OnConfigChange:               configWatcher.OnChange,

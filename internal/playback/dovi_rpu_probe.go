@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
@@ -226,7 +227,7 @@ func runDVRPUProbe(ctx context.Context, bin, inputPath string) dvRPUVerdict {
 	output := &cappedBuffer{limit: maxDVRPUProbeOutput}
 	cmd.Stdout = output
 	cmd.Stderr = output
-	err := cmd.Run()
+	err := encodinglimit.Run(cmd)
 
 	if dvRPUOutputFailed(output.String()) {
 		return dvRPUBroken

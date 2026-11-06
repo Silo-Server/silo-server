@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 )
 
 type AdminNodeConfigurationService interface {
@@ -106,6 +107,7 @@ func adminNodeConfigurationOutput(ctx context.Context, node *nodepool.Node, err 
 	return &AdminNodeConfigurationOutput{ETag: tag, Body: body}, nil
 }
 func registerAdminNodeConfiguration(reg *Registry) {
+	registerAdminNodeEnrollment(reg)
 	create := Operation{Operation: humaOp("POST", Prefix+"/admin/nodes", "createAdminNode", "admin-nodes", "Persist node configuration and durable pool invalidation. An identical natural URL configuration resolves a repeated create; conflicting configuration returns 409. No worker probe or replica completion acknowledgement."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyUniqueConstraint}
 	create.DefaultStatus = http.StatusCreated
 	create.Errors = append(create.Errors, http.StatusConflict)

@@ -75,11 +75,6 @@
       "count": 1
     }
   },
-  "src/hooks/queries/admin/nodes.ts": {
-    "no-restricted-syntax": {
-      "count": 2
-    }
-  },
   "src/hooks/queries/catalog.ts": {
     "react-hooks/exhaustive-deps": {
       "count": 1

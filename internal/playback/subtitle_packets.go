@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/embeddedsub"
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 )
@@ -190,18 +191,25 @@ func ExtractSubtitlePacketsWebVTT(ctx context.Context, in *SubtitlePacketInput, 
 // startSubtitleCommand starts cmd, writing in's stream to its stdin when in
 // is set. wait ends the input context after the command exits, then joins
 // the writer, including a storage open or read that no longer has a consumer.
+// The process counts against the node's encoding capacity until wait returns;
+// when admission fails, cmd is never started.
 func startSubtitleCommand(ctx context.Context, cmd *exec.Cmd, in *SubtitlePacketInput) (wait func() (waitErr, feedErr error), err error) {
 	if in == nil {
-		if err := cmd.Start(); err != nil {
+		if err := encodinglimit.Start(cmd); err != nil {
 			return nil, err
 		}
-		return func() (error, error) { return cmd.Wait(), nil }, nil
+		return func() (error, error) { return encodinglimit.Wait(cmd), nil }, nil
 	}
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
+	// The stdin pipe is made only after admission, so a refused command
+	// leaves no pipe behind.
+	var stdin io.WriteCloser
+	if err := encodinglimit.StartWith(cmd, func() error {
+		var pipeErr error
+		if stdin, pipeErr = cmd.StdinPipe(); pipeErr != nil {
+			return pipeErr
+		}
+		return cmd.Start()
+	}); err != nil {
 		return nil, err
 	}
 	feedCtx, cancel := context.WithCancel(ctx)
@@ -216,7 +224,7 @@ func startSubtitleCommand(ctx context.Context, cmd *exec.Cmd, in *SubtitlePacket
 		feed <- in.write(feedCtx, stdin)
 	}()
 	return func() (error, error) {
-		waitErr := cmd.Wait()
+		waitErr := encodinglimit.Wait(cmd)
 		cancel()
 		return waitErr, <-feed
 	}, nil

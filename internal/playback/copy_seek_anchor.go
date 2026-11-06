@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
@@ -121,7 +122,7 @@ func resolveCopySeekAnchor(
 	stderr := newBoundedTailBuffer(stderrTailMaxBytes)
 	cmd.Stdout = &stdout
 	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	if err := encodinglimit.Run(cmd); err != nil {
 		if tail := truncateStderr(stderr.String()); tail != "" {
 			return 0, 0, fmt.Errorf("resolve copy seek anchor: ffmpeg failed: %w (stderr: %s)", err, tail)
 		}

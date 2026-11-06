@@ -711,6 +711,12 @@
 # own fetch past its item limit, on Home and on its library page.
 ./internal/api/handlers TestCatalogRowBackedSectionBrowseDB
 
+# A worker's reported encoding ceiling lowers the stored node cap without
+# clearing its drain state; default, older and invalid reports leave the
+# customer's cap alone, and an automatic change bumps the admin revision once.
+./internal/nodepool TestRepositoryEncodingCeilingPreservesDrainState
+./internal/nodepool TestRepositoryHealthReconcilesWorkerCeilingAndRevision
+
 # Server collections show a restricted viewer only the members it can open, and
 # leave out a collection whose members it can open none of (#2828).
 ./internal/api/handlers TestServerCollectionCountsFollowTheViewerDB

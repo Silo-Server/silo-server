@@ -326,7 +326,7 @@ REMOVED_BY_SCOPE_TABLE = {
 }
 
 def flow_for(r):
-    if r['listener'] in ('proxy', 'transcode_node'):
+    if r['listener'] in ('proxy', 'transcode_node', 'node_enrollment'):
         p = r['path']
         if p == '/api/v1/health' or p in ('/status', '/metrics', '/hw-capabilities') or p.startswith('/admin/'):
             return 'operational'
@@ -356,11 +356,11 @@ def disposition_for(r, consumers):
     if p.startswith('/api/v1/plugins/{installation_id}/*') or p.startswith('/api/v1/plugin-assets/'): return 'documented_exclusion', 'dynamic_plugin_proxy', 'Dynamic plugin HTTP proxy path; cannot have a finite static response schema (api-contract.md, "What Huma covers").'
     if k in REMOVED_BY_SCOPE_TABLE: return 'removed', 'v1_scope_removals_table', 'Listed in docs/architecture/v1-scope.md removals ("String GET/PUT/DELETE /api/v1/settings…"); still registered on the bridge surface, retired by the tombstone. Successor: the typed settings contract (/api/v1/settings/values*).'
     if r['listener'] == 'api' and p in ('/api/v1/health', '/api/v1/ready'): return 'redesigned', 'contract_root_probes', 'api-contract.md: liveness/readiness move to version-neutral root /health and /ready and stay out of the OpenAPI artifact.'
-    if r['listener'] in ('proxy', 'transcode_node') and p == '/api/v1/health': return 'redesigned', 'contract_root_probes', 'Plan ratified constraint 4 moves operational probes to root /health and /ready without listener qualification, and decision register Decision 2 (cluster and remote-node upgrade contract) requires the API-to-worker control-plane probe to move under the supported worker protocol rather than survive as a v1 alias. The v2 probe is GET /health on this same listener; internal/nodepool/health.go is the internal consumer that must follow.'
+    if r['listener'] in ('proxy', 'transcode_node', 'node_enrollment') and p == '/api/v1/health': return 'redesigned', 'contract_root_probes', 'Plan ratified constraint 4 moves operational probes to root /health and /ready without listener qualification, and decision register Decision 2 (cluster and remote-node upgrade contract) requires the API-to-worker control-plane probe to move under the supported worker protocol rather than survive as a v1 alias. The v2 probe is GET /health on this same listener; internal/nodepool/health.go is the internal consumer that must follow.'
     if k == 'api POST /api/v1/playback/start': return 'redesigned', 'contract_playback_start_status', 'api-contract.md: the legacy/draft-body 426 becomes the v2 422 protocol-version/input-schema problem; v3 payload semantics unchanged.'
     if k == 'api POST /api/v1/auth/plugin-launch': return 'redesigned', 'contract_plugin_cookie_path', 'api-contract.md "Credential continuity": the plugin access cookie is reissued on a narrow v2 plugin-content parent path, never broadened to /.'
     if consumers and all(c in ('compat',) for c in consumers): return 'compatibility_only', 'only_compat_consumer', 'Only consumer is the jellycompat/ABS implementation.'
-    if r['listener'] in ('proxy', 'transcode_node'): return 'ported', 'default_ported', NODE_PORTED_RATIONALE
+    if r['listener'] in ('proxy', 'transcode_node', 'node_enrollment'): return 'ported', 'default_ported', NODE_PORTED_RATIONALE
     return 'ported', 'default_ported', 'No exclusion, removal, or ratified redesign applies; port to v2 in its section PR.'
 
 NODE_PORTED_RATIONALE = ("No exclusion, removal, or ratified redesign applies. The node listeners have no /api/v2 namespace: "
@@ -440,7 +440,7 @@ for r in rows:
     if r['listener'] in ('proxy', 'transcode_node') and r['path'] == '/api/v1/health': notes.append("Administrator action: rewrite the proxy/transcode-node container HEALTHCHECK and orchestrator probes from /api/v1/health to /health on the node listener, and upgrade API replicas and nodes together inside the homogeneous-version maintenance window (Decision 2). Internal consumer: internal/nodepool/health.go CheckNode builds NodeEndpoint(n.URL, \"/api/v1/health\") and must switch to /health in the same change; the node-listener /api/v1/health route is then retired individually (it is not under the main-API tombstone).")
     if k == 'api POST /api/v1/playback/start': notes.append("Administrator action: none beyond the coordinated upgrade. Client action: the v2 start body must declare protocol_version 3; a legacy or draft body receives 422 (protocol-version/input-schema problem) on v2 instead of the v1 426. The v3 payload semantics are unchanged and remain tier 1.")
     if k == 'api POST /api/v1/auth/plugin-launch': notes.append("Administrator action: none beyond the coordinated upgrade; plugin pages open before the cutover need one fresh launch afterwards. Client action: the v2 launch reissues the five-minute HttpOnly SameSite=Lax plugin access cookie on the narrow v2 plugin-content parent path; the /api/v1-path cookie is expired on launch/logout where practical and otherwise dies within its five-minute maximum. Never broadened to /.")
-    if disp == 'ported' and r['listener'] in ('proxy', 'transcode_node'): notes.append(NODE_PORTED_NOTE)
+    if disp == 'ported' and r['listener'] in ('proxy', 'transcode_node', 'node_enrollment'): notes.append(NODE_PORTED_NOTE)
     if r['path'] == '/status' : notes.append("No caller found in this repository or the first-party clients; verify before treating as unused.")
     if r['path'].startswith('/stream/subtitles/'): notes.append("No URL builder for the proxy subtitle path was found in server or client code; verify whether v3 subtitle inventory still emits proxy subtitle URLs.")
     if r['path'] in ('/api/v1/downloads/{id}/file-proxy', '/api/v1/direct-download-proxy'): notes.append("No producer or client reference found; candidate for a maintainer removal decision.")

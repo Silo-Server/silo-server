@@ -17,12 +17,13 @@ import (
 // asked again after HardwareRetryInterval, so a GPU that recovers takes the
 // work back.
 type HardwareResolver struct {
-	// Resolve, Generation, and Now stand in for
-	// playback.ResolveHWAccelWithFFmpegContext, playback.HWProbeGeneration,
-	// and time.Now; tests replace them.
-	Resolve    func(ctx context.Context, hwAccel, ffmpegPath, hwDevice string) string
-	Generation func() uint64
-	Now        func() time.Time
+	// ResolveResult, Generation, and Now stand in for playback's resolution,
+	// probe generation, and time.Now. Resolve is a legacy test override; when
+	// set it takes precedence over ResolveResult.
+	Resolve       func(ctx context.Context, hwAccel, ffmpegPath, hwDevice string) string
+	ResolveResult func(ctx context.Context, hwAccel, ffmpegPath, hwDevice string) (string, error)
+	Generation    func() uint64
+	Now           func() time.Time
 
 	mu                 sync.Mutex
 	accel, device      string
@@ -49,11 +50,11 @@ const HardwareRetryInterval = 5 * time.Minute
 // and playback.hw_device values.
 func NewHardwareResolver(accel, device string) *HardwareResolver {
 	return &HardwareResolver{
-		Resolve:    playback.ResolveHWAccelWithFFmpegContext,
-		Generation: playback.HWProbeGeneration,
-		Now:        time.Now,
-		accel:      accel,
-		device:     device,
+		ResolveResult: playback.ResolveHWAccelWithFFmpegContextResult,
+		Generation:    playback.HWProbeGeneration,
+		Now:           time.Now,
+		accel:         accel,
+		device:        device,
 	}
 }
 
@@ -92,9 +93,15 @@ func (h *HardwareResolver) Backend(ctx context.Context, ffmpegPath string) (stri
 		h.resolvedFFmpegAt == ffmpegPath && h.resolvedGeneration == generation &&
 		(h.retryAt.IsZero() || now.Before(h.retryAt))
 	if !current {
-		accel := h.Resolve(ctx, h.accel, ffmpegPath, h.device)
-		// A probe the caller's context cut short is not a verdict.
-		if ctx.Err() != nil {
+		var accel string
+		var err error
+		if h.Resolve != nil {
+			accel = h.Resolve(ctx, h.accel, ffmpegPath, h.device)
+		} else {
+			accel, err = h.ResolveResult(ctx, h.accel, ffmpegPath, h.device)
+		}
+		// A canceled or temporarily refused probe is not a verdict.
+		if err != nil || ctx.Err() != nil {
 			return accel, h.device
 		}
 		h.resolvedAccel, h.resolvedFrom, h.resolvedDevice, h.resolvedFFmpegAt = accel, h.accel, h.device, ffmpegPath

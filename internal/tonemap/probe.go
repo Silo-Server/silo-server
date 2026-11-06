@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/Silo-Server/silo-server/internal/encodinglimit"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
@@ -174,6 +175,10 @@ func probeWithRunner(
 	dolbyVisionUnsettled := false
 	trackingRunner := func(commandCtx context.Context, name string, args ...string) ([]byte, error) {
 		output, err := run(commandCtx, name, args...)
+		if errors.Is(err, encodinglimit.ErrAtCapacity) {
+			transientErr = errors.Join(transientErr, err)
+			return output, err
+		}
 		// The Dolby Vision smoke is optional, so while the whole probe still
 		// has time, its own deadline is just another unsettled failure; it
 		// must not discard the standard kinds that already passed.
@@ -546,7 +551,7 @@ func hardwareFilter(backend, hardwareDevice string) string {
 // runCommand executes a probe command and retains stderr alongside stdout for
 // capability detection and bounded diagnostics.
 func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return fspath.CommandContext(ctx, name, args...).CombinedOutput()
+	return encodinglimit.CombinedOutput(fspath.CommandContext(ctx, name, args...))
 }
 
 // runBounded applies the per-command probe deadline within the caller's total
