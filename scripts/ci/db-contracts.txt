@@ -87,6 +87,10 @@
 ./internal/catalog TestSearchTextFoldMatchesGoPostgres
 ./internal/catalog TestFoldSearchDiacriticsMigrationPostgres
 
+# name_prefix narrows the matches of every text search, relevance and sorted,
+# without changing which matches the search finds, and skips Meilisearch.
+./internal/catalog TestSearchNamePrefixNarrowsTextSearchDB
+
 # Section and Smart collection rule fields and operators compile to working SQL.
 ./internal/catalog TestRuleFieldsFilterCatalogDB
 ./internal/api/handlers TestCatalogProfileSectionsDB
