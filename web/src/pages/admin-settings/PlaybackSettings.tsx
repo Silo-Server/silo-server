@@ -82,8 +82,11 @@ const PREVIEW_PLACEMENT_KEYS = [
   "playback.trickplay_execution",
 ];
 
+const TRICKPLAY_NODE_CAPACITY_KEY = "playback.trickplay_node_capacity";
+
 const PREVIEW_ADVANCED_KEYS = [
   "playback.trickplay_workers",
+  TRICKPLAY_NODE_CAPACITY_KEY,
   "playback.chapter_thumbnail_hdr_policy",
   "playback.chapter_thumbnail_software_tone_map_enabled",
 ];
@@ -210,10 +213,16 @@ export default function PlaybackSettings() {
   // Showing the placement selects takes a node list that has one, so a
   // single-server page never shows them while the list loads.
   const showPreviewPlacement = hasUsableTranscodeNode(nodes.data);
+  // A node's seek preview capacity matters only once previews may run on one.
+  const showTrickplayNodeCapacity =
+    trickplayExecution !== IMAGE_EXECUTION_DEFAULT || form.isDirty(TRICKPLAY_NODE_CAPACITY_KEY);
   const previewAdvancedKeys = [
     ...PREVIEW_ADVANCED_KEYS,
     ...(showPreviewPlacement ? [] : PREVIEW_PLACEMENT_KEYS),
-  ].filter((key) => keys.includes(key));
+  ].filter(
+    (key) =>
+      keys.includes(key) && (key !== TRICKPLAY_NODE_CAPACITY_KEY || showTrickplayNodeCapacity),
+  );
 
   const isDirty = form.isDirty;
   const anyDirty = (keys: readonly string[]) => keys.some((key) => isDirty(key));
@@ -611,6 +620,17 @@ export default function PlaybackSettings() {
                 value={form.getValue("playback.trickplay_workers")}
                 onChange={(v) => form.setValue("playback.trickplay_workers", v)}
                 restartRequired={restartKeys.has("playback.trickplay_workers")}
+              />
+            )}
+            {supportsTrickplay && showTrickplayNodeCapacity && (
+              <SettingField
+                label="Seek previews per transcode node"
+                type="number"
+                description="How many files one transcode node makes seek previews for at once, across every server, 1 to 64. Each counts toward the node's job limit, so leave room for playback."
+                dirty={form.isDirty(TRICKPLAY_NODE_CAPACITY_KEY)}
+                value={form.getValue(TRICKPLAY_NODE_CAPACITY_KEY) || "1"}
+                onChange={(v) => form.setValue(TRICKPLAY_NODE_CAPACITY_KEY, v)}
+                restartRequired={restartKeys.has(TRICKPLAY_NODE_CAPACITY_KEY)}
               />
             )}
             {!showPreviewPlacement && trickplayExecutionField}
