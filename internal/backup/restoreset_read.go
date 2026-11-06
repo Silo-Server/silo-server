@@ -576,9 +576,11 @@ func (p *restoreSetParser) blob(key string, h *tar.Header, tr io.Reader) error {
 	if h.Size > maxRestoreSetBlob {
 		return fmt.Errorf("blob %q is larger than %d bytes", key, maxRestoreSetBlob)
 	}
-	dir := p.rs.dir
-	if p.opts.Extract != nil && !p.opts.Extract(key) {
-		dir = ""
+	// Only an extracting read writes blobs; the set's directory also exists
+	// for account documents when nothing is extracted.
+	dir := ""
+	if p.opts.ExtractDir != "" && (p.opts.Extract == nil || p.opts.Extract(key)) {
+		dir = p.rs.dir
 	}
 	target, err := p.copyEntry(dir, "blob", h, tr, "")
 	if err != nil {

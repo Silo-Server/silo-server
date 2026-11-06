@@ -1134,7 +1134,8 @@ func mustLoadUser(t *testing.T, rs *RestoreSet, ref UserRef) *UserDocument {
 // TestAccountDocumentsStayOnDisk: an account's document is written to the
 // set's directory and loaded on demand, never held or charged to the set's
 // memory, so a server's accounts together may exceed maxRestoreSetMetadata;
-// a written document that changed since the read is refused.
+// blobs are still not extracted, and a written document that changed since
+// the read is refused.
 func TestAccountDocumentsStayOnDisk(t *testing.T) {
 	index, entries := testRestoreSet()
 	doc := testUserDocument(5, "upload:profile-avatars/5/p1/original.webp")
@@ -1151,6 +1152,12 @@ func TestAccountDocumentsStayOnDisk(t *testing.T) {
 	defer rs.Cleanup()
 	if rs.metadataBytes >= int64(len(data)) {
 		t.Fatalf("charged %d bytes for a set whose account document alone is %d", rs.metadataBytes, len(data))
+	}
+	// A read that extracts nothing writes no blob beside the documents.
+	for key, file := range rs.blobs {
+		if file != "" {
+			t.Fatalf("a preview read extracted blob %s", key)
+		}
 	}
 	if loaded := mustLoadUser(t, rs, rs.Users[0]); len(loaded.Items) != len(doc.Items) {
 		t.Fatalf("loaded %d items, want %d", len(loaded.Items), len(doc.Items))
