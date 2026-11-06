@@ -604,7 +604,8 @@ Validation failures add an `errors` array. Each entry contains `location` using 
 Rejected values are never echoed. Stack traces, database/upstream errors, filesystem paths,
 internal node URLs, credentials, tokens, private media data, and other implementation detail are
 never returned to the client. Problem responses default to `Cache-Control: no-store` unless a
-specific public problem is reviewed as cacheable.
+specific public problem is reviewed as cacheable. Clients translate a problem by its type and
+field codes, not its text; see [interface translation](i18n.md#problem-details).
 
 Server logs remain useful to the self-hosting administrator. They use the existing structured
 logger and `logredact` key-based secret filtering rather than a v2-specific redaction framework.
