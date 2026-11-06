@@ -76,10 +76,10 @@ const (
 	confirmedStopLease           = confirmedStopDispatchTimeout + 30*time.Second
 
 	// importedWatchSamePlayWindow is how close a provider's watch time must be
-	// to a play already in the profile's history for a watched import to treat
-	// it as that play. A scrobble carries no watch time, so the provider stamps
-	// its copy of a Silo play when the stop arrives, seconds after Silo's row;
-	// the window also covers a stop delivered late by a retry.
+	// to a scrobble stop the connection sent for a watched import to treat it
+	// as that scrobbled play. A scrobble carries no watch time, so the provider
+	// stamps its copy when the stop arrives; the window covers clock skew and
+	// a slow provider.
 	importedWatchSamePlayWindow = 10 * time.Minute
 )
 
@@ -1191,13 +1191,13 @@ func (s *Service) ImportWatched(
 	}
 	sort.Strings(mediaItemIDs)
 	var store userstore.UserStore
-	var localPlays map[string][]time.Time
+	var scrobbleStops map[string][]time.Time
 	if s.storeProvider != nil && len(mediaItemIDs) > 0 {
 		store, err = s.storeProvider.ForUser(ctx, conn.UserID)
 		if err != nil {
 			return result, fmt.Errorf("open user store: %w", err)
 		}
-		if localPlays, err = localPlayTimes(ctx, store, conn.ProfileID, mediaItemIDs); err != nil {
+		if scrobbleStops, err = s.repo.ListScrobbleStops(ctx, conn.ID, mediaItemIDs); err != nil {
 			return result, err
 		}
 	}
@@ -1205,9 +1205,9 @@ func (s *Service) ImportWatched(
 		leaf := matchedLeaves[mediaItemID]
 		watchedAt := leaf.watchedAt
 		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
-		if playNear(localPlays[mediaItemID], watchedAt, importedWatchSamePlayWindow) {
-			// The provider's copy of a play Silo recorded and scrobbled: the
-			// play is already in history, but a later completion still counts.
+		if playNear(scrobbleStops[mediaItemID], watchedAt, importedWatchSamePlayWindow) {
+			// The provider's copy of a play this connection scrobbled: Silo
+			// recorded the play, but a later completion still counts.
 			wrote, err := store.SetProgressIfNewer(ctx, conn.ProfileID, mediaItemID, 0, duration, true, watchedAt)
 			if err != nil {
 				return result, err
@@ -1466,34 +1466,9 @@ func visiblePlays(ctx context.Context, store completedHistoryLister, query users
 	return kept, nil
 }
 
-// localPlayTimes returns when each of mediaItemIDs was played to the end in
-// Silo, from the profile's visible history. Only these plays are scrobbled, so
-// only they come back from a provider; imported plays and manual marks don't.
-func localPlayTimes(ctx context.Context, store completedHistoryLister, profileID string, mediaItemIDs []string) (map[string][]time.Time, error) {
-	plays := make(map[string][]time.Time)
-	for start := 0; start < len(mediaItemIDs); start += completedHistoryPageSize {
-		rows, err := listAllCompletedHistory(ctx, store, userstore.CompletedHistoryQuery{
-			ProfileID:      profileID,
-			MediaItemIDs:   mediaItemIDs[start:min(start+completedHistoryPageSize, len(mediaItemIDs))],
-			IncludeSources: []userstore.WatchHistorySource{userstore.WatchHistorySourcePlayback, userstore.WatchHistorySourceJellycompat},
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range rows {
-			watchedAt, err := time.Parse(time.RFC3339, row.WatchedAt)
-			if err != nil {
-				continue
-			}
-			plays[row.MediaItemID] = append(plays[row.MediaItemID], watchedAt)
-		}
-	}
-	return plays, nil
-}
-
-// playNear reports whether any of plays is within window of at, either side.
-func playNear(plays []time.Time, at time.Time, window time.Duration) bool {
-	for _, play := range plays {
+// playNear reports whether any of times is within window of at, either side.
+func playNear(times []time.Time, at time.Time, window time.Duration) bool {
+	for _, play := range times {
 		if play.Sub(at).Abs() <= window {
 			return true
 		}

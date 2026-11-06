@@ -1028,6 +1028,19 @@ func (r *serviceFakeRepo) ListOpenScrobbleSessions(_ context.Context) ([]Scrobbl
 	return append([]ScrobbleSession(nil), r.scrobbleSessions...), nil
 }
 
+func (r *serviceFakeRepo) ListScrobbleStops(_ context.Context, connectionID string, mediaItemIDs []string) (map[string][]time.Time, error) {
+	r.scrobbleMu.Lock()
+	defer r.scrobbleMu.Unlock()
+	stops := make(map[string][]time.Time)
+	for _, session := range r.scrobbleSessions {
+		if session.ConnectionID == connectionID && session.StopSentAt != nil && session.HistoryID != "" &&
+			slices.Contains(mediaItemIDs, session.MediaItemID) {
+			stops[session.MediaItemID] = append(stops[session.MediaItemID], *session.StopSentAt)
+		}
+	}
+	return stops, nil
+}
+
 func (r *serviceFakeRepo) ListPendingScrobbleReconciliations(_ context.Context) ([]ScrobbleSession, error) {
 	r.scrobbleMu.Lock()
 	defer r.scrobbleMu.Unlock()
@@ -2119,22 +2132,24 @@ func TestServiceImportWatchedDeduplicatesResolvedLeavesAtNewestTimestamp(t *test
 }
 
 // A scrobbled play comes back from the provider stamped when the stop arrived,
-// seconds after Silo's own row (#3433). The import treats a watch within ten
-// minutes of a play Silo recorded as that play, and records a later one. Only
-// Silo's plays are scrobbled, so a nearby manual mark doesn't count.
-func TestServiceImportWatchedSkipsProviderCopyOfLocalPlay(t *testing.T) {
+// a second or so after Silo's own row (#3433). The import treats a watch within
+// ten minutes of a stop this connection sent as that play, and records a watch
+// with no such stop: a later play, a play Silo didn't scrobble to this
+// provider, or one another connection scrobbled.
+func TestServiceImportWatchedSkipsProviderCopyOfScrobbledPlay(t *testing.T) {
 	localPlay := time.Date(2026, 11, 3, 1, 8, 27, 0, time.UTC)
+	stopSent := localPlay.Add(time.Second)
 	tests := []struct {
 		name         string
-		source       userstore.WatchHistorySource
+		connectionID string // of the scrobble session; "" for none
 		remote       time.Time
 		wantRecorded bool
 	}{
-		{name: "scrobble stamped seconds later", source: userstore.WatchHistorySourcePlayback, remote: localPlay.Add(4 * time.Second)},
-		{name: "scrobble delivered late by a retry", source: userstore.WatchHistorySourcePlayback, remote: localPlay.Add(9 * time.Minute)},
-		{name: "scrobble from a Jellyfin app", source: userstore.WatchHistorySourceJellycompat, remote: localPlay.Add(5 * time.Second)},
-		{name: "a later play", source: userstore.WatchHistorySourcePlayback, remote: localPlay.Add(11 * time.Minute), wantRecorded: true},
-		{name: "a nearby manual mark", source: userstore.WatchHistorySourceManual, remote: localPlay.Add(4 * time.Second), wantRecorded: true},
+		{name: "provider stamp at the stop", connectionID: "conn-1", remote: stopSent},
+		{name: "provider stamp minutes after the stop", connectionID: "conn-1", remote: stopSent.Add(9 * time.Minute)},
+		{name: "a later play", connectionID: "conn-1", remote: stopSent.Add(11 * time.Minute), wantRecorded: true},
+		{name: "a play this connection didn't scrobble", remote: stopSent, wantRecorded: true},
+		{name: "a play another connection scrobbled", connectionID: "conn-2", remote: stopSent, wantRecorded: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2143,9 +2158,16 @@ func TestServiceImportWatchedSkipsProviderCopyOfLocalPlay(t *testing.T) {
 			if err := userdb.AddHistory(db, userstore.WatchHistoryEntry{
 				ID: "history-1", ProfileID: "profile-1", MediaItemID: testMovieMediaID,
 				WatchedAt: localPlay.Format(time.RFC3339), DurationSeconds: 7200, Completed: true,
-				Source: tt.source,
+				Source: userstore.WatchHistorySourcePlayback,
 			}); err != nil {
 				t.Fatalf("AddHistory: %v", err)
+			}
+			repo := newServiceFakeRepo()
+			if tt.connectionID != "" {
+				repo.scrobbleSessions = []ScrobbleSession{{
+					PlaybackSessionID: "play-1", ConnectionID: tt.connectionID, MediaItemID: testMovieMediaID,
+					HistoryID: "history-1", LastAction: "stop", StopSentAt: &stopSent,
+				}}
 			}
 			remote := tt.remote
 			provider := watchedImporterStub{
@@ -2155,7 +2177,7 @@ func TestServiceImportWatchedSkipsProviderCopyOfLocalPlay(t *testing.T) {
 				}},
 			}
 			watchState := &recordingWatchState{}
-			service := NewService(newServiceFakeRepo(), NewRegistry()).
+			service := NewService(repo, NewRegistry()).
 				WithMatcher(matchedMatcherStub{mediaItemID: testMovieMediaID}).
 				WithWatchState(watchState).
 				WithUserStoreProvider(staticStoreProvider{store: store})
