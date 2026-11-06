@@ -85,5 +85,31 @@ func intersectMaturityLimits(viewer, owner access.MaturityLimits) access.Maturit
 		out.MaxAdvisoryAge = owner.MaxAdvisoryAge
 	}
 	out.RequireAdvisoryAge = viewer.HidesUnadvised() || owner.HidesUnadvised()
+	out.AllowedTitleIDs = intersectAllowedTitles(viewer, owner)
 	return out
+}
+
+// intersectAllowedTitles returns the allowed titles for the intersected
+// limits. A side without limits keeps the other side's allowances whole. When
+// both sides have limits, only titles both allowed pass the combined limits:
+// that is narrower than "each side's limits or its own allowances" but never
+// wider, so one profile's allowance cannot lift the other profile's limit.
+func intersectAllowedTitles(viewer, owner access.MaturityLimits) []string {
+	switch {
+	case !owner.Active():
+		return viewer.AllowedTitleIDs
+	case !viewer.Active():
+		return owner.AllowedTitleIDs
+	}
+	ownerAllowed := make(map[string]struct{}, len(owner.AllowedTitleIDs))
+	for _, id := range owner.AllowedTitleIDs {
+		ownerAllowed[id] = struct{}{}
+	}
+	var both []string
+	for _, id := range viewer.AllowedTitleIDs {
+		if _, ok := ownerAllowed[id]; ok {
+			both = append(both, id)
+		}
+	}
+	return both
 }

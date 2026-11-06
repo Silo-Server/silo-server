@@ -20,6 +20,15 @@ vi.mock("@/hooks/queries/profiles", () => ({
   useDeleteProfileAvatar: () => mocks.useDeleteProfileAvatar(),
 }));
 
+// Title allowances are covered by their own tests; the editor's own fields are under test here.
+vi.mock("@/hooks/queries/titleAllowances", () => ({
+  useCanManageTitleAllowances: () => false,
+  profileHasMaturityLimit: () => false,
+}));
+vi.mock("@/hooks/useCurrentProfile", () => ({
+  useCurrentProfile: () => ({ profile: null }),
+}));
+
 import { ProfileEditorDialog } from "./ProfileEditorDialog";
 
 function makeProfile(overrides: Partial<Profile> = {}): Profile {

@@ -101,6 +101,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/trickplay"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/Silo-Server/silo-server/internal/watchlist"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
@@ -3175,6 +3176,15 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if personalDataHandler != nil && itemsHandler != nil {
 		v2deps.PersonalLists = personalDataHandler
 		v2deps.NotInterested = personalDataHandler
+		// Allowances live in the shared tables, so they are kept only where
+		// the user store is PostgreSQL in the same database.
+		if viewerResolver != nil && deps.DB != nil {
+			if shared, ok := deps.UserStoreProvider.(interface{ StoresAccountsIn(*pgxpool.Pool) bool }); ok && shared.StoresAccountsIn(deps.DB) {
+				v2deps.TitleAllowances = handlers.NewTitleAllowanceHandler(personalDataHandler, viewerResolver, pgstore.NewTitleAllowances(deps.DB)).
+					WithSmartCollections(&catalog.QueryExecutor{Pool: deps.DB}).
+					WithCollectionOwners(collectionOwners)
+			}
+		}
 	}
 	if ratingsHandler != nil {
 		v2deps.Ratings = ratingsHandler

@@ -1667,7 +1667,7 @@ func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Sessi
 	// Fold the client's clamped max content rating into the access filter so the
 	// shared cached list respects the client's cap AND the cache key captures it
 	// — identical to the clamp BrowseItems applies.
-	filter.MaxContentRating = clampMaxContentRating(filter.MaxContentRating, query.maxOfficialRating)
+	filter.MaturityLimits = clampMaturityLimits(filter.MaturityLimits, query.maxOfficialRating)
 
 	limit := query.limit
 	if limit <= 0 {
@@ -2169,7 +2169,7 @@ var errConfiguredUserStoreUnavailable = errors.New("configured user store unavai
 // browse applies for query.
 func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Session, query itemsQuery) (catalog.AccessFilter, catalog.BrowseFilters) {
 	access := h.resolveAccessFilter(ctx, session)
-	access.MaxContentRating = clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating)
+	access.MaturityLimits = clampMaturityLimits(access.MaturityLimits, query.maxOfficialRating)
 	sortKey, order := "", ""
 	if query.sortExplicit {
 		sortKey = query.sort

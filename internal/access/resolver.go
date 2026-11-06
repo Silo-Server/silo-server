@@ -106,8 +106,9 @@ func (r *Resolver) Resolve(ctx context.Context, input ResolveInput) (Scope, erro
 	}
 
 	preferences := ResolveViewerPreferences(ctx, store, r.defaults, input.ProfileID)
+	var profile *userstore.Profile
 	if input.ProfileID != "" {
-		profile, err := store.GetProfile(ctx, input.ProfileID)
+		profile, err = store.GetProfile(ctx, input.ProfileID)
 		if err != nil {
 			return Scope{}, fmt.Errorf("loading profile %s: %w", input.ProfileID, err)
 		}
@@ -257,14 +258,14 @@ func subtractInts(src, exclude []int) []int {
 }
 
 // ProfileMaturity is the profile's maturity limits under the server's
-// unrated-content decision, as Resolve applies them.
+// unrated-content decision, with its allowed titles, as Resolve applies them.
 func ProfileMaturity(profile *userstore.Profile, allowUnrated bool) MaturityLimits {
 	return MaturityLimits{
 		MaxContentRating:    profile.MaxContentRating,
 		AllowUnratedContent: allowUnrated,
 		MaxAdvisoryAge:      profile.MaxAdvisoryAge,
 		RequireAdvisoryAge:  profile.RequireAdvisoryAge && profile.MaxAdvisoryAge > 0,
-	}
+	}.WithAllowedTitles(profile.AllowedTitleIDs)
 }
 
 // ProfileLibraries is the libraries a profile may see under its account's
