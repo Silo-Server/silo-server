@@ -1,6 +1,7 @@
 package transcodenode
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -30,10 +31,13 @@ const (
 // trickplayWork counts the node's trickplay runs against
 // playback.trickplay_node_capacity, and holds the hardware they decode on.
 type trickplayWork struct {
-	mu       sync.Mutex
-	running  int
-	once     sync.Once
-	hardware *mediasample.HardwareResolver
+	mu      sync.Mutex
+	running int
+	// resolving pairs each run's Set with its Backend, so concurrent runs
+	// across a settings reload never resolve another run's accelerator.
+	resolving sync.Mutex
+	once      sync.Once
+	hardware  *mediasample.HardwareResolver
 }
 
 // start admits a run when fewer than capacity are running. It never waits: a
@@ -54,6 +58,16 @@ func (t *trickplayWork) done() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.running--
+}
+
+// backend resolves the accelerator for accel and device, the node's current
+// playback.hw_accel and playback.hw_device.
+func (t *trickplayWork) backend(ctx context.Context, ffmpeg, accel, device string) (string, string) {
+	hardware := t.resolver()
+	t.resolving.Lock()
+	defer t.resolving.Unlock()
+	hardware.Set(accel, device)
+	return hardware.Backend(ctx, ffmpeg)
 }
 
 func (t *trickplayWork) resolver() *mediasample.HardwareResolver {
@@ -110,9 +124,7 @@ func (s *Server) handleTrickplayExtract(w http.ResponseWriter, r *http.Request) 
 	if accel == "" {
 		accel = trickplayAutoAccel
 	}
-	hardware := s.trickplay.resolver()
-	hardware.Set(accel, cfg.Playback.HWDevice)
-	resolved, device := hardware.Backend(r.Context(), ffmpeg)
+	resolved, device := s.trickplay.backend(r.Context(), ffmpeg, accel, cfg.Playback.HWDevice)
 	runner := mediasample.Runner{FFmpegPath: ffmpeg, Workload: processmetrics.Trickplay}
 	if mediasample.SupportsHardwareSheets(resolved) {
 		runner.HWAccel, runner.HWDevice = resolved, device
