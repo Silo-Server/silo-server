@@ -28,8 +28,9 @@ import (
 // account's entry (UserRef). The preview and a restore load one document at
 // a time (loadUser), so memory follows the largest account, not their sum.
 
-// UserRef is one account of a restore set's users section: its entry, which
-// matching reads, and the file its validated document was written to.
+// UserRef is one account of a restore set's users section: the identity
+// matching reads (id, username, and email; the other fields are empty) and
+// the file its validated document was written to.
 type UserRef struct {
 	Account AccountEntry
 	file    string

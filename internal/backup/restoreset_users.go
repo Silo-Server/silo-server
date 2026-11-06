@@ -591,7 +591,10 @@ func (p *restoreSetParser) decodeUsers(spec sectionSpec) (int, error) {
 			p.rs.accountBlobs = map[string][]string{}
 		}
 		p.rs.accountBlobs[id] = blobs
-		p.rs.Users = append(p.rs.Users, UserRef{Account: doc.Account, file: file, sha256: p.files[name].SHA256})
+		// Only what matching reads stays in memory: the policy lists can be
+		// large, and the whole entry is in the document.
+		identity := AccountEntry{ID: doc.Account.ID, Username: doc.Account.Username, Email: doc.Account.Email}
+		p.rs.Users = append(p.rs.Users, UserRef{Account: identity, file: file, sha256: p.files[name].SHA256})
 		p.rs.metadataBytes += userRefCost
 	}
 	return len(p.itemIDs(spec)), nil

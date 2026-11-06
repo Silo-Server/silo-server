@@ -58,9 +58,9 @@ func (s *Service) checkUpload(ctx context.Context, parts *partsReader, declared 
 		return nil, nil, parts.err
 	case ctx.Err() != nil:
 		return nil, nil, context.Cause(ctx)
-	case errors.Is(err, ErrNotEnoughTempSpace):
+	case errors.Is(err, ErrNotEnoughTempSpace), errors.As(err, new(*tempStorageError)):
 		// Nothing is wrong with the upload: it stays, to be checked again
-		// once there is room for its account documents.
+		// once the temporary directory has room or works.
 		return nil, nil, err
 	case errors.Is(err, ErrRestoreSetTooNew):
 		return nil, &UploadRejection{Reason: RejectNewerSilo, Message: ErrRestoreSetTooNew.Error()}, nil

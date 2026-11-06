@@ -77,7 +77,8 @@ const (
 	// lookups: its key in blobs, blobSizes, and the index's directories.
 	blobIndexCost = 256
 	// userRefCost is about what one account costs the set in memory beside
-	// its spilled document: its entry and file name (UserRef).
+	// its spilled document: its identity, two strings of at most
+	// maxAccountField bytes, and its file name (UserRef).
 	userRefCost = 4 << 10
 	// maxRestoreSetTrailer bounds the bytes after the tar end marker.
 	maxRestoreSetTrailer = 1 << 20
