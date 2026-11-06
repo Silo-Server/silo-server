@@ -16,7 +16,15 @@ servers does not change how often a plugin hears of it.
 The dispatcher reads envelopes published on the `events.Hub`. Each hub also
 relays other nodes' envelopes to its local subscribers; the dispatcher takes
 only envelopes whose `SourceID` is its own hub's, and skips `V2Only` ones.
-`RuntimeHost.PublishEvent` puts plugin-published events on the hub too.
+`RuntimeHost.PublishEvent` puts plugin-published events on the hub too, on
+`ChannelPlugins`.
+
+The hub keeps `ChannelPlugins` envelopes on the server that published them:
+no websocket client receives that channel, and every other server's
+dispatcher would drop them. Before it builds a plugin event's envelope,
+`RuntimeHost.PublishEvent` asks the hub whether the event could have
+subscribers (`Hub.PluginEventWanted`, answered from the dispatcher's index),
+so a plugin event nobody subscribes to is not encoded or published.
 
 It does not read the [Redis event bus](redis-event-bus.md). Bus event types
 are internal cache and coordination signals, not a plugin contract, and
@@ -30,22 +38,23 @@ and plugin events (`plugin.<plugin_id>.<name>`). The subscriber index leaves
 out any other name a manifest lists, so an internal event such as
 `user_state.changed` never reaches a plugin.
 
-Before an event is stored, `events.Project` rewrites its payload into the
-catalog's public shape: the fields of the SDK payload type and nothing else.
-A field the host adds for its own clients therefore stays off the plugin
-contract until the SDK type adds it. `notification.created` also gets the
-envelope's `user_id`, because profile IDs repeat across accounts. An event
-whose payload doesn't fit its catalog type is logged and not stored.
+Every identifier in a catalog payload is a JSON string. The host's
+payloads are shared with the events socket, where numeric IDs such as
+`library_id` stay JSON numbers, so the dispatcher converts them: a top-level
+`id` or `*_id` field holding a number becomes its decimal string, and zero
+becomes absent (a job the server queued itself has no `created_by_user_id`).
+`notification.created` also gets the envelope's account as `user_id`,
+because profile IDs repeat across accounts.
 
-Request lifecycle events (`request.submitted`, `.approved`, `.declined`,
-`.fulfilled`) exist only for plugins: `notifications.System` publishes them
-on `ChannelPlugins`, which no websocket client receives, beside the
-server-channel post for the same transition. Their event ID is derived from
-the request and its last update, so a repeated call carries the same ID.
+Then `events.Project` rewrites the payload into the catalog's public shape:
+the fields of the SDK payload type and nothing else. A field the host adds
+for its own clients therefore stays off the plugin contract until the SDK
+type adds it. An event whose payload doesn't fit its catalog type, such as a
+number where the catalog has a string, is logged and not stored.
 
-`TestEventCatalogMatchesProducers` projects what each producer publishes and
-fails when a producer change drops a catalog field, or when the SDK catalog
-gains an event without a producer case.
+`TestEventCatalogMatchesProducers` runs what each producer publishes through
+that conversion and fails when a producer change drops or retypes a catalog
+field, or when the SDK catalog gains an event without a producer case.
 
 The index check happens before queueing, so events no plugin subscribes to
 cost a map lookup and never take a place in the intake queue. An envelope
@@ -88,6 +97,9 @@ published while the server drains its requests after its context ended.
 - Only catalog and plugin events reach plugins, in their projected shape.
   Delivering another name, or a payload that skipped `events.Project`, makes
   an internal detail part of the plugin contract.
+- Catalog payload IDs are strings. Change a producer's ID to a string on the
+  events socket and the conversion leaves it alone; add a numeric ID under a
+  name other than `id` or `*_id` and projection refuses the event.
 - A claim must stay a `MATERIALIZED` CTE. As
   `id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` the planner may run the
   subquery more than once and claim more than `n` rows.
@@ -119,7 +131,7 @@ published while the server drains its requests after its context ended.
 - One process sees each event, so a plugin that keeps per-process state
   cannot use events to keep every process's copy current.
 - During a rolling upgrade, servers on older builds still deliver internal
-  event names and unprojected payloads until they are replaced.
+  event names, unprojected payloads and numeric IDs until they are replaced.
 
 ## Plugin contract
 

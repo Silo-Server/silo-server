@@ -189,7 +189,6 @@ func TestNotifyFulfilledAnnouncesOnceAfterTheStamp(t *testing.T) {
 	notifier := &fakeNotifier{}
 	svc := NewService(store, &fakeTMDBClient{}, presentMovie(42))
 	svc.SetFulfillmentNotifier(notifier)
-	svc.SetRequesterIdentityResolver(&fakeRequesterIdentity{username: "bob"})
 
 	svc.notifyFulfilledPending(context.Background())
 	if len(notifier.requestIDs) != 1 || len(notifier.announced) != 0 {
@@ -201,14 +200,6 @@ func TestNotifyFulfilledAnnouncesOnceAfterTheStamp(t *testing.T) {
 	svc.notifyFulfilledPending(context.Background())
 	if !slices.Equal(notifier.announced, []string{"req1"}) {
 		t.Fatalf("announced = %v, want req1 once", notifier.announced)
-	}
-	// Plugins learn which catalog item fulfilled the request from it.
-	if want := fakePresenceContentID(MediaTypeMovie, 42); !slices.Equal(notifier.announcedContent, []string{want}) {
-		t.Fatalf("announced content = %v, want %q", notifier.announcedContent, want)
-	}
-	// ...and who asked for it, as the request.fulfilled event's requester_name.
-	if !slices.Equal(notifier.announcedRequester, []string{"bob"}) {
-		t.Fatalf("announced requester = %v, want bob", notifier.announcedRequester)
 	}
 }
 

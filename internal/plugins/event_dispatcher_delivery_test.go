@@ -103,8 +103,8 @@ func TestServerWithoutRedisDeliversEvents(t *testing.T) {
 		t.Fatalf("publish: %v", err)
 	}
 	waitFor(t, client)
-	if got := client.get()[0].GetPayload().AsMap()["library_id"]; got != float64(7) {
-		t.Fatalf("payload library_id = %v, want 7", got)
+	if got := client.get()[0].GetPayload().AsMap()["library_id"]; got != "7" {
+		t.Fatalf("payload library_id = %v, want \"7\"", got)
 	}
 }
 
@@ -252,7 +252,7 @@ func TestUndeliverablePayloadIsDropped(t *testing.T) {
 func TestPayloadOffTheCatalogIsNotQueued(t *testing.T) {
 	ctx := t.Context()
 	d, deliveries := newDeliveryFixture(&flakyClient{})
-	d.store(ctx, hubEvent(catalogEnvelope("scan.completed", `{"id":"scan-1","library_id":"seven"}`)))
+	d.store(ctx, hubEvent(catalogEnvelope("scan.completed", `{"id":"scan-1","library_id":true}`)))
 	if pending := deliveries.pending(); len(pending) != 0 {
 		t.Fatalf("outbox = %+v, want empty", pending)
 	}

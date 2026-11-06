@@ -17,7 +17,6 @@ type FulfillmentNotifier interface {
 	NotifyFulfilled(ctx context.Context, req Request, contentID string) error
 	// AnnounceFulfilled posts the server-wide announcement. It runs once per
 	// request, after the request is stamped as notified, and is best-effort.
-	// req carries the requester's resolved identity when it could be found.
 	AnnounceFulfilled(ctx context.Context, req Request)
 }
 
@@ -141,8 +140,6 @@ func (s *Service) notifyFulfilledPending(ctx context.Context) {
 			continue
 		}
 		req.Followers = followers
-		// The stored row doesn't carry the match; the announcement names it.
-		req.LibraryContentID = match.ContentID
 		if err := s.notifier.NotifyFulfilled(ctx, *req, match.ContentID); err != nil {
 			slog.WarnContext(ctx, "request fulfill-notify: dispatch failed", "component", "requests",
 				"request_id", req.ID, "err", err)
@@ -166,10 +163,8 @@ func (s *Service) notifyFulfilledPending(ctx context.Context) {
 		}
 		// The announcement has no per-recipient dedupe, so it goes out only
 		// from the pass whose stamp took: a retry after a failed write above
-		// does not repeat it. Only the announcement carries the requester's
-		// identity; the deliveries above are addressed by ids.
+		// does not repeat it.
 		if stamped {
-			s.populateRequesterIdentity(ctx, req)
 			s.notifier.AnnounceFulfilled(ctx, *req)
 		}
 	}

@@ -96,9 +96,6 @@ type System struct {
 	// configured channel the same way.
 	dispatcher Dispatcher
 
-	// events carries host events to plugins; nil without a hub.
-	events *evt.Hub
-
 	pool   *pgxpool.Pool
 	stores userstore.UserStoreProvider
 	// scopes resolves a recipient's current access before a delivery that
@@ -273,7 +270,6 @@ func NewSystem(
 		pushSender:          pushSenderInst,
 		serverChannelWorker: serverChannelSweep,
 		dispatcher:          multiDispatcher,
-		events:              hub,
 		pool:                pool,
 		stores:              stores,
 		scopes:              scopes,
