@@ -754,6 +754,9 @@ func checkCatalogIdentity(manifest *pluginv1.PluginManifest, pluginID, version s
 // archives of existing installations are opened with openPluginArchive.
 func openInstallArchive(data []byte, req InstallArchiveRequest) (*zip.Reader, []byte, *pluginv1.PluginManifest, error) {
 	reader, manifestBytes, manifest, err := openPluginArchive(data)
+	if invalid, ok := errors.AsType[*invalidManifestError](err); ok {
+		return nil, nil, nil, packageError(err, "The plugin's manifest is invalid: %s", invalid.err)
+	}
 	if err != nil {
 		return nil, nil, nil, packageError(err, "The plugin archive couldn't be read.")
 	}

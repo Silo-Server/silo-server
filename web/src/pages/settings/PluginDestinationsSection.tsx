@@ -36,6 +36,7 @@ import { Switch } from "@/components/ui/switch";
 import { useNotificationPreferences } from "@/hooks/queries/notifications";
 import {
   pluginDestinationErrorMessage,
+  pluginSettingsRejection,
   useCreateNotificationPluginDestination,
   useDeleteNotificationPluginDestination,
   useNotificationPluginChannels,
@@ -116,6 +117,9 @@ function DestinationFormDialog({
   const channel = channels.find((c) => channelKey(c) === kind);
   const [name, setName] = useState(destination?.name ?? channel?.display_name ?? "");
   const [settings, setSettings] = useState<Record<string, unknown>>(destination?.settings ?? {});
+  // The plugin's reason for refusing the last submitted settings, shown under
+  // the fields until they change.
+  const [settingsRejection, setSettingsRejection] = useState<string | null>(null);
   const [settingsValid, setSettingsValid] = useState(true);
   const [reasons, setReasons] = useState<Record<DestinationNotifyKey, boolean>>({
     notify_favorites: destination?.notify_favorites ?? true,
@@ -162,8 +166,12 @@ function DestinationFormDialog({
     );
 
   const submit = () => {
-    const onError = (error: unknown) =>
-      toast.error(pluginDestinationErrorMessage(error, "The destination couldn't be saved"));
+    setSettingsRejection(null);
+    const onError = (error: unknown) => {
+      const rejection = pluginSettingsRejection(error);
+      if (rejection) setSettingsRejection(rejection);
+      else toast.error(pluginDestinationErrorMessage(error, "The destination couldn't be saved"));
+    };
     if (editing) {
       update.mutate(
         {
@@ -216,6 +224,7 @@ function DestinationFormDialog({
                 onValueChange={(next) => {
                   setKind(next);
                   setSettings({});
+                  setSettingsRejection(null);
                   const picked = channels.find((c) => channelKey(c) === next);
                   if (picked && !name.trim()) setName(picked.display_name);
                 }}
@@ -247,10 +256,18 @@ function DestinationFormDialog({
               <SchemaForm
                 descriptor={form}
                 values={settings}
-                onChange={setSettings}
+                onChange={(next) => {
+                  setSettings(next);
+                  setSettingsRejection(null);
+                }}
                 idPrefix={`plugin-destination-${kind}`}
                 onValidityChange={setSettingsValid}
               />
+              {settingsRejection && (
+                <p role="alert" className="text-destructive text-sm">
+                  {settingsRejection}
+                </p>
+              )}
               {secretsSet.length > 0 && (
                 <p className="text-muted-foreground text-xs">
                   Secret fields you leave blank keep their saved values.

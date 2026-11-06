@@ -44,6 +44,15 @@ export function pluginDestinationErrorMessage(error: unknown, fallback: string):
   return error instanceof Error ? error.message : fallback;
 }
 
+// pluginSettingsRejection is the plugin's own reason for refusing a
+// destination's settings, which the dialog shows under the settings fields.
+// It is null for any other error.
+export function pluginSettingsRejection(error: unknown): string | null {
+  if (!(error instanceof V2ProblemError)) return null;
+  const rejection = error.problem.errors?.find((e) => e.location === "body.settings");
+  return rejection?.detail || null;
+}
+
 export function useNotificationPluginChannels(enabled = true) {
   const context = captureProfileRequestContext();
   return useQuery({
