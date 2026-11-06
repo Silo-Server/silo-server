@@ -22767,6 +22767,8 @@ export interface components {
     AndroidPushRegistrationCapability: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description A registration applied at a new generation records the calling login session, and push to it stops when that session ends. A replay of the current generation records nothing, so an older registration binds only at a newer generation. */
+      binds_login_session: boolean;
       platforms: string[];
       /** @description Local ordered registration storage is configured; does not assert provider delivery availability. */
       registration_available: boolean;

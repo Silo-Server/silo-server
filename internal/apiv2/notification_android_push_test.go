@@ -23,6 +23,18 @@ func (f *fakeOrderedPush) ApplyAndroidPush(_ context.Context, cmd notifications.
 	f.calls++
 	return notifications.AndroidPushReceipt{Generation: cmd.Generation, RegistrationID: "registration", ServerDeviceID: "server-device", PushMode: notifications.PushModePrivatePush, Removed: cmd.Remove}, f.err
 }
+
+// A client feature-detects this to know a registration at a new generation
+// records its login session, so an older registration is worth sending again.
+func TestOrderedAndroidPushCapabilitiesAdvertiseLoginSessionBinding(t *testing.T) {
+	deps := pilotDeps(nil, nil)
+	deps.OrderedAndroidPush = new(fakeOrderedPush)
+	rec := do(t, NewHandler(deps), http.MethodGet, Prefix+"/notifications/push/devices/capabilities", "", profileOwner())
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"binds_login_session":true`) {
+		t.Fatalf("capabilities=%d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestOrderedAndroidPushTransport(t *testing.T) {
 	f := new(fakeOrderedPush)
 	deps := pilotDeps(nil, nil)

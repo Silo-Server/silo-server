@@ -108,9 +108,10 @@ and its token. The next sign-in registers again at a newer generation.
 A registration with no recorded session keeps delivering: an API key has none, and
 neither does a registration made before the server recorded them. An Apple client
 fills it in when it renews its display token, which can be weeks later. An Android
-client that has nothing new to register does not send a request. Either client's
-older registration stays unbound until then, and one whose session had already
-ended stays unbound until it signs in again.
+client registers once more at a newer generation when capabilities report
+`binds_login_session`, because a replay of its current generation records nothing.
+A registration stays unbound until then, and one whose session had already ended
+stays unbound until it signs in again.
 
 ## Reset after a lost installation key
 
@@ -257,8 +258,9 @@ the same way.
 ## Ordered Android registration
 
 `GET /api/v2/notifications/push/devices/capabilities` reports `platforms`
-(`["android"]`) and `registration_available`, which says whether local registration
-storage is configured. It requires the acting login/profile. `registration_available`
+(`["android"]`), `binds_login_session` (see "Delivery follows the login"), and
+`registration_available`, which says whether local registration storage is
+configured. It requires the acting login/profile. `registration_available`
 is independent of relay delivery availability; use notification capabilities
 for delivery configuration. Apple registration and browser web push remain
 separate contracts.
