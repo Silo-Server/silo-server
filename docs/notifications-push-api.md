@@ -97,6 +97,22 @@ shared Keychain access group) and clear it on sign-out, server removal, or
 profile change. The server revokes it implicitly when the login session is
 revoked or expires.
 
+## Delivery follows the login
+
+A registration records the login session that made it. Once that session ends,
+by sign-out, revocation, a password change, an admin, or expiry, the server sends
+nothing more to the device, including attempts already queued, which fail with
+reason `login_session_ended`. Notification retention then deletes the registration
+and its token. The next sign-in registers again at a newer generation.
+
+A registration with no recorded session keeps delivering: an API key has none, and
+neither does a registration made before the server recorded them. An Apple client
+fills it in when it renews its display token, which can be weeks later. An Android
+client registers once more at a newer generation when capabilities report
+`binds_login_session`, because a replay of its current generation records nothing.
+A registration stays unbound until then, and one whose session had already ended
+stays unbound until it signs in again.
+
 ## Reset after a lost installation key
 
 The server binds an Apple installation (`device_id`) to the installation key and
@@ -242,8 +258,9 @@ the same way.
 ## Ordered Android registration
 
 `GET /api/v2/notifications/push/devices/capabilities` reports `platforms`
-(`["android"]`) and `registration_available`, which says whether local registration
-storage is configured. It requires the acting login/profile. `registration_available`
+(`["android"]`), `binds_login_session` (see "Delivery follows the login"), and
+`registration_available`, which says whether local registration storage is
+configured. It requires the acting login/profile. `registration_available`
 is independent of relay delivery availability; use notification capabilities
 for delivery configuration. Apple registration and browser web push remain
 separate contracts.
@@ -378,9 +395,9 @@ which serializes bridge writers and ordered v2 writers across API nodes.
 
 An older client switching accounts can therefore receive a conflict while the
 previous account's destination remains registered. Repeating registration does
-not resolve it, and neither does signing out or revoking the owning account's
-sessions. The conflict clears only when the owning account unregisters that
-device, or when the owning profile or account is deleted. Ordered bootstrap must
+not resolve it. The conflict clears when the owning account unregisters that
+device, when the owning profile or account is deleted, or when notification
+retention removes the registration because its login session ended. Ordered bootstrap must
 occur while that existing account is selected; subsequent account transfers
 require its installation key and a newer generation. This repair adds no
 recovery or automatic rebinding mechanism.

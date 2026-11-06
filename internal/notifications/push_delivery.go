@@ -100,6 +100,17 @@ func scanPushDeliveryAttempts(rows pgx.Rows) ([]PushDeliveryAttempt, error) {
 	return attempts, rows.Err()
 }
 
+// pushDeviceLoginLive is true for a device whose registering login session has
+// not ended. It is checked when sending rather than written when a session ends
+// because sessions end on many paths, and expiry happens without any code
+// running. A session that no longer exists has ended: backups carry push_devices
+// but not auth_sessions. A device with no recorded session (an API key, or a
+// registration older than the column) keeps delivering. Liveness matches
+// auth.SessionRepository.IsValid.
+const pushDeviceLoginLive = `(push_devices.login_session_id IS NULL OR EXISTS (
+	SELECT 1 FROM auth_sessions s
+	WHERE s.id = push_devices.login_session_id AND s.revoked_at IS NULL AND s.expires_at > now()))`
+
 // ListEnabledPushByProfiles loads delivery-eligible push devices for the
 // admin-enabled platforms, keyed by account and profile: profile IDs repeat
 // across accounts.
@@ -115,7 +126,8 @@ func (r *PushDeviceRepository) ListEnabledPushByProfiles(ctx context.Context, tx
 		  AND platform = ANY($3)
 		  AND provider = $4
 		  AND push_mode = $5
-		  AND enabled`,
+		  AND enabled
+		  AND `+pushDeviceLoginLive,
 		userIDs, profileIDs, platforms, PushProviderSiloRelay, PushModePrivatePush)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled push devices: %w", err)
@@ -194,7 +206,8 @@ func (r *PushDeviceRepository) EnqueueTestAttempt(ctx context.Context, platform,
 		  AND platform = $2
 		  AND provider = $3
 		  AND push_mode = $4
-		  AND enabled`
+		  AND enabled
+		  AND ` + pushDeviceLoginLive
 	args := []any{profileID, platform, PushProviderSiloRelay, PushModePrivatePush}
 	if serverDeviceID != "" {
 		args = append(args, serverDeviceID)
@@ -267,16 +280,19 @@ func (r *PushDeviceRepository) GetPushAttempt(ctx context.Context, id string) (*
 	return &attempts[0], nil
 }
 
-func (r *PushDeviceRepository) getPushDeviceByID(ctx context.Context, id string) (*PushDevice, error) {
+// getPushDeviceByID loads a device and whether its login is still live. The
+// device is nil, with no error, when the row is gone.
+func (r *PushDeviceRepository) getPushDeviceByID(ctx context.Context, id string) (*PushDevice, bool, error) {
+	var loginLive bool
 	device, err := scanPushDevice(r.pool.QueryRow(ctx,
-		`SELECT `+pushDeviceColumns+` FROM push_devices WHERE id = $1`, id))
+		`SELECT `+pushDeviceColumns+`, `+pushDeviceLoginLive+` FROM push_devices WHERE id = $1`, id), &loginLive)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get push device: %w", err)
+		return nil, false, fmt.Errorf("get push device: %w", err)
 	}
-	return device, nil
+	return device, loginLive, nil
 }
 
 // ClaimPendingPushForDelivery claims the delivery's own pending attempts for
@@ -363,6 +379,18 @@ func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, attemptI
 		return nil, nil
 	}
 	return &attempts[0], nil
+}
+
+// DeleteEndedLoginRegistrations removes the registrations, tokens included, of
+// login sessions that have ended. Their pushes already stopped at
+// pushDeviceLoginLive. An installation's ordering record stays: a later sign-in
+// registers at a newer generation.
+func (r *PushDeviceRepository) DeleteEndedLoginRegistrations(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE NOT `+pushDeviceLoginLive)
+	if err != nil {
+		return 0, fmt.Errorf("delete registrations of ended logins: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (r *PushDeviceRepository) RecordPushSuccess(ctx context.Context, deviceID string) error {
