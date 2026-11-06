@@ -71,6 +71,7 @@ type AdminPlaybackHistoryEntry struct {
 	AudioDecision        *string  `json:"audio_decision" nullable:"true" enum:"direct,remux,transcode" doc:"How the audio stream was delivered when the play ended, with the video_decision values. Null when unknown"`
 	EndReason            *string  `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted,replaced" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
 	LifecycleSeq         *int64   `json:"lifecycle_seq" nullable:"true" doc:"Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed"`
+	APIServedBytes       *int64   `json:"api_served_bytes" nullable:"true" doc:"Viewer bytes the API servers sent for the play, counted a minute at a time while it played. Bytes a stream node or proxy sent the viewer directly are not included. Null when no count was recorded for the play: the API servers sent it nothing, or it played before counting existed, so null does not mean the play used no data"`
 }
 
 // TransformSchema admits null in the nullable enums: JSON Schema applies the
@@ -236,6 +237,6 @@ func adminPlaybackHistoryEntryOf(row handlers.AdminPlaybackHistoryRow) AdminPlay
 		ClientIP: row.ClientIP, DeviceID: row.DeviceID, DevicePlatform: row.DevicePlatform,
 		ClientName: row.ClientName, ClientVersion: row.ClientVersion,
 		VideoDecision: row.VideoDecision, AudioDecision: row.AudioDecision, EndReason: row.EndReason,
-		LifecycleSeq: row.LifecycleSeq,
+		LifecycleSeq: row.LifecycleSeq, APIServedBytes: row.APIServedBytes,
 	}
 }

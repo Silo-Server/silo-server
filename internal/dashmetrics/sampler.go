@@ -27,6 +27,10 @@
 // won the minute writes it, so a minute's split and total come from one
 // snapshot. Idle nodes write no row.
 //
+// The same per-minute telemetry deltas also add each playback session's
+// growth to playback_session_api_egress, which the admin playback history
+// shows as the play's API-served bytes.
+//
 // Sampling is best-effort: every failure is logged and swallowed. A missed
 // minute is a gap in the chart, never a failed request or a dead server.
 package dashmetrics
@@ -34,8 +38,10 @@ package dashmetrics
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -54,6 +60,10 @@ const (
 	// sampleTickTimeout bounds one tick's database work, comfortably under the
 	// interval so a wedged pool costs missed minutes, not a stuck sampler.
 	sampleTickTimeout = 30 * time.Second
+
+	// shutdownFlushTimeout bounds the last session-bytes write as the sampler
+	// stops, so a wedged pool cannot hold up shutdown.
+	shutdownFlushTimeout = 5 * time.Second
 
 	// retentionDays is how much history the charts can show — a month, so the
 	// dashboard's widest range has samples to draw. 1440 minutes a day times 31
@@ -84,8 +94,18 @@ type Sampler struct {
 	prevBytes    map[string]int64
 	lastEgressAt time.Time
 
+	// unsaved holds per-session growth that has not reached
+	// playback_session_api_egress yet. A failed write keeps it for the next
+	// tick: prevBytes has already moved past those bytes, so dropping them
+	// would leave the play's total short for good.
+	unsaved map[string]int64
+
 	stopOnce sync.Once
 	stop     chan struct{}
+	// done closes when the goroutine Start launched has saved its last
+	// session bytes and returned; started records that there is one.
+	started bool
+	done    chan struct{}
 }
 
 // NewSampler builds a sampler for this process. telemetry may be nil, in which
@@ -104,16 +124,31 @@ func NewSampler(pool *pgxpool.Pool, telemetry *streamtelemetry.Registry, nodeID 
 		source:    "proc:" + nodeID,
 		interval:  sampleInterval,
 		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
 // Start samples once immediately — which also establishes the egress baseline —
-// and then every minute until ctx is canceled or Stop is called.
+// and then every minute until ctx is canceled or Stop is called. Once Stop is
+// called it saves the session bytes served since the last tick, so a restart
+// or deploy does not lose up to a minute of every active play. A canceled ctx
+// only ends the ticks: the server cancels it before its HTTP servers finish
+// draining, and responses still sending then would lose their last bytes if
+// the save ran at once, so the save waits for Stop, which the server calls
+// after the drain.
 func (s *Sampler) Start(ctx context.Context) {
 	if s == nil || s.pool == nil {
 		return
 	}
+	s.started = true
 	go func() {
+		defer close(s.done)
+		defer func() {
+			// ctx is usually already canceled at shutdown.
+			flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownFlushTimeout)
+			defer cancel()
+			s.flushSessionBytes(flushCtx)
+		}()
 		s.sampleOnce(ctx, time.Now())
 
 		ticker := time.NewTicker(s.interval)
@@ -121,6 +156,7 @@ func (s *Sampler) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
+				<-s.stop
 				return
 			case <-s.stop:
 				return
@@ -131,7 +167,8 @@ func (s *Sampler) Start(ctx context.Context) {
 	}()
 }
 
-// Stop ends the sampling goroutine. It is safe to call more than once.
+// Stop ends the sampling goroutine and waits for it to save its last session
+// bytes. It is safe to call more than once.
 func (s *Sampler) Stop() {
 	if s == nil {
 		return
@@ -139,6 +176,9 @@ func (s *Sampler) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stop)
 	})
+	if s.started {
+		<-s.done
+	}
 }
 
 // sampleOnce writes this minute's rows and, once an hour, prunes expired ones.
@@ -221,13 +261,22 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	delta, next := computeEgressDelta(s.prevBytes, s.telemetry.Sweep())
 	previous, previousAt := s.prevBytes, s.lastEgressAt
 	s.prevBytes, s.lastEgressAt = next, at
+	s.queueSessionBytes(delta.Sessions)
 
 	// The very first snapshot carries every byte served since the process
 	// started. Charting that as one minute of egress would draw a spike that
-	// never happened, so the first tick only establishes the baseline.
-	if previous == nil || previousAt.IsZero() {
-		return
+	// never happened, so the first tick only establishes the baseline. Its
+	// session bytes are still saved below: no earlier tick saved them.
+	if previous != nil && !previousAt.IsZero() {
+		s.sampleEgressRate(ctx, delta, at.Sub(previousAt))
 	}
+	// After the chart row, so a slow write of many sessions cannot use up the
+	// tick deadline the chart row needs.
+	s.saveSessionBytes(ctx)
+}
+
+// sampleEgressRate writes this process's egress rate for the minute.
+func (s *Sampler) sampleEgressRate(ctx context.Context, delta egressDelta, elapsed time.Duration) {
 
 	// Zero minutes are written too: an idle server should draw a line along the
 	// baseline, not a gap that reads as "no data". egress_kbps stays the total
@@ -235,7 +284,6 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	// carries the file-transfer subset. The subset is clamped under the total
 	// after rounding so a reader deriving playback as total - download can
 	// never see a negative minute from two independent roundings.
-	elapsed := at.Sub(previousAt)
 	totalKbps := egressKbps(delta.Total, elapsed)
 	downloadKbps := min(egressKbps(delta.Download, elapsed), totalKbps)
 	_, err := s.pool.Exec(ctx, `
@@ -250,8 +298,68 @@ func (s *Sampler) sampleProcessEgress(ctx context.Context, at time.Time) {
 	}
 }
 
-// pruneExpired drops samples older than the retention window.
+// flushSessionBytes sweeps the telemetry once more and saves the session
+// growth since the last tick. It runs once, as the sampler stops.
+func (s *Sampler) flushSessionBytes(ctx context.Context) {
+	if s.telemetry != nil {
+		delta, next := computeEgressDelta(s.prevBytes, s.telemetry.Sweep())
+		s.prevBytes = next
+		s.queueSessionBytes(delta.Sessions)
+	}
+	s.saveSessionBytes(ctx)
+}
+
+// queueSessionBytes adds per-session growth to the bytes waiting to be saved.
+func (s *Sampler) queueSessionBytes(sessions map[string]int64) {
+	for id, grown := range sessions {
+		if s.unsaved == nil {
+			s.unsaved = make(map[string]int64, len(sessions))
+		}
+		s.unsaved[id] += grown
+	}
+}
+
+// saveSessionBytes adds the waiting growth to each session's API-served
+// bytes, and keeps it for the next try when the write fails. Every API process
+// adds only what it served, so replicas never overwrite one another. The ids
+// are sorted so two replicas adding to the same sessions take the row locks in
+// the same order and cannot deadlock. A write that times out after the
+// database committed it is added again on the next try; that over-count is
+// the price of never under-counting after an ordinary failure.
+func (s *Sampler) saveSessionBytes(ctx context.Context) {
+	if len(s.unsaved) == 0 {
+		return
+	}
+	ids := slices.Sorted(maps.Keys(s.unsaved))
+	bytes := make([]int64, len(ids))
+	for i, id := range ids {
+		bytes[i] = s.unsaved[id]
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO playback_session_api_egress (session_id, api_served_bytes)
+		SELECT * FROM unnest($1::text[], $2::bigint[])
+		ON CONFLICT (session_id) DO UPDATE
+		SET api_served_bytes = playback_session_api_egress.api_served_bytes + EXCLUDED.api_served_bytes,
+		    updated_at = now()
+	`, ids, bytes)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to record playback session API-served bytes; retrying next tick", "component", component, "sessions", len(ids), "error", err)
+		return
+	}
+	s.unsaved = nil
+}
+
+// pruneExpired drops samples older than the retention window, and the
+// API-served bytes of sessions that never got a history row.
 func (s *Sampler) pruneExpired(ctx context.Context) {
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM playback_session_api_egress e
+		WHERE e.updated_at < now() - make_interval(days => $1)
+		  AND NOT EXISTS (SELECT 1 FROM admin_playback_history h WHERE h.session_id = e.session_id)
+	`, retentionDays)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to prune playback session API-served bytes", "component", component, "error", err)
+	}
 	for _, table := range []string{"dashboard_metric_samples", "dashboard_node_egress_samples"} {
 		_, err := s.pool.Exec(ctx, `
 			DELETE FROM `+table+`

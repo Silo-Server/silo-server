@@ -71,6 +71,9 @@ type Registry struct {
 	started                 atomic.Bool
 	leaveMu                 sync.Mutex
 	left                    bool
+
+	// sessionGenerations numbers every logical session this registry creates.
+	sessionGenerations atomic.Uint64
 }
 
 func NewRegistry(cfg Config, store SnapshotStore, logger *slog.Logger) *Registry {
@@ -244,6 +247,7 @@ func (r *Registry) attach(obs *Observation, attachment Attachment) {
 			return
 		}
 		s = newLogicalSession(attachment, r.cfg, observedAt)
+		s.generation = r.sessionGenerations.Add(1)
 		if pending, ok := shard.pendingRealtime[attachment.SessionID]; ok {
 			s.realtimeAlive = pending.connected
 			delete(shard.pendingRealtime, attachment.SessionID)
