@@ -670,9 +670,13 @@ func (r *Repository) syncGeneratedHomeLibraryRecentTitles(ctx context.Context, l
 	for _, section := range sections {
 		// A row keyed as a generated library row still holds the server's
 		// title, whatever English wrote it, so it follows the library's
-		// name. A row an admin titled with another default's text keeps
-		// the text check.
+		// name, unless it already names another one: a rename that lost a
+		// race with a newer one. A row an admin titled with another
+		// default's text keeps the text check.
 		keyed := section.TitleKey != "" && section.TitleKey == generatedHomeLibraryRecentTitleKey(section)
+		if keyed && section.TitleArgs[titleArgLibrary] != oldLibraryName {
+			continue
+		}
 		if !keyed && !ShouldSyncGeneratedHomeLibraryRecentTitle(section, oldLibraryName) {
 			continue
 		}

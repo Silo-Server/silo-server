@@ -37,20 +37,7 @@ func TestSectionTitleKeysFollowServerTitlesPostgres(t *testing.T) {
 	repo := NewRepository(pool)
 	find := func(scope string, libraryID *int, sectionType SectionType) *PageSection {
 		t.Helper()
-		rows, err := repo.ListByScopeAll(ctx, scope, libraryID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, row := range rows {
-			if row.SectionType != sectionType {
-				continue
-			}
-			if libraryID != nil || IsGeneratedHomeLibraryRecentSection(row, library) {
-				return row
-			}
-		}
-		t.Fatalf("no %s %s row", scope, sectionType)
-		return nil
+		return findTitleKeyRow(t, repo, library, scope, libraryID, sectionType)
 	}
 
 	t.Run("default row", func(t *testing.T) {
@@ -91,9 +78,13 @@ func TestSectionTitleKeysFollowServerTitlesPostgres(t *testing.T) {
 		if err := repo.SyncGeneratedHomeLibraryRecentTitles(ctx, library, name, renamed); err != nil {
 			t.Fatal(err)
 		}
+		// A rename that lost a race arrives naming an old name: no change.
+		if err := repo.SyncGeneratedHomeLibraryRecentTitles(ctx, library, name, name+"-stale"); err != nil {
+			t.Fatal(err)
+		}
 		row = find("home", nil, SectionRecentlyAdded)
 		if row.Title != "Recently Added in "+renamed || row.TitleKey != "home.section.recentlyAddedIn" || row.TitleArgs["library"] != renamed {
-			t.Fatalf("after library rename: title %q key %q args %v", row.Title, row.TitleKey, row.TitleArgs)
+			t.Fatalf("after library renames: title %q key %q args %v", row.Title, row.TitleKey, row.TitleArgs)
 		}
 		row.Title = "New audiobooks"
 		if err := repo.Update(ctx, row); err != nil {
@@ -115,4 +106,21 @@ func TestSectionTitleKeysFollowServerTitlesPostgres(t *testing.T) {
 			t.Fatalf("admin-titled generated row after library rename: title %q key %q", row.Title, row.TitleKey)
 		}
 	})
+}
+
+// findTitleKeyRow is the scope's row of sectionType: on Home, the one
+// generated for library.
+func findTitleKeyRow(t *testing.T, repo *Repository, library int, scope string, libraryID *int, sectionType SectionType) *PageSection {
+	t.Helper()
+	rows, err := repo.ListByScopeAll(context.Background(), scope, libraryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.SectionType == sectionType && (libraryID != nil || IsGeneratedHomeLibraryRecentSection(row, library)) {
+			return row
+		}
+	}
+	t.Fatalf("no %s %s row", scope, sectionType)
+	return nil
 }
