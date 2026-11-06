@@ -7,7 +7,8 @@ import {
 } from "react-intl";
 import type { ReactNode } from "react";
 
-import { LOCALES, type MessageKey } from "@/locales/keys";
+import { languageDirection } from "@/lib/appLocale";
+import type { MessageKey } from "@/locales/keys";
 import { englishMessage, type Messages } from "./catalog";
 
 /** Values for a plain-text message. */
@@ -19,7 +20,6 @@ export type RichValues = Record<
 >;
 
 const cache = createIntlCache();
-const RTL_TAGS = new Set(LOCALES.filter((locale) => locale.dir === "rtl").map(({ tag }) => tag));
 
 function onError(error: { code?: string }): void {
   // A language without a message falls back to English; that is expected.
@@ -114,7 +114,7 @@ function isolateValues<V extends RichValues>(
   ast: MessageFormatElement[],
   values: V | undefined,
 ): V | undefined {
-  if (!values || !RTL_TAGS.has(intl.locale)) return values;
+  if (!values || languageDirection(intl.locale) !== "rtl") return values;
   const { printed, selectors } = argumentUse(ast);
   const isolated: RichValues = { ...values };
   for (const name of printed) {

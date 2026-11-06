@@ -57,6 +57,15 @@ function pseudoLanguage(tag: string | null | undefined) {
 }
 
 /**
+ * The text direction of an app language or pseudo-locale tag. It doesn't
+ * depend on whether the language's catalog has shipped: a stored `ar` lays
+ * out right to left, and isolates its placeholders, before then.
+ */
+export function languageDirection(tag: string): "ltr" | "rtl" {
+  return pseudoLanguage(tag)?.dir ?? (tag === "ar" ? "rtl" : "ltr");
+}
+
+/**
  * The picker entry a stored tag selects: a pseudo-locale when the build carries
  * them, else the shipped language it matches; null for neither.
  */
@@ -170,7 +179,7 @@ export function resolveAppLocale(input: {
     catalog: language,
     formatLocale,
     localizedFormats: language !== "en" && (formatLocale ? true : runtimeLanguage === language),
-    dir: language === "ar" ? "rtl" : "ltr",
+    dir: languageDirection(language),
   };
 }
 
