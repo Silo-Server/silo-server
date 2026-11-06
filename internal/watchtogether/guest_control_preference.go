@@ -51,9 +51,9 @@ func (s *Service) initialGuestControlPolicy(ctx context.Context, userID int, pro
 // The save runs after the room operation has committed and released the room,
 // so a slow settings store delays only this request. It saves only when the
 // room ended at the requested policy: a write that lost to a competing one
-// returns the winner's policy and saves nothing. Concurrent changes from
-// different rooms or servers are last-writer-wins, the same as any other
-// setting.
+// with a different policy returns the winner's and saves nothing. Concurrent
+// changes from different rooms or servers are last-writer-wins, the same as
+// any other setting.
 func (s *Service) UpdatePolicyAndRemember(ctx context.Context, roomID string, user int, profile string, policy GuestControlPolicy) (Snapshot, error) {
 	snapshot, err := s.UpdatePolicy(ctx, roomID, user, profile, policy)
 	if err == nil && snapshot.GuestControlPolicy == policy {

@@ -101,7 +101,7 @@ func TestRoomStartsWithAndSavesHostGuestControlPolicy(t *testing.T) {
 	if _, err := svc.UpdatePolicyAndRemember(t.Context(), "room-1", 7, "host", GuestControlPolicyGuestPlayPause); err != nil {
 		t.Fatal(err)
 	}
-	// A write that loses to a competing one saves nothing.
+	// A write that loses to a competing one with a different policy saves nothing.
 	svc.repo = &competingPolicyRepo{stubRepo: repo}
 	if _, err := svc.UpdatePolicyAndRemember(t.Context(), "room-1", 7, "host", GuestControlPolicyGuestPlayPause); err != nil {
 		t.Fatal(err)
