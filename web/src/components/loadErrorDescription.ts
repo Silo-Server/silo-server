@@ -1,4 +1,5 @@
 import { V2TimeoutError } from "@/api/v2/request";
+import { t } from "@/i18n";
 
 /**
  * The explanation under a "Couldn't load …" heading. A read that ran out its
@@ -7,6 +8,6 @@ import { V2TimeoutError } from "@/api/v2/request";
  */
 export function loadErrorDescription(error: unknown): string {
   return error instanceof V2TimeoutError
-    ? "The server isn't responding. Try again in a moment."
-    : "Something went wrong while loading it. Try again in a moment.";
+    ? t("web.common.ui.loadError.timeout")
+    : t("web.common.ui.loadError.generic");
 }

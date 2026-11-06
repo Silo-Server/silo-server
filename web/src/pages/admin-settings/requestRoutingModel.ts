@@ -331,8 +331,12 @@ function yearRangeLabel(from?: number, to?: number, tx: Text = t): string {
   return "";
 }
 
-function genreNames(ids: readonly number[], mediaType: RequestRouteMediaType): string[] {
-  return ids.map((id) => tmdbGenreName(id, mediaType));
+function genreNames(
+  ids: readonly number[],
+  mediaType: RequestRouteMediaType,
+  tx: Text = t,
+): string[] {
+  return ids.map((id) => tmdbGenreName(id, mediaType, tx));
 }
 
 /** The name of a brand with no known name, in a sentence or (`title`) a rule name. */
@@ -458,7 +462,7 @@ function conditionClauses(
     out.push(
       clause(
         "web.admin.settings.requests.model.clause.language",
-        c.original_languages.map(routingLanguageName),
+        c.original_languages.map((code) => routingLanguageName(code)),
       ),
     );
   }
@@ -466,7 +470,7 @@ function conditionClauses(
     out.push(
       clause(
         "web.admin.settings.requests.model.clause.notLanguage",
-        c.exclude_original_languages.map(routingLanguageName),
+        c.exclude_original_languages.map((code) => routingLanguageName(code)),
       ),
     );
   }
@@ -474,7 +478,7 @@ function conditionClauses(
     out.push(
       clause(
         "web.admin.settings.requests.model.clause.country",
-        c.origin_countries.map(routingCountryName),
+        c.origin_countries.map((code) => routingCountryName(code)),
       ),
     );
   }
@@ -482,7 +486,7 @@ function conditionClauses(
     out.push(
       clause(
         "web.admin.settings.requests.model.clause.notCountry",
-        c.exclude_origin_countries.map(routingCountryName),
+        c.exclude_origin_countries.map((code) => routingCountryName(code)),
       ),
     );
   }
@@ -598,19 +602,20 @@ export function autoRuleName(
   const named = (key: MessageKey, list: readonly string[]) => tx(key, { values: orListTx(list) });
   if (c.anime === true) parts.push(tx("web.admin.settings.requests.model.autoName.anime"));
   if (c.anime === false) parts.push(tx("web.admin.settings.requests.model.autoName.notAnime"));
-  if (c.genre_ids?.length) parts.push(orListTx(genreNames(c.genre_ids, mediaType)));
-  if (c.exclude_genre_ids?.length) parts.push(not(genreNames(c.exclude_genre_ids, mediaType)));
+  if (c.genre_ids?.length) parts.push(orListTx(genreNames(c.genre_ids, mediaType, tx)));
+  if (c.exclude_genre_ids?.length) parts.push(not(genreNames(c.exclude_genre_ids, mediaType, tx)));
   if (c.original_languages?.length)
-    parts.push(orListTx(c.original_languages.map(routingLanguageName)));
+    parts.push(orListTx(c.original_languages.map((code) => routingLanguageName(code, tx))));
   if (c.exclude_original_languages?.length) {
-    parts.push(not(c.exclude_original_languages.map(routingLanguageName)));
+    parts.push(not(c.exclude_original_languages.map((code) => routingLanguageName(code, tx))));
   }
-  if (c.origin_countries?.length) parts.push(orListTx(c.origin_countries.map(routingCountryName)));
+  if (c.origin_countries?.length)
+    parts.push(orListTx(c.origin_countries.map((code) => routingCountryName(code, tx))));
   if (c.exclude_origin_countries?.length) {
     parts.push(
       named(
         "web.admin.settings.requests.model.autoName.notCountry",
-        c.exclude_origin_countries.map(routingCountryName),
+        c.exclude_origin_countries.map((code) => routingCountryName(code, tx)),
       ),
     );
   }
@@ -972,7 +977,7 @@ export function factsSentence(facts: RequestRouteFacts, mediaType: RequestRouteM
     facts.anime ? t("web.admin.settings.requests.model.facts.anime") : null,
     facts.original_language ? routingLanguageName(facts.original_language) : null,
     facts.origin_countries.length > 0
-      ? facts.origin_countries.map(routingCountryName).join(", ")
+      ? facts.origin_countries.map((code) => routingCountryName(code)).join(", ")
       : null,
     facts.year ? String(facts.year) : null,
     mediaType === "series"
@@ -1037,7 +1042,7 @@ function traceMissSentence(
     "web.admin.settings.requests.model.trace.languageIs",
   );
   const countries = has(
-    facts.origin_countries.map(routingCountryName),
+    facts.origin_countries.map((code) => routingCountryName(code)),
     "web.admin.settings.requests.model.trace.noCountry",
     "web.admin.settings.requests.model.trace.countryIs",
   );
@@ -1058,19 +1063,25 @@ function traceMissSentence(
     case "exclude_genre_ids":
       return miss(genres, orList(genreNames(c.exclude_genre_ids ?? [], mediaType)), true);
     case "original_languages":
-      return miss(language, orList((c.original_languages ?? []).map(routingLanguageName)));
+      return miss(
+        language,
+        orList((c.original_languages ?? []).map((code) => routingLanguageName(code))),
+      );
     case "exclude_original_languages":
       return miss(
         language,
-        orList((c.exclude_original_languages ?? []).map(routingLanguageName)),
+        orList((c.exclude_original_languages ?? []).map((code) => routingLanguageName(code))),
         true,
       );
     case "origin_countries":
-      return miss(countries, orList((c.origin_countries ?? []).map(routingCountryName)));
+      return miss(
+        countries,
+        orList((c.origin_countries ?? []).map((code) => routingCountryName(code))),
+      );
     case "exclude_origin_countries":
       return miss(
         countries,
-        orList((c.exclude_origin_countries ?? []).map(routingCountryName)),
+        orList((c.exclude_origin_countries ?? []).map((code) => routingCountryName(code))),
         true,
       );
     case "year_from":

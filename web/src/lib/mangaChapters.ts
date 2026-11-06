@@ -1,4 +1,5 @@
 import type { MangaChapter } from "@/api/types";
+import { t } from "@/i18n";
 
 // A MangaListEntry is one row in the manga detail list. Most manga releases are
 // one file per volume, so the common cases are flat: a `volume` unit (a single
@@ -17,16 +18,27 @@ const VOLUME_TOKEN_PATTERN = /^v?(\d+)$/i;
 // through unchanged so unusual volume schemes still render sensibly.
 export function prettifyVolumeLabel(volume: string): string {
   const match = volume.trim().match(VOLUME_TOKEN_PATTERN);
-  return match ? `Volume ${Number(match[1])}` : volume.trim();
+  return match
+    ? t("web.common.format.manga.volume", { number: String(Number(match[1])) })
+    : volume.trim();
 }
 
 // chapterLabel prefers a "Chapter <n>" form derived from the index, falling
 // back to the chapter's own trimmed title when no index is available.
 export function chapterLabel(chapter: MangaChapter): string {
   if (typeof chapter.chapter_index === "number") {
-    return `Chapter ${chapter.chapter_index}`;
+    return t("web.common.format.manga.chapter", { number: String(chapter.chapter_index) });
   }
-  return chapter.title?.trim() || "Chapter";
+  return chapter.title?.trim() || t("web.common.format.manga.chapterFallback");
+}
+
+// volumeChapterLabel names a chapter nested in a volume section so it stays
+// meaningful out of context ("Volume 3 · Chapter 12").
+export function volumeChapterLabel(volumeLabel: string, chapter: MangaChapter): string {
+  return t("web.common.format.manga.volumeChapter", {
+    volume: volumeLabel,
+    chapter: chapterLabel(chapter),
+  });
 }
 
 // chapterSortKey returns a comparable index where missing indices sort last.
@@ -131,7 +143,7 @@ export function flattenMangaList(entries: MangaListEntry[]): FlatMangaChapter[] 
   for (const entry of entries) {
     if (entry.kind === "section") {
       for (const chapter of entry.chapters) {
-        flat.push({ chapter, label: `${entry.label} · ${chapterLabel(chapter)}` });
+        flat.push({ chapter, label: volumeChapterLabel(entry.label, chapter) });
       }
     } else {
       flat.push({ chapter: entry.chapter, label: entry.label });

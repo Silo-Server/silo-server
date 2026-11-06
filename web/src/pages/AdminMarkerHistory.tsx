@@ -22,7 +22,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAllMarkerEditHistory } from "@/hooks/queries/admin/markers";
-import { MARKER_LABELS, formatClock } from "@/lib/markers";
+import { MARKER_LABEL_KEYS, formatClock } from "@/lib/markers";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
 import { useT, type Translate } from "@/i18n";
 
@@ -141,7 +141,7 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
             t("web.admin.markers.history.mediaFileFallback", { id: String(row.media_file_id) })}
         </div>
       </TableCell>
-      <TableCell>{MARKER_LABELS[row.segment]}</TableCell>
+      <TableCell>{t(MARKER_LABEL_KEYS[row.segment])}</TableCell>
       <TableCell>
         <div className="flex items-center gap-2">
           <Badge variant={row.action === "clear" ? "outline" : "secondary"}>

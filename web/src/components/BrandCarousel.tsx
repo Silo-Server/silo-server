@@ -3,6 +3,7 @@ import type { DiscoverBrandCard, DiscoverBrowseKind } from "@/api/types";
 import BrandCard from "@/components/BrandCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
+import { useT } from "@/i18n";
 
 interface BrandCarouselProps {
   kind: DiscoverBrowseKind;
@@ -21,6 +22,7 @@ export default function BrandCarousel({
   isError,
   onRetry,
 }: BrandCarouselProps) {
+  const t = useT();
   const { emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } = useCarouselEmbla();
 
   const slides = isLoading
@@ -40,14 +42,14 @@ export default function BrandCarousel({
             onClick={onRetry}
             className="text-muted-foreground hover:text-foreground text-xs underline-offset-2 hover:underline"
           >
-            Retry
+            {t("common.retry")}
           </button>
         ) : null}
       </div>
 
       {isError && !isLoading ? (
         <div className="text-muted-foreground flex h-28 items-center px-4 text-xs sm:px-6 lg:px-10 xl:px-12">
-          Could not load {title.toLowerCase()}.
+          {t("web.common.ui.carousel.loadFailed", { title_lower: title.toLowerCase() })}
         </div>
       ) : (
         <div className="relative">
@@ -59,7 +61,7 @@ export default function BrandCarousel({
               type="button"
               onClick={scrollPrev}
               className="from-background/80 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
-              aria-label="Scroll left"
+              aria-label={t("web.common.ui.carousel.scrollLeft")}
             >
               <ChevronLeft className="text-foreground h-6 w-6" />
             </button>
@@ -69,7 +71,7 @@ export default function BrandCarousel({
             ref={emblaRef}
             className="embla__viewport overflow-hidden pr-4 sm:pr-6 lg:pr-10 xl:pr-12"
             tabIndex={0}
-            aria-label={`${title} carousel`}
+            aria-label={t("web.common.ui.carousel.label", { title })}
             onKeyDown={(e) => {
               if (e.key === "ArrowLeft") {
                 scrollPrev();
@@ -95,7 +97,7 @@ export default function BrandCarousel({
               type="button"
               onClick={scrollNext}
               className="from-background/80 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-(--duration-fast) group-hover/carousel:opacity-100 focus-visible:opacity-100"
-              aria-label="Scroll right"
+              aria-label={t("web.common.ui.carousel.scrollRight")}
             >
               <ChevronRight className="text-foreground h-6 w-6" />
             </button>

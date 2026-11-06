@@ -11,13 +11,15 @@ import { cn } from "@/lib/utils";
 
 interface SideNavSectionProps {
   label: string;
+  /** Stable id of the section, unique within the nav; the label is translated. */
+  id: string;
   /** Prefix for the section heading id, e.g. "admin-nav". */
   idPrefix: string;
   children: ReactNode;
 }
 
-export function SideNavSection({ label, idPrefix, children }: SideNavSectionProps) {
-  const headingId = `${idPrefix}-${label.toLowerCase().replace(/\s+/g, "-")}`;
+export function SideNavSection({ label, id, idPrefix, children }: SideNavSectionProps) {
+  const headingId = `${idPrefix}-${id}`;
   return (
     <div role="group" aria-labelledby={headingId}>
       <h3

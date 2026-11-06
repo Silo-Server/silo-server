@@ -223,7 +223,12 @@ export default function AdminSidebar({
         className="sidebar-scroll flex-1 space-y-5 overflow-y-auto px-3"
       >
         {sections.map((section) => (
-          <SideNavSection key={section.id} label={section.label} idPrefix="admin-nav">
+          <SideNavSection
+            key={section.id}
+            id={section.id}
+            label={section.label}
+            idPrefix="admin-nav"
+          >
             {section.entries.map((entry) => {
               if (!isAdminNavTopic(entry)) {
                 return (
@@ -267,7 +272,11 @@ export default function AdminSidebar({
           </SideNavSection>
         ))}
         {adminPluginItems.length > 0 ? (
-          <SideNavSection label={t("web.admin.shell.sidebar.pluginApps")} idPrefix="admin-nav">
+          <SideNavSection
+            id="plugin-apps"
+            label={t("web.admin.shell.sidebar.pluginApps")}
+            idPrefix="admin-nav"
+          >
             {adminPluginItems.map(renderPluginItem)}
           </SideNavSection>
         ) : null}

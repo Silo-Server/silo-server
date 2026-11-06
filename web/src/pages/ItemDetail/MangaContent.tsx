@@ -35,6 +35,7 @@ import {
   chapterLabel,
   firstUnreadChapter,
   flattenMangaList,
+  volumeChapterLabel,
   type MangaListEntry,
 } from "@/lib/mangaChapters";
 import { cn } from "@/lib/utils";
@@ -45,7 +46,7 @@ import ScoreRow from "./components/ScoreRow";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
 import { hasMachineTranslation } from "./components/machineTranslation";
-import { useT } from "@/i18n";
+import { useAppLanguage, useT } from "@/i18n";
 
 function genreHref(genre: string, libraryId?: number): string {
   const params = new URLSearchParams();
@@ -266,7 +267,12 @@ export default function MangaContent({
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const entries = useMemo(() => buildMangaList(item.manga?.chapters ?? []), [item.manga?.chapters]);
+  const language = useAppLanguage();
+  const entries = useMemo(
+    () => buildMangaList(item.manga?.chapters ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the entry labels follow the language
+    [item.manga?.chapters, language],
+  );
   const year = item.year ? String(item.year) : "";
   const publisher = item.studios?.[0];
   const chapterRows = item.manga?.chapters ?? [];
@@ -523,7 +529,7 @@ function flattenFirst(entries: ReturnType<typeof buildMangaList>) {
   if (!first) return null;
   if (first.kind === "section") {
     const [chapter] = first.chapters;
-    return chapter ? { chapter, label: `${first.label} · ${chapterLabel(chapter)}` } : null;
+    return chapter ? { chapter, label: volumeChapterLabel(first.label, chapter) } : null;
   }
   return { chapter: first.chapter, label: first.label };
 }

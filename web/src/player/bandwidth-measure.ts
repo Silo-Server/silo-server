@@ -20,7 +20,12 @@ const DEFAULT_RETRY_AFTER_SECONDS = 30;
 
 export class ProbeRateLimited extends Error {
   constructor(readonly retryAfter: number) {
-    super(t("web.player.speedTest.retryAfter", { seconds: retryAfter }));
+    super(
+      t("web.common.speedTest.retryAfter", {
+        count: retryAfter,
+        count_text: String(retryAfter),
+      }),
+    );
   }
 }
 

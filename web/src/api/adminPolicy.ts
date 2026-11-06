@@ -1,5 +1,6 @@
 import { v2, V2ProblemError, type V2Body } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
+import { t } from "@/i18n";
 
 type Schemas = components["schemas"];
 export type PolicyVendorModule = Schemas["AdminPolicyVendor"];
@@ -16,7 +17,7 @@ export type PolicyDomain = V2Body<"POST /api/v2/admin/policy/documents">["domain
 
 export function policyDomain(value: string): PolicyDomain {
   if (value === "scope" || value === "permission" || value === "action") return value;
-  throw new Error("Unsupported policy domain");
+  throw new Error(t("web.admin.common.policy.unsupportedDomain"));
 }
 export async function fetchPolicySnapshot(id: string): Promise<PolicySnapshot> {
   let etag = "";
@@ -27,21 +28,22 @@ export async function fetchPolicySnapshot(id: string): Promise<PolicySnapshot> {
     },
   });
   if (!etag || etag === "*" || etag.startsWith("W/"))
-    throw new Error("Reload this policy before editing; its revision is unavailable.");
+    throw new Error(t("web.admin.common.policy.revisionUnavailable"));
   return { ...value, etag };
 }
 export function policyMutationMessage(error: unknown, fallback: string) {
   if (error instanceof V2ProblemError && error.status === 412) {
-    return "The policy changed. Your draft and original revision are kept. Review the current policy before submitting a new change.";
+    return t("web.admin.common.policy.changedConflict");
   }
   if (error instanceof V2ProblemError) return error.message;
-  return `${fallback} The outcome may be unknown. Review the saved state before trying again.`;
+  return t("web.admin.common.policy.outcomeUnknown", { fallback });
 }
 export function policyApplyMessage(result: PolicyApplyResult) {
-  const saved = `Policy change saved at generation ${result.persisted_generation}.`;
+  const generation = String(result.persisted_generation);
+  const loaded = String(result.application.loaded_generation);
   if (!result.application.local_applied)
-    return `${saved} This server could not reload it. Do not repeat the write; check the policy service before relying on the change.`;
+    return t("web.admin.common.policy.savedNotReloaded", { generation });
   if (result.application.publication_failed)
-    return `${saved} This server reloaded generation ${result.application.loaded_generation}, but notification failed. Other servers may still use an earlier policy.`;
-  return `${saved} This server loaded generation ${result.application.loaded_generation}. Other servers apply changes independently.`;
+    return t("web.admin.common.policy.savedNotifyFailed", { generation, loaded });
+  return t("web.admin.common.policy.savedLoaded", { generation, loaded });
 }

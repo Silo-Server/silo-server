@@ -99,8 +99,14 @@ export function SettingsSidebar({
       </div>
 
       <nav aria-label={title} className="sidebar-scroll flex-1 space-y-5 overflow-y-auto px-3 pb-6">
-        {groups.map((group) => (
-          <SideNavSection key={group.label} label={group.label} idPrefix={idPrefix}>
+        {groups.map((group, index) => (
+          // The groups carry no id; the position only has to be unique in this render.
+          <SideNavSection
+            key={group.label}
+            id={String(index)}
+            label={group.label}
+            idPrefix={idPrefix}
+          >
             {group.items.map((item) => (
               <SideNavItem
                 key={item.id}

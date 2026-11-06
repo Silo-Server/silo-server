@@ -2,6 +2,7 @@ import { Check } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import type { MediaItemUserState } from "@/api/types";
+import { useT } from "@/i18n";
 
 import {
   EDGE_INSET,
@@ -28,6 +29,7 @@ function remainingEpisodes(userState: MediaItemUserState | undefined): number | 
 // CardOverlays), and it shows whether or not badges are on. The layer is
 // sized from the card width the same way the badges are.
 export default function CardWatchStatus({ userState }: CardWatchStatusProps) {
+  const t = useT();
   const played = userState?.played === true;
   const left = remainingEpisodes(userState);
   if (!played && left === null) return null;
@@ -50,7 +52,7 @@ export default function CardWatchStatus({ userState }: CardWatchStatusProps) {
       {played ? (
         <span
           role="img"
-          aria-label="Watched"
+          aria-label={t("web.common.overlays.watched")}
           data-watched-indicator="poster"
           className="absolute grid place-items-center rounded-full border border-white/35 bg-emerald-500 text-white shadow-sm"
           style={style}
@@ -60,7 +62,10 @@ export default function CardWatchStatus({ userState }: CardWatchStatusProps) {
       ) : (
         <span
           role="img"
-          aria-label={`${left} ${left === 1 ? "episode" : "episodes"} left`}
+          aria-label={t("web.common.overlays.episodesLeft", {
+            count: left,
+            count_text: String(left),
+          })}
           data-watch-status-remaining={left}
           className="absolute grid place-items-center rounded-full border border-white/20 bg-black/65 px-[0.4em] leading-none font-bold text-white tabular-nums shadow-sm backdrop-blur-sm"
           style={style}
