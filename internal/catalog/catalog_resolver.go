@@ -2648,10 +2648,15 @@ func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter,
 		return AccessFilter{}, nil, true
 	}
 
+	// The viewer's user and profile carry through so personalized sorts and
+	// rules (plays, date viewed, watched) resolve against that profile's
+	// history, as the request was validated for in Resolve.
 	searchAccess := AccessFilter{
 		AllowedLibraryIDs:  allowedLibraryIDs,
 		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
 		MaturityLimits:     access.MaturityLimits,
+		UserID:             access.UserID,
+		ProfileID:          access.ProfileID,
 	}
 
 	scope := req.Query.MediaScope
