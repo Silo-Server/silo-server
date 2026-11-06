@@ -162,7 +162,7 @@ func TestSubmitRoutedMissingSeasonsToAMixedSetup(t *testing.T) {
 	router := &fakeRouterProvider{seasonCapable: map[int]bool{1: true}}
 	svc := seasonService(store, severanceInLibrary())
 	svc.SetRouterProvider(router)
-	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+	store.settings.ForceDualQuality = true
 	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["drama"], Viewer{}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
 	}

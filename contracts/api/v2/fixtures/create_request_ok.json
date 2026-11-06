@@ -14,6 +14,7 @@
   "requested_by_user_id": "1",
   "requested_by_profile_id": "p-owner",
   "is_anime": false,
+  "is_4k": false,
   "targets": [],
   "created_at": "2026-01-02T03:04:05.678Z",
   "updated_at": "2026-01-02T03:04:05.678Z"

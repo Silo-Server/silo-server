@@ -107,6 +107,7 @@ type RequestMediaDetail struct {
 	Availability        string                   `json:"availability" doc:"missing or available in this server's catalog" example:"missing"`
 	LibraryContentID    string                   `json:"library_content_id,omitempty" doc:"The catalog item when the media is available"`
 	Request             RequestMediaState        `json:"request"`
+	Request4K           RequestMediaState        `json:"request_4k" doc:"The title's 4K request: its open 4K request, or whether the viewer may make one. Reasons beyond request's: 4k_not_allowed (the account may not make 4K requests) and 4k_unavailable (no download server takes 4K for this media type). A 4K request is independent of the regular one and is not refused because the library has the title"`
 	InWatchlist         bool                     `json:"in_watchlist" doc:"Whether the title is on the viewing profile's watchlist, as a watchlist title or through its catalog item" example:"false"`
 	Seasons             []RequestMediaSeason     `json:"seasons" doc:"Series: the regular seasons (specials excluded) with library availability and request coverage; empty for movies"`
 }
@@ -231,6 +232,7 @@ type MediaRequest struct {
 	RequestedByProfileID ID                      `json:"requested_by_profile_id,omitempty" example:"p-owner"`
 	IntegrationKind      string                  `json:"integration_kind,omitempty" doc:"Admins only: the download server's kind" example:"radarr"`
 	IsAnime              bool                    `json:"is_anime"`
+	Is4K                 bool                    `json:"is_4k" doc:"A 4K request, fulfilled by a 4K copy alone. A regular request gets an HD copy, and a 4K one too while the server asks every request for 4K" example:"false"`
 	Targets              []RequestTarget         `json:"targets" doc:"Empty, never null"`
 	ExternalID           string                  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
 	ExternalStatus       string                  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
@@ -266,6 +268,7 @@ type MediaRequestCreate struct {
 	PosterPath   string `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath string `json:"backdrop_path,omitempty" doc:"TMDB image path"`
 	Seasons      []int  `json:"seasons,omitempty" maxItems:"200" doc:"Series only: the season numbers to request, starting at 1 (a season below 1 is refused). Omitted: every aired season not yet complete in the library" example:"[2,3]"`
+	Is4K         bool   `json:"is_4k,omitempty" doc:"Request a 4K copy alone. Needs the account's 4K permission (403 otherwise) and a download server that takes 4K (409 otherwise); see request_4k on the title detail. Omitted seasons then mean every aired season" example:"false"`
 }
 
 // MediaRequestCreateInput is the createRequest request.
@@ -523,6 +526,7 @@ func (reg *Registry) createRequest(ctx context.Context, in *MediaRequestCreateIn
 		PosterPath:   in.Body.PosterPath,
 		BackdropPath: in.Body.BackdropPath,
 		Seasons:      in.Body.Seasons,
+		Is4K:         in.Body.Is4K,
 	})
 	if err != nil {
 		return nil, requestProblem(err)
@@ -788,6 +792,10 @@ func requestProblem(err error) *Problem {
 		return CapabilityProblem(StateDisabled, "requests")
 	case errors.Is(err, mediarequests.ErrUserBlocked):
 		return NewProblem(TypePermissionDenied, "This account is blocked from requesting media.")
+	case errors.Is(err, mediarequests.ErrUHDNotAllowed):
+		return NewProblem(TypePermissionDenied, "This account may not make 4K requests.")
+	case errors.Is(err, mediarequests.ErrUHDUnavailable):
+		return NewProblem(TypeConflict, "No download server takes 4K requests for this media type.")
 	case errors.Is(err, mediarequests.ErrAlreadyAvailable):
 		return NewProblem(TypeConflict, "The media is already available in the library.")
 	case errors.Is(err, mediarequests.ErrAlreadyRequested):
@@ -845,6 +853,7 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 		OutcomeReason:    r.OutcomeReason,
 		Source:           string(requestSourceOf(r.Source)),
 		IsAnime:          r.IsAnime,
+		Is4K:             r.Is4K,
 		Targets:          make([]RequestTarget, 0, len(r.Targets)),
 		LibraryContentID: r.LibraryContentID,
 		CreatedAt:        NewInstant(r.CreatedAt),
@@ -947,7 +956,7 @@ func requestMediaDetailOf(d *mediarequests.MediaDetail) RequestMediaDetail {
 		NumberOfEpisodes: d.NumberOfEpisodes, FirstAirDate: calendarDate(d.FirstAirDate), LastAirDate: calendarDate(d.LastAirDate),
 		Networks: NonNil(d.Networks), Cast: cast, Director: d.Director, Creators: NonNil(d.Creators),
 		Recommendations: requestMediaResultsOf(d.Recommendations), Availability: string(d.Availability),
-		LibraryContentID: d.LibraryContentID, Request: requestMediaStateOf(d.Request),
+		LibraryContentID: d.LibraryContentID, Request: requestMediaStateOf(d.Request), Request4K: requestMediaStateOf(d.Request4K),
 		Seasons: requestMediaSeasonsOf(d.Seasons),
 	}
 }

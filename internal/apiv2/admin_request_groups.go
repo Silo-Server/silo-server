@@ -28,6 +28,7 @@ type AdminRequestGroupLimit struct {
 	MaxRequests  *int   `json:"max_requests" nullable:"true" minimum:"0" example:"10"`
 	WindowDays   *int   `json:"window_days" nullable:"true" minimum:"1" example:"7"`
 	ApprovalMode string `json:"approval_mode" enum:"inherit,manual,auto" doc:"inherit uses the server-wide approval setting" example:"manual"`
+	Requests4K   string `json:"requests_4k" enum:"inherit,allowed,denied" doc:"Whether the group's accounts may make 4K requests; inherit uses the server's requests_4k_default" example:"inherit"`
 }
 
 type AdminRequestGroupLimitBody struct {
@@ -35,6 +36,7 @@ type AdminRequestGroupLimitBody struct {
 	MaxRequests  *int   `json:"max_requests" nullable:"true" minimum:"0"`
 	WindowDays   *int   `json:"window_days" nullable:"true" minimum:"1"`
 	ApprovalMode string `json:"approval_mode" enum:"inherit,manual,auto"`
+	Requests4K   string `json:"requests_4k,omitempty" enum:"inherit,allowed,denied" doc:"Absent keeps the stored value" example:"allowed"`
 }
 
 type AdminRequestGroupInput struct {
@@ -75,7 +77,15 @@ func (reg *Registry) adminRequestGroupService() (adminRequestGroups, *Problem) {
 }
 
 func adminGroupLimitOf(r *mediarequests.GroupLimit) AdminRequestGroupLimit {
-	return AdminRequestGroupLimit{IDFromInt(r.GroupID), string(r.LimitMode), r.MaxRequests, r.WindowDays, string(r.ApprovalMode)}
+	return AdminRequestGroupLimit{IDFromInt(r.GroupID), string(r.LimitMode), r.MaxRequests, r.WindowDays, string(r.ApprovalMode), string(uhdModeOrInherit(r.UHDMode))}
+}
+
+// uhdModeOrInherit reads a missing 4K mode as inherit.
+func uhdModeOrInherit(m mediarequests.UHDMode) mediarequests.UHDMode {
+	if m == "" {
+		return mediarequests.UHDModeInherit
+	}
+	return m
 }
 
 func adminRequestGroupID(in AdminRequestGroupInput) (int64, *Problem) {
@@ -121,7 +131,7 @@ func (reg *Registry) updateAdminRequestGroupLimit(ctx context.Context, in *Admin
 		return nil, p
 	}
 	b := in.Body
-	r, err = s.UpsertGroupLimitConditional(ctx, v, mediarequests.GroupLimit{GroupID: id, LimitMode: mediarequests.LimitMode(b.LimitMode), MaxRequests: b.MaxRequests, WindowDays: b.WindowDays, ApprovalMode: mediarequests.ApprovalMode(b.ApprovalMode)}, rev)
+	r, err = s.UpsertGroupLimitConditional(ctx, v, mediarequests.GroupLimit{GroupID: id, LimitMode: mediarequests.LimitMode(b.LimitMode), MaxRequests: b.MaxRequests, WindowDays: b.WindowDays, ApprovalMode: mediarequests.ApprovalMode(b.ApprovalMode), UHDMode: mediarequests.UHDMode(b.Requests4K)}, rev)
 	if errors.Is(err, mediarequests.ErrStaleRevision) {
 		current, e := reg.getAdminRequestGroupLimit(ctx, &in.AdminRequestGroupInput)
 		if e != nil {

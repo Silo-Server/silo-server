@@ -4,5 +4,6 @@
   "global_window_days": 7,
   "global_auto_approval_enabled": false,
   "force_dual_quality": false,
-  "watchlist_requests": false
+  "watchlist_requests": false,
+  "requests_4k_default": false
 }

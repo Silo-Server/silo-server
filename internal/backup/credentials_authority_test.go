@@ -53,6 +53,7 @@ func TestAuthorityComparisonCoversEveryField(t *testing.T) {
 		"Unlimited":       func(p *requests.EffectivePolicy) { p.Unlimited = true },
 		"Blocked":         nil, // as RequestsEnabled
 		"AutoApprove":     func(p *requests.EffectivePolicy) { p.AutoApprove = true },
+		"AllowUHD":        func(p *requests.EffectivePolicy) { p.AllowUHD = true },
 	}
 	// Usage, not authority.
 	usage := map[string]bool{"Used": true, "Remaining": true, "WindowStart": true}

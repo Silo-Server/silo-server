@@ -34,6 +34,8 @@ interface GeneralDraft {
   force_dual_quality: boolean;
   /** Absent from servers without watchlist requests; the control hides. */
   watchlist_requests: boolean | undefined;
+  /** Absent from servers without 4K requests; the control hides. */
+  requests_4k_default: boolean | undefined;
 }
 
 function generalDraft(settings: RequestSettings): GeneralDraft {
@@ -44,6 +46,7 @@ function generalDraft(settings: RequestSettings): GeneralDraft {
     window_days: String(settings.global_window_days),
     force_dual_quality: settings.force_dual_quality,
     watchlist_requests: settings.watchlist_requests,
+    requests_4k_default: settings.requests_4k_default,
   };
 }
 
@@ -151,6 +154,7 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
         global_window_days: windowDays ?? base.global_window_days,
         force_dual_quality: draft.force_dual_quality,
         watchlist_requests: draft.watchlist_requests,
+        requests_4k_default: draft.requests_4k_default,
         updated_at: base.updated_at,
         etag: base.etag,
       });
@@ -288,10 +292,26 @@ function RequestsSettingsContent({ routing }: { routing: boolean }) {
                     dirty={draft.watchlist_requests !== baseGeneral.watchlist_requests}
                   />
                 ) : null}
+                {draft.requests_4k_default !== undefined ? (
+                  <SettingField
+                    label="Allow 4K requests"
+                    type="toggle"
+                    description={
+                      <>
+                        Lets people request a 4K version of a title on its own, separately from the
+                        regular request. A 4K request goes only to a server that takes 4K.{" "}
+                        <OverridableDefault />
+                      </>
+                    }
+                    value={String(draft.requests_4k_default)}
+                    onChange={(value) => editGeneral({ requests_4k_default: value === "true" })}
+                    dirty={draft.requests_4k_default !== baseGeneral.requests_4k_default}
+                  />
+                ) : null}
                 <SettingField
                   label="Also request a 4K version of every title"
                   type="toggle"
-                  description="Normally a 4K version is requested only for people whose playback limit allows 4K, and only when a server takes 4K. With this on, every request also asks for 4K."
+                  description="Normally a regular request asks for an HD version only, and a 4K version comes from a separate 4K request. With this on, every regular request also asks for 4K."
                   value={String(draft.force_dual_quality)}
                   onChange={(value) => editGeneral({ force_dual_quality: value === "true" })}
                   dirty={draft.force_dual_quality !== baseGeneral.force_dual_quality}

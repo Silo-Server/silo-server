@@ -28,7 +28,10 @@ type GroupLimit struct {
 	MaxRequests  *int
 	WindowDays   *int
 	ApprovalMode ApprovalMode
-	UpdatedAt    time.Time
+	// UHDMode is whether the group's accounts may make 4K requests. Empty on
+	// a write keeps the stored value, inherit on a new row.
+	UHDMode   UHDMode
+	UpdatedAt time.Time
 }
 
 // GroupLimitStore reads and writes access groups' request limits. The
@@ -47,7 +50,7 @@ func (r *Repository) GroupExists(ctx context.Context, groupID int64) (bool, erro
 
 func (r *Repository) GetGroupLimit(ctx context.Context, groupID int64) (*GroupLimit, error) {
 	row, err := scanGroupLimit(r.pool.QueryRow(ctx, `
-		SELECT group_id, limit_mode, max_requests, window_days, approval_mode, updated_at, revision
+		SELECT group_id, limit_mode, max_requests, window_days, approval_mode, uhd_mode, updated_at, revision
 		FROM request_group_limits WHERE group_id = $1`, groupID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -77,17 +80,18 @@ func (r *Repository) UpsertGroupLimitConditional(ctx context.Context, in GroupLi
 		return nil, err
 	}
 	out, err := scanGroupLimit(tx.QueryRow(ctx, `
-		INSERT INTO request_group_limits (group_id, limit_mode, max_requests, window_days, approval_mode, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now())
+		INSERT INTO request_group_limits (group_id, limit_mode, max_requests, window_days, approval_mode, uhd_mode, updated_at)
+		VALUES ($1, $2, $3, $4, $5, COALESCE(NULLIF($7, ''), 'inherit'), now())
 		ON CONFLICT (group_id) DO UPDATE SET
 			limit_mode = EXCLUDED.limit_mode,
 			max_requests = EXCLUDED.max_requests,
 			window_days = EXCLUDED.window_days,
 			approval_mode = EXCLUDED.approval_mode,
+			uhd_mode = COALESCE(NULLIF($7, ''), request_group_limits.uhd_mode),
 			updated_at = now()
 		WHERE $6::bigint = -1 OR request_group_limits.revision = $6
-		RETURNING group_id, limit_mode, max_requests, window_days, approval_mode, updated_at, revision`,
-		in.GroupID, in.LimitMode, in.MaxRequests, in.WindowDays, in.ApprovalMode, expected))
+		RETURNING group_id, limit_mode, max_requests, window_days, approval_mode, uhd_mode, updated_at, revision`,
+		in.GroupID, in.LimitMode, in.MaxRequests, in.WindowDays, in.ApprovalMode, expected, string(in.UHDMode)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrStaleRevision
 	}
@@ -103,7 +107,7 @@ func (r *Repository) UpsertGroupLimitConditional(ctx context.Context, in GroupLi
 func scanGroupLimit(row pgx.Row) (*GroupLimit, error) {
 	var out GroupLimit
 	var max, window sql.NullInt64
-	if err := row.Scan(&out.GroupID, &out.LimitMode, &max, &window, &out.ApprovalMode, &out.UpdatedAt, &out.Revision); err != nil {
+	if err := row.Scan(&out.GroupID, &out.LimitMode, &max, &window, &out.ApprovalMode, &out.UHDMode, &out.UpdatedAt, &out.Revision); err != nil {
 		return nil, err
 	}
 	if max.Valid {
@@ -146,7 +150,7 @@ func (s *Service) GetGroupLimit(ctx context.Context, v Viewer, groupID int64) (*
 	if err != nil || limit != nil {
 		return limit, err
 	}
-	return &GroupLimit{GroupID: groupID, LimitMode: LimitModeInherit, ApprovalMode: ApprovalModeInherit}, nil
+	return &GroupLimit{GroupID: groupID, LimitMode: LimitModeInherit, ApprovalMode: ApprovalModeInherit, UHDMode: UHDModeInherit}, nil
 }
 
 // UpsertGroupLimitConditional saves an access group's request limits.
@@ -190,6 +194,9 @@ func normalizeGroupLimit(in GroupLimit) (GroupLimit, error) {
 	case ApprovalModeInherit, ApprovalModeManual, ApprovalModeAuto:
 	default:
 		return GroupLimit{}, fmt.Errorf("%w: invalid approval mode", ErrInvalidInput)
+	}
+	if !in.UHDMode.valid() {
+		return GroupLimit{}, fmt.Errorf("%w: invalid 4K mode", ErrInvalidInput)
 	}
 	return in, nil
 }

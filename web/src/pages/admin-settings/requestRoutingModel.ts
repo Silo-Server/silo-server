@@ -83,8 +83,8 @@ export function initialChoices(source: RequestRoute | null): {
 /** The caption under the 4K version. */
 export function fourKCaption(forceDual: boolean): string {
   return forceDual
-    ? "Sent along with the HD version for every request (General)."
-    : "Sent along with the HD version when the requester's playback limit allows 4K.";
+    ? "Gets 4K requests, and a 4K version of every regular request (General)."
+    : "Gets 4K requests.";
 }
 
 /** A routing rule while it is being edited. */

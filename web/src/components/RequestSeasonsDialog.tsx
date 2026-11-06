@@ -33,6 +33,8 @@ interface RequestSeasonsDialogProps {
   title: string;
   /** The series' request detail when the caller has it; otherwise the dialog loads it when opened. */
   detail?: RequestMediaDetail;
+  /** Picks the seasons of the series' 4K request instead of its regular one. */
+  is4K?: boolean;
 }
 
 /**
@@ -41,6 +43,9 @@ interface RequestSeasonsDialogProps {
  * missing start picked, and a request the viewer does not change leaves the
  * choice to the server, which picks the same ones by its own clock, or the
  * whole series when none has aired.
+ *
+ * In 4K, the seasons' library and request status describe the HD copy and the
+ * regular request, so every season can be picked and none shows a status.
  */
 export function RequestSeasonsDialog({
   open,
@@ -48,6 +53,7 @@ export function RequestSeasonsDialog({
   tmdbID,
   title,
   detail: givenDetail,
+  is4K = false,
 }: RequestSeasonsDialogProps) {
   const loaded = useRequestMediaDetail("series", tmdbID, { enabled: open && !givenDetail });
   const detail = givenDetail ?? loaded.data;
@@ -59,14 +65,18 @@ export function RequestSeasonsDialog({
   // null keeps the default pick, so it follows the detail as it loads.
   const [picked, setPicked] = useState<number[] | null>(null);
 
-  const seasons = detail?.seasons ?? [];
-  const requestable = detail?.request.requestable ?? false;
+  const seasons = (detail?.seasons ?? []).map((season) =>
+    is4K ? { ...season, availability: "missing" as const, requested: false } : season,
+  );
+  const requestState = is4K ? detail?.request_4k : detail?.request;
+  const requestable = requestState?.requestable ?? false;
   const choices = requestable ? seasons.filter(seasonRequestable) : [];
   const defaults = defaultRequestSeasons(choices);
   const selected = (picked ?? defaults).filter((number) =>
     choices.some((season) => season.season_number === number),
   );
-  const inLibrary = detail?.availability === "available";
+  // The server doesn't hold a 4K request back for the library's copy.
+  const inLibrary = !is4K && detail?.availability === "available";
   // Untouched, the request names no seasons and the server decides. That
   // needs something for it to pick: an aired season still missing, or a
   // series outside the library (requested whole). A series in the library
@@ -88,7 +98,11 @@ export function RequestSeasonsDialog({
   const submit = () => {
     if (!detail) return;
     createRequest.mutate(
-      { ...requestInputFromMediaResult(detail), ...(!serverChooses && { seasons: selected }) },
+      {
+        ...requestInputFromMediaResult(detail),
+        ...(!serverChooses && { seasons: selected }),
+        ...(is4K && { is_4k: true }),
+      },
       { onSuccess: () => close(false) },
     );
   };
@@ -97,11 +111,11 @@ export function RequestSeasonsDialog({
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Request seasons</DialogTitle>
+          <DialogTitle>{is4K ? "Request seasons in 4K" : "Request seasons"}</DialogTitle>
           <DialogDescription>
             {requestable || !detail
-              ? `Choose the seasons of ${detail?.title ?? title} to request.`
-              : unavailableReason(detail.request.reason)}
+              ? `Choose the seasons of ${detail?.title ?? title} to request${is4K ? " in 4K" : ""}.`
+              : unavailableReason(requestState?.reason, is4K)}
           </DialogDescription>
         </DialogHeader>
 
@@ -211,11 +225,11 @@ export function RequestSeasonsDialog({
             className="gap-2"
           >
             {(createRequest.isPending || refreshing) && <Loader2 className="size-4 animate-spin" />}
-            {selected.length > 0
+            {(selected.length > 0
               ? `Request ${formatSeasonList(selected)}`
               : serverChooses
                 ? "Request series"
-                : "Request"}
+                : "Request") + (is4K ? " in 4K" : "")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -229,12 +243,14 @@ function seasonName(season: RequestMediaSeason): string {
 }
 
 /** Why no season can be picked, for a series the viewer cannot request now. */
-function unavailableReason(reason?: string): string {
+function unavailableReason(reason: string | undefined, is4K: boolean): string {
   switch (reason) {
     case "already_available":
       return "Every season is already in the library.";
     case "already_requested":
-      return "This series already has an open request.";
+      return is4K
+        ? "This series already has an open 4K request."
+        : "This series already has an open request.";
     default:
       return `${formatRequestReason(reason)}.`;
   }

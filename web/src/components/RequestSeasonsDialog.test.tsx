@@ -117,6 +117,49 @@ describe("RequestSeasonsDialog", () => {
     expect(within(dialog).queryByRole("button", { name: "Upcoming seasons" })).toBeNull();
   });
 
+  it("picks 4K seasons regardless of the HD copy and the regular request", () => {
+    render(
+      <RequestSeasonsDialog
+        open
+        onOpenChange={() => {}}
+        tmdbID={42}
+        title="Example"
+        is4K
+        detail={series({
+          availability: "available",
+          request: { requestable: false, reason: "already_available" },
+          request_4k: { requestable: true },
+          seasons: [season(1, { availability: "available" }), season(2, { requested: true })],
+        })}
+      />,
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Request seasons in 4K" })).toBeTruthy();
+    const first = within(dialog).getByRole("switch", { name: "Season 1" });
+    expect(first).toBeEnabled();
+    expect(first).not.toHaveAccessibleDescription(/In library/);
+    fireEvent.click(within(dialog).getByRole("switch", { name: "Season 2" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Request Season 1 in 4K" }));
+    expect(mocks.create.mock.calls[0]![0]).toMatchObject({ seasons: [1], is_4k: true });
+  });
+
+  it("leaves an untouched 4K pick to the server", () => {
+    render(
+      <RequestSeasonsDialog
+        open
+        onOpenChange={() => {}}
+        tmdbID={42}
+        title="Example"
+        is4K
+        detail={series({ request_4k: { requestable: true }, seasons: [season(1), season(2)] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Request Seasons 1–2 in 4K" }));
+    const input = mocks.create.mock.calls[0]![0];
+    expect(input).toMatchObject({ is_4k: true });
+    expect(input).not.toHaveProperty("seasons");
+  });
+
   it("waits for a refetch before sending from loaded detail", () => {
     mocks.loaded = { data: series({ seasons: [season(1)] }), isFetching: true, isError: false };
     const dialog = open();

@@ -79,7 +79,6 @@ func TestSubmitRoutedHonoursKeyOptionalRouter(t *testing.T) {
 			router := &fakeRouterProvider{keyOptional: map[int]bool{1: tc.keyOptional}}
 			svc := newTestService(store)
 			svc.SetRouterProvider(router)
-			svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 			got, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil)
 			if err != nil {

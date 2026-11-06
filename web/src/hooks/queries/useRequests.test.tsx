@@ -316,7 +316,7 @@ describe("polling while something downloads", () => {
     );
   });
 
-  it("reads a title's request every 30 seconds while it downloads", () => {
+  it("reads a title's requests every 30 seconds while either downloads", () => {
     function CallDetail() {
       useRequestMediaDetail("movie", 949);
       return null;
@@ -329,6 +329,18 @@ describe("polling while something downloads", () => {
     expect(interval({ state: { data: { request: { requestable: false, download } } } })).toBe(
       30_000,
     );
+    expect(
+      interval({
+        state: { data: { request: { requestable: false }, request_4k: { requestable: false } } },
+      }),
+    ).toBe(false);
+    expect(
+      interval({
+        state: {
+          data: { request: { requestable: false }, request_4k: { requestable: false, download } },
+        },
+      }),
+    ).toBe(30_000);
   });
 
   it("reads the admin queue every 30 seconds while a row on any loaded page downloads", () => {

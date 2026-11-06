@@ -2,13 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RequestMediaDetail } from "@/api/types";
+import type { MediaRequest, RequestMediaDetail } from "@/api/types";
 import type { WatchlistTitleEntry } from "@/api/v2/watchlistTitles";
 import { requestKeys } from "@/hooks/queries/keys";
 import RequestActionBar from "./RequestActionBar";
 
 const mocks = vi.hoisted(() => ({
   featureStatus: vi.fn(),
+  myRequests: vi.fn(),
   addWatchlistTitle: vi.fn(),
   deleteWatchlistTitle: vi.fn(),
   toastSuccess: vi.fn(),
@@ -27,7 +28,7 @@ vi.mock("@/hooks/queries/useRequests", async () => {
     useCancelMediaRequest: () => idle,
     useToggleRequestFollow: () => idle,
     useMediaRequest: () => ({ data: undefined }),
-    useMyMediaRequests: () => ({ data: undefined }),
+    useMyMediaRequests: () => ({ data: mocks.myRequests() }),
   };
 });
 vi.mock("@/api/v2/watchlistTitles", () => ({
@@ -165,5 +166,78 @@ describe("RequestActionBar watchlist toggle", () => {
     expect(
       queryClient.getQueryData<RequestMediaDetail>(requestKeys.detail("movie", 949))?.in_watchlist,
     ).toBe(true);
+  });
+});
+
+describe("RequestActionBar cancel", () => {
+  beforeEach(() => {
+    mocks.featureStatus.mockReturnValue({ data: { requests_enabled: true, allowed: true } });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  // Someone else's pending request: the detail names no request, so the
+  // viewer's own requests for the title are looked up instead.
+  const othersPending: RequestMediaDetail = {
+    ...heat,
+    request: { requestable: false, reason: "already_requested", status: "pending" },
+  };
+  const ownPending = (is4K: boolean): MediaRequest => ({
+    id: is4K ? "r-4k" : "r-hd",
+    provider: "tmdb",
+    media_type: "movie",
+    tmdb_id: 949,
+    title: "Heat",
+    status: "pending",
+    outcome: "active",
+    requested_by_user_id: 1,
+    is_4k: is4K,
+    created_at: "2026-01-02T03:04:05.000Z",
+    updated_at: "2026-01-02T03:04:05.000Z",
+  });
+
+  it("does not offer the viewer's 4K request as the title's request to cancel", () => {
+    mocks.myRequests.mockReturnValue([ownPending(true)]);
+    renderBar(othersPending);
+    expect(screen.queryByRole("button", { name: "Cancel request" })).toBeNull();
+  });
+
+  it("offers the viewer's own 4K request to cancel when there is no regular one", () => {
+    mocks.myRequests.mockReturnValue([ownPending(true)]);
+    renderBar({
+      ...heat,
+      request_4k: { requestable: false, reason: "already_requested", status: "pending" },
+    });
+    expect(screen.getByRole("button", { name: "Cancel 4K request" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel request" })).toBeNull();
+  });
+
+  it("offers the viewer's own regular request to cancel", () => {
+    mocks.myRequests.mockReturnValue([ownPending(true), ownPending(false)]);
+    renderBar(othersPending);
+    expect(screen.getByRole("button", { name: "Cancel request" })).toBeTruthy();
+  });
+
+  it("asks which seasons of a series to request in 4K", () => {
+    mocks.myRequests.mockReturnValue([]);
+    renderBar({
+      ...heat,
+      media_type: "series",
+      title: "Example",
+      request_4k: { requestable: true },
+      seasons: [
+        {
+          season_number: 1,
+          episode_count: 8,
+          air_date: "2020-01-01",
+          availability: "available",
+          requested: false,
+        },
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Request in 4K" }));
+    expect(screen.getByRole("heading", { name: "Request seasons in 4K" })).toBeTruthy();
   });
 });

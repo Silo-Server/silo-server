@@ -57,6 +57,7 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
 import {
   describeInheritedValue,
+  formatRequest4K,
   formatRequestApproval,
   formatRequestQuota,
   hasRequestLimitErrors,
@@ -747,6 +748,11 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
                     limit: describeInheritedValue(
                       formatRequestQuota(serverTerms.quota),
                       serverTerms.quotaSource,
+                      null,
+                    ),
+                    requests4K: describeInheritedValue(
+                      formatRequest4K(serverTerms.allow4K),
+                      serverTerms.allow4KSource,
                       null,
                     ),
                   }

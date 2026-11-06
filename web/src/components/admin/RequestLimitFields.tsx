@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { Request4KMode } from "@/api/types";
 import {
   isZeroRequestLimit,
   type RequestApprovalChoice,
@@ -26,7 +27,7 @@ export interface RequestLimitFieldsProps {
   /** The inherit option's label: "Use group default" or "Use server default". */
   inheritLabel: string;
   /** What each field resolves to while it inherits, shown under it. */
-  inherited?: { approval: string; limit: string };
+  inherited?: { approval: string; limit: string; requests4K?: string };
   /** The numbers a limit starts from when it is switched to custom with none typed. */
   customSeed: { maxRequests: string; windowDays: string };
   errors: RequestLimitErrors;
@@ -57,6 +58,8 @@ export function RequestLimitFields({
 }: RequestLimitFieldsProps) {
   const approvalId = useId();
   const approvalHintId = useId();
+  const uhdId = useId();
+  const uhdHintId = useId();
   const limitId = useId();
   const limitHintId = useId();
   const maxId = useId();
@@ -69,6 +72,7 @@ export function RequestLimitFields({
   const [edited, setEdited] = useState(false);
 
   const approvalHint = draft.approval === "inherit" && inherited ? inherited.approval : undefined;
+  const uhdHint = draft.requests4K === "inherit" ? inherited?.requests4K : undefined;
   const limitHint = draft.limit === "inherit" && inherited ? inherited.limit : undefined;
   const custom = draft.limit === "custom";
   const zero = isZeroRequestLimit(draft);
@@ -204,6 +208,35 @@ export function RequestLimitFields({
             className="text-destructive text-xs"
           >
             {errors.windowDays}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="min-w-0 space-y-2">
+        <Label htmlFor={uhdId}>4K requests</Label>
+        <Select
+          value={draft.requests4K}
+          onValueChange={(requests4K) =>
+            onChange({ ...draft, requests4K: requests4K as Request4KMode })
+          }
+          disabled={disabled}
+        >
+          <SelectTrigger
+            id={uhdId}
+            className="w-full"
+            aria-describedby={describedBy(uhdHint !== undefined && uhdHintId)}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="inherit">{inheritLabel}</SelectItem>
+            <SelectItem value="allowed">Can request 4K</SelectItem>
+            <SelectItem value="denied">No 4K requests</SelectItem>
+          </SelectContent>
+        </Select>
+        {uhdHint !== undefined ? (
+          <p id={uhdHintId} className="text-muted-foreground text-xs">
+            {uhdHint}
           </p>
         ) : null}
       </div>

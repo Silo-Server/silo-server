@@ -16,6 +16,7 @@
       "requested_by_user_id": "1",
       "requested_by_profile_id": "p-owner",
       "is_anime": false,
+      "is_4k": false,
       "targets": [
         {
           "id": "42",
@@ -47,6 +48,7 @@
       "requested_by_user_id": "1",
       "requested_by_profile_id": "p-owner",
       "is_anime": false,
+      "is_4k": false,
       "targets": [
         {
           "id": "42",

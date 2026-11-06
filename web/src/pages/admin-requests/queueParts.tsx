@@ -80,7 +80,10 @@ export function RequestStateSummary({ request }: { request: MediaRequest }) {
   const problem = requestProblemText(request);
   return (
     <div className="flex min-w-0 flex-col items-start gap-1">
-      {state ? <RequestStatusBadge state={state} /> : null}
+      <div className="flex flex-wrap items-center gap-1">
+        {state ? <RequestStatusBadge state={state} /> : null}
+        {request.is_4k ? <Badge variant="outline">4K</Badge> : null}
+      </div>
       {problem ? (
         <p
           className={cn(

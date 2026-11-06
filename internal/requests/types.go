@@ -51,7 +51,8 @@ const (
 )
 
 // Target is one fulfillment of a request against a single instance at a single
-// quality. A request fans out to one Target per resolved quality.
+// quality. A regular request fans out to its HD target, plus a 4K one while
+// force-dual is on; a 4K request has the 4K target alone.
 type Target struct {
 	ID              int64     `json:"id"`
 	RequestID       string    `json:"request_id"`
@@ -185,6 +186,25 @@ const (
 
 type ApprovalMode string
 
+// UHDMode is whether an account or access group may make 4K requests;
+// inherit defers to the next layer, ending at the server-wide default.
+type UHDMode string
+
+const (
+	UHDModeInherit UHDMode = "inherit"
+	UHDModeAllowed UHDMode = "allowed"
+	UHDModeDenied  UHDMode = "denied"
+)
+
+// valid accepts the modes and empty, which keeps the stored value on a write.
+func (m UHDMode) valid() bool {
+	switch m {
+	case "", UHDModeInherit, UHDModeAllowed, UHDModeDenied:
+		return true
+	}
+	return false
+}
+
 const (
 	ApprovalModeInherit ApprovalMode = "inherit"
 	ApprovalModeManual  ApprovalMode = "manual"
@@ -208,8 +228,12 @@ type Settings struct {
 	// WatchlistRequests lets adding a title that is not in the library to a
 	// watchlist request it too. v2 only; the frozen v1 shape does not carry
 	// it, and a v1 settings write keeps the stored value.
-	WatchlistRequests bool      `json:"-"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	WatchlistRequests bool `json:"-"`
+	// UHDRequestsAllowed is the server-wide default for whether accounts may
+	// make 4K requests. v2 only, kept by a v1 settings write like
+	// WatchlistRequests.
+	UHDRequestsAllowed bool      `json:"-"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type FeatureStatus struct {
@@ -227,6 +251,9 @@ type FeatureStatus struct {
 	// profile settings are on. The caller adds the account's permission
 	// (v2 only).
 	WatchlistRequests bool `json:"-"`
+	// UHDRequestsAllowed reports that the viewer may make 4K requests and a
+	// download server takes them, for movies or for series (v2 only).
+	UHDRequestsAllowed bool `json:"-"`
 }
 
 type UserLimit struct {
@@ -236,7 +263,10 @@ type UserLimit struct {
 	MaxRequests  *int         `json:"max_requests,omitempty"`
 	WindowDays   *int         `json:"window_days,omitempty"`
 	ApprovalMode ApprovalMode `json:"approval_mode"`
-	UpdatedAt    time.Time    `json:"updated_at"`
+	// UHDMode is whether the account may make 4K requests (v2 only). Empty
+	// on a write keeps the stored value, inherit on a new row.
+	UHDMode   UHDMode   `json:"-"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type EffectivePolicy struct {
@@ -246,9 +276,11 @@ type EffectivePolicy struct {
 	Unlimited       bool
 	Blocked         bool
 	AutoApprove     bool
-	Used            int
-	Remaining       int
-	WindowStart     time.Time
+	// AllowUHD is whether the account may make 4K requests.
+	AllowUHD    bool
+	Used        int
+	Remaining   int
+	WindowStart time.Time
 }
 
 type Request struct {
@@ -273,9 +305,11 @@ type Request struct {
 	// reason was given. v2 only; the frozen v1 shape does not carry it.
 	OutcomeReason string `json:"-"`
 	// Source is what created the request. v2 only.
-	Source           Source     `json:"-"`
-	IntegrationKind  string     `json:"integration_kind,omitempty"`
-	IsAnime          bool       `json:"is_anime"`
+	Source          Source `json:"-"`
+	IntegrationKind string `json:"integration_kind,omitempty"`
+	IsAnime         bool   `json:"is_anime"`
+	// Is4K marks a 4K request, fulfilled by a 4K copy alone. v2 only.
+	Is4K             bool       `json:"-"`
 	Targets          []Target   `json:"targets,omitempty"`
 	ExternalID       string     `json:"external_id,omitempty"`
 	ExternalStatus   string     `json:"external_status,omitempty"`
@@ -377,6 +411,21 @@ func (r *Request) State() State {
 	if r.Status == StatusPending {
 		return StatePending
 	}
+	if r.Is4K {
+		// The library cannot tell a 4K copy from an HD one, so a 4K request
+		// is done when its 4K target is and the title is in the library.
+		switch r.Status {
+		case StatusApproved:
+			return StateApproved
+		case StatusCompleted:
+			if r.LibraryContentID != "" {
+				return StateAvailable
+			}
+			return StateProcessing
+		default:
+			return StateProcessing
+		}
+	}
 	if len(r.SeasonProgress) > 0 {
 		if seasonsDelivered(r.SeasonProgress, r.Status == StatusCompleted) {
 			return StateAvailable
@@ -436,6 +485,12 @@ type RequestState struct {
 	// detail fills it; search and discovery do not load targets (v2 only).
 	Download *DownloadProgress `json:"-"`
 }
+
+// Reasons a title cannot be requested in 4K, on top of the RequestState ones.
+const (
+	ReasonUHDNotAllowed  = "4k_not_allowed"
+	ReasonUHDUnavailable = "4k_unavailable"
+)
 
 type MediaResult struct {
 	MediaType        MediaType    `json:"media_type"`
@@ -500,6 +555,9 @@ type MediaDetail struct {
 	Availability        Availability      `json:"availability"`
 	LibraryContentID    string            `json:"library_content_id,omitempty"`
 	Request             RequestState      `json:"request"`
+	// Request4K is the title's 4K request state: its open 4K request, or
+	// whether the viewer may make one (v2 only).
+	Request4K RequestState `json:"-"`
 	// Seasons lists a series' regular seasons with their library
 	// availability and whether the active request covers them.
 	Seasons []RequestSeason `json:"-"`
@@ -526,6 +584,8 @@ type CreateRequestInput struct {
 	// Source records what created the request; empty means SourceDirect.
 	// Set by the watchlist path, never read from a client body.
 	Source Source `json:"-"`
+	// Is4K asks for a 4K copy alone. v2 only.
+	Is4K bool `json:"-"`
 }
 
 // RequestPageKey identifies the last emitted request in descending creation order.

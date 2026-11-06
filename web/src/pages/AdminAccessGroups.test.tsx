@@ -277,7 +277,13 @@ describe("AdminAccessGroups", () => {
     expect(writes).toEqual([
       expect.objectContaining({
         url: "/api/v2/admin/request-groups/1/limit",
-        body: { limit_mode: "custom", max_requests: 0, window_days: 7, approval_mode: "auto" },
+        body: {
+          limit_mode: "custom",
+          max_requests: 0,
+          window_days: 7,
+          approval_mode: "auto",
+          requests_4k: "inherit",
+        },
       }),
     ]);
   });

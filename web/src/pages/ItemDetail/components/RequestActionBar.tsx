@@ -13,24 +13,20 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import type { MediaRequest, RequestMediaDetail } from "@/api/types";
+import type { MediaRequest, RequestMediaDetail, RequestState } from "@/api/types";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
 import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import { RequestSeasonsDialog } from "@/components/RequestSeasonsDialog";
 import {
   useCancelMediaRequest,
   useCreateMediaRequest,
-  useMediaRequest,
-  useMyMediaRequests,
   useRequestFeatureStatus,
   useToggleRequestFollow,
 } from "@/hooks/queries/useRequests";
 import { useToggleWatchlistTitle } from "@/hooks/queries/watchlistTitles";
-import { useAuth } from "@/hooks/useAuth";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
-  canCancelOwnRequest,
   formatRequestDisplayState,
   formatRequestReason,
   requestDisplayState,
@@ -38,6 +34,7 @@ import {
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
 import { watchlistTitlesAvailable } from "@/lib/watchlistTitles";
+import { useOwnCancellableRequest } from "./useOwnCancellableRequest";
 import ActionBar, {
   type ActionBarLink,
   type ActionBarPrimaryAction,
@@ -79,13 +76,24 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   const toggleFollow = useToggleRequestFollow();
   const toggleWatchlist = useToggleWatchlistTitle();
   const featureStatus = useRequestFeatureStatus();
-  const ownRequest = useOwnCancellableRequest(item);
-  const [confirmCancel, setConfirmCancel] = useState(false);
+  const ownRequest = useOwnCancellableRequest(item.media_type, item.tmdb_id, item.request, false);
+  const own4KRequest = useOwnCancellableRequest(
+    item.media_type,
+    item.tmdb_id,
+    item.request_4k,
+    true,
+  );
+  // Which of the viewer's requests the cancel dialog is for.
+  const [confirmCancel, setConfirmCancel] = useState<MediaRequest | null>(null);
   const [pickSeasons, setPickSeasons] = useState(false);
+  const [pick4KSeasons, setPick4KSeasons] = useState(false);
   // A series TMDB lists seasons for is requested season by season.
   const seasonPicker = item.media_type === "series" && (item.seasons?.length ?? 0) > 0;
 
   const state = requestDisplayState(item.request.status, undefined, item.request.state);
+  // The title's 4K request is separate from the regular one: a title in the
+  // library in HD can still be requested in 4K.
+  const uhd = item.request_4k;
   const inLibrary =
     item.availability === "available" || state === "available" || Boolean(item.library_content_id);
   const following = item.request.following === true;
@@ -151,13 +159,33 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
         }),
     });
   }
+  if (uhd?.requestable) {
+    secondaryActions.push({
+      id: "request-4k",
+      label: "Request in 4K",
+      icon: Plus,
+      pending: createRequest.isPending,
+      onClick: seasonPicker
+        ? () => setPick4KSeasons(true)
+        : () => createRequest.mutate({ ...requestInputFromMediaResult(item), is_4k: true }),
+    });
+  }
   if (ownRequest) {
     secondaryActions.push({
       id: "cancel",
       label: "Cancel request",
       icon: X,
       pending: cancelRequest.isPending,
-      onClick: () => setConfirmCancel(true),
+      onClick: () => setConfirmCancel(ownRequest),
+    });
+  }
+  if (own4KRequest) {
+    secondaryActions.push({
+      id: "cancel-4k",
+      label: "Cancel 4K request",
+      icon: X,
+      pending: cancelRequest.isPending,
+      onClick: () => setConfirmCancel(own4KRequest),
     });
   }
   if (canFollow) {
@@ -203,12 +231,15 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
       {item.request.download ? (
         <RequestDownloadProgress download={item.request.download} className="mt-3 max-w-xs" />
       ) : null}
-      {ownRequest ? (
+      <Request4KStatus state={uhd} />
+      {confirmCancel ? (
         <CancelRequestDialog
-          title={item.title}
-          open={confirmCancel}
-          onOpenChange={setConfirmCancel}
-          onConfirm={() => cancelRequest.mutate(ownRequest.id)}
+          title={confirmCancel.is_4k ? `${item.title} (4K)` : item.title}
+          open
+          onOpenChange={(open) => {
+            if (!open) setConfirmCancel(null);
+          }}
+          onConfirm={() => cancelRequest.mutate(confirmCancel.id)}
           isPending={cancelRequest.isPending}
         />
       ) : null}
@@ -221,39 +252,34 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
           detail={item}
         />
       ) : null}
+      {seasonPicker ? (
+        <RequestSeasonsDialog
+          open={pick4KSeasons}
+          onOpenChange={setPick4KSeasons}
+          tmdbID={item.tmdb_id}
+          title={item.title}
+          detail={item}
+          is4K
+        />
+      ) : null}
     </>
   );
 }
 
-/**
- * The viewer's own request for this title, while they can still cancel it.
- * The detail names the request when it is the account's own (or the viewer is
- * an admin), so that request is read directly and kept only if the account
- * made it; an account's active requests can run past one list page. A detail
- * without the ID falls back to the account's active requests. The title's
- * download progress comes from the detail, so another request downloading is
- * no reason to read the list again.
- */
-function useOwnCancellableRequest(item: RequestMediaDetail): MediaRequest | undefined {
-  const { user } = useAuth();
-  const mayCancel = item.request.status === "pending" || item.request.status === "approved";
-  const requestID = item.request.request_id;
-  const named = useMediaRequest(requestID, { enabled: mayCancel });
-  const mine = useMyMediaRequests(
-    { outcome: "active" },
-    { enabled: mayCancel && !requestID, pollDownloads: false },
-  );
-  if (!mayCancel) return undefined;
-  if (requestID) {
-    const request = named.data;
-    return request && request.requested_by_user_id === user?.id && canCancelOwnRequest(request)
-      ? request
-      : undefined;
-  }
-  return mine.data?.find(
-    (request) =>
-      request.media_type === item.media_type &&
-      request.tmdb_id === item.tmdb_id &&
-      canCancelOwnRequest(request),
+/** The title's 4K request, if it has one: its state and how far its download is. */
+export function Request4KStatus({ state }: { state: RequestState | undefined }) {
+  const display = state ? requestDisplayState(state.status, undefined, state.state) : undefined;
+  if (!state || !display) return null;
+  const Icon = STATE_ICONS[display];
+  return (
+    <>
+      <p className="text-muted-foreground mt-2.5 flex items-center gap-1.5 text-xs">
+        <Icon aria-hidden="true" className="size-3.5" />
+        4K: {display === "pending" ? "Requested" : formatRequestDisplayState(display)}
+      </p>
+      {state.download ? (
+        <RequestDownloadProgress download={state.download} className="mt-2 max-w-xs" />
+      ) : null}
+    </>
   );
 }

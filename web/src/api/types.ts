@@ -1890,6 +1890,8 @@ export type RequestUserState =
   | "failed";
 export type RequestLimitMode = "inherit" | "custom" | "unlimited" | "blocked";
 export type RequestApprovalMode = "inherit" | "manual" | "auto" | "blocked";
+/** Whether an account or access group may make 4K requests; inherit defers to the next layer. */
+export type Request4KMode = "inherit" | "allowed" | "denied";
 
 export interface RequestState {
   status?: MediaRequestStatus;
@@ -1999,6 +2001,12 @@ export interface RequestMediaDetail {
   availability: RequestAvailability;
   library_content_id?: string;
   request: RequestState;
+  /**
+   * The title's 4K request, separate from the regular one: its open 4K
+   * request, or whether the viewer may make one. Absent from servers without
+   * 4K requests.
+   */
+  request_4k?: RequestState;
   /** The title is on the viewer's watchlist; see RequestMediaResult.in_watchlist. */
   in_watchlist?: boolean;
 }
@@ -2102,6 +2110,8 @@ export interface CreateMediaRequestInput {
   backdrop_path?: string;
   /** Series only: the seasons to request. Omitted: every aired season not yet in the library. */
   seasons?: number[];
+  /** Ask for a 4K copy alone. */
+  is_4k?: boolean;
 }
 
 /** The download server details (integration_*, instance_name, route_name, external_*, last_error) reach admins only. */
@@ -2146,6 +2156,8 @@ export interface MediaRequest {
   requested_by_user_id?: number;
   requested_by_profile_id?: string;
   is_anime?: boolean;
+  /** A 4K request, fulfilled by a 4K copy alone. */
+  is_4k?: boolean;
   /** Series: the requested seasons; empty means the whole series. */
   seasons?: number[];
   /** Series season requests: each requested season's episodes, once the series is in the library. */
@@ -2191,6 +2203,12 @@ export interface RequestSettings {
    * value is kept.
    */
   watchlist_requests?: boolean;
+  /**
+   * Whether accounts may make 4K requests where neither the account nor its
+   * access group says. Absent from servers without 4K requests; left out of
+   * an update, the stored value is kept.
+   */
+  requests_4k_default?: boolean;
   updated_at: string;
 }
 
@@ -2202,6 +2220,8 @@ export interface RequestUserLimit {
   max_requests?: number | null;
   window_days?: number | null;
   approval_mode: RequestApprovalMode;
+  /** Absent from servers without 4K requests. */
+  requests_4k?: Request4KMode;
   updated_at?: string;
 }
 

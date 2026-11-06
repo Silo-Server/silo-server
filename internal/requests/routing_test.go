@@ -114,10 +114,53 @@ func routingStore(facts RoutingFacts) *fakeStore {
 	return store
 }
 
+// A 4K request is accepted only when the title's own route sends 4K to an
+// enabled server, so a 4K rule for other titles does not count.
+func TestEnsureUHDRequestableReadsTheTitlesRoute(t *testing.T) {
+	store := routingStore(RoutingFacts{})
+	store.routes[0].UHD = RouteDestination{}                           // Everything else: no 4K
+	store.routes[1].UHD = RouteDestination{IntegrationID: "radarr-4k"} // Anime: 4K
+	svc, _ := newRoutedService(store)
+	ctx := context.Background()
+	allowed := EffectivePolicy{AllowUHD: true}
+
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, capturedFacts(RoutingFacts{})); !errors.Is(err, ErrUHDUnavailable) {
+		t.Fatalf("a title no 4K rule takes: error = %v, want ErrUHDUnavailable", err)
+	}
+	anime := capturedFacts(RoutingFacts{Anime: true})
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, anime); err != nil {
+		t.Fatalf("an anime title: %v, want it accepted", err)
+	}
+	if err := svc.ensureUHDRequestable(ctx, EffectivePolicy{}, 7, MediaTypeMovie, anime); !errors.Is(err, ErrUHDNotAllowed) {
+		t.Fatalf("without permission: error = %v, want ErrUHDNotAllowed", err)
+	}
+	store.integrations[1].Enabled = false // radarr-4k
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, anime); !errors.Is(err, ErrUHDUnavailable) {
+		t.Fatalf("the 4K server disabled: error = %v, want ErrUHDUnavailable", err)
+	}
+	// Another rule's 4K server is enabled, but not the one this title gets.
+	store.routes[0].UHD = RouteDestination{IntegrationID: "radarr-hd"}
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, anime); !errors.Is(err, ErrUHDUnavailable) {
+		t.Fatalf("the title's 4K server disabled, another enabled: error = %v, want ErrUHDUnavailable", err)
+	}
+
+	// A 4K rule for one requester counts for that requester alone.
+	store.integrations[1].Enabled = true
+	store.routes[0].UHD = RouteDestination{}
+	store.routes[1].Conditions = RouteConditions{RequesterUserIDs: []int{7}}
+	plain := capturedFacts(RoutingFacts{})
+	if err := svc.ensureUHDRequestable(ctx, allowed, 7, MediaTypeMovie, plain); err != nil {
+		t.Fatalf("the rule's requester: %v, want it accepted", err)
+	}
+	if err := svc.ensureUHDRequestable(ctx, allowed, 8, MediaTypeMovie, plain); !errors.Is(err, ErrUHDUnavailable) {
+		t.Fatalf("another requester: error = %v, want ErrUHDUnavailable", err)
+	}
+}
+
 func TestSubmitRoutedSendsEachTierToItsServer(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{Anime: true}))
 	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+	store.settings.ForceDualQuality = true
 
 	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -159,7 +202,7 @@ func TestSubmitRoutedDropsUnroutedFourK(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{}))
 	store.routes[0].UHD = RouteDestination{}
 	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+	store.settings.ForceDualQuality = true
 
 	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -200,7 +243,7 @@ func TestDecideRoutesSkipsHDWithoutAnHDServer(t *testing.T) {
 		wantStep RouteStep
 	}{
 		{"4K goes out", fourKOnly(), movie, both, "fallback", true, RouteStepSkips},
-		{"requester without 4K", fourKOnly(), movie, []Quality{Quality1080p}, "", false, RouteStepPasses},
+		{"regular request", fourKOnly(), movie, []Quality{Quality1080p}, "", false, RouteStepPasses},
 		{"4K skipped too", noServers, movie, both, "", false, RouteStepPasses},
 		{"a rule sends HD", fourKOnly(), anime, both, "anime", false, RouteStepDecided},
 		{"a rule sends 4K", animeTo4K, anime, both, "fallback", true, RouteStepSkips},
@@ -218,13 +261,12 @@ func TestDecideRoutesSkipsHDWithoutAnHDServer(t *testing.T) {
 	}
 }
 
-// A requester without 4K has nothing to receive when no server takes HD, so
-// the HD tier still fails and says why.
-func TestSubmitRoutedFailsHDForARequesterWithout4K(t *testing.T) {
+// A regular request has nothing to receive when no server takes HD, so the
+// HD tier still fails and says why.
+func TestSubmitRoutedFailsHDForARegularRequest(t *testing.T) {
 	store := routingStore(capturedFacts(RoutingFacts{}))
 	store.routes[0].HD = RouteDestination{}
 	svc, router := newRoutedService(store)
-	svc.SetEntitlementResolver(fixedCeiling{q: "1080p"})
 
 	if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
 		t.Fatalf("submit: %v", err)
@@ -394,7 +436,7 @@ func TestSubmitRoutedDropsTargetsForTheOtherTier(t *testing.T) {
 			router := &fakeRouterProvider{targetsOverride: tc.returned}
 			svc := newTestService(store)
 			svc.SetRouterProvider(router)
-			svc.SetEntitlementResolver(fixedCeiling{q: "2160p"})
+			store.settings.ForceDualQuality = true
 
 			if _, err := svc.submitApprovedRequest(context.Background(), *store.requests["r1"], Viewer{}, nil); err != nil {
 				t.Fatalf("submit: %v", err)

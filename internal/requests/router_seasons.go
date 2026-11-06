@@ -147,8 +147,7 @@ func (s *Service) missingSeasonsDeliverable(ctx context.Context, fc *fulfillCont
 	}
 	var ids []string
 	if err := s.ensureRoutingFacts(ctx, &req, routes); err == nil {
-		allowed, _ := s.allowedQualities(ctx, req, fc.settings)
-		for _, decision := range decideRoutes(routes, req, allowed) {
+		for _, decision := range decideRoutes(routes, req, requestQualities(req, fc.settings)) {
 			if !decision.Skip {
 				ids = append(ids, decision.IntegrationID)
 			}

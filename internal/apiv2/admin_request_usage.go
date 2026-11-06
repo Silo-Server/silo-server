@@ -26,6 +26,7 @@ type AdminRequestUserUsage struct {
 	WindowStart     Instant `json:"window_start"`
 	Remaining       int     `json:"remaining" minimum:"0"`
 	AutoApprove     bool    `json:"auto_approve"`
+	Requests4K      bool    `json:"requests_4k" doc:"Whether this account may make 4K requests, resolved over the account, its access group and the server default"`
 }
 
 type AdminRequestUserUsageOutput struct {
@@ -36,7 +37,7 @@ func adminRequestUserUsageOf(p mediarequests.EffectivePolicy) AdminRequestUserUs
 	return AdminRequestUserUsage{
 		RequestsEnabled: p.RequestsEnabled, Allowed: !p.Blocked, Unlimited: p.Unlimited, Used: p.Used,
 		MaxRequests: p.MaxRequests, WindowDays: p.WindowDays, WindowStart: NewInstant(p.WindowStart),
-		Remaining: p.Remaining, AutoApprove: p.AutoApprove,
+		Remaining: p.Remaining, AutoApprove: p.AutoApprove, Requests4K: p.AllowUHD,
 	}
 }
 
