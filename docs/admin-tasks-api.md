@@ -83,9 +83,13 @@ the persisted configuration when they restart. Runtime state and persisted
 schedule state are separate reads. The web editor captures the persisted schedule
 when editing begins, keeps the draft and original validator after conflicts, and
 requires explicit review and revision adoption before another submission. It
-disables both mutation retries and authentication-refresh replay. The inherited
-`max_runtime_ms` setting is stored but is not enforced by the task runner; the
-editor labels that limitation rather than promising a timeout.
+disables both mutation retries and authentication-refresh replay.
+
+A trigger's `max_runtime_ms` bounds each run that trigger starts. When it
+elapses, the task runner cancels the run's context exactly as a cancel request
+does, so a task stops wherever it stops on cancel and keeps the progress it
+saved. The run is recorded as `cancelled` with an `error_message` naming the
+limit. Runs that no trigger started, such as manual runs, are not bounded.
 
 A task can spread its scheduled starts so servers sharing a remote service do
 not start together. Each daily or weekly run of such a task starts at a random

@@ -319,9 +319,7 @@ function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
         )}
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="text-muted-foreground text-xs whitespace-nowrap">
-            Max runtime (not enforced):
-          </label>
+          <label className="text-muted-foreground text-xs whitespace-nowrap">Max runtime:</label>
           <Input
             type="number"
             min={0}
