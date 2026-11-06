@@ -10,9 +10,10 @@ vi.mock("@/hooks/useViewTransition", () => ({ useViewTransitionNavigate: () => n
 vi.mock("@/hooks/useAuth", () => ({
   useOptionalAuth: () => ({ user: { id: 1 }, profile: { id: "p1" } }),
 }));
+const episodes = vi.hoisted(() => ({ list: [] as unknown[] }));
 vi.mock("@/hooks/queries/episodes", () => ({
   useSeasons: () => ({ data: { seasons: [] } }),
-  useSeasonEpisodes: () => ({ data: { episodes: [] }, isLoading: false }),
+  useSeasonEpisodes: () => ({ data: { episodes: episodes.list }, isLoading: false }),
 }));
 const saved = vi.hoisted(() => ({
   policy: "host_only",
@@ -76,6 +77,7 @@ beforeEach(() => {
   setProfileToken(null);
   saved.policy = "host_only";
   saved.readOk = true;
+  episodes.list = [];
   toast.info.mockClear();
   nav.navigate.mockClear();
 });
@@ -218,6 +220,32 @@ describe("StartPartySheet", () => {
     rerender(sheet("Dune: Part Two"));
     expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
     expect(saved.refetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the host's picked episode when the page re-renders the sheet", () => {
+    episodes.list = [
+      { content_id: "ep2", title: "The Second", season_number: 1, episode_number: 2, files: [{}] },
+    ];
+    const client = new QueryClient();
+    const sheet = () => (
+      <QueryClientProvider client={client}>
+        <StartPartySheet
+          open
+          onOpenChange={() => {}}
+          item={movie}
+          seriesId="show"
+          initialSeasonNumber={1}
+          initialTarget={{ content_id: "ep1", title: "The First", subtitle: "S1 E1" }}
+        />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(sheet());
+    fireEvent.click(screen.getByRole("button", { name: "Change" }));
+    fireEvent.click(screen.getByRole("button", { name: /The Second/ }));
+    expect(screen.getByText('S1 E2 "The Second"')).toBeTruthy();
+    // Detail pages build the target inline, so any page render passes a new object.
+    rerender(sheet());
+    expect(screen.getByText('S1 E2 "The Second"')).toBeTruthy();
   });
 
   it("vote mode skips staging and hands the item to the room as the first suggestion", async () => {

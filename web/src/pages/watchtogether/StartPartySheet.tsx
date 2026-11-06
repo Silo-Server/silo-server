@@ -1,7 +1,7 @@
 import { captureRoomCreationDraft } from "@/api/v2/watchTogetherCreate";
 import { updateRoomPolicy } from "@/api/v2/watchTogetherPolicy";
 import { stageRoomItem } from "@/api/v2/watchTogetherStage";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { isCapturedProfileAuthorityActive, StaleApiRequestContextError } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -162,15 +162,21 @@ export function StartPartySheet({
   const [target, setTarget] = useState<StartPartyTarget | null>(initialTarget);
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Detail pages pass a new initialTarget object on every render, so reset on
+  // open or when the page's item changes, never on identity alone: a page
+  // render must not undo the episode or switch choice the host made here.
+  const initialTargetRef = useRef(initialTarget);
+  useEffect(() => {
+    initialTargetRef.current = initialTarget;
+  });
+  const initialTargetId = initialTarget?.content_id;
   useEffect(() => {
     if (open) {
-      setTarget(initialTarget);
+      setTarget(initialTargetRef.current);
       setChoosing(false);
       setBusy(false);
     }
-  }, [open, initialTarget]);
-  // Only on open: detail pages pass a new initialTarget object on every
-  // render, which must not undo the host's switch choice.
+  }, [open, initialTargetId]);
   useEffect(() => {
     if (open) {
       setGuestsCanPause(null);
