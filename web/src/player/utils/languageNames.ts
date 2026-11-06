@@ -1,5 +1,4 @@
-import { appLanguage } from "@/lib/appLocale";
-import { getLanguageName } from "@/lib/languageNames";
+import { getLanguageName, namesLanguage } from "@/lib/languageNames";
 
 export { canonicalLanguageTag, getLanguageName, normalizeLanguageCode } from "@/lib/languageNames";
 
@@ -54,11 +53,12 @@ export interface LanguageOption {
 let cachedOptions: { language: string; options: LanguageOption[] } | null = null;
 
 /**
- * Sorted common-language list, named and sorted in the interface language.
- * Built per language, so a language change mid-session relabels it.
+ * Sorted common-language list, named and sorted in the language names come out
+ * in. Built per names language, so a language change, or that language's name
+ * data arriving, relabels it.
  */
 export function languageOptions(): LanguageOption[] {
-  const language = appLanguage();
+  const language = namesLanguage();
   if (cachedOptions?.language !== language) {
     const options = COMMON_LANGUAGE_CODES.map((code) => ({
       code,

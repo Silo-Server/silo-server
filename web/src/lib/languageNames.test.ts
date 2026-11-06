@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { languageOptions } from "@/player/utils/languageNames";
 import { resolveAppLocale, setAppLocale } from "./appLocale";
 import {
   canonicalLanguageTag,
@@ -55,10 +56,13 @@ describe("languageNames", () => {
   });
 
   it("names languages in the interface language once its data has loaded", async () => {
+    const germanOption = () => languageOptions().find((option) => option.code === "de")?.label;
     applyLanguage("pt-BR");
     expect(displayLanguageName("de")).toBe("German");
+    expect(germanOption()).toBe("German");
     await loadLanguageNames("pt-BR");
     expect(displayLanguageName("de")).toBe("alemão");
+    expect(germanOption()).toBe("alemão");
 
     applyLanguage("zh-Hans");
     await loadLanguageNames("zh-Hans");
