@@ -2177,8 +2177,8 @@ func TestServiceImportWatchedSkipsProviderCopyOfLocalPlay(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GetProgress: %v", err)
 			}
-			if progress == nil || !progress.Completed {
-				t.Fatalf("progress = %+v, want completed", progress)
+			if progress == nil || !progress.Completed || result.ProgressUpdated != 1 {
+				t.Fatalf("progress = %+v, result %+v; want completed and counted, so the sync refreshes signals", progress, result)
 			}
 		})
 	}

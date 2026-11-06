@@ -868,7 +868,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			result, err := s.ImportWatched(ctx, conn, cfg, importer)
 			run.InboundWatchedFound = result.Found
 			run.InboundWatchedImported = result.Imported
-			signalsChanged = signalsChanged || result.Imported > 0
+			signalsChanged = signalsChanged || result.Imported > 0 || result.ProgressUpdated > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			afterFlow("watched import", err)
 		}
@@ -1127,10 +1127,13 @@ func summarizeWarnings(warnings []string) []string {
 }
 
 type ImportWatchedResult struct {
-	Found     int
-	Imported  int
-	Unmatched int
-	Warnings  []string
+	Found    int
+	Imported int
+	// ProgressUpdated counts provider copies of Silo's own plays that added
+	// no history row but moved the item's progress.
+	ProgressUpdated int
+	Unmatched       int
+	Warnings        []string
 }
 
 type matchedWatchedLeaf struct {
@@ -1205,8 +1208,12 @@ func (s *Service) ImportWatched(
 		if playNear(localPlays[mediaItemID], watchedAt, importedWatchSamePlayWindow) {
 			// The provider's copy of a play Silo recorded and scrobbled: the
 			// play is already in history, but a later completion still counts.
-			if _, err := store.SetProgressIfNewer(ctx, conn.ProfileID, mediaItemID, 0, duration, true, watchedAt); err != nil {
+			wrote, err := store.SetProgressIfNewer(ctx, conn.ProfileID, mediaItemID, 0, duration, true, watchedAt)
+			if err != nil {
 				return result, err
+			}
+			if wrote {
+				result.ProgressUpdated++
 			}
 			continue
 		}
