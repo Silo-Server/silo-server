@@ -448,8 +448,8 @@ func TestDiscordTotalLimitTruncation(t *testing.T) {
 	if err := json.Unmarshal(payload, &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Embeds[0].Title) > discordTitleLimit {
-		t.Fatalf("title exceeds Discord limit: %d bytes", len(body.Embeds[0].Title))
+	if n := discordTextLen(body.Embeds[0].Title); n > discordTitleLimit {
+		t.Fatalf("title exceeds Discord limit: %d characters", n)
 	}
 
 	embed := discordEmbed{
@@ -532,7 +532,10 @@ type discordDigestCase struct {
 	links int
 	// fullTeasers requires every teaser to be sent unshortened.
 	fullTeasers bool
-	build       func() ([]byte, error)
+	// fullTitles and fullFields require over-long titles and field values to
+	// be clipped exactly to Discord's character limits, no shorter.
+	fullTitles, fullFields bool
+	build                  func() ([]byte, error)
 }
 
 // TestDiscordDigestMessageLimit covers Discord's 6,000-character cap, which
@@ -565,12 +568,27 @@ func TestDiscordDigestMessageLimit(t *testing.T) {
 		{name: "server channel", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
 			return BuildServerChannelDiscordContent(digestContentGroups(10), false)
 		}},
+		{name: "server channel with an over-long genre", items: 1, wantEmbeds: 1, links: 3, build: func() ([]byte, error) {
+			groups := digestContentGroups(1)
+			groups[0].Meta.Genres = []string{strings.Repeat("ドラマ", 400), "Documentary"}
+			return BuildServerChannelDiscordContent(groups, false)
+		}},
+		{name: "dm non-latin title and reason keep Discord's full limits", items: 1, wantEmbeds: 1, links: 1,
+			fullTitles: true, fullFields: true, build: func() ([]byte, error) {
+				return BuildDiscordDMPayload(digestDeclinedRows(1, strings.Repeat("申請作品", 70), strings.Repeat("配信地域外のため", 140)))
+			}},
 		// A request overview is client-supplied up to the ~1 MiB body cap;
 		// clipping it must not cost time proportional to its length.
 		{name: "request with a 1 MiB overview", items: 1, wantEmbeds: 1, links: 1, build: func() ([]byte, error) {
 			return BuildServerChannelRequestDiscord(ServerChannelEventRequestApproved, RequestEventInfo{
 				TMDBID: 42, MediaType: "movie", Title: "00 Requested Title",
 				Overview: strings.Repeat(digestOverview, 2000),
+			})
+		}},
+		{name: "request with a 1 MiB emoji overview", items: 1, wantEmbeds: 1, links: 1, build: func() ([]byte, error) {
+			return BuildServerChannelRequestDiscord(ServerChannelEventRequestApproved, RequestEventInfo{
+				TMDBID: 42, MediaType: "movie", Title: "00 Requested Title",
+				Overview: strings.Repeat("🎬", 256<<10),
 			})
 		}},
 	}
@@ -585,20 +603,27 @@ func TestDiscordDigestMessageLimit(t *testing.T) {
 	}
 }
 
-// TestTruncateWithEllipsisKeepsRuneBoundary covers the byte limit falling
-// inside a multibyte rune: the cut backs up to the rune start.
-func TestTruncateWithEllipsisKeepsRuneBoundary(t *testing.T) {
+// TestDiscordClipsCountCharacters covers Discord's limits counting
+// characters, not UTF-8 bytes: non-Latin text gets the same room as Latin
+// text, and a character outside the Basic Multilingual Plane (most emoji)
+// counts as two and is never split at the limit.
+func TestDiscordClipsCountCharacters(t *testing.T) {
 	for _, tc := range []struct {
-		value string
-		limit int
-		want  string
+		name      string
+		got, want string
 	}{
-		{value: strings.Repeat("é", 10), limit: 10, want: "ééé…"}, // cut at byte 7, inside "é"
-		{value: strings.Repeat("申", 10), limit: 10, want: "申申…"},  // cut at byte 7, inside "申"
-		{value: "abcdefghijk", limit: 10, want: "abcdefg…"},
+		{"accented text at the limit is unchanged", truncateWithEllipsis(strings.Repeat("é", 10), 10), strings.Repeat("é", 10)},
+		{"cjk text over the limit", truncateWithEllipsis(strings.Repeat("申", 11), 10), strings.Repeat("申", 9) + "…"},
+		{"latin text over the limit", truncateWithEllipsis("abcdefghijk", 10), "abcdefghi…"},
+		{"emoji at the limit are unchanged", truncateWithEllipsis(strings.Repeat("😀", 5), 10), strings.Repeat("😀", 5)},
+		{"emoji over the limit", truncateWithEllipsis(strings.Repeat("😀", 6), 10), strings.Repeat("😀", 4) + "…"},
+		{"emoji straddling the limit is dropped whole", truncateWithEllipsis("a😀", 2), "a…"},
+		{"no room beside the ellipsis", truncateWithEllipsis("ab", 1), ""},
+		{"non-latin overview keeps the full teaser", overviewSnippet(strings.Repeat("申", 400)),
+			strings.Repeat("申", discordOverviewLimit-1) + "…"},
 	} {
-		if got := truncateWithEllipsis(tc.value, tc.limit); got != tc.want {
-			t.Errorf("truncateWithEllipsis(%q, %d) = %q, want %q", tc.value, tc.limit, got, tc.want)
+		if tc.got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, tc.got, tc.want)
 		}
 	}
 }
@@ -651,6 +676,16 @@ func checkDiscordDigest(t *testing.T, tc discordDigestCase, payload []byte) {
 		t.Fatalf("last embed %q is not the newest item", last)
 	}
 	for _, embed := range body.Embeds {
+		if n := discordTextLen(embed.Title); n > discordTitleLimit || tc.fullTitles && n != discordTitleLimit {
+			t.Fatalf("title carries %d characters, Discord allows %d", n, discordTitleLimit)
+		}
+		for _, field := range embed.Fields {
+			if n := discordTextLen(field.Value); n > discordFieldValueLimit {
+				t.Fatalf("field %q carries %d characters, Discord allows %d", field.Name, n, discordFieldValueLimit)
+			} else if tc.fullFields && field.Name == "Reason" && n != discordFieldValueLimit {
+				t.Fatalf("field %q was clipped to %d characters, Discord allows %d", field.Name, n, discordFieldValueLimit)
+			}
+		}
 		if got := strings.Count(embed.Description, "](https://"); got != tc.links || !strings.HasSuffix(embed.Description, ")") {
 			t.Fatalf("description %q lost its provider links (%d of %d)", embed.Description, got, tc.links)
 		}

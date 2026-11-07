@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // Discord embed accent colors per reason (decimal RGB), in reason precedence
@@ -308,12 +307,9 @@ func discordEmbedLen(embed *discordEmbed, length func(string) int) int {
 	return total
 }
 
-func byteLen(s string) int { return len(s) }
-
-// discordEmbedTotal counts in bytes, which never undercounts Discord's
-// characters.
+// discordEmbedTotal counts one embed's characters toward the 6,000 limit.
 func discordEmbedTotal(embed *discordEmbed) int {
-	return discordEmbedLen(embed, byteLen)
+	return discordEmbedLen(embed, discordTextLen)
 }
 
 // enforceDiscordTotalLimit applies the 6,000-char total cap: truncate the
@@ -324,7 +320,7 @@ func enforceDiscordTotalLimit(embed *discordEmbed) {
 		return
 	}
 	overflow := discordEmbedTotal(embed) - discordTotalLimit
-	if keep := len(embed.Description) - overflow; keep > 0 {
+	if keep := discordTextLen(embed.Description) - overflow; keep > 0 {
 		embed.Description = truncateWithEllipsis(embed.Description, keep)
 	} else {
 		embed.Description = ""
@@ -362,12 +358,17 @@ const discordMinTeaser = 80
 func discordTextLen(s string) int {
 	n := 0
 	for _, r := range s {
-		n++
-		if r > 0xFFFF {
-			n++
-		}
+		n += discordRuneLen(r)
 	}
 	return n
+}
+
+// discordRuneLen is one character's share of discordTextLen.
+func discordRuneLen(r rune) int {
+	if r > 0xFFFF {
+		return 2
+	}
+	return 1
 }
 
 // discordMessageChars counts embed text across a whole message, the scope of
@@ -434,22 +435,24 @@ func fitDiscordMessage(entries []discordDigestEntry) ([]discordEmbed, int) {
 	}
 }
 
+// truncateWithEllipsis clips value to at most limit characters, counted as
+// discordTextLen counts them, ending a cut value with "…" (one character). It
+// walks at most limit characters and never counts the rest: a client-supplied
+// request overview can be ~1 MiB.
 func truncateWithEllipsis(value string, limit int) string {
-	const ellipsis = "…" // 3 bytes in UTF-8; limits are byte counts
-	if limit <= 0 {
-		return ""
+	n, cut := 0, -1
+	for i, r := range value {
+		width := discordRuneLen(r)
+		if cut < 0 && n+width > limit-1 {
+			cut = i // the ellipsis takes the last character of the limit
+		}
+		if n+width > limit {
+			if cut == 0 {
+				return ""
+			}
+			return value[:cut] + "…"
+		}
+		n += width
 	}
-	if len(value) <= limit {
-		return value
-	}
-	if limit <= len(ellipsis) {
-		return value[:0]
-	}
-	// Cut at the byte budget, backed up to a rune start. The cost must not
-	// grow with len(value): a client-supplied request overview can be ~1 MiB.
-	cut := limit - len(ellipsis)
-	for cut > 0 && !utf8.RuneStart(value[cut]) {
-		cut--
-	}
-	return value[:cut] + ellipsis
+	return value
 }
