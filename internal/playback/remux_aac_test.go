@@ -34,7 +34,7 @@ func TestBuildRemuxArgsConvertsADTSOnlyForCopiedAAC(t *testing.T) {
 		{name: "re-encoded aac is never adts", transcodeAudio: true, codec: "aac", want: ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			args := buildRemuxArgsWithLeadingPictureDropV3("/x.ts", "mp4", 0, test.transcodeAudio, -1, 0, false, false, 0, 0, 0, false, test.codec)
+			args := buildRemuxArgsWithLeadingPictureDropV3("/x.ts", "mp4", 0, test.transcodeAudio, -1, 0, false, false, 0, 0, 0, false, test.codec, nil)
 			if got := remuxAudioBitstreamFilterArg(args); got != test.want {
 				t.Fatalf("-bsf:a = %q, want %q (args=%s)", got, test.want, strings.Join(args, " "))
 			}
@@ -89,7 +89,7 @@ func TestRemuxCopiesAACIntoFragmentedMP4(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			outputPath := filepath.Join(dir, strings.ReplaceAll(test.name, " ", "-")+".mp4")
-			args := buildRemuxArgsWithLeadingPictureDropV3(sourcePath, "mp4", test.seek, false, -1, 0, false, false, 0, 0, 0, false, "aac")
+			args := buildRemuxArgsWithLeadingPictureDropV3(sourcePath, "mp4", test.seek, false, -1, 0, false, false, 0, 0, 0, false, "aac", nil)
 			args[len(args)-1] = outputPath
 			if output, err := exec.CommandContext(ctx, ffmpegPath, args...).CombinedOutput(); err != nil {
 				t.Fatalf("ffmpeg remux failed: %v\n%s", err, output)
