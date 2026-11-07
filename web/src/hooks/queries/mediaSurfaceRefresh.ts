@@ -1,4 +1,5 @@
 import type { Query, QueryClient } from "@tanstack/react-query";
+import { API_READ_TIMEOUT_MS } from "@/api/requestDeadline";
 import type {
   HomeSectionItemsResponse,
   ItemDetail,
@@ -484,9 +485,95 @@ export async function invalidateMediaSurfaceQueries(
   const matches = (query: Query) =>
     shouldInvalidateMediaSurfaceQuery(query.queryKey, scoped, relatedIds);
   const runningLetterIndexes = refetchLetterIndexesWhenDone(queryClient, matches);
+  const holdsCatalogLists = holdCatalogListsForFirstReads(queryClient, matches);
   await queryClient.invalidateQueries({
-    predicate: (query) => matches(query) && !runningLetterIndexes.has(query),
+    predicate: (query) =>
+      matches(query) &&
+      !runningLetterIndexes.has(query) &&
+      !(holdsCatalogLists && isCatalogListQuery(query)),
   });
+}
+
+const CATALOG_LIST_KEY = [...catalogKeys.all, "list"] as const;
+// How long a sweep waits for each catalog page on its first read, from when
+// the hold first sees it: as long as a read may take before the client gives
+// up on it, so every read that can still land does, however late in the hold
+// it started.
+const CATALOG_LIST_READ_HOLD_MS = API_READ_TIMEOUT_MS;
+const heldCatalogListSweeps = new WeakMap<QueryClient, Array<(query: Query) => boolean>>();
+
+function isCatalogListQuery(query: Query) {
+  return queryKeyStartsWith(query.queryKey, CATALOG_LIST_KEY);
+}
+
+function firstCatalogListReads(queryClient: QueryClient, matches: (query: Query) => boolean) {
+  return queryClient.getQueryCache().findAll({
+    queryKey: CATALOG_LIST_KEY,
+    fetchStatus: "fetching",
+    predicate: (query) => query.state.data === undefined && matches(query),
+  });
+}
+
+// A catalog page on its first read has nothing to show until it lands. A
+// sweep refetches page 0, and page 0 coming back under a new snapshot re-keys
+// every later page: the first read loses its last observer, which aborts it,
+// and the page starts over under the new key with no earlier page to stand in
+// for it. A jump deep into a large title-ordered library takes longer than a
+// scan's sweep window to seek, so during a scan it never landed. While a list
+// page of the sweep is on its first read, the sweep leaves the catalog lists
+// alone and sweeps them once no first read remains that started within the
+// last CATALOG_LIST_READ_HOLD_MS; a read that runs past that fails on the
+// client anyway. Sweeps arriving meanwhile join the held one. A page already
+// shown still reloads under the new snapshot, showing what it held until
+// then. Returns whether the sweep must leave the lists alone.
+function holdCatalogListsForFirstReads(
+  queryClient: QueryClient,
+  matches: (query: Query) => boolean,
+): boolean {
+  const held = heldCatalogListSweeps.get(queryClient);
+  if (held) {
+    held.push(matches);
+    return true;
+  }
+  if (firstCatalogListReads(queryClient, matches).length === 0) return false;
+  const sweeps = [matches];
+  heldCatalogListSweeps.set(queryClient, sweeps);
+  const anySweep = (query: Query) => sweeps.some((match) => match(query));
+  void (async () => {
+    // When the hold first saw each first read; each gets its own deadline.
+    const seenAt = new Map<Query, number>();
+    const pendingReads = () => {
+      const now = Date.now();
+      return firstCatalogListReads(queryClient, anySweep).filter((query) => {
+        const seen = seenAt.get(query) ?? now;
+        seenAt.set(query, seen);
+        return now - seen < CATALOG_LIST_READ_HOLD_MS;
+      });
+    };
+    try {
+      let reads = pendingReads();
+      while (reads.length > 0) {
+        const nextDeadline = Math.min(
+          ...reads.map((query) => (seenAt.get(query) ?? 0) + CATALOG_LIST_READ_HOLD_MS),
+        );
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          Promise.allSettled(reads.map((query) => query.promise)),
+          new Promise((resolve) => (timer = setTimeout(resolve, nextDeadline - Date.now()))),
+        ]);
+        clearTimeout(timer);
+        reads = pendingReads();
+      }
+    } finally {
+      // Always release the hold, or every later sweep would join one that
+      // never ends and the lists would stop refreshing.
+      heldCatalogListSweeps.delete(queryClient);
+    }
+    await queryClient.invalidateQueries({
+      predicate: (query) => isCatalogListQuery(query) && anySweep(query),
+    });
+  })();
+  return true;
 }
 
 // itemKeyedListOwners is the items whose children a cached list holds.
