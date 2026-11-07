@@ -141,7 +141,7 @@ function CastCarousel({
                   className="embla__slide flex shrink-0 items-start self-stretch px-3 pb-10"
                 >
                   <div className="flex h-full items-center gap-2">
-                    <span className="text-muted-foreground/70 rotate-180 text-[0.625rem] font-semibold tracking-[0.2em] uppercase [writing-mode:vertical-rl]">
+                    <span className="text-muted-foreground/70 rotate-180 text-[0.625rem] font-semibold tracking-[0.2em] uppercase [text-orientation:sideways] [writing-mode:vertical-rl]">
                       {section.label}
                     </span>
                     <span className="bg-border h-full w-px" />
