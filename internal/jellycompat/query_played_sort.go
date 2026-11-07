@@ -32,9 +32,10 @@ func selectedSortKey(sortBy string) string {
 // sortsPlayedListByCatalog reports whether a Filters=IsPlayed request asks for
 // a catalog order (SortName, DateCreated, ...) that the played list, read from
 // progress rows, cannot apply, and that the catalog browse can serve whole.
-// DatePlayed is the played list's own order. A request with no SortBy, only
-// keys Silo does not map, or a key that maps to no catalog order (IndexNumber
-// and the other episode-order keys) keeps that list.
+// DatePlayed is the played list's own order. A request with no SortBy, or only
+// keys Silo does not map, keeps that list. The episode-order keys (IndexNumber
+// and the like) map to no catalog sort: an Episode-only request with one gets
+// the episode browse's season and episode order, any other keeps the list.
 //
 // The media-item browse holds no episodes and only an Episode-only request
 // browses episodes, so a request with no type filter, or one that mixes
@@ -45,7 +46,7 @@ func (q itemsQuery) sortsPlayedListByCatalog() bool {
 	if q.isPlayed == nil || !*q.isPlayed || q.sortByKey == sortKeyDatePlayed {
 		return false
 	}
-	if mapped, ok := sortKey(q.sortByKey); !ok || mapped == "" {
+	if mapped, ok := sortKey(q.sortByKey); !ok || (mapped == "" && !q.episodeOnly()) {
 		return false
 	}
 	if !q.hasItemTypeFilter || len(q.itemTypes) == 0 {

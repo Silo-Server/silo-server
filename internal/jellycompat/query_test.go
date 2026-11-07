@@ -136,6 +136,7 @@ func TestPlayedListSortRouting(t *testing.T) {
 		{"IncludeItemTypes=Movie,Episode&Filters=IsPlayed&SortBy=SortName", false, "sortname"},
 		{"Filters=IsPlayed&SortBy=SortName", false, "sortname"},
 		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=IndexNumber", false, "indexnumber"},
+		{"IncludeItemTypes=Episode&Filters=IsPlayed&SortBy=ParentIndexNumber,IndexNumber", true, "parentindexnumber"},
 		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=DatePlayed&SortOrder=Descending", false, "dateplayed"},
 		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=PlayCount,DatePlayed", false, "dateplayed"},
 		{"IncludeItemTypes=Movie&Filters=IsPlayed", false, ""},
