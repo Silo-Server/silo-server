@@ -272,7 +272,7 @@ export default function DetailHero({
                   <DetailTitle
                     title={title}
                     bounded={isViewportBounded}
-                    className={`text-foreground mb-3 font-extrabold tracking-tight ${
+                    className={`bidi-text text-foreground mb-3 font-extrabold tracking-tight ${
                       isCompact
                         ? "font-display text-3xl leading-[1.1] sm:text-4xl"
                         : "font-display text-4xl leading-[0.98] tracking-[-0.05em] sm:text-5xl lg:text-7xl"
@@ -283,7 +283,7 @@ export default function DetailHero({
                 {/* Tagline (italic) — falls back to subtitle */}
                 {(tagline || subtitle) && (
                   <div
-                    className={`text-muted-foreground mb-4 text-[0.8125rem] ${
+                    className={`bidi-text text-muted-foreground mb-4 text-[0.8125rem] ${
                       tagline
                         ? "text-foreground/72 italic"
                         : "text-muted-foreground text-base font-medium not-italic"

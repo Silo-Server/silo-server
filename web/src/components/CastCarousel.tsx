@@ -205,9 +205,13 @@ function CastCard({ data: member }: { data: CreditCardData }) {
         )}
       </div>
       <div className="px-0.5">
-        <div className="text-foreground truncate text-[0.8125rem] font-medium">{member.name}</div>
+        <div className="bidi-text text-foreground truncate text-[0.8125rem] font-medium">
+          {member.name}
+        </div>
         {member.subtitle ? (
-          <div className="text-muted-foreground truncate text-[0.6875rem]">{member.subtitle}</div>
+          <div className="bidi-text text-muted-foreground truncate text-[0.6875rem]">
+            {member.subtitle}
+          </div>
         ) : null}
       </div>
     </>
