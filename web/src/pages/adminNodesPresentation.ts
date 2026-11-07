@@ -1574,7 +1574,7 @@ export function describeNodeEgress(node: StreamNode): ResourceMetric {
 
 /** Kilobits per second as Mbps to one decimal, trailing zero dropped. */
 function formatMbps(kbps: number): string {
-  return (Math.round(kbps / 100) / 10).toString();
+  return formatDecimal(Math.round(kbps / 100) / 10, 1, 0);
 }
 
 /**

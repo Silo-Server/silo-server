@@ -2,6 +2,7 @@ import { ApiClientError } from "@/api/client";
 import type { PolicyCompileIssue } from "@/api/adminPolicy";
 import { t, type MessageKey } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
+import { formatDecimal } from "@/lib/numberFormat";
 
 export function formatPolicyDate(value?: string | null) {
   if (!value) return t("web.admin.access.policy.noValue");
@@ -11,7 +12,7 @@ export function formatPolicyDate(value?: string | null) {
 export function formatPolicyEvalMicros(evalTimeNS?: number | null) {
   if (evalTimeNS === undefined || evalTimeNS === null) return t("web.admin.access.policy.noValue");
   return t("web.admin.access.policy.evalMicros", {
-    value: String(Math.round(evalTimeNS / 100) / 10),
+    value: formatDecimal(Math.round(evalTimeNS / 100) / 10, 1, 0),
   });
 }
 
