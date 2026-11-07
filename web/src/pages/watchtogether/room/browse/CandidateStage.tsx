@@ -82,10 +82,13 @@ function CandidateBody({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onDismiss();
+      if (event.key !== "Escape") return;
+      // Claimed, so the page-level Back key does not also leave the room.
+      event.preventDefault();
+      onDismiss();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [onDismiss]);
 
   if (!isSeries) {

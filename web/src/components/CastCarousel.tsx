@@ -119,6 +119,7 @@ function CastCarousel({
 
       <div
         ref={emblaRef}
+        data-nav-group
         className={cn(
           "embla__viewport -mt-1 overflow-hidden pt-1",
           fullBleed && "pr-4 sm:pr-6 lg:pr-10 xl:pr-12",
