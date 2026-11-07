@@ -264,8 +264,12 @@ export function buildProfileAccessSummary(
         count_text: String(libraryCount),
       })
     : t("web.profiles.helpers.access.allLibraries");
-  const qualityLabel = formatPlaybackQualityPreset(profile.max_playback_quality);
-  const playbackQuality = t("web.profiles.helpers.access.quality", { quality: qualityLabel });
+  const playbackQuality =
+    playbackQualityPresetFromValue(profile.max_playback_quality) === "any"
+      ? t("web.profiles.helpers.access.anyQuality")
+      : t("web.profiles.helpers.access.quality", {
+          quality: formatPlaybackQualityPreset(profile.max_playback_quality),
+        });
 
   return {
     contentRating,

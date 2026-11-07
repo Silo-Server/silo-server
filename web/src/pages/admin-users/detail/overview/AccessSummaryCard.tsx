@@ -14,6 +14,7 @@ import {
   PERMISSION_METADATA_CURATION,
   hasAssignedPermission,
 } from "@/lib/permissions";
+import { playbackQualityPresetFromValue } from "@/lib/playback-quality";
 import type { ResolvedRequestTerms } from "@/lib/requestAccess";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
 
@@ -195,9 +196,11 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
         icon={<Play />}
         title={
           <>
-            {t("web.admin.users.detail.overview.access.quality", {
-              quality: formatQuality(effective.max_playback_quality),
-            })}
+            {playbackQualityPresetFromValue(effective.max_playback_quality) === "any"
+              ? t("web.admin.users.detail.overview.access.anyQuality")
+              : t("web.admin.users.detail.overview.access.quality", {
+                  quality: formatQuality(effective.max_playback_quality),
+                })}
             {user.max_playback_quality !== null ? CUSTOM : null}
             {" · "}
             {effective.max_streams === 0
