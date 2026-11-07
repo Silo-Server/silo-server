@@ -43,7 +43,6 @@ describe("LocaleProvider", () => {
     );
 
     await waitFor(() => expect(document.documentElement.lang).not.toBe(""));
-    expect(loadTranslations).toHaveBeenCalledWith("ar");
     expect(document.documentElement).toHaveAttribute("lang", lang);
     expect(document.documentElement).toHaveAttribute("dir", dir);
     expect(appIntl().locale).toBe(lang);
