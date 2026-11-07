@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -223,11 +225,15 @@ func TestJellyfinFetchPlayedSince_RestartsWhenAPlayMovesTheList(t *testing.T) {
 	for i := range list {
 		list[i] = jellyfinItem{ID: "item-" + strconv.Itoa(i), Type: "Movie", UserData: playedAt(since.Add(time.Duration(300-i)*time.Minute - time.Second))}
 	}
+	var mu sync.Mutex
 	firstPages := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start, _ := strconv.Atoi(r.URL.Query().Get("StartIndex"))
+		// Take the page and move the list before any byte is sent, so the
+		// client cannot request the next page before the move.
+		mu.Lock()
 		end := min(start+jellyfinPageSize, len(list))
-		writeJellyfinItems(t, w, len(list), list[start:end])
+		page, total := slices.Clone(list[start:end]), len(list)
 		if start == 0 {
 			firstPages++
 			if firstPages == 1 {
@@ -237,6 +243,8 @@ func TestJellyfinFetchPlayedSince_RestartsWhenAPlayMovesTheList(t *testing.T) {
 				list = append([]jellyfinItem{moved}, append(list[:250:250], list[251:]...)...)
 			}
 		}
+		mu.Unlock()
+		writeJellyfinItems(t, w, total, page)
 	}))
 	defer server.Close()
 
@@ -249,6 +257,8 @@ func TestJellyfinFetchPlayedSince_RestartsWhenAPlayMovesTheList(t *testing.T) {
 	for _, item := range items {
 		ids[item.ID]++
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if len(items) != 300 || len(ids) != 300 || ids["item-250"] != 1 || firstPages != 2 {
 		t.Fatalf("items = %d (%d distinct), item-250 = %d, first-page reads = %d; want all 300 plays once after one restart", len(items), len(ids), ids["item-250"], firstPages)
 	}
