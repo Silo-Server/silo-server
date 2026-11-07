@@ -21243,6 +21243,20 @@ export interface components {
       section_type: string;
       title: string;
       /**
+       * @description Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none
+       * @example {
+       *       "library": "Movies"
+       *     }
+       */
+      title_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. Sent when getHomeCapabilities reports section_title_keys
+       * @example home.section.recentlyAddedIn
+       */
+      title_key?: string;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
@@ -27738,7 +27752,7 @@ export interface components {
        */
       section_item_limit_max?: number;
       /**
-       * @description Sections and profile section settings carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as a seasonal row's in-season title, have none; a client shows title whenever the key is absent or unknown). Absent when the home sections service is not configured, and on a server that predates the fields
+       * @description Sections, profile section settings and admin section definitions carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as a seasonal row's in-season title, have none; a client shows title whenever the key is absent or unknown), and profile section settings carry default_title_key and default_title_args the same way for default_title. Absent when the home sections service is not configured, and on a server that predates the fields
        * @example true
        */
       section_title_keys?: boolean;
@@ -32273,6 +32287,20 @@ export interface components {
        * @example Continue Watching
        */
       default_title: string;
+      /**
+       * @description Values of the default_title_key message's placeholders by name; present only with default_title_key, and absent when the message has none
+       * @example {
+       *       "library": "Movies"
+       *     }
+       */
+      default_title_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is default_title, under the same rules as title_key: present only while default_title is the server's own text, and absent when an administrator typed it
+       * @example home.section.continueWatching
+       */
+      default_title_key?: string;
       /** @example false */
       featured: boolean;
       /**

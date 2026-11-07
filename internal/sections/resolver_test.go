@@ -162,7 +162,8 @@ func TestResolveForSettings_KeepsAdminTitleAsDefault(t *testing.T) {
 // A row keeps the admin row's title key while the profile shows the admin
 // title, including an override that saved that same title (older web
 // builds saved it with every override), and loses it under a title of the
-// profile's own. A profile-built row has none.
+// profile's own, while its default title keeps the key. A profile-built row
+// has none.
 func TestResolveKeepsTitleKeyOnlyForTheAdminTitle(t *testing.T) {
 	args := map[string]string{"library": "Films"}
 	admin := []*PageSection{{ID: "1", SectionType: SectionRecentlyAdded, Title: "Recently Added in Films", TitleKey: "home.section.recentlyAddedIn", TitleArgs: args, Config: json.RawMessage(`{}`)}}
@@ -181,6 +182,11 @@ func TestResolveKeepsTitleKeyOnlyForTheAdminTitle(t *testing.T) {
 			if got.TitleKey != tc.wantKey || (tc.wantKey != "" && got.TitleArgs["library"] != "Films") {
 				t.Errorf("%s %s: key %q args %v, want key %q", name, tc.name, got.TitleKey, got.TitleArgs, tc.wantKey)
 			}
+		}
+		// The admin title a renamed row offers to go back to keeps its key.
+		got := ResolveForSettings(admin, []ProfileSectionOverride{tc.override})[0]
+		if got.DefaultTitleKey != "home.section.recentlyAddedIn" || got.DefaultTitleArgs["library"] != "Films" {
+			t.Errorf("ResolveForSettings %s: default key %q args %v", tc.name, got.DefaultTitleKey, got.DefaultTitleArgs)
 		}
 	}
 	custom := Resolve(nil, []ProfileSectionOverride{{ID: "c", IsUserAdded: true, UserSectionType: SectionHiddenGems, UserTitle: "Hidden Gems"}})

@@ -693,6 +693,7 @@
 ./internal/recommendations TestTVLibrarySectionFillsFromTheMainRowTailPostgres
 ./internal/sections TestRecommendationSectionsTakeTheServedRowTitlePostgres
 ./internal/sections TestSectionTitleKeysFollowServerTitlesPostgres
+./internal/apiv2 TestSectionTitleKeysOnRowReadsAndAdminSectionsDB
 
 # Banner, thumb, clear art, disc art and extra backdrops: the migration's Up
 # and Down, slot write-back, backdrop row identity and GC queueing, and the

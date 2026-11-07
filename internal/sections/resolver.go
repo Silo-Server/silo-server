@@ -149,6 +149,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 		// an admin title saved as the raw key still equals Title when the
 		// profile has no title override.
 		rs.DefaultTitle = readableTitle(rs.SectionType, s.Title, rs.Config)
+		rs.DefaultTitleKey, rs.DefaultTitleArgs = s.TitleKey, s.TitleArgs
 		rs.Title = readableTitle(rs.SectionType, rs.Title, rs.Config)
 		result = append(result, rs)
 	}
