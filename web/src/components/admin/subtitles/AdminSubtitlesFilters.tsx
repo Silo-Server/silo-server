@@ -79,10 +79,10 @@ export default function AdminSubtitlesFilters({
           })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Select value={language} onValueChange={onLanguageChange}>
             <SelectTrigger
-              className="min-w-[180px]"
+              className="max-w-80 min-w-[180px]"
               aria-label={t("web.admin.common.subtitles.filters.languageLabel")}
             >
               <SelectValue
@@ -103,7 +103,7 @@ export default function AdminSubtitlesFilters({
 
           <Select value={userId} onValueChange={onUserChange}>
             <SelectTrigger
-              className="min-w-[200px]"
+              className="max-w-80 min-w-[200px]"
               aria-label={t("web.admin.common.subtitles.filters.uploaderLabel")}
             >
               <SelectValue
