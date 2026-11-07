@@ -42,7 +42,7 @@ function clock(t: Translate, minute: string, hour: string): string | null {
   const m = Number(minute);
   if (h > 23 || m > 59) return null;
   return t("web.collections.fields.clockTime", {
-    hour: String(h % 12 === 0 ? 12 : h % 12),
+    hour: h % 12 === 0 ? 12 : h % 12,
     minute: String(m).padStart(2, "0"),
     period: h < 12 ? "am" : "pm",
   });
@@ -50,7 +50,7 @@ function clock(t: Translate, minute: string, hour: string): string | null {
 
 /** "1st", "22nd": a day of the month as an ordinal. */
 function ordinal(t: Translate, day: number): string {
-  return t("web.collections.fields.dayOrdinal", { day: String(day) });
+  return t("web.collections.fields.dayOrdinal", { day: day });
 }
 
 /** A cron schedule in words, for the shapes the step offers; null for anything else. */

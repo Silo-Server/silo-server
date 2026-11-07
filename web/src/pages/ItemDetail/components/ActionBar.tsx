@@ -1386,7 +1386,7 @@ function buildPlayChoiceDescription(
   if (percentComplete != null && percentComplete > 0) {
     return t("web.detail.actions.resumeDescriptionPercent", {
       time: formattedResumeTime,
-      percent: String(percentComplete),
+      percent: percentComplete,
     });
   }
 

@@ -89,13 +89,13 @@ function seasonProgressLabel(season: Season, t: Translate) {
   if (total === 0) return null;
   if (seen === 0 && u.in_progress_count === 0) return t("web.watchTogether.series.unwatched");
   if (seen === total) return t("web.watchTogether.series.allWatched");
-  return t("web.watchTogether.series.watchedOf", { seen: String(seen), total: String(total) });
+  return t("web.watchTogether.series.watchedOf", { seen: seen, total: total });
 }
 
 function seasonName(season: Season, t: Translate) {
   return season.is_specials
     ? t("web.watchTogether.common.specials")
-    : t("web.watchTogether.common.season", { number: String(season.season_number) });
+    : t("web.watchTogether.common.season", { number: season.season_number });
 }
 
 function EpisodeStill({ episode, hidden }: { episode: EpisodeListItem; hidden: boolean }) {
@@ -228,15 +228,15 @@ export function SeriesDrilldown({
   meta.push(
     t("web.watchTogether.series.seasonCount", {
       count: seasonList.length,
-      count_text: String(seasonList.length),
+      count_text: seasonList.length,
     }),
   );
   const currentSeason = seasonList.find((s) => s.season_number === season);
   const pickLabel = (episode: EpisodeListItem) =>
     t("web.watchTogether.series.pickLabel", {
       action: actionLabel,
-      season: String(season ?? episode.season_number),
-      episode: String(episode.episode_number),
+      season: season ?? episode.season_number,
+      episode: episode.episode_number,
     });
   const seasonHeading = currentSeason
     ? seasonName(currentSeason, t)
@@ -343,7 +343,7 @@ export function SeriesDrilldown({
                 ? t("web.watchTogether.series.seasonEpisodes", {
                     season: seasonHeading,
                     count: episodes.length,
-                    count_text: String(episodes.length),
+                    count_text: episodes.length,
                   })
                 : seasonHeading}
             </span>
@@ -398,21 +398,21 @@ export function SeriesDrilldown({
                             <span className="block text-[10px] font-semibold tracking-[0.16em] text-emerald-300/90 uppercase">
                               {t("web.watchTogether.series.nextUp", {
                                 count: nextUp.count,
-                                count_text: String(nextUp.count),
+                                count_text: nextUp.count,
                               })}
                             </span>
                           ) : null}
                           <span className="flex items-baseline gap-2">
                             <span className="text-muted-foreground shrink-0 text-xs font-semibold tabular-nums">
                               {t("web.watchTogether.common.episodeNumber", {
-                                number: String(episode.episode_number),
+                                number: episode.episode_number,
                               })}
                             </span>
                             <span className="truncate text-sm font-medium">{episode.title}</span>
                             <span className="text-muted-foreground shrink-0 text-xs">
                               {episode.runtime
                                 ? t("web.watchTogether.series.runtime", {
-                                    minutes: String(episode.runtime),
+                                    minutes: episode.runtime,
                                   })
                                 : ""}
                             </span>
@@ -466,8 +466,8 @@ export function SeriesDrilldown({
             </p>
             <p className="truncate text-sm font-semibold">
               {t("web.watchTogether.series.pickedEpisode", {
-                season: String(picked.seasonNumber),
-                episode: String(picked.episode.episode_number),
+                season: picked.seasonNumber,
+                episode: picked.episode.episode_number,
                 title: picked.episode.title,
               })}
             </p>
@@ -478,7 +478,7 @@ export function SeriesDrilldown({
                   names: risk.names.reduce((joined, name) =>
                     t("web.watchTogether.common.nameAnd", { first: joined, second: name }),
                   ),
-                  episode: String(risk.episodeNumber),
+                  episode: risk.episodeNumber,
                 })}
               </p>
             ) : replaces ? (

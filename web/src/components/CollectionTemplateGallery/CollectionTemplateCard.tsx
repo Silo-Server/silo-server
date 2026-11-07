@@ -91,7 +91,7 @@ export function CollectionTemplateCard({ template }: { template: CollectionTempl
     template.default_limit
       ? t("web.collections.metaLine.titleCount", {
           count: template.default_limit,
-          shown: String(template.default_limit),
+          shown: template.default_limit,
         })
       : null,
     template.default_sync_schedule ? scheduleDescription(t, template.default_sync_schedule) : null,

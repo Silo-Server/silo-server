@@ -78,13 +78,13 @@ export function validateSchemaValues(
         errors[field.key] = t("web.common.schemaForm.minLength", {
           label,
           count: v.min_length,
-          count_text: String(v.min_length),
+          count_text: v.min_length,
         });
       } else if (v?.max_length && raw.length > v.max_length) {
         errors[field.key] = t("web.common.schemaForm.maxLength", {
           label,
           count: v.max_length,
-          count_text: String(v.max_length),
+          count_text: v.max_length,
         });
       }
     }

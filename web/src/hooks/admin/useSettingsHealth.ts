@@ -283,7 +283,7 @@ export function buildSettingsHealth(input: SettingsHealthInput): SettingsHealthI
         maxConnections
           ? t("web.admin.settings.health.database.maxConnections", {
               count: maxConnections,
-              count_text: String(maxConnections),
+              count_text: maxConnections,
             })
           : null,
         redisConfigured ? REDIS : null,

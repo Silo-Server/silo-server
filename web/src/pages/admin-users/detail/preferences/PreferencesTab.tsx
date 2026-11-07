@@ -136,11 +136,11 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
                     ? t("web.admin.users.detail.preferences.tab.levelOption", {
                         profile: level.profileName,
                         level: level.name,
-                        count: String(level.entries.length),
+                        count: level.entries.length,
                       })
                     : t("web.admin.users.detail.preferences.tab.levelOptionNoProfile", {
                         level: level.name,
-                        count: String(level.entries.length),
+                        count: level.entries.length,
                       })}
                 </SelectItem>
               ))}

@@ -140,7 +140,7 @@ function ListItem({
             </>
           ) : null}
           <MetaDot />
-          {t("web.collections.metaLine.titleCount", { count: titles, shown: String(titles) })}
+          {t("web.collections.metaLine.titleCount", { count: titles, shown: titles })}
           <SyncStatus collection={collection} syncing={syncing} />
         </>
       }
@@ -234,7 +234,7 @@ function CompactItem({
         <p className="text-muted-foreground truncate text-[12.5px]">
           {collectionKindLabel(collectionKindOf(collection.collection_type))}
           <MetaDot />
-          {t("web.collections.metaLine.titleCount", { count: titles, shown: String(titles) })}
+          {t("web.collections.metaLine.titleCount", { count: titles, shown: titles })}
         </p>
       </div>
       <span className="inline-flex items-center gap-2">
@@ -266,9 +266,7 @@ export function CollectionColumnHeader({ count }: { count: number }) {
   const t = useT();
   return (
     <div className="text-muted-foreground flex items-center justify-between px-4 pt-1 pb-2 text-[12.5px]">
-      <span role="status">
-        {t("web.collections.shelves.count", { count, count_text: String(count) })}
-      </span>
+      <span role="status">{t("web.collections.shelves.count", { count, count_text: count })}</span>
       <span aria-hidden className="pe-14 max-lg:pe-16">
         {t("web.collections.admin.onCollectionsTab")}
       </span>

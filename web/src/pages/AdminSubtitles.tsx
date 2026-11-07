@@ -157,7 +157,7 @@ export default function AdminSubtitles() {
           <p className="text-muted-foreground text-sm">
             {t("web.admin.subtitles.page.summary", {
               count: subtitles.length,
-              total: String(total),
+              total: total,
             })}
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -188,7 +188,7 @@ export default function AdminSubtitles() {
               {t("web.admin.subtitles.page.previous")}
             </Button>
             <span className="text-muted-foreground px-1 text-sm">
-              {t("web.admin.subtitles.page.pageNumber", { page: String(page + 1) })}
+              {t("web.admin.subtitles.page.pageNumber", { page: page + 1 })}
             </span>
             <Button
               type="button"

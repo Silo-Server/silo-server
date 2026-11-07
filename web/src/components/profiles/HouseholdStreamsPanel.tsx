@@ -24,16 +24,16 @@ function formatElapsed(t: Translate, startedAt: string): string {
   }
   const minutes = Math.max(0, Math.floor((Date.now() - started) / 60_000));
   if (minutes < 60) {
-    return t("web.profiles.streams.elapsedMinutes", { minutes: String(minutes) });
+    return t("web.profiles.streams.elapsedMinutes", { minutes: minutes });
   }
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
   return remainder > 0
     ? t("web.profiles.streams.elapsedHoursMinutes", {
-        hours: String(hours),
-        minutes: String(remainder),
+        hours: hours,
+        minutes: remainder,
       })
-    : t("web.profiles.streams.elapsedHours", { hours: String(hours) });
+    : t("web.profiles.streams.elapsedHours", { hours: hours });
 }
 
 function streamMeta(t: Translate, session: AdminSession): string {
@@ -120,7 +120,7 @@ export function HouseholdStreamsPanel() {
                 <Radio className="h-3 w-3" />
                 {t("web.profiles.streams.live", {
                   count: sessions.length,
-                  count_text: String(sessions.length),
+                  count_text: sessions.length,
                 })}
               </span>
             ) : null}

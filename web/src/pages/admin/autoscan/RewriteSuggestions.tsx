@@ -155,7 +155,7 @@ export function RewriteSuggestions({
           {preview.unmatched.length > 0 && (
             <CollapsibleList
               title={t("web.admin.autoscan.rewrites.unmatched", {
-                count: String(preview.unmatched.length),
+                count: preview.unmatched.length,
               })}
               items={preview.unmatched}
             />
@@ -163,7 +163,7 @@ export function RewriteSuggestions({
           {preview.ambiguous.length > 0 && (
             <CollapsibleList
               title={t("web.admin.autoscan.rewrites.ambiguous", {
-                count: String(preview.ambiguous.length),
+                count: preview.ambiguous.length,
               })}
               items={preview.ambiguous.map((a) => `${a.root} → ${a.candidates.join(", ")}`)}
             />
@@ -171,7 +171,7 @@ export function RewriteSuggestions({
           {preview.covered.length > 0 && (
             <CollapsibleList
               title={t("web.admin.autoscan.rewrites.covered", {
-                count: String(preview.covered.length),
+                count: preview.covered.length,
               })}
               items={preview.covered}
             />

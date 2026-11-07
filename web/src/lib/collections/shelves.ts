@@ -168,8 +168,8 @@ export function shelfCountLine(shelf: Shelf): string {
   const count = shelf.collections.length;
   const by = sortedBy(shelf.sortMode);
   return by
-    ? t("web.collections.shelves.countSorted", { count, count_text: String(count), by })
-    : t("web.collections.shelves.count", { count, count_text: String(count) });
+    ? t("web.collections.shelves.countSorted", { count, count_text: count, by })
+    : t("web.collections.shelves.count", { count, count_text: count });
 }
 
 /** My collections holds each viewer's own collections, never a server one. */

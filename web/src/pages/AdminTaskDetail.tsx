@@ -44,16 +44,16 @@ function refreshReasonLabel(t: Translate, reason: string): string {
 }
 
 function formatDuration(t: Translate, ms: number): string {
-  if (ms < 1000) return t("web.admin.tasks.duration.milliseconds", { ms: String(ms) });
+  if (ms < 1000) return t("web.admin.tasks.duration.milliseconds", { ms: ms });
   const totalSeconds = Math.floor(ms / 1000);
   if (totalSeconds < 60) {
-    return t("web.admin.tasks.duration.seconds", { seconds: String(totalSeconds) });
+    return t("web.admin.tasks.duration.seconds", { seconds: totalSeconds });
   }
   const minutes = Math.floor(totalSeconds / 60);
   const remainSec = totalSeconds - minutes * 60;
   return t("web.admin.tasks.duration.minutesSeconds", {
-    minutes: String(minutes),
-    seconds: String(remainSec),
+    minutes: minutes,
+    seconds: remainSec,
   });
 }
 
@@ -121,7 +121,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
               <Badge key={entry.reason} variant="secondary">
                 {t("web.admin.tasks.refreshMetrics.reasonCount", {
                   reason: refreshReasonLabel(t, entry.reason),
-                  count: String(entry.count),
+                  count: entry.count,
                 })}
               </Badge>
             ))}
@@ -160,7 +160,7 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
                       {t("web.admin.tasks.detail.recentErrorAttempts", {
                         type: entry.type || t("web.admin.tasks.detail.itemFallback"),
                         count: entry.attempt_count,
-                        count_text: String(entry.attempt_count),
+                        count_text: entry.attempt_count,
                       })}
                     </div>
                   </div>

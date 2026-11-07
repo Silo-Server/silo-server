@@ -173,7 +173,7 @@ function readerFileLabel(file: FileVersion, t: Translate): string {
   const name =
     file.file_name ||
     file.file_path?.split(/[\\/]/).pop() ||
-    t("web.reader.fileOption.unnamed", { id: String(file.file_id) });
+    t("web.reader.fileOption.unnamed", { id: file.file_id });
   return format ? `${format} · ${name}` : name;
 }
 
@@ -889,7 +889,7 @@ export default function EbookReader() {
                   aria-valuemax={100}
                   aria-valuenow={Math.round(effectiveRulerTop)}
                   aria-valuetext={t("web.reader.ruler.valueText", {
-                    percent: String(Math.round(effectiveRulerTop)),
+                    percent: Math.round(effectiveRulerTop),
                   })}
                   title={t("web.reader.ruler.dragHint")}
                   className="focus-visible:ring-ring/50 pointer-events-auto absolute end-2 top-1/2 flex h-11 w-6 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-center rounded-md border border-yellow-500/60 bg-yellow-400/90 text-yellow-950 shadow-sm transition-colors select-none hover:bg-yellow-300 focus-visible:ring-[3px] focus-visible:outline-none"

@@ -23,8 +23,7 @@ export function buildChapterList(files: AudiobookFile[]): ChapterListEntry[] {
         absoluteStart: offset + chapter.start_seconds,
         fileId: file.id,
         label:
-          chapter.title ||
-          t("web.audiobooks.chapter.fallbackTitle", { number: String(chapter.index + 1) }),
+          chapter.title || t("web.audiobooks.chapter.fallbackTitle", { number: chapter.index + 1 }),
       });
     }
     offset += file.duration_seconds ?? 0;
@@ -66,8 +65,7 @@ export function buildPlayerChapters(files: AudiobookFile[]): PlayerChapter[] {
       out.push({
         index: nextIndex++,
         title:
-          chapter.title ||
-          t("web.audiobooks.chapter.fallbackTitle", { number: String(chapter.index + 1) }),
+          chapter.title || t("web.audiobooks.chapter.fallbackTitle", { number: chapter.index + 1 }),
         start_seconds: start,
         end_seconds: end > start ? end : start + 1,
         source: chapter.source || "embedded",

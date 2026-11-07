@@ -96,7 +96,7 @@ export function PosterTile({
               ))}
               {who.length > 2 ? (
                 <span className="pe-1 text-[11px] font-semibold text-white">
-                  {t("web.watchTogether.picker.moreMembers", { count: String(who.length - 2) })}
+                  {t("web.watchTogether.picker.moreMembers", { count: who.length - 2 })}
                 </span>
               ) : null}
             </span>
@@ -141,8 +141,8 @@ export function PosterTile({
 function pickerCaption(entry: PickerEntry, t: Translate) {
   if (entry.next_up) {
     return t("web.watchTogether.common.episodeCode", {
-      season: String(entry.next_up.season_number),
-      episode: String(entry.next_up.episode_number),
+      season: entry.next_up.season_number,
+      episode: entry.next_up.episode_number,
     });
   }
   return undefined;

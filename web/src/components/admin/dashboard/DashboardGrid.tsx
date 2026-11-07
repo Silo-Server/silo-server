@@ -289,8 +289,8 @@ export function DashboardGrid({
         setLiveMessage(
           t("web.admin.dashboard.grid.added", {
             title: t(getDashboardWidget(id).titleKey),
-            position: String(position),
-            total: String(entries.length + 1),
+            position: position,
+            total: entries.length + 1,
           }),
         );
         onAddPanelOpenChange(false);
@@ -443,8 +443,8 @@ export function DashboardGrid({
       setLiveMessage(
         t("web.admin.dashboard.grid.resized", {
           title: session.title,
-          span: String(session.latestSpan),
-          columns: String(GRID_COLUMNS),
+          span: session.latestSpan,
+          columns: GRID_COLUMNS,
           rows: session.latestRows,
         }),
       );
@@ -473,8 +473,8 @@ export function DashboardGrid({
       setLiveMessage(
         t("web.admin.dashboard.grid.moved", {
           title: t(getDashboardWidget(id).titleKey),
-          position: String(nextIndex + 1),
-          total: String(entries.length),
+          position: nextIndex + 1,
+          total: entries.length,
         }),
       );
     },
@@ -504,8 +504,8 @@ export function DashboardGrid({
       setLiveMessage(
         t("web.admin.dashboard.grid.resized", {
           title: t(widget.titleKey),
-          span: String(nextSpan),
-          columns: String(GRID_COLUMNS),
+          span: nextSpan,
+          columns: GRID_COLUMNS,
           rows: nextRows,
         }),
       );
@@ -644,8 +644,8 @@ export function DashboardGrid({
                       className="bg-primary text-primary-foreground absolute -top-3 left-1/2 z-30 -translate-x-1/2 rounded-full px-2 py-0.5 text-[10px] font-bold whitespace-nowrap tabular-nums shadow-md"
                     >
                       {t("web.admin.dashboard.grid.sizeBadge", {
-                        span: String(span),
-                        rows: String(rows),
+                        span: span,
+                        rows: rows,
                       })}
                     </span>
                   )}

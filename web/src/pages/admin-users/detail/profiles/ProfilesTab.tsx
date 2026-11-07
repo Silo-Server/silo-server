@@ -91,8 +91,8 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
           count === undefined
             ? undefined
             : t("web.admin.users.detail.common.profilesAllowed", {
-                count: String(count),
-                max: String(limit),
+                count: count,
+                max: limit,
               })
         }
         actions={

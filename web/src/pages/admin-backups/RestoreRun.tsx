@@ -68,7 +68,7 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
     item.missing_blobs.length > 0
       ? t("web.admin.backups.restore.run.filesMissing", {
           count: item.missing_blobs.length,
-          count_text: String(item.missing_blobs.length),
+          count_text: item.missing_blobs.length,
         })
       : null,
     item.restart_keys.length > 0
@@ -253,8 +253,8 @@ export function RestoreRun({
       progress && progress.total > 0
         ? t("web.admin.backups.restore.run.steps", {
             total: progress.total,
-            current_text: String(progress.current),
-            total_text: String(progress.total),
+            current_text: progress.current,
+            total_text: progress.total,
           })
         : t("web.admin.backups.restore.run.backsUpFirst");
     return (

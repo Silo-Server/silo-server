@@ -102,7 +102,7 @@ export function neverRestoredSettings(entries: readonly string[]): string[] {
 
 /** A message whose plural selects on `count`, which it prints as `count_text`. */
 function counted(key: MessageKey, count: number, values: TextValues = {}): string {
-  return t(key, { ...values, count, count_text: String(count) });
+  return t(key, { ...values, count, count_text: count });
 }
 
 /** "a", "a and b", "a, b, and c" in English: the interface language's list. */

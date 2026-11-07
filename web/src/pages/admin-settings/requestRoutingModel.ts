@@ -1088,7 +1088,7 @@ function traceMissSentence(
     case "year_to":
       return miss(
         facts.year
-          ? t("web.admin.settings.requests.model.trace.yearIs", { year: String(facts.year) })
+          ? t("web.admin.settings.requests.model.trace.yearIs", { year: facts.year })
           : t("web.admin.settings.requests.model.trace.noYear"),
         yearRangeLabel(c.year_from, c.year_to),
       );

@@ -5296,27 +5296,25 @@ export function VideoPlayer({
                   {year
                     ? t("web.player.titleWithYear", {
                         title: seriesContext.seriesTitle ?? title,
-                        year: String(year),
+                        year: year,
                       })
                     : (seriesContext.seriesTitle ?? title)}
                 </span>
                 <span>
                   {title
                     ? t("web.player.episode.codeWithTitle", {
-                        season: String(seriesContext.currentSeason),
-                        episode: String(seriesContext.currentEpisode),
+                        season: seriesContext.currentSeason,
+                        episode: seriesContext.currentEpisode,
                         title,
                       })
                     : t("web.player.episode.code", {
-                        season: String(seriesContext.currentSeason),
-                        episode: String(seriesContext.currentEpisode),
+                        season: seriesContext.currentSeason,
+                        episode: seriesContext.currentEpisode,
                       })}
                 </span>
               </>
             ) : (
-              <span>
-                {year ? t("web.player.titleWithYear", { title, year: String(year) }) : title}
-              </span>
+              <span>{year ? t("web.player.titleWithYear", { title, year: year }) : title}</span>
             )}
           </div>
         </div>

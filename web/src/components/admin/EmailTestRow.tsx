@@ -79,7 +79,7 @@ export function TestEmailRow() {
       {result && (
         <p className={`text-xs ${result.ok ? "text-emerald-500" : "text-amber-500"}`}>
           {result.ok
-            ? t("web.admin.common.emailTest.delivered", { duration_ms: String(result.duration_ms) })
+            ? t("web.admin.common.emailTest.delivered", { duration_ms: result.duration_ms })
             : result.message || t("web.admin.common.emailTest.failed")}
         </p>
       )}

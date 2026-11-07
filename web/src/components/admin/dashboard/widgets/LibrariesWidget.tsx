@@ -102,7 +102,7 @@ export function LibrariesWidget() {
                     <span>
                       {t("web.admin.dashboard.widgets.libraries.typeAndPaths", {
                         count: lib.paths.length,
-                        count_text: String(lib.paths.length),
+                        count_text: lib.paths.length,
                         type: libraryTypeLabel(lib.type),
                       })}
                     </span>

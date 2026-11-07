@@ -201,7 +201,7 @@ export function StarterPacksDialog({
   else if (newCount > 0)
     addLabel = t("web.collections.starterPacks.addCollections", {
       count: newCount,
-      count_text: String(newCount),
+      count_text: newCount,
     });
   else if (featured) addLabel = t("web.collections.starterPacks.setHeroBanners");
   else if (dryRun.isSuccess) addLabel = t("web.collections.starterPacks.nothingNewToAdd");
@@ -216,8 +216,8 @@ export function StarterPacksDialog({
       {progress && progress.total > 0
         ? t("web.collections.starterPacks.addingPackProgress", {
             pack: run?.pack.title ?? pack?.title ?? "",
-            current: String(progress.current),
-            total: String(progress.total),
+            current: progress.current,
+            total: progress.total,
           })
         : t("web.collections.starterPacks.addingPack", {
             pack: run?.pack.title ?? pack?.title ?? "",
@@ -442,7 +442,7 @@ function PackRail({
             <span className="text-xs tabular-nums opacity-80">
               {t("web.collections.starterPacks.tabCount", {
                 count: pack.templates.length,
-                count_text: String(pack.templates.length),
+                count_text: pack.templates.length,
                 sr: (chunks) => <span className="sr-only">{chunks}</span>,
               })}
             </span>
@@ -485,12 +485,12 @@ function PackSelect({
               ? t("web.collections.starterPacks.packOptionAdded", {
                   pack: pack.title,
                   count: pack.templates.length,
-                  count_text: String(pack.templates.length),
+                  count_text: pack.templates.length,
                 })
               : t("web.collections.starterPacks.packOption", {
                   pack: pack.title,
                   count: pack.templates.length,
-                  count_text: String(pack.templates.length),
+                  count_text: pack.templates.length,
                 })}
           </SelectItem>
         ))}
@@ -677,14 +677,14 @@ function WhatWillHappen({
                       <span className="inline-flex flex-wrap items-center gap-1.5">
                         <span className="whitespace-nowrap">
                           {t("web.collections.starterPacks.newCount", {
-                            count: String(row.added.length),
+                            count: row.added.length,
                             b: (chunks) => <b className="font-semibold">{chunks}</b>,
                           })}
                         </span>
                         {pinned > 0 ? (
                           <Tag pin>
                             {t("web.collections.starterPacks.pinnedFirstCount", {
-                              count: String(pinned),
+                              count: pinned,
                             })}
                           </Tag>
                         ) : null}
@@ -730,7 +730,7 @@ function WhatWillHappen({
         </div>
         {newCount > SYNC_LOAD_THRESHOLD ? (
           <p className="text-muted-foreground text-[13px]">
-            {t("web.collections.starterPacks.syncLoad", { count: String(newCount) })}
+            {t("web.collections.starterPacks.syncLoad", { count: newCount })}
           </p>
         ) : null}
       </>
@@ -994,7 +994,7 @@ function ApplyResult({
         lines.push(
           t("web.collections.starterPacks.addedToLibrary", {
             count: row.added.length,
-            count_text: String(row.added.length),
+            count_text: row.added.length,
             library: row.libraryName,
           }),
         );

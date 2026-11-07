@@ -96,8 +96,7 @@ function formatTimestamp(value: string | undefined): string {
 }
 
 function formatDuration(t: Translate, ms: number): string {
-  if (ms < 1000)
-    return t("web.admin.autoscan.activity.duration.milliseconds", { value: String(ms) });
+  if (ms < 1000) return t("web.admin.autoscan.activity.duration.milliseconds", { value: ms });
   if (ms < 60_000)
     return t("web.admin.autoscan.activity.duration.seconds", {
       value: formatDecimal(Math.round(ms / 100) / 10, 1, 0),
@@ -105,8 +104,8 @@ function formatDuration(t: Translate, ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return t("web.admin.autoscan.activity.duration.minutesSeconds", {
-    minutes: String(minutes),
-    seconds: String(seconds),
+    minutes: minutes,
+    seconds: seconds,
   });
 }
 
@@ -203,7 +202,7 @@ function scanSourceName(t: Translate, scan: AutoscanScan, lookups: SourceLabelLo
 function libraryName(t: Translate, librariesByID: Map<number, Library>, libraryID: number): string {
   return (
     librariesByID.get(libraryID)?.name ??
-    t("web.admin.autoscan.activity.libraryFallback", { id: String(libraryID) })
+    t("web.admin.autoscan.activity.libraryFallback", { id: libraryID })
   );
 }
 

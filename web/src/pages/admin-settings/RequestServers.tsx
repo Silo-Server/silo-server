@@ -118,13 +118,13 @@ function connectedMessage(t: Translate, options: RequestIntegrationOptions): str
     profiles !== undefined
       ? t("web.admin.settings.requests.serverEditor.qualityProfiles", {
           count: profiles,
-          count_text: String(profiles),
+          count_text: profiles,
         })
       : null,
     folders !== undefined
       ? t("web.admin.settings.requests.serverEditor.rootFolders", {
           count: folders,
-          count_text: String(folders),
+          count_text: folders,
         })
       : null,
   ].filter(Boolean);

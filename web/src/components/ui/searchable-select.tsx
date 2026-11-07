@@ -277,7 +277,7 @@ export function SearchableMultiSelect({
       ? (placeholder ?? t("web.ui.select.placeholder"))
       : value.length <= 3
         ? value.map(labelOf).join(", ")
-        : t("web.ui.selectedCount", { count: value.length, shown: String(value.length) });
+        : t("web.ui.selectedCount", { count: value.length, shown: value.length });
 
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen} modal={false}>

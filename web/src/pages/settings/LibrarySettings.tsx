@@ -676,8 +676,8 @@ export default function LibrarySettings() {
         <p className="text-muted-foreground text-sm leading-relaxed">
           {t("web.settings.library.visibleCount", {
             count: libraries.length,
-            count_text: String(libraries.length),
-            visible: String(visibleCount),
+            count_text: libraries.length,
+            visible: visibleCount,
             strong: (chunks) => <span className="text-foreground font-medium">{chunks}</span>,
           })}
         </p>

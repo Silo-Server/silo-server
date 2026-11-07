@@ -475,7 +475,7 @@ function syncAvailableIn(seconds: number) {
   return remainingMinutes > 0
     ? t("web.common.toast.watchProviders.syncAvailableHoursMinutes", {
         ...values,
-        minutes: String(remainingMinutes),
+        minutes: remainingMinutes,
       })
     : t("web.common.toast.watchProviders.syncAvailableHours", values);
 }

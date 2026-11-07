@@ -42,8 +42,7 @@ interface TrackDescriptor {
 }
 
 function describeTrack(t: Translate, track: PlayerAudioTrack, index: number): TrackDescriptor {
-  const title =
-    audioTitle(track) || t("web.player.audioMenu.trackFallback", { number: String(index + 1) });
+  const title = audioTitle(track) || t("web.player.audioMenu.trackFallback", { number: index + 1 });
   const language = formatLanguageName(track.language ?? "");
   const metaParts = [
     language && language.toLowerCase() !== title.toLowerCase() ? language : "",

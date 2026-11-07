@@ -142,7 +142,7 @@ function SkipIntervalRow({
             }`}
             onClick={() => onChange(seconds)}
           >
-            {t("web.audiobooks.player.settingsSeconds", { seconds: String(seconds) })}
+            {t("web.audiobooks.player.settingsSeconds", { seconds: seconds })}
           </button>
         ))}
       </div>

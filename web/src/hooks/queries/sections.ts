@@ -305,14 +305,14 @@ export function useDeleteSections() {
     onSuccess: async ({ requested, deleted, failed, firstError }) => {
       if (failed === 0) {
         toast.success(
-          t("web.admin.common.sections.deleted", { count: deleted, count_text: String(deleted) }),
+          t("web.admin.common.sections.deleted", { count: deleted, count_text: deleted }),
         );
       } else if (deleted > 0) {
         toast.warning(
           t("web.admin.common.sections.partiallyDeleted", {
             count: requested,
-            count_text: String(requested),
-            deleted: String(deleted),
+            count_text: requested,
+            deleted: deleted,
           }),
           {
             description: firstError,
@@ -322,7 +322,7 @@ export function useDeleteSections() {
         toast.error(
           t("web.admin.common.sections.deleteFailed", {
             count: failed,
-            count_text: String(failed),
+            count_text: failed,
           }),
           {
             description: firstError,

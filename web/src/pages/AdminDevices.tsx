@@ -174,24 +174,24 @@ function detectAnomalies(
         ratio != null && ratio >= 1.2
           ? t("web.admin.devices.anomaly.summaryRatio", {
               count,
-              count_text: String(count),
+              count_text: count,
               ratio: formatDecimal(ratio, 1, 0),
               platform: platformText,
             })
-          : t("web.admin.devices.anomaly.summaryCount", { count, count_text: String(count) }),
+          : t("web.admin.devices.anomaly.summaryCount", { count, count_text: count }),
       );
       detailParts.push(
         median > 0
           ? t("web.admin.devices.anomaly.detailMedian", {
               count,
-              count_text: String(count),
+              count_text: count,
               ratio: formatDecimal(ratio ?? 0, 1, 0),
               platform: platformText,
               median: formatDecimal(median, 2, 0),
             })
           : t("web.admin.devices.anomaly.detailTypical", {
               count,
-              count_text: String(count),
+              count_text: count,
               platform: platformText,
             }),
       );
@@ -199,13 +199,11 @@ function detectAnomalies(
 
     if (stale) {
       const staleDaysFloor = Math.floor(days ?? 0);
-      summaryParts.push(
-        t("web.admin.devices.anomaly.summaryStale", { days: String(staleDaysFloor) }),
-      );
+      summaryParts.push(t("web.admin.devices.anomaly.summaryStale", { days: staleDaysFloor }));
       detailParts.push(
         t("web.admin.devices.anomaly.detailStale", {
           days: staleDaysFloor,
-          days_text: String(staleDaysFloor),
+          days_text: staleDaysFloor,
         }),
       );
     }
@@ -486,13 +484,13 @@ export default function AdminDevices() {
               {filteredDevices.length !== devices.length
                 ? t("web.admin.devices.list.countOfTotal", {
                     count: filteredDevices.length,
-                    count_text: String(filteredDevices.length),
-                    total: String(devices.length),
+                    count_text: filteredDevices.length,
+                    total: devices.length,
                     muted: (chunks) => <span className="text-muted-foreground/60">{chunks}</span>,
                   })
                 : t("web.admin.devices.list.count", {
                     count: filteredDevices.length,
-                    count_text: String(filteredDevices.length),
+                    count_text: filteredDevices.length,
                   })}
             </span>
             {hasAnyFilter && (
@@ -1143,9 +1141,7 @@ function buildGroups(
       return {
         key: `u:${d.user_id}`,
         label:
-          d.username ||
-          d.email ||
-          t("web.admin.devices.group.userFallback", { id: String(d.user_id) }),
+          d.username || d.email || t("web.admin.devices.group.userFallback", { id: d.user_id }),
         href: `/admin/users/${d.user_id}`,
       };
     }
@@ -1274,9 +1270,9 @@ function DeviceGroup({
           )}
           <span className="text-muted-foreground/70 font-mono text-[10.5px] tabular-nums">
             {t("web.admin.devices.group.meta", {
-              devices: String(group.meta.devices),
-              profiles: String(group.meta.profiles),
-              overrides: String(group.meta.overrides),
+              devices: group.meta.devices,
+              profiles: group.meta.profiles,
+              overrides: group.meta.overrides,
             })}
           </span>
         </div>
@@ -1795,7 +1791,7 @@ function DeviceDetailPanel({
           value={String(totalOverrides)}
           sub={t("web.admin.devices.readout.acrossProfiles", {
             count: profileTabs.length,
-            count_text: String(profileTabs.length),
+            count_text: profileTabs.length,
           })}
           tone="primary"
         />
@@ -1810,7 +1806,7 @@ function DeviceDetailPanel({
           sub={
             profileTabs.length > 2
               ? t("web.admin.devices.readout.moreProfiles", {
-                  count: String(profileTabs.length - 2),
+                  count: profileTabs.length - 2,
                 })
               : profileTabs.map((p) => `${p.settings.length}`).join(" / ")
           }

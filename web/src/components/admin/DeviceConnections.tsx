@@ -47,10 +47,10 @@ function planSummaryText(t: Translate, summary: NonNullable<DeviceConnection["pl
   const action = summary.diagnostics.buffering_action ?? "none";
   const actionKey = BUFFERING_ACTION_LABELS[action];
   return [
-    t("web.admin.common.deviceConnections.stalls", { count: stalls, count_text: String(stalls) }),
+    t("web.admin.common.deviceConnections.stalls", { count: stalls, count_text: stalls }),
     t("web.admin.common.deviceConnections.bufferingSeconds", {
       count: seconds,
-      count_text: String(seconds),
+      count_text: seconds,
     }),
     actionKey ? t(actionKey) : action,
     formatRelative(summary.reported_at),

@@ -636,12 +636,12 @@ function MeterKey({ ceiling }: { ceiling: number }) {
     <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
       <span className="flex items-center gap-1.5">
         <span className="bg-warning inline-block h-2.5 w-0.5 rounded-full" aria-hidden="true" />
-        {t("web.admin.downloads.storage.meter.ceiling", { ceiling: String(ceiling) })}
+        {t("web.admin.downloads.storage.meter.ceiling", { ceiling: ceiling })}
       </span>
       <span className="flex items-center gap-1.5">
         <span className="bg-destructive inline-block h-2.5 w-0.5 rounded-full" aria-hidden="true" />
         {t("web.admin.downloads.storage.meter.scratch", {
-          percent: String(SCRATCH_ADMISSION_PERCENT),
+          percent: SCRATCH_ADMISSION_PERCENT,
         })}
       </span>
     </div>

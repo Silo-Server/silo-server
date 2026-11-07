@@ -124,7 +124,7 @@ function testedLabel(t: Translate, test: AITestState): string {
   return t("web.admin.settings.ai.test.testedMinutes", {
     ...values,
     minutes,
-    minutes_text: String(minutes),
+    minutes_text: minutes,
   });
 }
 

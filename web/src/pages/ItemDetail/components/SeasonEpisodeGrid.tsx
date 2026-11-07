@@ -133,7 +133,7 @@ function SeasonEpisodeCard({
     (episode.user_data?.position_seconds ?? 0) > 0 &&
     (episode.user_data?.duration_seconds ?? 0) > 0;
   const episodeTitle =
-    episode.title || t("web.detail.episodes.numbered", { episode: String(episode.episode_number) });
+    episode.title || t("web.detail.episodes.numbered", { episode: episode.episode_number });
   const unwatched = isEpisodeUnwatched(episode.user_data);
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);

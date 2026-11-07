@@ -76,11 +76,11 @@ export function getSeasonDisplayTitle(season: Season): string {
     return season.title;
   }
 
-  return t("web.detail.seasons.numbered", { season: String(season.season_number) });
+  return t("web.detail.seasons.numbered", { season: season.season_number });
 }
 
 export function formatEpisodeCount(count: number): string {
-  return t("web.detail.seasons.episodeCount", { count, count_text: String(count) });
+  return t("web.detail.seasons.episodeCount", { count, count_text: count });
 }
 
 export function formatSeasonMeta(season: Season): string {
@@ -91,8 +91,8 @@ export function formatSeasonMeta(season: Season): string {
 export function formatSeasonProgress(season: Season, watchedCount: number): string {
   return t("web.detail.seasons.watchedProgress", {
     count: season.episode_count,
-    watched: String(watchedCount),
-    count_text: String(season.episode_count),
+    watched: watchedCount,
+    count_text: season.episode_count,
   });
 }
 

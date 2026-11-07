@@ -216,7 +216,7 @@ export default function AdminDiagnostics() {
                 {status.data
                   ? t("web.admin.diagnostics.page.retentionDays", {
                       count: status.data.retention_days,
-                      count_text: String(status.data.retention_days),
+                      count_text: status.data.retention_days,
                     })
                   : t("web.admin.diagnostics.page.loading")}
               </div>
@@ -408,11 +408,11 @@ export default function AdminDiagnostics() {
             ? t("web.admin.diagnostics.pagination.refreshing")
             : reports.data?.next_cursor
               ? t("web.admin.diagnostics.pagination.pageWithMore", {
-                  page: String(activeCursorStack.length + 1),
+                  page: activeCursorStack.length + 1,
                 })
               : reports.data?.reports.length
                 ? t("web.admin.diagnostics.pagination.page", {
-                    page: String(activeCursorStack.length + 1),
+                    page: activeCursorStack.length + 1,
                   })
                 : ""}
         </div>

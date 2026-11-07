@@ -23,12 +23,12 @@ function formatRuntime(seconds: number | undefined | null): string | null {
   if (!isPositiveFinite(seconds)) return null;
   const minutes = Math.round(seconds / 60);
   if (minutes <= 0) return null;
-  if (minutes < 60) return t("web.home.hero.runtimeMinutes", { minutes: String(minutes) });
+  if (minutes < 60) return t("web.home.hero.runtimeMinutes", { minutes: minutes });
   const hours = Math.floor(minutes / 60);
   const remaining = minutes % 60;
   return remaining === 0
-    ? t("web.home.hero.runtimeHours", { hours: String(hours) })
-    : t("web.home.hero.runtimeHoursMinutes", { hours: String(hours), minutes: String(remaining) });
+    ? t("web.home.hero.runtimeHours", { hours: hours })
+    : t("web.home.hero.runtimeHoursMinutes", { hours: hours, minutes: remaining });
 }
 
 export interface HeroMetadataEntry {
@@ -52,8 +52,8 @@ export function formatHeroMetadata(item: SectionItem): HeroMetadataEntry[] {
       entries.push({
         key: "episode-identity",
         label: t("web.home.hero.episodeIdentity", {
-          season: String(item.season_number),
-          episode: String(item.episode_number),
+          season: item.season_number,
+          episode: item.episode_number,
         }),
       });
     }

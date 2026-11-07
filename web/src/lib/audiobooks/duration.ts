@@ -18,14 +18,14 @@ export function formatHoursMinutes(totalSeconds: number): string {
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   if (hours <= 0) {
-    return t("web.audiobooks.duration.minutes", { minutes: String(minutes) });
+    return t("web.audiobooks.duration.minutes", { minutes: minutes });
   }
   if (minutes === 0) {
-    return t("web.audiobooks.duration.hours", { hours: String(hours) });
+    return t("web.audiobooks.duration.hours", { hours: hours });
   }
   return t("web.audiobooks.duration.hoursMinutes", {
-    hours: String(hours),
-    minutes: String(minutes),
+    hours: hours,
+    minutes: minutes,
   });
 }
 

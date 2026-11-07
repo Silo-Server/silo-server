@@ -39,7 +39,7 @@ export function CollectionMetaLine({
     typeLabel,
     itemCount === undefined
       ? undefined
-      : t("web.collections.metaLine.titleCount", { count: itemCount, shown: String(itemCount) }),
+      : t("web.collections.metaLine.titleCount", { count: itemCount, shown: itemCount }),
   ]
     .filter(Boolean)
     .join(" · ");

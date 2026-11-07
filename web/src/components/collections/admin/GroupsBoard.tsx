@@ -413,8 +413,8 @@ export function GroupsBoard({
       const shown = shownCollections(shelf);
       const index = shown.findIndex((entry) => entry.id === id);
       return t("web.collections.dnd.positionOnShelf", {
-        position: String(index + 1),
-        total: String(shown.length),
+        position: index + 1,
+        total: shown.length,
         shelf: shelf.name,
       });
     };
@@ -424,8 +424,8 @@ export function GroupsBoard({
         const at = collectionAt(id);
         return at
           ? t("web.collections.dnd.positionOnShelf", {
-              position: String(at.index + 1),
-              total: String(at.count),
+              position: at.index + 1,
+              total: at.count,
               shelf: at.shelf.name,
             })
           : "";
@@ -438,8 +438,8 @@ export function GroupsBoard({
       }
       const index = shelves.findIndex((entry) => entry.id === bare(id));
       return t("web.collections.dnd.position", {
-        position: String(index + 1),
-        total: String(shelves.length),
+        position: index + 1,
+        total: shelves.length,
       });
     };
     const refused = (active: UniqueIdentifier, over: UniqueIdentifier) => {

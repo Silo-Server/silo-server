@@ -48,12 +48,12 @@ export function RecentActivityWidget() {
                   })
                 : s.media_title ||
                   t("web.admin.dashboard.widgets.recentActivity.fileFallback", {
-                    id: String(s.media_file_id),
+                    id: s.media_file_id,
                   });
               const username =
                 s.username ||
                 t("web.admin.dashboard.widgets.recentActivity.userFallback", {
-                  id: String(s.user_id),
+                  id: s.user_id,
                 });
               const profileDisplay = s.profile_name || s.profile_id || "";
               const clientLabel = getSessionClientLabel(s);

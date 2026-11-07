@@ -30,8 +30,7 @@ function buildRows(t: Translate, files: AudiobookFile[]): Row[] {
           chapter: ch,
           absoluteStart: offset + ch.start_seconds,
           durationSeconds: Math.max(0, (ch.end_seconds ?? ch.start_seconds) - ch.start_seconds),
-          label:
-            ch.title || t("web.audiobooks.chapter.fallbackTitle", { number: String(ch.index + 1) }),
+          label: ch.title || t("web.audiobooks.chapter.fallbackTitle", { number: ch.index + 1 }),
           positionIndex: positionIndex++,
         });
       }
@@ -46,7 +45,7 @@ function formatChapterDuration(t: Translate, s: number): string {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
   return t("web.audiobooks.chapters.duration", {
-    minutes: String(m),
+    minutes: m,
     seconds: String(sec).padStart(2, "0"),
   });
 }
@@ -97,7 +96,7 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
           />
           {t("web.audiobooks.chapters.heading")}
           <span className="text-muted-foreground text-sm font-normal">
-            {t("web.audiobooks.chapters.count", { count: String(rows.length) })}
+            {t("web.audiobooks.chapters.count", { count: rows.length })}
           </span>
         </button>
         {expanded && (

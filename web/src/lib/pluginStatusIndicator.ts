@@ -34,7 +34,7 @@ export function pluginStatusIndicator(installation: PluginInstallation): {
       return {
         dotClass: "bg-warning",
         label: t("web.admin.plugins.statusIndicator.restarting", {
-          restart_count: String(runtime.restart_count),
+          restart_count: runtime.restart_count,
         }),
         title: runtime.last_error,
       };

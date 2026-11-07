@@ -93,7 +93,7 @@ export default function WeekNavigator({
               aria-current={today ? "date" : undefined}
               aria-label={t(
                 hasEvents ? "web.calendar.dayLabelWithEvents" : "web.calendar.dayLabel",
-                { weekday: label, day: String(day) },
+                { weekday: label, day: day },
               )}
               onClick={() => onSelectDay(dateStr)}
               className={`group/day focus-visible:ring-primary/50 flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 py-2 transition-all duration-150 outline-none focus-visible:ring-2 active:scale-[0.97] sm:min-h-[3.5rem] sm:gap-1 sm:px-2 sm:py-2.5 ${variant}`}

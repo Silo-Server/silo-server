@@ -870,7 +870,7 @@ export default function FilterRuleEditor({
               allowPersonalizedFilters={allowPersonalizedFilters}
               onChange={(updates) => updateRule(groupIdx, ruleIdx, updates)}
               onRemove={() => removeRule(groupIdx, ruleIdx)}
-              label={t("web.catalog.rules.ruleNumber", { number: String(ruleIdx + 1) })}
+              label={t("web.catalog.rules.ruleNumber", { number: ruleIdx + 1 })}
               valueScope={valueScope}
             />
           ))}

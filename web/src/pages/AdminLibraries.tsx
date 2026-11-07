@@ -530,7 +530,7 @@ function LibrariesPage() {
                                 <Badge variant="secondary">
                                   {t("web.admin.libraries.scans.running", {
                                     count: runningLibraryScans,
-                                    count_text: String(runningLibraryScans),
+                                    count_text: runningLibraryScans,
                                   })}
                                 </Badge>
                               ) : null}
@@ -538,7 +538,7 @@ function LibrariesPage() {
                                 <Badge variant="secondary">
                                   {t("web.admin.libraries.scans.queued", {
                                     count: queuedLibraryScans,
-                                    count_text: String(queuedLibraryScans),
+                                    count_text: queuedLibraryScans,
                                   })}
                                 </Badge>
                               ) : null}
@@ -902,7 +902,7 @@ function ScanQueuePopover({
           <span className="tabular-nums">
             {t("web.admin.libraries.scanQueue.trigger", {
               count: totalScans,
-              count_text: String(totalScans),
+              count_text: totalScans,
             })}
           </span>
         </Button>
@@ -930,7 +930,7 @@ function ScanQueuePopover({
                 <span className="tabular-nums">
                   {t("web.admin.libraries.scans.running", {
                     count: totalRunning,
-                    count_text: String(totalRunning),
+                    count_text: totalRunning,
                   })}
                 </span>
               </>
@@ -944,7 +944,7 @@ function ScanQueuePopover({
                 <span className="tabular-nums">
                   {t("web.admin.libraries.scans.queued", {
                     count: totalQueued,
-                    count_text: String(totalQueued),
+                    count_text: totalQueued,
                   })}
                 </span>
               </>
@@ -1102,7 +1102,7 @@ function ScanQueueGroup({
                 hiddenCount <= group.queuedCount
                   ? "web.admin.libraries.scanQueue.moreQueued"
                   : "web.admin.libraries.scanQueue.more",
-                { count: hiddenCount, count_text: String(hiddenCount) },
+                { count: hiddenCount, count_text: hiddenCount },
               )}{" "}
               <ChevronDown className="h-3 w-3" />
             </>
@@ -1117,9 +1117,7 @@ function ScanQueueGroup({
 }
 
 function getLibraryScanGroupName(t: Translate, library: Library | null, libraryID: number) {
-  return (
-    library?.name ?? t("web.admin.libraries.scanQueue.libraryFallback", { id: String(libraryID) })
-  );
+  return library?.name ?? t("web.admin.libraries.scanQueue.libraryFallback", { id: libraryID });
 }
 
 function SortableLibraryRow({ id, children }: { id: number; children: React.ReactNode }) {
@@ -1246,14 +1244,14 @@ function LibraryScanTasks({
           {runningCount > 0
             ? t("web.admin.libraries.scans.running", {
                 count: runningCount,
-                count_text: String(runningCount),
+                count_text: runningCount,
               })
             : null}
           {runningCount > 0 && queuedCount > 0 ? SPACED_SEPARATOR : null}
           {queuedCount > 0
             ? t("web.admin.libraries.scans.queued", {
                 count: queuedCount,
-                count_text: String(queuedCount),
+                count_text: queuedCount,
               })
             : null}
         </span>
@@ -1271,7 +1269,7 @@ function LibraryScanTasks({
               <>
                 {t("web.admin.libraries.activeWork.showAll", {
                   count: scans.length,
-                  count_text: String(scans.length),
+                  count_text: scans.length,
                 })}{" "}
                 <ChevronDown className="h-3 w-3" />
               </>
@@ -1443,9 +1441,9 @@ function PaginationBar({
     <div className="border-border/40 flex items-center justify-between border-t px-1 pt-3">
       <span className="text-muted-foreground text-xs tracking-tight tabular-nums">
         {t("web.admin.libraries.pagination.range", {
-          start: String(rangeStart),
-          end: String(rangeEnd),
-          total: String(total),
+          start: rangeStart,
+          end: rangeEnd,
+          total: total,
         })}
       </span>
       <div className="flex items-center gap-0.5">
@@ -1754,8 +1752,8 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           <span className="text-muted-foreground tabular-nums">
             {t("web.admin.libraries.ambiguousRoots.showing", {
               count: totalRoots,
-              shown: String(roots.length),
-              count_text: String(totalRoots),
+              shown: roots.length,
+              count_text: totalRoots,
             })}
           </span>
           <Button
@@ -1802,7 +1800,7 @@ function buildRootEvidenceSummary(t: Translate, root: LibraryRoot): string {
     parts.push(
       t("web.admin.libraries.ambiguousRoots.evidence.seasonFiles", {
         count: evidence.season_structure_files,
-        count_text: String(evidence.season_structure_files),
+        count_text: evidence.season_structure_files,
       }),
     );
   }
@@ -1810,7 +1808,7 @@ function buildRootEvidenceSummary(t: Translate, root: LibraryRoot): string {
     parts.push(
       t("web.admin.libraries.ambiguousRoots.evidence.movieFiles", {
         count: evidence.movie_evidence_files,
-        count_text: String(evidence.movie_evidence_files),
+        count_text: evidence.movie_evidence_files,
       }),
     );
   }
@@ -1818,7 +1816,7 @@ function buildRootEvidenceSummary(t: Translate, root: LibraryRoot): string {
     parts.push(
       t("web.admin.libraries.ambiguousRoots.evidence.wrapperCollapses", {
         count: evidence.wrapper_collapses,
-        count_text: String(evidence.wrapper_collapses),
+        count_text: evidence.wrapper_collapses,
       }),
     );
   }
@@ -1826,7 +1824,7 @@ function buildRootEvidenceSummary(t: Translate, root: LibraryRoot): string {
     parts.push(
       t("web.admin.libraries.ambiguousRoots.evidence.ancestorPromotions", {
         count: evidence.ancestor_promotions,
-        count_text: String(evidence.ancestor_promotions),
+        count_text: evidence.ancestor_promotions,
       }),
     );
   }
@@ -2349,7 +2347,7 @@ function UnmatchedItemsSection() {
                     </Link>
                     {u.year ? (
                       <span className="text-muted-foreground ms-1 text-xs">
-                        {t("web.admin.libraries.unmatched.year", { year: String(u.year) })}
+                        {t("web.admin.libraries.unmatched.year", { year: u.year })}
                       </span>
                     ) : null}
                   </TableCell>
@@ -2545,7 +2543,7 @@ function StaleIDsSection() {
           <span className="text-muted-foreground tabular-nums">
             {t("web.admin.libraries.staleIds.showing", {
               count: staleIDs.length,
-              count_text: String(staleIDs.length),
+              count_text: staleIDs.length,
             })}
           </span>
           <Button

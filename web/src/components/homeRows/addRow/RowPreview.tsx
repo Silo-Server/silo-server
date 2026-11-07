@@ -83,8 +83,8 @@ export function RowPreview({
             {t("web.home.addRow.preview.count", {
               refreshing: state.refreshing ? "yes" : "no",
               count: state.totalCount,
-              total: String(state.totalCount),
-              shown: String(Math.min(state.totalCount, countUpTo)),
+              total: state.totalCount,
+              shown: Math.min(state.totalCount, countUpTo),
               hidden: (chunks) => <span className="sr-only">{chunks}</span>,
               b: (chunks) => <b className="text-foreground font-semibold">{chunks}</b>,
               dot: (chunks) => (

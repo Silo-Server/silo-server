@@ -583,7 +583,7 @@ export default function CollectionGuidedRulesEditor({
               <SelectItem value="__custom__">{t("web.collections.guidedRules.custom")}</SelectItem>
               {DECADE_OPTIONS.map((year) => (
                 <SelectItem key={year} value={String(year)}>
-                  {t("web.collections.guidedRules.decadeOption", { decade: String(year) })}
+                  {t("web.collections.guidedRules.decadeOption", { decade: year })}
                 </SelectItem>
               ))}
             </SelectContent>

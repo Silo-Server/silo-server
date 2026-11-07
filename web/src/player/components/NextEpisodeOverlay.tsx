@@ -25,8 +25,8 @@ export function NextEpisodeOverlay({
       </div>
       <div className="text-sm font-medium">
         {t("web.player.nextEpisode.episodeLine", {
-          season: String(episode.seasonNumber),
-          episode: String(episode.episodeNumber),
+          season: episode.seasonNumber,
+          episode: episode.episodeNumber,
           title: episode.title,
         })}
       </div>

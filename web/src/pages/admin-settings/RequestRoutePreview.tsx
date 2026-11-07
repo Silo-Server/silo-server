@@ -67,7 +67,7 @@ function deciderLabel(
   const index = rules.findIndex((rule) => rule.route_id === routeId);
   if (index !== -1) {
     return t("web.admin.settings.requests.preview.deciderRule", {
-      number: String(index + 1),
+      number: index + 1,
       rule: rules[index]!.route_name,
     });
   }
@@ -342,7 +342,7 @@ export function RequestRoutePreview({ scope }: { scope: RoutingScope }) {
                   {result.year ? (
                     <span className="text-muted-foreground">
                       {t("web.admin.settings.requests.preview.resultYear", {
-                        year: String(result.year),
+                        year: result.year,
                       })}
                     </span>
                   ) : null}
@@ -375,7 +375,7 @@ export function RequestRoutePreview({ scope }: { scope: RoutingScope }) {
                 picked.year
                   ? t("web.admin.settings.requests.preview.pickedTitle", {
                       title: picked.title,
-                      year: String(picked.year),
+                      year: picked.year,
                     })
                   : picked.title
               }

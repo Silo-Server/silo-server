@@ -59,24 +59,24 @@ function useTaskClock() {
 
 function formatDuration(t: Translate, ms: number): string {
   if (ms <= 0) return t("web.admin.tasks.duration.underOneMs");
-  if (ms < 1000) return t("web.admin.tasks.duration.milliseconds", { ms: String(ms) });
+  if (ms < 1000) return t("web.admin.tasks.duration.milliseconds", { ms: ms });
   const totalSeconds = Math.floor(ms / 1000);
   if (totalSeconds < 60) {
-    return t("web.admin.tasks.duration.seconds", { seconds: String(totalSeconds) });
+    return t("web.admin.tasks.duration.seconds", { seconds: totalSeconds });
   }
   const minutes = Math.floor(totalSeconds / 60);
   const remainSec = totalSeconds - minutes * 60;
   if (minutes < 60) {
     return t("web.admin.tasks.duration.minutesSeconds", {
-      minutes: String(minutes),
-      seconds: String(remainSec),
+      minutes: minutes,
+      seconds: remainSec,
     });
   }
   const hours = Math.floor(minutes / 60);
   const remainMinutes = minutes % 60;
   return t("web.admin.tasks.duration.hoursMinutes", {
-    hours: String(hours),
-    minutes: String(remainMinutes),
+    hours: hours,
+    minutes: remainMinutes,
   });
 }
 
@@ -93,11 +93,11 @@ function formatNextRun(t: Translate, dateStr: string, now: number): string {
   const diff = new Date(dateStr).getTime() - now;
   if (diff < 0) return t("web.admin.tasks.nextRun.overdue");
   const minutes = Math.floor(diff / 60_000);
-  if (minutes < 60) return t("web.admin.tasks.nextRun.inMinutes", { minutes: String(minutes) });
+  if (minutes < 60) return t("web.admin.tasks.nextRun.inMinutes", { minutes: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("web.admin.tasks.nextRun.inHours", { hours: String(hours) });
+  if (hours < 24) return t("web.admin.tasks.nextRun.inHours", { hours: hours });
   const days = Math.floor(hours / 24);
-  return t("web.admin.tasks.nextRun.inDays", { days: String(days) });
+  return t("web.admin.tasks.nextRun.inDays", { days: days });
 }
 
 const EM_DASH = "—";
@@ -163,7 +163,7 @@ function RefreshMetadataSummary({ metrics }: { metrics: MetadataRefreshMetrics }
             <Badge key={entry.reason} variant="secondary">
               {t("web.admin.tasks.refreshMetrics.reasonCount", {
                 reason: refreshReasonLabel(t, entry.reason),
-                count: String(entry.count),
+                count: entry.count,
               })}
             </Badge>
           ))}

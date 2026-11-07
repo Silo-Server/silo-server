@@ -131,7 +131,7 @@ export function HomeRowsPage({
             : "web.home.rows.page.summaryProfile",
           {
             row_count: rows.length,
-            shown_count: String(shownCount),
+            shown_count: shownCount,
           },
         )
       : undefined;

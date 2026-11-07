@@ -319,7 +319,7 @@ export default function AdminBackups() {
                   {active.operation === "backup" ? (
                     <span className="text-muted-foreground tabular-nums">
                       {t("web.admin.backups.active.percent", {
-                        percent: String(Math.round(active.progress)),
+                        percent: Math.round(active.progress),
                       })}
                     </span>
                   ) : null}

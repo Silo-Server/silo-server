@@ -265,8 +265,8 @@ export function PlayingNextScreen({
                   <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
                     <span className="text-xs font-medium text-white/60 sm:text-sm">
                       {t("web.player.episode.code", {
-                        season: String(nextEpisode.seasonNumber),
-                        episode: String(nextEpisode.episodeNumber),
+                        season: nextEpisode.seasonNumber,
+                        episode: nextEpisode.episodeNumber,
                       })}
                     </span>
                     <span className="hidden text-sm text-white/25 sm:inline">{EM_DASH}</span>
@@ -540,7 +540,7 @@ function OnDeckCarousel({
                       <div className="text-[11px] text-white/30">
                         {t("web.player.upNext.minutesLeft", {
                           count: timeLeft,
-                          minutes: String(timeLeft),
+                          minutes: timeLeft,
                         })}
                       </div>
                     )}

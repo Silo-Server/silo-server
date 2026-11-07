@@ -218,7 +218,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
             <span className="font-medium">{item.title}</span>
             {item.year ? (
               <span className="text-muted-foreground ms-2">
-                {t("web.item.dialog.yearInParens", { year: String(item.year) })}
+                {t("web.item.dialog.yearInParens", { year: item.year })}
               </span>
             ) : null}
             <Badge variant="secondary" className="ms-2 text-[10px]">
@@ -276,8 +276,8 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                             {file.season_number && file.episode_number ? (
                               <Badge variant="outline" className="text-[10px]">
                                 {t("web.item.split.episodeCode", {
-                                  season: String(file.season_number),
-                                  episode: String(file.episode_number),
+                                  season: file.season_number,
+                                  episode: file.episode_number,
                                 })}
                               </Badge>
                             ) : null}
@@ -439,7 +439,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
               <div className="font-medium">
                 {t("web.item.split.previewHeading", {
                   count: preview.files_moved,
-                  file_count: String(preview.files_moved),
+                  file_count: preview.files_moved,
                   target_id: preview.target_content_id,
                   id: (chunks) => <span className="font-mono text-xs">{chunks}</span>,
                 })}
@@ -452,24 +452,24 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
               <ul className="text-muted-foreground list-inside list-disc text-xs">
                 <li>
                   {t("web.item.split.resumePoints", {
-                    count: String(preview.reattribution.progress_moved),
+                    count: preview.reattribution.progress_moved,
                   })}
                 </li>
                 <li>
                   {t("web.item.split.historyEntries", {
-                    moved: String(preview.reattribution.history_moved),
-                    ambiguous: String(preview.reattribution.history_ambiguous),
+                    moved: preview.reattribution.history_moved,
+                    ambiguous: preview.reattribution.history_ambiguous,
                   })}
                 </li>
                 <li>
                   {t("web.item.split.downloads", {
-                    count: String(preview.reattribution.downloads),
+                    count: preview.reattribution.downloads,
                   })}
                 </li>
                 {preview.episode_pairs > 0 && (
                   <li>
                     {t("web.item.split.episodesReanchored", {
-                      count: String(preview.episode_pairs),
+                      count: preview.episode_pairs,
                     })}
                   </li>
                 )}
@@ -477,8 +477,8 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                   0 && (
                   <li>
                     {t("web.item.split.overridesPinned", {
-                      folders: String(preview.root_overrides?.length ?? 0),
-                      files: String(preview.file_overrides?.length ?? 0),
+                      folders: preview.root_overrides?.length ?? 0,
+                      files: preview.file_overrides?.length ?? 0,
                     })}
                   </li>
                 )}

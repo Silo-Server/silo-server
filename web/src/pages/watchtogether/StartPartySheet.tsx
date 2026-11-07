@@ -110,7 +110,7 @@ function EpisodeChooser({
           >
             {s.is_specials
               ? t("web.watchTogether.common.specials")
-              : t("web.watchTogether.common.season", { number: String(s.season_number) })}
+              : t("web.watchTogether.common.season", { number: s.season_number })}
           </button>
         ))}
       </div>
@@ -124,7 +124,7 @@ function EpisodeChooser({
             >
               <span className="text-muted-foreground w-7 shrink-0 text-xs font-semibold tabular-nums">
                 {t("web.watchTogether.common.episodeNumber", {
-                  number: String(episode.episode_number),
+                  number: episode.episode_number,
                 })}
               </span>
               <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>
@@ -347,7 +347,7 @@ export function StartPartySheet({
                 ? item.season_count
                   ? t("web.watchTogether.startSheet.seriesSeasons", {
                       count: item.season_count,
-                      count_text: String(item.season_count),
+                      count_text: item.season_count,
                     })
                   : t("web.watchTogether.common.series")
                 : item.type === "season"

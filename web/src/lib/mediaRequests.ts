@@ -332,7 +332,7 @@ export function formatRequestSeasonMeta(season: RequestMediaSeason): string {
     parts.push(
       t("web.requests.status.seasonEpisodes", {
         count: season.episode_count,
-        count_text: String(season.episode_count),
+        count_text: season.episode_count,
       }),
     );
   }
@@ -353,8 +353,8 @@ export function formatSeasonProgress(progress: RequestSeasonProgress[]): string 
   if (aired === 0) return "";
   return t("web.requests.status.seasonProgress", {
     aired,
-    have: String(have),
-    aired_text: String(aired),
+    have: have,
+    aired_text: aired,
   });
 }
 

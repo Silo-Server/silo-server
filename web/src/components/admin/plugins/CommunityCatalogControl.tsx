@@ -53,7 +53,7 @@ export function CommunityCatalogControl({
             <p className="text-muted-foreground text-[13px]">
               {t("web.admin.plugins.communityCatalog.migrated", {
                 count: settings.migrated_plugin_count,
-                count_text: String(settings.migrated_plugin_count),
+                count_text: settings.migrated_plugin_count,
               })}
             </p>
           ) : null}
@@ -74,7 +74,7 @@ export function CommunityCatalogControl({
             <AlertDialogDescription>
               {t("web.admin.plugins.communityCatalog.hideDescription", {
                 count: settings.installed_community_plugin_count,
-                count_text: String(settings.installed_community_plugin_count),
+                count_text: settings.installed_community_plugin_count,
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>

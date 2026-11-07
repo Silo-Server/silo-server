@@ -58,7 +58,7 @@ export default function MetadataBadges({
       {duration && <span className="metadata-badge">{duration}</span>}
       {seasonCount != null && (
         <span className="metadata-badge">
-          {t("web.detail.badges.seasons", { count: seasonCount, count_text: String(seasonCount) })}
+          {t("web.detail.badges.seasons", { count: seasonCount, count_text: seasonCount })}
         </span>
       )}
       {seasonLabel && <span className="metadata-badge">{seasonLabel}</span>}
@@ -66,20 +66,20 @@ export default function MetadataBadges({
         <span className="metadata-badge">
           {t("web.detail.badges.episodes", {
             count: episodeCount,
-            count_text: String(episodeCount),
+            count_text: episodeCount,
           })}
         </span>
       )}
       {volumeCount != null && volumeCount > 0 && (
         <span className="metadata-badge">
-          {t("web.detail.badges.volumes", { count: volumeCount, count_text: String(volumeCount) })}
+          {t("web.detail.badges.volumes", { count: volumeCount, count_text: volumeCount })}
         </span>
       )}
       {chapterCount != null && chapterCount > 0 && (
         <span className="metadata-badge">
           {t("web.detail.badges.chapters", {
             count: chapterCount,
-            count_text: String(chapterCount),
+            count_text: chapterCount,
           })}
         </span>
       )}

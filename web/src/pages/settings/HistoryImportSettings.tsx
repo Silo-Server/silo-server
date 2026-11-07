@@ -1161,7 +1161,7 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
                   {sample.title}
                   {sample.year ? (
                     <span className="text-muted-foreground ms-1.5 font-normal">
-                      {t("web.settings.historyImport.sampleYear", { year: String(sample.year) })}
+                      {t("web.settings.historyImport.sampleYear", { year: sample.year })}
                     </span>
                   ) : null}
                 </div>
@@ -1261,7 +1261,7 @@ function HistoryRunCard({
             {run.matched > 0
               ? t("web.settings.historyImport.timeWithMatched", {
                   time: formatRelativeTime(t, run.created_at),
-                  count: String(run.matched),
+                  count: run.matched,
                   detail: (chunks) => <span>{chunks}</span>,
                 })
               : formatRelativeTime(t, run.created_at)}
@@ -1294,14 +1294,13 @@ function formatRelativeTime(t: Translate, dateStr: string): string {
 
 function formatDuration(t: Translate, startStr: string, endStr: string): string {
   const seconds = Math.floor((new Date(endStr).getTime() - new Date(startStr).getTime()) / 1000);
-  if (seconds < 60)
-    return t("web.settings.historyImport.duration.seconds", { seconds: String(seconds) });
+  if (seconds < 60) return t("web.settings.historyImport.duration.seconds", { seconds: seconds });
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return s > 0
     ? t("web.settings.historyImport.duration.minutesSeconds", {
-        minutes: String(m),
-        seconds: String(s),
+        minutes: m,
+        seconds: s,
       })
-    : t("web.settings.historyImport.duration.minutes", { minutes: String(m) });
+    : t("web.settings.historyImport.duration.minutes", { minutes: m });
 }

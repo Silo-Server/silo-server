@@ -68,7 +68,7 @@ export default function HistoryTab() {
             settings
               ? t(`${H}.cacheHours`, {
                   count: settings.cache_hours,
-                  count_text: String(settings.cache_hours),
+                  count_text: settings.cache_hours,
                 })
               : "—"
           }
@@ -77,9 +77,7 @@ export default function HistoryTab() {
         <StatTile
           label={t(`${H}.diskCeiling`)}
           value={
-            settings
-              ? t(`${H}.diskCeilingValue`, { percent: String(settings.disk_ceiling_percent) })
-              : "—"
+            settings ? t(`${H}.diskCeilingValue`, { percent: settings.disk_ceiling_percent }) : "—"
           }
           detail={t(`${H}.diskCeilingDetail`)}
         />

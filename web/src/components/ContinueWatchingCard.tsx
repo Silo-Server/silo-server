@@ -176,13 +176,13 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       : t("web.home.continueWatching.nextEpisode")
     : card.type === "ebook"
       ? t("web.home.continueWatching.percentRead", {
-          percent: String(Math.round(Math.min(Math.max(progressPercent, 0), 100))),
+          percent: Math.round(Math.min(Math.max(progressPercent, 0), 100)),
         })
       : card.durationSeconds > 0
         ? card.type === "audiobook"
           ? formatListeningTimeLeft(card.positionSeconds, card.durationSeconds)
           : t("web.home.continueWatching.minutesLeft", {
-              minutes: String(Math.round((card.durationSeconds - card.positionSeconds) / 60)),
+              minutes: Math.round((card.durationSeconds - card.positionSeconds) / 60),
             })
         : "\u00A0";
   const handleWatchClick = useCallback(

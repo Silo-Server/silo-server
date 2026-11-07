@@ -336,7 +336,7 @@ function RecJobStatusCard({
             />
           </div>
           <p className="text-muted-foreground mt-1 text-end text-xs">
-            {t("web.admin.recommendations.jobs.percent", { percent: String(pct) })}
+            {t("web.admin.recommendations.jobs.percent", { percent: pct })}
           </p>
         </div>
       )}

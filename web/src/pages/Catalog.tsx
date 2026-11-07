@@ -418,8 +418,8 @@ function CatalogResults({
     ? t("web.catalog.page.inLibraryNoun")
     : t("web.catalog.page.resultNoun", { count: totalItems });
   const resultCount = inLibrary
-    ? t("web.catalog.page.inLibraryCount", { count: String(totalItems) })
-    : t("web.catalog.page.resultCount", { count: totalItems, shown: String(totalItems) });
+    ? t("web.catalog.page.inLibraryCount", { count: totalItems })
+    : t("web.catalog.page.resultCount", { count: totalItems, shown: totalItems });
 
   if (collectionUnavailable) {
     return (
@@ -567,7 +567,7 @@ function CatalogResults({
                 ) : (
                   <>
                     <span className="text-muted-foreground text-sm">
-                      {t("web.catalog.page.selectedCount", { count: String(selectedIds.size) })}
+                      {t("web.catalog.page.selectedCount", { count: selectedIds.size })}
                     </span>
                     <Button
                       variant="outline"

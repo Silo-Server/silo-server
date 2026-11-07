@@ -354,7 +354,7 @@ function GridVariant({
       {pageError ? (
         <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 py-6">
           <p className="text-muted-foreground text-sm">
-            {t("web.requests.toAdd.pageFailed", { page: String(page) })}
+            {t("web.requests.toAdd.pageFailed", { page: page })}
           </p>
           <Button
             variant="outline"
@@ -381,8 +381,8 @@ function GridVariant({
         label={t("web.requests.toAdd.pages")}
         position={
           totalPages > 0
-            ? t("web.requests.toAdd.pageOf", { page: String(page), total: String(totalPages) })
-            : t("web.requests.toAdd.page", { page: String(page) })
+            ? t("web.requests.toAdd.pageOf", { page: page, total: totalPages })
+            : t("web.requests.toAdd.page", { page: page })
         }
         hasPrevious={page > 1}
         hasNext={page < totalPages}

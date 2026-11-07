@@ -86,7 +86,7 @@ function reportShownBatch(
           : "web.admin.homeRows.select.turnedOffPartial",
         {
           count: attempted,
-          done_text: String(changedIds.length),
+          done_text: changedIds.length,
         },
       ),
       { description },
@@ -159,7 +159,7 @@ function reportRestore(
     .map(({ libraryId, error, outcome }) => {
       const label =
         alsoPages.find((page) => page.id === libraryId)?.label ??
-        t("web.admin.homeRows.restore.libraryFallback", { id: String(libraryId) });
+        t("web.admin.homeRows.restore.libraryFallback", { id: libraryId });
       if (outcome === "unknown") return t("web.admin.homeRows.restore.pageUnknown", { label });
       return t("web.admin.homeRows.restore.pageFailed", {
         label,
@@ -525,8 +525,8 @@ export default function AdminHomeRows() {
   }
 
   const deleteProgressLabel = t("web.admin.homeRows.delete.progress", {
-    done: String(deleteSectionsMutation.progress?.completed ?? 0),
-    total: String(deleteSectionsMutation.progress?.total ?? deleteTargets.length),
+    done: deleteSectionsMutation.progress?.completed ?? 0,
+    total: deleteSectionsMutation.progress?.total ?? deleteTargets.length,
   });
   const bulkBusy =
     !canManageCurrentScope ||

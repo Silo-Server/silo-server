@@ -94,7 +94,7 @@ export function formatDashboardLibraryScanProgress(scan: ScanRun, activeScanCoun
       running
         ? "web.admin.dashboard.format.scanRunningWithMore"
         : "web.admin.dashboard.format.scanQueuedWithMore",
-      { detail, more: activeScanCount - 1, more_text: String(activeScanCount - 1) },
+      { detail, more: activeScanCount - 1, more_text: activeScanCount - 1 },
     );
   }
   return t(

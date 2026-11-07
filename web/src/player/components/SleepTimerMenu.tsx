@@ -94,7 +94,7 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
                 setOpen(false);
               }}
             >
-              {t("web.player.sleepTimer.minutes", { minutes: String(seconds / 60) })}
+              {t("web.player.sleepTimer.minutes", { minutes: seconds / 60 })}
             </button>
           ))}
           <button

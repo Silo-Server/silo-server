@@ -84,7 +84,7 @@ export function SelectModeBar({
         className="bg-popover/95 border-border pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-2xl border py-[7px] ps-4 pe-[7px] shadow-[0_24px_60px_-20px_rgb(0_0_0/0.9)] backdrop-blur"
       >
         <span role="status" className="me-2 text-sm font-semibold whitespace-nowrap">
-          {t("web.ui.selectedCount", { count, shown: String(count) })}
+          {t("web.ui.selectedCount", { count, shown: count })}
           {tooMany ? (
             <span className="text-warning ms-2 font-normal">{t(text.tooMany, { limit })}</span>
           ) : null}

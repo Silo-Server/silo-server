@@ -499,7 +499,7 @@ function ProfileEditorForm({
             <p className="text-muted-foreground text-xs">
               {t("web.profiles.editor.presetsShowing", {
                 count: visiblePresets.length,
-                count_text: String(visiblePresets.length),
+                count_text: visiblePresets.length,
                 summary:
                   PROFILE_AVATAR_STYLES.find((style) => style.id === activePresetStyle)?.summary ??
                   "",

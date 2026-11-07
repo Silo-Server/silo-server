@@ -389,7 +389,7 @@ function LimitPolicyField({
   const help =
     draftValue === null
       ? min > 0
-        ? t(DEFAULT_SOURCE_TEXT[source].limitHelpMin, { min: String(min) })
+        ? t(DEFAULT_SOURCE_TEXT[source].limitHelpMin, { min: min })
         : t(DEFAULT_SOURCE_TEXT[source].limitHelp)
       : min === 0
         ? t("web.profiles.userPolicy.zeroUnlimited")
@@ -536,7 +536,7 @@ export function PolicyAccessFields({
               ? t("web.profiles.libraryAccess.allLibraries")
               : t("web.profiles.libraries.count", {
                   count: effective.library_ids.length,
-                  count_text: String(effective.library_ids.length),
+                  count_text: effective.library_ids.length,
                 }),
         )}
       />

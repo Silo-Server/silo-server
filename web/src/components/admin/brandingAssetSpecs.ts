@@ -44,7 +44,7 @@ export const BRANDING_ASSET_SPECS: Record<BrandingAssetKind, BrandingAssetSpec> 
     maxUploadBytes: WORDMARK_MAX_BYTES,
     guidance: () =>
       t("web.admin.common.brandingAssets.wordmarkGuidance", {
-        px: String(WORDMARK_PX),
+        px: WORDMARK_PX,
         size: megabytes(WORDMARK_MAX_BYTES),
       }),
     defaultUrl: "/silo-wordmark-sidebar.png",
@@ -55,7 +55,7 @@ export const BRANDING_ASSET_SPECS: Record<BrandingAssetKind, BrandingAssetSpec> 
     maxUploadBytes: MARK_MAX_BYTES,
     guidance: () =>
       t("web.admin.common.brandingAssets.markGuidance", {
-        px: String(MARK_PX),
+        px: MARK_PX,
         size: megabytes(MARK_MAX_BYTES),
       }),
     defaultUrl: "/silo-icon-1024.png",
@@ -76,7 +76,7 @@ export const BRANDING_ASSET_SPECS: Record<BrandingAssetKind, BrandingAssetSpec> 
     maxUploadBytes: LOGIN_BG_MAX_BYTES,
     guidance: () =>
       t("web.admin.common.brandingAssets.loginBackgroundGuidance", {
-        px: String(LOGIN_BG_PX),
+        px: LOGIN_BG_PX,
         size: megabytes(LOGIN_BG_MAX_BYTES),
       }),
     defaultUrl: null,

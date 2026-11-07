@@ -111,7 +111,7 @@ export function NowListening({
             <div className="space-y-1">
               <p className="text-muted-foreground text-[11px] tracking-[0.18em] uppercase">
                 {t("web.audiobooks.player.chapterNumber", {
-                  number: String(playback.currentChapter.index + 1),
+                  number: playback.currentChapter.index + 1,
                 })}
               </p>
               <p className="text-foreground text-lg font-medium">{playback.currentChapter.title}</p>

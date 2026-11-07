@@ -151,7 +151,7 @@ export function syncStatusLabel(
     case "running": {
       const percent = syncProgressPercent(sync);
       return percent
-        ? t("web.subtitles.sync.status.syncingPercent", { percent: String(percent) })
+        ? t("web.subtitles.sync.status.syncingPercent", { percent: percent })
         : t("web.subtitles.sync.status.syncing");
     }
     case "no_match":

@@ -75,16 +75,12 @@ export function dataCountsPhrase(data: {
   left_out: number;
 }): string {
   const parts = [
-    data.added > 0 ? t("web.profiles.dataTypes.counts.added", { count: String(data.added) }) : null,
-    data.updated > 0
-      ? t("web.profiles.dataTypes.counts.updated", { count: String(data.updated) })
-      : null,
+    data.added > 0 ? t("web.profiles.dataTypes.counts.added", { count: data.added }) : null,
+    data.updated > 0 ? t("web.profiles.dataTypes.counts.updated", { count: data.updated }) : null,
     data.unchanged > 0
-      ? t("web.profiles.dataTypes.counts.unchanged", { count: String(data.unchanged) })
+      ? t("web.profiles.dataTypes.counts.unchanged", { count: data.unchanged })
       : null,
-    data.left_out > 0
-      ? t("web.profiles.dataTypes.counts.leftOut", { count: String(data.left_out) })
-      : null,
+    data.left_out > 0 ? t("web.profiles.dataTypes.counts.leftOut", { count: data.left_out }) : null,
   ].filter((part): part is string => part !== null);
   return parts.length > 0 ? parts.join(", ") : t("web.profiles.dataTypes.counts.nothing");
 }
@@ -97,7 +93,7 @@ export function titleList(titles: readonly string[]): string {
   const shown = titles.slice(0, TITLES_SHOWN).join(", ");
   const rest = titles.length - TITLES_SHOWN;
   return rest > 0
-    ? t("web.profiles.dataTypes.titleListMore", { titles: shown, count: String(rest) })
+    ? t("web.profiles.dataTypes.titleListMore", { titles: shown, count: rest })
     : shown;
 }
 
@@ -141,7 +137,7 @@ export function pendingSummary(
   );
   const shown = ordered.slice(0, PENDING_TYPES_SHOWN).map((id) => {
     const count = totals.get(id)!;
-    return t(PENDING_COUNTS[id], { count, count_text: String(count) });
+    return t(PENDING_COUNTS[id], { count, count_text: count });
   });
   const items = shown.join(" · ");
   return ordered.length > PENDING_TYPES_SHOWN

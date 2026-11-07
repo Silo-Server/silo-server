@@ -99,9 +99,7 @@ export const NAMES_SHOWN = 5;
 export function nameSampleText(names: readonly string[], shown = NAMES_SHOWN): string {
   const list = names.slice(0, shown).join(", ");
   const more = names.length - shown;
-  return more > 0
-    ? t("web.admin.backups.warnings.nameSample", { names: list, more: String(more) })
-    : list;
+  return more > 0 ? t("web.admin.backups.warnings.nameSample", { names: list, more: more }) : list;
 }
 
 export interface MissingFileGroup {

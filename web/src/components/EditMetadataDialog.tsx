@@ -262,7 +262,7 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
             {fieldLockMap && lockedCount > 0 && (
               <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
                 <Lock className="size-3" />
-                {t("web.item.editMetadata.lockedCount", { count: String(lockedCount) })}
+                {t("web.item.editMetadata.lockedCount", { count: lockedCount })}
               </span>
             )}
           </DialogHeader>

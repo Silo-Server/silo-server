@@ -149,7 +149,7 @@ export function groupDeviceDownloads(
 
 /** A count message whose number prints as typed, without grouping. */
 function counted(key: MessageKey, n: number): string {
-  return t(key, { count: n, count_text: String(n) });
+  return t(key, { count: n, count_text: n });
 }
 
 /** "Season 3", "Seasons 1, 2". */

@@ -172,7 +172,7 @@ export function requestGroupLabel(name: string): string {
 
 /** "per day", "per 7 days". */
 function perWindow(days: number): string {
-  return t("web.admin.common.requestAccess.perWindow", { days, days_text: String(days) });
+  return t("web.admin.common.requestAccess.perWindow", { days, days_text: days });
 }
 
 /**
@@ -297,11 +297,11 @@ export function requestGroupLimitSummary(layer: RequestLimitLayer): string {
     const max = layer.max_requests;
     parts.push(
       days == null || days <= 0
-        ? t("web.admin.common.requestAccess.summaryCount", { count: max, count_text: String(max) })
+        ? t("web.admin.common.requestAccess.summaryCount", { count: max, count_text: max })
         : t("web.admin.common.requestAccess.summaryPerWindow", {
             days,
-            days_text: String(days),
-            max: String(max),
+            days_text: days,
+            max: max,
           }),
     );
   }

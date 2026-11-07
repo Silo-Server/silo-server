@@ -613,7 +613,7 @@ export function formatEpisodeCode(
     return null;
   }
   return t("web.notifications.queries.episodeCode", {
-    season: String(notification.season_number),
-    episode: String(notification.episode_number),
+    season: notification.season_number,
+    episode: notification.episode_number,
   });
 }

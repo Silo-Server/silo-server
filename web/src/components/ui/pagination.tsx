@@ -137,7 +137,7 @@ export function TablePagination({
                   size="icon-sm"
                   className="tabular-nums"
                   onClick={() => goTo(entry)}
-                  aria-label={t("web.ui.pagination.page", { page: String(entry + 1) })}
+                  aria-label={t("web.ui.pagination.page", { page: entry + 1 })}
                   aria-current={entry === safePage ? "page" : undefined}
                 >
                   {entry + 1}
@@ -147,8 +147,8 @@ export function TablePagination({
           </div>
           <span className="text-muted-foreground px-2 text-xs tabular-nums sm:hidden">
             {t("web.ui.pagination.compact", {
-              page: String(safePage + 1),
-              pages: String(pageCount),
+              page: safePage + 1,
+              pages: pageCount,
             })}
           </span>
 

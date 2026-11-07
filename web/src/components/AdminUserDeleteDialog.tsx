@@ -108,7 +108,7 @@ export function AdminUserDeleteDialog({
               ? t("web.admin.users.deleteDialog.description")
               : t("web.admin.users.deleteDialog.descriptionCounted", {
                   count: profileCount,
-                  count_text: String(profileCount),
+                  count_text: profileCount,
                 })}
           </AlertDialogDescription>
         </AlertDialogHeader>

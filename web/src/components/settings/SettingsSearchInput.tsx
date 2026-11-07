@@ -44,7 +44,7 @@ export function SettingsSearchInput({
   const status = hasQuery
     ? resultCount === 0
       ? emptyLabel
-      : t("web.settings.search.matchCount", { count: resultCount, count_text: String(resultCount) })
+      : t("web.settings.search.matchCount", { count: resultCount, count_text: resultCount })
     : null;
 
   useEffect(() => {

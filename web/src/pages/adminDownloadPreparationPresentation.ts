@@ -240,11 +240,11 @@ export function formatRemaining(seconds: number | null): string {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest === 0
-    ? t(`${K}.remaining.hours`, { hours, hours_text: String(hours) })
+    ? t(`${K}.remaining.hours`, { hours, hours_text: hours })
     : t(`${K}.remaining.hoursMinutes`, {
         hours,
-        hours_text: String(hours),
-        minutes: String(rest),
+        hours_text: hours,
+        minutes: rest,
       });
 }
 
@@ -278,7 +278,7 @@ export function formatRetryIn(iso: string | undefined, now = Date.now()): string
   if (seconds <= 0) return t(`${K}.retryIn.now`);
   if (seconds < 60) return t(`${K}.retryIn.seconds`, { seconds });
   const minutes = Math.round(seconds / 60);
-  return t(`${K}.retryIn.minutes`, { minutes, minutes_text: String(minutes) });
+  return t(`${K}.retryIn.minutes`, { minutes, minutes_text: minutes });
 }
 
 /** "12 min ago" style age for a past instant. */
@@ -289,7 +289,7 @@ export function formatAgo(iso: string | undefined, now = Date.now()): string {
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return t(`${K}.ago.minutes`, { minutes });
   const hours = Math.round(minutes / 60);
-  return t(`${K}.ago.hours`, { hours, hours_text: String(hours) });
+  return t(`${K}.ago.hours`, { hours, hours_text: hours });
 }
 
 export function requesterName(r: AdminDownloadPreparation["requesters"][number]): string {

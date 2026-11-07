@@ -176,7 +176,7 @@ function describeLiveGPU(
     sessions:
       sessions === 0
         ? t("web.admin.nodes.gpu.idle")
-        : t("web.admin.nodes.gpu.sessionCount", { count: sessions, count_text: String(sessions) }),
+        : t("web.admin.nodes.gpu.sessionCount", { count: sessions, count_text: sessions }),
     title: liveGPUTitle(stats, detail, device, measured),
   };
 }
@@ -210,7 +210,7 @@ function liveGPUTitle(
 
   const whole = finiteNumber(stats.total_busy_pct);
   if (whole != null) {
-    lines.push(t("web.admin.nodes.gpu.wholeGpu", { percent: String(clampPercent(whole)) }));
+    lines.push(t("web.admin.nodes.gpu.wholeGpu", { percent: clampPercent(whole) }));
   }
   const vram = formatUsedOfTotal(stats.vram_used_mb, stats.vram_total_mb, mebibytesToBytes);
   if (vram) {
@@ -228,7 +228,7 @@ function formatEngine(
   value: number | null | undefined,
 ): string | null {
   const percent = finiteNumber(value);
-  return percent == null ? null : t(key, { percent: String(clampPercent(percent)) });
+  return percent == null ? null : t(key, { percent: clampPercent(percent) });
 }
 
 function isMeasuredGPUSource(source: string | undefined): boolean {
@@ -419,7 +419,7 @@ function countedDescriptions(details: readonly NodeRenderDevice[]): string {
     .map((entry) =>
       entry.count > 1
         ? t("web.admin.nodes.gpu.deviceMultiple", {
-            count: String(entry.count),
+            count: entry.count,
             device: entry.label,
           })
         : entry.label,
@@ -802,7 +802,7 @@ export function describeNodeAccelerationOverride(
       ? firstDevice
       : t("web.admin.nodes.override.deviceCount", {
           count: devices.length,
-          count_text: String(devices.length),
+          count_text: devices.length,
         });
   const label = [accelLabel, devices.length > 0 ? deviceLabel : ""]
     .filter((part) => part !== "")
@@ -1012,7 +1012,7 @@ function describeCPU(system: HostSystemStats): ResourceMetric {
     .join(" · ");
 
   const title = [
-    t("web.admin.nodes.cpu.busyTitle", { percent: String(percent) }),
+    t("web.admin.nodes.cpu.busyTitle", { percent: percent }),
     coreValues && coreValues.count > 0 ? t("web.admin.nodes.cpu.coresTitle", coreValues) : null,
     load1 != null ? t("web.admin.nodes.cpu.loadTitle", { load: formatDecimal(load1, 2) }) : null,
   ]
@@ -1203,7 +1203,7 @@ export function describeGPUBusy(gpu: readonly HostGPUStats[]): ResourceMetric | 
   const sessions = gpu.reduce((total, stats) => total + (finiteNumber(stats.sessions) ?? 0), 0);
   const sessionLabel = t("web.admin.nodes.gpu.sessionCount", {
     count: sessions,
-    count_text: String(sessions),
+    count_text: sessions,
   });
   const title = gpu
     .map((stats) => {
@@ -1212,10 +1212,10 @@ export function describeGPUBusy(gpu: readonly HostGPUStats[]): ResourceMetric | 
       const video = finiteNumber(stats.video_busy_pct);
       const reading =
         measured && video != null
-          ? t("web.admin.nodes.gpu.videoEngine", { percent: String(clampPercent(video)) })
+          ? t("web.admin.nodes.gpu.videoEngine", { percent: clampPercent(video) })
           : t("web.admin.nodes.gpu.notMeasured");
       const count = Math.max(0, Math.trunc(finiteNumber(stats.sessions) ?? 0));
-      return `${device} — ${reading} · ${t("web.admin.nodes.gpu.sessionCount", { count, count_text: String(count) })}`;
+      return `${device} — ${reading} · ${t("web.admin.nodes.gpu.sessionCount", { count, count_text: count })}`;
     })
     .join("\n");
 
@@ -1353,13 +1353,13 @@ function describeNodeGroup(value: string, members: readonly StreamNode[]): NodeG
 function describeGroupComposition(proxies: number, transcodes: number): string {
   const proxyText =
     proxies > 0
-      ? t("web.admin.nodes.groups.proxyCount", { count: proxies, count_text: String(proxies) })
+      ? t("web.admin.nodes.groups.proxyCount", { count: proxies, count_text: proxies })
       : null;
   const transcodeText =
     transcodes > 0
       ? t("web.admin.nodes.groups.transcodeCount", {
           count: transcodes,
-          count_text: String(transcodes),
+          count_text: transcodes,
         })
       : null;
   if (proxyText && transcodeText) {
@@ -1478,7 +1478,7 @@ export function describeNodeDrain(node: StreamNode): NodeDrainPresentation | nul
   const active = Math.max(0, Math.trunc(finiteNumber(node.active_jobs) ?? 0));
   return {
     phase: "draining",
-    label: t("web.admin.nodes.drain.drainingLabel", { count: active, count_text: String(active) }),
+    label: t("web.admin.nodes.drain.drainingLabel", { count: active, count_text: active }),
     detail: requested
       ? t("web.admin.nodes.drain.requestedDetail")
       : t("web.admin.nodes.drain.stopSignalDetail"),
@@ -1538,12 +1538,12 @@ export function describeNodeJobs(node: StreamNode): ResourceMetric {
       capped == null
         ? t("web.admin.nodes.capacity.jobsUncappedTitle", {
             count: active,
-            count_text: String(active),
+            count_text: active,
           })
         : t("web.admin.nodes.capacity.jobsCappedTitle", {
             count: active,
-            count_text: String(active),
-            cap: String(capped),
+            count_text: active,
+            cap: capped,
           }),
     muted: false,
     warning: capped != null && active >= capped,

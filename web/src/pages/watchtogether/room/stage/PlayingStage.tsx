@@ -83,7 +83,7 @@ export function PlayingStage({
           clock: formatClock(position),
           state: stateLabel,
           count: room.member_count,
-          count_text: String(room.member_count),
+          count_text: room.member_count,
         })}
       >
         <Button type="button" onClick={onRejoin} className="gap-2">

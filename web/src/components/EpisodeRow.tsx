@@ -17,7 +17,7 @@ interface EpisodeRowProps {
 export default function EpisodeRow({ episode, rating, watched, progress }: EpisodeRowProps) {
   const t = useT();
   const fallbackTitle = t("web.detail.episodes.numbered", {
-    episode: String(episode.episode_number),
+    episode: episode.episode_number,
   });
   const { prefs: overlayPrefs } = useOverlayPrefs();
   const watchedState = watched ?? episode.user_data?.played ?? false;
@@ -110,9 +110,7 @@ export default function EpisodeRow({ episode, rating, watched, progress }: Episo
             <span className="mx-1.5">{t("web.detail.separator.dot")}</span>
           )}
           {episode.runtime > 0 && (
-            <span>
-              {t("web.detail.episodes.runtimeMinutes", { minutes: String(episode.runtime) })}
-            </span>
+            <span>{t("web.detail.episodes.runtimeMinutes", { minutes: episode.runtime })}</span>
           )}
           {episodeFilesUnreadable(episode) && (
             <>

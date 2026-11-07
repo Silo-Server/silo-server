@@ -45,7 +45,7 @@ const LONG: Record<ItemState, MessageKey> = {
 };
 
 function countText(key: MessageKey, count: number): string {
-  return t(key, { count, count_text: String(count) });
+  return t(key, { count, count_text: count });
 }
 
 /** The count line beside the bar: "120 match · 52 differ · 12 new · 3 can't". */
@@ -283,8 +283,8 @@ export function sectionProgress(section: RestoreSection, selection: SelectionKey
   const chosen = restorable.filter((item) => selection.has(itemKey(section.id, item.id))).length;
   return t("web.admin.backups.restore.progress.chosen", {
     chosen,
-    chosen_text: String(chosen),
-    total_text: String(restorable.length),
+    chosen_text: chosen,
+    total_text: restorable.length,
   });
 }
 

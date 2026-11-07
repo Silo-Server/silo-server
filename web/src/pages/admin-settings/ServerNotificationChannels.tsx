@@ -321,7 +321,7 @@ function ChannelCard({
     channel.last_failure_message ||
     (channel.last_failure_status != null
       ? t("web.admin.settings.notifications.serverChannels.httpStatus", {
-          status: String(channel.last_failure_status),
+          status: channel.last_failure_status,
         })
       : t("web.admin.settings.notifications.serverChannels.httpError"));
 

@@ -23,7 +23,7 @@ export class ProbeRateLimited extends Error {
     super(
       t("web.common.speedTest.retryAfter", {
         count: retryAfter,
-        count_text: String(retryAfter),
+        count_text: retryAfter,
       }),
     );
   }

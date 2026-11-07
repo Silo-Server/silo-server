@@ -179,7 +179,7 @@ export function RequestSeasonsDialog({
                           disabled={!choosable}
                           onCheckedChange={(on) => toggle(season.season_number, on)}
                           aria-label={t("web.requests.seasons.season", {
-                            number: String(season.season_number),
+                            number: season.season_number,
                           })}
                           aria-describedby={`${metaID} ${statusID}`}
                         />

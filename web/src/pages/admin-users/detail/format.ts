@@ -17,10 +17,10 @@ export function formatWatchTime(seconds: number): string {
   const minutes = Math.floor((total % 3600) / 60);
   return hours > 0
     ? t("web.admin.users.detail.common.watchTime.hoursMinutes", {
-        hours: String(hours),
-        minutes: String(minutes),
+        hours: hours,
+        minutes: minutes,
       })
-    : t("web.admin.users.detail.common.watchTime.minutes", { minutes: String(minutes) });
+    : t("web.admin.users.detail.common.watchTime.minutes", { minutes: minutes });
 }
 
 /** A month and day, "Sep 26"; "" when there is no date. */
@@ -123,7 +123,7 @@ export function formatStorageLimit(bytes: number): string {
     return t("web.admin.users.detail.common.bytes.gb", { value: formatDecimal(gb, 1, 0) });
   }
   return t("web.admin.users.detail.common.bytes.mb", {
-    value: String(Math.round(value / 1024 ** 2)),
+    value: Math.round(value / 1024 ** 2),
   });
 }
 

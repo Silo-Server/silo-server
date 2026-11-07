@@ -319,7 +319,7 @@ export function SortableSectionCardRow({
           {t("web.home.rows.sections.kindAndLimit", {
             item_count: section.itemLimit,
             kind: rowKindLabel(section.sectionType),
-            items: String(section.itemLimit),
+            items: section.itemLimit,
           })}
         </div>
       </div>

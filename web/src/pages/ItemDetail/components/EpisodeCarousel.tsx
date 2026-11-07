@@ -136,7 +136,7 @@ function EpisodeCarouselCard({
   const prefetchHandlers = useDwellPrefetch(onPrefetch);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle =
-    ep.title || t("web.detail.episodes.numbered", { episode: String(ep.episode_number) });
+    ep.title || t("web.detail.episodes.numbered", { episode: ep.episode_number });
   const episodeHref = buildItemHref({
     contentId: ep.content_id,
     libraryId: episodeLinkLibraryId(ep, libraryId),

@@ -135,11 +135,11 @@ export function sourceLabels(tracks: PlayerSubtitleInfo[]): Map<number, string> 
     }
     const numbered = t("web.subtitles.translate.trackNumbered", {
       label,
-      number: String(index + 1),
+      number: index + 1,
     });
     let candidate = numbered;
     for (let n = 2; used.has(candidate); n++) {
-      candidate = t("web.subtitles.translate.duplicate", { label: numbered, count: String(n) });
+      candidate = t("web.subtitles.translate.duplicate", { label: numbered, count: n });
     }
     used.add(candidate);
     labels.set(index, candidate);
@@ -152,7 +152,7 @@ export function audioLabel(track: PlayerAudioTrack, i: number): string {
   const lang =
     getLanguageName(track.language ?? "") ||
     track.language ||
-    t("web.subtitles.translate.audioTrackNumber", { number: String(i + 1) });
+    t("web.subtitles.translate.audioTrackNumber", { number: i + 1 });
   const parts = [lang];
   if (track.layout) parts.push(track.layout);
   if (track.default) parts.push(t("web.subtitles.translate.audioDefault"));

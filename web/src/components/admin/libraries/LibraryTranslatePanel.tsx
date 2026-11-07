@@ -29,7 +29,7 @@ function jobStatusText(t: Translate, job: LibraryTranslationJob, withLanguage: b
     job.fields_total > 0
       ? t("web.admin.common.libraryEditor.translate.statusWithPercent", {
           status: message,
-          percent: String(Math.round(job.progress * 100)),
+          percent: Math.round(job.progress * 100),
         })
       : message;
   return withLanguage

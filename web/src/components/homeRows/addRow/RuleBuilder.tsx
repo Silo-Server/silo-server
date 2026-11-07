@@ -280,7 +280,7 @@ export function RuleBuilder({
             key={index}
             role={several ? "group" : undefined}
             aria-label={
-              several ? t("web.home.addRow.rules.group", { number: String(index + 1) }) : undefined
+              several ? t("web.home.addRow.rules.group", { number: index + 1 }) : undefined
             }
             className="grid gap-2"
           >
@@ -299,7 +299,7 @@ export function RuleBuilder({
                   match: () => (
                     <MatchSelect
                       label={t("web.home.addRow.rules.groupMatchLabel", {
-                        number: String(index + 1),
+                        number: index + 1,
                       })}
                       value={group.match}
                       names={RULE_NAMES}
@@ -312,7 +312,7 @@ export function RuleBuilder({
                   variant="ghost"
                   size="icon"
                   aria-label={t("web.home.addRow.rules.removeGroup", {
-                    number: String(index + 1),
+                    number: index + 1,
                   })}
                   className="text-muted-foreground ms-auto size-8"
                   onClick={() => {
@@ -333,7 +333,7 @@ export function RuleBuilder({
                 onChange={(updates) => updateRule(index, ruleIndex, updates)}
                 onRemove={() => removeRule(index, ruleIndex)}
                 roomy
-                label={t("web.home.addRow.rules.rule", { number: String(ruleIndex + 1) })}
+                label={t("web.home.addRow.rules.rule", { number: ruleIndex + 1 })}
                 valueScope={valueScope}
                 focusValue={focusRule === `${index}:${ruleIndex}`}
               />

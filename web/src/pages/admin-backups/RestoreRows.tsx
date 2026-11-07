@@ -216,7 +216,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
       <SettingFieldStatus key="files" tone="warn">
         {t("web.admin.backups.restore.rows.filesMissing", {
           count: item.missing_blobs.length,
-          count_text: String(item.missing_blobs.length),
+          count_text: item.missing_blobs.length,
         })}
       </SettingFieldStatus>
     ) : null,

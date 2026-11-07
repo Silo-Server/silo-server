@@ -88,7 +88,7 @@ export function SyncStatusBlock({
         />
         <b className="font-semibold">{syncedAgo(sync.lastAt)}</b>
         <span className="text-muted-foreground text-[12.5px]">
-          {t("web.collections.metaLine.titleCount", { count: itemCount, shown: String(itemCount) })}
+          {t("web.collections.metaLine.titleCount", { count: itemCount, shown: itemCount })}
         </span>
       </>
     );

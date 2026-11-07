@@ -59,7 +59,7 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
             ? t("web.admin.backups.warnings.hideNames")
             : t("web.admin.backups.warnings.showAllNames", {
                 count: group.labels.length,
-                count_text: String(group.labels.length),
+                count_text: group.labels.length,
               })}
         </Disclosure>
       ) : null}
@@ -99,7 +99,7 @@ export function OmittedAccounts({
     context === "restore"
       ? "web.admin.backups.warnings.omittedRestore"
       : "web.admin.backups.warnings.omittedBackup",
-    { count: omitted.length, count_text: String(omitted.length) },
+    { count: omitted.length, count_text: omitted.length },
   );
   return (
     <div className="min-w-0 space-y-1.5">

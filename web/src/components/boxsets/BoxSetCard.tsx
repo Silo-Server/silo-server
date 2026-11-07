@@ -23,8 +23,8 @@ export default function BoxSetCard({ boxSet }: { boxSet: BoxSetSummary }) {
   const meta =
     boxSet.played_count > 0
       ? t("web.detail.boxSet.watchedFraction", {
-          played: String(boxSet.played_count),
-          total: String(boxSet.movie_count),
+          played: boxSet.played_count,
+          total: boxSet.movie_count,
         })
       : boxSetYears(boxSet) || boxSetFilmCount(boxSet.movie_count);
 

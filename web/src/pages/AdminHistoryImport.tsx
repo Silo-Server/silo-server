@@ -827,7 +827,7 @@ function DiscoverDialog({
                     ? t("web.admin.historyImport.discover.allMapped")
                     : t("web.admin.historyImport.discover.unmappedFound", {
                         count: unmappedUsers.length,
-                        count_text: String(unmappedUsers.length),
+                        count_text: unmappedUsers.length,
                       })}
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => refetch()}>
@@ -1202,21 +1202,21 @@ function MappingsSection({
         <div role="status" className="space-y-1 text-sm">
           <p>
             {t("web.admin.historyImport.mappings.bulkSummary", {
-              accepted: String(bulkRun.data.accepted),
-              active: String(bulkRun.data.active),
-              failed: String(bulkRun.data.failed),
+              accepted: bulkRun.data.accepted,
+              active: bulkRun.data.active,
+              failed: bulkRun.data.failed,
             })}
           </p>
           {bulkRun.data.outcomes.map((outcome) => (
             <p key={outcome.mapping_id}>
               {outcome.error
                 ? t("web.admin.historyImport.mappings.bulkOutcomeWithError", {
-                    id: String(outcome.mapping_id),
+                    id: outcome.mapping_id,
                     status: outcome.status,
                     error: outcome.error,
                   })
                 : t("web.admin.historyImport.mappings.bulkOutcome", {
-                    id: String(outcome.mapping_id),
+                    id: outcome.mapping_id,
                     status: outcome.status,
                   })}
             </p>
@@ -1266,7 +1266,7 @@ function MappingsSection({
                   <TableCell>
                     <p className="text-sm">
                       {users.find((user) => user.id === m.silo_user_id)?.username ||
-                        t("web.admin.historyImport.userFallback", { id: String(m.silo_user_id) })}
+                        t("web.admin.historyImport.userFallback", { id: m.silo_user_id })}
                     </p>
                     {m.silo_profile_name && (
                       <p className="text-muted-foreground text-xs">{m.silo_profile_name}</p>
@@ -1428,7 +1428,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
               const expanded = expandedId === run.id;
               const runUser =
                 userMap.get(run.user_id) ??
-                t("web.admin.historyImport.userFallback", { id: String(run.user_id) });
+                t("web.admin.historyImport.userFallback", { id: run.user_id });
               return (
                 <div key={run.id}>
                   <div className="flex items-center gap-3 px-4 py-3">
@@ -1478,7 +1478,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         <span>
                           {t("web.admin.historyImport.runs.fetchedCount", {
                             count: run.fetched,
-                            count_text: String(run.fetched),
+                            count_text: run.fetched,
                           })}
                         </span>
                       )}
@@ -1486,7 +1486,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         <span className="text-success">
                           {t("web.admin.historyImport.runs.matchedCount", {
                             count: run.matched,
-                            count_text: String(run.matched),
+                            count_text: run.matched,
                           })}
                         </span>
                       )}
@@ -1494,7 +1494,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         <span className="text-warning">
                           {t("web.admin.historyImport.runs.unmatchedCount", {
                             count: run.unmatched,
-                            count_text: String(run.unmatched),
+                            count_text: run.unmatched,
                           })}
                         </span>
                       )}
@@ -1574,7 +1574,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                           <p className="text-muted-foreground text-xs font-medium">
                             {t("web.admin.historyImport.runs.warnings", {
                               count: run.warnings.length,
-                              count_text: String(run.warnings.length),
+                              count_text: run.warnings.length,
                             })}
                           </p>
                           <ul className="text-muted-foreground list-inside list-disc space-y-0.5 text-xs">
@@ -1585,7 +1585,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                               <li className="italic">
                                 {t("web.admin.historyImport.runs.moreWarnings", {
                                   count: run.warnings.length - 5,
-                                  count_text: String(run.warnings.length - 5),
+                                  count_text: run.warnings.length - 5,
                                 })}
                               </li>
                             )}
@@ -1603,7 +1603,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                                 {s.year
                                   ? t("web.admin.historyImport.runs.sampleWithYear", {
                                       title: s.title,
-                                      year: String(s.year),
+                                      year: s.year,
                                       reason: s.reason,
                                     })
                                   : t("web.admin.historyImport.runs.sample", {

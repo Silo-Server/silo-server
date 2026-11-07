@@ -81,7 +81,7 @@ export function NowPlayingWidget() {
           >
             {t("web.admin.dashboard.widgets.nowPlaying.viewAll", {
               count: sessions.length,
-              count_text: String(sessions.length),
+              count_text: sessions.length,
             })}
           </Link>
         )}
@@ -134,7 +134,7 @@ export function NowPlayingWidget() {
               >
                 {t("web.admin.dashboard.widgets.nowPlaying.moreStreams", {
                   count: sessions.length - visibleCount,
-                  count_text: String(sessions.length - visibleCount),
+                  count_text: sessions.length - visibleCount,
                 })}
               </Link>
             )}
@@ -247,11 +247,11 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
       })
     : session.media_title ||
       t("web.admin.dashboard.widgets.nowPlaying.fileFallback", {
-        id: String(session.media_file_id),
+        id: session.media_file_id,
       });
   const username =
     session.username ||
-    t("web.admin.dashboard.widgets.nowPlaying.userFallback", { id: String(session.user_id) });
+    t("web.admin.dashboard.widgets.nowPlaying.userFallback", { id: session.user_id });
   const elapsed = formatRelativeTime(session.started_at, {
     rounding: "floor",
     justNowLabel: t("web.admin.dashboard.widgets.nowPlaying.justNow"),

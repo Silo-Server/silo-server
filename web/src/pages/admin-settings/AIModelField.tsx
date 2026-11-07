@@ -57,7 +57,7 @@ export function ModelField({
       <span className="text-muted-foreground text-xs">
         {t("web.admin.settings.ai.modelField.suggested", {
           count: suggestions.length,
-          count_text: String(suggestions.length),
+          count_text: suggestions.length,
         })}
       </span>
     ) : undefined;

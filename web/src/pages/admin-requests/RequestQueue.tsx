@@ -332,7 +332,7 @@ function newerRequest(a: MediaRequest | undefined, b: MediaRequest | undefined) 
 
 /** An account's name when its username isn't known: "User 7". */
 function accountFallback(t: Translate, id: number) {
-  return t("web.admin.requests.userFallback", { id: String(id) });
+  return t("web.admin.requests.userFallback", { id: id });
 }
 
 function reasonDialogText(t: Translate, prompt: ReasonPrompt | null) {
@@ -589,7 +589,7 @@ function BulkBar({
             ? t("web.admin.requests.bulk.selected", countValues)
             : t("web.admin.requests.bulk.selectAll", {
                 count: rows.length,
-                count_text: String(rows.length),
+                count_text: rows.length,
               })}
         </label>
         {count > 0 ? (

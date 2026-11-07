@@ -26,8 +26,7 @@ function calendarLabels(t: Translate): Partial<Labels> {
     labelMonthDropdown: () => t("web.common.ui.calendar.monthDropdown"),
     labelYearDropdown: () => t("web.common.ui.calendar.yearDropdown"),
     labelWeekNumberHeader: () => t("web.common.ui.calendar.weekNumberHeader"),
-    labelWeekNumber: (weekNumber) =>
-      t("web.common.ui.calendar.weekNumber", { number: String(weekNumber) }),
+    labelWeekNumber: (weekNumber) => t("web.common.ui.calendar.weekNumber", { number: weekNumber }),
     labelDayButton: (date, modifiers, options, dateLib) => {
       const full = fullDate(date, options, dateLib);
       if (modifiers.today && modifiers.selected) {

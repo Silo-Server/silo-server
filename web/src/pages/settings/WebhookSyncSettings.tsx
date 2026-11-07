@@ -131,10 +131,10 @@ function relativeTime(t: Translate, value?: string | null) {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
   if (seconds < 60) return t("web.settings.webhooks.justNow");
   if (seconds < 3600)
-    return t("web.settings.webhooks.minutesAgo", { minutes: String(Math.floor(seconds / 60)) });
+    return t("web.settings.webhooks.minutesAgo", { minutes: Math.floor(seconds / 60) });
   if (seconds < 86400)
-    return t("web.settings.webhooks.hoursAgo", { hours: String(Math.floor(seconds / 3600)) });
-  return t("web.settings.webhooks.daysAgo", { days: String(Math.floor(seconds / 86400)) });
+    return t("web.settings.webhooks.hoursAgo", { hours: Math.floor(seconds / 3600) });
+  return t("web.settings.webhooks.daysAgo", { days: Math.floor(seconds / 86400) });
 }
 
 type ConnectionHealth = "healthy" | "error" | "waiting";
@@ -643,7 +643,7 @@ export default function WebhookSyncSettings() {
                   {hasSignedInToPlex
                     ? t("web.settings.webhooks.add.plexServers", {
                         count: plexServers.length,
-                        count_text: String(plexServers.length),
+                        count_text: plexServers.length,
                       })
                     : t("web.settings.webhooks.add.plexAuthorizeHint")}
                 </p>
@@ -814,14 +814,14 @@ export default function WebhookSyncSettings() {
                         {connection.last_webhook_received_at
                           ? t("web.settings.webhooks.servers.usersLastEvent", {
                               count: userCount,
-                              count_text: String(userCount),
+                              count_text: userCount,
                               time:
                                 relativeTime(t, connection.last_webhook_received_at) ??
                                 formatTimestamp(t, connection.last_webhook_received_at),
                             })
                           : t("web.settings.webhooks.servers.users", {
                               count: userCount,
-                              count_text: String(userCount),
+                              count_text: userCount,
                             })}
                       </p>
                     </div>
@@ -1316,9 +1316,9 @@ export default function WebhookSyncSettings() {
                   <div className="border-border/40 flex items-center justify-between border-t px-1 pt-3">
                     <span className="text-muted-foreground text-xs tracking-tight tabular-nums">
                       {t("web.settings.webhooks.deliveries.range", {
-                        start: String(eventRangeStart),
-                        end: String(eventRangeEnd),
-                        total: String(filteredEvents.length),
+                        start: eventRangeStart,
+                        end: eventRangeEnd,
+                        total: filteredEvents.length,
                       })}
                     </span>
                     <div className="flex items-center gap-0.5">
@@ -1384,7 +1384,7 @@ export default function WebhookSyncSettings() {
               <DialogDescription>
                 {t("web.settings.webhooks.event.receivedHttp", {
                   time: formatTimestamp(t, selectedEvent.received_at),
-                  status: String(selectedEvent.http_status),
+                  status: selectedEvent.http_status,
                 })}
               </DialogDescription>
             </DialogHeader>

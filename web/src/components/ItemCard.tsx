@@ -36,13 +36,13 @@ function formatRuntime(t: Translate, minutes?: number | null) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   if (hours === 0) {
-    return t("web.item.card.runtimeMinutes", { minutes: String(remainingMinutes) });
+    return t("web.item.card.runtimeMinutes", { minutes: remainingMinutes });
   }
   return remainingMinutes === 0
-    ? t("web.item.card.runtimeHours", { hours: String(hours) })
+    ? t("web.item.card.runtimeHours", { hours: hours })
     : t("web.item.card.runtimeHoursMinutes", {
-        hours: String(hours),
-        minutes: String(remainingMinutes),
+        hours: hours,
+        minutes: remainingMinutes,
       });
 }
 
@@ -86,10 +86,10 @@ function mangaCountChipLabel(t: Translate, item: BrowseItem): string | null {
   const chapters = item.manga_chapter_count ?? 0;
   const parts: string[] = [];
   if (volumes > 0) {
-    parts.push(t("web.item.card.mangaVolumes", { count: String(volumes) }));
+    parts.push(t("web.item.card.mangaVolumes", { count: volumes }));
   }
   if (chapters > 0) {
-    parts.push(t("web.item.card.mangaChapters", { count: String(chapters) }));
+    parts.push(t("web.item.card.mangaChapters", { count: chapters }));
   }
   return parts.length > 0 ? parts.join(" · ") : null;
 }

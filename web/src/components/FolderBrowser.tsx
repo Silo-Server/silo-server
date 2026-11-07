@@ -313,7 +313,7 @@ export default function FolderBrowser({
             {selectedPaths.size > 0
               ? t("web.admin.common.folderBrowser.selectedCount", {
                   count: selectedPaths.size,
-                  count_text: String(selectedPaths.size),
+                  count_text: selectedPaths.size,
                 })
               : t("web.admin.common.folderBrowser.selectHint")}
           </div>
@@ -325,7 +325,7 @@ export default function FolderBrowser({
               <Button type="button" onClick={handleAddSelected}>
                 {t("web.admin.common.folderBrowser.addFolders", {
                   count: addableSelected,
-                  count_text: String(addableSelected),
+                  count_text: addableSelected,
                 })}
               </Button>
             ) : (

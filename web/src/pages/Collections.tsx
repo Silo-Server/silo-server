@@ -491,8 +491,8 @@ function moveAnnouncements(t: Translate, collections: Collection[]): Announcemen
     t("web.collections.page.dndUnknownCollection");
   const position = (id: UniqueIdentifier) =>
     t("web.collections.dnd.position", {
-      position: String(collections.findIndex((collection) => collection.id === id) + 1),
-      total: String(collections.length),
+      position: collections.findIndex((collection) => collection.id === id) + 1,
+      total: collections.length,
     });
   return {
     onDragStart: ({ active }) =>
@@ -683,7 +683,7 @@ function Wall({
               className="text-sm font-medium underline-offset-4 hover:underline"
             >
               {t("web.collections.page.seeAllIn", {
-                count: String(entry.total_count),
+                count: entry.total_count,
                 library: entry.library_name,
               })}
             </Link>

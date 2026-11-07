@@ -281,7 +281,7 @@ function ChatGPTConnectionPanel({
                   state: accountState(account),
                   account:
                     account.email || t("web.admin.settings.ai.chatgptConnection.accountFallback"),
-                  number: String(index + 1),
+                  number: index + 1,
                 }),
                 disabled:
                   account.plan_ineligible === true ||
@@ -354,7 +354,7 @@ function ChatGPTConnectionPanel({
                       email: account.email,
                     })
                   : t("web.admin.settings.ai.chatgptConnection.reconnectNumbered", {
-                      number: String(index + 1),
+                      number: index + 1,
                     })}
               </Button>
             ) : null}
@@ -370,7 +370,7 @@ function ChatGPTConnectionPanel({
                       email: account.email,
                     })
                   : t("web.admin.settings.ai.chatgptConnection.disconnectNumbered", {
-                      number: String(index + 1),
+                      number: index + 1,
                     })}
               </Button>
             ) : null}

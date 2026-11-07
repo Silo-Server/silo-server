@@ -18,7 +18,7 @@ export function itemHeadline(item: ItemDetail, t: (id: MessageKey, values?: Text
       : t("web.watchTogether.hero.episode", code);
   }
   return item.year
-    ? t("web.watchTogether.hero.movieYear", { title: item.title, year: String(item.year) })
+    ? t("web.watchTogether.hero.movieYear", { title: item.title, year: item.year })
     : item.title;
 }
 

@@ -266,7 +266,7 @@ export function getSettingAnomaly(
       kind: "stale",
       reason: t("web.admin.common.deviceOverrides.anomaly.stale", {
         count: options.deviceStaleDays,
-        count_text: String(options.deviceStaleDays),
+        count_text: options.deviceStaleDays,
       }),
     };
   }
@@ -733,7 +733,7 @@ export function DeviceProfileTabs({
           <span className="tabular-nums">
             {t("web.admin.common.deviceOverrides.summary.overrides", {
               count: overrideCount,
-              count_text: String(overrideCount),
+              count_text: overrideCount,
               b: (chunks) => <span className="text-foreground/80 font-medium">{chunks}</span>,
             })}
             {showAllSettings && rows.length > overrideCount && (
@@ -741,7 +741,7 @@ export function DeviceProfileTabs({
                 {SEPARATOR}
                 {t("web.admin.common.deviceOverrides.summary.inherited", {
                   count: rows.length - overrideCount,
-                  count_text: String(rows.length - overrideCount),
+                  count_text: rows.length - overrideCount,
                 })}
               </span>
             )}
@@ -756,7 +756,7 @@ export function DeviceProfileTabs({
                 <AlertTriangle className="h-2.5 w-2.5" />
                 {t("web.admin.common.deviceOverrides.summary.suspect", {
                   count: anomalyCountInProfile,
-                  count_text: String(anomalyCountInProfile),
+                  count_text: anomalyCountInProfile,
                 })}
               </span>
             </>

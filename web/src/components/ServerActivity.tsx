@@ -99,7 +99,7 @@ function useServerActivityData() {
 
   const libraryName = (id: number) =>
     libraries.find((l) => l.id === id)?.name ??
-    t("web.admin.common.serverActivity.libraryFallback", { id: String(id) });
+    t("web.admin.common.serverActivity.libraryFallback", { id: id });
 
   return {
     sessions,
@@ -186,7 +186,7 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
                     : "web.admin.common.serverActivity.trigger.active",
                   {
                     count: totalActive,
-                    count_text: String(totalActive),
+                    count_text: totalActive,
                   },
                 )
               : t("web.admin.common.serverActivity.trigger.idle")
@@ -409,7 +409,7 @@ function StreamCountRow({ method, count }: { method: string; count: number }) {
       <span className="text-[12px] font-medium">
         {t("web.admin.common.serverActivity.streamCount", {
           count,
-          count_text: String(count),
+          count_text: count,
           method: meta.label,
         })}
       </span>
@@ -479,7 +479,7 @@ function PreparationsSummary({
     hiddenRunning > 0
       ? t("web.admin.common.serverActivity.moreRunning", {
           count: hiddenRunning,
-          count_text: String(hiddenRunning),
+          count_text: hiddenRunning,
         })
       : "",
     queued > 0 ? t("web.admin.common.serverActivity.queued", localeCount(queued)) : "",
@@ -551,7 +551,7 @@ function PreparationRow({
         </Link>
         {percent != null ? (
           <span className="text-muted-foreground ms-2 shrink-0 text-[10px] font-semibold tabular-nums">
-            {t("web.admin.common.serverActivity.percent", { percent: String(Math.floor(percent)) })}
+            {t("web.admin.common.serverActivity.percent", { percent: Math.floor(percent) })}
           </span>
         ) : (
           <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
@@ -638,7 +638,7 @@ function formatScanProgress(scan: ScanRun, t: Translate) {
       message: result.message ?? t("web.admin.common.serverActivity.processingFiles"),
       processed: result.files_processed.toLocaleString(formatLocale()),
       total: result.total_files.toLocaleString(formatLocale()),
-      percent: String(percent),
+      percent: percent,
     });
   }
   if (result.message) {

@@ -80,7 +80,7 @@ function deriveMediaLocationsWithSummary(
         ...location,
         fileId: version.file_id,
         versionLabel:
-          summaryBuilder(version) || t("web.item.locations.version", { number: String(index + 1) }),
+          summaryBuilder(version) || t("web.item.locations.version", { number: index + 1 }),
       };
     })
     .filter((location): location is MediaLocationEntry => Boolean(location));

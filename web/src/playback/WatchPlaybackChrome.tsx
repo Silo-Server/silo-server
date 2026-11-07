@@ -148,7 +148,7 @@ function buildPlaybackSubtitle(
   }
 
   if (request.libraryId != null) {
-    return t("web.player.bar.library", { id: String(request.libraryId) });
+    return t("web.player.bar.library", { id: request.libraryId });
   }
 
   return undefined;

@@ -742,16 +742,16 @@ function exportScopeLabel(t: Translate, job: AdminJob) {
   const exportRequest = job.request_payload as { library_ids?: number[] };
   const count = exportRequest.library_ids?.length ?? 0;
   return count > 0
-    ? t("web.admin.catalogMaintenance.exports.libraryCount", { count, count_text: String(count) })
+    ? t("web.admin.catalogMaintenance.exports.libraryCount", { count, count_text: count })
     : t("web.admin.catalogMaintenance.exports.allLibraries");
 }
 
 function itemCount(t: Translate, count: number) {
-  return t("web.admin.catalogMaintenance.count.items", { count, count_text: String(count) });
+  return t("web.admin.catalogMaintenance.count.items", { count, count_text: count });
 }
 
 function fileCount(t: Translate, count: number) {
-  return t("web.admin.catalogMaintenance.count.files", { count, count_text: String(count) });
+  return t("web.admin.catalogMaintenance.count.files", { count, count_text: count });
 }
 
 function describeExportJob(t: Translate, job: AdminJob) {

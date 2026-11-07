@@ -359,14 +359,14 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
       ? t("web.admin.access.groups.card.allLibraries")
       : t("web.admin.access.groups.card.libraryCount", {
           count: group.library_ids.length,
-          count_text: String(group.library_ids.length),
+          count_text: group.library_ids.length,
         }),
     group.download_allowed
       ? t("web.admin.access.groups.card.downloadsOn")
       : t("web.admin.access.groups.card.downloadsOff"),
     t("web.admin.access.groups.card.streams", {
       count: Math.max(group.max_streams, 0),
-      count_text: String(Math.max(group.max_streams, 0)),
+      count_text: Math.max(group.max_streams, 0),
     }),
     group.requests_allowed
       ? t("web.admin.access.groups.card.requestsOn")
@@ -396,7 +396,7 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
         <span className="bg-secondary text-secondary-foreground shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium">
           {t("web.admin.access.groups.card.memberCount", {
             count: group.member_count,
-            count_text: String(group.member_count),
+            count_text: group.member_count,
           })}
         </span>
       </div>
@@ -467,7 +467,7 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
   const deleteDescription = t("web.admin.access.groups.delete.description", {
     members: memberCount === undefined ? "unknown" : memberCount === 0 ? "none" : "some",
     count: memberCount ?? 0,
-    count_text: String(memberCount ?? 0),
+    count_text: memberCount ?? 0,
     destination: defaultGroupName ? "named" : "unnamed",
     default_group: defaultGroupName ?? "",
   });

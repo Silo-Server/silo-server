@@ -1308,7 +1308,7 @@ export default function NotificationsAdminSettings() {
                   <Chip>
                     {t("web.admin.settings.notifications.serverChannelsCard.destinations", {
                       count: serverChannels.length,
-                      count_text: String(serverChannels.length),
+                      count_text: serverChannels.length,
                     })}
                   </Chip>
                 )}
@@ -1316,7 +1316,7 @@ export default function NotificationsAdminSettings() {
                   <Chip tone="warning">
                     {t("web.admin.settings.notifications.serverChannelsCard.failing", {
                       count: failingServerChannels,
-                      count_text: String(failingServerChannels),
+                      count_text: failingServerChannels,
                     })}
                   </Chip>
                 )}

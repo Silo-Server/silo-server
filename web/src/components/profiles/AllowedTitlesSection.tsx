@@ -169,11 +169,11 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
                           count: collection.item_count,
-                          count_text: String(collection.item_count),
+                          count_text: collection.item_count,
                         })
                       : t("web.profiles.allowedTitles.titleCountPaused", {
                           count: collection.item_count,
-                          count_text: String(collection.item_count),
+                          count_text: collection.item_count,
                         })}
                   </span>
                 </span>

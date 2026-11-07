@@ -15,7 +15,7 @@ const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
 
 function itemLabel(t: Translate, title: string, year?: number): string {
-  return year ? t("web.home.addRow.curated.title", { title, year: String(year) }) : title;
+  return year ? t("web.home.addRow.curated.title", { title, year: year }) : title;
 }
 
 /**
@@ -138,7 +138,7 @@ export function CuratedTitlesEditor({
                     <span className="text-muted-foreground ms-1.5 text-xs">
                       {item.year
                         ? t("web.home.addRow.curated.resultMeta", {
-                            year: String(item.year),
+                            year: item.year,
                             type: item.type,
                           })
                         : item.type}

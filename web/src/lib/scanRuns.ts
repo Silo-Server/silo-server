@@ -98,7 +98,7 @@ export function formatActiveScanStarted(iso: string | undefined) {
     return t("web.admin.common.scans.startedHoursAgo", { count: hours });
   }
   const days = Math.floor(seconds / 86400);
-  return t("web.admin.common.scans.startedDaysAgo", { count: days, count_text: String(days) });
+  return t("web.admin.common.scans.startedDaysAgo", { count: days, count_text: days });
 }
 
 export function formatActiveScanProgress(scan: ScanRun) {
@@ -115,7 +115,7 @@ export function formatActiveScanProgress(scan: ScanRun) {
       message: result.message ?? t("web.admin.common.scans.processingFiles"),
       processed: result.files_processed.toLocaleString(formatLocale()),
       total: result.total_files.toLocaleString(formatLocale()),
-      percent: String(percent),
+      percent: percent,
     });
   }
   return result.message ?? "";

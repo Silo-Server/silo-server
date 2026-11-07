@@ -159,14 +159,13 @@ function formatDurationSeconds(seconds?: number): string {
   const s = total % 60;
   if (h > 0) {
     return t("web.detail.mediaInfo.durationHms", {
-      hours: String(h),
-      minutes: String(m),
-      seconds: String(s),
+      hours: h,
+      minutes: m,
+      seconds: s,
     });
   }
-  if (m > 0)
-    return t("web.detail.mediaInfo.durationMs", { minutes: String(m), seconds: String(s) });
-  return t("web.detail.mediaInfo.durationS", { seconds: String(s) });
+  if (m > 0) return t("web.detail.mediaInfo.durationMs", { minutes: m, seconds: s });
+  return t("web.detail.mediaInfo.durationS", { seconds: s });
 }
 
 function pushRow(rows: MediaSpecRow[], label: MessageKey, value?: string | false) {
@@ -183,7 +182,7 @@ function sectionTitle(
   index: number,
   total: number,
 ): string {
-  return total > 1 ? t(numbered, { number: String(index + 1) }) : t(kind);
+  return total > 1 ? t(numbered, { number: index + 1 }) : t(kind);
 }
 
 function trackTitle(track: { title?: string; embedded_title?: string }): string {
@@ -230,7 +229,7 @@ export function buildVideoSections(version: FileVersion): MediaSpecSection[] {
     pushRow(
       rows,
       "web.detail.mediaInfo.row.bitDepthLabel",
-      track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: String(track.bit_depth) }) : "",
+      track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: track.bit_depth }) : "",
     );
     pushRow(rows, "web.detail.mediaInfo.row.pixelFormat", track.pixel_format);
     pushRow(
@@ -281,7 +280,7 @@ export function buildAudioSections(version: FileVersion): MediaSpecSection[] {
     pushRow(
       rows,
       "web.detail.mediaInfo.row.bitDepthLabel",
-      track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: String(track.bit_depth) }) : "",
+      track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: track.bit_depth }) : "",
     );
     pushRow(rows, "web.detail.mediaInfo.row.defaultLabel", yesIf(track.default));
     return {

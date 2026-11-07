@@ -220,7 +220,7 @@ export function DeviceDownloadsCard({
         }),
       ]
     : [shortenId(deviceId), profileMeta];
-  const counted = (key: MessageKey, n: number) => t(key, { count: n, count_text: String(n) });
+  const counted = (key: MessageKey, n: number) => t(key, { count: n, count_text: n });
   const totals = android
     ? [
         onDevice > 0 ? counted("web.admin.users.detail.downloads.count.onDevice", onDevice) : "",

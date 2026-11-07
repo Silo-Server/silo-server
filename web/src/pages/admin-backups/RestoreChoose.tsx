@@ -496,7 +496,7 @@ function SectionBlock({
                   names={names}
                   label={t("web.admin.backups.restore.choose.sameLabel", {
                     count: groups.same.length,
-                    count_text: String(groups.same.length),
+                    count_text: groups.same.length,
                   })}
                 />
               ) : null}
@@ -576,7 +576,7 @@ export function RestoreChoose({
             <SettingFieldStatus tone="warn">
               {t("web.admin.backups.restore.choose.omitted", {
                 count: set.omitted.length,
-                count_text: String(set.omitted.length),
+                count_text: set.omitted.length,
               })}
             </SettingFieldStatus>
           </div>
@@ -586,7 +586,7 @@ export function RestoreChoose({
             <SettingFieldStatus tone="warn">
               {t("web.admin.backups.restore.choose.missingFiles", {
                 count: set.missing_blobs.length,
-                count_text: String(set.missing_blobs.length),
+                count_text: set.missing_blobs.length,
               })}
             </SettingFieldStatus>
           </div>
