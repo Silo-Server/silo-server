@@ -6,6 +6,7 @@
 ./internal/catalog TestDualLibraryItemDeniedByDisabledLibraryDB
 ./internal/catalog TestEpisodeOpensUnderEveryLibraryOfItsSeriesDB
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
+./internal/catalog TestCatalogSearchSortsByProfilePlaysDB
 ./internal/catalog TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
