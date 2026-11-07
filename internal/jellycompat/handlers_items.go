@@ -260,7 +260,7 @@ func (h *ItemsHandler) HandleItems(w http.ResponseWriter, r *http.Request) {
 		h.handleBrowseItems(w, r, session, query)
 	case query.isResumable:
 		h.handleResumeResponse(w, r, session, query)
-	case query.sortsPlayedListByCatalog():
+	case h.browsesPlayedListByCatalog(query):
 		// The played list reads progress rows, which carry no catalog fields
 		// to sort by; the catalog browse applies IsPlayed and sorts.
 		h.handleBrowseItems(w, r, session, query)
