@@ -1,5 +1,5 @@
 import { t } from "@/i18n";
-import { formatLocale } from "@/lib/appLocale";
+import { appLanguage, formatLocale } from "@/lib/appLocale";
 
 /** Returns the ISO date string (YYYY-MM-DD) of the Monday for the week containing `date`. */
 export function getWeekStart(date: Date): string {
@@ -41,7 +41,16 @@ export function formatDayHeading(dateStr: string): string {
   const d = parseDate(dateStr);
   const weekday = d.toLocaleDateString(formatLocale(), { weekday: "long" });
   const month = d.toLocaleDateString(formatLocale(), { month: "long" });
-  return t("web.calendar.dayHeading", { weekday, month, day: String(d.getDate()) });
+  const heading = t("web.calendar.dayHeading", { weekday, month, day: String(d.getDate()) });
+  // Languages that write weekdays in lower case ("miércoles, 4 de noviembre")
+  // still start a heading with a capital; skip any leading isolate marks.
+  // English keeps its bytes, even with a browser that names days in another
+  // language.
+  if (appLanguage() === "en") return heading;
+  return heading.replace(
+    /^([\u2066-\u2069\u200e\u200f]*)(\p{Ll})/u,
+    (_, marks: string, letter: string) => marks + letter.toLocaleUpperCase(formatLocale()),
+  );
 }
 
 /** Returns a short day label like "Mon" and day number like "7". */
