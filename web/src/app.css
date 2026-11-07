@@ -665,6 +665,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
        (card overlay badges scale with the card in container units). Browsers
        without CSS trigonometry fall back to the in-app scale factor. */
     --ui-root-text-ratio: var(--ui-text-scale-factor);
+    /* Japanese and Chinese lines never start with "ー" or a small kana. This
+       only changes where CJK text may break. */
+    line-break: strict;
   }
   @supports (width: calc(1px * tan(atan2(1rem, 16px)))) {
     html {
