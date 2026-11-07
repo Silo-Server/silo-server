@@ -200,7 +200,8 @@ export default function FolderBrowser({
               <div className="min-w-0 overflow-x-auto">
                 <p className="font-medium">{t("web.admin.common.folderBrowser.currentFolder")}</p>
                 <p className="text-muted-foreground font-mono text-xs whitespace-nowrap">
-                  {resolvedPath}
+                  {/* A path reads left to right in every language. */}
+                  <span dir="ltr">{resolvedPath}</span>
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">

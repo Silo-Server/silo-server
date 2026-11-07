@@ -76,6 +76,7 @@ import {
   saveEbookReaderConfigKeepalive,
   type EbookReaderAnnotation,
 } from "@/reader/ebookReaderApi";
+import { readingArrowKey } from "@/lib/direction";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
 
@@ -520,9 +521,11 @@ export default function EbookReader() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isEditableTarget(event.target)) return;
-      if (event.key === "ArrowLeft") {
+      // The page buttons mirror right to left, so the keys follow them.
+      const key = readingArrowKey({ key: event.key, currentTarget: document.documentElement });
+      if (key === "ArrowLeft") {
         readerRef.current?.prev();
-      } else if (event.key === "ArrowRight") {
+      } else if (key === "ArrowRight") {
         readerRef.current?.next();
       }
     };
