@@ -124,6 +124,8 @@ interface FormatFileSizeOptions {
   fallback?: string;
   /** Use IEC unit labels (GiB/MiB/KiB) instead of GB/MB/KB. Math is 1024-based either way. */
   iecUnits?: boolean;
+  /** Drop a zero decimal, as a limit is said: "64 MB", not "64.0 MB". */
+  trimZeroDecimal?: boolean;
 }
 
 const SIZE_UNIT_KEYS: Record<"si" | "iec", [MessageKey, MessageKey, MessageKey]> = {
@@ -132,12 +134,13 @@ const SIZE_UNIT_KEYS: Record<"si" | "iec", [MessageKey, MessageKey, MessageKey]>
 };
 
 export function formatFileSize(bytes?: number, options: FormatFileSizeOptions = {}): string {
-  const { fallback = "", iecUnits = false } = options;
+  const { fallback = "", iecUnits = false, trimZeroDecimal = false } = options;
   if (!isPositive(bytes)) return fallback;
   const [giga, mega, kilo] = SIZE_UNIT_KEYS[iecUnits ? "iec" : "si"];
-  if (bytes >= 1024 ** 3) return t(giga, { size: formatDecimal(bytes / 1024 ** 3, 1) });
-  if (bytes >= 1024 ** 2) return t(mega, { size: formatDecimal(bytes / 1024 ** 2, 1) });
-  if (bytes >= 1024) return t(kilo, { size: formatDecimal(bytes / 1024, 1) });
+  const size = (value: number) => formatDecimal(value, 1, trimZeroDecimal ? 0 : 1);
+  if (bytes >= 1024 ** 3) return t(giga, { size: size(bytes / 1024 ** 3) });
+  if (bytes >= 1024 ** 2) return t(mega, { size: size(bytes / 1024 ** 2) });
+  if (bytes >= 1024) return t(kilo, { size: size(bytes / 1024) });
   return t("web.common.format.size.bytes", { size: String(bytes) });
 }
 
