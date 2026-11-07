@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -116,5 +117,172 @@ func TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB(t *testing.T) {
 	}
 	if stored.ProbeFailedAt == nil || stored.ProbeUpdatedAt != nil {
 		t.Fatalf("probe state after rescan: failed=%v updated=%v, want the rejection kept", stored.ProbeFailedAt, stored.ProbeUpdatedAt)
+	}
+}
+
+// TestScanSkipsVideoLibraryFilesWithoutVideoDB covers a file in a movie
+// library that ffprobe reads as audio only, such as a soundtrack saved as
+// .mkv. It is not cataloged, and a row written while the file still held video
+// leaves through the missing-file path, so its title is hidden at once and
+// deleted after the removal grace, and a later scan whose probe fails or
+// rejects the file does not bring it back. Only a container whose header lists every stream is
+// judged: an MPEG program stream can hold video past the part ffprobe reads.
+func TestScanSkipsVideoLibraryFilesWithoutVideoDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	repo := NewFileRepository(pool)
+	ffprobe := writeAudioOnlyFFprobe(t)
+
+	for _, tc := range []struct {
+		name string
+		scan func(ctx context.Context, s *Scanner, folder *models.MediaFolder, paths []string) error
+	}{
+		{"folder scan", func(ctx context.Context, s *Scanner, folder *models.MediaFolder, _ []string) error {
+			_, err := s.ScanFolder(ctx, folder)
+			return err
+		}},
+		{"file scan", func(ctx context.Context, s *Scanner, folder *models.MediaFolder, paths []string) error {
+			for _, path := range paths {
+				if err := s.ScanFile(ctx, path, folder); err != nil {
+					return err
+				}
+			}
+			return nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			root := t.TempDir()
+			folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("audio-only-%d", time.Now().UnixNano()))
+			folder := &models.MediaFolder{ID: folderID, Type: "movies", Paths: []string{root}}
+			newPath := filepath.Join(root, "Soundtrack (2020).mkv")
+			replacedPath := filepath.Join(root, "Replaced (2020).mkv")
+			legacyPath := filepath.Join(root, "Score (2021).mkv")
+			programStreamPath := filepath.Join(root, "Program Stream (2019).mpg")
+			paths := []string{newPath, replacedPath, legacyPath, programStreamPath}
+			for _, path := range paths {
+				if err := os.WriteFile(path, []byte("audio"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// One row a scan wrote while the file was still a video, and one
+			// written for the audio-only file before such files were skipped.
+			oldModifiedAt := time.Now().UTC().Add(-time.Hour)
+			probedAt := time.Now().UTC()
+			for _, row := range []models.MediaFile{
+				{FilePath: replacedPath, FileSize: 1 << 30, FileModifiedAt: &oldModifiedAt, CodecVideo: "h264", Container: "matroska", Duration: 5400},
+				{FilePath: legacyPath, FileSize: 5, FileModifiedAt: &oldModifiedAt, CodecAudio: "aac", Container: containerMKV, Duration: 6,
+					AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 2}}, ProbeSource: probeSourceLocal, ProbeUpdatedAt: &probedAt},
+			} {
+				row.MediaFolderID, row.SubtitleTracks, row.ExternalSubtitles = folderID, []models.SubtitleTrack{}, []models.ExternalSubtitle{}
+				if _, err := repo.Upsert(ctx, row); err != nil {
+					t.Fatalf("seed %s: %v", filepath.Base(row.FilePath), err)
+				}
+			}
+
+			if err := tc.scan(ctx, NewScanner(repo, ffprobe, nil, 1, false, time.Hour), folder, paths); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if _, err := repo.GetByPath(ctx, newPath); !errors.Is(err, ErrFileNotFound) {
+				t.Fatalf("audio-only .mkv: GetByPath err = %v, want no row", err)
+			}
+			if stored, err := repo.GetByPath(ctx, replacedPath); err != nil || stored.MissingSince == nil || stored.CodecVideo != "h264" {
+				t.Fatalf("replaced row: %s (err %v), want marked missing with its old facts", rowState(stored), err)
+			}
+			if stored, err := repo.GetByPath(ctx, programStreamPath); err != nil || stored.MissingSince != nil {
+				t.Fatalf("audio-only .mpg: GetByPath = %v, %v; want a present row", stored, err)
+			}
+
+			for _, failing := range []string{filepath.Join(t.TempDir(), "ffprobe"), writeRejectingFFprobe(t)} {
+				if err := tc.scan(ctx, NewScanner(repo, failing, nil, 1, false, time.Hour), folder, []string{legacyPath}); err != nil {
+					t.Fatalf("scan with a failing ffprobe: %v", err)
+				}
+				if stored, err := repo.GetByPath(ctx, legacyPath); err != nil || stored.MissingSince == nil || stored.CodecAudio != "aac" {
+					t.Fatalf("legacy audio-only row after a failed probe: %s (err %v), want still missing with its facts", rowState(stored), err)
+				}
+			}
+		})
+	}
+}
+
+// TestMovedFileWithoutVideoIsNotRelinkedDB covers a renamed file whose probe
+// finds no video: it must not take back the row it had at its old path, which
+// would restore its title without the scan ever judging it.
+func TestMovedFileWithoutVideoIsNotRelinkedDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	repo := NewFileRepository(pool)
+	ctx := t.Context()
+	root := t.TempDir()
+	folderID := seedDeadRootTestFolder(t, pool, "movies", fmt.Sprintf("moved-audio-%d", time.Now().UnixNano()))
+	folder := &models.MediaFolder{ID: folderID, Type: "movies", Paths: []string{root}}
+	from := filepath.Join(root, "Score (2021)", "Score (2021).mkv")
+	to := filepath.Join(root, "Score (2021)", "Score (2021) - 1080p.mkv")
+	writeRelinkTestMedia(t, from, 1)
+	writeRelinkTestMedia(t, filepath.Join(root, "Keeper (2010)", "Keeper (2010).mkv"), 9)
+	// A node without ffprobe catalogs the file without judging its streams.
+	if _, err := NewScanner(repo, "", nil, 1, false, time.Hour).ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("first scan: %v", err)
+	}
+	if err := os.Rename(from, to); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewScanner(repo, writeAudioOnlyFFprobe(t), nil, 1, false, time.Hour).ScanFolder(ctx, folder); err != nil {
+		t.Fatalf("scan after rename: %v", err)
+	}
+	if _, err := repo.GetByPath(ctx, to); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("renamed audio-only file: GetByPath err = %v, want no row", err)
+	}
+	if stored, err := repo.GetByPath(ctx, from); err != nil || stored.MissingSince == nil {
+		t.Fatalf("old row: %s (err %v), want marked missing", rowState(stored), err)
+	}
+}
+
+// rowState describes the fields TestScanSkipsVideoLibraryFilesWithoutVideoDB
+// checks.
+func rowState(file *models.MediaFile) string {
+	if file == nil {
+		return "no row"
+	}
+	return fmt.Sprintf("missing_since=%v codec_video=%q codec_audio=%q", file.MissingSince, file.CodecVideo, file.CodecAudio)
+}
+
+// writeAudioOnlyFFprobe writes an ffprobe that reads every file as one AAC
+// stream, in the container its extension names.
+func writeAudioOnlyFFprobe(t *testing.T) string {
+	t.Helper()
+	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, ffprobe, `#!/bin/sh
+for arg; do file=$arg; done
+case $file in
+*.mpg) format=mpeg ;;
+*.mp3) format=mp3 ;;
+*) format=matroska,webm ;;
+esac
+printf '{"format":{"format_name":"%s","duration":"6.0","size":"5"},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":2}]}\n' "$format"
+`)
+	return ffprobe
+}
+
+// TestPodcastSubtreeScanKeepsAudioFilesDB covers podcast subtree scans, which
+// share the video scan path with movie libraries: their audio files are
+// cataloged, not skipped for having no video.
+func TestPodcastSubtreeScanKeepsAudioFilesDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	repo := NewFileRepository(pool)
+	ffprobe := writeAudioOnlyFFprobe(t)
+	ctx := t.Context()
+	root := t.TempDir()
+	folderID := seedDeadRootTestFolder(t, pool, "podcasts", fmt.Sprintf("podcast-audio-%d", time.Now().UnixNano()))
+	folder := &models.MediaFolder{ID: folderID, Type: "podcasts", Paths: []string{root}}
+	show := filepath.Join(root, "Some Show")
+	episode := filepath.Join(show, "Episode 1.mp3")
+	if err := errors.Join(os.MkdirAll(show, 0o755), os.WriteFile(episode, []byte("audio"), 0o600)); err != nil {
+		t.Fatal(err)
+	}
+	s := NewScanner(repo, ffprobe, nil, 1, false, time.Hour)
+	if _, err := s.ScanSubtree(ctx, folder, show); err != nil {
+		t.Fatalf("ScanSubtree: %v", err)
+	}
+	if stored, err := repo.GetByPath(ctx, episode); err != nil || stored.MissingSince != nil {
+		t.Fatalf("podcast episode: GetByPath = %v, %v; want a present row", stored, err)
 	}
 }

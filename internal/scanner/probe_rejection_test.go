@@ -58,6 +58,36 @@ func TestIsProbeRejectionSeparatesRefusedFilesFromProbeTrouble(t *testing.T) {
 		t.Fatal("nil error reported as a rejection")
 	}
 
+	// ffprobe can exit 0 on a damaged file after guessing its format, such as
+	// an AVI with a broken header read as a bare MPEG-4 stream at score 5. A
+	// score at or below AVPROBE_SCORE_RETRY (25) is a guess, and a guess of a
+	// container the extension rules out is a rejection. A low score for the
+	// container the extension names is a short valid stream, not damage: a
+	// .m4v file can be a bare MPEG-4 stream of a few frames, read as m4v at 25.
+	rawStream := filepath.Join(t.TempDir(), "S01E04.m4v")
+	if err := os.WriteFile(rawStream, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		file      string
+		format    string
+		score     int
+		rejection bool
+	}{
+		{media, "m4v", 5, true},
+		{media, "m4v", 25, true},
+		{media, "m4v", 26, false},
+		{media, "matroska,webm", 5, false},
+		{rawStream, "m4v", 25, false},
+	} {
+		guess := filepath.Join(t.TempDir(), "ffprobe")
+		writeFakeTool(t, guess, fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' '{\"format\":{\"format_name\":\"%s\",\"probe_score\":%d},\"streams\":[{\"codec_type\":\"video\",\"codec_name\":\"mpeg4\",\"width\":640,\"height\":360}]}'\n", tc.format, tc.score))
+		_, err = ProbeFile(ctx, guess, tc.file)
+		if got := err != nil && IsProbeRejection(ctx, tc.file, err); got != tc.rejection {
+			t.Fatalf("%s read as %s at probe_score %d: err = %v, rejection = %v, want %v", filepath.Base(tc.file), tc.format, tc.score, err, got, tc.rejection)
+		}
+	}
+
 	// The shell and the dynamic loader exit 126 or 127 when ffprobe itself
 	// cannot start, such as a shared library it cannot map.
 	for _, code := range []int{126, 127} {
