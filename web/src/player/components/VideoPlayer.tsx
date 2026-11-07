@@ -143,7 +143,7 @@ import {
   setWatchTogetherGuestControl,
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import { MediaDataMeter } from "../media-data-meter";
 import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
@@ -2465,9 +2465,9 @@ export function VideoPlayer({
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
   const hudSubtitle = seriesContext
-    ? `S${seriesContext.currentSeason} · E${seriesContext.currentEpisode}${title ? ` — ${title}` : ""}`
+    ? `S${numberText(seriesContext.currentSeason)} · E${numberText(seriesContext.currentEpisode)}${title ? ` — ${title}` : ""}`
     : year
-      ? String(year)
+      ? numberText(year)
       : undefined;
   const cancelNextEpisodeAutoPlay = nextEpisode.cancelAutoPlay;
   const cancelNextEpisodeAutoPlayRef = useRef(cancelNextEpisodeAutoPlay);

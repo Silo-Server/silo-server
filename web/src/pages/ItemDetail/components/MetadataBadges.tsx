@@ -1,4 +1,4 @@
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 
 interface MetadataBadgesProps {
   year?: string;
@@ -39,7 +39,7 @@ export default function MetadataBadges({
   const age = String(advisoryAge);
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {year && <span className="metadata-badge">{year}</span>}
+      {year && <span className="metadata-badge">{numberText(year)}</span>}
       {contentRating && <span className="metadata-badge">{contentRating}</span>}
       {advisoryAge != null && advisoryAge > 0 && (
         <span

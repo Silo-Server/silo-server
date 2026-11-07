@@ -30,7 +30,7 @@ import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useContinueWatching } from "@/hooks/queries/progress";
 import {
@@ -144,7 +144,7 @@ function buildPlaybackSubtitle(
   }
 
   if (item.year) {
-    return String(item.year);
+    return numberText(item.year);
   }
 
   if (request.libraryId != null) {

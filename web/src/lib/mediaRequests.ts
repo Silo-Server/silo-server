@@ -10,7 +10,7 @@ import type {
   RequestSearchMediaType,
   RequestUserState,
 } from "@/api/types";
-import { t } from "@/i18n";
+import { numberText, t } from "@/i18n";
 import { formatDate } from "@/lib/datetime";
 
 export function formatMediaType(mediaType: RequestMediaType): string {
@@ -260,7 +260,9 @@ export function formatSeasonList(seasons: number[]): string {
   for (let i = 0; i < sorted.length; ) {
     let j = i;
     while (j + 1 < sorted.length && sorted[j + 1] === sorted[j]! + 1) j++;
-    runs.push(j > i ? `${sorted[i]}–${sorted[j]}` : String(sorted[i]));
+    runs.push(
+      j > i ? `${numberText(sorted[i]!)}–${numberText(sorted[j]!)}` : numberText(sorted[i]!),
+    );
     i = j + 1;
   }
   return t("web.requests.status.seasonList", { count: sorted.length, list: runs.join(", ") });

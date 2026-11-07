@@ -46,7 +46,7 @@ import {
 } from "@/lib/mediaRequests";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
-import { useT, type MessageKey } from "@/i18n";
+import { numberText, useT, type MessageKey } from "@/i18n";
 
 type RequestTab = "discover" | "yours";
 type RequestGroupKey = "attention" | "on_the_way" | "in_library" | "cancelled";
@@ -418,7 +418,7 @@ function RequestRow({
   const MediaIcon = request.media_type === "series" ? Tv : Film;
   const details = [
     formatMediaType(request.media_type),
-    request.year ? String(request.year) : "",
+    request.year ? numberText(request.year) : "",
     request.seasons?.length ? formatSeasonList(request.seasons) : "",
     state === "partially_available" && request.season_progress?.length
       ? formatSeasonProgress(request.season_progress)

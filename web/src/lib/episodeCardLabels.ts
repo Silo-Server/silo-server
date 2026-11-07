@@ -1,4 +1,4 @@
-import { t } from "@/i18n";
+import { numberText, t } from "@/i18n";
 
 interface EpisodeCardLabelItem {
   type?: string;
@@ -17,8 +17,8 @@ export interface EpisodeCardLabels {
 /** "S01E02", zero-padded like the Apple and Android episode cards. */
 export function formatEpisodeCode(seasonNumber: number, episodeNumber: number): string {
   return t("web.detail.episodeCode", {
-    season: String(seasonNumber).padStart(2, "0"),
-    episode: String(episodeNumber).padStart(2, "0"),
+    season: numberText(String(seasonNumber).padStart(2, "0")),
+    episode: numberText(String(episodeNumber).padStart(2, "0")),
   });
 }
 

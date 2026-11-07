@@ -27,7 +27,7 @@ import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { isEpisodeStill, isEpisodeUnwatched } from "@/lib/episodeSpoilers";
 import { RatingEntry } from "@/components/ratings/RatingEntry";
 import { formatHeroMetadata } from "./heroMetadata";
-import { useAppLanguage, useT, type Translate } from "@/i18n";
+import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 
 // On-view translation for the visible slide loads after the hero itself, so
 // it stays out of the launch bundle; the plain overview shows meanwhile.
@@ -334,7 +334,7 @@ export default function HeroBanner({
   const metadata = formatHeroMetadata(current);
 
   const slideCount = slides.length;
-  const padded = (n: number) => String(n).padStart(2, "0");
+  const padded = (n: number) => numberText(String(n).padStart(2, "0"));
   const activeAudiobookPlaying =
     current.type === "audiobook" && audiobookPlayback?.active?.contentId === current.content_id
       ? audiobookPlayback.active.playing

@@ -50,8 +50,13 @@ function Dialog({ row }: { row: HomeRow }) {
   `{count, plural, one {# page} other {# pages}}`; pass `count` as a number. A
   language without the message falls back to English with English plural rules.
 - **Placeholders:** pass dates, durations and sizes already formatted, as strings
-  (`formatLocale()` / `appLanguage()` from `@/lib/appLocale`). Pass a number that is
-  not a plural count as a string too, or ICU groups it (`2,026`).
+  (`formatLocale()` / `appLanguage()` from `@/lib/appLocale`).
+- **Digits:** in Arabic, numbers print in the format locale's digits, as dates do
+  (Arabic-Indic on ar-EG, Latin on ar-AE): the plural `#` and number values. A
+  string is never changed, so pass a number that is shown as a number, not
+  `String(n)`; a plain `{n}` prints it without grouping in every language. A number
+  shown outside a message, such as a year, goes through `numberText()`; a value
+  that is sent, matched or put in a URL never does.
 - **Apostrophes:** the catalog validator rejects an ASCII `'` next to a brace or `#`
   (`{name}'s`, `'{title}'`). Extraction can't change English, so such a string stays
   literal, with an `eslint-disable` comment saying why, until a wording change replaces it.

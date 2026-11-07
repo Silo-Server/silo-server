@@ -22,7 +22,7 @@ import {
   useRetryMediaRequest,
 } from "@/hooks/queries/admin/requests";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime } from "@/lib/datetime";
 import { formatMediaType, formatSeasonList, requestDetailHref } from "@/lib/mediaRequests";
@@ -675,7 +675,7 @@ function QueueRow({
           </Link>
           <p className="text-muted-foreground text-xs">
             {[
-              request.year,
+              request.year ? numberText(request.year) : null,
               formatMediaType(request.media_type),
               request.seasons?.length ? formatSeasonList(request.seasons) : null,
             ]

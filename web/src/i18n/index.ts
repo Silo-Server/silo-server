@@ -16,6 +16,8 @@ export {
   appIntl,
   createAppIntl,
   englishText,
+  messageNumberingSystem,
+  numberText,
   serverText,
   setAppIntl,
   subscribeAppIntl,

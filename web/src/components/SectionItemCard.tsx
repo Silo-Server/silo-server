@@ -21,7 +21,7 @@ import {
 import type { SectionItem } from "@/api/types";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
-import { useAppLanguage, useT } from "@/i18n";
+import { numberText, useAppLanguage, useT } from "@/i18n";
 
 interface SectionItemCardProps {
   item: SectionItem;
@@ -158,7 +158,7 @@ export default memo(function SectionItemCard({
         ) : (
           <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
             {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
-            {item.year ? String(item.year) : null}{" "}
+            {item.year ? numberText(item.year) : null}{" "}
             {item.type === "series" ? t("web.home.sectionRow.seriesType") : null}
           </ViewTransitionLink>
         )}

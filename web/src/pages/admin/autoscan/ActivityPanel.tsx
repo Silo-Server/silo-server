@@ -46,7 +46,7 @@ import {
 } from "@/components/ui/table";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import {
   useAutoscanConnections,
   useAutoscanEvents,
@@ -655,7 +655,7 @@ function eventDetailsSummary(t: Translate, event: AutoscanEvent): string {
   );
   const linkedText = t("web.admin.autoscan.activity.details.linkedCount", {
     count: linked,
-    count_text: `${linked}${event.changes_truncated ? "+" : ""}`,
+    count_text: `${numberText(linked)}${event.changes_truncated ? "+" : ""}`,
   });
   return [paths, linkedText].join(SEPARATOR);
 }

@@ -170,7 +170,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
         : ENGLISH_APP_LOCALE;
       const translated: Messages = messages ? { ...messages, ...adminMessages } : {};
       // The formatter first: helpers that subscribe to the app locale read it.
-      const next = createAppIntl(locale.catalog, translated);
+      const next = createAppIntl(locale.catalog, translated, locale.formatLocale);
       setAppIntl(next, { admin: adminMessages !== undefined });
       setAppLocale(locale);
       setIntl(next);
