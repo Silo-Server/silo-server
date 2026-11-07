@@ -198,6 +198,8 @@ func NewRouter(deps Dependencies) chi.Router {
 	if deps.KeptSubtitles != nil {
 		playbackHandler.SubtitleCache.SetEmbeddedSource(deps.KeptSubtitles)
 	}
+	playbackHandler.AudioPreferences = deps.AudioPreferences
+	playbackHandler.SubtitlePreferences = deps.SubtitlePreferences
 	if subtitleRepo != nil {
 		playbackHandler.SubtitleRepo = subtitleRepo
 		playbackHandler.SubtitleBlobs = deps.SubtitleBlobs
