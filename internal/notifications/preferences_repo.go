@@ -24,12 +24,11 @@ func NewPreferencesRepository(pool *pgxpool.Pool) *PreferencesRepository {
 func (r *PreferencesRepository) Get(ctx context.Context, userID int, profileID string) (Preferences, error) {
 	prefs := DefaultPreferences(userID, profileID)
 	err := r.pool.QueryRow(ctx, `
-		SELECT enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up, updated_at
+		SELECT enabled, notify_next_up, updated_at
 		FROM notification_preferences
 		WHERE user_id = $1 AND profile_id = $2`,
 		userID, profileID,
-	).Scan(&prefs.Enabled, &prefs.NotifyFavorites, &prefs.NotifyWatchlist,
-		&prefs.NotifyContinueWatching, &prefs.NotifyNextUp, &prefs.UpdatedAt)
+	).Scan(&prefs.Enabled, &prefs.NotifyNextUp, &prefs.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return prefs, nil
 	}
@@ -51,8 +50,7 @@ func (r *PreferencesRepository) GetMany(ctx context.Context, tx pgx.Tx, profiles
 	}
 	userIDs, profileIDs := profileKeyArrays(profiles)
 	rows, err := tx.Query(ctx, `
-		SELECT p.user_id, p.profile_id, p.enabled, p.notify_favorites, p.notify_watchlist,
-		       p.notify_continue_watching, p.notify_next_up, p.updated_at
+		SELECT p.user_id, p.profile_id, p.enabled, p.notify_next_up, p.updated_at
 		FROM notification_preferences p
 		JOIN unnest($1::integer[], $2::text[]) AS wanted(user_id, profile_id)
 		  ON wanted.user_id = p.user_id AND wanted.profile_id = p.profile_id`,
@@ -63,8 +61,7 @@ func (r *PreferencesRepository) GetMany(ctx context.Context, tx pgx.Tx, profiles
 	defer rows.Close()
 	for rows.Next() {
 		var prefs Preferences
-		if err := rows.Scan(&prefs.UserID, &prefs.ProfileID, &prefs.Enabled, &prefs.NotifyFavorites,
-			&prefs.NotifyWatchlist, &prefs.NotifyContinueWatching, &prefs.NotifyNextUp, &prefs.UpdatedAt); err != nil {
+		if err := rows.Scan(&prefs.UserID, &prefs.ProfileID, &prefs.Enabled, &prefs.NotifyNextUp, &prefs.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan notification preferences: %w", err)
 		}
 		out[profileKey{prefs.UserID, prefs.ProfileID}] = prefs
@@ -77,17 +74,13 @@ func (r *PreferencesRepository) GetMany(ctx context.Context, tx pgx.Tx, profiles
 func (r *PreferencesRepository) Upsert(ctx context.Context, prefs Preferences) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO notification_preferences
-			(user_id, profile_id, enabled, notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+			(user_id, profile_id, enabled, notify_next_up, updated_at)
+		VALUES ($1, $2, $3, $4, now())
 		ON CONFLICT (user_id, profile_id) DO UPDATE SET
 			enabled = EXCLUDED.enabled,
-			notify_favorites = EXCLUDED.notify_favorites,
-			notify_watchlist = EXCLUDED.notify_watchlist,
-			notify_continue_watching = EXCLUDED.notify_continue_watching,
 			notify_next_up = EXCLUDED.notify_next_up,
 			updated_at = now()`,
-		prefs.UserID, prefs.ProfileID, prefs.Enabled, prefs.NotifyFavorites,
-		prefs.NotifyWatchlist, prefs.NotifyContinueWatching, prefs.NotifyNextUp)
+		prefs.UserID, prefs.ProfileID, prefs.Enabled, prefs.NotifyNextUp)
 	if err != nil {
 		return fmt.Errorf("upsert notification preferences: %w", err)
 	}

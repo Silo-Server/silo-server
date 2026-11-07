@@ -8,13 +8,11 @@ import (
 	"unicode/utf8"
 )
 
-// Discord embed accent colors per reason (decimal RGB), in reason precedence
-// order: favorite, watchlist, continue_watching, next_up.
+// Discord embed accent colors (decimal RGB): Next Up episodes, and every
+// other delivery.
 const (
-	discordColorFavorite         = 5814783
-	discordColorWatchlist        = 3066993
-	discordColorContinueWatching = 15844367
-	discordColorNextUp           = 15158332
+	discordColorDefault = 5814783
+	discordColorNextUp  = 15158332
 )
 
 // Discord embed limits (enforced by the builder).
@@ -130,6 +128,8 @@ func discordEmbedAuthorLine(row DeliveryRow) string {
 	switch row.Type {
 	case DeliveryTypeEpisodeAvailable:
 		return "New episode on Silo"
+	case DeliveryTypeWatchlistAvailable:
+		return "Now available on Silo"
 	case DeliveryTypeRequestFulfilled:
 		if parseRequestFlags(row.ReasonFlags).Follower {
 			return "Now available on Silo"
@@ -240,9 +240,12 @@ func buildDiscordDigestEntry(row DeliveryRow, test bool) discordDigestEntry {
 
 func discordEmbedTitle(row DeliveryRow) string {
 	switch row.Type {
-	case DeliveryTypeRequestFulfilled:
+	case DeliveryTypeRequestFulfilled, DeliveryTypeWatchlistAvailable:
 		if row.SeriesTitle != "" {
 			return titleWithYear(row.SeriesTitle, row.Year)
+		}
+		if row.Type == DeliveryTypeWatchlistAvailable {
+			return "Watchlist title available"
 		}
 		return "Request fulfilled"
 	case DeliveryTypeRequestApproved, DeliveryTypeRequestDeclined:
@@ -277,18 +280,10 @@ func discordEmbedTitle(row DeliveryRow) string {
 }
 
 func discordEmbedColor(flags ReasonFlags) int {
-	switch {
-	case flags.Favorite:
-		return discordColorFavorite
-	case flags.Watchlist:
-		return discordColorWatchlist
-	case flags.ContinueWatching:
-		return discordColorContinueWatching
-	case flags.NextUp:
+	if flags.NextUp {
 		return discordColorNextUp
-	default:
-		return discordColorFavorite
 	}
+	return discordColorDefault
 }
 
 // discordEmbedLen sums length over the embed text Discord's 6,000-character

@@ -2,6 +2,8 @@ package notifications
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -25,157 +27,123 @@ func TestEpisodeKey(t *testing.T) {
 	}
 }
 
-func TestEvaluateRecipientReasons(t *testing.T) {
-	prefs := DefaultPreferences(1, "p1")
-	episodeKey := EpisodeKey(2, 5)
-
-	t.Run("favorite matches", func(t *testing.T) {
-		flags, ok := EvaluateRecipient(SeriesInterest{Favorite: true}, prefs, episodeKey)
-		if !ok || !flags.Favorite || flags.Watchlist || flags.NextUp {
-			t.Fatalf("unexpected flags %+v ok=%v", flags, ok)
+// notifiedInBatch runs a claimed batch of one series' episode keys through
+// fanout's order and eligibility for one profile, raising last-notified the
+// way fanout does, and returns the keys that notified.
+func notifiedInBatch(interest SeriesInterest, prefs Preferences, keys ...int) []int {
+	events := make([]ReleaseEvent, len(keys))
+	for i, key := range keys {
+		events[i] = ReleaseEvent{LibraryID: 1, SeriesID: "s", EpisodeKey: key}
+	}
+	SortFanoutEvents(events)
+	var notified []int
+	for _, event := range events {
+		if _, ok := EvaluateRecipient(interest, prefs, event.EpisodeKey); ok {
+			notified = append(notified, event.EpisodeKey)
+			interest.LastNotifiedEpisodeKey = intPtr(event.EpisodeKey)
 		}
-	})
-
-	t.Run("multiple reasons merge", func(t *testing.T) {
-		interest := SeriesInterest{
-			Favorite:               true,
-			ContinueWatching:       true,
-			NextUpCandidate:        true,
-			NextExpectedEpisodeKey: intPtr(episodeKey),
-		}
-		flags, ok := EvaluateRecipient(interest, prefs, episodeKey)
-		if !ok || !flags.Favorite || !flags.ContinueWatching || !flags.NextUp {
-			t.Fatalf("unexpected flags %+v ok=%v", flags, ok)
-		}
-	})
-
-	t.Run("next up gated by cursor", func(t *testing.T) {
-		interest := SeriesInterest{
-			NextUpCandidate:        true,
-			NextExpectedEpisodeKey: intPtr(episodeKey + 1),
-		}
-		if _, ok := EvaluateRecipient(interest, prefs, episodeKey); ok {
-			t.Fatal("episode below next_expected must not notify via next_up")
-		}
-		interest.NextExpectedEpisodeKey = intPtr(episodeKey)
-		if _, ok := EvaluateRecipient(interest, prefs, episodeKey); !ok {
-			t.Fatal("episode at next_expected must notify via next_up")
-		}
-	})
-
-	t.Run("last notified suppresses repeats and older keys", func(t *testing.T) {
-		interest := SeriesInterest{Favorite: true, LastNotifiedEpisodeKey: intPtr(episodeKey)}
-		if _, ok := EvaluateRecipient(interest, prefs, episodeKey); ok {
-			t.Fatal("already-notified key must suppress")
-		}
-		if _, ok := EvaluateRecipient(interest, prefs, episodeKey-1); ok {
-			t.Fatal("older key must suppress")
-		}
-		if _, ok := EvaluateRecipient(interest, prefs, episodeKey+1); !ok {
-			t.Fatal("newer key must notify")
-		}
-	})
-
-	t.Run("preferences are a hard gate", func(t *testing.T) {
-		disabled := DefaultPreferences(1, "p1")
-		disabled.NotifyFavorites = false
-		if _, ok := EvaluateRecipient(SeriesInterest{Favorite: true}, disabled, episodeKey); ok {
-			t.Fatal("disabled reason must not produce a delivery")
-		}
-		killSwitch := DefaultPreferences(1, "p1")
-		killSwitch.Enabled = false
-		interest := SeriesInterest{Favorite: true, Watchlist: true, ContinueWatching: true}
-		if _, ok := EvaluateRecipient(interest, killSwitch, episodeKey); ok {
-			t.Fatal("master toggle must suppress everything")
-		}
-	})
+	}
+	return notified
 }
 
-// ActiveReasons is the event-independent half of EvaluateRecipient: the
-// reasons preferences let notify, with Next Up needing a known episode.
-func TestActiveReasons(t *testing.T) {
-	key := EpisodeKey(1, 4)
-	all := SeriesInterest{Favorite: true, Watchlist: true, ContinueWatching: true, NextUpCandidate: true, NextExpectedEpisodeKey: &key}
-	prefs := DefaultPreferences(1, "p")
-	if got := ActiveReasons(all, prefs); got != (ReasonFlags{Favorite: true, Watchlist: true, ContinueWatching: true, NextUp: true}) {
-		t.Errorf("all enabled = %+v", got)
+func TestEvaluateRecipientNotifiesOnlyTheNextEpisode(t *testing.T) {
+	e := func(season, episode int) int { return EpisodeKey(season, episode) }
+	waiting := func(next int, open bool) SeriesInterest {
+		return SeriesInterest{NextUpCandidate: true, LastCompletedEpisodeKey: intPtr(next - 1), NextExpectedEpisodeKey: intPtr(next), NextExpectedOpen: open}
 	}
-	prefs.NotifyWatchlist = false
-	if got := ActiveReasons(all, prefs); got.Watchlist || !got.Favorite {
-		t.Errorf("watchlist off = %+v", got)
-	}
-	if got := ActiveReasons(SeriesInterest{NextUpCandidate: true}, prefs); got.Any() {
-		t.Errorf("next up without an expected episode = %+v", got)
-	}
-	prefs.Enabled = false
-	if got := ActiveReasons(all, prefs); got.Any() {
-		t.Errorf("disabled = %+v", got)
-	}
-}
+	off := DefaultPreferences(1, "p")
+	off.NotifyNextUp = false
+	master := DefaultPreferences(1, "p")
+	master.Enabled = false
 
-func TestApplyBurstCap(t *testing.T) {
-	event := func(library int, series string, key int) ReleaseEvent {
-		return ReleaseEvent{
-			ID:         series + "-" + time.Duration(key).String(),
-			LibraryID:  library,
-			SeriesID:   series,
-			EpisodeKey: key,
-		}
-	}
-
-	t.Run("caps per series keeping highest keys", func(t *testing.T) {
-		events := []ReleaseEvent{
-			event(1, "a", 1), event(1, "a", 2), event(1, "a", 3), event(1, "a", 4), event(1, "a", 5),
-			event(1, "b", 10),
-		}
-		fanout, suppressed := ApplyBurstCap(events, 3)
-		if len(fanout) != 4 || len(suppressed) != 2 {
-			t.Fatalf("got %d fanned out, %d suppressed; want 4/2", len(fanout), len(suppressed))
-		}
-		for _, ev := range suppressed {
-			if ev.SeriesID != "a" || ev.EpisodeKey > 2 {
-				t.Fatalf("suppressed wrong event: %+v", ev)
+	for _, tc := range []struct {
+		name     string
+		interest SeriesInterest
+		prefs    *Preferences
+		batch    []int
+		want     []int
+	}{
+		{name: "the next episode notifies", interest: waiting(e(1, 6), false), batch: []int{e(1, 6)}, want: []int{e(1, 6)}},
+		{name: "a batch drop notifies only the next", interest: waiting(e(1, 6), false), batch: []int{e(1, 8), e(1, 6), e(1, 7)}, want: []int{e(1, 6)}},
+		{name: "a later episode landing first does not notify", interest: waiting(e(1, 6), false), batch: []int{e(1, 7)}},
+		{name: "a profile behind the release does not hear about it", interest: waiting(e(1, 3), false), batch: []int{e(1, 6), e(1, 7), e(1, 8)}},
+		{name: "an open cursor takes the first arrival past it", interest: waiting(e(1, 11), true), batch: []int{e(2, 2), e(2, 1)}, want: []int{e(2, 1)}},
+		{name: "an open cursor ignores episodes before it", interest: waiting(e(1, 11), true), batch: []int{e(1, 3)}},
+		{name: "one notification per Next Up position", interest: func() SeriesInterest {
+			i := waiting(e(2, 1), true)
+			i.LastNotifiedEpisodeKey = intPtr(e(2, 1))
+			return i
+		}(), batch: []int{e(2, 2)}},
+		{name: "a notification before the cursor does not block it", interest: func() SeriesInterest {
+			i := waiting(e(1, 7), false)
+			i.LastNotifiedEpisodeKey = intPtr(e(1, 6))
+			return i
+		}(), batch: []int{e(1, 7)}, want: []int{e(1, 7)}},
+		{name: "a series that is not a Next Up candidate is silent", interest: SeriesInterest{LastCompletedEpisodeKey: intPtr(e(1, 5)), NextExpectedEpisodeKey: intPtr(e(1, 6))}, batch: []int{e(1, 6)}},
+		{name: "no cursor, no notification", interest: SeriesInterest{NextUpCandidate: true}, batch: []int{e(1, 1)}},
+		{name: "the Next Up switch is a hard gate", interest: waiting(e(1, 6), false), prefs: &off, batch: []int{e(1, 6)}},
+		{name: "the master switch is a hard gate", interest: waiting(e(1, 6), false), prefs: &master, batch: []int{e(1, 6)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefs := DefaultPreferences(1, "p")
+			if tc.prefs != nil {
+				prefs = *tc.prefs
 			}
-		}
-	})
+			got := notifiedInBatch(tc.interest, prefs, tc.batch...)
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Fatalf("notified %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
-	t.Run("distinct libraries are distinct groups", func(t *testing.T) {
-		events := []ReleaseEvent{
-			event(1, "a", 1), event(1, "a", 2),
-			event(2, "a", 1), event(2, "a", 2),
+// nextExpectedEpisode places the Next Up cursor the way Home picks its next
+// episode, except that an episode the library has no file for yet still
+// holds the cursor.
+func TestNextExpectedEpisode(t *testing.T) {
+	e := func(season, episode int) int { return EpisodeKey(season, episode) }
+	catalog := func(keys ...int) map[string]int {
+		out := make(map[string]int, len(keys))
+		for _, key := range keys {
+			out[strconv.Itoa(key)] = key
 		}
-		fanout, suppressed := ApplyBurstCap(events, 2)
-		if len(fanout) != 4 || len(suppressed) != 0 {
-			t.Fatalf("got %d/%d; same series in two libraries must not share a cap", len(fanout), len(suppressed))
+		return out
+	}
+	ids := func(keys ...int) []string {
+		out := make([]string, len(keys))
+		for i, key := range keys {
+			out[i] = strconv.Itoa(key)
 		}
-	})
-
-	t.Run("under cap passes through", func(t *testing.T) {
-		events := []ReleaseEvent{event(1, "a", 1), event(1, "b", 2)}
-		fanout, suppressed := ApplyBurstCap(events, 3)
-		if len(fanout) != 2 || len(suppressed) != 0 {
-			t.Fatalf("got %d/%d; want 2/0", len(fanout), len(suppressed))
-		}
-	})
-
-	t.Run("kept events emit in ascending key order", func(t *testing.T) {
-		// Fanout raises last_notified_episode_key as it processes each event
-		// inside one transaction; emitting a higher key first would make
-		// EvaluateRecipient suppress every remaining event in the group.
-		events := []ReleaseEvent{
-			event(1, "a", 5), event(1, "a", 3), event(1, "a", 4), event(1, "a", 1),
-		}
-		fanout, suppressed := ApplyBurstCap(events, 3)
-		if len(fanout) != 3 || len(suppressed) != 1 {
-			t.Fatalf("got %d/%d; want 3/1", len(fanout), len(suppressed))
-		}
-		if fanout[0].EpisodeKey != 3 || fanout[1].EpisodeKey != 4 || fanout[2].EpisodeKey != 5 {
-			t.Fatalf("want keys [3 4 5] in order, got %+v", fanout)
-		}
-		if suppressed[0].EpisodeKey != 1 {
-			t.Fatalf("want lowest key suppressed, got %+v", suppressed[0])
-		}
-	})
+		return out
+	}
+	for _, tc := range []struct {
+		name     string
+		anchor   int
+		episodes map[string]int
+		started  []string
+		want     int
+		open     bool
+	}{
+		{name: "the following episode", anchor: e(1, 5), episodes: catalog(e(1, 4), e(1, 5), e(1, 6), e(1, 7)), started: ids(e(1, 4), e(1, 5)), want: e(1, 6)},
+		{name: "a gap in the numbering", anchor: e(1, 5), episodes: catalog(e(1, 5), e(1, 7)), started: ids(e(1, 5)), want: e(1, 7)},
+		{name: "the next season's premiere", anchor: e(1, 10), episodes: catalog(e(1, 10), e(2, 1), e(2, 2)), started: ids(e(1, 10)), want: e(2, 1)},
+		{name: "a finale before the next season is known", anchor: e(1, 10), episodes: catalog(e(1, 9), e(1, 10)), started: ids(e(1, 10)), want: e(1, 11), open: true},
+		{name: "a rewatch skips what was already watched", anchor: e(1, 2), episodes: catalog(e(1, 1), e(1, 2), e(1, 3), e(1, 4), e(1, 5)), started: ids(e(1, 1), e(1, 2), e(1, 3), e(1, 4)), want: e(1, 5)},
+		{name: "a rewatch of a series watched through is open past its end", anchor: e(1, 2), episodes: catalog(e(1, 1), e(1, 2), e(1, 3)), started: ids(e(1, 1), e(1, 2), e(1, 3)), want: e(1, 4), open: true},
+		{name: "an episode watched out of order stays watched", anchor: e(1, 5), episodes: catalog(e(1, 5), e(1, 6), e(1, 7), e(1, 8)), started: ids(e(1, 5), e(1, 7)), want: e(1, 6)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, open := nextExpectedEpisode(tc.anchor, tc.episodes, tc.started)
+			if got != tc.want || open != tc.open {
+				t.Fatalf("nextExpectedEpisode = %d open=%v, want %d open=%v", got, open, tc.want, tc.open)
+			}
+		})
+	}
+	// Two catalog rows for one episode: watching either counts.
+	episodes := map[string]int{"a": e(1, 6), "b": e(1, 6), "c": e(1, 7)}
+	if got, open := nextExpectedEpisode(e(1, 5), episodes, []string{"a"}); got != e(1, 7) || open {
+		t.Fatalf("duplicate rows: got %d open=%v, want %d", got, open, e(1, 7))
+	}
 }
 
 func TestCursorRoundTrip(t *testing.T) {

@@ -31,18 +31,13 @@ type Reason = (typeof NOTIFICATION_REASONS)[number]["key"];
 
 /** The preference that lets each reason notify, named as its switch is. */
 const REASON_PREFERENCES: Record<Reason, { key: keyof NotificationPreferences; label: string }> = {
-  favorite: { key: "notify_favorites", label: "Favorites" },
-  watchlist: { key: "notify_watchlist", label: "Watchlist" },
-  continue_watching: { key: "notify_continue_watching", label: "Continue Watching" },
   next_up: { key: "notify_next_up", label: "Next Up" },
 };
 
 /** What a new episode has to be for the series to notify. */
 function triggerText(series: NotifiedSeries): string {
-  const { favorite, watchlist, continue_watching: continueWatching } = series.active_reasons;
   const code = series.next_up_after && formatEpisodeCode(series.next_up_after);
-  if (favorite || watchlist || continueWatching || !code) return "Any new episode";
-  return `Any episode after ${code}`;
+  return code ? `The next episode after ${code}` : "The next new episode";
 }
 
 /** Why a listed series does not notify: the mute, or the switches that
@@ -136,14 +131,6 @@ function NotifiedSeriesRow({
   );
 }
 
-const REASON_FILTERS = [
-  { value: "all", label: "All reasons" },
-  { value: "favorite", label: "Favorites" },
-  { value: "watchlist", label: "Watchlist" },
-  { value: "continue_watching", label: "Continue Watching" },
-  { value: "next_up", label: "Next Up" },
-] as const;
-
 const SORTS = [
   { value: "title", label: "Title (A–Z)" },
   { value: "-title", label: "Title (Z–A)" },
@@ -152,7 +139,6 @@ const SORTS = [
   { value: "-year", label: "Release year" },
 ] as const;
 
-type ReasonFilter = (typeof REASON_FILTERS)[number]["value"];
 type SortOption = (typeof SORTS)[number]["value"];
 
 function oneOf<T extends string>(
@@ -164,12 +150,11 @@ function oneOf<T extends string>(
 }
 
 /**
- * The Series view's search, reason filter, and sort, kept in the URL so they
- * survive opening a series and coming back.
+ * The Series view's search and sort, kept in the URL so they survive opening
+ * a series and coming back.
  */
 function useSeriesOptions() {
   const [params, setParams] = useSearchParams();
-  const reason = oneOf(REASON_FILTERS, params.get("reason"), "all");
   const sort = oneOf(SORTS, params.get("sort"), "title");
   const q = params.get("q") ?? "";
   const set = (key: string, value: string, fallback: string) =>
@@ -183,15 +168,12 @@ function useSeriesOptions() {
       { replace: true },
     );
   return {
-    reason,
     sort,
     q,
-    setReason: (value: ReasonFilter) => set("reason", value, "all"),
     setSort: (value: SortOption) => set("sort", value, "title"),
     setQ: (value: string) => set("q", value, ""),
     options: {
       q: q.trim(),
-      reason: reason === "all" ? undefined : reason,
       sort,
     } satisfies NotifiedSeriesOptions,
   };
@@ -225,24 +207,6 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
         />
       </div>
       <div className="flex gap-2">
-        <Select
-          value={series.reason}
-          onValueChange={(value) => series.setReason(value as ReasonFilter)}
-        >
-          <SelectTrigger
-            className="h-9 flex-1 sm:w-auto sm:min-w-[9.5rem] sm:flex-none"
-            aria-label="Filter by reason"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {REASON_FILTERS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Select value={series.sort} onValueChange={(value) => series.setSort(value as SortOption)}>
           <SelectTrigger
             className="h-9 flex-1 sm:w-auto sm:min-w-[9.5rem] sm:flex-none"
@@ -291,7 +255,7 @@ export function NotifiedSeriesList({
   const { data: prefs } = useNotificationPreferences();
   const notifying = active.data?.pages.flatMap((page) => page.series) ?? [];
   const silenced = inactive.data?.pages.flatMap((page) => page.series) ?? [];
-  const filtered = series.options.q !== "" || series.options.reason !== undefined;
+  const filtered = series.options.q !== "";
   // The scroll foot pages the list it sits under: notifying series first.
   const tail = active.hasNextPage ? active : inactive;
 
@@ -329,14 +293,15 @@ export function NotifiedSeriesList({
   ) {
     body = filtered ? (
       <div className="text-muted-foreground py-16 text-center text-sm">
-        No series match. Try another search or reason.
+        No series match. Try another search.
       </div>
     ) : (
       <div className="text-muted-foreground flex flex-col items-center gap-3 py-20 text-center">
         <BellOff className="h-10 w-10 opacity-50" />
         <div className="text-sm">No series notify you yet</div>
         <div className="max-w-sm text-xs">
-          Series you favorite, add to your watchlist, or start watching show up here.
+          A series shows up here once you finish an episode, so the next one notifies you when it
+          arrives.
         </div>
       </div>
     );
@@ -391,7 +356,8 @@ export function NotifiedSeriesList({
   return (
     <div>
       <p className="text-muted-foreground mb-3 px-3 text-sm">
-        New episodes of these series notify this profile. Change which reasons count in{" "}
+        The next new episode of each of these series notifies this profile. Turn Next Up
+        notifications off in{" "}
         <button
           type="button"
           className="text-foreground underline underline-offset-4"

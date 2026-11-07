@@ -164,8 +164,10 @@ func TestFanoutSkipsSecondLibraryCopy(t *testing.T) {
 				t.Fatalf("seed libraries: %v", err)
 			}
 			if _, err := pool.Exec(ctx, `
-				INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite)
-				VALUES (1, 'both', $1, $3, true), (1, 'both', $2, $3, true), (1, 'copy-only', $2, $3, true)`,
+				INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id,
+					next_up_candidate, next_expected_episode_key, next_expected_open)
+				VALUES (1, 'both', $1, $3, true, 0, true), (1, 'both', $2, $3, true, 0, true),
+					(1, 'copy-only', $2, $3, true, 0, true)`,
 				c.library, c.otherLibrary, c.series); err != nil {
 				t.Fatalf("seed interest: %v", err)
 			}
@@ -390,9 +392,10 @@ func TestDispatchOperationalResolvesBeforeHoldingConnection(t *testing.T) {
 }
 
 // seedFanoutEvent creates the fanout tables in the test schema (series mutes
-// included, empty), an interest
-// row on account 1 favoriting c's series for each profile, and release event
-// "event-1" for c's episode. It returns the episode key.
+// included, empty), a Next Up interest row on account 1 for c's series for
+// each profile, and release event
+// "event-1" for c's episode, which is each profile's next episode. It returns
+// the episode key.
 func seedFanoutEvent(t *testing.T, pool *pgxpool.Pool, c accessCatalog, profiles []string) int {
 	t.Helper()
 	ctx := t.Context()
@@ -404,8 +407,9 @@ func seedFanoutEvent(t *testing.T, pool *pgxpool.Pool, c accessCatalog, profiles
 	}
 	for _, profile := range profiles {
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id, favorite)
-			VALUES (1, $1, $2, $3, true)`, profile, c.library, c.series); err != nil {
+			INSERT INTO profile_series_interest (user_id, profile_id, library_id, series_id,
+				next_up_candidate, last_completed_episode_key, next_expected_episode_key)
+			VALUES (1, $1, $2, $3, true, $4, $5)`, profile, c.library, c.series, EpisodeKey(1, 1), EpisodeKey(1, 2)); err != nil {
 			t.Fatalf("seed interest: %v", err)
 		}
 	}

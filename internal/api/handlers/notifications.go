@@ -280,9 +280,27 @@ func (h *NotificationsHandler) HandleGetPreferences(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to load notification preferences")
 		return
 	}
-	writeJSON(w, http.StatusOK, prefs)
+	writeJSON(w, http.StatusOK, preferencesResponseOf(prefs))
 }
 
+// preferencesResponse is the frozen v1 preferences shape. Favorites, the
+// watchlist and Continue Watching no longer notify for new episodes, so their
+// switches always read false.
+type preferencesResponse struct {
+	ProfileID              string `json:"profile_id"`
+	Enabled                bool   `json:"enabled"`
+	NotifyFavorites        bool   `json:"notify_favorites"`
+	NotifyWatchlist        bool   `json:"notify_watchlist"`
+	NotifyContinueWatching bool   `json:"notify_continue_watching"`
+	NotifyNextUp           bool   `json:"notify_next_up"`
+}
+
+func preferencesResponseOf(prefs notifications.Preferences) preferencesResponse {
+	return preferencesResponse{ProfileID: prefs.ProfileID, Enabled: prefs.Enabled, NotifyNextUp: prefs.NotifyNextUp}
+}
+
+// updatePreferencesRequest accepts the frozen v1 body. The favorites,
+// watchlist and Continue Watching switches are still accepted and ignored.
 type updatePreferencesRequest struct {
 	Enabled                *bool `json:"enabled"`
 	NotifyFavorites        *bool `json:"notify_favorites"`
@@ -303,12 +321,12 @@ func (h *NotificationsHandler) HandleUpdatePreferences(w http.ResponseWriter, r 
 		return
 	}
 
-	prefs, err := h.system.Preferences.Patch(r.Context(), userID, profileID, notifications.PreferencePatch{Enabled: req.Enabled, NotifyFavorites: req.NotifyFavorites, NotifyWatchlist: req.NotifyWatchlist, NotifyContinueWatching: req.NotifyContinueWatching, NotifyNextUp: req.NotifyNextUp})
+	prefs, err := h.system.Preferences.Patch(r.Context(), userID, profileID, notifications.PreferencePatch{Enabled: req.Enabled, NotifyNextUp: req.NotifyNextUp})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save notification preferences")
 		return
 	}
-	writeJSON(w, http.StatusOK, prefs)
+	writeJSON(w, http.StatusOK, preferencesResponseOf(prefs))
 }
 
 type capabilityResponse struct {

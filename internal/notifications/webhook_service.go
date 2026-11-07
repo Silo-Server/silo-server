@@ -39,15 +39,12 @@ func newWebhookService(repo *WebhookRepository, cipher *secret.Cipher, settings 
 // WebhookInput is the create/update request shape. Pointer fields are
 // optional on update; Create requires Name and URL.
 type WebhookInput struct {
-	Name                   *string
-	URL                    *string
-	Type                   *string
-	Enabled                *bool
-	NotifyFavorites        *bool
-	NotifyWatchlist        *bool
-	NotifyContinueWatching *bool
-	NotifyNextUp           *bool
-	NotifyRequests         *bool
+	Name           *string
+	URL            *string
+	Type           *string
+	Enabled        *bool
+	NotifyNextUp   *bool
+	NotifyRequests *bool
 }
 
 // validateChannelName limits destination names to 64 characters; invalid is the caller's sentinel to wrap.
@@ -152,18 +149,15 @@ func (s *WebhookService) Create(ctx context.Context, userID int, profileID strin
 	}
 
 	hook := Webhook{
-		ID:                     ulid.Make().String(),
-		UserID:                 userID,
-		ProfileID:              profileID,
-		Name:                   name,
-		Type:                   hookType,
-		URLHost:                host,
-		Enabled:                true,
-		NotifyFavorites:        boolOrDefault(input.NotifyFavorites, true),
-		NotifyWatchlist:        boolOrDefault(input.NotifyWatchlist, true),
-		NotifyContinueWatching: boolOrDefault(input.NotifyContinueWatching, true),
-		NotifyNextUp:           boolOrDefault(input.NotifyNextUp, true),
-		NotifyRequests:         boolOrDefault(input.NotifyRequests, true),
+		ID:             ulid.Make().String(),
+		UserID:         userID,
+		ProfileID:      profileID,
+		Name:           name,
+		Type:           hookType,
+		URLHost:        host,
+		Enabled:        true,
+		NotifyNextUp:   boolOrDefault(input.NotifyNextUp, true),
+		NotifyRequests: boolOrDefault(input.NotifyRequests, true),
 	}
 	hook.URLCiphertext, err = s.cipher.Encrypt(rawURL, webhookURLAAD(hook.ID))
 	if err != nil {
@@ -304,7 +298,7 @@ func sampleDeliveryRow(profileID string) DeliveryRow {
 			SeriesID:    &seriesID,
 			EpisodeID:   &episodeID,
 			Type:        DeliveryTypeEpisodeAvailable,
-			ReasonFlags: []byte(`{"favorite":true,"watchlist":false,"continue_watching":false,"next_up":false}`),
+			ReasonFlags: []byte(`{"next_up":true}`),
 			CreatedAt:   time.Now(),
 		},
 		SeriesTitle:   "Silo Test Series",
@@ -387,15 +381,6 @@ func (s *WebhookService) applyWebhookInput(ctx context.Context, hook *Webhook, i
 			hook.DisabledReason = nil
 			hook.ConsecutiveFailures = 0
 		}
-	}
-	if input.NotifyFavorites != nil {
-		hook.NotifyFavorites = *input.NotifyFavorites
-	}
-	if input.NotifyWatchlist != nil {
-		hook.NotifyWatchlist = *input.NotifyWatchlist
-	}
-	if input.NotifyContinueWatching != nil {
-		hook.NotifyContinueWatching = *input.NotifyContinueWatching
 	}
 	if input.NotifyNextUp != nil {
 		hook.NotifyNextUp = *input.NotifyNextUp
