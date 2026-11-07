@@ -107,4 +107,10 @@ describe("formatWith", () => {
       `${FSI}Monday${PDI} 1 primero`,
     );
   });
+
+  it("leaves values without a letter unisolated in a right-to-left language", () => {
+    // An isolate around "01" would split "S01E03" and render it as "03 S01E".
+    const values = { season: "01", episode: "03" };
+    expect(formatWith(createAppIntl("ar-XB", {}), "web.detail.episodeCode", values)).toBe("S01E03");
+  });
 });

@@ -125,10 +125,15 @@ function translation(intl: IntlShape, id: string): MessageFormatElement[] | unde
   return Array.isArray(translated) ? translated : undefined;
 }
 
+/** A letter, which has a strong direction; digits and punctuation take theirs from the text around them. */
+const STRONG = /\p{L}/u;
+
 /**
  * In a right-to-left interface, wraps each printed string value in Unicode
  * isolates so a left-to-right title keeps its punctuation in place. Selector
  * values and left-to-right output are left alone, so English keeps its bytes.
+ * So are values without a letter ("01" in "S{season}E{episode}"): an isolate
+ * would cut a number off the letters it belongs to and reorder it.
  */
 function isolateValues<V extends RichValues>(
   intl: IntlShape,
@@ -140,7 +145,9 @@ function isolateValues<V extends RichValues>(
   const isolated: RichValues = { ...values };
   for (const name of printed) {
     const value = values[name];
-    if (typeof value === "string" && !selectors.has(name)) isolated[name] = FSI + value + PDI;
+    if (typeof value === "string" && !selectors.has(name) && STRONG.test(value)) {
+      isolated[name] = FSI + value + PDI;
+    }
   }
   return isolated as V;
 }
