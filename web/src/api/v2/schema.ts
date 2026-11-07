@@ -21252,7 +21252,7 @@ export interface components {
         [key: string]: string;
       };
       /**
-       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. Sent when getHomeCapabilities reports section_title_keys
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present
        * @example home.section.recentlyAddedIn
        */
       title_key?: string;
@@ -27752,7 +27752,7 @@ export interface components {
        */
       section_item_limit_max?: number;
       /**
-       * @description Sections, profile section settings and admin section definitions carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as a seasonal row's in-season title, have none; a client shows title whenever the key is absent or unknown), and profile section settings carry default_title_key and default_title_args the same way for default_title. Absent when the home sections service is not configured, and on a server that predates the fields
+       * @description Sections, profile section settings, admin section definitions and recommendation rows carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as a seasonal row's in-season title, have none; a client shows title whenever the key is absent or unknown), and profile section settings carry default_title_key and default_title_args the same way for default_title. Informational: clients act on title_key whenever it is present. Absent when the home sections service is not configured, and on a server that predates the fields
        * @example true
        */
       section_title_keys?: boolean;
@@ -32345,7 +32345,7 @@ export interface components {
         [key: string]: string;
       };
       /**
-       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. Sent when getHomeCapabilities reports section_title_keys
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present
        * @example home.section.recentlyAddedIn
        */
       title_key?: string;
@@ -32893,6 +32893,20 @@ export interface components {
        * @example Because you enjoy Crime
        */
       title: string;
+      /**
+       * @description Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none
+       * @example {
+       *       "library": "Movies"
+       *     }
+       */
+      title_args?: {
+        [key: string]: string;
+      };
+      /**
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present
+       * @example home.section.recentlyAddedIn
+       */
+      title_key?: string;
       /**
        * @description Row type: cluster, similar_users_liked, popular, recently_added, top_rated, genre_sampler
        * @example cluster
@@ -33542,7 +33556,7 @@ export interface components {
         [key: string]: string;
       };
       /**
-       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. Sent when getHomeCapabilities reports section_title_keys
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present
        * @example home.section.recentlyAddedIn
        */
       title_key?: string;
@@ -33595,7 +33609,7 @@ export interface components {
         [key: string]: string;
       };
       /**
-       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. Sent when getHomeCapabilities reports section_title_keys
+       * @description Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section or recommendation row name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present
        * @example home.section.recentlyAddedIn
        */
       title_key?: string;

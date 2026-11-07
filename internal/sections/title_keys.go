@@ -31,7 +31,9 @@ const (
 )
 
 // defaultTitleKeys maps the text of each default row title to its key. The
-// page_sections title-key migration keyed existing rows from the same pairs.
+// page_sections title-key migration keyed existing rows from the same pairs;
+// a later migration keyed the rows of an older default no longer built here,
+// "Trending on Server" (home.section.trendingOnServer).
 var defaultTitleKeys = map[string]string{
 	titleContinueWatching:          titleKeyContinueWatching,
 	titleContinueListening:         "home.section.continueListening",

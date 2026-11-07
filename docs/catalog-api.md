@@ -52,14 +52,18 @@ wants the rest of it in place reads the row again at its own limit
 ## Section titles
 
 A `Section` and a `SectionLayoutEntry` (Home and library pages), each row of
-`getProfileSectionSettings`, and each `AdminSection` (`listAdminSections`,
-`getAdminSection`, and the responses that answer one) carry `title_key` and
-`title_args` while their `title` is the server's own text: a built-in row name such as
+`getProfileSectionSettings`, each `AdminSection` (`listAdminSections`,
+`getAdminSection`, and the responses that answer one), and each `RecommendationRow`
+(`getDiscover`, `getForYouMain`, `listForYouRows`, `getRecommendationSection`) carry
+`title_key` and `title_args` while their `title` is the server's own text: a built-in row name such as
 `home.section.continueWatching`, a generated library row (`home.section.recentlyAddedIn` with `{"library": "Movies"}`),
 the synthetic Next Up row, a Because You Watched heading that names its title
-(`home.section.becauseYouWatchedTitle` with `title`), and the shared row a For You or
+(`home.section.becauseYouWatchedTitle` with `title`), the shared row a For You or
 taste-match section shows a new profile (`home.section.popularOnServer`,
-`home.section.topGenre` with `genre`). The key names a message in the shared translation
+`home.section.topGenre` with `genre`), and every recommendation row title the server words
+(`home.section.forYou`, `home.section.becauseYouEnjoy` with `genres`, the cluster's
+comma-separated genre names, `home.section.profilesLikeYouEnjoyed`). A home row that still
+holds the older default "Trending on Server" carries `home.section.trendingOnServer`. The key names a message in the shared translation
 catalog, and `title_args` fills its placeholders by name. A client that has the key shows
 its translation; otherwise, and whenever the fields are absent, it shows `title`.
 `title_args` and `default_title_args` are left out when the message has no placeholders,
@@ -82,7 +86,8 @@ also carries `default_title_key` and `default_title_args` for its `default_title
 administrator's title a renamed row can go back to, under the same rules. An
 `AdminSection` describes the stored row, so an editor still edits `title` itself.
 `getHomeCapabilities`
-reports `section_title_keys: true` on a server that sends them. The frozen `/api/v1` reads
+reports `section_title_keys: true` on a server that sends them; it is informational, and a
+client acts on `title_key` whenever it is present. The frozen `/api/v1` reads
 and the Jellyfin surface do not carry them.
 
 ## People search
