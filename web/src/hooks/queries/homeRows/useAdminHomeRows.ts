@@ -29,7 +29,6 @@ import {
 } from "@/lib/homeRows/payloads";
 import type { RowDraft } from "@/lib/homeRows/rowDraft";
 import { stableJson } from "@/lib/homeRows/stableJson";
-import { homeRowTitle } from "@/lib/sectionTitle";
 import { useT } from "@/i18n";
 import {
   RowChangedError,
@@ -53,7 +52,9 @@ const BATCH_PARALLEL = 4;
 /** Why a row in a select-mode batch was left as it was. */
 export interface BatchFailure {
   id: string;
+  /** The row's stored title, with its catalog key; show it through `useHomeRowTitle`. */
   title: string;
+  titleKey?: HomeRow["titleKey"];
   /** changed: it no longer matches the page. */
   reason: "changed" | "failed";
   message?: string;
@@ -313,17 +314,18 @@ export function useAdminHomeRows(): AdminHomeRows {
         };
         const settle = async (id: string) => {
           const row = onScreen.get(id);
-          const title = row ? homeRowTitle(toHomeRow(row)) : id;
+          const { title, titleKey } = row ? toHomeRow(row) : { title: id, titleKey: undefined };
           try {
             const reason = await writeOne(id);
-            if (reason) failures.push({ id, title, reason });
+            if (reason) failures.push({ id, title, titleKey, reason });
           } catch (error) {
             failures.push(
               isStale(error)
-                ? { id, title, reason: "changed" }
+                ? { id, title, titleKey, reason: "changed" }
                 : {
                     id,
                     title,
+                    titleKey,
                     reason: "failed",
                     message: adminSectionMutationMessage(error, "Could not save this row"),
                   },
