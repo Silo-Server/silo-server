@@ -37,13 +37,14 @@ type itemsQuery struct {
 	totalOverride          *int
 	isFavorite             bool
 	isResumable            bool
-	isNotFolder            bool // Filters=IsNotFolder or IsFolder=false: leaf items only
-	includesOnlyLeafTypes  bool // IncludeItemTypes names Episode and no Series or Season
-	hasItemTypeFilter      bool // true when IncludeItemTypes or ExcludeItemTypes was present in the request
-	wantsBoxSets           bool // true when IncludeItemTypes contains BoxSet
-	wantsViews             bool // true when IncludeItemTypes contains CollectionFolder
-	sortExplicit           bool // true when SortBy was present in the request
-	needsDetailFields      bool // true when requested Fields include detail-level data (e.g. MediaSources)
+	isNotFolder            bool   // Filters=IsNotFolder or IsFolder=false: leaf items only
+	includesOnlyLeafTypes  bool   // IncludeItemTypes names Episode and no Series or Season
+	hasItemTypeFilter      bool   // true when IncludeItemTypes or ExcludeItemTypes was present in the request
+	wantsBoxSets           bool   // true when IncludeItemTypes contains BoxSet
+	wantsViews             bool   // true when IncludeItemTypes contains CollectionFolder
+	sortExplicit           bool   // true when SortBy was present in the request
+	sortByKey              string // the SortBy key parseSort selects, lowercased; "" when no key maps
+	needsDetailFields      bool   // true when requested Fields include detail-level data (e.g. MediaSources)
 	itemType               string
 	sort                   string
 	order                  string
@@ -214,6 +215,7 @@ func parseItemsQuery(r *http.Request, codec *ResourceIDCodec) itemsQuery {
 	result.includesOnlyLeafTypes = itemTypesContain(includedTypes, "episode") &&
 		!itemTypesContain(includedTypes, "series") && !itemTypesContain(includedTypes, "season")
 	result.sortExplicit = strings.TrimSpace(q.Get("SortBy")) != ""
+	result.sortByKey = selectedSortKey(q.Get("SortBy"))
 	if result.sort == "latest_episode_added" && !itemTypesOnlySeries(result.itemTypes) {
 		result.sort = "created_at"
 	}
@@ -687,15 +689,42 @@ func mapSortBy(raw string) string {
 	return sort
 }
 
+const (
+	// sortKeySortName and sortKeyDatePlayed are lowercased Jellyfin SortBy
+	// keys, as selectedSortKey returns them.
+	sortKeySortName   = "sortname"
+	sortKeyDatePlayed = "dateplayed"
+	// sortOrderAscending is the browse order mapSortOrder returns for
+	// SortOrder=Ascending.
+	sortOrderAscending = "asc"
+	// progressStatusCompleted selects watched rows from the user-data service.
+	progressStatusCompleted = "completed"
+)
+
 // sortsBySortName reports whether the SortBy key parseSort selects is SortName
 // rather than Name; both map to the title sort.
 func sortsBySortName(sortBy string) bool {
+	return selectedSortKey(sortBy) == sortKeySortName
+}
+
+// selectedSortKey returns the SortBy key parseSort selects, lowercased, or ""
+// when no key maps. DatePlayed and DateCreated map to the same browse sort, so
+// callers that must tell them apart read the key itself.
+func selectedSortKey(sortBy string) string {
 	for _, key := range strings.Split(sortBy, ",") {
 		if _, ok := sortKey(key); ok {
-			return strings.EqualFold(strings.TrimSpace(key), "SortName")
+			return strings.ToLower(strings.TrimSpace(key))
 		}
 	}
-	return false
+	return ""
+}
+
+// sortsPlayedListByCatalog reports whether a Filters=IsPlayed request asks for
+// a catalog order (SortName, DateCreated, ...) that the played list, read from
+// progress rows, cannot apply. DatePlayed is the played list's own order, and
+// a request with no SortBy, or only keys Silo does not map, keeps that list.
+func (q itemsQuery) sortsPlayedListByCatalog() bool {
+	return q.isPlayed != nil && *q.isPlayed && q.sortByKey != "" && q.sortByKey != sortKeyDatePlayed
 }
 
 // sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the

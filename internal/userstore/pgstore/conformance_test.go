@@ -92,6 +92,21 @@ func TestPostgresAtomicJellycompatProgress(t *testing.T) {
 	storetest.RunAtomicJellycompatProgress(t, newStore(pool, userID))
 }
 
+// TestPostgresJellycompatPlayedByDate runs the play-date listing conformance
+// test against the Postgres backend; the SQLite backend runs it in
+// internal/userdb. Skips unless SILO_TEST_DATABASE_URL is set.
+func TestPostgresJellycompatPlayedByDate(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	userID := seedTestUser(t, pool, "conf-playedbydate")
+	t.Cleanup(func() {
+		for _, table := range []string{"user_watch_history", "user_history_hidden_items", "user_watch_progress", "user_profiles"} {
+			_, _ = pool.Exec(ctx, `DELETE FROM `+table+` WHERE user_id = $1`, userID)
+		}
+	})
+	storetest.RunJellycompatPlayedByDate(t, newStore(pool, userID))
+}
+
 // TestPostgresPersonalListPage runs the keyset favorites/watchlist paging
 // and membership-change conformance tests against the Postgres backend.
 // Skips unless SILO_TEST_DATABASE_URL is set.
