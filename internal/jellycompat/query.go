@@ -689,42 +689,10 @@ func mapSortBy(raw string) string {
 	return sort
 }
 
-const (
-	// sortKeySortName and sortKeyDatePlayed are lowercased Jellyfin SortBy
-	// keys, as selectedSortKey returns them.
-	sortKeySortName   = "sortname"
-	sortKeyDatePlayed = "dateplayed"
-	// sortOrderAscending is the browse order mapSortOrder returns for
-	// SortOrder=Ascending.
-	sortOrderAscending = "asc"
-	// progressStatusCompleted selects watched rows from the user-data service.
-	progressStatusCompleted = "completed"
-)
-
 // sortsBySortName reports whether the SortBy key parseSort selects is SortName
 // rather than Name; both map to the title sort.
 func sortsBySortName(sortBy string) bool {
 	return selectedSortKey(sortBy) == sortKeySortName
-}
-
-// selectedSortKey returns the SortBy key parseSort selects, lowercased, or ""
-// when no key maps. DatePlayed and DateCreated map to the same browse sort, so
-// callers that must tell them apart read the key itself.
-func selectedSortKey(sortBy string) string {
-	for _, key := range strings.Split(sortBy, ",") {
-		if _, ok := sortKey(key); ok {
-			return strings.ToLower(strings.TrimSpace(key))
-		}
-	}
-	return ""
-}
-
-// sortsPlayedListByCatalog reports whether a Filters=IsPlayed request asks for
-// a catalog order (SortName, DateCreated, ...) that the played list, read from
-// progress rows, cannot apply. DatePlayed is the played list's own order, and
-// a request with no SortBy, or only keys Silo does not map, keeps that list.
-func (q itemsQuery) sortsPlayedListByCatalog() bool {
-	return q.isPlayed != nil && *q.isPlayed && q.sortByKey != "" && q.sortByKey != sortKeyDatePlayed
 }
 
 // sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the

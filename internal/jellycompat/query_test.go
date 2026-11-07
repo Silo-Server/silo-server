@@ -119,24 +119,28 @@ func TestParseItemsQuerySort(t *testing.T) {
 }
 
 // A Filters=IsPlayed request sorted by a catalog field goes to the catalog
-// browse; DatePlayed, no SortBy, and keys Silo does not map keep the played
-// list (#2978).
+// browse when the browse can return every matching type; DatePlayed, no
+// SortBy, keys Silo does not map, and lists that would lose their episodes
+// keep the played list (#2978).
 func TestPlayedListSortRouting(t *testing.T) {
 	for _, tc := range []struct {
 		params      string
 		wantCatalog bool
 		wantKey     string
 	}{
-		{"Filters=IsPlayed&SortBy=SortName&SortOrder=Descending", true, "sortname"},
-		{"Filters=IsPlayed&SortBy=DateCreated", true, "datecreated"},
-		{"Filters=IsPlayed&SortBy=DatePlayed&SortOrder=Descending", false, "dateplayed"},
-		{"Filters=IsPlayed&SortBy=PlayCount,DatePlayed", false, "dateplayed"},
-		{"Filters=IsPlayed", false, ""},
-		{"Filters=IsPlayed&SortBy=PlayCount", false, ""},
-		{"IsPlayed=false&SortBy=SortName", false, "sortname"},
-		{"SortBy=SortName", false, "sortname"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=SortName&SortOrder=Descending", true, "sortname"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=DateCreated", true, "datecreated"},
+		{"IncludeItemTypes=Episode&Filters=IsPlayed&SortBy=SortName", true, "sortname"},
+		{"IncludeItemTypes=Movie,Episode&Filters=IsPlayed&SortBy=SortName", false, "sortname"},
+		{"Filters=IsPlayed&SortBy=SortName", false, "sortname"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=DatePlayed&SortOrder=Descending", false, "dateplayed"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=PlayCount,DatePlayed", false, "dateplayed"},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed", false, ""},
+		{"IncludeItemTypes=Movie&Filters=IsPlayed&SortBy=PlayCount", false, ""},
+		{"IncludeItemTypes=Movie&IsPlayed=false&SortBy=SortName", false, "sortname"},
+		{"IncludeItemTypes=Movie&SortBy=SortName", false, "sortname"},
 	} {
-		query := parseItemsQuery(httptest.NewRequest("GET", "/Items?Recursive=true&IncludeItemTypes=Movie&"+tc.params, nil), NewResourceIDCodec())
+		query := parseItemsQuery(httptest.NewRequest("GET", "/Items?Recursive=true&"+tc.params, nil), NewResourceIDCodec())
 		if got := query.sortsPlayedListByCatalog(); got != tc.wantCatalog || query.sortByKey != tc.wantKey {
 			t.Errorf("%s: catalog sort = %v, key %q; want %v, %q", tc.params, got, query.sortByKey, tc.wantCatalog, tc.wantKey)
 		}
