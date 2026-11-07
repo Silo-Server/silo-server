@@ -4647,7 +4647,7 @@ export function isFilterSectionConfig(
   return config != null && "match" in config && "groups" in config;
 }
 
-export interface PageSectionConfig {
+export interface PageSectionConfig extends SectionTitleKey {
   id: string;
   scope: string;
   library_id: number | null;
@@ -4825,6 +4825,9 @@ export interface SettingsSectionEntry extends SectionTitleKey {
   title: string;
   /** The admin row's own title; empty for a profile-built row. Absent on entries built locally. */
   default_title?: string;
+  /** The catalog key of `default_title` while it is the server's own title (see `SectionTitleKey`). */
+  default_title_key?: string;
+  default_title_args?: Record<string, string>;
   featured: boolean;
   item_limit: number;
   hidden: boolean;

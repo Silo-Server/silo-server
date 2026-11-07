@@ -45,6 +45,7 @@ import { libraryPagesOf, pageLabel, pageParam } from "@/lib/homeRows/pages";
 import type { HomeRow, LibraryPage, PageRef } from "@/lib/homeRows/types";
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
 import { useT, type Translate } from "@/i18n";
+import { useHomeRowTitle } from "@/lib/sectionTitle";
 
 function batchFailureText(t: Translate, { title, reason, message }: BatchFailure) {
   if (reason === "changed") return t("web.admin.homeRows.select.rowChanged", { title });
@@ -163,6 +164,7 @@ function reportRestore(
 
 export default function AdminHomeRows() {
   const t = useT();
+  const rowTitle = useHomeRowTitle();
   const adapter = useAdminHomeRows();
   const { scope, serverCapabilities: capabilities } = adapter;
   const capabilitiesFailed = useAdminSectionCapabilities().isError;
@@ -558,7 +560,7 @@ export default function AdminHomeRows() {
                 onChange: updateSectionSelection,
                 onSelectAll: selectAllRows,
                 onExit: exitSelectMode,
-                label: (row) => t("web.admin.homeRows.select.rowLabel", { title: row.title }),
+                label: (row) => t("web.admin.homeRows.select.rowLabel", { title: rowTitle(row) }),
                 bar: (
                   <SelectModeBar
                     count={selectedSections.length}

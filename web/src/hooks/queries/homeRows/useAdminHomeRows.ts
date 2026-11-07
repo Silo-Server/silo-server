@@ -29,6 +29,7 @@ import {
 } from "@/lib/homeRows/payloads";
 import type { RowDraft } from "@/lib/homeRows/rowDraft";
 import { stableJson } from "@/lib/homeRows/stableJson";
+import { homeRowTitle } from "@/lib/sectionTitle";
 import { useT } from "@/i18n";
 import {
   RowChangedError,
@@ -74,6 +75,9 @@ function toHomeRow(section: PageSectionConfig): HomeRow {
     ...(section.web_only === undefined ? {} : { webOnly: section.web_only }),
     shown: section.enabled,
     own: false,
+    titleKey: section.title_key
+      ? { title: section.title, key: section.title_key, args: section.title_args }
+      : undefined,
   };
 }
 
@@ -308,7 +312,8 @@ export function useAdminHomeRows(): AdminHomeRows {
           return null;
         };
         const settle = async (id: string) => {
-          const title = onScreen.get(id)?.title ?? id;
+          const row = onScreen.get(id);
+          const title = row ? homeRowTitle(toHomeRow(row)) : id;
           try {
             const reason = await writeOne(id);
             if (reason) failures.push({ id, title, reason });

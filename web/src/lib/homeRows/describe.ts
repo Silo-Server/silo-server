@@ -1,7 +1,8 @@
 import { queryDefinitionFromSectionConfig, type LibraryCollection } from "@/api/types";
-import { t, type MessageKey } from "@/i18n";
+import { serverText, t, type MessageKey } from "@/i18n";
 import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
 import { formatDecimal } from "@/lib/numberFormat";
+import { homeRowTitle } from "@/lib/sectionTitle";
 import { rowKindLabel } from "./catalog";
 import type { HomeRow, PageRef, Surface } from "./types";
 
@@ -259,7 +260,8 @@ function describeRecentlyAdded(config: Record<string, unknown>, onHome: boolean)
  */
 export function describeRow(row: HomeRow, context: DescribeContext): DescriptionPart[] {
   if (row.renamedFrom) {
-    return withStrong(t("web.home.rows.describe.renamedFrom", { name: STRONG }), row.renamedFrom);
+    const name = serverText(row.renamedFromKey?.key, row.renamedFromKey?.args, row.renamedFrom);
+    return withStrong(t("web.home.rows.describe.renamedFrom", { name: STRONG }), name);
   }
   const own = context.surface === "profile" ? profileSentence(row) : undefined;
   if (own) return [t(own)];
@@ -424,14 +426,14 @@ export function rowSwitchLabel(
 ): string {
   if (surface === "profile") {
     return t("web.home.rows.describe.switchProfile", {
-      row: row.title,
+      row: homeRowTitle(row),
       page_kind: profilePageKind(page, pageLabel),
       page: pageLabel,
     });
   }
   return t("web.home.rows.describe.switchAdmin", {
     shown: row.shown ? "yes" : "no",
-    row: row.title,
+    row: homeRowTitle(row),
   });
 }
 
