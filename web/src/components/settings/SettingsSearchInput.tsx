@@ -86,7 +86,13 @@ export function SettingsSearchInput({
           value={value}
           placeholder={placeholder}
           onChange={(event) => onChange(event.target.value)}
-          className={cn("h-11 rounded-xl ps-9 pe-10", showShortcutHint && !hasQuery && "sm:pe-16")}
+          className={cn(
+            "h-11 rounded-xl ps-9",
+            // Only the clear button needs the end padding; an empty field
+            // gives it to the placeholder, which runs longer in translation.
+            hasQuery ? "pe-10" : "pe-3",
+            showShortcutHint && !hasQuery && "sm:pe-16",
+          )}
           autoComplete="off"
         />
         {hasQuery ? (
