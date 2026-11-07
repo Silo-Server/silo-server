@@ -21,15 +21,19 @@ func TestArtworkReadinessSurvivesRequestCancellation(t *testing.T) {
 	h := NewReadyHandler(nil, nil, artworkProbeFunc(func(ctx context.Context) error {
 		calls++
 		if ctx.Err() != nil {
-			t.Fatalf("probe inherited canceled request: %v", ctx.Err())
+			t.Errorf("probe inherited canceled request: %v", ctx.Err())
+			return ctx.Err()
 		}
 		deadline, ok := ctx.Deadline()
 		if !ok || time.Until(deadline) > 5*time.Second {
-			t.Fatal("shared probe must have a bounded lifetime")
+			t.Error("shared probe must have a bounded lifetime")
 		}
 		return nil
 	}))
-	if !h.checkArtwork(ctx) || !h.checkArtwork(t.Context()) || calls != 1 {
+	// A canceled caller may stop waiting, but must not cancel or poison the
+	// shared probe that the next caller uses.
+	h.checkArtwork(ctx)
+	if !h.checkArtwork(t.Context()) || calls != 1 {
 		t.Fatalf("healthy probe was not cached: calls=%d healthy=%v", calls, h.artworkOK)
 	}
 }
@@ -51,6 +55,39 @@ func TestArtworkReadinessRecoversAfterFailedProbeExpires(t *testing.T) {
 	h.artworkChecked = time.Now().Add(-31 * time.Second)
 	if !h.checkArtwork(t.Context()) || calls != 2 {
 		t.Fatal("storage recovery was not observed")
+	}
+}
+
+// A refresh that outlives a request reports the previous result until the
+// refresh times out, so slow but healthy storage does not read as degraded
+// every time the cache expires, and stuck storage still reads as failed.
+func TestArtworkRefreshReportsPreviousResultUntilItTimesOut(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	calls := 0
+	h := NewReadyHandler(nil, nil, artworkProbeFunc(func(context.Context) error {
+		calls++
+		if calls > 1 {
+			<-release
+		}
+		return nil
+	}))
+	if !h.checkArtwork(t.Context()) {
+		t.Fatal("healthy storage reported failed")
+	}
+	h.artworkMu.Lock()
+	h.artworkChecked = time.Now().Add(-31 * time.Second)
+	h.artworkMu.Unlock()
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	if !h.checkArtwork(expired) {
+		t.Fatal("a refresh in progress hid the previous healthy result")
+	}
+	h.artworkMu.Lock()
+	h.artworkStarted = time.Now().Add(-artworkProbeTimeout)
+	h.artworkMu.Unlock()
+	if h.checkArtwork(expired) {
+		t.Fatal("a refresh stuck past its timeout still reported healthy storage")
 	}
 }
 
