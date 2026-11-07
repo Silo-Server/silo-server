@@ -226,6 +226,28 @@ func (r *Repository) ListActiveByTMDB(ctx context.Context, mediaType MediaType, 
 	return out, nil
 }
 
+func (r *Repository) ListRequestedTMDB(ctx context.Context, mediaType MediaType, tmdbIDs []int) (map[int]bool, error) {
+	out := map[int]bool{}
+	if len(tmdbIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT DISTINCT tmdb_id FROM media_requests
+		WHERE media_type = $1 AND provider = 'tmdb' AND tmdb_id = ANY($2)
+	`, mediaType, tmdbIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list requested tmdb ids: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[int])
+	if err != nil {
+		return nil, fmt.Errorf("list requested tmdb ids: %w", err)
+	}
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
 func (r *Repository) ListProfileWatchlistRequests(ctx context.Context, userID int, profileID string) ([]*Request, error) {
 	rows, err := r.pool.Query(ctx, requestSelectSQL()+`
 		WHERE requested_by_user_id = $1
