@@ -437,7 +437,7 @@ export default function AdminPlaybackHistory() {
                         setPage(0);
                       }}
                     >
-                      <SelectTrigger className="h-8 w-[100px]">
+                      <SelectTrigger className="h-8 min-w-[100px]">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
