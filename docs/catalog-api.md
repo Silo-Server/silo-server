@@ -62,7 +62,8 @@ the synthetic Next Up row, a Because You Watched heading that names its title
 taste-match section shows a new profile (`home.section.popularOnServer`,
 `home.section.topGenre` with `genre`), and every recommendation row title the server words
 (`home.section.forYou`, `home.section.becauseYouEnjoy` with `genres`, the cluster's
-comma-separated genre names, `home.section.profilesLikeYouEnjoyed`). A home row that still
+comma-separated genre names, `home.section.pickedFromYourHistory`,
+`home.section.profilesLikeYouEnjoyed`). A home row that still
 holds the older default "Trending on Server" carries `home.section.trendingOnServer`. The key names a message in the shared translation
 catalog, and `title_args` fills its placeholders by name. A client that has the key shows
 its translation; otherwise, and whenever the fields are absent, it shows `title`.
