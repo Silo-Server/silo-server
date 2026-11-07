@@ -2642,6 +2642,9 @@ func (r *CatalogResolver) fetchAllSearchCandidates(ctx context.Context, req Cata
 	return items, nil
 }
 
+// catalogSearchAccess narrows the viewer's access to the request's libraries
+// for a search, and returns the item types to search. The bool reports that
+// no requested library is accessible, so the search can return empty.
 func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter, []string, bool) {
 	allowedLibraryIDs, earlyEmpty := access.LibraryScope(req.Query.LibraryIDs)
 	if earlyEmpty {

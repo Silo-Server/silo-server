@@ -30,8 +30,9 @@ func (postgresCatalogStateProvider) ForUser(context.Context, int) (userstore.Use
 // Close has nothing to release.
 func (postgresCatalogStateProvider) Close() error { return nil }
 
-// Search sorted by plays orders the matches by the viewer profile's completed
-// plays, ignoring unfinished plays and other profiles' plays (#3626).
+// TestCatalogSearchSortsByProfilePlaysDB checks that a search sorted by plays
+// orders the matches by the viewer profile's completed plays, ignoring
+// unfinished plays and other profiles' plays (#3626).
 func TestCatalogSearchSortsByProfilePlaysDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
