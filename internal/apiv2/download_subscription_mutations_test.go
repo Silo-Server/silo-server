@@ -80,7 +80,7 @@ func TestSubscriptionMutationTransport(t *testing.T) {
 		t.Fatalf("%d %s %+v", rec.Code, rec.Body.String(), svc.patch)
 	}
 	current := rec.Header().Get("ETag")
-	for _, body := range []string{`{"active":null}`, `{"mode":null}`, `{"season_numbers":null}`, `{"max_storage_bytes":-1}`} {
+	for _, body := range []string{`{"active":null}`, `{"mode":null}`, `{"season_numbers":null}`, `{"quality":null}`, `{"max_storage_bytes":-1}`} {
 		rec = do(t, h, "PATCH", path+"/monitor", body, with(device, "If-Match", current))
 		if rec.Code != 400 {
 			t.Fatalf("invalid %d %s", rec.Code, rec.Body.String())

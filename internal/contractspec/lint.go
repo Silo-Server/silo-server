@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +40,9 @@ const (
 	typeString = "string"
 )
 
+// componentSchemas prefixes the location of a component schema in findings.
+const componentSchemas = "components.schemas."
+
 // Lint checks the generated document against the contract's shape rules and
 // returns every violation, sorted, so a report names them all at once. The
 // rules: every operation names a unique lowerCamelCase operationId; every
@@ -47,7 +51,8 @@ const (
 // each status its class implies; non-public operations require the bearer
 // scheme and public ones carry no security; no schema is a free-form object
 // unless it is marked as an extension bag; date, URL, and language or
-// country members declare their shape (lintValueShape).
+// country members declare their shape (lintValueShape); a nullable enum
+// lists null (lintNullableEnum).
 func Lint(doc []byte) []string {
 	var d document
 	if err := json.Unmarshal(doc, &d); err != nil {
@@ -94,8 +99,9 @@ func Lint(doc []byte) []string {
 		if !isPascal(name) {
 			fail("components.schemas.%s: schema name is not PascalCase", name)
 		}
-		lintFreeForm(fail, "components.schemas."+name, d.Components.Schemas[name])
-		lintMemberShapes(fail, "components.schemas."+name, d.Components.Schemas[name])
+		lintFreeForm(fail, componentSchemas+name, d.Components.Schemas[name])
+		lintMemberShapes(fail, componentSchemas+name, d.Components.Schemas[name])
+		lintNullableEnums(fail, componentSchemas+name, d.Components.Schemas[name])
 	}
 	if _, ok := d.Components.SecuritySchemes[securityScheme]; !ok {
 		fail("components.securitySchemes.%s is missing", securityScheme)
@@ -359,6 +365,41 @@ func lintMemberShapes(fail func(string, ...any), where string, s *schema) {
 	lintMemberShapes(fail, where+".items", s.Items)
 }
 
+// lintNullableEnums walks a schema tree through its members, array items,
+// typed map values, and oneOf, anyOf and allOf branches (every place the
+// generator adds null), and applies lintNullableEnum to each schema; a $ref
+// is checked as its own component.
+func lintNullableEnums(fail func(string, ...any), where string, s *schema) {
+	if s == nil || s.Ref != "" {
+		return
+	}
+	lintNullableEnum(fail, where, s)
+	for _, name := range sortedKeys(s.Properties) {
+		lintNullableEnums(fail, where+"."+name, s.Properties[name])
+	}
+	lintNullableEnums(fail, where+".items", s.Items)
+	if ap, ok := s.AdditionalProperties.(map[string]any); ok {
+		var value schema
+		if raw, err := json.Marshal(ap); err == nil && json.Unmarshal(raw, &value) == nil {
+			lintNullableEnums(fail, where+".additionalProperties", &value)
+		}
+	}
+	for keyword, branches := range map[string][]*schema{"oneOf": s.OneOf, "anyOf": s.AnyOf, "allOf": s.AllOf} {
+		for i, branch := range branches {
+			lintNullableEnums(fail, fmt.Sprintf("%s.%s[%d]", where, keyword, i), branch)
+		}
+	}
+}
+
+// lintNullableEnum requires a nullable schema with an enum to list null in
+// it: JSON Schema applies type and enum separately, so a validator holding
+// ["string", "null"] and an enum of strings alone refuses null.
+func lintNullableEnum(fail func(string, ...any), where string, s *schema) {
+	if s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil) {
+		fail("%s: nullable enum does not list null", where)
+	}
+}
+
 // lintValueShape requires a string member (or a string array's items) whose
 // name says what it carries to declare that shape, so generated clients can
 // type it: a date declares format date or date-time, or a YYYY-MM-DD
@@ -477,7 +518,14 @@ type schema struct {
 	Properties           map[string]*schema `json:"properties"`
 	Items                *schema            `json:"items"`
 	AdditionalProperties any                `json:"additionalProperties"`
-	Extensions           map[string]any     `json:"-"`
+	Enum                 []any              `json:"enum"`
+	OneOf                []*schema          `json:"oneOf"`
+	AnyOf                []*schema          `json:"anyOf"`
+	AllOf                []*schema          `json:"allOf"`
+	// Nullable is set when the type list names "null"; Type keeps the
+	// other name.
+	Nullable   bool           `json:"-"`
+	Extensions map[string]any `json:"-"`
 }
 
 // schemaType is the JSON Schema `type` member: a single name, or in OpenAPI
@@ -513,6 +561,12 @@ func (s *schema) UnmarshalJSON(b []byte) error {
 	}
 	*s = schema(p)
 	s.Extensions = extensions(b)
+	var typed struct {
+		Type []string `json:"type"`
+	}
+	if json.Unmarshal(b, &typed) == nil {
+		s.Nullable = slices.Contains(typed.Type, "null")
+	}
 	return nil
 }
 

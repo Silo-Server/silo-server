@@ -265,6 +265,27 @@ func TestLintSeededFailures(t *testing.T) {
 			},
 			want: "components.schemas.AdminItemMetadataUpdate.release_date: declares its shape; delete its shapePending entry",
 		},
+		"nullable enum without null": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["mode"] = map[string]any{"type": []any{"string", "null"}, "enum": []any{"a", "b"}}
+			},
+			want: "components.schemas.SystemInfo.mode: nullable enum does not list null",
+		},
+		"nullable enum without null in a oneOf branch": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["mode"] = map[string]any{"oneOf": []any{map[string]any{"type": "integer"}, map[string]any{"type": []any{"string", "null"}, "enum": []any{"a"}}}}
+			},
+			want: "components.schemas.SystemInfo.mode.oneOf[1]: nullable enum does not list null",
+		},
+		"nullable enum without null in a typed map value": {
+			seed: func(doc map[string]any) {
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["modes"] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": []any{"string", "null"}, "enum": []any{"a"}}}
+			},
+			want: "components.schemas.SystemInfo.modes.additionalProperties: nullable enum does not list null",
+		},
 		"missing security scheme": {
 			seed: func(doc map[string]any) { delete(doc["components"].(map[string]any), "securitySchemes") },
 			want: "components.securitySchemes.bearerAuth is missing",
