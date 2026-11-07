@@ -22,7 +22,9 @@ import {
   type Messages,
 } from "@/i18n";
 import {
+  type AppLocale,
   browserLocaleInputs,
+  ENGLISH_APP_LOCALE,
   getAppLocale,
   hasCatalog,
   resolveAppLocale,
@@ -154,20 +156,23 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
         })
       : undefined;
     void Promise.all([
-      // Without its catalog a language still renders, in English.
-      loadTranslations(catalog).catch((): Messages => ({})),
+      loadTranslations(catalog).catch(() => undefined),
       admin,
       // Without name data, language names stay English.
       names?.catch(() => undefined),
     ]).then(([messages, adminMessages]) => {
       if (cancelled) return;
+      // Without its catalog (a chunk a newer release replaced) the language
+      // renders as English: English text, plural rules, `lang` and `dir`, and
+      // none of its admin part.
+      const locale: AppLocale = messages
+        ? { language, catalog, formatLocale, localizedFormats, dir }
+        : ENGLISH_APP_LOCALE;
+      const translated: Messages = messages ? { ...messages, ...adminMessages } : {};
       // The formatter first: helpers that subscribe to the app locale read it.
-      const next = createAppIntl(
-        catalog,
-        adminMessages ? { ...messages, ...adminMessages } : messages,
-      );
+      const next = createAppIntl(locale.catalog, translated);
       setAppIntl(next, { admin: adminMessages !== undefined });
-      setAppLocale({ language, catalog, formatLocale, localizedFormats, dir });
+      setAppLocale(locale);
       setIntl(next);
     });
     return () => {

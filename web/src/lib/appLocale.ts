@@ -207,13 +207,16 @@ export function browserLocaleInputs(): {
   };
 }
 
-let current: AppLocale = {
+/** English with the browser's formats: the app before it has a language, and when one fails to load. */
+export const ENGLISH_APP_LOCALE: AppLocale = Object.freeze({
   language: "en",
   catalog: "en",
   formatLocale: undefined,
   localizedFormats: false,
   dir: "ltr",
-};
+});
+
+let current: AppLocale = ENGLISH_APP_LOCALE;
 const listeners = new Set<() => void>();
 
 function applyToDocument(locale: AppLocale): void {
