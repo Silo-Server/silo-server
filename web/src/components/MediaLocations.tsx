@@ -140,18 +140,22 @@ export default function MediaLocations({
               <div className="min-w-0 flex-1 space-y-1.5">
                 <div className="text-sm font-medium">{location.versionLabel}</div>
                 <div className="min-w-0 font-mono text-xs leading-relaxed sm:text-[0.75rem]">
-                  {location.folderName ? (
-                    <span
-                      className="text-muted-foreground"
-                      title={location.folderPath}
-                      aria-label={t("web.item.locations.parentFolder", {
-                        path: location.folderPath,
-                      })}
-                    >
-                      {t("web.item.locations.folderName", { folder: location.folderName })}
-                    </span>
-                  ) : null}
-                  <span className="text-foreground ms-1 break-all">{location.fileName}</span>
+                  {/* A path reads left to right in every language; inline, so it
+                    keeps the panel's alignment. */}
+                  <span dir="ltr">
+                    {location.folderName ? (
+                      <span
+                        className="text-muted-foreground"
+                        title={location.folderPath}
+                        aria-label={t("web.item.locations.parentFolder", {
+                          path: location.folderPath,
+                        })}
+                      >
+                        {t("web.item.locations.folderName", { folder: location.folderName })}
+                      </span>
+                    ) : null}
+                    <span className="text-foreground ms-1 break-all">{location.fileName}</span>
+                  </span>
                 </div>
               </div>
 
