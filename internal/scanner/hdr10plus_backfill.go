@@ -30,6 +30,17 @@ const (
 	// hdr10PlusPrimaryVideoStream selects the first video stream that is not
 	// cover art, the stream the scanner stores as the first video track.
 	hdr10PlusPrimaryVideoStream = "V:0"
+	// hdr10PlusNoFrameKey, on the first video track, holds when a read last
+	// decoded no frame, as a fixed-width UTC timestamp so the candidate query
+	// compares it as text. A scan that reprobes the file rewrites the track
+	// without it, and a later successful read removes it.
+	hdr10PlusNoFrameKey = "hdr10_plus_no_frame_at"
+	// hdr10PlusNoFrameRetryAfter is how long a file whose read decoded no
+	// frame waits before it is read again. Such a file fails the same way on
+	// every pass, often over a network mount, but a fixed ffprobe or decoder
+	// still reaches it within a day.
+	hdr10PlusNoFrameRetryAfter = 24 * time.Hour
+	hdr10PlusNoFrameTimeLayout = "2006-01-02T15:04:05Z"
 )
 
 // errHDR10PlusStorageStalled ends a pass whose frame reads keep timing out.
@@ -52,7 +63,8 @@ var (
 // HDR10PlusBackfillResult counts what one backfill pass did. HDR10Plus and
 // NotHDR10Plus are recorded on the file, so it is not read again until a scan
 // rewrites its row. Changed, Unreadable, and TimedOut are read again on the
-// next pass.
+// next pass, except an Unreadable file whose read decoded no frame, which
+// waits hdr10PlusNoFrameRetryAfter.
 type HDR10PlusBackfillResult struct {
 	// Checked is the number of candidate files examined.
 	Checked int `json:"checked"`
@@ -65,7 +77,8 @@ type HDR10PlusBackfillResult struct {
 	Changed int `json:"changed"`
 	// Unreadable files could not be opened or decoded, or ffprobe failed.
 	// None is recorded as not HDR10+: a misconfigured ffprobe would otherwise
-	// mark the whole library that way.
+	// mark the whole library that way. A file whose read decoded no frame
+	// records only when that happened, so it is not read again for a day.
 	Unreadable int `json:"unreadable"`
 	// TimedOut files did not answer within the frame read timeout.
 	TimedOut int `json:"timed_out"`
@@ -76,7 +89,8 @@ type HDR10PlusBackfillResult struct {
 // side data, so earlier probes stored every HDR10+ file as plain HDR10.
 //
 // Candidates are present files whose first video track is PQ and has no
-// hdr10_plus key. The backfiller decodes the first frame of the primary video
+// hdr10_plus key, apart from those whose read decoded no frame in the last
+// hdr10PlusNoFrameRetryAfter. The backfiller decodes the first frame of the primary video
 // stream and sets only hdr10_plus and, for an HDR10+ file, video_range_type on
 // that track. It leaves the rest of the probe alone, so chapters, probe time,
 // and everything keyed to them stay as they are. A pass is resumable by
@@ -225,8 +239,9 @@ func (b *HDR10PlusBackfiller) loadCandidates(ctx context.Context, afterID int) (
 		  AND jsonb_typeof(mf.video_tracks->0) = 'object'
 		  AND lower(COALESCE(mf.video_tracks->0->>'color_transfer', '')) LIKE '%smpte2084%'
 		  AND NOT (mf.video_tracks->0 ? 'hdr10_plus')
+		  AND COALESCE(mf.video_tracks->0->>'`+hdr10PlusNoFrameKey+`', '') < $3
 		ORDER BY mf.id
-		LIMIT $2`, afterID, b.batch)
+		LIMIT $2`, afterID, b.batch, time.Now().Add(-hdr10PlusNoFrameRetryAfter).UTC().Format(hdr10PlusNoFrameTimeLayout))
 	if err != nil {
 		return nil, afterID, 0, fmt.Errorf("loading HDR10+ backfill candidates: %w", err)
 	}
@@ -272,6 +287,9 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 	if err != nil {
 		slog.DebugContext(ctx, "scanner: HDR10+ backfill could not read the first frame",
 			"component", "scanner", "file_id", c.id, "path", c.path, "error", err)
+		if errors.Is(err, errNoFrameDecoded) {
+			return b.recordNoFrame(ctx, c)
+		}
 		return hdr10PlusOutcomeUnreadable, nil
 	}
 	// The frame describes the file on disk, which a scan has not reprobed if
@@ -310,13 +328,13 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 	// first track, so fields this binary does not know survive. Write only
 	// over the exact row that was read: the same file revision and the same
 	// first track. A scan that rewrote the row in the meantime read the frame
-	// itself.
+	// itself. A no-frame mark from an earlier read goes.
 	tag, err := b.pool.Exec(ctx, `
 		UPDATE media_files
-		SET video_tracks = CASE WHEN $5::boolean
+		SET video_tracks = (CASE WHEN $5::boolean
 		        THEN jsonb_set(jsonb_set(video_tracks, '{0,hdr10_plus}', 'true'::jsonb), '{0,video_range_type}', to_jsonb($6::text))
 		        ELSE jsonb_set(video_tracks, '{0,hdr10_plus}', 'false'::jsonb)
-		    END,
+		    END) #- '{0,`+hdr10PlusNoFrameKey+`}',
 		    updated_at = NOW()
 		WHERE id = $1
 		  AND file_size = $2
@@ -330,6 +348,30 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 		return hdr10PlusOutcomeChanged, nil
 	}
 	return outcome, nil
+}
+
+// recordNoFrame marks a file whose read decoded no frame, so passes in the
+// next hdr10PlusNoFrameRetryAfter skip it. Such a file fails the same way
+// every time; ffprobe ran and opened it, so this is not the storage or a
+// broken binary. The mark holds only a time, never a status, and goes on the
+// exact row that was read. It leaves updated_at alone: nothing a client sees
+// changed.
+func (b *HDR10PlusBackfiller) recordNoFrame(ctx context.Context, c hdr10PlusCandidate) (hdr10PlusOutcome, error) {
+	tag, err := b.pool.Exec(ctx, `
+		UPDATE media_files
+		SET video_tracks = jsonb_set(video_tracks, '{0,`+hdr10PlusNoFrameKey+`}', to_jsonb($5::text))
+		WHERE id = $1
+		  AND file_size = $2
+		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz
+		  AND video_tracks->0 = $4::jsonb`,
+		c.id, c.size, c.normalizedModifiedAt(), c.trackJSON, time.Now().UTC().Format(hdr10PlusNoFrameTimeLayout))
+	if err != nil {
+		return 0, fmt.Errorf("recording HDR10+ frame read failure for file %d: %w", c.id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return hdr10PlusOutcomeChanged, nil
+	}
+	return hdr10PlusOutcomeUnreadable, nil
 }
 
 // statFileBounded runs statFile off the worker's goroutine, bounded by ctx and
@@ -373,7 +415,7 @@ func (b *HDR10PlusBackfiller) statFileBounded(ctx context.Context, path string) 
 // so a misconfigured ffprobe or unreachable storage is visible.
 func logHDR10PlusUnreadable(ctx context.Context, result HDR10PlusBackfillResult) {
 	if result.Unreadable > 0 {
-		slog.WarnContext(ctx, "scanner: HDR10+ backfill could not read some files; they are read again on the next pass",
+		slog.WarnContext(ctx, "scanner: HDR10+ backfill could not read some files; a file that decoded no frame is read again in a day, the rest on the next pass",
 			"component", "scanner", "unreadable", result.Unreadable, "checked", result.Checked)
 	}
 }
