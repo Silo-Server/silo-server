@@ -249,7 +249,7 @@ function ClaimForm({ token }: { token: string }) {
               : t("web.auth.invite.description")}
           </CardDescription>
           {invitation.note && (
-            <blockquote className="border-border mt-4 border-l-2 py-1 pl-3 text-sm leading-relaxed">
+            <blockquote className="border-border mt-4 border-s-2 py-1 ps-3 text-sm leading-relaxed">
               <span className="text-muted-foreground block text-xs">
                 {invitation.inviter_name
                   ? t("web.auth.invite.noteFrom", { inviter: invitation.inviter_name })
@@ -264,7 +264,7 @@ function ClaimForm({ token }: { token: string }) {
             <div className="mb-6 space-y-3">
               <Button asChild size="lg" className="h-12 w-full text-base font-semibold">
                 <a href={appLink}>
-                  <Smartphone className="mr-2 h-5 w-5" /> {t("web.auth.openInApp")}
+                  <Smartphone className="me-2 h-5 w-5" /> {t("web.auth.openInApp")}
                 </a>
               </Button>
               <p className="text-muted-foreground text-center text-xs">

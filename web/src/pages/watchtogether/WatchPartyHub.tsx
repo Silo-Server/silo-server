@@ -362,7 +362,7 @@ export default function WatchPartyHub() {
         >
           <div
             aria-hidden="true"
-            className="from-primary/20 pointer-events-none absolute -top-24 -right-24 size-64 rounded-full bg-gradient-to-br to-transparent blur-3xl"
+            className="from-primary/20 pointer-events-none absolute -end-24 -top-24 size-64 rounded-full bg-gradient-to-br to-transparent blur-3xl"
           />
           <div className="relative">
             <div className="flex items-center gap-2">
@@ -392,7 +392,7 @@ export default function WatchPartyHub() {
                   role="radio"
                   aria-checked={selected}
                   onClick={() => setSelectionMode(option.value)}
-                  className={`flex items-start gap-3 rounded-xl border px-3 py-3 text-left text-sm transition-colors ${
+                  className={`flex items-start gap-3 rounded-xl border px-3 py-3 text-start text-sm transition-colors ${
                     selected
                       ? "border-foreground/50 bg-accent"
                       : "border-border/60 text-muted-foreground hover:bg-muted/60"

@@ -131,7 +131,7 @@ export function DownloadsTab({ user }: { user: AdminUser }) {
         <Button
           variant="outline"
           size="sm"
-          className="ml-2"
+          className="ms-2"
           onClick={() => {
             void downloads.refetch();
             void monitors.refetch();

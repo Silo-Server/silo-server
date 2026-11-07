@@ -99,7 +99,7 @@ function ClaimLinkBox({
       <p className="text-muted-foreground text-xs">{finePrint}</p>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button variant="outline" onClick={() => onCopy(claimUrl)}>
-          <Copy className="mr-1.5 h-4 w-4" /> {t("web.admin.settings.invitations.claimLink.copy")}
+          <Copy className="me-1.5 h-4 w-4" /> {t("web.admin.settings.invitations.claimLink.copy")}
         </Button>
         <Button onClick={onDone}>{t("common.done")}</Button>
       </div>
@@ -395,7 +395,7 @@ function InvitationManager() {
         >
           <DialogTrigger asChild>
             <Button size="sm" disabled={publicURLMissing}>
-              <MailPlus className="mr-1 h-4 w-4" />
+              <MailPlus className="me-1 h-4 w-4" />
               {t("web.admin.settings.invitations.invite.button")}
             </Button>
           </DialogTrigger>
@@ -575,7 +575,7 @@ function InvitationRow({
       <TableCell>
         <Badge variant={badge.variant}>{t(badge.label)}</Badge>
         {invitation.status === "pending" && (
-          <span className="text-muted-foreground ml-2 text-xs">
+          <span className="text-muted-foreground ms-2 text-xs">
             {t("web.admin.settings.invitations.row.expires", {
               date: formatDate(invitation.expires_at),
             })}

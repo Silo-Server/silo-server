@@ -62,7 +62,7 @@ export function SideNavItem({
   onIntent,
 }: SideNavItemProps) {
   const className = cn(
-    "relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition-colors duration-150",
+    "relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-start text-[13px] font-medium transition-colors duration-150",
     active
       ? "text-primary bg-accent"
       : "text-muted-foreground hover:text-foreground hover:bg-accent/70",
@@ -71,7 +71,7 @@ export function SideNavItem({
     <>
       {active && (
         <span
-          className="absolute top-1/2 left-[-12px] h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+          className="absolute start-[-12px] top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
           style={{ background: "var(--primary)" }}
         />
       )}
@@ -79,7 +79,7 @@ export function SideNavItem({
         <Icon className="h-[18px] w-[18px]" />
       </span>
       <span className="min-w-0 truncate">{label}</span>
-      {badge && <span className="ml-auto">{badge}</span>}
+      {badge && <span className="ms-auto">{badge}</span>}
     </>
   );
   const ariaCurrent = active ? "page" : undefined;
@@ -164,7 +164,7 @@ export function SideNavTopic({
         aria-controls={listId}
         onClick={onToggle}
         className={cn(
-          "hover:text-foreground hover:bg-accent/70 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-[13px] font-medium transition-colors duration-150",
+          "hover:text-foreground hover:bg-accent/70 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-start text-[13px] font-medium transition-colors duration-150",
           open ? "text-foreground" : "text-muted-foreground",
         )}
       >
@@ -172,7 +172,7 @@ export function SideNavTopic({
           <Icon className="h-[18px] w-[18px]" />
         </span>
         <span className="min-w-0 truncate">{label}</span>
-        <span className="ml-auto flex items-center gap-2">
+        <span className="ms-auto flex items-center gap-2">
           {!open && badge ? badge : null}
           <Chevron className="text-muted-foreground h-3.5 w-3.5" aria-hidden="true" />
         </span>
@@ -181,7 +181,7 @@ export function SideNavTopic({
         <ul
           id={listId}
           aria-label={label}
-          className="border-border/70 mt-0.5 mb-1.5 ml-[21px] list-none space-y-px border-l pl-3"
+          className="border-border/70 ms-[21px] mt-0.5 mb-1.5 list-none space-y-px border-s ps-3"
         >
           {children}
         </ul>
@@ -212,7 +212,7 @@ export function SideNavSubItem({
   onIntent,
 }: SideNavSubItemProps) {
   const className = cn(
-    "relative flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] transition-colors duration-150",
+    "relative flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[12.5px] transition-colors duration-150",
     active
       ? "text-primary bg-accent font-medium"
       : "text-muted-foreground hover:text-foreground hover:bg-accent/70",
@@ -221,12 +221,12 @@ export function SideNavSubItem({
     <>
       {active && (
         <span
-          className="absolute top-1/2 left-[-13px] h-4 w-[2px] -translate-y-1/2 rounded-full"
+          className="absolute start-[-13px] top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full"
           style={{ background: "var(--primary)" }}
         />
       )}
       <span className="min-w-0 truncate">{label}</span>
-      {badge && <span className="ml-auto">{badge}</span>}
+      {badge && <span className="ms-auto">{badge}</span>}
     </>
   );
   const ariaCurrent = active ? "page" : undefined;

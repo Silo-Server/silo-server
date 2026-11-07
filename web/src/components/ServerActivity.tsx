@@ -202,13 +202,13 @@ export default function ServerActivity({ hideWhenEmpty = false, className }: Ser
             }`}
           />
           {totalActive > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-[18px] min-w-[18px] animate-[pulse-opacity_2s_ease-in-out_infinite] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
+            <span className="absolute -end-0.5 -top-0.5 flex h-[18px] min-w-[18px] animate-[pulse-opacity_2s_ease-in-out_infinite] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm">
               {totalActiveLabel}
             </span>
           )}
           {showConnectionProblem && (
             <span
-              className="ring-background absolute -right-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2"
+              className="ring-background absolute -end-0.5 -bottom-0.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2"
               aria-hidden="true"
             />
           )}
@@ -433,11 +433,11 @@ function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void 
           {task.name}
         </Link>
         {hasDeterminateProgress ? (
-          <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
+          <span className="text-muted-foreground ms-2 shrink-0 text-[10px] font-semibold tabular-nums">
             {formatTaskProgress(task.progress)}
           </span>
         ) : (
-          <span className="text-primary ml-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+          <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
             <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
             {t("web.admin.common.serverActivity.running")}
           </span>
@@ -550,11 +550,11 @@ function PreparationRow({
           {preparationCompactTitle(prep)}
         </Link>
         {percent != null ? (
-          <span className="text-muted-foreground ml-2 shrink-0 text-[10px] font-semibold tabular-nums">
+          <span className="text-muted-foreground ms-2 shrink-0 text-[10px] font-semibold tabular-nums">
             {t("web.admin.common.serverActivity.percent", { percent: String(Math.floor(percent)) })}
           </span>
         ) : (
-          <span className="text-primary ml-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+          <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
             <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
             {preparationRunningLabel(prep)}
           </span>
@@ -595,7 +595,7 @@ function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) 
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center gap-2">
           <span className="truncate text-[12px] font-medium">{libraryName}</span>
-          <span className="text-muted-foreground ml-auto shrink-0 text-[10px]">
+          <span className="text-muted-foreground ms-auto shrink-0 text-[10px]">
             {scan.status === "running"
               ? t("web.admin.common.serverActivity.scanning")
               : t("web.admin.common.serverActivity.scanQueued")}

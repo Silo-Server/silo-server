@@ -100,7 +100,7 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
               <TableHead>{t("web.admin.access.policy.history.column.created")}</TableHead>
               <TableHead>{t("web.admin.access.policy.history.column.comment")}</TableHead>
               <TableHead>{t("web.admin.access.policy.history.column.compile")}</TableHead>
-              <TableHead className="text-right">
+              <TableHead className="text-end">
                 {t("web.admin.access.policy.history.column.actions")}
               </TableHead>
             </TableRow>
@@ -143,7 +143,7 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
                       version: String(version.version_number),
                     })}
                     {isActive && (
-                      <Badge variant="secondary" className="ml-2">
+                      <Badge variant="secondary" className="ms-2">
                         {t("web.admin.access.policy.status.active")}
                       </Badge>
                     )}
@@ -166,7 +166,7 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
                         : t("web.admin.access.policy.history.failed")}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-end">
                     <Button
                       type="button"
                       size="sm"

@@ -160,7 +160,7 @@ export function AudioTrackMenu({
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 max-w-[min(360px,calc(100vw-1rem))] min-w-[280px] rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+          className="absolute end-0 bottom-full z-30 mb-2 max-w-[min(360px,calc(100vw-1rem))] min-w-[280px] rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
@@ -178,7 +178,7 @@ export function AudioTrackMenu({
                 }}
                 role="menuitem"
                 type="button"
-                className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                className={`flex w-full items-start gap-2 px-3 py-2 text-start transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                   isActive ? "text-blue-400" : "text-white/85"
                 }`}
                 onClick={() => handleSelect(index)}

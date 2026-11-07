@@ -129,7 +129,7 @@ export function RoomStatusStrip({
         ) : null}
       </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="ms-auto flex shrink-0 items-center gap-2">
         <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
           <ConnectionStatusDot state={connectionState} />
           <span className="hidden sm:inline">

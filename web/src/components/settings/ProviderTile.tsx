@@ -159,8 +159,8 @@ export function ProviderPanelActions({
           role="status"
           className={
             test.ok
-              ? "text-muted-foreground mr-auto text-xs"
-              : "mr-auto text-xs text-amber-600 dark:text-amber-400"
+              ? "text-muted-foreground me-auto text-xs"
+              : "me-auto text-xs text-amber-600 dark:text-amber-400"
           }
         >
           {test.ok ? testedLabel(t, test) : test.message}
@@ -236,7 +236,7 @@ export function ProviderTile({
             </p>
           ) : null}
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2.5">
+        <div className="ms-auto flex shrink-0 items-center gap-2.5">
           <ProviderState state={state} label={statePill} />
           {headerActions}
           {!expanded && primaryAction ? (
@@ -253,7 +253,7 @@ export function ProviderTile({
         </div>
       </div>
 
-      {expanded && children ? <div className="mt-3.5 pl-12">{children}</div> : null}
+      {expanded && children ? <div className="mt-3.5 ps-12">{children}</div> : null}
     </fieldset>
   );
 }

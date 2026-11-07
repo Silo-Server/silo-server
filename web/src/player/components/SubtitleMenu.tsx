@@ -275,7 +275,7 @@ export function SubtitleMenu({
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 flex w-max max-w-[min(420px,calc(100vw-1rem))] min-w-[220px] flex-col rounded-lg bg-black/90 shadow-lg backdrop-blur"
+          className="absolute end-0 bottom-full z-30 mb-2 flex w-max max-w-[min(420px,calc(100vw-1rem))] min-w-[220px] flex-col rounded-lg bg-black/90 shadow-lg backdrop-blur"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
@@ -286,7 +286,7 @@ export function SubtitleMenu({
               }}
               role="menuitem"
               type="button"
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+              className={`flex w-full items-center gap-2 px-3 py-2 text-start text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                 activeIndex === null ? "bg-white/5 text-white" : "text-white/70"
               }`}
               onClick={() => handleSelect(null)}
@@ -322,7 +322,7 @@ export function SubtitleMenu({
                   }}
                   role="menuitem"
                   type="button"
-                  className={`flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                  className={`flex w-full items-start gap-2 px-3 py-2 text-start hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                     isActive ? "bg-white/5 text-white" : "text-white/70"
                   }`}
                   onClick={() => handleSelect(track.index)}
@@ -394,7 +394,7 @@ export function SubtitleMenu({
                 </button>
                 <button
                   type="button"
-                  className="ml-1 rounded px-2 py-1 text-xs text-white/60 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                  className="ms-1 rounded px-2 py-1 text-xs text-white/60 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={resetDelay}
                   disabled={delayDisabled || delayMs === 0}
                   aria-label={t("web.subtitles.menu.resetDelayLabel")}
@@ -415,7 +415,7 @@ export function SubtitleMenu({
                 }}
                 role="menuitem"
                 type="button"
-                className="flex w-full px-3 py-2 text-left text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                className="flex w-full px-3 py-2 text-start text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
                 onClick={() => {
                   setSearchOpen(true);
                   setOpen(false);
@@ -434,7 +434,7 @@ export function SubtitleMenu({
                   }}
                   role="menuitem"
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-start text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
                   onClick={() => {
                     setTranslateOpen(true);
                     setOpen(false);
@@ -450,7 +450,7 @@ export function SubtitleMenu({
               }}
               role="menuitem"
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+              className="flex w-full items-center gap-2 px-3 py-2 text-start text-sm text-white/70 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
               onClick={() => {
                 setAppearanceOpen(true);
                 setOpen(false);

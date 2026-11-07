@@ -23,7 +23,7 @@ export function ShowsSummary({
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
       <span className="text-sm font-medium">{t("web.home.addRow.shows.label")}</span>
-      <div className="border-border flex items-center gap-3 rounded-xl border py-2.5 pr-3 pl-2.5">
+      <div className="border-border flex items-center gap-3 rounded-xl border py-2.5 ps-2.5 pe-3">
         <span
           aria-hidden
           className={cn(

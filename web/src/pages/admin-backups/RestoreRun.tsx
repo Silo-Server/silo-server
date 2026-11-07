@@ -136,7 +136,7 @@ function AccountReport({
         </p>
       )}
       {account.profiles.length > 0 ? (
-        <ul className="border-border/60 space-y-2 border-l pl-3">
+        <ul className="border-border/60 space-y-2 border-s ps-3">
           {account.profiles.map((profile) => {
             const outcome = OUTCOME[profile.outcome];
             return (

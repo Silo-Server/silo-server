@@ -414,9 +414,9 @@ export default function AdminDevices() {
         })}
         actions={
           <div className="relative w-full sm:w-[340px]">
-            <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+            <Search className="text-muted-foreground absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
             <Input
-              className="bg-background/60 h-9 pr-9 pl-9 text-[13px]"
+              className="bg-background/60 h-9 ps-9 pe-9 text-[13px]"
               placeholder={t("web.admin.devices.search.placeholder")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -425,7 +425,7 @@ export default function AdminDevices() {
               <button
                 type="button"
                 onClick={() => setSearch("")}
-                className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 -translate-y-1/2 rounded p-1 transition-colors"
+                className="text-muted-foreground hover:text-foreground absolute end-2 top-1/2 -translate-y-1/2 rounded p-1 transition-colors"
                 aria-label={t("web.admin.devices.search.clear")}
               >
                 <X className="h-3.5 w-3.5" />
@@ -622,7 +622,7 @@ function FleetPulse({
         <Histogram counts={sortedCounts} max={maxCount} />
       </div>
 
-      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+      <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
         <span className="text-muted-foreground/70 text-[10px] tracking-[0.08em] uppercase">
           {t("web.admin.devices.groupBy.label")}
         </span>
@@ -673,7 +673,7 @@ function DeviceScopeControl({
         onClick={() => onChange(true)}
         aria-pressed={overridesOnly}
         className={cn(
-          "border-border/60 inline-flex items-center gap-2 border-l px-3.5 py-2 text-[13px] font-medium transition-colors",
+          "border-border/60 inline-flex items-center gap-2 border-s px-3.5 py-2 text-[13px] font-medium transition-colors",
           overridesOnly
             ? "bg-surface-hover/70 text-foreground"
             : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
@@ -745,7 +745,7 @@ function SettingsScopeControl({
         disabled={!canShowOverrides}
         aria-pressed={!showAllSettings}
         className={cn(
-          "border-border/60 inline-flex items-center gap-1.5 border-l px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+          "border-border/60 inline-flex items-center gap-1.5 border-s px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
           !showAllSettings
             ? "bg-surface-hover/70 text-foreground"
             : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
@@ -837,7 +837,7 @@ function SegmentedControl<T extends string>({
             onClick={() => onChange(opt.value)}
             className={cn(
               "px-2.5 py-1 text-[11.5px] transition-colors",
-              i > 0 && "border-border/60 border-l",
+              i > 0 && "border-border/60 border-s",
               active
                 ? "bg-surface-hover/70 text-foreground"
                 : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
@@ -1044,7 +1044,7 @@ function SavedViewRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors",
+        "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start transition-colors",
         active
           ? "bg-surface-hover/70 text-foreground"
           : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
@@ -1244,12 +1244,12 @@ function DeviceGroup({
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           aria-controls={`device-group-${group.key}`}
-          className="text-foreground hover:text-foreground/80 group flex min-w-0 flex-1 items-center gap-1.5 text-left transition-colors"
+          className="text-foreground hover:text-foreground/80 group flex min-w-0 flex-1 items-center gap-1.5 text-start transition-colors"
         >
           <ChevronRight
             className={cn(
               "text-muted-foreground/70 group-hover:text-foreground h-3 w-3 shrink-0 transition-transform",
-              open && "rotate-90",
+              open && "rotate-90 rtl:-rotate-90",
             )}
           />
           <span className="truncate text-[12.5px] font-semibold">{group.label}</span>
@@ -1326,7 +1326,7 @@ function DeviceRow({
       <span
         aria-hidden
         className={cn(
-          "absolute top-1.5 bottom-1.5 left-0 w-[2px] rounded-r transition-opacity",
+          "absolute start-0 top-1.5 bottom-1.5 w-[2px] rounded-e transition-opacity",
           active ? "bg-foreground opacity-100" : "opacity-0",
         )}
       />
@@ -1382,7 +1382,7 @@ function OverrideGauge({ count, active }: { count: number; active: boolean }) {
       </span>
       <span
         className={cn(
-          "min-w-[14px] text-right font-mono text-[11px] tabular-nums",
+          "min-w-[14px] text-end font-mono text-[11px] tabular-nums",
           active
             ? "text-foreground"
             : count === 0

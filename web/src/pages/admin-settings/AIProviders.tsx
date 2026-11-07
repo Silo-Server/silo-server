@@ -253,7 +253,7 @@ function TypeCard({
       aria-checked={selected}
       onClick={onSelect}
       className={cn(
-        "border-border hover:bg-accent/40 flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+        "border-border hover:bg-accent/40 flex items-start gap-3 rounded-lg border p-3 text-start transition-colors",
         selected && "border-[var(--settings-accent)] bg-[var(--settings-accent-soft)]",
       )}
     >

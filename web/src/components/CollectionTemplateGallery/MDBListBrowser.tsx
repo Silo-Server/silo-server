@@ -144,7 +144,7 @@ export function MDBListBrowser({
       <div className="relative">
         <Search
           aria-hidden
-          className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+          className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
         />
         <Input
           type="search"
@@ -156,7 +156,7 @@ export function MDBListBrowser({
               : t("web.collections.templateGallery.searchOff")
           }
           disabled={!searchEnabled}
-          className="h-11 pl-9"
+          className="h-11 ps-9"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -266,14 +266,14 @@ export function MDBListBrowser({
         <div className="relative">
           <Link2
             aria-hidden
-            className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+            className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
           />
           <Input
             id={`${id}-link`}
             type="url"
             inputMode="url"
             placeholder={MDBLIST_LINK_PLACEHOLDER}
-            className="h-11 pl-9"
+            className="h-11 ps-9"
             aria-invalid={linkInvalid || undefined}
             aria-describedby={linkInvalid ? `${id}-link-error` : undefined}
             value={link}

@@ -232,7 +232,7 @@ function TaskRow({
                 </span>
               )}
               {task.last_execution && (
-                <span className="ml-2">
+                <span className="ms-2">
                   {typeof task.last_execution.duration_ms === "number"
                     ? t("web.admin.tasks.row.lastRunWithDuration", {
                         time: lastRunTime(task.last_execution.completed_at),
@@ -248,12 +248,12 @@ function TaskRow({
               )}
               {task.next_run_at &&
                 (isOverdue(task.next_run_at, now) ? (
-                  <span className="text-warning ml-2 inline-flex items-center gap-1 font-medium">
+                  <span className="text-warning ms-2 inline-flex items-center gap-1 font-medium">
                     <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                     {t("web.admin.tasks.row.overdue")}
                   </span>
                 ) : (
-                  <span className="ml-2">
+                  <span className="ms-2">
                     {t("web.admin.tasks.row.next", {
                       next: formatNextRun(t, task.next_run_at, now),
                     })}
@@ -313,11 +313,11 @@ function TaskRow({
           aria-busy={isShowingRunFeedback}
         >
           {task.state === "cancelling" ? (
-            <Square className="mr-1.5 h-3.5 w-3.5 fill-current" />
+            <Square className="me-1.5 h-3.5 w-3.5 fill-current" />
           ) : isRunning ? (
-            <Square className="mr-1.5 h-3.5 w-3.5 fill-current" />
+            <Square className="me-1.5 h-3.5 w-3.5 fill-current" />
           ) : (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
           )}
           {task.state === "cancelling"
             ? t("web.admin.tasks.row.stopping")
@@ -335,7 +335,7 @@ function TaskRow({
           }}
           disabled={runTask.isPending}
         >
-          <Play className="mr-1.5 h-3.5 w-3.5" />
+          <Play className="me-1.5 h-3.5 w-3.5" />
           {t("web.admin.tasks.actions.runNow")}
         </Button>
       )}

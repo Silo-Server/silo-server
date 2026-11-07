@@ -55,7 +55,7 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
         <div
           role="dialog"
           aria-label={t("web.audiobooks.player.settings")}
-          className="absolute right-0 bottom-full mb-2 flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm"
+          className="absolute end-0 bottom-full mb-2 flex w-[260px] flex-col gap-4 rounded-lg bg-black/90 px-4 py-3.5 shadow-xl backdrop-blur-sm"
         >
           <SkipIntervalRow
             label={t("web.audiobooks.player.settingsSkipBack")}
@@ -77,7 +77,7 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
             type="button"
             role="switch"
             aria-checked={prefs.smartRewind}
-            className="group flex items-start justify-between gap-3 text-left focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+            className="group flex items-start justify-between gap-3 text-start focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
             onClick={() => prefs.setSmartRewind(!prefs.smartRewind)}
           >
             <span className="flex flex-col gap-0.5">
@@ -96,7 +96,7 @@ export function PlayerSettingsMenu({ prefs }: PlayerSettingsMenuProps) {
             >
               <span
                 className={`h-[14px] w-[14px] rounded-full bg-black/80 transition-transform ${
-                  prefs.smartRewind ? "translate-x-[14px]" : "translate-x-0"
+                  prefs.smartRewind ? "translate-x-[14px] rtl:-translate-x-[14px]" : "translate-x-0"
                 }`}
               />
             </span>

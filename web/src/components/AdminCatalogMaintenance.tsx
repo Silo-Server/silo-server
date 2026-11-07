@@ -165,7 +165,7 @@ export default function AdminCatalogMaintenance() {
             {t("web.admin.catalogMaintenance.header.body")}
           </p>
         </div>
-        <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-2">
+        <div className="ms-auto flex shrink-0 flex-wrap justify-end gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -173,7 +173,7 @@ export default function AdminCatalogMaintenance() {
             disabled={exportMutation.isPending}
           >
             <Download
-              className={`mr-1 h-4 w-4 ${exportMutation.isPending ? "animate-pulse" : ""}`}
+              className={`me-1 h-4 w-4 ${exportMutation.isPending ? "animate-pulse" : ""}`}
             />
             {t("web.admin.catalogMaintenance.header.startExport")}
           </Button>
@@ -188,7 +188,7 @@ export default function AdminCatalogMaintenance() {
           >
             <DialogTrigger asChild>
               <Button variant="outline" size="sm">
-                <Upload className="mr-1 h-4 w-4" />
+                <Upload className="me-1 h-4 w-4" />
                 {t("web.admin.catalogMaintenance.header.importCatalog")}
               </Button>
             </DialogTrigger>
@@ -273,7 +273,7 @@ export default function AdminCatalogMaintenance() {
                             disabled={localImportSourcesQuery.isFetching}
                           >
                             <RefreshCw
-                              className={`mr-1 h-4 w-4 ${localImportSourcesQuery.isFetching ? "animate-spin" : ""}`}
+                              className={`me-1 h-4 w-4 ${localImportSourcesQuery.isFetching ? "animate-spin" : ""}`}
                             />
                             {t("web.admin.catalogMaintenance.refresh")}
                           </Button>
@@ -358,7 +358,7 @@ export default function AdminCatalogMaintenance() {
                         disabled={importSourcesQuery.isFetching}
                       >
                         <RefreshCw
-                          className={`mr-1 h-4 w-4 ${importSourcesQuery.isFetching ? "animate-spin" : ""}`}
+                          className={`me-1 h-4 w-4 ${importSourcesQuery.isFetching ? "animate-spin" : ""}`}
                         />
                         {t("web.admin.catalogMaintenance.refresh")}
                       </Button>
@@ -472,7 +472,7 @@ export default function AdminCatalogMaintenance() {
                     </div>
                   ))}
                   <Button type="button" variant="outline" size="sm" onClick={addRewrite}>
-                    <Plus className="mr-1 h-4 w-4" /> {addRewriteLabel}
+                    <Plus className="me-1 h-4 w-4" /> {addRewriteLabel}
                   </Button>
                 </div>
                 <div className="border-border/60 bg-muted/30 text-muted-foreground rounded-md border p-3 text-xs">
@@ -581,7 +581,7 @@ export default function AdminCatalogMaintenance() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" onClick={() => importJobsQuery.refetch()}>
-                      <RefreshCw className="mr-1 h-4 w-4" />
+                      <RefreshCw className="me-1 h-4 w-4" />
                       {t("web.admin.catalogMaintenance.refresh")}
                     </Button>
                   </div>
@@ -683,7 +683,7 @@ export default function AdminCatalogMaintenance() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Button variant="outline" size="sm" onClick={() => exportJobsQuery.refetch()}>
-                      <RefreshCw className="mr-1 h-4 w-4" />
+                      <RefreshCw className="me-1 h-4 w-4" />
                       {t("web.admin.catalogMaintenance.refresh")}
                     </Button>
                     {job.download_url ? (
@@ -694,7 +694,7 @@ export default function AdminCatalogMaintenance() {
                           window.open(job.download_url, "_blank", "noopener,noreferrer")
                         }
                       >
-                        <Download className="mr-1 h-4 w-4" />
+                        <Download className="me-1 h-4 w-4" />
                         {t("web.admin.catalogMaintenance.exports.download")}
                       </Button>
                     ) : null}

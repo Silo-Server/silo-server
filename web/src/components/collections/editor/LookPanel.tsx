@@ -111,7 +111,7 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
           aria-labelledby={`${id}-heading`}
           aria-describedby={`${id}-summary`}
           onClick={() => toggle(true)}
-          className="hover:bg-accent/30 focus-visible:ring-ring/50 grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-[22px] px-4 py-4 text-left outline-none focus-visible:ring-[3px] max-sm:grid-cols-[auto_minmax(0,1fr)] sm:pr-6"
+          className="hover:bg-accent/30 focus-visible:ring-ring/50 grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-[22px] px-4 py-4 text-start outline-none focus-visible:ring-[3px] max-sm:grid-cols-[auto_minmax(0,1fr)] sm:pe-6"
         >
           <span className="flex items-center gap-2">
             {slots.map((slot) => (

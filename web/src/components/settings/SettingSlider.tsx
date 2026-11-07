@@ -66,7 +66,7 @@ export function SettingSlider({
           if (next !== undefined && next !== value) onCommit(next);
         }}
       />
-      <span className="text-muted-foreground min-w-16 text-right text-xs font-medium tabular-nums">
+      <span className="text-muted-foreground min-w-16 text-end text-xs font-medium tabular-nums">
         {readout}
       </span>
     </div>

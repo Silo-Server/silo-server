@@ -53,7 +53,7 @@ function PolicyPipelineStrip() {
             {index < PIPELINE_STEPS.length - 1 && (
               <ArrowRight
                 aria-hidden
-                className="text-muted-foreground/50 absolute top-1 -right-3 hidden size-4 md:block"
+                className="text-muted-foreground/50 absolute -end-3 top-1 hidden size-4 md:block"
               />
             )}
           </li>

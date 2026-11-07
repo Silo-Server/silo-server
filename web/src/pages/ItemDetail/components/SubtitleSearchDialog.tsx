@@ -249,7 +249,7 @@ export default function SubtitleSearchDialog({
         </DialogHeader>
 
         <TooltipProvider delayDuration={250}>
-          <div className="overlay-scroll min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
+          <div className="overlay-scroll min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pe-1">
             {version && (
               <SubtitleUploadForm
                 mediaFileId={version.file_id}
@@ -375,7 +375,7 @@ export default function SubtitleSearchDialog({
                             </Badge>
                           )}
                           {result.downloads > 0 && (
-                            <span className="text-muted-foreground ml-0.5 text-[11px] tabular-nums">
+                            <span className="text-muted-foreground ms-0.5 text-[11px] tabular-nums">
                               {t("web.detail.subtitleSearch.downloadCount", {
                                 count: result.downloads,
                                 count_text: result.downloads.toLocaleString(formatLocale()),
@@ -419,7 +419,7 @@ export default function SubtitleSearchDialog({
                           </Tooltip>
 
                           {hasExtras && expanded && (
-                            <ul className="border-border/60 text-muted-foreground space-y-0.5 border-l pl-2 font-mono text-[12px] leading-snug">
+                            <ul className="border-border/60 text-muted-foreground space-y-0.5 border-s ps-2 font-mono text-[12px] leading-snug">
                               {extras.map((name, i) => (
                                 <li key={i} className="truncate" title={name}>
                                   {name}

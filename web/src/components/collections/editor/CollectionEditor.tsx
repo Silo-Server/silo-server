@@ -626,7 +626,7 @@ export function CollectionEditor<Raw extends WireCollection>({
           <>
             {notSavedMessage(pending)}{" "}
             {afterPending ? (
-              <span className="text-muted-foreground ml-3 font-normal">{afterPending}</span>
+              <span className="text-muted-foreground ms-3 font-normal">{afterPending}</span>
             ) : null}
           </>
         )
@@ -652,7 +652,7 @@ export function CollectionEditor<Raw extends WireCollection>({
           <>
             {notCreatedYet()} {/* A phone's bar has room for the state and the buttons only. */}
             {createHint ? (
-              <span className="text-muted-foreground ml-3 font-normal max-sm:sr-only">
+              <span className="text-muted-foreground ms-3 font-normal max-sm:sr-only">
                 {createHint}
               </span>
             ) : null}

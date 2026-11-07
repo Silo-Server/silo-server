@@ -56,7 +56,7 @@ export function IPAddressesCard({ userId }: { userId: number }) {
           <Button
             variant="outline"
             size="sm"
-            className="ml-auto"
+            className="ms-auto"
             disabled={history.isFetchingNextPage}
             onClick={() => void history.fetchNextPage()}
           >
@@ -111,7 +111,7 @@ export function IPAddressesCard({ userId }: { userId: number }) {
                   </span>
                 ) : null}
               </span>
-              <span className="text-muted-foreground col-span-2 text-xs tabular-nums sm:col-span-1 sm:text-right">
+              <span className="text-muted-foreground col-span-2 text-xs tabular-nums sm:col-span-1 sm:text-end">
                 {t("web.admin.users.detail.activity.ips.requests", {
                   count: entry.request_count,
                   count_text: entry.request_count.toLocaleString(formatLocale()),

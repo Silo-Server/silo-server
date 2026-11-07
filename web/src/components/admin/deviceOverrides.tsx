@@ -336,7 +336,7 @@ export function DeviceOverrideRow({
         !isOverride && "opacity-70 hover:opacity-100",
         // Anomalies get a destructive left edge so they read as "this is
         // probably the row you came here for" without dominating the UI.
-        anomaly && "border-destructive/40 -ml-3 border-l-2 pl-3",
+        anomaly && "border-destructive/40 -ms-3 border-s-2 ps-3",
       )}
     >
       <div className="min-w-0 space-y-0.5">
@@ -719,7 +719,7 @@ export function DeviceProfileTabs({
       <div
         className="border-border/60 flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-2.5"
         style={{
-          backgroundImage: `linear-gradient(90deg, color-mix(in oklab, ${accent} 8%, transparent), transparent 70%)`,
+          backgroundImage: `linear-gradient(calc(90deg * var(--dir-sign)), color-mix(in oklab, ${accent} 8%, transparent), transparent 70%)`,
         }}
       >
         <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">

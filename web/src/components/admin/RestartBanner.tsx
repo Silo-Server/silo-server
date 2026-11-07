@@ -65,7 +65,7 @@ export function RestartBanner({
       role="status"
       className={cn(
         "mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-amber-500/30 px-4 py-3 sm:mb-6 sm:px-5",
-        "bg-[linear-gradient(90deg,color-mix(in_srgb,var(--warning)_16%,transparent),color-mix(in_srgb,var(--warning)_6%,transparent))]",
+        "bg-[linear-gradient(calc(90deg*var(--dir-sign)),color-mix(in_srgb,var(--warning)_16%,transparent),color-mix(in_srgb,var(--warning)_6%,transparent))]",
         className,
       )}
     >

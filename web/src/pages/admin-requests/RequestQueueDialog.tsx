@@ -71,7 +71,7 @@ export function RequestQueueDialog({
         showCloseButton={false}
       >
         {/* Its own close button, with a backing that stays visible over the backdrop. */}
-        <DialogClose className="bg-background/75 hover:bg-background focus-visible:ring-ring absolute top-3 right-3 z-10 rounded-md p-1.5 backdrop-blur transition-colors focus-visible:ring-2 focus-visible:outline-none">
+        <DialogClose className="bg-background/75 hover:bg-background focus-visible:ring-ring absolute end-3 top-3 z-10 rounded-md p-1.5 backdrop-blur transition-colors focus-visible:ring-2 focus-visible:outline-none">
           <X className="size-4" aria-hidden="true" />
           <span className="sr-only">{t("web.admin.requests.detail.close")}</span>
         </DialogClose>
@@ -116,12 +116,12 @@ function RequestDetail({
           <DialogHeader
             className={
               backdrop
-                ? "-mt-16 flex-row items-end gap-4 px-6 text-left"
-                : "flex-row gap-4 px-6 pt-6 text-left"
+                ? "-mt-16 flex-row items-end gap-4 px-6 text-start"
+                : "flex-row gap-4 px-6 pt-6 text-start"
             }
           >
             <RequestPoster request={request} size="w185" className="relative w-20 shadow-md" />
-            <div className="min-w-0 space-y-1 pr-6">
+            <div className="min-w-0 space-y-1 pe-6">
               <DialogTitle className="text-lg leading-tight text-balance">
                 <Link
                   to={requestDetailHref(request.media_type, request.tmdb_id)}
@@ -417,13 +417,13 @@ function RequestHistory({ requestId }: { requestId: string }) {
   return (
     <ol
       aria-label={t("web.admin.requests.history.label")}
-      className="border-border space-y-3 border-l pl-4"
+      className="border-border space-y-3 border-s ps-4"
     >
       {events.data.map((event) => (
         <li key={event.id} className="relative text-sm">
           <span
             aria-hidden="true"
-            className="bg-muted-foreground/60 absolute top-1.5 -left-[1.3rem] h-2 w-2 rounded-full"
+            className="bg-muted-foreground/60 absolute -start-[1.3rem] top-1.5 h-2 w-2 rounded-full"
           />
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="font-medium">{formatRequestEventType(event.type)}</span>

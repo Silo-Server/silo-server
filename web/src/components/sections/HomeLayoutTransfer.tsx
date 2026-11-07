@@ -354,7 +354,7 @@ function HomeLayoutImportSummary({
       {plan.skippedSections.length > 0 ? (
         <div className="text-muted-foreground space-y-1">
           <p>{t("web.home.layout.skippedHeading")}</p>
-          <ul className="list-disc space-y-0.5 pl-5">
+          <ul className="list-disc space-y-0.5 ps-5">
             {plan.skippedSections.map((section, index) => (
               <li key={`${section.page}-${section.title}-${index}`}>
                 {t("web.home.layout.skippedSection", {

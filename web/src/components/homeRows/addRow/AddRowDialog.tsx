@@ -358,7 +358,7 @@ export function AddRowDialog({
       <Button
         type="button"
         variant="ghost"
-        className="text-destructive hover:text-destructive -ml-3"
+        className="text-destructive hover:text-destructive -ms-3"
         disabled={busy || !onDelete}
         onClick={() => session && onDelete?.(session)}
       >
@@ -386,7 +386,7 @@ export function AddRowDialog({
           <div className="relative mt-3">
             <Search
               aria-hidden
-              className="text-muted-foreground absolute top-1/2 left-3.5 size-4 -translate-y-1/2"
+              className="text-muted-foreground absolute start-3.5 top-1/2 size-4 -translate-y-1/2"
             />
             <Input
               ref={searchRef}
@@ -395,7 +395,7 @@ export function AddRowDialog({
               placeholder={
                 phone ? t("web.home.addRow.searchRows") : t("web.home.addRow.searchRowsPlaceholder")
               }
-              className="h-11 pl-10"
+              className="h-11 ps-10"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />

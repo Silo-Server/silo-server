@@ -44,7 +44,7 @@ export function WatchTogetherPanel({
     <div
       aria-hidden={!visible}
       inert={!visible}
-      className={`absolute top-4 right-4 z-50 w-56 rounded-xl border border-white/10 bg-black/80 p-3 text-white shadow-2xl backdrop-blur-xl transition-opacity duration-300 ${
+      className={`absolute end-4 top-4 z-50 w-56 rounded-xl border border-white/10 bg-black/80 p-3 text-white shadow-2xl backdrop-blur-xl transition-opacity duration-300 ${
         visible ? "opacity-100" : "pointer-events-none opacity-0"
       }`}
     >
@@ -133,7 +133,7 @@ export function WatchTogetherPanel({
             type="button"
             onClick={onStopPlayback}
             title={t("web.player.watchTogether.stopTitle")}
-            className="ml-auto rounded-md bg-white/12 px-2.5 py-1 text-[11px] font-medium text-white/90 transition-colors hover:bg-white/20"
+            className="ms-auto rounded-md bg-white/12 px-2.5 py-1 text-[11px] font-medium text-white/90 transition-colors hover:bg-white/20"
           >
             {t("web.player.watchTogether.stop")}
           </button>

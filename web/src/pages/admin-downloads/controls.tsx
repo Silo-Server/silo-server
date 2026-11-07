@@ -27,7 +27,7 @@ export function SearchField({
       }}
     >
       <Search
-        className="text-muted-foreground absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2"
+        className="text-muted-foreground absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2"
         aria-hidden="true"
       />
       <Input
@@ -36,7 +36,7 @@ export function SearchField({
         onBlur={() => onSearch(text.trim())}
         placeholder={label}
         aria-label={label}
-        className={cn("h-8 pl-8 text-sm", className)}
+        className={cn("h-8 ps-8 text-sm", className)}
       />
     </form>
   );

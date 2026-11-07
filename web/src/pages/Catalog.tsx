@@ -462,11 +462,11 @@ function CatalogResults({
             <div className="items-baseline gap-3 sm:flex">
               <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
               {showExactResultCount ? (
-                <div className="text-right tabular-nums" role="status" aria-live="polite">
+                <div className="text-end tabular-nums" role="status" aria-live="polite">
                   <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
                     {totalItems}
                   </span>
-                  <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
+                  <span className="text-muted-foreground ms-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
                     {resultNoun}
                   </span>
                   <span className="text-muted-foreground text-xs sm:hidden">{resultCount}</span>

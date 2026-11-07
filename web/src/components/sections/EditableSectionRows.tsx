@@ -135,7 +135,7 @@ export function SectionDragOverlay({
     <div className="surface-panel flex items-center gap-2 rounded-xl border-0 px-3 py-2 shadow-lg">
       <GripVertical className="text-muted-foreground h-4 w-4" />
       <span className="font-medium">{section.title}</span>
-      <Badge variant="secondary" className="ml-2">
+      <Badge variant="secondary" className="ms-2">
         {recipeLabel(catalog, section.sectionType, section.config)}
       </Badge>
     </div>

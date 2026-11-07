@@ -115,7 +115,7 @@ function SuggestionRow({
               />
             </div>
           </div>
-          <span className="text-muted-foreground w-14 shrink-0 text-right text-xs tabular-nums">
+          <span className="text-muted-foreground w-14 shrink-0 text-end text-xs tabular-nums">
             {t("web.watchTogether.suggestions.votes", {
               count: suggestion.vote_count,
               count_text: String(suggestion.vote_count),

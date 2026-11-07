@@ -90,7 +90,7 @@ function BackupStatus({
       const missing = backup.missing_blobs.length;
       const omitted = backup.restore_set_omitted.length;
       return (
-        <div className="flex flex-col items-start gap-0.5 max-sm:items-end max-sm:text-right">
+        <div className="flex flex-col items-start gap-0.5 max-sm:items-end max-sm:text-end">
           <SettingFieldStatus tone="warn">{label}</SettingFieldStatus>
           {missing > 0 || omitted > 0 ? (
             <button
@@ -373,7 +373,7 @@ export function BackupTable({
           <TableHeader className="max-sm:hidden">
             <TableRow>
               <TableHead>{t("web.admin.backups.table.taken")}</TableHead>
-              <TableHead className="text-right">{t("web.admin.backups.table.size")}</TableHead>
+              <TableHead className="text-end">{t("web.admin.backups.table.size")}</TableHead>
               <TableHead className="hidden md:table-cell">
                 {t("web.admin.backups.table.siloVersion")}
               </TableHead>
@@ -424,9 +424,9 @@ export function BackupTable({
                     </TableCell>
                     <TableCell
                       className={cn(
-                        "text-right tabular-nums",
+                        "text-end tabular-nums",
                         PHONE_CELL,
-                        "max-sm:text-muted-foreground max-sm:row-start-2 max-sm:text-left max-sm:text-xs",
+                        "max-sm:text-muted-foreground max-sm:row-start-2 max-sm:text-start max-sm:text-xs",
                       )}
                     >
                       {formatFileSize(backup.size_bytes, { fallback: NO_VALUE })}
@@ -449,7 +449,7 @@ export function BackupTable({
                       />
                     </TableCell>
                     <TableCell className={cn(PHONE_CELL, "max-sm:col-span-2 max-sm:row-start-3")}>
-                      <div className="flex flex-wrap justify-end gap-1 max-sm:-ml-2.5 max-sm:justify-start">
+                      <div className="flex flex-wrap justify-end gap-1 max-sm:-ms-2.5 max-sm:justify-start">
                         {restorable && otherKey ? (
                           <Button variant="ghost" size="sm" disabled aria-describedby={otherKeyId}>
                             {restoreLabel}

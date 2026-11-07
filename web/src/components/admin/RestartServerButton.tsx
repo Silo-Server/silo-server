@@ -46,7 +46,7 @@ export function RestartServerButton({
         onClick={() => setShowConfirm(true)}
         disabled={restart.isPending}
       >
-        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+        <RotateCcw className="me-1.5 h-3.5 w-3.5" />
         {label ?? t("web.admin.common.restartServer.button")}
       </Button>
       <ConfirmDialog

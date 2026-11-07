@@ -138,7 +138,7 @@ function PercentInput({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
-        className="w-20 [appearance:textfield] text-right [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-20 [appearance:textfield] text-end [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       <span className="text-muted-foreground text-sm">
         {t("web.settings.subtitleAppearance.percentSign")}

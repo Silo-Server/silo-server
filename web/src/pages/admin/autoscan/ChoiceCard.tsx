@@ -41,7 +41,7 @@ export function ChoiceCard({
       aria-describedby={describedBy}
       onClick={disabled ? undefined : onSelect}
       className={cn(
-        "rounded-lg border p-3 text-left transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-60",
+        "rounded-lg border p-3 text-start transition-colors aria-disabled:cursor-not-allowed aria-disabled:opacity-60",
         selected
           ? "border-primary bg-accent"
           : "border-border [&:not([aria-disabled])]:hover:bg-accent/50",

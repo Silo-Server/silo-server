@@ -67,9 +67,9 @@ export function RowPreview({
           : t("web.home.addRow.preview.labelUntitled")
       }
       aria-busy={state.status === "loading" || (state.status === "ready" && state.refreshing)}
-      className="ring-border/85 relative overflow-hidden rounded-2xl bg-[radial-gradient(120%_140%_at_0%_0%,rgb(255_255_255/0.05),transparent_50%)] py-4 pl-4 ring-1 ring-inset sm:pl-[18px]"
+      className="ring-border/85 relative overflow-hidden rounded-2xl bg-[radial-gradient(120%_140%_at_0%_0%,rgb(255_255_255/0.05),transparent_50%)] py-4 ps-4 ring-1 ring-inset sm:ps-[18px]"
     >
-      <div className="mb-3 flex items-baseline justify-between gap-3 pr-4 sm:pr-[18px]">
+      <div className="mb-3 flex items-baseline justify-between gap-3 pe-4 sm:pe-[18px]">
         <span className="truncate text-base font-semibold tracking-[-0.015em]">
           {title || t("web.home.addRow.preview.untitled")}
         </span>
@@ -105,7 +105,7 @@ export function RowPreview({
         )}
       </div>
       {message ? (
-        <div className="flex items-center gap-3 pr-4">
+        <div className="flex items-center gap-3 pe-4">
           <span
             aria-hidden
             className={cn(

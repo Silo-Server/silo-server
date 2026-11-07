@@ -20,6 +20,8 @@ import { getDashboardWidget } from "./registry";
 import type { WidgetId } from "./types";
 import type { DashboardLayout } from "./useDashboardLayout";
 import { WidgetChromeProvider } from "./widgetChrome";
+import { isRightToLeft, readingArrowKey } from "@/lib/direction";
+import { Direction } from "radix-ui";
 
 /** Fallback for the `gap` of `.admin-widget-grid` in app.css (0.875rem). */
 const GRID_GAP_PX = 14;
@@ -111,6 +113,7 @@ export function DashboardGrid({
     addWidget,
   } = layout;
   const t = useT();
+  const dir = Direction.useDirection();
 
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [draggedId, setDraggedId] = useState<WidgetId | null>(null);
@@ -129,6 +132,8 @@ export function DashboardGrid({
     id: WidgetId;
     title: string;
     startX: number;
+    /** 1, or -1 right to left, where the handle grows the widget leftward. */
+    inlineSign: number;
     startY: number;
     startSpan: number;
     startRows: number;
@@ -204,9 +209,11 @@ export function DashboardGrid({
       const host = (event.target as HTMLElement).closest<HTMLElement>("[data-widget-id]");
       if (!host) return null;
       const rect = host.getBoundingClientRect();
-      return { id: overId, edge: event.clientX < rect.left + rect.width / 2 ? "before" : "after" };
+      // "Before" is the start side: the left half, or the right half right to left.
+      const leftHalf = event.clientX < rect.left + rect.width / 2;
+      return { id: overId, edge: leftHalf !== (dir === "rtl") ? "before" : "after" };
     },
-    [findWidgetIdFromEvent],
+    [dir, findWidgetIdFromEvent],
   );
 
   /** The entry the payload should land in front of, or null to append. */
@@ -341,6 +348,7 @@ export function DashboardGrid({
         id,
         title: t(widget.titleKey),
         startX: event.clientX,
+        inlineSign: isRightToLeft(event.currentTarget) ? -1 : 1,
         startY: event.clientY,
         startSpan: currentSpan,
         startRows: currentRows,
@@ -373,7 +381,10 @@ export function DashboardGrid({
     // Each axis is clamped to its own range, so a widget with a pinned width
     // still grows in height and never drifts sideways under the pointer.
     const nextSpan = clamp(
-      Math.round(session.startSpan + (session.latestClientX - session.startX) / session.columnUnit),
+      Math.round(
+        session.startSpan +
+          ((session.latestClientX - session.startX) * session.inlineSign) / session.columnUnit,
+      ),
       session.minSpan,
       session.maxSpan,
     );
@@ -443,8 +454,9 @@ export function DashboardGrid({
 
   const handleMoveKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLButtonElement>, id: WidgetId) => {
-      const backward = event.key === "ArrowLeft" || event.key === "ArrowUp";
-      const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+      const key = readingArrowKey(event);
+      const backward = key === "ArrowLeft" || key === "ArrowUp";
+      const forward = key === "ArrowRight" || key === "ArrowDown";
       if (!backward && !forward) return;
       event.preventDefault();
       const index = entries.findIndex((entry) => entry.id === id);
@@ -477,9 +489,10 @@ export function DashboardGrid({
       currentRows: number,
     ) => {
       // The corner handle owns both axes: left/right walk columns, up/down walk
-      // rows, matching the direction the same drag would take.
-      const columnStep =
-        event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : undefined;
+      // rows, matching the direction the same drag would take. The handle sits
+      // on the end corner, so right to left the keys mirror too.
+      const key = readingArrowKey(event);
+      const columnStep = key === "ArrowLeft" ? -1 : key === "ArrowRight" ? 1 : undefined;
       const rowStep = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : undefined;
       if (columnStep === undefined && rowStep === undefined) return;
       event.preventDefault();
@@ -574,12 +587,12 @@ export function DashboardGrid({
                       aria-hidden="true"
                       className={cn(
                         "bg-primary pointer-events-none absolute inset-y-0 z-30 w-1 rounded-full",
-                        dropIndicator.edge === "before" ? "-left-2.5" : "-right-2.5",
+                        dropIndicator.edge === "before" ? "-start-2.5" : "-end-2.5",
                       )}
                     />
                   )}
 
-                  <div className="border-border bg-background/95 absolute -top-3 right-3 z-20 flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-md backdrop-blur">
+                  <div className="border-border bg-background/95 absolute end-3 -top-3 z-20 flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-md backdrop-blur">
                     <button
                       type="button"
                       aria-label={t("web.admin.dashboard.grid.moveLabel", { title })}
@@ -609,7 +622,7 @@ export function DashboardGrid({
                       aria-label={t("web.admin.dashboard.grid.resizeLabel", { title })}
                       title={t("web.admin.dashboard.grid.resizeHint")}
                       className={cn(
-                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -right-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:block",
+                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -end-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:block rtl:cursor-nesw-resize",
                         isWidgetResizing && "border-primary bg-primary/30",
                       )}
                       onPointerDown={(event) =>
@@ -671,7 +684,7 @@ export function DashboardGrid({
                 <button
                   key={widget.id}
                   type="button"
-                  className="border-border hover:border-primary/50 hover:bg-accent/40 focus-visible:ring-ring flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                  className="border-border hover:border-primary/50 hover:bg-accent/40 focus-visible:ring-ring flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-start transition-colors focus-visible:ring-2 focus-visible:outline-none"
                   onClick={() => addWidget(widget.id)}
                   // Dragging is the pointer shortcut for placing the widget at
                   // a specific spot; clicking (the keyboard path) appends.

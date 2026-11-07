@@ -45,8 +45,8 @@ export function MiniBar({
   return (
     <div
       ref={barRef}
-      className="bg-background fixed right-0 bottom-0 z-40 border-t px-3 pt-2 pb-2 shadow-lg sm:px-6"
-      style={{ left: "var(--app-sidebar-offset, 0px)" }}
+      className="bg-background fixed end-0 bottom-0 z-40 border-t px-3 pt-2 pb-2 shadow-lg sm:px-6"
+      style={{ insetInlineStart: "var(--app-sidebar-offset, 0px)" }}
     >
       <SeekBar
         currentTime={playback.currentTime}
@@ -87,7 +87,10 @@ export function MiniBar({
               </div>
             ) : null}
             <div className="text-muted-foreground flex items-center gap-2 text-[10px] leading-tight uppercase">
-              <span className="font-mono text-[11px] tracking-[0.12em] normal-case tabular-nums">
+              <span
+                dir="ltr"
+                className="font-mono text-[11px] tracking-[0.12em] normal-case tabular-nums"
+              >
                 {formatTime(playback.currentTime)}
                 <span className="mx-1 opacity-50">{TIME_SEPARATOR}</span>
                 {formatTime(playback.duration)}
@@ -96,7 +99,8 @@ export function MiniBar({
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-2 sm:gap-3">
+        {/* Transport and time read left to right in every language, like the timeline. */}
+        <div dir="ltr" className="flex items-center justify-center gap-2 sm:gap-3">
           {hasChapters && (
             <span className="hidden sm:contents">
               <CircleButton
@@ -142,6 +146,7 @@ export function MiniBar({
             {playback.playing ? (
               <Pause className="h-5 w-5" strokeWidth={0} fill="currentColor" />
             ) : (
+              // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
               <Play className="ml-[2px] h-5 w-5" strokeWidth={0} fill="currentColor" />
             )}
           </CircleButton>

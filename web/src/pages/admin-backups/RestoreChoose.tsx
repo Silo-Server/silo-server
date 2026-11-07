@@ -165,7 +165,7 @@ function SectionIndex({
             <button
               type="button"
               onClick={() => scrollToSection(section.id)}
-              className="hover:bg-accent focus-visible:ring-ring/50 flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-left text-[13px] outline-none focus-visible:ring-[3px]"
+              className="hover:bg-accent focus-visible:ring-ring/50 flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-start text-[13px] outline-none focus-visible:ring-[3px]"
             >
               <span className="truncate">{t(SECTION_TITLES[section.id])}</span>
               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
@@ -248,7 +248,7 @@ function LibraryGroupRows({
         </span>
       </Disclosure>
       {open ? (
-        <div id={listId} className="pl-5">
+        <div id={listId} className="ps-5">
           <Rows items={items} {...rows} />
         </div>
       ) : null}
@@ -275,7 +275,7 @@ function BlockedGroupRows({ group, ...rows }: Omit<RowsProps, "items"> & { group
         </Disclosure>
       </div>
       {open ? (
-        <div id={listId} className="pt-1 pl-3">
+        <div id={listId} className="ps-3 pt-1">
           <Rows items={group.items} withLibrary {...rows} />
         </div>
       ) : null}
@@ -335,7 +335,7 @@ function NeverRestored({ keys }: { keys: readonly string[] }) {
         </Disclosure>
       </div>
       {open ? (
-        <p id={listId} className="text-muted-foreground pt-1 pl-5 text-xs leading-relaxed">
+        <p id={listId} className="text-muted-foreground ps-5 pt-1 text-xs leading-relaxed">
           {neverRestoredSettings(keys).map((key, position) => (
             <span key={key}>
               {position > 0 ? KEY_SEPARATOR : null}
@@ -633,7 +633,7 @@ export function RestoreChoose({
             {t("web.admin.backups.restore.choose.nothingChosen")}
           </p>
         ) : (
-          <ul className="list-disc space-y-1.5 pl-5 text-sm">
+          <ul className="list-disc space-y-1.5 ps-5 text-sm">
             {plan.flatMap((group) =>
               group.sentences.map((sentence, position) => (
                 <li key={`${group.section}-${position}`}>

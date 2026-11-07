@@ -252,7 +252,7 @@ export default function Profiles() {
                   </AvatarFallback>
                 </Avatar>
                 {profile.has_pin ? (
-                  <span className="bg-surface border-border text-muted-foreground absolute -right-0.5 -bottom-0.5 flex h-6 w-6 items-center justify-center rounded-full border">
+                  <span className="bg-surface border-border text-muted-foreground absolute -end-0.5 -bottom-0.5 flex h-6 w-6 items-center justify-center rounded-full border">
                     <Lock className="h-3 w-3" aria-hidden="true" />
                   </span>
                 ) : null}

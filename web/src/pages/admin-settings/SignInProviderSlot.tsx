@@ -296,11 +296,11 @@ function Step({
         </h4>
       </div>
       {description ? (
-        <p className="text-muted-foreground mt-1 ml-[32px] text-xs leading-relaxed">
+        <p className="text-muted-foreground ms-[32px] mt-1 text-xs leading-relaxed">
           {description}
         </p>
       ) : null}
-      <div className="settings-field-list ml-[32px]">{children}</div>
+      <div className="settings-field-list ms-[32px]">{children}</div>
     </section>
   );
 }
@@ -1049,7 +1049,7 @@ export function SignInProviderSlot({
               aria-pressed={on}
               onClick={() => setPicked(choice.id)}
               className={cn(
-                "bg-muted/20 hover:bg-muted/40 rounded-xl border px-3.5 py-3 text-left transition-colors",
+                "bg-muted/20 hover:bg-muted/40 rounded-xl border px-3.5 py-3 text-start transition-colors",
                 on
                   ? "border-[var(--settings-accent)] ring-1 ring-[var(--settings-accent)]"
                   : "border-border",

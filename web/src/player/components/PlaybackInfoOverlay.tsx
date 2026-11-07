@@ -69,7 +69,7 @@ export function PlaybackInfoOverlay({
   });
 
   return (
-    <div className="absolute top-12 left-4 z-50 max-h-[calc(100%-6rem)] w-80 overflow-y-auto rounded-lg bg-black/85 text-sm text-white shadow-lg backdrop-blur-sm">
+    <div className="absolute start-4 top-12 z-50 max-h-[calc(100%-6rem)] w-80 overflow-y-auto rounded-lg bg-black/85 text-sm text-white shadow-lg backdrop-blur-sm">
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
         <span className="font-medium text-white/90">{t("web.player.info.title")}</span>
         <button
@@ -91,7 +91,7 @@ export function PlaybackInfoOverlay({
             {section.rows.map((row) => (
               <div key={row.label} className="flex justify-between gap-4 py-0.5">
                 <span className="shrink-0 text-white/60">{row.label}</span>
-                <span className="truncate text-right text-white/90">{row.value}</span>
+                <span className="truncate text-end text-white/90">{row.value}</span>
               </div>
             ))}
           </div>

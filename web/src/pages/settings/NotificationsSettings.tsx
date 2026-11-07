@@ -325,7 +325,7 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
             className="max-w-xs"
           />
           <Button size="sm" disabled={requestAddress.isPending || !address.trim()} onClick={submit}>
-            {requestAddress.isPending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+            {requestAddress.isPending && <Loader2 className="me-1 h-3 w-3 animate-spin" />}
             {t("web.settings.notifications.email.requestVerification")}
           </Button>
         </div>
@@ -504,7 +504,7 @@ function DiscordSection() {
             </div>
           </div>
           <Button size="sm" disabled={!canManage || linkInit.isPending} onClick={startLink}>
-            {linkInit.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {linkInit.isPending && <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />}
             {t("web.settings.notifications.discord.linkButton")}
           </Button>
         </div>
@@ -750,7 +750,7 @@ function WebPushSection() {
             disabled={busy}
             onClick={() => void (subscribedHere ? disable() : enable())}
           >
-            {busy && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {busy && <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />}
             {subscribedHere
               ? t("web.settings.notifications.push.disable")
               : t("web.settings.notifications.push.enable")}
@@ -793,7 +793,7 @@ function WebPushSection() {
                   disabled={removeSubscription.isPending}
                   onClick={() => removeSubscription.mutate(sub.id)}
                 >
-                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  <Trash2 className="me-1.5 h-3.5 w-3.5" />
                   {t("web.settings.notifications.push.remove")}
                 </Button>
               </div>
@@ -936,7 +936,7 @@ function WebhookFormDialog({
                   <div className="text-sm">
                     {t(field.labelKey)}
                     {globallyDisabled && (
-                      <span className="text-muted-foreground ml-2 text-xs">
+                      <span className="text-muted-foreground ms-2 text-xs">
                         {t("web.settings.notifications.webhooks.disabledInProfile")}
                       </span>
                     )}
@@ -958,7 +958,7 @@ function WebhookFormDialog({
             {t("common.cancel")}
           </Button>
           <Button onClick={submit} disabled={pending || !name.trim()}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {pending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
             {editing ? t("common.save") : t("web.settings.notifications.webhooks.create")}
           </Button>
         </DialogFooter>
@@ -1020,7 +1020,7 @@ function WebhookCard({
         <span className="text-sm font-medium">{webhook.name}</span>
         <Badge variant="secondary">{webhook.type}</Badge>
         <span className="text-muted-foreground text-xs">{webhook.url_host}</span>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ms-auto flex items-center gap-1.5">
           <span className="text-muted-foreground text-xs">
             {webhook.enabled ? t("web.settings.value.enabled") : t("web.settings.value.disabled")}
           </span>
@@ -1092,14 +1092,14 @@ function WebhookCard({
           }
         >
           {test.isPending ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
           ) : (
-            <Send className="mr-1.5 h-3.5 w-3.5" />
+            <Send className="me-1.5 h-3.5 w-3.5" />
           )}
           {t("web.settings.notifications.webhooks.test")}
         </Button>
         <Button variant="outline" size="sm" onClick={onEdit}>
-          <Pencil className="mr-1.5 h-3.5 w-3.5" />
+          <Pencil className="me-1.5 h-3.5 w-3.5" />
           {t("web.settings.notifications.webhooks.edit")}
         </Button>
         {webhook.type === "generic" && (
@@ -1113,7 +1113,7 @@ function WebhookCard({
               })
             }
           >
-            <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+            <KeyRound className="me-1.5 h-3.5 w-3.5" />
             {t("web.settings.notifications.webhooks.rotateSecret")}
           </Button>
         )}
@@ -1126,7 +1126,7 @@ function WebhookCard({
             setConfirmDelete(true);
           }}
         >
-          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+          <Trash2 className="me-1.5 h-3.5 w-3.5" />
           {t("web.settings.notifications.webhooks.delete")}
         </Button>
       </div>
@@ -1206,11 +1206,11 @@ function WebhooksSection() {
                   setFormOpen(true);
                 }}
               >
-                <Plus className="mr-1.5 h-4 w-4" />
+                <Plus className="me-1.5 h-4 w-4" />
                 {t("web.settings.notifications.webhooks.add")}
               </Button>
               {atLimit && (
-                <span className="text-muted-foreground ml-2 text-xs">
+                <span className="text-muted-foreground ms-2 text-xs">
                   {t("web.settings.notifications.webhooks.limit", {
                     count: maxPerProfile,
                     count_text: String(maxPerProfile),

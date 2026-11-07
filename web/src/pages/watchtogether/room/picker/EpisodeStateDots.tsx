@@ -39,7 +39,7 @@ export function EpisodeStateDots({
             })}
           >
             {state === "in_progress" ? (
-              <span className={`absolute inset-y-0 left-0 w-1/2 ${dot}`} />
+              <span className={`absolute inset-y-0 start-0 w-1/2 ${dot}`} />
             ) : null}
           </span>
         );
@@ -81,7 +81,7 @@ export function DotsLegend() {
       </span>
       <span className="flex items-center gap-1">
         <span className="relative inline-block size-2 overflow-hidden rounded-full border border-transparent">
-          <span className="absolute inset-y-0 left-0 w-1/2 bg-white/70" />
+          <span className="absolute inset-y-0 start-0 w-1/2 bg-white/70" />
         </span>
         {t("web.watchTogether.dots.inProgress")}
       </span>

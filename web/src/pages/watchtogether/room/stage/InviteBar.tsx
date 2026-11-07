@@ -67,7 +67,7 @@ export function InviteBar({
         {t("web.watchTogether.inviteBar.code")}
       </Button>
       {isHost ? (
-        <label className="ml-auto flex items-center gap-2 text-sm">
+        <label className="ms-auto flex items-center gap-2 text-sm">
           <Switch
             checked={guestsCanPause}
             onCheckedChange={(checked) => onSetPolicy(checked ? "guest_play_pause" : "host_only")}
@@ -76,7 +76,7 @@ export function InviteBar({
           {t("web.watchTogether.inviteBar.guestsCanPause")}
         </label>
       ) : (
-        <span className="text-muted-foreground ml-auto text-xs">
+        <span className="text-muted-foreground ms-auto text-xs">
           {guestsCanPause
             ? t("web.watchTogether.inviteBar.guestsCanPause")
             : t("web.watchTogether.inviteBar.hostControls")}

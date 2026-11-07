@@ -87,7 +87,7 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
   const stillUrl = extra.still_url && extra.still_url !== failedSrc ? extra.still_url : null;
 
   return (
-    <button type="button" onClick={onPlay} className="group/extra block w-full text-left">
+    <button type="button" onClick={onPlay} className="group/extra block w-full text-start">
       <div
         className="media-card-image bg-muted relative mb-2 aspect-video overflow-hidden rounded-lg"
         style={
@@ -112,6 +112,7 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
         )}
         <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors duration-200 group-hover/extra:bg-black/30">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-black/60 opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover/extra:opacity-100 group-focus-visible/extra:opacity-100">
+            {/* eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror */}
             <Play className="ml-0.5 h-4 w-4 fill-white text-white" />
           </span>
         </div>

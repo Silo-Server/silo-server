@@ -354,7 +354,7 @@ export function SchemaForm({
       <div
         key={field.key}
         data-nested={nested ? "true" : undefined}
-        className={cn("space-y-2", nested && "border-border/60 ml-0.5 border-l pl-3")}
+        className={cn("space-y-2", nested && "border-border/60 ms-0.5 border-s ps-3")}
       >
         <div className="space-y-1">
           <Label htmlFor={`${idPrefix}-${field.key}`}>{field.label || field.key}</Label>
@@ -367,8 +367,8 @@ export function SchemaForm({
     );
   }
 
-  // A switch field as a single settings row: label + description on the left,
-  // the toggle on the right. No outer border — the group container owns it.
+  // A switch field as a single settings row: label + description at the start,
+  // the toggle at the end. No outer border — the group container owns it.
   function renderSwitchRow(field: PluginAdminFormField): React.ReactNode {
     const id = `${idPrefix}-${field.key}`;
     const err = mergedErrors[field.key];
@@ -391,7 +391,7 @@ export function SchemaForm({
             {renderLockNote(field)}
           </div>
         </div>
-        {err ? <p className="text-destructive mt-1.5 ml-11 text-xs">{err}</p> : null}
+        {err ? <p className="text-destructive ms-11 mt-1.5 text-xs">{err}</p> : null}
       </div>
     );
   }

@@ -272,16 +272,16 @@ export default function EditMetadataDialog({ item, open, onOpenChange }: EditMet
             style={{ height: "min(70vh, 580px)" }}
           >
             {/* Sidebar — horizontal tabs on mobile, vertical on sm+ */}
-            <nav className="border-border/10 flex flex-shrink-0 overflow-x-auto border-b bg-black/10 sm:w-[160px] sm:flex-col sm:overflow-x-visible sm:border-r sm:border-b-0 sm:py-2">
+            <nav className="border-border/10 flex flex-shrink-0 overflow-x-auto border-b bg-black/10 sm:w-[160px] sm:flex-col sm:overflow-x-visible sm:border-e sm:border-b-0 sm:py-2">
               {visibleSections.map((section) => (
                 <button
                   key={section.key}
                   type="button"
                   onClick={() => setActiveSection(section.key)}
                   className={cn(
-                    "px-4 py-2 text-left text-[13px] font-medium whitespace-nowrap transition-colors",
+                    "px-4 py-2 text-start text-[13px] font-medium whitespace-nowrap transition-colors",
                     effectiveActiveSection === section.key
-                      ? "border-primary bg-primary/8 text-primary max-sm:border-b-2 sm:border-r-2"
+                      ? "border-primary bg-primary/8 text-primary max-sm:border-b-2 sm:border-e-2"
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >

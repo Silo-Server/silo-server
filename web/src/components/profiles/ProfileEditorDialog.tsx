@@ -483,7 +483,7 @@ function ProfileEditorForm({
                     setPresetBatch(0);
                   }}
                   className={cn(
-                    "rounded-2xl border px-4 py-3 text-left transition-colors",
+                    "rounded-2xl border px-4 py-3 text-start transition-colors",
                     selected
                       ? "border-primary bg-primary/8 text-foreground"
                       : "border-border hover:border-primary/40",

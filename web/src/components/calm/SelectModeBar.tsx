@@ -77,16 +77,16 @@ export function SelectModeBar({
   const tooMany = count > limit;
   const disabled = busy || count === 0 || tooMany;
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col items-center gap-1.5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:left-[240px]">
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col items-center gap-1.5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:start-[240px]">
       <div
         role="group"
         aria-label={t(text.group)}
-        className="bg-popover/95 border-border pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-2xl border py-[7px] pr-[7px] pl-4 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.9)] backdrop-blur"
+        className="bg-popover/95 border-border pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-2xl border py-[7px] ps-4 pe-[7px] shadow-[0_24px_60px_-20px_rgb(0_0_0/0.9)] backdrop-blur"
       >
-        <span role="status" className="mr-2 text-sm font-semibold whitespace-nowrap">
+        <span role="status" className="me-2 text-sm font-semibold whitespace-nowrap">
           {t("web.ui.selectedCount", { count, shown: String(count) })}
           {tooMany ? (
-            <span className="text-warning ml-2 font-normal">{t(text.tooMany, { limit })}</span>
+            <span className="text-warning ms-2 font-normal">{t(text.tooMany, { limit })}</span>
           ) : null}
         </span>
         {actions.map((action) => (
@@ -148,7 +148,7 @@ export function SelectAllHeader({
   if (count > 0 && selectedCount === count) checked = true;
   else if (selectedCount > 0) checked = "indeterminate";
   return (
-    <div className="border-border/75 mb-0.5 flex items-center gap-3 border-b py-2.5 pr-3.5 pl-2 text-[13.5px]">
+    <div className="border-border/75 mb-0.5 flex items-center gap-3 border-b py-2.5 ps-2 pe-3.5 text-[13.5px]">
       <span className="grid w-7 place-items-center">
         <SelectCheckbox
           ref={ref}
@@ -164,7 +164,7 @@ export function SelectAllHeader({
       <span className="text-muted-foreground text-[13px]">
         {t(SELECT_MODE_TEXT[noun].limit, { limit })}
       </span>
-      <Button size="sm" variant="ghost" className="ml-auto" onClick={onDone}>
+      <Button size="sm" variant="ghost" className="ms-auto" onClick={onDone}>
         {t("common.done")}
       </Button>
     </div>

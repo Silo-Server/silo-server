@@ -285,7 +285,7 @@ export default function AdminBackups() {
                 {backUpNowButton}
               </div>
               {blocker ? (
-                <p id={blockerId} className="text-muted-foreground max-w-72 text-right text-xs">
+                <p id={blockerId} className="text-muted-foreground max-w-72 text-end text-xs">
                   {blocker}
                 </p>
               ) : null}

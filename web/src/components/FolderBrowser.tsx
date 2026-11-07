@@ -211,7 +211,7 @@ export default function FolderBrowser({
                   disabled={!canGoUp}
                   onClick={() => navigate(parentPath)}
                 >
-                  <ArrowUp className="mr-1 h-3.5 w-3.5" />
+                  <ArrowUp className="me-1 h-3.5 w-3.5" />
                   {t("web.admin.common.folderBrowser.up")}
                 </Button>
                 <Button type="button" variant="ghost" size="icon" onClick={() => refetch()}>
@@ -278,7 +278,7 @@ export default function FolderBrowser({
                         {/* Navigate into folder */}
                         <button
                           type="button"
-                          className="flex min-w-0 flex-1 items-center gap-2 py-2 pr-2 text-left text-sm"
+                          className="flex min-w-0 flex-1 items-center gap-2 py-2 pe-2 text-start text-sm"
                           onClick={() => navigate(entry.path)}
                         >
                           <FolderOpen className="text-muted-foreground h-4 w-4 shrink-0" />

@@ -87,7 +87,7 @@ export function SearchableSelect({
           <span className="truncate">
             {value ? labelOf(value) : (placeholder ?? t("web.ui.select.placeholder"))}
           </span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
         </button>
       </PopoverPrimitive.Trigger>
 
@@ -150,7 +150,7 @@ export function SearchableSelect({
                   }}
                 >
                   <Check
-                    className={cn("mr-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
+                    className={cn("me-2 h-4 w-4 shrink-0", value ? "opacity-0" : "opacity-100")}
                   />
                   <span className="text-muted-foreground italic">{t("web.ui.select.any")}</span>
                 </button>
@@ -175,7 +175,7 @@ export function SearchableSelect({
                   >
                     <Check
                       className={cn(
-                        "mr-2 h-4 w-4 shrink-0",
+                        "me-2 h-4 w-4 shrink-0",
                         value === opt ? "opacity-100" : "opacity-0",
                       )}
                     />
@@ -293,7 +293,7 @@ export function SearchableMultiSelect({
           )}
         >
           <span className="truncate">{displayText}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <ChevronsUpDown className="ms-2 h-4 w-4 shrink-0 opacity-50" />
         </button>
       </PopoverPrimitive.Trigger>
 
@@ -352,7 +352,7 @@ export function SearchableMultiSelect({
                     )}
                     onClick={() => onChange([])}
                   >
-                    <Check className="mr-2 h-4 w-4 shrink-0 opacity-0" />
+                    <Check className="me-2 h-4 w-4 shrink-0 opacity-0" />
                     <span className="text-muted-foreground italic">
                       {t("web.ui.select.clearAll")}
                     </span>
@@ -377,7 +377,7 @@ export function SearchableMultiSelect({
                     >
                       <Check
                         className={cn(
-                          "mr-2 h-4 w-4 shrink-0",
+                          "me-2 h-4 w-4 shrink-0",
                           selected.has(opt) ? "opacity-100" : "opacity-0",
                         )}
                       />

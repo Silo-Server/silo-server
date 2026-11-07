@@ -126,9 +126,9 @@ export function StreamBitrateLimitInput({
               placeholder={t("web.player.bitrateLimit.customPlaceholder")}
               value={draft}
               onChange={(event) => handleDraftChange(event.target.value)}
-              className="pr-14"
+              className="pe-14"
             />
-            <span className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm">
+            <span className="text-muted-foreground pointer-events-none absolute inset-y-0 end-3 flex items-center text-sm">
               {t("web.player.bitrateLimit.unit")}
             </span>
           </div>

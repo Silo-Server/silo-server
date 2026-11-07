@@ -314,7 +314,7 @@ export function RuleBuilder({
                   aria-label={t("web.home.addRow.rules.removeGroup", {
                     number: String(index + 1),
                   })}
-                  className="text-muted-foreground ml-auto size-8"
+                  className="text-muted-foreground ms-auto size-8"
                   onClick={() => {
                     setFocusRule(null);
                     setGroups(groups.filter((_, at) => at !== index));

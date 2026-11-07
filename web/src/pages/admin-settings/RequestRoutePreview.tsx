@@ -210,7 +210,7 @@ export function RoutePreviewResult({
             className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs font-medium"
           >
             <ChevronRight
-              className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`}
+              className={`size-3.5 transition-transform ${open ? "rotate-90 rtl:-rotate-90" : ""}`}
               aria-hidden="true"
             />
             {t("web.admin.settings.requests.preview.howDecided")}
@@ -218,7 +218,7 @@ export function RoutePreviewResult({
           {open ? (
             <ol
               id={traceId}
-              className="text-muted-foreground mt-1 list-none space-y-0.5 pl-5 text-xs"
+              className="text-muted-foreground mt-1 list-none space-y-0.5 ps-5 text-xs"
             >
               {preview.rules.map((rule, index) => {
                 const route = routes.find((candidate) => candidate.id === rule.route_id);

@@ -170,7 +170,7 @@ export function DeviceList({
   return (
     <div className="surface-panel rounded-[1.5rem] border-0 p-3 shadow-none">
       <div className="relative mb-1">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
@@ -181,7 +181,7 @@ export function DeviceList({
           aria-label={t("web.settings.deviceList.searchLabel")}
           // text-base on mobile: iOS Safari zooms the viewport when a focused
           // input's font is under 16px, and the zoom does not undo itself.
-          className="h-11 pl-8 text-base xl:h-9 xl:text-[13px]"
+          className="h-11 ps-8 text-base xl:h-9 xl:text-[13px]"
         />
       </div>
 
@@ -229,7 +229,7 @@ export function DeviceList({
           with a few hundred devices produced a thirteen-thousand-pixel page,
           so the settings never came into view. The list keeps its own scroll
           and the page stays roughly one screen. */}
-      <div className="overlay-scroll -mr-1.5 max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain pr-1.5 xl:max-h-[calc(100vh-16rem)]">
+      <div className="overlay-scroll -me-1.5 max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain pe-1.5 xl:max-h-[calc(100vh-16rem)]">
         {sections.map((section) => (
           <section key={section.title}>
             <h3 className="text-muted-foreground bg-surface sticky top-0 z-10 px-2 pt-3 pb-1 text-xs font-semibold tracking-[0.09em] uppercase">
@@ -366,7 +366,7 @@ function DeviceRow({
       aria-current={selected ? "true" : undefined}
       onClick={() => onSelect(device)}
       className={cn(
-        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2.5 text-left transition-colors",
+        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2.5 text-start transition-colors",
         // Rows are a tap target on a phone and a selection on a desktop, so
         // they carry a comfortable minimum height only where that matters.
         "min-h-14 xl:min-h-0",

@@ -11,7 +11,7 @@ export default function ItemDetailSkeleton() {
     <div>
       {/* Hero skeleton */}
       <section className="border-border/10 relative isolate overflow-hidden border-b">
-        <div className="absolute inset-0 bg-gradient-to-r from-[var(--background)] via-[var(--background)]/70 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[var(--background)] via-[var(--background)]/70 to-transparent rtl:bg-gradient-to-l" />
         <div className="absolute inset-0 bg-gradient-to-t from-[var(--background)] via-[var(--background)]/40 to-transparent" />
 
         <div className="page-shell-wide relative flex min-h-[60dvh] flex-col justify-end pt-28 pb-8 lg:min-h-[72dvh]">

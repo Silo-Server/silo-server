@@ -69,7 +69,7 @@ export function BarList({
           >
             <span
               aria-hidden="true"
-              className="absolute inset-y-0 left-0 rounded-r-[4px]"
+              className="absolute inset-y-0 start-0 rounded-e-[4px]"
               style={{
                 width: `${ratio * 100}%`,
                 minWidth: value > 0 ? 6 : 0,

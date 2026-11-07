@@ -283,7 +283,7 @@ function ChannelCard({
             aria-expanded={open}
             aria-controls={bodyId}
             onClick={() => setOpen((current) => !current)}
-            className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left"
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-start"
           >
             {header}
             <ChevronDown
@@ -309,7 +309,7 @@ function ChannelCard({
       {expandable && open && (
         <div
           id={bodyId}
-          className="animate-in fade-in-0 slide-in-from-top-1 pb-4 pl-[3.25rem] duration-200"
+          className="animate-in fade-in-0 slide-in-from-top-1 ps-[3.25rem] pb-4 duration-200"
         >
           {children}
         </div>
@@ -450,9 +450,9 @@ function RegisterRelayRow({
       <div className="flex flex-wrap items-center gap-2 py-2">
         <Button variant="outline" size="sm" disabled={pending} onClick={() => void registerRelay()}>
           {pending ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
           ) : (
-            <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+            <KeyRound className="me-1.5 h-3.5 w-3.5" />
           )}
           {actionLabel}
         </Button>
@@ -548,7 +548,7 @@ function DiscordSetupGuide() {
             ),
           })}
         </p>
-        <ol className="list-decimal space-y-1.5 pl-4">
+        <ol className="list-decimal space-y-1.5 ps-4">
           <li>{t("web.admin.settings.notifications.discord.guideCreate")}</li>
           <li>
             {t("web.admin.settings.notifications.discord.guideOAuth", {
@@ -596,7 +596,7 @@ function InviteBotRow({ clientId }: { clientId: string }) {
           disabled={!trimmed}
           onClick={() => window.open(discordInviteUrl(trimmed), "_blank", "noopener,noreferrer")}
         >
-          <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+          <ExternalLink className="me-1.5 h-3.5 w-3.5" />
           {t("web.admin.settings.notifications.discord.invite")}
         </Button>
         <Button
@@ -607,9 +607,9 @@ function InviteBotRow({ clientId }: { clientId: string }) {
           onClick={() => void copyInviteLink()}
         >
           {copied ? (
-            <Check className="mr-1.5 h-3.5 w-3.5" />
+            <Check className="me-1.5 h-3.5 w-3.5" />
           ) : (
-            <Copy className="mr-1.5 h-3.5 w-3.5" />
+            <Copy className="me-1.5 h-3.5 w-3.5" />
           )}
           {t("web.admin.settings.notifications.discord.copyLink")}
         </Button>

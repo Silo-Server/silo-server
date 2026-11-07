@@ -335,7 +335,7 @@ function RecJobStatusCard({
               style={{ width: `${pct}%` }}
             />
           </div>
-          <p className="text-muted-foreground mt-1 text-right text-xs">
+          <p className="text-muted-foreground mt-1 text-end text-xs">
             {t("web.admin.recommendations.jobs.percent", { percent: String(pct) })}
           </p>
         </div>
@@ -616,7 +616,7 @@ export default function AdminRecommendations() {
               <button
                 type="button"
                 onClick={() => toggleSection(section.id)}
-                className="hover:bg-accent/40 flex w-full items-center justify-between rounded-2xl px-5 py-4 text-left transition-colors"
+                className="hover:bg-accent/40 flex w-full items-center justify-between rounded-2xl px-5 py-4 text-start transition-colors"
               >
                 <span className="text-sm font-semibold">{section.title}</span>
                 {isOpen ? (

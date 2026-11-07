@@ -85,7 +85,7 @@ export function SaveFirstDialog({
               {isSaving ? (
                 <span
                   aria-hidden
-                  className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                  className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
                 />
               ) : null}
               {t("web.collections.saveFirst.saveAndContinue")}

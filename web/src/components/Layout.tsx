@@ -394,7 +394,7 @@ export default function Layout({ children }: LayoutProps) {
       <div ref={shellRef} className="bg-background relative min-h-[100dvh] overflow-x-clip">
         <a
           href="#main-content"
-          className="focus:bg-background focus:text-foreground focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-lg focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:outline-none"
+          className="focus:bg-background focus:text-foreground focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-50 focus:rounded-lg focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:outline-none"
         >
           {t("web.shell.layout.skipToContent")}
         </a>
@@ -409,7 +409,7 @@ export default function Layout({ children }: LayoutProps) {
             // second one beside it. The fallback holds the column's place.
             <Suspense
               fallback={
-                <div className="border-sidebar-border/70 bg-sidebar/92 fixed top-0 bottom-0 left-0 z-40 w-[260px] border-r" />
+                <div className="border-sidebar-border/70 bg-sidebar/92 fixed start-0 top-0 bottom-0 z-40 w-[260px] border-e" />
               }
             >
               <UserSettingsSidebar backTo={settingsReturnPath} swap={sidebarSwap} />
@@ -484,7 +484,7 @@ export default function Layout({ children }: LayoutProps) {
 
         {/* Desktop admin activity indicator (top-right, hidden on mobile) */}
         {showAdminActivity && (
-          <div className="fixed top-6 right-5 z-40 hidden lg:block">
+          <div className="fixed end-5 top-6 z-40 hidden lg:block">
             <AdminActivityIndicator />
           </div>
         )}
@@ -495,7 +495,7 @@ export default function Layout({ children }: LayoutProps) {
           data-sidebar-target-collapsed={targetDetailImmersion ? "true" : undefined}
           data-sidebar-visual-collapsed={visualDetailImmersion ? "true" : undefined}
           className={`sidebar-main-stage relative min-h-screen ${
-            targetDetailImmersion ? "lg:ml-16" : "lg:ml-[260px]"
+            targetDetailImmersion ? "lg:ms-16" : "lg:ms-[260px]"
           } ${hasBackgroundBar ? "pb-32 sm:pb-36" : ""}`}
           style={{ viewTransitionName: "main-content" }}
         >

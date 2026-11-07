@@ -150,10 +150,10 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
           <TableHeader>
             <TableRow>
               <TableHead>{t("web.admin.common.libraryEditor.matcher.library")}</TableHead>
-              <TableHead className="text-right">
+              <TableHead className="text-end">
                 {t("web.admin.common.libraryEditor.matcher.pending")}
               </TableHead>
-              <TableHead className="text-right">
+              <TableHead className="text-end">
                 {t("web.admin.common.libraryEditor.matcher.parked")}
               </TableHead>
               <TableHead className="w-28" />
@@ -178,8 +178,8 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                           id: String(queue.library_id),
                         })}
                     </TableCell>
-                    <TableCell className="text-right tabular-nums">{queue.pending_count}</TableCell>
-                    <TableCell className="text-right tabular-nums">
+                    <TableCell className="text-end tabular-nums">{queue.pending_count}</TableCell>
+                    <TableCell className="text-end tabular-nums">
                       {queue.parked_count > 0 ? (
                         <Badge variant="outline" className="border-amber-500/30 text-amber-600">
                           {queue.parked_count}
@@ -188,7 +188,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                         0
                       )}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-end">
                       <Button
                         size="sm"
                         variant="outline"

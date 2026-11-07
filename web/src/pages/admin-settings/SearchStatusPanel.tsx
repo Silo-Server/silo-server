@@ -262,7 +262,7 @@ function StatusRow({ label, value, badge }: { label: string; value: string; badg
     <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
       <span className="text-sm font-medium">{label}</span>
       <span className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-2 text-sm">
-        <span className="max-w-full text-right break-words">{value}</span>
+        <span className="max-w-full text-end break-words">{value}</span>
         {badge ? <Badge variant="outline">{badge}</Badge> : null}
       </span>
     </div>

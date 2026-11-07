@@ -263,9 +263,9 @@ export default function PreparationTab() {
                         : workerFilter && "opacity-30",
                     )}
                   >
-                    <span className="text-muted-foreground mr-1">{worker.label}</span>
+                    <span className="text-muted-foreground me-1">{worker.label}</span>
                     {worker.name}
-                    <span className="text-muted-foreground ml-1.5 tabular-nums">
+                    <span className="text-muted-foreground ms-1.5 tabular-nums">
                       {worker.count}
                     </span>
                   </button>
@@ -278,20 +278,20 @@ export default function PreparationTab() {
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative max-w-md min-w-[200px] flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={t(`${K}.filter.placeholder`)}
             aria-label={t(`${K}.filter.label`)}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 pl-9 text-[13px]"
+            className="h-8 ps-9 text-[13px]"
           />
           {search && (
             <button
               type="button"
               aria-label={t(`${K}.filter.clear`)}
               onClick={() => setSearch("")}
-              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2"
+              className="text-muted-foreground hover:text-foreground absolute end-2.5 top-1/2 -translate-y-1/2"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -321,7 +321,7 @@ export default function PreparationTab() {
           <span className="text-[12px] font-medium tabular-nums">
             {t(`${K}.selection.count`, jobCount(selectedItems.length))}
           </span>
-          <div className="ml-auto flex flex-wrap gap-1.5">
+          <div className="ms-auto flex flex-wrap gap-1.5">
             <Button
               size="sm"
               variant="outline"
@@ -1124,7 +1124,7 @@ function FFmpegConsole({
   return (
     <div className="mt-3 space-y-2">
       {isFetching && !isLoading && (
-        <div className="text-muted-foreground text-right text-[10px]">
+        <div className="text-muted-foreground text-end text-[10px]">
           {t(`${K}.ffmpeg.refreshing`)}
         </div>
       )}

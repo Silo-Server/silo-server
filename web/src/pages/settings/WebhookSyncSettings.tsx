@@ -797,7 +797,7 @@ export default function WebhookSyncSettings() {
                   type="button"
                   onClick={() => setSelectedConnectionId(connection.id)}
                   className={cn(
-                    "group flex w-full items-center justify-between gap-4 rounded-lg px-4 py-3 text-left transition-colors",
+                    "group flex w-full items-center justify-between gap-4 rounded-lg px-4 py-3 text-start transition-colors",
                     isSelected ? "bg-accent/50 ring-border ring-1" : "hover:bg-accent/20",
                   )}
                 >
@@ -806,7 +806,7 @@ export default function WebhookSyncSettings() {
                     <div className="min-w-0">
                       <span className="text-sm font-medium">
                         {connection.server_name}
-                        <span className="text-muted-foreground ml-2 text-xs font-normal">
+                        <span className="text-muted-foreground ms-2 text-xs font-normal">
                           {providerLabel(connection.provider)}
                         </span>
                       </span>
@@ -1096,7 +1096,7 @@ export default function WebhookSyncSettings() {
                     </summary>
                     <div className="mt-3">
                       {selectedConnection.provider === "plex" ? (
-                        <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 text-sm leading-relaxed">
+                        <ol className="text-muted-foreground list-decimal space-y-1.5 ps-5 text-sm leading-relaxed">
                           <li>{t("web.settings.webhooks.setup.plex.step1", { hl })}</li>
                           <li>{t("web.settings.webhooks.setup.plex.step2", { hl })}</li>
                           <li>{t("web.settings.webhooks.setup.plex.step3")}</li>
@@ -1105,7 +1105,7 @@ export default function WebhookSyncSettings() {
                       ) : null}
                       {selectedConnection.provider === "emby" ? (
                         <div className="space-y-4 text-sm">
-                          <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 leading-relaxed">
+                          <ol className="text-muted-foreground list-decimal space-y-1.5 ps-5 leading-relaxed">
                             <li>{t("web.settings.webhooks.setup.emby.step1", { hl })}</li>
                             <li>{t("web.settings.webhooks.setup.emby.step2", { hl })}</li>
                             <li>{t("web.settings.webhooks.setup.emby.step3")}</li>
@@ -1153,7 +1153,7 @@ export default function WebhookSyncSettings() {
                       ) : null}
                       {selectedConnection.provider === "jellyfin" ? (
                         <div className="space-y-4 text-sm">
-                          <ol className="text-muted-foreground list-decimal space-y-1.5 pl-5 leading-relaxed">
+                          <ol className="text-muted-foreground list-decimal space-y-1.5 ps-5 leading-relaxed">
                             <li>{t("web.settings.webhooks.setup.jellyfin.step1", { hl })}</li>
                             <li>{t("web.settings.webhooks.setup.jellyfin.step2", { hl })}</li>
                             <li>{t("web.settings.webhooks.setup.jellyfin.step3", { hl })}</li>
@@ -1212,12 +1212,12 @@ export default function WebhookSyncSettings() {
                 {/* Filter bar */}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <div className="relative flex-1">
-                    <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+                    <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
                     <Input
                       value={eventSearch}
                       onChange={(e) => setEventSearch(e.target.value)}
                       placeholder={t("web.settings.webhooks.deliveries.search")}
-                      className="h-8 pl-8 text-xs"
+                      className="h-8 ps-8 text-xs"
                     />
                   </div>
                   <Select
@@ -1261,7 +1261,7 @@ export default function WebhookSyncSettings() {
                         <TableHead className="text-xs">
                           {t("web.settings.webhooks.deliveries.colUser")}
                         </TableHead>
-                        <TableHead className="text-right text-xs">
+                        <TableHead className="text-end text-xs">
                           {t("web.settings.webhooks.deliveries.colTime")}
                         </TableHead>
                       </TableRow>
@@ -1297,7 +1297,7 @@ export default function WebhookSyncSettings() {
                           <TableCell className="text-muted-foreground text-xs">
                             {eventUserLabel(t, event)}
                           </TableCell>
-                          <TableCell className="text-muted-foreground text-right text-xs">
+                          <TableCell className="text-muted-foreground text-end text-xs">
                             {relativeTime(t, event.received_at) ??
                               formatTimestamp(t, event.received_at)}
                           </TableCell>

@@ -183,7 +183,7 @@ export function GroupCard({
           "grid items-center gap-2",
           showGrips
             ? "grid-cols-[28px_minmax(0,1fr)_auto_auto]"
-            : "grid-cols-[minmax(0,1fr)_auto_auto] pl-1",
+            : "grid-cols-[minmax(0,1fr)_auto_auto] ps-1",
         )}
       >
         {showGrips ? (

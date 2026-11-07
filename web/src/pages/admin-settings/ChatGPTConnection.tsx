@@ -420,7 +420,7 @@ function ChatGPTConnectionPanel({
               {t("web.admin.settings.ai.chatgptConnection.dialogDescription")}
             </DialogDescription>
           </DialogHeader>
-          <ol className="list-decimal space-y-3 pl-5 text-sm">
+          <ol className="list-decimal space-y-3 ps-5 text-sm">
             <li>
               {t("web.admin.settings.ai.chatgptConnection.step1")}
               <div className="mt-2">

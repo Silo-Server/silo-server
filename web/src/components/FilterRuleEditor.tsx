@@ -882,13 +882,13 @@ export default function FilterRuleEditor({
             className="h-7 text-xs"
             onClick={() => addRule(groupIdx)}
           >
-            <Plus className="mr-1 h-3 w-3" /> {t("web.catalog.rules.addRule")}
+            <Plus className="me-1 h-3 w-3" /> {t("web.catalog.rules.addRule")}
           </Button>
         </div>
       ))}
 
       <Button type="button" variant="outline" size="sm" onClick={addGroup}>
-        <Plus className="mr-1 h-3.5 w-3.5" /> {t("web.catalog.rules.addGroup")}
+        <Plus className="me-1 h-3.5 w-3.5" /> {t("web.catalog.rules.addGroup")}
       </Button>
 
       {/* Sort controls */}

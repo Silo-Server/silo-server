@@ -291,7 +291,7 @@ export default function DetailHero({
                   >
                     {tagline || subtitle}
                     {tagline && taglineMachineTranslated && (
-                      <MachineTranslatedLabel compact className="ml-1.5 align-middle not-italic" />
+                      <MachineTranslatedLabel compact className="ms-1.5 align-middle not-italic" />
                     )}
                   </div>
                 )}

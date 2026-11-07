@@ -615,8 +615,12 @@ export default function CardOverlays({
   });
 
   return (
+    // Positions are on the artwork, which doesn't mirror: the layer lays out left to
+    // right in every language (its rows are flex rows, and the overflow check
+    // measures right edges).
     <div
       ref={layerRef}
+      dir="ltr"
       data-card-overlays={variant}
       className="@container/card-overlays pointer-events-none absolute inset-0 z-10"
     >

@@ -265,7 +265,7 @@ function MaxTitlesInput({
       />
       <span
         aria-hidden
-        className="border-border text-muted-foreground flex shrink-0 items-center self-stretch border-l pl-3"
+        className="border-border text-muted-foreground flex shrink-0 items-center self-stretch border-s ps-3"
       >
         {t("web.collections.fields.maxTitlesSuffix")}
       </span>

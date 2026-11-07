@@ -93,7 +93,7 @@ function NoMatches({ label, onClear }: { label: string; onClear: () => void }) {
 function ResultCount({ shown, total }: { shown: number; total: number }) {
   const t = useT();
   return (
-    <span className="text-muted-foreground ml-auto text-xs tabular-nums" aria-live="polite">
+    <span className="text-muted-foreground ms-auto text-xs tabular-nums" aria-live="polite">
       {shown === total
         ? t("web.admin.plugins.list.resultCount", { count: total, count_text: String(total) })
         : t("web.admin.plugins.list.resultCountFiltered", {
@@ -158,7 +158,7 @@ function PluginsBoard() {
           onClick={() => checkPluginUpdates.mutate()}
           disabled={checkPluginUpdates.isPending || isCheckingUpdates}
         >
-          <Download className="mr-1.5 h-3.5 w-3.5" />
+          <Download className="me-1.5 h-3.5 w-3.5" />
           {isCheckingUpdates
             ? t("web.admin.plugins.page.checkingUpdates")
             : t("web.admin.plugins.page.checkUpdates")}
@@ -192,7 +192,7 @@ function PluginsBoard() {
           <TabsTrigger value="installed">
             {t("web.admin.plugins.page.installedTab")}
             {installations.length > 0 && (
-              <Badge variant="secondary" className="ml-1.5 text-[10px]">
+              <Badge variant="secondary" className="ms-1.5 text-[10px]">
                 {installations.length}
               </Badge>
             )}
@@ -200,7 +200,7 @@ function PluginsBoard() {
           <TabsTrigger value="catalog">
             {t("web.admin.plugins.page.catalogTab")}
             {catalog.length > 0 && (
-              <Badge variant="secondary" className="ml-1.5 text-[10px]">
+              <Badge variant="secondary" className="ms-1.5 text-[10px]">
                 {catalog.length}
               </Badge>
             )}

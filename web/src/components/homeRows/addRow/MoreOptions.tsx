@@ -121,7 +121,7 @@ export function MoreOptions({
             </div>
           ) : null}
           {hero && onHeroChange && onWebOnlyChange ? (
-            <div className="border-border/70 ml-4 flex items-center justify-between gap-4 border-l-2 pl-4">
+            <div className="border-border/70 ms-4 flex items-center justify-between gap-4 border-s-2 ps-4">
               <div>
                 <Label htmlFor={`${id}-apps`}>{t("web.home.addRow.more.showInApps")}</Label>
                 <p className="text-muted-foreground mt-1 text-[13px]">

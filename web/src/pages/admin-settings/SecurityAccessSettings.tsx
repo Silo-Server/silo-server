@@ -136,7 +136,7 @@ function RateBox({
         value={field.value}
         onChange={(e) => field.onChange(e.target.value)}
         disabled={disabled}
-        className="w-24 text-right tabular-nums"
+        className="w-24 text-end tabular-nums"
       />
     </span>
   );
@@ -468,7 +468,7 @@ export default function SecurityAccessSettings() {
                 )(e.target.value)
               }
               disabled={savingRateLimits}
-              className={cn("text-right tabular-nums", SETTINGS_NUMBER_WIDTH)}
+              className={cn("text-end tabular-nums", SETTINGS_NUMBER_WIDTH)}
             />
           </SettingFieldRow>
 

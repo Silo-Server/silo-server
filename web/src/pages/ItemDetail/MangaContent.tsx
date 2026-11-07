@@ -501,13 +501,15 @@ function MangaSection({
             count: entry.chapters.length,
             count_text: String(entry.chapters.length),
           })}
-          <ChevronDown className={cn("size-4 transition-transform", !open && "-rotate-90")} />
+          <ChevronDown
+            className={cn("size-4 transition-transform", !open && "-rotate-90 rtl:rotate-90")}
+          />
         </span>
       </button>
       {open && (
         <ul className="divide-border/40 divide-y">
           {entry.chapters.map((chapter) => (
-            <li key={chapter.content_id} className="pl-4">
+            <li key={chapter.content_id} className="ps-4">
               <MangaRow
                 chapter={chapter}
                 label={chapterLabel(chapter)}

@@ -210,7 +210,7 @@ export function MetadataLanguageSetting({
                 disabled={disabled || !newSource}
                 onClick={addException}
               >
-                <Plus className="mr-1.5 size-3.5" aria-hidden="true" />
+                <Plus className="me-1.5 size-3.5" aria-hidden="true" />
                 {t("web.settings.metadataLanguage.addException")}
               </Button>
             </div>

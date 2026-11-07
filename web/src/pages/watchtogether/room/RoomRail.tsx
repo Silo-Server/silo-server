@@ -215,7 +215,7 @@ export function RoomRailBody({
         <TabsTrigger value="people">
           {t("web.watchTogether.rail.people")}
           {room ? (
-            <span className="bg-surface-raised ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
+            <span className="bg-surface-raised ms-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
               {room.member_count}
             </span>
           ) : null}
@@ -252,14 +252,14 @@ export function RoomRail(props: {
   const latest = props.entries[0];
   return (
     <>
-      <aside className="border-border/60 hidden min-h-0 w-80 shrink-0 border-l md:flex md:flex-col">
+      <aside className="border-border/60 hidden min-h-0 w-80 shrink-0 border-s md:flex md:flex-col">
         <RoomRailBody {...props} />
       </aside>
       <div className="border-border/60 flex items-center gap-3 border-t px-4 py-2 md:hidden">
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left text-sm"
+          className="flex min-w-0 flex-1 items-center gap-3 text-start text-sm"
           aria-label={t("web.watchTogether.rail.openLabel")}
         >
           <span className="font-semibold">

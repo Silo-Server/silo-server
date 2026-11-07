@@ -128,7 +128,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
               {mark}
             </span>
             {name}
-            <span className="text-muted-foreground ml-auto inline-flex items-center gap-1 font-medium">
+            <span className="text-muted-foreground ms-auto inline-flex items-center gap-1 font-medium">
               <RefreshCw className="size-3" />
               {t("web.collections.fields.scheduleDaily")}
             </span>
@@ -156,7 +156,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
 const DOT = "·";
 
 const CARD =
-  "group border-border/90 bg-surface/60 relative flex flex-col overflow-hidden rounded-[18px] border text-left outline-none";
+  "group border-border/90 bg-surface/60 relative flex flex-col overflow-hidden rounded-[18px] border text-start outline-none";
 
 /** Name, what it does and examples: the part of a card under its picture. */
 function CardBody({
@@ -178,7 +178,7 @@ function CardBody({
   const t = useT();
   const Icon = ICON[kind];
   return (
-    <span className="grid gap-1.5 px-5 pt-[18px] pb-5 max-lg:pr-11">
+    <span className="grid gap-1.5 px-5 pt-[18px] pb-5 max-lg:pe-11">
       <span className="flex items-center gap-2.5 text-[17px] font-semibold tracking-[-0.015em]">
         <span
           aria-hidden
@@ -242,7 +242,7 @@ function TypeCard({
       />
       <ChevronRight
         aria-hidden
-        className="text-muted-foreground absolute right-[18px] bottom-5 size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 max-lg:opacity-100"
+        className="text-muted-foreground absolute end-[18px] bottom-5 size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100 max-lg:opacity-100"
       />
     </Link>
   );

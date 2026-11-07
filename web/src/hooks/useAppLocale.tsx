@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
+import { Direction } from "radix-ui";
 
 import {
   settingsCapabilitiesSupportKey,
@@ -20,7 +21,14 @@ import {
   subscribeAdminRequest,
   type Messages,
 } from "@/i18n";
-import { browserLocaleInputs, hasCatalog, resolveAppLocale, setAppLocale } from "@/lib/appLocale";
+import {
+  browserLocaleInputs,
+  getAppLocale,
+  hasCatalog,
+  resolveAppLocale,
+  setAppLocale,
+  subscribeAppLocale,
+} from "@/lib/appLocale";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { appearanceCache, storage } from "@/utils/storage";
 
@@ -40,6 +48,11 @@ function languageBeforeSettings(owner: string | null): string | null {
   const signedOut = storage.get(SIGNED_OUT_KEY);
   if (signedOut !== null) return signedOut === FOLLOW_DEVICE ? null : signedOut;
   return appearanceCache.get(CACHE_KEY, owner);
+}
+
+/** The direction `<html dir>` has now (`setAppLocale` writes both). */
+function appliedDirection() {
+  return getAppLocale().dir;
 }
 
 function resolve(stored: string | null) {
@@ -162,5 +175,13 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
     };
   }, [language, catalog, formatLocale, localizedFormats, dir, withAdmin]);
 
-  return <AppIntlProvider intl={intl}>{children}</AppIntlProvider>;
+  // Radix menus, selects, sliders and tabs, and useDirection() everywhere,
+  // follow the direction the document has.
+  const appliedDir = useSyncExternalStore(subscribeAppLocale, appliedDirection, appliedDirection);
+
+  return (
+    <AppIntlProvider intl={intl}>
+      <Direction.Provider dir={appliedDir}>{children}</Direction.Provider>
+    </AppIntlProvider>
+  );
 }

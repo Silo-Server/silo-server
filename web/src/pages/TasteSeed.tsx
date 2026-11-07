@@ -172,7 +172,7 @@ export default function TasteSeed() {
             <Button onClick={handleSubmit} disabled={submitDisabled}>
               {submit.isPending ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="me-2 h-4 w-4 animate-spin" />
                   {t("web.home.tasteSeed.saving")}
                 </>
               ) : (
@@ -215,7 +215,7 @@ export default function TasteSeed() {
             <div ref={sentinelRef} className="h-12" />
             {isFetchingNextPage && (
               <div className="text-muted-foreground flex justify-center py-4 text-sm">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="me-2 h-4 w-4 animate-spin" />
                 {t("web.home.tasteSeed.loadingMore")}
               </div>
             )}
@@ -256,7 +256,7 @@ function TasteSeedCard({
         { title: item.title },
       )}
       onClick={() => onToggle(item.content_id)}
-      className="group focus-visible:ring-ring relative block overflow-hidden rounded-xl text-left focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+      className="group focus-visible:ring-ring relative block overflow-hidden rounded-xl text-start focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
     >
       <div
         className="relative aspect-[2/3] overflow-hidden rounded-xl"
@@ -292,7 +292,7 @@ function TasteSeedCard({
 
         {/* Selection check indicator */}
         <span
-          className={`absolute top-2 right-2 inline-flex size-7 items-center justify-center rounded-full border transition ${
+          className={`absolute end-2 top-2 inline-flex size-7 items-center justify-center rounded-full border transition ${
             selected
               ? "border-primary bg-primary text-primary-foreground"
               : "border-white/60 bg-black/40 text-transparent group-hover:bg-black/55"

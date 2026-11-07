@@ -18,7 +18,7 @@ export default function ScrollToTopButton() {
       variant="outline"
       size="icon"
       aria-label={t("web.shell.scrollToTop.label")}
-      className={`fixed right-6 bottom-6 z-50 rounded-md transition-opacity duration-150 ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+      className={`fixed end-6 bottom-6 z-50 rounded-md transition-opacity duration-150 ${visible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
       onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
     >
       <ArrowUp className="h-4 w-4" />

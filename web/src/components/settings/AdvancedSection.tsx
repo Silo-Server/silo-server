@@ -110,20 +110,22 @@ export function AdvancedSection({
         onClick={toggle}
         className={cn(
           "text-muted-foreground hover:text-foreground flex w-full items-center gap-2.5",
-          "py-3 text-left text-[13px] transition-colors",
+          "py-3 text-start text-[13px] transition-colors",
           open && "text-foreground",
         )}
       >
         <ChevronRight
           className={cn(
             "size-3.5 shrink-0 transition-transform",
-            open ? "rotate-90 text-[var(--settings-accent)]" : "text-muted-foreground",
+            open
+              ? "rotate-90 text-[var(--settings-accent)] rtl:-rotate-90"
+              : "text-muted-foreground",
           )}
           aria-hidden="true"
         />
         <span className="min-w-0 font-medium">{title}</span>
         {typeof count === "number" ? (
-          <span aria-hidden="true" className="text-muted-foreground ml-auto shrink-0 text-xs">
+          <span aria-hidden="true" className="text-muted-foreground ms-auto shrink-0 text-xs">
             {count}
           </span>
         ) : null}
@@ -131,7 +133,7 @@ export function AdvancedSection({
       {open ? (
         <div
           className={cn(
-            "ml-[6px] border-l-2 border-[var(--settings-accent-line)] pl-[15px]",
+            "ms-[6px] border-s-2 border-[var(--settings-accent-line)] ps-[15px]",
             "settings-field-list",
           )}
         >

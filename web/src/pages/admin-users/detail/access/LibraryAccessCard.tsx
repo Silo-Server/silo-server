@@ -332,7 +332,7 @@ export function LibraryAccessCard({
               </span>
             </label>
             {choose ? (
-              <div className="mt-2.5 space-y-2 pl-7">
+              <div className="mt-2.5 space-y-2 ps-7">
                 <div className="flex flex-wrap gap-2">
                   {libraries.map((library) => {
                     const checked = d.libraryIds?.includes(library.id) ?? false;

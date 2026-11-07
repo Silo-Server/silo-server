@@ -324,6 +324,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
             {card.type === "ebook" ? (
               <BookOpen className="h-5 w-5" />
             ) : (
+              // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
               <Play className="ml-0.5 h-5 w-5" fill="currentColor" />
             )}
           </ViewTransitionLink>

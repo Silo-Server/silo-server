@@ -153,7 +153,7 @@ export function AdminSectionCommandDialog({
           <DialogDescription>{t("web.admin.homeRows.commandDialog.description")}</DialogDescription>
         </VisuallyHidden.Root>
         <div className="border-border flex h-12 shrink-0 items-center border-b px-4">
-          <Search className="text-muted-foreground mr-3 h-4 w-4 shrink-0" aria-hidden="true" />
+          <Search className="text-muted-foreground me-3 h-4 w-4 shrink-0" aria-hidden="true" />
           <input
             ref={inputRef}
             type="search"
@@ -170,7 +170,7 @@ export function AdminSectionCommandDialog({
             autoComplete="off"
             autoFocus
           />
-          <kbd className="bg-muted text-muted-foreground pointer-events-none ml-3 hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none sm:inline-flex">
+          <kbd className="bg-muted text-muted-foreground pointer-events-none ms-3 hidden rounded border px-1.5 py-0.5 text-[10px] font-medium select-none sm:inline-flex">
             {ESCAPE_KEY_LABEL}
           </kbd>
         </div>
@@ -248,7 +248,7 @@ function AdminCommandResultRow({
       onMouseEnter={onMouseEnter}
       onClick={onPick}
       className={cn(
-        "focus-visible:ring-ring/50 flex w-full items-start gap-3 rounded-md px-3 py-2 text-left transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
+        "focus-visible:ring-ring/50 flex w-full items-start gap-3 rounded-md px-3 py-2 text-start transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
         selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/70",
       )}
     >

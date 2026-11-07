@@ -1270,7 +1270,7 @@ export default function StorageSettings() {
                 <p className="font-medium text-amber-500">
                   {t("web.admin.settings.storage.notes.title")}
                 </p>
-                <ul className="text-muted-foreground mt-2 list-disc space-y-1 pl-4">
+                <ul className="text-muted-foreground mt-2 list-disc space-y-1 ps-4">
                   <li>{t("web.admin.settings.storage.notes.metadataRetained")}</li>
                   {!privateOnlyTransition ? (
                     <>

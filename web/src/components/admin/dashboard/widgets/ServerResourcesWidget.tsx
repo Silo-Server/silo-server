@@ -140,7 +140,7 @@ function ResourceRow({ label, metric }: { label: string; metric: ResourceMetric 
       <LoadMeter fill={metric.fill} />
       <span
         className={cn(
-          "text-right font-semibold tabular-nums",
+          "text-end font-semibold tabular-nums",
           metric.muted && "text-muted-foreground",
         )}
         title={title}

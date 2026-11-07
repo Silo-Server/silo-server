@@ -151,7 +151,7 @@ export default function MediaLocations({
                       {t("web.item.locations.folderName", { folder: location.folderName })}
                     </span>
                   ) : null}
-                  <span className="text-foreground ml-1 break-all">{location.fileName}</span>
+                  <span className="text-foreground ms-1 break-all">{location.fileName}</span>
                 </div>
               </div>
 

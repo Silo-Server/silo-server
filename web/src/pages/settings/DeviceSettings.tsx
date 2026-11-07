@@ -352,7 +352,7 @@ function DeviceDetail({
       <button
         type="button"
         onClick={onBack}
-        className="text-muted-foreground hover:text-foreground -ml-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium xl:hidden"
+        className="text-muted-foreground hover:text-foreground -ms-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium xl:hidden"
       >
         <ChevronLeft className="h-4 w-4" />
         {t("web.settings.device.allDevices")}

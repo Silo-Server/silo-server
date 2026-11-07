@@ -114,7 +114,7 @@ export function ChaptersMenu({
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 flex max-h-[60vh] min-w-[280px] flex-col overflow-y-auto rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+          className="absolute end-0 bottom-full z-30 mb-2 flex max-h-[60vh] min-w-[280px] flex-col overflow-y-auto rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
@@ -129,7 +129,7 @@ export function ChaptersMenu({
               }}
               role="menuitem"
               type="button"
-              className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+              className={`flex w-full items-center gap-3 px-3 py-2 text-start transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                 index === activeIndex ? "bg-white/5 text-white" : "text-white/75"
               }`}
               onClick={() => {

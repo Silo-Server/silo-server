@@ -320,7 +320,7 @@ export default function AdminActivity() {
                 ? t("web.admin.activity.page.refreshing")
                 : t("web.admin.activity.page.refresh")}
             </Button>
-            <div className="min-w-[8.75rem] px-1 text-right">
+            <div className="min-w-[8.75rem] px-1 text-end">
               <div className="text-muted-foreground text-[10px] font-semibold tracking-wider uppercase">
                 {t("web.admin.activity.realtime.heading")}
               </div>
@@ -357,7 +357,7 @@ export default function AdminActivity() {
               className="max-w-xs font-mono text-sm"
             />
             <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
-              <Search className="mr-1 h-3.5 w-3.5" />
+              <Search className="me-1 h-3.5 w-3.5" />
               {t("web.admin.activity.ipLookup.submit")}
             </Button>
           </form>
@@ -382,7 +382,7 @@ export default function AdminActivity() {
                       <TableHead>{t("web.admin.activity.ipLookup.column.user")}</TableHead>
                       <TableHead>{t("web.admin.activity.ipLookup.column.firstSeen")}</TableHead>
                       <TableHead>{t("web.admin.activity.ipLookup.column.lastSeen")}</TableHead>
-                      <TableHead className="text-right">
+                      <TableHead className="text-end">
                         {t("web.admin.activity.ipLookup.column.requests")}
                       </TableHead>
                     </TableRow>
@@ -403,7 +403,7 @@ export default function AdminActivity() {
                           {formatDateTime(entry.first_seen)}
                         </TableCell>
                         <TableCell className="text-sm">{formatDateTime(entry.last_seen)}</TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-end">
                           {entry.request_count.toLocaleString(formatLocale())}
                         </TableCell>
                       </TableRow>
@@ -505,9 +505,9 @@ export default function AdminActivity() {
                             : ""
                       }`}
                     >
-                      <span className="text-muted-foreground mr-1">{node.label}</span>
+                      <span className="text-muted-foreground me-1">{node.label}</span>
                       {node.name}
-                      <span className="text-muted-foreground ml-1.5 tabular-nums">
+                      <span className="text-muted-foreground ms-1.5 tabular-nums">
                         {node.count}
                       </span>
                     </button>
@@ -521,17 +521,17 @@ export default function AdminActivity() {
       {/* Search + filters */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[200px] flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={t("web.admin.activity.filter.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 pl-9 text-[13px]"
+            className="h-8 ps-9 text-[13px]"
           />
           {search && (
             <button
               onClick={() => setSearch("")}
-              className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2.5 -translate-y-1/2"
+              className="text-muted-foreground hover:text-foreground absolute end-2.5 top-1/2 -translate-y-1/2"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -632,7 +632,7 @@ export default function AdminActivity() {
             >
               {t("web.admin.activity.column.time")}
             </SortHeader>
-            <div className="text-muted-foreground text-right text-[10px] font-semibold tracking-wider uppercase">
+            <div className="text-muted-foreground text-end text-[10px] font-semibold tracking-wider uppercase">
               {t("web.admin.activity.column.actions")}
             </div>
           </div>
@@ -858,7 +858,7 @@ function StreamRow({
         </div>
 
         {/* Duration */}
-        <div className="min-w-0 text-right">
+        <div className="min-w-0 text-end">
           <div className="flex items-center justify-end">
             <span
               className={`inline-flex min-w-[4.75rem] items-center justify-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold ${
@@ -939,7 +939,7 @@ function StreamRow({
             <Link to={userHref} className="hover:text-primary truncate transition-colors">
               <span className="text-[13px] font-semibold">{username}</span>
               {profileDisplay ? (
-                <span className="border-primary/30 bg-primary/15 text-primary ml-1.5 rounded border px-1.5 py-0.5 text-[10px] leading-none">
+                <span className="border-primary/30 bg-primary/15 text-primary ms-1.5 rounded border px-1.5 py-0.5 text-[10px] leading-none">
                   {profileDisplay}
                 </span>
               ) : null}

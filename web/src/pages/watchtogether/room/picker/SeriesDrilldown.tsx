@@ -284,7 +284,7 @@ export function SeriesDrilldown({
               <p className="text-muted-foreground mt-1 line-clamp-2 max-w-3xl text-xs leading-relaxed">
                 {item.overview}
                 {hasMachineTranslation(item.machine_translated_fields) && (
-                  <MachineTranslatedLabel compact className="ml-1.5 align-middle" />
+                  <MachineTranslatedLabel compact className="ms-1.5 align-middle" />
                 )}
               </p>
             ) : detail.isLoading ? (
@@ -298,7 +298,7 @@ export function SeriesDrilldown({
           size="icon-sm"
           onClick={onClose}
           aria-label={t("web.watchTogether.series.close")}
-          className="absolute top-2 right-2 bg-black/30 hover:bg-black/50"
+          className="absolute end-2 top-2 bg-black/30 hover:bg-black/50"
         >
           <X className="size-4" />
         </Button>
@@ -308,7 +308,7 @@ export function SeriesDrilldown({
         {/* Seasons: a vertical list on wide screens, chips on narrow ones. */}
         <nav
           aria-label={t("web.watchTogether.series.seasons")}
-          className="border-border/60 overlay-scroll flex shrink-0 gap-1.5 overflow-x-auto border-b px-3 py-2 @2xl:w-44 @2xl:flex-col @2xl:overflow-y-auto @2xl:border-r @2xl:border-b-0 @2xl:px-2 @2xl:py-3"
+          className="border-border/60 overlay-scroll flex shrink-0 gap-1.5 overflow-x-auto border-b px-3 py-2 @2xl:w-44 @2xl:flex-col @2xl:overflow-y-auto @2xl:border-e @2xl:border-b-0 @2xl:px-2 @2xl:py-3"
         >
           {seasonList.map((s) => {
             const active = season === s.season_number;
@@ -319,7 +319,7 @@ export function SeriesDrilldown({
                 type="button"
                 onClick={() => setSeason(s.season_number)}
                 aria-pressed={active}
-                className={`flex shrink-0 flex-col rounded-lg px-3 py-1.5 text-left transition-colors @2xl:w-full ${
+                className={`flex shrink-0 flex-col rounded-lg px-3 py-1.5 text-start transition-colors @2xl:w-full ${
                   active
                     ? "bg-foreground text-background"
                     : "text-muted-foreground hover:text-foreground hover:bg-white/[0.05]"
@@ -383,7 +383,7 @@ export function SeriesDrilldown({
                         type="button"
                         onClick={pick}
                         aria-label={pickLabel(episode)}
-                        className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                        className="flex min-w-0 flex-1 items-start gap-3 text-start"
                       >
                         <EpisodeStill
                           episode={episode}

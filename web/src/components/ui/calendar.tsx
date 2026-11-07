@@ -1,5 +1,6 @@
 import { useMemo, type ComponentProps } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
+import { Direction } from "radix-ui";
 import { DateLib, DayPicker, type Labels } from "react-day-picker";
 
 import { buttonVariants } from "@/components/ui/button";
@@ -52,8 +53,12 @@ function Calendar({
 }: ComponentProps<typeof DayPicker>) {
   const t = useT();
   const translatedLabels = useMemo(() => ({ ...calendarLabels(t), ...labels }), [t, labels]);
+  // DayPicker turns its arrow keys for right to left; its month chevrons mirror
+  // through the app's icon rule (the default nav always draws left and right).
+  const dir = Direction.useDirection();
   return (
     <DayPicker
+      dir={dir}
       showOutsideDays={showOutsideDays}
       labels={translatedLabels}
       className={cn("p-3", className)}

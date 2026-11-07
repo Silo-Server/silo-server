@@ -152,7 +152,7 @@ function NotificationRow({
           <span className={`truncate text-sm ${unread ? "font-semibold" : "font-medium"}`}>
             {notificationTitle(t, notification)}
           </span>
-          <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+          <span className="text-muted-foreground ms-auto shrink-0 text-xs">
             {formatNotificationTime(t, notification.created_at)}
           </span>
         </div>
@@ -198,7 +198,7 @@ function NotificationRow({
         <Button
           variant="ghost"
           size="icon"
-          className="absolute right-2 bottom-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
+          className="absolute end-2 bottom-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
           title={t("web.notifications.inbox.markRead")}
           onClick={(event) => {
             event.preventDefault();
@@ -267,7 +267,7 @@ function NotificationPreferencesPopover({
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm">
-          <Settings2 className="mr-1.5 h-4 w-4" />
+          <Settings2 className="me-1.5 h-4 w-4" />
           {t("web.notifications.preferences.open")}
         </Button>
       </PopoverTrigger>
@@ -373,7 +373,7 @@ function NotificationsInbox() {
           <Bell className="h-6 w-6" />
           {t("web.notifications.inbox.title")}
         </h1>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-2">
           {!showSeries && (unreadCount ?? 0) > 0 && (
             <Button
               variant="outline"
@@ -381,7 +381,7 @@ function NotificationsInbox() {
               onClick={() => void markDisplayedRead()}
               disabled={markAllRead.isPending || markAllRead.isError || !cutoff}
             >
-              <CheckCheck className="mr-1.5 h-4 w-4" />
+              <CheckCheck className="me-1.5 h-4 w-4" />
               {t("web.notifications.inbox.markAllRead")}
             </Button>
           )}
@@ -494,7 +494,7 @@ function NotificationsInbox() {
                     onClick={() => list.fetchNextPage()}
                     disabled={list.isFetchingNextPage}
                   >
-                    {list.isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {list.isFetchingNextPage && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
                     {t("web.notifications.inbox.loadMore")}
                   </Button>
                 </div>

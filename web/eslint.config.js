@@ -5,6 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import eslintConfigPrettier from "eslint-config-prettier";
 import eslintComments from "@eslint-community/eslint-plugin-eslint-comments";
 import formatjs from "eslint-plugin-formatjs";
+import noPhysicalDirection from "./eslint-rules/no-physical-direction.js";
 
 // Requests infer their shape through the generated v2 contract.
 const CONTRACT_SYNTAX = [
@@ -329,6 +330,21 @@ const I18N_CONVERTED = [
   "src/reader/**",
 ];
 
+// Files that draw physical geometry, where left means left in every language:
+// media timelines measured with clientX, chart plots, badges placed on poster
+// artwork. Everything else uses logical utilities (ps-, ms-, start-,
+// text-start…) so the layout mirrors right to left. A single literal line
+// elsewhere takes an eslint-disable comment with its reason.
+const PHYSICAL_DIRECTION = [
+  "src/components/admin/dashboard/charts/chartChrome.tsx",
+  "src/components/admin/dashboard/charts/LineChart.tsx",
+  "src/components/admin/dashboard/charts/StackedColumnChart.tsx",
+  "src/components/overlays/CardOverlays.tsx",
+  "src/player/components/PlaybackSpeedTrack.tsx",
+  "src/player/components/SeekBar.tsx",
+  "src/player/components/VolumeControl.tsx",
+];
+
 export default tseslint.config(
   { ignores: ["dist", "src/locales"] },
   {
@@ -409,6 +425,13 @@ export default tseslint.config(
     rules: {
       "no-restricted-imports": ["error", { paths: [REACT_INTL_IMPORT, PLAIN_TEXT_IMPORT] }],
     },
+  },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    // Tests assert whatever classes the source uses.
+    ignores: [...PHYSICAL_DIRECTION, "**/*.test.*", "**/*.test-support.*"],
+    plugins: { silo: { rules: { "no-physical-direction": noPhysicalDirection } } },
+    rules: { "silo/no-physical-direction": "error" },
   },
   {
     files: ["src/i18n/**"],

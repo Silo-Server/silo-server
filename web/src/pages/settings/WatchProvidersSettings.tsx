@@ -785,7 +785,7 @@ function WatchProviderCard({
             aria-expanded={settingsOpen}
             aria-controls={settingsPanelId}
             onClick={() => setSettingsOpen(!settingsOpen)}
-            className="text-muted-foreground hover:text-foreground flex w-full items-center justify-between gap-3 rounded-lg py-1 text-left text-sm font-medium transition-colors"
+            className="text-muted-foreground hover:text-foreground flex w-full items-center justify-between gap-3 rounded-lg py-1 text-start text-sm font-medium transition-colors"
           >
             {t("web.settings.watchProviders.settings")}
             <ChevronDown

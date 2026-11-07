@@ -357,7 +357,7 @@ function MarkerProviderTile({
               : undefined
         }
       />
-      <div className="border-border ml-3 border-l pl-4">
+      <div className="border-border ms-3 border-s ps-4">
         <SettingField
           label={t("web.admin.settings.markers.provider.autoLocal")}
           type="toggle"

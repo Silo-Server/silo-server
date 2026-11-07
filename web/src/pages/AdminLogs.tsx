@@ -169,7 +169,7 @@ function AdminLogsPage() {
         title={t("web.admin.logs.page.title")}
         subtitle={t("web.admin.logs.page.subtitle")}
         actions={
-          <div className="text-right">
+          <div className="text-end">
             <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
               {t("web.admin.logs.page.streamLabel")}
             </div>

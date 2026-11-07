@@ -74,6 +74,7 @@ import {
 } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { menuItemKey } from "@/lib/uiCustomization";
+import { Direction } from "radix-ui";
 
 // Same icons the admin library-type picker shows; Library only for a type the
 // picker does not know.
@@ -124,7 +125,7 @@ function SidebarSectionHeader({
   // exactly the rail — otherwise the dash sits 12px right of centre.
   const collapsedDivider = (
     <div
-      className={`sidebar-fade absolute inset-y-0 -left-3 flex w-16 items-center justify-center ${
+      className={`sidebar-fade absolute inset-y-0 -start-3 flex w-16 items-center justify-center ${
         show ? "pointer-events-none opacity-0" : "opacity-100"
       }`}
       aria-hidden="true"
@@ -200,6 +201,7 @@ interface ResolvedPrimaryMenuLink {
 
 export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
   const t = useT();
+  const dir = Direction.useDirection();
   const entrance = useSidebarEntrance(swap);
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
@@ -492,7 +494,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
     // border box, so the border rides along and lands exactly on the rail edge.
     <aside
       data-collapsed={railCollapsed ? "true" : undefined}
-      className="border-sidebar-border/70 sidebar-surface fixed top-0 bottom-0 left-0 z-40 w-[260px] overflow-hidden border-r"
+      className="border-sidebar-border/70 sidebar-surface fixed start-0 top-0 bottom-0 z-40 w-[260px] overflow-hidden border-e"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       style={sidebarSurfaceStyle({ collapsed, sidebarExpanded })}
@@ -516,13 +518,13 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
         >
           <span
             aria-hidden={!showLabels}
-            className={`sidebar-fade absolute left-5 ${showLabels ? "opacity-100" : "opacity-0"}`}
+            className={`sidebar-fade absolute start-5 ${showLabels ? "opacity-100" : "opacity-0"}`}
           >
             <SiloBrand variant="wordmark" className="h-12 w-[112px]" />
           </span>
           <span
             aria-hidden={showLabels}
-            className={`sidebar-fade absolute left-3.5 ${showLabels ? "opacity-0" : "opacity-100"}`}
+            className={`sidebar-fade absolute start-3.5 ${showLabels ? "opacity-0" : "opacity-100"}`}
           >
             <SiloBrand variant="mark" className="h-9 w-9" />
           </span>
@@ -563,7 +565,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     >
                       {active ? (
                         <span
-                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                           style={{ background: "var(--primary)" }}
                         />
                       ) : null}
@@ -583,7 +585,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 >
                   {isActive("/", true) && (
                     <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                       style={{ background: "var(--primary)" }}
                     />
                   )}
@@ -601,7 +603,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               >
                 {isCatalogSourceActive("query") && (
                   <span
-                    className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                    className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                     style={{ background: "var(--primary)" }}
                   />
                 )}
@@ -609,7 +611,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 <SidebarLabel show={showLabels}>{t("web.shell.sidebar.search")}</SidebarLabel>
                 <kbd
                   aria-hidden={!showLabels}
-                  className={`bg-muted text-muted-foreground sidebar-fade pointer-events-none ml-auto hidden rounded border px-1.5 py-0.5 text-[0.625rem] font-medium select-none lg:inline-flex ${
+                  className={`bg-muted text-muted-foreground sidebar-fade pointer-events-none ms-auto hidden rounded border px-1.5 py-0.5 text-[0.625rem] font-medium select-none lg:inline-flex ${
                     showLabels ? "opacity-100" : "opacity-0"
                   }`}
                 >
@@ -655,7 +657,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         >
                           {active && (
                             <span
-                              className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                              className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                               style={{ background: "var(--primary)" }}
                             />
                           )}
@@ -665,7 +667,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                           <ViewTransitionLink
                             to={href}
                             onClick={onNavigate}
-                            className="flex min-w-0 flex-1 items-center gap-2.5 py-2.5 pl-3"
+                            className="flex min-w-0 flex-1 items-center gap-2.5 py-2.5 ps-3"
                             aria-current={active ? "page" : undefined}
                           >
                             <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
@@ -704,7 +706,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
 
                         {/* Pinned items under this library — hidden when collapsed */}
                         {showLabels && hasPins && isExpanded && (
-                          <div className="border-sidebar-border ml-3 space-y-0.5 border-l pl-2">
+                          <div className="border-sidebar-border ms-3 space-y-0.5 border-s ps-2">
                             {libraryPins.map((pin) => {
                               const pinHref =
                                 pin.type === "collection"
@@ -748,7 +750,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                           label: pin.label,
                                         })
                                       }
-                                      className="text-muted-foreground hover:text-destructive absolute right-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
+                                      className="text-muted-foreground hover:text-destructive absolute end-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
                                       title={t("web.shell.sidebar.unpin")}
                                     >
                                       <PinOff className="h-3 w-3" />
@@ -785,7 +787,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     >
                       {isActive("/recommendations") && (
                         <span
-                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                           style={{ background: "var(--primary)" }}
                         />
                       )}
@@ -804,7 +806,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     >
                       {isActive("/requests") && (
                         <span
-                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                           style={{ background: "var(--primary)" }}
                         />
                       )}
@@ -825,7 +827,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     >
                       {isActive("/calendar") && (
                         <span
-                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                           style={{ background: "var(--primary)" }}
                         />
                       )}
@@ -846,7 +848,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     >
                       {isActive("/notifications") && (
                         <span
-                          className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                          className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                           style={{ background: "var(--primary)" }}
                         />
                       )}
@@ -855,7 +857,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         {(unreadNotifications ?? 0) > 0 && (
                           <span
                             aria-hidden="true"
-                            className={`sidebar-fade absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${
+                            className={`sidebar-fade absolute -end-0.5 -top-0.5 h-2 w-2 rounded-full ${
                               showLabels ? "opacity-0" : "opacity-100"
                             }`}
                             style={{ background: "var(--primary)" }}
@@ -867,7 +869,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                       </SidebarLabel>
                       {(unreadNotifications ?? 0) > 0 && (
                         <span
-                          className={`sidebar-fade ml-auto rounded-full px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold ${
+                          className={`sidebar-fade ms-auto rounded-full px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold ${
                             showLabels ? "opacity-100" : "opacity-0"
                           }`}
                           style={{
@@ -902,7 +904,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 >
                   {isCatalogSourceActive("favorites") && (
                     <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                       style={{ background: "var(--primary)" }}
                     />
                   )}
@@ -919,7 +921,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 >
                   {isCatalogSourceActive("watchlist") && (
                     <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                       style={{ background: "var(--primary)" }}
                     />
                   )}
@@ -936,7 +938,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 >
                   {isActive("/rooms") && (
                     <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                       style={{ background: "var(--primary)" }}
                     />
                   )}
@@ -953,7 +955,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 >
                   {isActive("/collections") && (
                     <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                       style={{ background: "var(--primary)" }}
                     />
                   )}
@@ -972,7 +974,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 >
                   {isCatalogSourceActive("history") && (
                     <span
-                      className="absolute top-1/2 left-0 h-[18px] w-[3px] -translate-y-1/2 rounded-r-sm"
+                      className="absolute start-0 top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-e-sm"
                       style={{ background: "var(--primary)" }}
                     />
                   )}
@@ -1073,7 +1075,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              side={getProfileMenuSide(collapsed)}
+              side={getProfileMenuSide(collapsed, dir)}
               align="start"
               className="w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl p-2"
             >
