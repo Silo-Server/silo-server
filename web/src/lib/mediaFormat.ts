@@ -5,6 +5,7 @@
 
 import { t, type MessageKey } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
+import { formatDecimal } from "@/lib/numberFormat";
 
 export const CODEC_LABELS: Record<string, string> = {
   aac: "AAC",
@@ -134,9 +135,9 @@ export function formatFileSize(bytes?: number, options: FormatFileSizeOptions = 
   const { fallback = "", iecUnits = false } = options;
   if (!isPositive(bytes)) return fallback;
   const [giga, mega, kilo] = SIZE_UNIT_KEYS[iecUnits ? "iec" : "si"];
-  if (bytes >= 1024 ** 3) return t(giga, { size: (bytes / 1024 ** 3).toFixed(1) });
-  if (bytes >= 1024 ** 2) return t(mega, { size: (bytes / 1024 ** 2).toFixed(1) });
-  if (bytes >= 1024) return t(kilo, { size: (bytes / 1024).toFixed(1) });
+  if (bytes >= 1024 ** 3) return t(giga, { size: formatDecimal(bytes / 1024 ** 3, 1) });
+  if (bytes >= 1024 ** 2) return t(mega, { size: formatDecimal(bytes / 1024 ** 2, 1) });
+  if (bytes >= 1024) return t(kilo, { size: formatDecimal(bytes / 1024, 1) });
   return t("web.common.format.size.bytes", { size: String(bytes) });
 }
 
@@ -149,7 +150,7 @@ export function formatBitrate(kbps?: number, fallback = ""): string {
 
 export function formatMbpsFromKbps(kbps?: number, fallback = "—"): string {
   if (!isPositive(kbps)) return fallback;
-  return t("web.common.format.bitrate.mbps", { rate: (kbps / 1000).toFixed(1) });
+  return t("web.common.format.bitrate.mbps", { rate: formatDecimal(kbps / 1000, 1) });
 }
 
 export function formatSampleRate(sampleRate?: number, fallback = ""): string {

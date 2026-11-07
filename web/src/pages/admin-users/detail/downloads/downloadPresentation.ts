@@ -1,6 +1,7 @@
 import type { AdminUserDownload, AdminUserDownloadSubscription } from "@/api/v2/adminUserActivity";
 import { t, type MessageKey } from "@/i18n";
 import { episodeCode } from "../format";
+import { formatDecimal } from "@/lib/numberFormat";
 
 export type DownloadBadgeTone = "ok" | "accent" | "neutral" | "warn" | "danger";
 
@@ -58,7 +59,7 @@ export const IN_PROGRESS_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 function formatMbps(kbps: number): string {
-  return (kbps / 1000).toFixed(1).replace(/\.0$/, "");
+  return formatDecimal(kbps / 1000, 1, 0);
 }
 
 /** "Original" for the source file; "10 Mbps · server-prepared" for a server-made copy. */

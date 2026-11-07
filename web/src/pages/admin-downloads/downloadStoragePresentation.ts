@@ -5,6 +5,7 @@ import type {
   AdminDownloadStorageLocation,
 } from "@/api/v2/adminDownloadStorage";
 import { t, type MessageKey } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 /**
  * Values for a plural message: `count` selects the form, `count_text` prints
@@ -30,7 +31,7 @@ export function formatStorageBytes(bytes: number | null | undefined): string {
     index++;
   }
   if (index === 0) return `${Math.round(scaled)} B`;
-  return `${scaled >= 100 ? Math.round(scaled) : scaled.toFixed(scaled >= 10 ? 0 : 1)} ${units[index]}`;
+  return `${scaled >= 100 ? Math.round(scaled) : formatDecimal(scaled, scaled >= 10 ? 0 : 1)} ${units[index]}`;
 }
 
 /** Fill at which a node stops taking playback sessions (scratch pressure). */

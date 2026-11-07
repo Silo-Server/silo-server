@@ -1,6 +1,7 @@
 import { queryDefinitionFromSectionConfig, type LibraryCollection } from "@/api/types";
 import { t, type MessageKey } from "@/i18n";
 import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
+import { formatDecimal } from "@/lib/numberFormat";
 import { rowKindLabel } from "./catalog";
 import type { HomeRow, PageRef, Surface } from "./types";
 
@@ -101,9 +102,9 @@ function positive(value: unknown, fallback: number): number {
   return n !== undefined && n > 0 ? n : fallback;
 }
 
-/** A TMDB rating floor as the presets write it: 7.5, 8.0. */
+/** A TMDB rating floor as the presets write it, shown with one decimal: 7.5, 8.0. */
 function rating(value: unknown, fallback: number): string {
-  return (num(value) || fallback).toFixed(1);
+  return formatDecimal(num(value) || fallback, 1);
 }
 
 function cadence(config: Record<string, unknown>): string {
@@ -358,7 +359,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
       const days = positive(config.lookback_days, 365);
       return [
         t("web.home.rows.describe.forgotten", {
-          rating: "7.0",
+          rating: formatDecimal(7, 1),
           votes: MIN_VOTES,
           count: days,
           days: String(days),

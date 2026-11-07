@@ -7,6 +7,7 @@ import type {
 import { formatChannels, formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
 import { formatLocale } from "@/lib/appLocale";
 import { t, type MessageKey } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 const K = "web.admin.downloads.preparation";
 
@@ -108,7 +109,7 @@ export function formatPreparationSource(p: AdminDownloadPreparation): string {
 export function formatPreparationBitrate(kbps?: number): string {
   if (!kbps || kbps <= 0) return "";
   const mbps = kbps / 1000;
-  return t(`${K}.bitrate`, { value: String(Number.isInteger(mbps) ? mbps : mbps.toFixed(1)) });
+  return t(`${K}.bitrate`, { value: formatDecimal(mbps, Number.isInteger(mbps) ? 0 : 1) });
 }
 
 /** What the prepared file will be, e.g. "1080p H.264 · 10 Mbps · HDR → SDR". */
@@ -249,7 +250,7 @@ export function formatRemaining(seconds: number | null): string {
 
 export function formatSpeed(speed?: number): string {
   if (!speed || speed <= 0) return "";
-  return `${speed >= 10 ? Math.round(speed) : speed.toFixed(1)}×`;
+  return `${speed >= 10 ? Math.round(speed) : formatDecimal(speed, 1)}×`;
 }
 
 export function formatClock(seconds: number): string {

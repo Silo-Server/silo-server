@@ -9,6 +9,7 @@ import { formatDateTime } from "@/lib/datetime";
 
 import { SettingFieldStatus } from "./SettingField";
 import { formatLocale } from "@/lib/appLocale";
+import { formatDecimal } from "@/lib/numberFormat";
 
 /**
  * Read-only view of the catalog search index: which provider is answering
@@ -283,7 +284,7 @@ function formatIndexedTypes(t: Translate, value?: string[]) {
 
 function formatSemanticRatio(value?: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return "0";
-  return value.toFixed(2);
+  return formatDecimal(value, 2);
 }
 
 function formatPercent(value?: number) {

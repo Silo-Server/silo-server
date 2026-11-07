@@ -19,6 +19,7 @@ import {
   TRANSFORMATION_VIDEO_TO_H264_V3,
 } from "./protocol-v3";
 import type { PlayerAudioTrack, PlayerFileVersion, PlayerVideoTrack, QualityOption } from "./types";
+import { formatDecimal } from "@/lib/numberFormat";
 
 /** `t`, or a component's `useT()` result. */
 type Translate = (id: MessageKey, values?: TextValues) => string;
@@ -319,7 +320,7 @@ function formatQualityBitrate(translate: Translate, kbps?: number): string {
   if (kbps >= 1000) {
     const mbps = kbps / 1000;
     return translate("web.player.quality.bitrateMbps", {
-      mbps: mbps % 1 === 0 ? String(mbps) : mbps.toFixed(1),
+      mbps: formatDecimal(mbps, mbps % 1 === 0 ? 0 : 1),
     });
   }
   return translate("web.player.quality.bitrateKbps", { kbps: String(kbps) });

@@ -2,6 +2,7 @@ import type { AdminSession } from "@/api/types";
 import { t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 import { formatCodecLabel } from "@/lib/mediaFormat";
+import { formatDecimal } from "@/lib/numberFormat";
 
 export function formatDecisionLabel(decision?: string): string {
   switch (decision) {
@@ -292,7 +293,7 @@ export function formatSessionBitrate(kbps?: number | null): string | null {
     return null;
   }
   if (kbps >= 1000) {
-    return `${(kbps / 1000).toFixed(1)} Mbps`;
+    return `${formatDecimal(kbps / 1000, 1)} Mbps`;
   }
   return `${Math.round(kbps)} kbps`;
 }

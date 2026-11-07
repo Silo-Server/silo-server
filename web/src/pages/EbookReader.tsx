@@ -77,6 +77,7 @@ import {
   type EbookReaderAnnotation,
 } from "@/reader/ebookReaderApi";
 import { readingArrowKey } from "@/lib/direction";
+import { formatDecimal } from "@/lib/numberFormat";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
 
@@ -1471,7 +1472,7 @@ function ReaderRange({ label, value, min, max, step, suffix = "", onChange }: Re
           {label}
         </span>
         <span data-reader-range-value className="justify-self-end leading-4 tabular-nums">
-          {Number.isInteger(step) ? value : value.toFixed(2)}
+          {Number.isInteger(step) ? value : formatDecimal(value, 2)}
           {suffix}
         </span>
       </span>

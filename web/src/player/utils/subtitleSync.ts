@@ -1,6 +1,7 @@
 import type { components } from "@/api/v2/schema";
 import { t } from "@/i18n";
 import type { PlayerSubtitleInfo } from "../types";
+import { formatDecimal } from "@/lib/numberFormat";
 
 export type StoredSubtitle = components["schemas"]["StoredSubtitle"];
 export type SubtitleSyncState = components["schemas"]["SubtitleSyncState"];
@@ -66,7 +67,7 @@ export function isSyncInProgress(status: SubtitleSyncStatus | undefined): boolea
 export function formatSyncOffset(offsetMs: number): string {
   const seconds = Math.abs(offsetMs) / 1000;
   const sign = offsetMs < 0 ? "−" : "+";
-  return t("web.subtitles.sync.offsetSeconds", { offset: `${sign}${seconds.toFixed(1)}` });
+  return t("web.subtitles.sync.offsetSeconds", { offset: `${sign}${formatDecimal(seconds, 1)}` });
 }
 
 const FRAME_RATES = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60];
@@ -87,11 +88,14 @@ export function describeSyncScale(scale: number): string | null {
   for (const from of FRAME_RATES) {
     for (const to of FRAME_RATES) {
       if (from !== to && Math.abs(from / to - scale) <= FRAME_RATE_TOLERANCE) {
-        return t("web.subtitles.sync.frameRate", { from: String(from), to: String(to) });
+        return t("web.subtitles.sync.frameRate", {
+          from: formatDecimal(from, 3, 0),
+          to: formatDecimal(to, 3, 0),
+        });
       }
     }
   }
-  return t("web.subtitles.sync.speed", { factor: String(Number(scale.toFixed(4))) });
+  return t("web.subtitles.sync.speed", { factor: formatDecimal(scale, 4, 0) });
 }
 
 /** "+2.3 s · 25→23.976 fps": a correction in a few characters. */

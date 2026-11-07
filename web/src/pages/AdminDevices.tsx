@@ -46,6 +46,7 @@ import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
 import { cn } from "@/lib/utils";
 import { useT, type MessageKey, type Translate } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 // ─────────────────────────────────────────────────────────────────────
 // types & constants
@@ -174,7 +175,7 @@ function detectAnomalies(
           ? t("web.admin.devices.anomaly.summaryRatio", {
               count,
               count_text: String(count),
-              ratio: String(ratio),
+              ratio: formatDecimal(ratio, 1, 0),
               platform: platformText,
             })
           : t("web.admin.devices.anomaly.summaryCount", { count, count_text: String(count) }),
@@ -184,9 +185,9 @@ function detectAnomalies(
           ? t("web.admin.devices.anomaly.detailMedian", {
               count,
               count_text: String(count),
-              ratio: String(ratio),
+              ratio: formatDecimal(ratio ?? 0, 1, 0),
               platform: platformText,
-              median: String(median),
+              median: formatDecimal(median, 2, 0),
             })
           : t("web.admin.devices.anomaly.detailTypical", {
               count,

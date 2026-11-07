@@ -4,6 +4,7 @@ import { V2ProblemError } from "@/api/v2/request";
 import { t, type MessageKey } from "@/i18n";
 
 import { backupDateTime, knownSiloVersion, sourceServerName } from "./backupPresentation";
+import { formatDecimal } from "@/lib/numberFormat";
 
 /** How many times one part is sent before the upload stops and offers a retry. */
 const UPLOAD_PART_ATTEMPTS = 3;
@@ -30,7 +31,7 @@ export function progressLabel(sent: number, total: number): string {
     total >= GB ? [GB, "GB", 1] : total >= MB ? [MB, "MB", 0] : [KB, "KB", 0];
   const show = (bytes: number, round: (n: number) => number) => {
     const scale = 10 ** digits;
-    return (round((bytes / unit) * scale) / scale).toFixed(digits);
+    return formatDecimal(round((bytes / unit) * scale) / scale, digits);
   };
   const totalText = show(total, Math.round);
   // Never show the total before the last byte arrived.
@@ -45,8 +46,8 @@ export function progressPercent(sent: number, total: number): number {
 
 /** A size limit as a person says it: "2 GB". */
 export function limitLabel(bytes: number): string {
-  if (bytes >= GB) return `${+(bytes / GB).toFixed(1)} GB`;
-  return `${+(bytes / MB).toFixed(1)} MB`;
+  if (bytes >= GB) return `${formatDecimal(bytes / GB, 1, 0)} GB`;
+  return `${formatDecimal(bytes / MB, 1, 0)} MB`;
 }
 
 export type SniffResult = "restore_set" | "encrypted" | "not_a_restore_set";
