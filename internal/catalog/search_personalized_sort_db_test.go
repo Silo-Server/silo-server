@@ -70,6 +70,10 @@ func TestCatalogSearchSortsByProfilePlaysDB(t *testing.T) {
 		batchEquivExec(t, pool, `INSERT INTO user_watch_history (id, user_id, profile_id, media_item_id, watched_at, completed) VALUES ($1, $2, $3, $4, NOW() - $5 * INTERVAL '1 hour', $6)`,
 			fmt.Sprintf("%s-play-%d", prefix, i), userID, play.profile, id(play.movie), i+1, play.completed)
 	}
+	// The plays sort also counts a completed progress row; an unfinished one
+	// counts nothing, or "never" would tie "once" and sort ahead of it by title.
+	batchEquivExec(t, pool, `INSERT INTO user_watch_progress (user_id, profile_id, media_item_id, position_seconds, duration_seconds, completed, updated_at) VALUES ($1, $2, $3, 600, 5400, FALSE, NOW())`,
+		userID, profile, id("never"))
 
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool)).
 		WithUserStoreProvider(postgresCatalogStateProvider{})
