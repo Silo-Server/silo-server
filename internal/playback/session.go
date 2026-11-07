@@ -104,6 +104,24 @@ type Session struct {
 	// Watch measures how much of the session was actually watched; Position
 	// is only where the player is now. See WatchTime.
 	Watch WatchTime
+	// TimelineDuration is the length in seconds of the timeline Position is
+	// measured on when that is more than the session's file, such as a whole
+	// Audiobookshelf book of several files. Zero means the file's own
+	// duration.
+	TimelineDuration float64
+	// IdleGrace, when set, replaces the manager's active and paused grace
+	// windows for this session. It is for a player whose progress reports
+	// are the only sign of playback, which sends no stop: the play is over
+	// once this long passes without one.
+	IdleGrace time.Duration
+	// ReportOnly marks a play the server knows only from the client's
+	// progress reports. It may be playing a downloaded copy, so it is shown in
+	// the admin views but never counts toward stream limits.
+	ReportOnly bool
+	// ReportedListening is the running listening total the client sent with
+	// its latest report, for a client that reports one (see
+	// UpdateProgressReported).
+	ReportedListening float64
 	// StopReported marks a session a client reported stopped without an ID
 	// that could end it (#1454). It only hides the session from the live
 	// admin view: pause state and idle grace are untouched, so a stale stop
@@ -739,6 +757,40 @@ func (m *SessionManager) RegisterReconstructed(s *Session) *Session {
 	return s
 }
 
+// RegisterReportOnly adds a report-only session (see Session.ReportOnly)
+// under its own ID, unless the account already has maxPerUser of them live.
+// Report-only sessions are outside stream limits, so this cap is what bounds
+// how many one account can hold. It reports whether a session is now live
+// under the ID, which is also true when one already was.
+func (m *SessionManager) RegisterReportOnly(s *Session, maxPerUser int) bool {
+	if s == nil || s.ID == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.sessions[s.ID]; ok {
+		return true
+	}
+	count := 0
+	for _, other := range m.sessions {
+		if other.UserID == s.UserID && other.ReportOnly {
+			count++
+		}
+	}
+	if count >= maxPerUser {
+		return false
+	}
+	now := time.Now()
+	if s.StartedAt.IsZero() {
+		s.StartedAt = now
+	}
+	s.ReportOnly = true
+	s.UpdatedAt = now
+	s.LastActivityAt = now
+	m.sessions[s.ID] = s
+	return true
+}
+
 // RegisterReconstructedWithLimits is RegisterReconstructed plus the same per-user
 // admission caps StartSession enforces. Token-carried reconstruct replays a
 // signed recipe to rebuild a session lost to a restart; without a cap check a
@@ -986,6 +1038,60 @@ func transcodingDisabledError(requiresVideoTranscode, requiresAudioTranscode boo
 // UpdateProgress updates the playback position and pause state for a session.
 func (m *SessionManager) UpdateProgress(sessionID string, position float64, isPaused bool) error {
 	return m.updateProgress(sessionID, position, isPaused, -1)
+}
+
+// UpdateProgressListened is UpdateProgress for a playing client that also
+// reports how many seconds it played since its previous report; the session's
+// watch time credits that report (see WatchTime.Credit).
+func (m *SessionManager) UpdateProgressListened(sessionID string, position, listened float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	m.creditProgressLocked(s, position, listened)
+	return nil
+}
+
+// UpdateProgressReported is UpdateProgressListened for a client that reports
+// its listening as a running total for the play: the session credits how far
+// the total rose past the highest one seen, so a late or repeated report
+// credits nothing. A client that has not reported a total is measured from
+// its position instead, as UpdateProgress does.
+func (m *SessionManager) UpdateProgressReported(sessionID string, position, total float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if total <= 0 && s.ReportedListening <= 0 {
+		s.Position = position
+		s.IsPaused = false
+		s.StopReported = false
+		s.streamRevision++
+		m.touchSessionLocked(s)
+		s.Watch.Observe(position, false, s.UpdatedAt)
+		return nil
+	}
+	listened := max(total-s.ReportedListening, 0)
+	s.ReportedListening = max(s.ReportedListening, total)
+	m.creditProgressLocked(s, position, listened)
+	return nil
+}
+
+// creditProgressLocked records a playing report and credits the seconds the
+// client says it listened since its previous one.
+func (m *SessionManager) creditProgressLocked(s *Session, position, listened float64) {
+	s.Position = position
+	s.IsPaused = false
+	s.StopReported = false
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	s.Watch.Credit(position, listened, s.StartedAt, s.UpdatedAt)
 }
 
 // UpdateProgressSample keeps a confirmed pause state when an already accepted
@@ -1613,6 +1719,22 @@ func (m *SessionManager) SetProgressPersistenceDisabled(sessionID string, disabl
 	return nil
 }
 
+// SetTimelineDuration records the length of the timeline the session's
+// Position is measured on, for a player whose position spans more than the
+// session's file. See Session.TimelineDuration.
+func (m *SessionManager) SetTimelineDuration(sessionID string, seconds float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+
+	s.TimelineDuration = seconds
+	return nil
+}
+
 // TouchActivity refreshes the session's activity timestamp without changing
 // any other playback state.
 func (m *SessionManager) TouchActivity(sessionID string) error {
@@ -2063,7 +2185,7 @@ func (m *SessionManager) cleanInactive(activeIdle, pausedIdle, startupIdle time.
 		if s.activeTransportCount > 0 {
 			continue
 		}
-		activeIdle, pausedIdle := remoteTransportGrace(s, activeIdle, pausedIdle)
+		activeIdle, pausedIdle := sessionGrace(s, activeIdle, pausedIdle)
 		if m.sessionIsInactiveLocked(s, now, activeIdle, pausedIdle, startupIdle) {
 			cp := *s
 			expired = append(expired, &cp)
@@ -2097,11 +2219,23 @@ func (m *SessionManager) countsTowardLimitsLocked(s *Session, now time.Time) boo
 	if s.IsJellyfinCompat && m.compatExpiryClaimer != nil {
 		return true
 	}
+	if s.ReportOnly {
+		return false
+	}
 	if s.activeTransportCount > 0 {
 		return true
 	}
-	activeGrace, pausedGrace := remoteTransportGrace(s, m.activeGrace, m.pausedGrace)
+	activeGrace, pausedGrace := sessionGrace(s, m.activeGrace, m.pausedGrace)
 	return !m.sessionIsInactiveLocked(s, now, activeGrace, pausedGrace, StartupSessionGrace)
+}
+
+// sessionGrace returns the idle windows that apply to s: its own IdleGrace
+// when set, widened like any other for a remotely served session.
+func sessionGrace(s *Session, activeIdle, pausedIdle time.Duration) (time.Duration, time.Duration) {
+	if s != nil && s.IdleGrace > 0 {
+		activeIdle, pausedIdle = s.IdleGrace, s.IdleGrace
+	}
+	return remoteTransportGrace(s, activeIdle, pausedIdle)
 }
 
 // remoteTransportGrace widens the idle windows for a session whose bytes are

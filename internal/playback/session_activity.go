@@ -69,7 +69,7 @@ func (m *SessionManager) refreshExternalActivity(source string, reader SessionAc
 	var candidates []Session
 	originals := make(map[string]*Session)
 	for id, s := range m.sessions {
-		active, paused := remoteTransportGrace(s, activeIdle, pausedIdle)
+		active, paused := sessionGrace(s, activeIdle, pausedIdle)
 		if s.activeTransportCount == 0 && include(s, m.sessionIsInactiveLocked(s, now, active, paused, startupIdle)) {
 			candidates = append(candidates, *s)
 			originals[id] = s
@@ -136,7 +136,7 @@ func (m *SessionManager) claimCompatExpiryLocked(now time.Time, activeIdle, paus
 	}
 	var candidates []SessionExpiryCandidate
 	for _, s := range m.sessions {
-		active, paused := remoteTransportGrace(s, activeIdle, pausedIdle)
+		active, paused := sessionGrace(s, activeIdle, pausedIdle)
 		if !s.IsJellyfinCompat || protected[s] || s.activeTransportCount > 0 || !m.sessionIsInactiveLocked(s, now, active, paused, startupIdle) {
 			continue
 		}
