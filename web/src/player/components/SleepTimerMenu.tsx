@@ -49,7 +49,7 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
       <button
         type="button"
-        className="player-utility-btn flex items-center gap-1.5 px-2 text-xs"
+        className="player-utility-btn flex w-auto items-center gap-1.5 px-2 text-xs"
         onClick={() => setOpen((v) => !v)}
         aria-label={t("web.player.sleepTimer.trigger")}
         aria-expanded={open}
