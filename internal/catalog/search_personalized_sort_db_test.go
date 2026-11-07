@@ -15,14 +15,19 @@ import (
 // is unused here.
 type postgresCatalogStateStore struct{ userstore.UserStore }
 
+// CatalogStateInPostgres reports true, so the resolver runs personalized
+// queries in SQL.
 func (postgresCatalogStateStore) CatalogStateInPostgres() bool { return true }
 
+// postgresCatalogStateProvider hands every user a postgresCatalogStateStore.
 type postgresCatalogStateProvider struct{}
 
+// ForUser returns a postgresCatalogStateStore for any user.
 func (postgresCatalogStateProvider) ForUser(context.Context, int) (userstore.UserStore, error) {
 	return postgresCatalogStateStore{}, nil
 }
 
+// Close has nothing to release.
 func (postgresCatalogStateProvider) Close() error { return nil }
 
 // Search sorted by plays orders the matches by the viewer profile's completed
