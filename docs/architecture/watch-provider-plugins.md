@@ -194,6 +194,14 @@ run on the caller's context, for watched exports and the
 open-scrobble sweep (one lookup for all its sessions), take at most five
 seconds and at most half of the time the caller has left.
 
+A Jellyfin client's Stopped report stages its stop and delivers it as a
+confirmed stop, which gives each provider the same two minutes as any other
+watch-sync call to the plugin. The report waits at most five seconds for that
+delivery before it answers; delivery carries on in the background. A staged
+stop that keeps failing is retried until an hour after the play stopped, then
+dropped with one warning. A completed play still reaches a provider that
+exports watched history, through history export.
+
 An episode's `title` is its own, and its `year` is its series' year, as on
 the import side. An item whose event kind differs from its catalog kind gets
 no titles: an episode without provider IDs is sent as a movie, and must not

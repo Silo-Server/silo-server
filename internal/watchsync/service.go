@@ -67,13 +67,15 @@ const (
 
 	manualSyncCooldown = time.Hour
 	manualSyncTimeout  = 10 * time.Minute
-	// A completed stop may require a cold metadata lookup in a provider plugin.
+	// ConfirmedStopDispatchTimeout bounds one provider's confirmed stop. A
+	// completed stop may require a cold metadata lookup in a provider plugin.
 	// Match the plugin-host watch-sync deadline so the durable confirmation path
 	// does not cancel valid provider work before the RPC can finish. The reclaim
 	// lease must remain longer than that entire dispatch and finalization window
 	// so a second request cannot take over while the first is still valid.
-	confirmedStopDispatchTimeout = 2 * time.Minute
-	confirmedStopLease           = confirmedStopDispatchTimeout + 30*time.Second
+	// Callers of ScrobbleStopConfirmed must leave at least this much time.
+	ConfirmedStopDispatchTimeout = 2 * time.Minute
+	confirmedStopLease           = ConfirmedStopDispatchTimeout + 30*time.Second
 )
 
 var errConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
@@ -2224,7 +2226,7 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 		results := make(chan error, len(confirmedTargets))
 		for _, target := range confirmedTargets {
 			go func() {
-				providerCtx, cancel := context.WithTimeout(ctx, confirmedStopDispatchTimeout)
+				providerCtx, cancel := context.WithTimeout(ctx, ConfirmedStopDispatchTimeout)
 				defer cancel()
 				results <- s.dispatchScrobbleConfirmed(
 					providerCtx,
