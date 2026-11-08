@@ -156,6 +156,36 @@ func TestHandleCreateProfile_EnforcesInheritedGroupProfileLimit(t *testing.T) {
 	}
 }
 
+// TestListProfilesReportsProfileLimit covers the limit listProfiles reports:
+// the one CreateProfile enforces, and 0 (not a failed list) when it cannot be
+// read.
+func TestListProfilesReportsProfileLimit(t *testing.T) {
+	groupID := int64(4)
+	tests := []struct {
+		name string
+		repo testProfileUserRepo
+		want int
+	}{
+		{name: "inherits the group's limit", repo: testProfileUserRepo{user: &models.User{ID: 1, Role: models.RoleUser, AccessGroupID: &groupID}}, want: 1},
+		{name: "an account override wins", repo: testProfileUserRepo{user: &models.User{ID: 1, Role: models.RoleUser, AccessGroupID: &groupID, MaxProfiles: new(3)}}, want: 3},
+		{name: "an unreadable account still lists", repo: testProfileUserRepo{err: errors.New("boom")}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler := NewProfileHandler(testUserStoreProvider{store: newProfileTestStore(t)})
+			handler.UserRepo = tt.repo
+			handler.AccessGroups = profileLimitGroups{policy: access.GroupPolicy{ID: groupID, MaxProfiles: 1}}
+			view, err := handler.ListProfiles(context.Background(), 1)
+			if err != nil {
+				t.Fatalf("ListProfiles: %v", err)
+			}
+			if len(view.Profiles) != 1 || view.MaxProfiles != tt.want {
+				t.Fatalf("profiles = %d, max_profiles = %d, want 1 and %d", len(view.Profiles), view.MaxProfiles, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleCreateProfile_RejectsDuplicateName(t *testing.T) {
 	store := newProfileTestStore(t)
 	handler := NewProfileHandler(testUserStoreProvider{store: store})
