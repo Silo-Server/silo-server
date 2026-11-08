@@ -240,10 +240,17 @@ export function describeRow(row: HomeRow, context: DescribeContext): Description
     }
     case "most_watched":
       return [`Watched most often here this ${config.window === "month" ? "month" : "week"}`];
-    case "trending_discover":
+    case "trending_discover": {
+      const what =
+        config.filter_type === "movie"
+          ? "Movies trending"
+          : config.filter_type === "series"
+            ? "TV shows trending"
+            : "Trending";
       return [
-        `Trending on TMDB ${config.window === "day" ? "today" : "this week"}, from what you have`,
+        `${what} on TMDB ${config.window === "day" ? "today" : "this week"}, from what you have`,
       ];
+    }
     case "profile_activity_feed":
       return ["What other profiles just watched"];
     case "recommended_for_you":
