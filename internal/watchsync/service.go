@@ -1150,7 +1150,18 @@ func (s *Service) ImportWatched(
 	rows := batch.Rows
 	result := ImportWatchedResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
 	matchedLeaves := make(map[string]matchedWatchedLeaf)
+	addLeaf := func(match historyimport.Match, watchedAt time.Time) {
+		existing, ok := matchedLeaves[match.MediaItemID]
+		if !ok || watchedAt.After(existing.watchedAt) {
+			matchedLeaves[match.MediaItemID] = matchedWatchedLeaf{match: match, watchedAt: watchedAt}
+		}
+	}
+	// fresh holds what the provider returned this sync: its current state,
+	// which replaces any watch kept from an earlier one.
+	fresh := make(map[pendingWatchKey]bool, len(rows))
+	var unmatched, applied []RemoteWatch
 	for _, row := range rows {
+		fresh[pendingKeyOf(row)] = true
 		matches, reason, err := s.matchWatchedLeaves(ctx, row)
 		if err != nil {
 			return result, err
@@ -1160,20 +1171,24 @@ func (s *Service) ImportWatched(
 			if reason != "" {
 				result.Warnings = append(result.Warnings, reason)
 			}
+			unmatched = append(unmatched, row)
 			continue
 		}
 		if row.LastWatchedAt == nil {
 			continue
 		}
+		applied = append(applied, row)
 		for _, match := range matches {
-			existing, ok := matchedLeaves[match.MediaItemID]
-			if !ok || row.LastWatchedAt.After(existing.watchedAt) {
-				matchedLeaves[match.MediaItemID] = matchedWatchedLeaf{
-					match:     match,
-					watchedAt: *row.LastWatchedAt,
-				}
-			}
+			addLeaf(match, *row.LastWatchedAt)
 		}
+	}
+	pending, keepsPending := s.repo.(pendingWatchStore)
+	if keepsPending {
+		retried, err := s.retryPendingWatches(ctx, pending, conn, fresh, addLeaf)
+		if err != nil {
+			return result, err
+		}
+		applied = append(applied, retried...)
 	}
 	mediaItemIDs := make([]string, 0, len(matchedLeaves))
 	for mediaItemID := range matchedLeaves {
@@ -1203,6 +1218,16 @@ func (s *Service) ImportWatched(
 			result.Imported++
 		}
 	}
+	// The kept watches are settled before the cursor moves past them, so a
+	// failure here leaves the provider's rows to be read again.
+	if keepsPending {
+		if err := pending.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, unmatched); err != nil {
+			return result, err
+		}
+		if err := pending.DeletePendingWatches(ctx, conn.ID, conn.ProviderAccountID, applied); err != nil {
+			return result, err
+		}
+	}
 	now := s.now()
 	update := flowSucceeded(now)
 	update.LastInboundSyncAt = &now
@@ -1211,6 +1236,61 @@ func (s *Service) ImportWatched(
 		return result, err
 	}
 	return result, nil
+}
+
+// retryPendingWatches matches the watches kept from earlier syncs again and
+// passes each match to add. It skips a kept watch the provider returned again
+// this sync, and returns the ones that matched. A kept watch that still
+// matches nothing adds no warning: its sync already reported it.
+func (s *Service) retryPendingWatches(
+	ctx context.Context,
+	store pendingWatchStore,
+	conn Connection,
+	fresh map[pendingWatchKey]bool,
+	add func(historyimport.Match, time.Time),
+) ([]RemoteWatch, error) {
+	kept, err := store.ListPendingWatches(ctx, conn.ID, conn.ProviderAccountID)
+	if err != nil {
+		return nil, err
+	}
+	var batched, retried []RemoteWatch
+	var records []historyimport.Record
+	for _, watch := range kept {
+		if fresh[pendingKeyOf(watch)] {
+			continue
+		}
+		if batchMatchable(watch) {
+			batched = append(batched, watch)
+			records = append(records, watch.HistoryRecord())
+			continue
+		}
+		matches, _, err := s.matchWatchedLeaves(ctx, watch)
+		if err != nil {
+			return nil, err
+		}
+		if len(matches) == 0 {
+			continue
+		}
+		for _, match := range matches {
+			add(match, *watch.LastWatchedAt)
+		}
+		retried = append(retried, watch)
+	}
+	if len(records) == 0 {
+		return retried, nil
+	}
+	matches, err := store.MatchPendingWatches(ctx, records)
+	if err != nil {
+		return nil, err
+	}
+	for i, match := range matches {
+		if match == nil {
+			continue
+		}
+		add(*match, *batched[i].LastWatchedAt)
+		retried = append(retried, batched[i])
+	}
+	return retried, nil
 }
 
 func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch) ([]historyimport.Match, string, error) {
