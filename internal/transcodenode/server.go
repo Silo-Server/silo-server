@@ -77,6 +77,7 @@ type TranscodeStartRequest struct {
 	TargetResolution           string                 `json:"target_resolution"`
 	TargetCodecVideo           string                 `json:"target_codec_video"`
 	TargetCodecAudio           string                 `json:"target_codec_audio"`
+	CopyAudioCodec             string                 `json:"copy_audio_codec,omitempty"`
 	TargetAudioChannels        int                    `json:"target_audio_channels,omitempty"`
 	TargetAudioBitrateKbps     int                    `json:"target_audio_bitrate_kbps,omitempty"`
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps"`
@@ -1812,6 +1813,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		TargetResolution:           req.TargetResolution,
 		TargetCodecVideo:           req.TargetCodecVideo,
 		TargetCodecAudio:           req.TargetCodecAudio,
+		CopyAudioCodec:             req.CopyAudioCodec,
 		TargetAudioChannels:        req.TargetAudioChannels,
 		TargetAudioBitrateKbps:     req.TargetAudioBitrateKbps,
 		TargetBitrateKbps:          req.TargetBitrateKbps,

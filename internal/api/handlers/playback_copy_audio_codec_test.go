@@ -23,3 +23,16 @@ func TestIdentityRecipeCardCarriesCopiedAudioCodec(t *testing.T) {
 		t.Fatalf("transcoded remux claims CopyAudioCodec = %q, want empty", claims.CopyAudioCodec)
 	}
 }
+
+// An HLS remux plans its audio as "copy", so the copied codec comes from the
+// plan, which keeps the source codec when it converts nothing. fMP4 segments
+// add aac_adtstoasc only for a copied AAC track.
+func TestCopiedAudioCodecV3NamesOnlyACopiedTrack(t *testing.T) {
+	plan := &playback.PlanV3{EffectiveRecipe: playback.EffectiveRecipeV3{AudioCodec: "aac"}}
+	if got := copiedAudioCodecV3(playback.PlannerResultV3{Plan: plan, TargetAudioCodec: "copy"}); got != "aac" {
+		t.Fatalf("copied HLS remux audio codec = %q, want aac", got)
+	}
+	if got := copiedAudioCodecV3(playback.PlannerResultV3{Plan: plan, TargetAudioCodec: "aac", TranscodeAudio: true}); got != "" {
+		t.Fatalf("encoded HLS audio codec = %q, want empty", got)
+	}
+}

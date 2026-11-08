@@ -1463,6 +1463,9 @@ func (h *PlaybackHandler) buildProxyRedirectURL(
 		claims.RoutingExecution = string(noderouting.ExecutionProxy)
 		claims.RoutingExecutionNodeID = proxyNode.ID
 	case string(playback.PlayTranscode):
+		if targetAudioCodec == compatCopyCodec {
+			claims.CopyAudioCodec = compatSourceAudioCodec(source)
+		}
 		claims.RoutingWorkload = string(noderouting.WorkloadVideoTranscode)
 		if compatHLSCopiesVideo(source) {
 			claims.RoutingWorkload = string(noderouting.WorkloadRemux)
@@ -1805,6 +1808,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 	}
 	if !compatHLSTranscodesAudio(source) {
 		reqBody.TargetCodecAudio = compatCopyCodec
+		reqBody.CopyAudioCodec = compatSourceAudioCodec(source)
 	}
 	// Jellyfin-compat remote starts are not otherwise waited on. Let the node
 	// wait only when its live auto pipeline can fall back.
@@ -2016,6 +2020,7 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		StartSegmentNumber:     reqBody.StartSegmentNumber,
 		TargetCodecVideo:       reqBody.TargetCodecVideo,
 		TargetCodecAudio:       reqBody.TargetCodecAudio,
+		CopyAudioCodec:         reqBody.CopyAudioCodec,
 		TargetResolution:       reqBody.TargetResolution,
 		SubtitleBurnIn:         reqBody.SubtitleBurnIn,
 		SubtitleTrackIndex:     reqBody.SubtitleTrackIndex,

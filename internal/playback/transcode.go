@@ -67,6 +67,11 @@ type TranscodeOpts struct {
 	// CopyVideoMPEGTS packages copied video in MPEG-TS instead of fMP4. It is
 	// durable because the segment extension and bytes must survive restarts.
 	CopyVideoMPEGTS bool
+	// CopyAudioCodec is the codec of the source audio track a "copy"
+	// TargetCodecAudio keeps. fMP4 segments add aac_adtstoasc for a copied AAC
+	// track; empty (older recipes and tokens) keeps the plain copy. It is
+	// durable because reconstruction must write the same segment bytes.
+	CopyAudioCodec string
 	// KeyframePlaylist serves a copy-video stream that starts at the
 	// beginning as one complete VOD playlist planned from the source's
 	// keyframe index, instead of FFmpeg's growing playlist (#1466). It is
@@ -958,6 +963,10 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 	// Audio codec.
 	args = appendAudioArgs(args, opts)
+	if isAudioCopy && HLSOutputContainer(opts) == OutputContainerFMP4 {
+		// MPEG-TS segments carry ADTS as it is; only fMP4 needs the filter.
+		args = appendCopiedAACToMP4Args(args, opts.CopyAudioCodec)
+	}
 
 	// Subtitle burn-in and resolution scaling — only when encoding video.
 	if !isVideoCopy {
