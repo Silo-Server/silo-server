@@ -6,10 +6,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 )
 
+// PublicRoomsAvailable reports whether the public-room operations are served.
 func (h *WatchTogetherHandler) PublicRoomsAvailable() bool {
 	return h != nil && h.Service != nil && h.TokenService != nil && h.Service.PublicRoomsAvailable()
 }
 
+// UpdateWatchTogetherVisibility lists or unlists a room and renews the host's room proof.
 func (h *WatchTogetherHandler) UpdateWatchTogetherVisibility(ctx context.Context, room string, user int, profile string, visibility watchtogether.RoomVisibility) (watchtogether.Snapshot, string, error) {
 	if !h.PublicRoomsAvailable() {
 		return watchtogether.Snapshot{}, "", apiError(503, "unavailable", "Public watch parties are unavailable")
@@ -22,6 +24,7 @@ func (h *WatchTogetherHandler) UpdateWatchTogetherVisibility(ctx context.Context
 	return response.Room, response.RoomAccessToken, err
 }
 
+// ListWatchTogetherPublicRooms lists the server's open public rooms.
 func (h *WatchTogetherHandler) ListWatchTogetherPublicRooms(ctx context.Context, user int, profile string) ([]watchtogether.PublicRoom, error) {
 	if !h.PublicRoomsAvailable() {
 		return nil, apiError(503, "unavailable", "Public watch parties are unavailable")
@@ -29,6 +32,7 @@ func (h *WatchTogetherHandler) ListWatchTogetherPublicRooms(ctx context.Context,
 	return h.Service.ListPublicRooms(ctx, user, profile)
 }
 
+// RequestWatchTogetherJoin asks a public room's host to let the profile in.
 func (h *WatchTogetherHandler) RequestWatchTogetherJoin(ctx context.Context, room string, user int, profile string) (watchtogether.JoinRequest, error) {
 	if !h.PublicRoomsAvailable() {
 		return watchtogether.JoinRequest{}, apiError(503, "unavailable", "Public watch parties are unavailable")
@@ -36,6 +40,7 @@ func (h *WatchTogetherHandler) RequestWatchTogetherJoin(ctx context.Context, roo
 	return h.Service.RequestToJoin(ctx, room, user, profile)
 }
 
+// ListWatchTogetherJoinRequests lists a room's pending requests for its host.
 func (h *WatchTogetherHandler) ListWatchTogetherJoinRequests(ctx context.Context, room string, user int, profile string) ([]watchtogether.JoinRequest, error) {
 	if !h.PublicRoomsAvailable() {
 		return nil, apiError(503, "unavailable", "Public watch parties are unavailable")
@@ -43,6 +48,7 @@ func (h *WatchTogetherHandler) ListWatchTogetherJoinRequests(ctx context.Context
 	return h.Service.ListJoinRequests(ctx, room, user, profile)
 }
 
+// DecideWatchTogetherJoinRequest records the host's answer to a request.
 func (h *WatchTogetherHandler) DecideWatchTogetherJoinRequest(ctx context.Context, room, request string, user int, profile string, status watchtogether.JoinRequestStatus) (watchtogether.JoinRequest, error) {
 	if !h.PublicRoomsAvailable() {
 		return watchtogether.JoinRequest{}, apiError(503, "unavailable", "Public watch parties are unavailable")

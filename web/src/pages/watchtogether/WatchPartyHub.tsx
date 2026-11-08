@@ -644,18 +644,36 @@ function OpenPartyStatus({ party }: { party: WatchTogetherPublicRoom }) {
   // cannot see stays unnamed.
   const detail = useCatalogItemDetail(party.selected_content_id);
   const title = detail.data ? itemHeadline(detail.data) : null;
-  if (party.phase === "playing") {
-    return (
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-emerald-400" />
-        <span className="truncate">{title ? `Watching ${title}` : "In progress"}</span>
-      </span>
-    );
-  }
+  const playing = party.phase === "playing";
+  const label = playing
+    ? title
+      ? `Watching ${title}`
+      : "In progress"
+    : title
+      ? `In menu · up next ${title}`
+      : "In menu";
+  // A failed refresh keeps the last title but says it may be out of date.
+  const stale = detail.isError && !!detail.data;
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-sky-400" />
-      <span className="truncate">{title ? `In menu · up next ${title}` : "In menu"}</span>
+      <span
+        aria-hidden="true"
+        className={`size-1.5 shrink-0 rounded-full ${playing ? "bg-emerald-400" : "bg-sky-400"}`}
+      />
+      <span className="truncate">{label}</span>
+      {stale ? (
+        <span className="shrink-0">
+          (may be out of date ·{" "}
+          <button
+            type="button"
+            onClick={() => void detail.refetch()}
+            className="hover:text-foreground underline underline-offset-2"
+          >
+            Retry
+          </button>
+          )
+        </span>
+      ) : null}
     </span>
   );
 }

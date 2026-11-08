@@ -45,6 +45,15 @@ export function WatchTogetherPanel({
   // screen notices it; after that the panel follows the controls again.
   const [attention, setAttention] = useState(false);
   const seenRequests = useRef(new Set<string>());
+  // The hide timer outlives list changes: answering one of several requests
+  // must not cancel it and leave the panel over the video.
+  const hideTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+    },
+    [],
+  );
   const askingKey = asking
     .map((request) => `${request.id}:${Date.parse(request.created_at)}`)
     .join(",");
@@ -54,11 +63,12 @@ export function WatchTogetherPanel({
     keys.forEach((key) => seenRequests.current.add(key));
     if (!fresh) return;
     const show = window.setTimeout(() => setAttention(true), 0);
-    const hide = window.setTimeout(() => setAttention(false), REQUEST_ATTENTION_MS);
-    return () => {
-      window.clearTimeout(show);
-      window.clearTimeout(hide);
-    };
+    if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+    hideTimer.current = window.setTimeout(() => {
+      hideTimer.current = null;
+      setAttention(false);
+    }, REQUEST_ATTENTION_MS);
+    return () => window.clearTimeout(show);
   }, [askingKey]);
   const shown = visible || (attention && asking.length > 0);
   const policy = room?.guest_control_policy ?? "host_only";
@@ -75,7 +85,7 @@ export function WatchTogetherPanel({
     <div
       aria-hidden={!shown}
       inert={!shown}
-      className={`absolute top-4 right-4 z-50 w-56 rounded-xl border border-white/10 bg-black/80 p-3 text-white shadow-2xl backdrop-blur-xl transition-opacity duration-300 ${
+      className={`overlay-scroll absolute top-4 right-4 z-50 max-h-[calc(100dvh-2rem)] w-56 overflow-y-auto rounded-xl border border-white/10 bg-black/80 p-3 text-white shadow-2xl backdrop-blur-xl transition-opacity duration-300 ${
         shown ? "opacity-100" : "pointer-events-none opacity-0"
       }`}
     >
@@ -133,7 +143,10 @@ export function WatchTogetherPanel({
       ) : null}
 
       {asking.length > 0 ? (
-        <ul aria-label="Asking to join" className="mt-3 space-y-1.5 border-t border-white/8 pt-2.5">
+        <ul
+          aria-label="Asking to join"
+          className="mt-3 max-h-40 space-y-1.5 overflow-y-auto border-t border-white/8 pt-2.5"
+        >
           {asking.map((request) => (
             <li key={request.id} className="flex items-center gap-1.5 text-xs">
               <span className="min-w-0 flex-1 truncate">{request.display_name} wants in</span>

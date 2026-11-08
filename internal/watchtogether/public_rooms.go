@@ -137,6 +137,7 @@ func (s *Service) SetRoomVisibility(ctx context.Context, roomID string, user int
 	})
 }
 
+// setRoomVisibility runs inside the room operation; see SetRoomVisibility.
 func (s *Service) setRoomVisibility(ctx context.Context, roomID string, userID int, profileID string, visibility RoomVisibility) (Snapshot, error) {
 	if visibility != RoomVisibilityPrivate && visibility != RoomVisibilityPublic {
 		return Snapshot{}, ErrInvalidVisibility
@@ -160,11 +161,15 @@ func (s *Service) setRoomVisibility(ctx context.Context, roomID string, userID i
 		s.mu.Unlock()
 		return snapshot, nil
 	}
+	previous := live.room.Visibility
 	live.room.Visibility = visibility
 	conflict, updateErr := s.persistRoomChangeLocked(ctx, live, func(room Room, expectedGeneration int64) (*Room, error) {
 		return store.UpdateVisibility(ctx, roomID, room.Visibility, room.Generation, expectedGeneration)
 	})
 	if updateErr != nil {
+		// The write did not land; keep the live room matching the database so
+		// a retry is not taken for a no-op.
+		live.room.Visibility = previous
 		s.mu.Unlock()
 		return Snapshot{}, updateErr
 	}
@@ -326,6 +331,7 @@ func (s *Service) ReadOwnJoinRequest(ctx context.Context, roomID, requestID stri
 	return *row, nil
 }
 
+// requireHost returns ErrRoomForbidden unless the profile hosts the open room.
 func (s *Service) requireHost(ctx context.Context, roomID string, userID int, profileID string) error {
 	room, err := s.GetRoom(ctx, roomID)
 	if err != nil {
@@ -337,6 +343,7 @@ func (s *Service) requireHost(ctx context.Context, roomID string, userID int, pr
 	return nil
 }
 
+// displayName is the profile's name, or the generic member name without a resolver.
 func (s *Service) displayName(ctx context.Context, userID int, profileID string) string {
 	if s.profileNames == nil {
 		return fallbackMemberName
@@ -401,6 +408,8 @@ func (s *Service) sendJoinRequestsToLocalHost(ctx context.Context, roomID string
 	})
 }
 
+// publishJoinRequestsUpdate asks the other API servers to resend the
+// room's pending list to a host socket they hold.
 func (s *Service) publishJoinRequestsUpdate(roomID string) {
 	s.clusterMu.Lock()
 	bus := s.clusterBus

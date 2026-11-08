@@ -207,3 +207,25 @@ func TestPublicRoomsCountOnlyLeasedMembers(t *testing.T) {
 		t.Fatalf("listed room = %+v", room)
 	}
 }
+
+// failingVisibilityRepo refuses every visibility write.
+type failingVisibilityRepo struct{ *stubRepo }
+
+func (failingVisibilityRepo) UpdateVisibility(context.Context, string, RoomVisibility, int64, int64) (*Room, error) {
+	return nil, errors.New("database unavailable")
+}
+
+func TestFailedVisibilityWriteKeepsTheLiveRoom(t *testing.T) {
+	now := time.Date(2026, 11, 7, 20, 0, 0, 0, time.UTC)
+	repo := &stubRepo{room: baseRoom(now)}
+	service := NewService(failingVisibilityRepo{repo}, &stubSessions{}, &stubFiles{}, nil, nil, nil)
+	service.now = func() time.Time { return now }
+	service.rooms[repo.room.ID] = &liveRoom{room: repo.room, members: make(map[string]*memberState)}
+
+	if _, err := service.SetRoomVisibility(t.Context(), repo.room.ID, 7, "host", RoomVisibilityPublic); err == nil {
+		t.Fatal("failed write reported success")
+	}
+	if got := service.rooms[repo.room.ID].room.visibility(); got != RoomVisibilityPrivate {
+		t.Fatalf("live room visibility = %q after a failed write", got)
+	}
+}

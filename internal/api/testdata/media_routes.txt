@@ -940,9 +940,14 @@ POST /api/v2/watch-providers/{provider}/sync	non-media
 GET /api/v2/watch-providers/{provider}/sync-runs	non-media
 GET /api/v2/watch-together/capabilities	non-media
 POST /api/v2/watch-together/join	non-media
+GET /api/v2/watch-together/public-rooms	non-media
 POST /api/v2/watch-together/rooms	non-media
 DELETE /api/v2/watch-together/rooms/{room_id}	non-media
 GET /api/v2/watch-together/rooms/{room_id}	non-media
+GET /api/v2/watch-together/rooms/{room_id}/join-requests	non-media
+POST /api/v2/watch-together/rooms/{room_id}/join-requests	non-media
+GET /api/v2/watch-together/rooms/{room_id}/join-requests/{request_id}	non-media
+PATCH /api/v2/watch-together/rooms/{room_id}/join-requests/{request_id}	non-media
 POST /api/v2/watch-together/rooms/{room_id}/member-state	non-media
 GET /api/v2/watch-together/rooms/{room_id}/picker	non-media
 POST /api/v2/watch-together/rooms/{room_id}/playback/start	non-media
@@ -958,6 +963,7 @@ POST /api/v2/watch-together/rooms/{room_id}/suggestions/promote	non-media
 DELETE /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}	non-media
 DELETE /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non-media
 POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non-media
+PATCH /api/v2/watch-together/rooms/{room_id}/visibility	non-media
 GET /api/v2/watch-together/rooms/{room_id}/ws	non-media
 POST /api/v2/watch-together/rooms/{room_id}/ws-ticket	non-media
 GET /api/v2/watch/{id}	non-media
@@ -2295,9 +2301,14 @@ POST /api/v2/watch-providers/{provider}/sync	non-media
 GET /api/v2/watch-providers/{provider}/sync-runs	non-media
 GET /api/v2/watch-together/capabilities	non-media
 POST /api/v2/watch-together/join	non-media
+GET /api/v2/watch-together/public-rooms	non-media
 POST /api/v2/watch-together/rooms	non-media
 DELETE /api/v2/watch-together/rooms/{room_id}	non-media
 GET /api/v2/watch-together/rooms/{room_id}	non-media
+GET /api/v2/watch-together/rooms/{room_id}/join-requests	non-media
+POST /api/v2/watch-together/rooms/{room_id}/join-requests	non-media
+GET /api/v2/watch-together/rooms/{room_id}/join-requests/{request_id}	non-media
+PATCH /api/v2/watch-together/rooms/{room_id}/join-requests/{request_id}	non-media
 POST /api/v2/watch-together/rooms/{room_id}/member-state	non-media
 GET /api/v2/watch-together/rooms/{room_id}/picker	non-media
 POST /api/v2/watch-together/rooms/{room_id}/playback/start	non-media
@@ -2313,6 +2324,7 @@ POST /api/v2/watch-together/rooms/{room_id}/suggestions/promote	non-media
 DELETE /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}	non-media
 DELETE /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non-media
 POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote	non-media
+PATCH /api/v2/watch-together/rooms/{room_id}/visibility	non-media
 GET /api/v2/watch-together/rooms/{room_id}/ws	non-media
 POST /api/v2/watch-together/rooms/{room_id}/ws-ticket	non-media
 GET /api/v2/watch/{id}	non-media

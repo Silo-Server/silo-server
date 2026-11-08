@@ -103,6 +103,7 @@ type WatchTogetherJoinRequestReadOutput struct {
 	}
 }
 
+// watchTogetherJoinRequestOf converts a stored request to its wire shape.
 func watchTogetherJoinRequestOf(row watchtogether.JoinRequest) WatchTogetherJoinRequest {
 	out := WatchTogetherJoinRequest{
 		ID: ID(row.ID), RoomID: ID(row.RoomID), UserID: ID(strconv.Itoa(row.UserID)), ProfileID: row.ProfileID,
@@ -114,6 +115,7 @@ func watchTogetherJoinRequestOf(row watchtogether.JoinRequest) WatchTogetherJoin
 	return out
 }
 
+// publicRoomsProblem maps public-room service errors to problem responses.
 func publicRoomsProblem(err error) error {
 	switch {
 	case errors.Is(err, watchtogether.ErrPublicRoomsUnavailable):
@@ -135,6 +137,7 @@ func publicRoomsProblem(err error) error {
 	}
 }
 
+// publicRoomsIdentity resolves the service and the caller's account and profile.
 func (reg *Registry) publicRoomsIdentity(ctx context.Context) (WatchTogetherPublicRoomsService, int, string, error) {
 	svc := reg.deps.WatchTogetherPublicRooms
 	if svc == nil {
@@ -149,12 +152,14 @@ func (reg *Registry) publicRoomsIdentity(ctx context.Context) (WatchTogetherPubl
 
 const watchTogetherRoomPath = Prefix + "/watch-together/rooms/{room_id}"
 
+// registerWatchTogetherPublicRooms registers the visibility and join-request operations.
 func registerWatchTogetherPublicRooms(reg *Registry) {
 	registerWatchTogetherVisibility(reg)
 	registerWatchTogetherJoinRequestCreation(reg)
 	registerWatchTogetherJoinRequestReview(reg)
 }
 
+// registerWatchTogetherVisibility registers the visibility switch and the open-room list.
 func registerWatchTogetherVisibility(reg *Registry) {
 	const room = watchTogetherRoomPath
 	visibility := Operation{Operation: humaOp(http.MethodPatch, room+"/visibility", "updateWatchTogetherRoomVisibility", "realtime", "List or unlist a room as the host. A public room appears in the open-party list to every profile on the server, which may ask to join without the code; the host still approves each request. Unlisting keeps pending requests for the host to answer."), Class: ClassProfileScoped, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
@@ -271,6 +276,7 @@ func registerWatchTogetherJoinRequestReview(reg *Registry) {
 
 }
 
+// registerWatchTogetherJoinRequestRead registers the requester's read of its own request.
 func registerWatchTogetherJoinRequestRead(reg *Registry) {
 	const room = watchTogetherRoomPath
 	read := Operation{Operation: humaOp(http.MethodGet, room+"/join-requests/{request_id}", "getWatchTogetherJoinRequest", "realtime", "Read this profile's own join request. Once approved, the response also carries the room snapshot and room proof, the same proof joining by code issues. Another profile's request reads as not found."), Class: ClassProfileScoped, ServiceBacked: true}

@@ -55,7 +55,8 @@ func selectionPG(t *testing.T) *pgxpool.Pool {
  phase text, playback_state text, resume_on_ready boolean, selection_mode text, selection_revision bigint,
  selected_content_id text, selected_file_id integer, selected_library_id integer, guest_control_policy text,
  anchor_position_seconds double precision, is_paused boolean, anchor_updated_at timestamptz,
- generation bigint, created_at timestamptz, closed_at timestamptz)`)
+ generation bigint, created_at timestamptz, closed_at timestamptz,
+ visibility text NOT NULL DEFAULT 'private')`)
 	if err != nil {
 		t.Fatal(err)
 	}

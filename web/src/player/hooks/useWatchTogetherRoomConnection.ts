@@ -140,6 +140,9 @@ export function useWatchTogetherRoomConnection({
   const [room, setRoom] = useState<WatchTogetherRoomSnapshot | null>(null);
   const [suggestions, setSuggestions] = useState<WatchTogetherSuggestion[]>([]);
   const [joinRequests, setJoinRequests] = useState<WatchTogetherJoinRequest[]>([]);
+  // Advances with every socket frame or local decision, so an HTTP read that
+  // started earlier cannot replace a newer list.
+  const joinRequestsVersion = useRef(0);
   const [closedReason, setClosedReason] = useState<string | null>(null);
   const [replacement, setReplacement] = useState<{ scope: string; reason: string } | null>(null);
   const [rejoinAttempt, setRejoinAttempt] = useState(0);
@@ -443,7 +446,10 @@ export function useWatchTogetherRoomConnection({
           }
           case "join_requests_update": {
             const payload = message.join_requests as WatchTogetherJoinRequest[] | undefined;
-            if (Array.isArray(payload)) setJoinRequests(payload);
+            if (Array.isArray(payload)) {
+              joinRequestsVersion.current++;
+              setJoinRequests(payload);
+            }
             return;
           }
           case "room_closed":
@@ -602,9 +608,10 @@ export function useWatchTogetherRoomConnection({
     }
     const authority = captureProfileRequestContext();
     let cancelled = false;
+    const versionAtRequest = joinRequestsVersion.current;
     void listJoinRequests(roomId, authority)
       .then((rows) => {
-        if (!cancelled) setJoinRequests(rows);
+        if (!cancelled && joinRequestsVersion.current === versionAtRequest) setJoinRequests(rows);
       })
       .catch(() => {});
     return () => {
@@ -630,6 +637,7 @@ export function useWatchTogetherRoomConnection({
     async (requestId: string, approve: boolean) => {
       if (!roomId) return;
       await decideRoomJoinRequest(roomId, requestId, approve ? "approved" : "denied");
+      joinRequestsVersion.current++;
       setJoinRequests((current) => current.filter((request) => request.id !== requestId));
     },
     [roomId],

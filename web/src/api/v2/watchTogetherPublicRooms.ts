@@ -43,6 +43,7 @@ const requestStatuses: readonly WatchTogetherJoinRequestStatus[] = [
   "denied",
 ];
 
+/** Validates a join request from the API and converts its ids to numbers. */
 export function normalizeJoinRequest(
   row: components["schemas"]["WatchTogetherJoinRequest"],
 ): WatchTogetherJoinRequest {
@@ -55,6 +56,7 @@ export function normalizeJoinRequest(
   };
 }
 
+/** Lists or unlists a room as its host; returns the authoritative snapshot. */
 export async function updateRoomVisibility(
   roomId: string,
   visibility: WatchTogetherRoomVisibility,
@@ -71,6 +73,7 @@ export async function updateRoomVisibility(
   return normalizeRoomResponse(roomId, result);
 }
 
+/** Reads the open public rooms on this server, newest first. */
 export async function listPublicRooms(
   context = captureProfileRequestContext(),
 ): Promise<WatchTogetherPublicRoom[]> {
@@ -92,6 +95,7 @@ export async function listPublicRooms(
   });
 }
 
+/** Asks a public room's host to let this profile in. Asking again returns the same request. */
 export async function createJoinRequest(
   roomId: string,
   context = captureProfileRequestContext(),
@@ -132,6 +136,7 @@ export async function readJoinRequest(
   return { request, room };
 }
 
+/** Reads a room's pending requests as its host, oldest first. */
 export async function listJoinRequests(
   roomId: string,
   context = captureProfileRequestContext(),
@@ -145,6 +150,7 @@ export async function listJoinRequests(
   return result.join_requests.map(normalizeJoinRequest);
 }
 
+/** Approves or denies a request as the host. An approval cannot be undone. */
 export async function decideJoinRequest(
   roomId: string,
   requestId: string,

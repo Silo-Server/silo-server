@@ -15,12 +15,15 @@ type JoinRequestRepository struct {
 	pool *pgxpool.Pool
 }
 
+// NewJoinRequestRepository returns a JoinRequestStore backed by pool.
 func NewJoinRequestRepository(pool *pgxpool.Pool) *JoinRequestRepository {
 	return &JoinRequestRepository{pool: pool}
 }
 
 const joinRequestColumns = `id, room_id, user_id, profile_id, display_name, status, created_at, decided_at`
 
+// ListPublicRooms reads open public rooms, newest first, with their runtime
+// and the viewer's own request, in one query.
 func (r *JoinRequestRepository) ListPublicRooms(ctx context.Context, viewerUserID int, viewerProfileID string, limit int) ([]publicRoomRow, error) {
 	if r == nil || r.pool == nil {
 		return nil, ErrPublicRoomsUnavailable
@@ -65,6 +68,7 @@ func (r *JoinRequestRepository) ListPublicRooms(ctx context.Context, viewerUserI
 	return out, rows.Err()
 }
 
+// CreateJoinRequest implements JoinRequestStore.CreateJoinRequest.
 func (r *JoinRequestRepository) CreateJoinRequest(ctx context.Context, request JoinRequest) (*JoinRequest, bool, error) {
 	if r == nil || r.pool == nil {
 		return nil, false, ErrPublicRoomsUnavailable
@@ -107,6 +111,7 @@ func (r *JoinRequestRepository) CreateJoinRequest(ctx context.Context, request J
 	return existing, false, nil
 }
 
+// GetJoinRequest reads one request by id.
 func (r *JoinRequestRepository) GetJoinRequest(ctx context.Context, requestID string) (*JoinRequest, error) {
 	if r == nil || r.pool == nil {
 		return nil, ErrPublicRoomsUnavailable
@@ -115,6 +120,7 @@ func (r *JoinRequestRepository) GetJoinRequest(ctx context.Context, requestID st
 		`SELECT `+joinRequestColumns+` FROM watch_together_join_requests WHERE id = $1`, requestID))
 }
 
+// ListPendingJoinRequests reads a room's pending requests, oldest first.
 func (r *JoinRequestRepository) ListPendingJoinRequests(ctx context.Context, roomID string, limit int) ([]JoinRequest, error) {
 	if r == nil || r.pool == nil {
 		return nil, ErrPublicRoomsUnavailable
@@ -139,6 +145,8 @@ func (r *JoinRequestRepository) ListPendingJoinRequests(ctx context.Context, roo
 	return out, rows.Err()
 }
 
+// DecideJoinRequest implements JoinRequestStore.DecideJoinRequest. The
+// approved-to-denied guard runs in SQL so concurrent hosts cannot race it.
 func (r *JoinRequestRepository) DecideJoinRequest(ctx context.Context, roomID, requestID string, status JoinRequestStatus, decidedAt time.Time) (*JoinRequest, error) {
 	if r == nil || r.pool == nil {
 		return nil, ErrPublicRoomsUnavailable
@@ -163,6 +171,7 @@ func (r *JoinRequestRepository) DecideJoinRequest(ctx context.Context, roomID, r
 	return nil, ErrJoinRequestNotFound
 }
 
+// scanJoinRequest reads one join request row; no row is ErrJoinRequestNotFound.
 func scanJoinRequest(row pgx.Row) (*JoinRequest, error) {
 	var request JoinRequest
 	if err := row.Scan(
