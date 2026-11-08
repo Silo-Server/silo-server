@@ -262,3 +262,43 @@ it("imports a Plex Home member with that member's own tokens", async () => {
     vi.unstubAllGlobals();
   }
 });
+
+it("finishes Plex sign-in while the optional Plex Home lookup hangs", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: string) => {
+      const path = new URL(input).pathname;
+      if (path === "/api/v2/pins/7") return Promise.resolve(Response.json({ authToken: "owner" }));
+      if (path === "/api/v2/resources") {
+        return Promise.resolve(
+          Response.json([
+            {
+              name: "Living Room",
+              clientIdentifier: "srv",
+              provides: "server",
+              owned: true,
+              accessToken: "owner-server",
+              connections: [{ uri: "https://srv.plex.direct:32400", local: false }],
+            },
+          ]),
+        );
+      }
+      // plex.tv never answers the Home lookups.
+      return new Promise<Response>(() => {});
+    }),
+  );
+  try {
+    render(
+      <MemoryRouter
+        initialEntries={["/settings/history-import?plex_auth=1&plex_pin_id=7&plex_pin_code=c"]}
+      >
+        <HistoryImportSettings />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Signed in")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Plex Home user" })).toBeNull();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { PageHeader } from "@/components/page/PageHeader";
 import { useEventChannel } from "@/components/realtimeEventsContext";
@@ -150,6 +150,9 @@ export default function HistoryImportSettings() {
   const [plexHomeUserPin, setPlexHomeUserPin] = useState("");
   const [plexSwitchPending, setPlexSwitchPending] = useState(false);
   const [plexSwitchError, setPlexSwitchError] = useState<string | null>(null);
+  // Counts Plex sign-ins so a Home lookup that finishes after a newer sign-in
+  // (or a reconnect) is dropped.
+  const plexHomeRequest = useRef(0);
 
   const loginMutation = useLoginEmbyConnect();
   const createRunMutation = useCreateHistoryImportRun();
@@ -229,16 +232,24 @@ export default function HistoryImportSettings() {
           pinID,
           returnedPlexPinCode,
         );
-        const home = await loadPlexHome(accountToken);
         if (cancelled) {
           return;
         }
         setPlexAccountToken(accountToken);
         setPlexServers(servers);
         setPlexServerId(servers[0]?.clientIdentifier ?? "");
-        setPlexHome(home);
-        setPlexHomeUserId(home.accountUUID);
         setPlexHomeUserPin("");
+        // Home users are optional, so a slow lookup must not hold up importing
+        // the signed-in account. It outlives this effect, which reruns once the
+        // sign-in query is cleared, so it checks the request count instead.
+        const request = ++plexHomeRequest.current;
+        void loadPlexHome(accountToken).then((home) => {
+          if (plexHomeRequest.current !== request) {
+            return;
+          }
+          setPlexHome(home);
+          setPlexHomeUserId(home.accountUUID);
+        });
       } catch (error) {
         if (cancelled) {
           return;
@@ -276,6 +287,7 @@ export default function HistoryImportSettings() {
     setPlexAuthError(null);
     setPlexServers([]);
     setPlexServerId("");
+    plexHomeRequest.current += 1;
     setPlexHome(emptyPlexHome);
     setPlexHomeUserId("");
     setPlexHomeUserPin("");
@@ -600,7 +612,11 @@ export default function HistoryImportSettings() {
                     </div>
                     <div className="space-y-2">
                       <Label>Server</Label>
-                      <Select value={plexServerId} onValueChange={setPlexServerId}>
+                      <Select
+                        value={plexServerId}
+                        onValueChange={setPlexServerId}
+                        disabled={pending}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Choose a server" />
                         </SelectTrigger>
@@ -622,6 +638,7 @@ export default function HistoryImportSettings() {
                         <Label>Plex Home user</Label>
                         <Select
                           value={plexHomeUserId}
+                          disabled={pending}
                           onValueChange={(value) => {
                             setPlexHomeUserId(value);
                             setPlexHomeUserPin("");
@@ -657,6 +674,7 @@ export default function HistoryImportSettings() {
                           autoComplete="off"
                           value={plexHomeUserPin}
                           onChange={(e) => setPlexHomeUserPin(e.target.value)}
+                          disabled={pending}
                         />
                       </div>
                     )}
@@ -749,7 +767,7 @@ export default function HistoryImportSettings() {
           <div className="w-full space-y-2 sm:max-w-[280px]">
             <Label>Import into profile</Label>
             {canImportForOthers ? (
-              <Select value={effectiveProfileId} onValueChange={setProfileId}>
+              <Select value={effectiveProfileId} onValueChange={setProfileId} disabled={pending}>
                 <SelectTrigger aria-label="Import into profile">
                   <SelectValue placeholder="Choose a profile" />
                 </SelectTrigger>
