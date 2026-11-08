@@ -364,9 +364,10 @@ func parseBitDepth(stream Stream) int {
 
 // StreamBitrateKbps returns a stream's bitrate in kbps, or 0 when unknown.
 // Matroska has no per-stream bitrate field, so ffprobe reports bit_rate as
-// N/A there; mkvmerge writes the measured rate as a BPS statistics tag
-// (BPS-eng in older muxers), which is the fallback. The tag order matches
-// Jellyfin's ProbeResultNormalizer.
+// N/A there unless the codec header states one (AC-3, E-AC-3 and DTS do;
+// AAC, FLAC, Opus and TrueHD do not). mkvmerge writes the measured rate as a
+// BPS statistics tag (BPS-eng in older muxers), which is the fallback. The
+// tag order matches Jellyfin's ProbeResultNormalizer.
 func StreamBitrateKbps(stream Stream) int {
 	if bps := parseNumeric(stream.BitRate); bps > 0 {
 		return bps / 1000
