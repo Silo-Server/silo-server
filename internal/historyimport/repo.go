@@ -1130,6 +1130,50 @@ func (l catalogLookup) MatchEpisodeBySeries(ctx context.Context, seriesID string
 	return &match, nil
 }
 
+// seriesLeafFilter limits a series' episodes, aliased e, to those a watched
+// marker covers: in a library, aired by the marker's time (cutoff, a
+// timestamptz; NULL covers every air date) or with no air date, and, for a
+// whole-series marker (season, an integer, NULL), in a regular season, since
+// providers leave specials out of a finished show's episode count.
+const seriesLeafFilter = `
+	(%[1]s::integer IS NULL OR e.season_number = %[1]s)
+	AND (%[1]s::integer IS NOT NULL OR e.season_number <> 0)
+	AND (%[2]s::timestamptz IS NULL OR e.air_date IS NULL OR e.air_date <= (%[2]s::timestamptz AT TIME ZONE 'UTC')::date)
+	AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)`
+
+// CountSeriesLeaves counts, for each whole-series marker (series id and
+// watched time, by index), the episodes MatchEpisodesBySeries would return,
+// in one query.
+func CountSeriesLeaves(ctx context.Context, q lookupQuerier, seriesIDs []string, watchedAt []time.Time) ([]int, error) {
+	counts := make([]int, len(seriesIDs))
+	if len(seriesIDs) == 0 {
+		return counts, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT m.idx, count(e.content_id)
+		FROM unnest($1::text[], $2::timestamptz[]) WITH ORDINALITY AS m(series_id, cutoff, idx)
+		LEFT JOIN episodes e ON e.series_id = m.series_id AND `+fmt.Sprintf(seriesLeafFilter, "NULL", "m.cutoff")+`
+		GROUP BY m.idx`,
+		seriesIDs, watchedAt,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("counting series episodes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var idx int64
+		var count int
+		if err := rows.Scan(&idx, &count); err != nil {
+			return nil, fmt.Errorf("scanning series episode count: %w", err)
+		}
+		counts[idx-1] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating series episode counts: %w", err)
+	}
+	return counts, nil
+}
+
 func (l catalogLookup) MatchEpisodesBySeries(
 	ctx context.Context,
 	seriesID string,
@@ -1140,12 +1184,7 @@ func (l catalogLookup) MatchEpisodesBySeries(
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		LEFT JOIN media_items series ON series.content_id = e.series_id
-		WHERE e.series_id = $1
-		  AND ($2::integer IS NULL OR e.season_number = $2)
-		  AND ($3::timestamptz IS NULL OR e.air_date IS NULL OR e.air_date <= ($3::timestamptz AT TIME ZONE 'UTC')::date)
-		  AND EXISTS (
-			SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id
-		  )
+		WHERE e.series_id = $1 AND `+fmt.Sprintf(seriesLeafFilter, "$2", "$3")+`
 		ORDER BY e.season_number, e.episode_number, e.content_id`,
 		seriesID, seasonNumber, watchedAt,
 	)

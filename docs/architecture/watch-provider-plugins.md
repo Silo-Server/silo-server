@@ -161,6 +161,17 @@ watches instead.
   listing a connection's rows drops those of any other account. After a reconnect to a
   different account, no watch from the old one imports, even from a sync of the old
   account that was still running.
+- A plugin can return watched state for a SERIES item: the account finished the
+  series as of `last_watched_at`, which it must send. Without that time, the row is
+  skipped with a warning. The marker covers every regular-season episode in a library
+  that had aired by then, or that has no air date. Specials are not covered. Simkl
+  reports completed shows this way, because it lists no episodes for them.
+- Whole-series and whole-season markers stay kept after they match, with
+  `applied_leaves`, the number of episodes they covered. Each sync counts what every
+  kept series marker covers in one query (`historyimport.CountSeriesLeaves`, the same
+  filter as the expansion). A marker covering more episodes than it was applied with is
+  applied again, which marks an episode a library gains later. A smaller count is only
+  recorded, so an episode added after another was removed is still marked.
 - Every watched import matches the kept rows again after the provider's own rows, in
   batched catalog reads (`historyimport.MatchAllOn`). A kept row that matches imports
   like a fresh one and is deleted. One that still matches nothing adds no warning. A
