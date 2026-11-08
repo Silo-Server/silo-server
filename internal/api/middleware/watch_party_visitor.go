@@ -14,14 +14,15 @@ import (
 const roomRoutePrefix = `^/api/v2/watch-together/rooms/([^/]+)`
 
 // watchPartyVisitorRoomRoutes are the room routes a Watch Party visitor may
-// call, for its own room only: reading the room, the live socket, what the
-// members have watched of the candidates, suggestions and votes, and
-// reporting a source its player refused. Host operations (selection, policy,
-// start, stop, promote, close) and creating or joining other rooms are not
-// listed, so they stay refused.
+// call, for its own room only: reading the room, the live socket,
+// suggestions and votes, and reporting a source its player refused. Host
+// operations (selection, policy, start, stop, promote, close) and creating or
+// joining other rooms are not listed, so they stay refused. Member state is
+// not listed either: it answers for any content id the host can see, so a
+// visitor could probe the host's library and the members' watch history.
 var watchPartyVisitorRoomRoutes = []scopeRoute{
 	{http.MethodGet, regexp.MustCompile(roomRoutePrefix + `$`)},
-	{http.MethodPost, regexp.MustCompile(roomRoutePrefix + `/(member-state|source-fallback|ws-ticket)$`)},
+	{http.MethodPost, regexp.MustCompile(roomRoutePrefix + `/(source-fallback|ws-ticket)$`)},
 	{http.MethodGet, regexp.MustCompile(roomRoutePrefix + `/suggestions$`)},
 	{http.MethodPost, regexp.MustCompile(roomRoutePrefix + `/suggestions$`)},
 	{http.MethodDelete, regexp.MustCompile(roomRoutePrefix + `/suggestions/[^/]+$`)},

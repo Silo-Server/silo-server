@@ -1221,6 +1221,11 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if session.IsRemotePlayback() || session.IsWatchPartyVisitor() {
 		refreshed = boundSessionClaims(refreshed, session)
 	}
+	if session.IsWatchPartyVisitor() {
+		// The host's temporary password is the host's to change; a visitor
+		// cannot change it and keeps its room.
+		refreshed.PasswordChangeRequired = false
+	}
 	return s.generateTokenPair(refreshed)
 }
 

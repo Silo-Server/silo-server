@@ -165,7 +165,7 @@ func (s *VisitorStore) CreateInvite(ctx context.Context, room Room) (VisitorInvi
 	invite := VisitorInvite{ID: uuid.NewString(), RoomID: room.ID, CreatedAt: now, ExpiresAt: now.Add(VisitorInviteTTL)}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var open bool
-		if err := tx.QueryRow(ctx, `SELECT closed_at IS NULL AND phase <> 'ended' FROM watch_together_rooms WHERE id = $1 FOR SHARE`, room.ID).Scan(&open); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT closed_at IS NULL AND phase <> 'ended' FROM watch_together_rooms WHERE id = $1 FOR UPDATE`, room.ID).Scan(&open); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrRoomNotFound
 			}
@@ -244,8 +244,9 @@ func (s *VisitorStore) PreviewInvite(ctx context.Context, token string) (Visitor
 
 // AcceptInvite admits a visitor named displayName through token. In one
 // transaction it checks the link and its open room, enforces
-// MaxVisitorsPerRoom, inserts the visitor, and calls createSession with the
-// same transaction so the visitor's login session commits with it. Every
+// MaxVisitorsPerRoom under the room row's lock (so accepts through different
+// links cannot overshoot it), inserts the visitor, and calls createSession
+// with the same transaction so the visitor's login session commits with it. Every
 // unusable token is ErrVisitorInviteNotFound.
 func (s *VisitorStore) AcceptInvite(ctx context.Context, token, displayName string, createSession func(context.Context, pgx.Tx, AcceptedVisitor) error) (AcceptedVisitor, error) {
 	if !s.available() || createSession == nil {
@@ -263,7 +264,7 @@ func (s *VisitorStore) AcceptInvite(ctx context.Context, token, displayName stri
 			FROM watch_together_visitor_invites i
 			JOIN watch_together_rooms r ON r.id = i.room_id
 			WHERE i.token_digest = $1 AND i.revoked_at IS NULL AND i.expires_at > $2 AND r.closed_at IS NULL AND r.phase <> 'ended'
-			FOR SHARE OF r FOR UPDATE OF i`,
+			FOR UPDATE OF r, i`,
 			visitorTokenDigest(strings.TrimSpace(token)), now).Scan(&inviteID, &accepted.RoomID, &accepted.HostUserID, &accepted.HostProfileID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrVisitorInviteNotFound

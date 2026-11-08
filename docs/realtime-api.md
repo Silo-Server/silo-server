@@ -531,7 +531,9 @@ room `409`. Responses are `no-store`.
   (`createWatchPartyVisitorInvite`) returns `201` with `invite` (`id`,
   `created_at`, `expires_at`), the secret `token` and `invite_path`
   (`/rooms/visit?token=...`). The token is shown only here; keep it out of
-  durable caches. A room with 5 usable links answers `409`.
+  durable caches. A room with 5 usable links answers `409`. Only the host's own
+  sign-in may create a link; an API key, an impersonating administrator or a
+  bound session gets `403`.
 - `GET .../visitor-invites` (`listWatchPartyVisitorInvites`) lists usable links
   without tokens.
 - `DELETE .../visitor-invites/{invite_id}` (`revokeWatchPartyVisitorInvite`)
@@ -558,8 +560,8 @@ answer `404`.
 
 A visitor client sends `Authorization`, `X-Profile-Id: <profile_id>` and
 `X-Profile-Token` when given, and the room proof as any member does. It then
-uses the ordinary room read, socket, suggestion, vote, member-state and
-source-fallback operations for its own room. It plays the room's
+uses the ordinary room read, socket, suggestion, vote and source-fallback
+operations for its own room. Member-state reads are refused to visitors. It plays the room's
 `selected_file_id` with `allow_alternate_versions: false` and
 `progress_persistence: client`; any other start is refused with `403`. Refresh
 works as for any session until the room closes, the host removes the visitor or

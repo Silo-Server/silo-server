@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -175,6 +176,12 @@ func registerWatchPartyVisitors(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
+		// Visitors act on the host's account, so only the host's own login
+		// session may invite them: not an API key, an impersonating
+		// administrator or a bound session.
+		if !claimsFrom(ctx).IsOwnLoginSession() {
+			return nil, NewProblem(TypePermissionDenied, "Only the host's own sign-in may invite visitors.")
+		}
 		created, err := svc.CreateWatchPartyVisitorInvite(ctx, in.RoomID, user, profile)
 		if err != nil {
 			return nil, visitorProblem(err)
@@ -275,8 +282,10 @@ func registerWatchPartyVisitorPublic(reg *Registry) {
 			return nil, p
 		}
 		deviceName := in.UserAgent
-		if len(deviceName) > 200 {
-			deviceName = deviceName[:200]
+		if runes := []rune(strings.ToValidUTF8(deviceName, "")); len(runes) > 200 {
+			deviceName = string(runes[:200])
+		} else {
+			deviceName = string(runes)
 		}
 		got, err := svc.AcceptWatchPartyVisitorInvite(withClientDevice(ctx), in.Token, in.Body.DisplayName, deviceName, clientip.FromContext(ctx))
 		if err != nil {

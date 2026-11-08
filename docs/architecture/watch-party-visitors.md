@@ -24,7 +24,8 @@ the host account's streams. There is no separate visitor stream category.
 Inside the room a visitor is its own member. Its member profile id is
 `visitor:<visitor_id>`, so it never shares the host's roster entry, votes,
 suggestions or room proof. Its display name comes from `watch_together_visitors`.
-Member-state reads skip visitors: they have no watch history or watchlist.
+Member-state reads skip visitors, which have no watch history or watchlist, and
+are not open to them: the read answers for any content id the host can see.
 
 ## Liveness
 
@@ -46,7 +47,7 @@ usual interval and close.
 `RequireAuth` narrows a visitor session to a route allowlist
 (`internal/api/middleware/watch_party_visitor.go`), as it does for a
 remote-playback handoff. Room routes must name the visitor's own room. The list
-covers reading the room, its socket ticket, member state, suggestions and votes,
+covers reading the room, its socket ticket, suggestions and votes,
 source fallback, the room and playback capabilities, playback start, progress,
 replan, stop and route events, stream and transcode media, and sign-out. Host
 operations, room creation and joining, the catalog, profiles, account, settings,
@@ -62,10 +63,15 @@ room and only as its visitor member.
 
 A visitor's playback start must name the room's current `selected_file_id`, pin
 it (`allow_alternate_versions: false`), and use `progress_persistence: client`,
-so nothing is written to the host profile's resume state or history. Media
-routes still check that a playback session belongs to the host profile; a
-visitor that learned the id of the host's own playback session could stream it,
-which is no more than the host shares by inviting it.
+so nothing is written to the host profile's resume state or history.
+
+Playback ownership is per account and profile, so the playback routes cannot
+tell a visitor's sessions from the host's own sessions on that profile. A
+visitor that learned the id of such a session could stream, stop or replan it,
+or report progress on it. Room snapshots show each member only its own
+attached session id, and session ids are random, so a visitor has no way to
+learn another one. Binding playback sessions to the login session that started
+them would close this; it is not part of this change.
 
 ## Invites
 
@@ -78,6 +84,7 @@ the same to the public lookup and acceptance routes, which use the `invitation`
 rate-limit bucket.
 
 Only the room's host account and profile may create, list or revoke links and
-remove visitors. Acceptance inserts the visitor and its login session in one
+remove visitors, and only the host's own sign-in may create a link: not an API
+key, an impersonating administrator or another bound session. Acceptance inserts the visitor and its login session in one
 transaction; tokens, a profile token for a PIN-protected host profile, and the
 visitor's room proof are minted after it commits.
