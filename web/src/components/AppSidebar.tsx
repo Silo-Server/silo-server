@@ -19,7 +19,7 @@ import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useProfiles } from "@/hooks/queries/profiles";
-import { canAddProfile } from "@/lib/profile-management";
+import { canSwitchProfile } from "@/lib/profile-management";
 import { useUnreadNotificationCount } from "@/hooks/queries/notifications";
 import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
@@ -209,9 +209,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   // the item stays, as it always did.
   const showSwitchProfile =
     profile != null &&
-    (!household.isSuccess ||
-      household.data.length > 1 ||
-      canAddProfile(household.data.length, household.maxProfiles));
+    (!household.isSuccess || canSwitchProfile(household.data.length, household.maxProfiles));
   const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();

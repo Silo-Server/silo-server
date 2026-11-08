@@ -11,6 +11,7 @@ import {
   buildProfileRequestFromDraft,
   buildProfileUpdateFromDraft,
   canAddProfile,
+  canSwitchProfile,
   clearKidsPreset,
   createProfileDraft,
 } from "./profile-management";
@@ -237,5 +238,14 @@ describe("profile-management", () => {
     { count: 3, max: null, want: true },
   ])("allows another profile for $count of $max: $want", ({ count, max, want }) => {
     expect(canAddProfile(count, max)).toBe(want);
+  });
+
+  it.each([
+    { count: 1, max: 1, want: false },
+    { count: 2, max: 2, want: true },
+    { count: 1, max: 2, want: true },
+    { count: 1, max: null, want: true },
+  ])("offers Switch Profile for $count of $max: $want", ({ count, max, want }) => {
+    expect(canSwitchProfile(count, max)).toBe(want);
   });
 });

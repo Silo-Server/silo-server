@@ -139,7 +139,7 @@ type ProfileCollection struct {
 	RequireAdvisoryAgeSupported bool `json:"require_advisory_age_supported" doc:"Whether profiles accept require_advisory_age and the server enforces it" example:"true"`
 	// MaxProfiles is the household limit createProfile enforces, so a client
 	// can stop offering a new profile the server would refuse.
-	MaxProfiles *int `json:"max_profiles,omitempty" nullable:"false" minimum:"1" doc:"How many profiles this account may have, from its effective access policy; createProfile answers 409 once the household holds this many. Omitted when the server could not read the limit, and on a remote-playback handoff, which lists only its own profile; a client then keeps offering new profiles" example:"5"`
+	MaxProfiles *int `json:"max_profiles,omitempty" nullable:"false" minimum:"1" doc:"How many profiles this account may have, from its effective access policy; createProfile answers 409 once the household holds this many. Omitted on a remote-playback handoff, which lists only its own profile and cannot create one, and when the server could not read the limit; in that second case a client keeps offering new profiles and createProfile stays the check" example:"5"`
 }
 
 // ProfileCollectionOutput is the listProfiles response.

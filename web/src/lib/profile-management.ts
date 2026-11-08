@@ -284,6 +284,14 @@ export function canAddProfile(profileCount: number, maxProfiles: number | null):
   return maxProfiles === null || profileCount < maxProfiles;
 }
 
+/**
+ * Whether Switch Profile leads anywhere: to another profile, or to room for a
+ * new one. A household with several profiles keeps it even at its limit.
+ */
+export function canSwitchProfile(profileCount: number, maxProfiles: number | null): boolean {
+  return profileCount > 1 || canAddProfile(profileCount, maxProfiles);
+}
+
 /** The sentence shown in place of New profile once the household is full. */
 export function profileLimitMessage(maxProfiles: number): string {
   const noun = maxProfiles === 1 ? "profile" : "profiles";
