@@ -19,9 +19,11 @@ import (
 // later is not complete before its first episode airs, even if one arrived
 // early.
 //
-// Once the download server reports a request done, the rule relaxes to the
-// old one per season (see seasonDelivered): an episode the server could not
-// find would otherwise hold the request, and its notification, open for good.
+// Once a request is completed, the rule relaxes to the old one per season
+// (see seasonDelivered): an episode the server could not find would otherwise
+// hold its notification open for good. A request router's report alone does
+// not complete a season request (see pluginCompletionStands); the library
+// does.
 
 // SeasonCounts is one season's episodes: aired, dated to air later, and
 // present in a library.
@@ -112,6 +114,30 @@ func seasonsDelivered(progress []SeasonProgress, serverDone bool) bool {
 		}
 	}
 	return len(progress) > 0
+}
+
+// pluginCompletionStands reports whether a request router's word that a
+// target completed is enough to complete it. It is for a movie or a
+// whole-series request. A season request completes only once every requested
+// season is complete in the library: a router may answer for the whole series
+// (Seerr's AVAILABLE does), so its word says nothing about the seasons this
+// request asked for. The request is still in flight here, so the relaxed rule
+// a finished request gets (seasonDelivered) does not apply. A series that is
+// not in the library, or a library that cannot report seasons, holds the
+// target open.
+func (s *Service) pluginCompletionStands(ctx context.Context, req Request) (bool, error) {
+	if req.MediaType != MediaTypeSeries || len(req.Seasons) == 0 {
+		return true, nil
+	}
+	matches, err := s.lookupPresence(ctx, req.MediaType, []PresenceCandidate{requestPresenceCandidate(req)})
+	if err != nil {
+		return false, err
+	}
+	counts, err := s.seasonCounts(ctx, matches[req.TMDBID])
+	if err != nil || counts == nil {
+		return false, err
+	}
+	return seasonsDelivered(seasonProgress(req.Seasons, counts), false), nil
 }
 
 // requestFulfilled reports whether a request's media is in the library: a

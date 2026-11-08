@@ -176,6 +176,77 @@ func TestSeriesDetailListsSeasonsAndStaysRequestable(t *testing.T) {
 	}
 }
 
+// A request router may report a series done for the whole series (Seerr's
+// AVAILABLE does), so for a season request its word completes a target only
+// once every requested season is complete in the library (#3503). Severance
+// is in the library with season 1 complete and season 2 at 4 of 10 episodes.
+func TestPluginCompletionWaitsForTheRequestedSeasons(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  Request
+		// submit has the plugin report the completion from Fulfill rather
+		// than from CheckStatus.
+		submit bool
+		want   Status
+	}{
+		{name: "movie", req: Request{MediaType: MediaTypeMovie, TMDBID: 550}, want: StatusCompleted},
+		{name: "whole series", req: Request{MediaType: MediaTypeSeries, TMDBID: 95396}, want: StatusCompleted},
+		{name: "requested seasons complete", req: Request{MediaType: MediaTypeSeries, TMDBID: 95396, Seasons: []int{1}}, want: StatusCompleted},
+		{name: "a requested season partial", req: Request{MediaType: MediaTypeSeries, TMDBID: 95396, Seasons: []int{1, 2}}, want: StatusDownloading},
+		{name: "series not in the library", req: Request{MediaType: MediaTypeSeries, TMDBID: 7, Seasons: []int{1}}, want: StatusDownloading},
+		{name: "submitted movie", req: Request{MediaType: MediaTypeMovie, TMDBID: 550}, submit: true, want: StatusCompleted},
+		{name: "submitted, a requested season partial", req: Request{MediaType: MediaTypeSeries, TMDBID: 95396, Seasons: []int{2}}, submit: true, want: StatusQueued},
+		{name: "submitted, series not in the library", req: Request{MediaType: MediaTypeSeries, TMDBID: 7, Seasons: []int{1}}, submit: true, want: StatusQueued},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			store := newFakeStore()
+			svc := seasonService(store, severanceInLibrary())
+			req := tc.req
+			req.ID, req.Outcome, req.RequestedByUserID = "req-1", OutcomeActive, 7
+			reported := RouterTarget{Quality: Quality1080p, ConnectionID: "router-1", ExternalID: "123", ExternalStatus: "5", Status: StatusCompleted}
+
+			if tc.submit {
+				store.integrations = []Integration{routerInst("router-1")}
+				// Only a plugin that takes seasons is sent a season request
+				// for a series already in the library.
+				uhd := reported
+				uhd.Quality = Quality2160p
+				svc.SetRouterProvider(&fakeRouterProvider{targetsOverride: []RouterTarget{reported, uhd}, seasonCapable: map[int]bool{1: true}})
+				req.Status = StatusApproved
+				store.requests[req.ID] = &req
+				if _, err := svc.submitApprovedRequest(ctx, req, Viewer{UserID: 7, IsAdmin: true}, nil); err != nil {
+					t.Fatalf("submit: %v", err)
+				}
+			} else {
+				req.Status = StatusDownloading
+				store.requests[req.ID] = &req
+				seedDownloadTarget(t, store, req.ID, "router-1", Quality1080p, StatusDownloading, nil)
+				targets, _ := store.ListTargets(ctx, req.ID)
+				if _, err := svc.applyTargetStatuses(ctx, req, targets, []RouterTargetStatus{{
+					Quality: reported.Quality, ConnectionID: reported.ConnectionID, Status: reported.Status, ExternalStatus: reported.ExternalStatus,
+				}}); err != nil {
+					t.Fatalf("applyTargetStatuses: %v", err)
+				}
+			}
+
+			targets, _ := store.ListTargets(ctx, req.ID)
+			for _, got := range targets {
+				if got.Status != tc.want {
+					t.Fatalf("%s target status = %s, want %s", got.Quality, got.Status, tc.want)
+				}
+				// A held target still shows what the server said.
+				if got.ExternalStatus != "5" {
+					t.Fatalf("%s external status = %q, want the plugin's", got.Quality, got.ExternalStatus)
+				}
+			}
+			if r := store.requests[req.ID]; len(targets) == 0 || (r.Status == StatusCompleted) != (tc.want == StatusCompleted) {
+				t.Fatalf("request status = %s with targets %+v", r.Status, targets)
+			}
+		})
+	}
+}
+
 func TestSeasonDeliveredRelaxesOnceTheServerIsDone(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

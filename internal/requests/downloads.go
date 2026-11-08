@@ -138,7 +138,7 @@ func (s *Service) refreshRequestDownloads(ctx, checkCtx context.Context, fc *ful
 		return reconcileUnchanged, false, featureErr
 	}
 	statuses, checkErr := s.checkTargetStatuses(checkCtx, req, polled, fc)
-	change, err = s.applyTargetStatuses(ctx, polled, statuses)
+	change, err = s.applyTargetStatuses(ctx, req, polled, statuses)
 	if err != nil {
 		return reconcileUnchanged, true, errors.Join(featureErr, err)
 	}

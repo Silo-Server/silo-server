@@ -248,7 +248,7 @@ func TestApplyTargetStatusesWritesAndClearsProgress(t *testing.T) {
 			reported.Quality, reported.ConnectionID = Quality1080p, "router-1"
 
 			targets, _ := store.ListTargets(context.Background(), "req-1")
-			change, err := service.applyTargetStatuses(context.Background(), targets, []RouterTargetStatus{
+			change, err := service.applyTargetStatuses(context.Background(), *store.requests["req-1"], targets, []RouterTargetStatus{
 				reported,
 				// A status for a target the request does not have is ignored.
 				{Quality: Quality2160p, ConnectionID: "router-1", Status: StatusCompleted, Progress: progress},

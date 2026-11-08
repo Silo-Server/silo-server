@@ -2621,6 +2621,16 @@ func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, 
 		if status == "" || !validStatus[status] {
 			status = StatusQueued // coerce unknown/empty status to the DB-valid default
 		}
+		if status == StatusCompleted {
+			stands, err := s.pluginCompletionStands(ctx, req)
+			if err != nil {
+				return nil, err
+			}
+			if !stands {
+				// Reconcile completes the target once the seasons are in.
+				status = StatusQueued
+			}
+		}
 		message := rt.Message
 		if status == StatusFailed {
 			message = explainSubmissionFailure(req, message)
@@ -2908,7 +2918,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		return reconcileUnchanged, nil
 	}
 	statuses, checkErr := s.checkTargetStatuses(ctx, req, targets, fc)
-	change, err := s.applyTargetStatuses(ctx, targets, statuses)
+	change, err := s.applyTargetStatuses(ctx, req, targets, statuses)
 	if err != nil {
 		return reconcileUnchanged, err
 	}
@@ -2922,10 +2932,15 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 // idle target costs no write per pass. A target with progress that got no
 // status back (its server was skipped or failed, or the call did) keeps it
 // until it goes stale; see settleUnansweredDownload. Both reconcile and the
-// download refresh pass apply statuses here.
-func (s *Service) applyTargetStatuses(ctx context.Context, targets []Target, statuses []RouterTargetStatus) (reconcileChange, error) {
+// download refresh pass apply statuses here. A completion the plugin reports
+// for a season request stands only once the requested seasons are in the
+// library (see pluginCompletionStands); until then the target keeps its status
+// and only the raw status is written.
+func (s *Service) applyTargetStatuses(ctx context.Context, req Request, targets []Target, statuses []RouterTargetStatus) (reconcileChange, error) {
 	change := reconcileUnchanged
 	answered := make([]bool, len(targets))
+	// Read once, and only when a status reports a completion.
+	var completionStands *bool
 	for _, st := range statuses {
 		// Match the returned status to the live target by (quality, connection).
 		var target *Target
@@ -2940,7 +2955,20 @@ func (s *Service) applyTargetStatuses(ctx context.Context, targets []Target, sta
 			continue
 		}
 		status := target.Status
-		if newStatus := st.Status; newStatus != "" && newStatus != target.Status {
+		newStatus := st.Status
+		if newStatus == StatusCompleted && newStatus != target.Status {
+			if completionStands == nil {
+				stands, err := s.pluginCompletionStands(ctx, req)
+				if err != nil {
+					return reconcileUnchanged, err
+				}
+				completionStands = &stands
+			}
+			if !*completionStands {
+				newStatus = target.Status
+			}
+		}
+		if newStatus != "" && newStatus != target.Status {
 			if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
 				return reconcileUnchanged, err
 			}
