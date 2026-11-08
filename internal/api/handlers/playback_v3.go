@@ -5003,7 +5003,7 @@ func (h *PlaybackHandler) updateV3SessionState(ctx context.Context, session *pla
 // copies (the plan keeps the source codec when it converts nothing), or empty
 // when the audio is encoded. fMP4 segments add aac_adtstoasc for AAC.
 func copiedAudioCodecV3(result playback.PlannerResultV3) string {
-	if result.Plan == nil || !strings.EqualFold(result.TargetAudioCodec, "copy") {
+	if result.Plan == nil || playback.TranscodesAudio(result.TargetAudioCodec) {
 		return ""
 	}
 	return result.Plan.EffectiveRecipe.AudioCodec
