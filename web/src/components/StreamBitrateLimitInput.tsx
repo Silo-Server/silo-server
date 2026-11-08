@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  LOW_STREAM_BITRATE_LIMIT_KBPS,
   STREAM_BITRATE_LIMIT_PRESETS_KBPS,
   formatStreamBitrateLimit,
   isLowStreamBitrateLimit,
@@ -54,7 +55,7 @@ export function StreamBitrateLimitInput({
   disabled?: boolean;
 }) {
   const t = useT();
-  const invalidMbps = t("web.player.bitrateLimit.invalid");
+  const invalidMbps = t("web.player.bitrateLimit.invalid", { places: 3, min: 0 });
   const [choice, setChoice] = useState(() =>
     invalidDraft !== undefined && (invalidDraft !== "" || value !== null)
       ? CUSTOM
@@ -137,7 +138,11 @@ export function StreamBitrateLimitInput({
         <p className="text-muted-foreground text-xs">{invalidMbps}</p>
       )}
       {custom && draftValue !== null && isLowStreamBitrateLimit(draftValue) && (
-        <p className="text-warning text-xs">{t("web.player.bitrateLimit.lowWarning")}</p>
+        <p className="text-warning text-xs">
+          {t("web.player.bitrateLimit.lowWarning", {
+            mbps: LOW_STREAM_BITRATE_LIMIT_KBPS / 1000,
+          })}
+        </p>
       )}
     </div>
   );

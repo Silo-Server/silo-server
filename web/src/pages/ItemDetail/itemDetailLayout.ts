@@ -132,5 +132,5 @@ export function resolveSeriesPrimaryAction(
     return { label: t("web.detail.actions.playNext"), href };
   }
   // Unstarted and fully watched series both resolve to the first episode.
-  return { label: t("web.detail.actions.startFromFirstEpisode"), href };
+  return { label: t("web.detail.actions.startFromFirstEpisode", { episode: 1 }), href };
 }
