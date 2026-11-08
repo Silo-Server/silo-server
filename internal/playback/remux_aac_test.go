@@ -54,6 +54,7 @@ func TestBuildFFmpegArgsConvertsADTSOnlyForCopiedAACInFMP4(t *testing.T) {
 		fMP4 bool
 	}{
 		{name: "copied aac in fmp4", opts: TranscodeOpts{TargetCodecVideo: "copy", TargetCodecAudio: "copy", CopyAudioCodec: "aac"}, want: "aac_adtstoasc", fMP4: true},
+		{name: "copied aac with copy in any case", opts: TranscodeOpts{TargetCodecVideo: "copy", TargetCodecAudio: " COPY ", CopyAudioCodec: "aac"}, want: "aac_adtstoasc", fMP4: true},
 		{name: "copied aac under encoded hevc", opts: TranscodeOpts{TargetCodecVideo: "hevc", TargetCodecAudio: "copy", CopyAudioCodec: "aac", HWAccel: "none"}, want: "aac_adtstoasc", fMP4: true},
 		{name: "copied aac in mpeg-ts", opts: TranscodeOpts{TargetCodecVideo: "copy", CopyVideoMPEGTS: true, TargetCodecAudio: "copy", CopyAudioCodec: "aac"}, want: ""},
 		{name: "copied ac3 would be rejected by the filter", opts: TranscodeOpts{TargetCodecVideo: "copy", TargetCodecAudio: "copy", CopyAudioCodec: "ac3"}, want: "", fMP4: true},

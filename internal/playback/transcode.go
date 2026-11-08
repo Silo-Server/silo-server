@@ -1125,7 +1125,7 @@ func HLSOutputContainer(opts TranscodeOpts) string {
 // ADTS as it is. Remote executors must confirm the copied codec for such a run
 // because an older one ignores it and fails after the first segment.
 func HLSCopiesAACIntoFMP4(opts TranscodeOpts) bool {
-	return opts.TargetCodecAudio == "copy" &&
+	return !TranscodesAudio(opts.TargetCodecAudio) &&
 		HLSOutputContainer(opts) == OutputContainerFMP4 &&
 		copiedAudioIsAAC(opts.CopyAudioCodec)
 }
