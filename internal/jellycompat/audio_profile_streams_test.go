@@ -46,8 +46,9 @@ func TestBuildMediaStreamsCarriesAudioFacts(t *testing.T) {
 	}
 
 	atmos := streams[1]
-	if atmos.ChannelLayout != "5.1(side)" {
-		t.Fatalf("atmos ChannelLayout = %q, want 5.1(side)", atmos.ChannelLayout)
+	// Jellyfin trims ffprobe's layout variant: "5.1(side)" is reported as "5.1".
+	if atmos.ChannelLayout != "5.1" {
+		t.Fatalf("atmos ChannelLayout = %q, want 5.1", atmos.ChannelLayout)
 	}
 	if atmos.BitRate != 768_000 {
 		t.Fatalf("atmos BitRate = %d, want 768000", atmos.BitRate)

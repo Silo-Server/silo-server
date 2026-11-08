@@ -3181,7 +3181,7 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			SupportsExternalStream: false,
 			Profile:                track.Profile,
 			AudioSpatialFormat:     compatAudioSpatialFormat(track.Profile),
-			ChannelLayout:          track.Layout,
+			ChannelLayout:          compatChannelLayout(track.Layout),
 			Channels:               track.Channels,
 			BitRate:                track.Bitrate * 1000,
 		})
@@ -3680,6 +3680,14 @@ func audioCodecDisplayName(codec string) string {
 	default:
 		return strings.ToUpper(strings.TrimSpace(codec))
 	}
+}
+
+// compatChannelLayout trims ffprobe's layout variant the way Jellyfin's
+// ParseChannelLayout does ("5.1(side)" becomes "5.1"); clients match their
+// channel badges against that form.
+func compatChannelLayout(layout string) string {
+	base, _, _ := strings.Cut(layout, "(")
+	return base
 }
 
 func audioChannelsDisplayName(channels int) string {
