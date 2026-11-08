@@ -1496,6 +1496,12 @@ func TestConfirmedTerminalStopDelivery(t *testing.T) {
 		{name: "provider keeping a reserve has time to write", needs: 20 * time.Second},
 		{name: "recent failing stop is kept for retry", err: providerDown, stoppedAgo: time.Minute, wantPending: true},
 		{name: "stop failing past its retry window is dropped", err: providerDown, stoppedAgo: compatConfirmedStopRetryWindow + time.Minute},
+		{
+			name:        "stop still being confirmed past its retry window is kept",
+			err:         errors.Join(providerDown, fmt.Errorf("mdblist: %w", watchsync.ErrConfirmedStopInProgress)),
+			stoppedAgo:  compatConfirmedStopRetryWindow + time.Minute,
+			wantPending: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

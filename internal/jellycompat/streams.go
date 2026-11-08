@@ -2340,7 +2340,10 @@ func (h *PlaybackHandler) deliverCompatTerminal(
 		*playSession.TerminalScrobbleEvent,
 		playSession.TerminalAuthoritative,
 	)
-	if err != nil && compatTerminalRetryWindowPassed(*playSession.TerminalScrobbleEvent, time.Now()) {
+	// A stop another dispatch is still confirming has no outcome yet, so it is
+	// kept whatever its age: that dispatch may still fail and need a retry.
+	if err != nil && !errors.Is(err, watchsync.ErrConfirmedStopInProgress) &&
+		compatTerminalRetryWindowPassed(*playSession.TerminalScrobbleEvent, time.Now()) {
 		slog.WarnContext(ctx, "dropped jellycompat watch provider stop after its retry window",
 			"component", "jellycompat",
 			"playback_session_id", playSession.TerminalScrobbleEvent.PlaybackSessionID,

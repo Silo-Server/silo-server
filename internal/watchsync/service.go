@@ -78,7 +78,9 @@ const (
 	confirmedStopLease           = ConfirmedStopDispatchTimeout + 30*time.Second
 )
 
-var errConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
+// ErrConfirmedStopInProgress means another dispatch of the same confirmed stop
+// still holds its claim, so its outcome is not known yet.
+var ErrConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
 
 func NewService(repo Repository, registry *Registry) *Service {
 	return &Service{
@@ -2297,7 +2299,7 @@ func (s *Service) dispatchScrobbleConfirmed(ctx context.Context, provider Provid
 		case confirmedStopAlreadySent:
 			return nil
 		case confirmedStopInProgress:
-			return errConfirmedStopInProgress
+			return ErrConfirmedStopInProgress
 		}
 
 		cfg, err := s.serverConfig(ctx, conn.Provider)
