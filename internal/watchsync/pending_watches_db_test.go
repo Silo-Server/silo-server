@@ -141,15 +141,7 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 	// Wait until the save either finished or is waiting on the rebind's lock.
 	var done error
 	finished := false
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
-		select {
-		case done = <-saved:
-			finished = true
-		default:
-		}
-		if finished {
-			break
-		}
+	for deadline := time.Now().Add(10 * time.Second); !finished && time.Now().Before(deadline); {
 		var waiting bool
 		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
 			WHERE wait_event_type = 'Lock' AND query LIKE '%FOR NO KEY UPDATE%')`).Scan(&waiting); err != nil {
@@ -158,7 +150,11 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 		if waiting {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case done = <-saved:
+			finished = true
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	if err := rebind.Commit(ctx); err != nil {
 		t.Fatal(err)
