@@ -98,6 +98,8 @@ func scanSessions(rows pgx.Rows) ([]*models.AuthSession, error) {
 			&s.Purpose,
 			&s.BoundProfileID,
 			&s.AbsoluteExpiresAt,
+			&s.BoundRoomID,
+			&s.BoundVisitorID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scanning session row: %w", err)

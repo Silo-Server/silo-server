@@ -931,7 +931,13 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 		if msg.SessionID == "" {
 			return errors.New("session_id is required")
 		}
-		_, err := h.Service.AttachSessionForConnection(ctx, reg, userID, profileID, apimw.GetProfileID(ctx), msg.SessionID)
+		// The credential's own profile; the v1 room socket names only the
+		// member profile, which is the same for every member but a visitor.
+		playbackProfile := apimw.GetProfileID(ctx)
+		if playbackProfile == "" && !watchtogether.IsVisitorMember(profileID) {
+			playbackProfile = profileID
+		}
+		_, err := h.Service.AttachSessionForConnection(ctx, reg, userID, profileID, playbackProfile, msg.SessionID)
 		return err
 	case "transport_request":
 		var msg watchTogetherTransportRequestMessage

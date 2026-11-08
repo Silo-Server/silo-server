@@ -86,7 +86,9 @@ type WatchPartyVisitorAcceptInput struct {
 	Token     string `path:"token" maxLength:"128"`
 	UserAgent string `header:"User-Agent"`
 	Body      struct {
-		DisplayName string `json:"display_name" minLength:"1" maxLength:"160" doc:"Name the room shows for the visitor, up to 40 characters"`
+		// maxLength bounds the raw value; the server trims surrounding
+		// space and then allows 1 to 40 characters (MaxVisitorNameRunes).
+		DisplayName string `json:"display_name" minLength:"1" maxLength:"160" doc:"Name the room shows for the visitor: 1 to 40 characters after surrounding space is trimmed. Longer values are refused with 422."`
 	}
 }
 

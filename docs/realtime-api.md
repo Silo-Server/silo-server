@@ -531,9 +531,9 @@ room `409`. Responses are `no-store`.
   (`createWatchPartyVisitorInvite`) returns `201` with `invite` (`id`,
   `created_at`, `expires_at`) and the secret `token`. The token is shown only
   here; keep it out of durable caches. Clients build the link to their own
-  visitor join screen from it; the web app has none yet. A room with 5 usable links answers `409`. Only the host's own
-  sign-in may create a link; an API key, an impersonating administrator or a
-  bound session gets `403`.
+  visitor join screen from it; the web app has none yet. A room with 5 usable
+  links answers `409`. Only the host's own sign-in may create a link; an API
+  key, an impersonating administrator or a bound session gets `403`.
 - `GET .../visitor-invites` (`listWatchPartyVisitorInvites`) lists usable links
   without tokens.
 - `DELETE .../visitor-invites/{invite_id}` (`revokeWatchPartyVisitorInvite`)

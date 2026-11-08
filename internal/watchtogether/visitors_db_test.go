@@ -37,6 +37,13 @@ func newVisitorDB(t *testing.T) *visitorDB {
 		t.Fatalf("connect test database: %v", err)
 	}
 	t.Cleanup(pool.Close)
+	var migrated bool
+	if err := pool.QueryRow(t.Context(), `SELECT to_regclass('public.watch_together_visitors') IS NOT NULL`).Scan(&migrated); err != nil {
+		t.Fatal(err)
+	}
+	if !migrated {
+		t.Skip("test database has not applied the watch party visitor migration")
+	}
 	db := &visitorDB{t: t, pool: pool, prefix: fmt.Sprintf("visitors-%d", time.Now().UnixNano()),
 		rooms: NewRepository(pool), store: NewVisitorStore(pool), sessions: auth.NewSessionRepository(pool)}
 	if err := pool.QueryRow(t.Context(), `INSERT INTO users (username, role) VALUES ($1, 'admin') RETURNING id`, db.prefix).Scan(&db.hostID); err != nil {
