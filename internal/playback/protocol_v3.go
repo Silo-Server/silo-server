@@ -175,6 +175,24 @@ const (
 // capabilities features list.
 const FeatureHLSVariableSubstitutionV3 = "hls_variable_substitution_v1"
 
+// FeatureProgressiveRangeRefusalV3 is a progressive delivery feature: the
+// client recovers from a refused mid-stream range on a progressive remux by
+// reopening the stream at its current position. A progressive remux is one
+// forward-only response, so it cannot honor `Range: bytes=N-` for N > 0, and
+// the 200 it answers instead restarts at the stream's origin. A browser takes
+// that 200 as the whole resource and reads it again from byte zero, which on
+// a long title stalls for longer each time. With the opt-in the plan's
+// progressive remux URL carries RemuxRangeQueryParam, and the stream answers
+// such a range 409 before it starts any work. /api/v2 advertises it in the
+// capabilities features list.
+const FeatureProgressiveRangeRefusalV3 = "progressive_range_refusal_v1"
+
+// ProgressiveRangeRefusalV3 reports whether the request's progressive delivery
+// listed progressive_range_refusal_v1.
+func ProgressiveRangeRefusalV3(request StartRequestV3) bool {
+	return deliverySupportsFeatureV3(request, DeliveryClassProgressiveV3, FeatureProgressiveRangeRefusalV3)
+}
+
 // FeatureCodecChannelCeilingsV3 tells a client that the server honors a
 // delivery's max_channels_by_codec. /api/v2 advertises it in the capabilities
 // features list.
@@ -304,7 +322,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery

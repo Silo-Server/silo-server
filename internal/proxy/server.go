@@ -986,7 +986,21 @@ func remuxRunsOnTranscodeNodeV3(claims *streamtoken.Claims) bool {
 	return claims != nil && claims.RoutingExecution == string(noderouting.ExecutionTranscode)
 }
 
+// refuseRemuxRange answers a mid-stream range on an opted-in progressive remux
+// with 409 before any capacity is held or work is relayed; see
+// playback.RefusesRemuxRange.
+func refuseRemuxRange(w http.ResponseWriter, r *http.Request) bool {
+	if !playback.RefusesRemuxRange(r) {
+		return false
+	}
+	http.Error(w, playback.RemuxRangeRefusedMessage, http.StatusConflict)
+	return true
+}
+
 func (s *Server) relayProgressiveRemux(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims, forwardToken string) {
+	if refuseRemuxRange(w, r) {
+		return
+	}
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "remux")
@@ -1009,6 +1023,9 @@ func validAudioV2RemuxClaims(claims *streamtoken.Claims) bool {
 // recipe, shared by the token routes and the grant routes for the same reason
 // serveDirectPlayClaims is.
 func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims *streamtoken.Claims) {
+	if refuseRemuxRange(w, r) {
+		return
+	}
 	// See serveDirectPlayClaims: shared by the token and grant routes.
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)

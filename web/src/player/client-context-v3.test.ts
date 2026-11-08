@@ -13,6 +13,7 @@ import {
   type WebCapabilityProbe,
 } from "./client-context-v3";
 import { readMeasuredBandwidthKbps } from "./bandwidth-probe";
+import { FEATURE_PROGRESSIVE_RANGE_REFUSAL_V3 } from "./protocol-v3";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -109,6 +110,33 @@ describe("structured HDR capabilities", () => {
     expect(deliveries.hls?.video_codecs).toContain("hevc");
     expect(deliveries.original_http?.hdr_details?.hdr10).toBe(false);
     expect(deliveries.original_http?.hdr_details?.dolby_vision_profiles).toEqual([]);
+  });
+
+  it("opts only Chromium's media loader into progressive range refusal", () => {
+    const uas = {
+      chrome: chromeUA,
+      edge: `${chromeUA} Edg/151.0.0.0`,
+      safari: safariUA,
+      chromeOnIOS:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 CriOS/151.0.0.0 Mobile/15E148 Safari/604.1",
+      firefox: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0",
+    };
+    const optedIn = Object.fromEntries(
+      Object.entries(uas).map(([name, ua]) => [
+        name,
+        buildDeliveriesV3(probe, ua).progressive?.features.includes(
+          FEATURE_PROGRESSIVE_RANGE_REFUSAL_V3,
+        ),
+      ]),
+    );
+
+    expect(optedIn).toEqual({
+      chrome: true,
+      edge: true,
+      safari: false,
+      chromeOnIOS: false,
+      firefox: false,
+    });
   });
 
   it("keeps Chromium native-HLS evidence scoped to its hls.js engine", () => {

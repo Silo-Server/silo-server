@@ -301,6 +301,71 @@ func TestHandleStream_AudioOnlyRemuxServesAudioContentType(t *testing.T) {
 	}
 }
 
+// A progressive remux can only stream from its seek origin. A URL that opted in
+// with remux_range=refuse answers a range past byte 0 with 409 before ffmpeg
+// starts, and leaves the session for the client's reopen. Every other request,
+// and every request without the opt-in, streams from the origin as before.
+func TestHandleStream_RemuxRangeRefusal(t *testing.T) {
+	const optIn = "?" + playback.RemuxRangeQueryParam + "=" + playback.RemuxRangeRefuse
+	for _, tc := range []struct {
+		name, method, query, rangeHeader string
+		wantStatus                       int
+	}{
+		{name: "resumed range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusConflict},
+		{name: "suffix range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=-500", wantStatus: http.StatusConflict},
+		{name: "range from the origin", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-", wantStatus: http.StatusOK},
+		{name: "byte-range probe", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-1", wantStatus: http.StatusOK},
+		{name: "no range", method: http.MethodGet, query: optIn, wantStatus: http.StatusOK},
+		{name: "unparseable range", method: http.MethodGet, query: optIn, rangeHeader: "items=5-", wantStatus: http.StatusOK},
+		{name: "head", method: http.MethodHead, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+		{name: "resumed range without the opt-in", method: http.MethodGet, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := models.MediaFile{
+				ID: 42, ContentID: "movie-1", CodecVideo: "h264", CodecAudio: "aac",
+				VideoTracks: []models.VideoTrack{{Codec: "h264"}}, Duration: 3600,
+				FilePath: writePlaybackTestMediaFile(t, "source.mkv"),
+			}
+			sessionMgr := playback.NewSessionManager(0, 0)
+			session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayRemux, false)
+			if err != nil {
+				t.Fatalf("StartSession: %v", err)
+			}
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nprintf muxed\n"), 0o755); err != nil {
+				t.Fatalf("write fake ffmpeg: %v", err)
+			}
+			handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: &file})
+			handler.PlaybackConfig = func() config.PlaybackConfig {
+				return config.PlaybackConfig{FFmpegPath: ffmpeg}
+			}
+
+			req := httptest.NewRequest(tc.method, "/api/v2/stream/"+session.ID+tc.query, nil)
+			if tc.rangeHeader != "" {
+				req.Header.Set("Range", tc.rangeHeader)
+			}
+			req = req.WithContext(newAuthorizedPlaybackContext())
+			req = withPlaybackRouteParam(req, "session_id", session.ID)
+			rr := httptest.NewRecorder()
+			handler.HandleStream(rr, req)
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d, body = %s", rr.Code, tc.wantStatus, rr.Body.String())
+			}
+			if tc.wantStatus == http.StatusConflict {
+				if strings.Contains(rr.Body.String(), "muxed") {
+					t.Fatal("a refused range started the remux")
+				}
+				if _, err := sessionMgr.GetSession(session.ID); err != nil {
+					t.Fatalf("a refused range ended the session: %v", err)
+				}
+			} else if tc.method == http.MethodGet && rr.Body.String() != "muxed" {
+				t.Fatalf("body = %q, want the remux from its origin", rr.Body.String())
+			}
+		})
+	}
+}
+
 // TestHandleSubtitle_ListDownloadedSubtitlesErrorReturns500 pins the fix for
 // issue #248: a failure listing downloaded subtitles must surface as a 500 with
 // an "internal_error" code, not be swallowed and reported to the client as a

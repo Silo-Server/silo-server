@@ -230,12 +230,21 @@ type mediaAuthModeV3 struct {
 	// credential-sized query once through EXT-X-DEFINE. It changes playlist
 	// text only, so it is not part of plan identity.
 	hlsVariableSubstitution bool
+	// progressiveRangeRefusal is the progressive delivery's
+	// progressive_range_refusal_v1 feature on /api/v2: a progressive remux URL
+	// carries playback.RemuxRangeQueryParam, so the stream refuses a
+	// mid-stream range instead of restarting at its origin. It changes the
+	// stream URL only, so it is not part of plan identity.
+	progressiveRangeRefusal bool
 }
 
-// withHLSVariableSubstitutionV3 adds the request's playlist-substitution
-// opt-in to mode. The frozen /api/v1 surface never negotiates it.
-func withHLSVariableSubstitutionV3(r *http.Request, mode mediaAuthModeV3, req playback.StartRequestV3) mediaAuthModeV3 {
-	mode.hlsVariableSubstitution = isNativeAPIV2(r.Context()) && playback.HLSVariableSubstitutionV3(req)
+// withNativeDeliveryFeaturesV3 adds the request's /api/v2 delivery opt-ins to
+// mode: the hls playlist-substitution form and the progressive range refusal.
+// The frozen /api/v1 surface never negotiates them.
+func withNativeDeliveryFeaturesV3(r *http.Request, mode mediaAuthModeV3, req playback.StartRequestV3) mediaAuthModeV3 {
+	native := isNativeAPIV2(r.Context())
+	mode.hlsVariableSubstitution = native && playback.HLSVariableSubstitutionV3(req)
+	mode.progressiveRangeRefusal = native && playback.ProgressiveRangeRefusalV3(req)
 	return mode
 }
 
@@ -2409,7 +2418,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	if result.Plan == nil {
 		return playback.DecisionResponseV3{}, &transportErrorV3{reason: "internal_error", message: "The server produced no playback plan."}
 	}
-	mode := withHLSVariableSubstitutionV3(r, headerAuthenticatedMediaV3(req.ClientFeatures), req)
+	mode := withNativeDeliveryFeaturesV3(r, headerAuthenticatedMediaV3(req.ClientFeatures), req)
 	ctx := playback.WithClientInfo(r.Context(), clientInfo)
 	session, err := h.sessionMgr.StartSessionWithFilesContext(ctx, userID, profileID, effectiveFile.ID, requestedFile.ID, result.PlayMethod, result.TranscodeAudio)
 	if err != nil {
@@ -3290,6 +3299,9 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	if result.Plan != nil && result.Plan.Delivery == playback.DeliveryRemuxProgressiveV3 {
 		if seek := timeline.seekSeconds; seek > 0 {
 			streamURL = appendPlaybackQueryV3(streamURL, "seek", strconv.FormatFloat(seek, 'f', -1, 64))
+		}
+		if mode.progressiveRangeRefusal {
+			streamURL = appendPlaybackQueryV3(streamURL, playback.RemuxRangeQueryParam, playback.RemuxRangeRefuse)
 		}
 	}
 	workload := routingWorkloadV3(result)
@@ -6195,10 +6207,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	result = retryIncompleteToneMapPlanningV3(result, toneMapCapabilityErr)
 	result = retryIncompletePlaybackSettingsV3(result, plannerSettingsErr)
 	// Media authentication and the hls playlist form are attempt-sticky (pinned
-	// in HandleReplanPlaybackV3), so this mode always equals the one the
-	// attempt started under: a reused transport cannot change the session's
-	// media security contract or the playlist form it serves.
-	mode := withHLSVariableSubstitutionV3(r, headerAuthenticatedMediaV3(start.ClientFeatures), start)
+	// in HandleReplanPlaybackV3), so they always equal the ones the attempt
+	// started under: a reused transport cannot change the session's media
+	// security contract or the playlist form it serves. The progressive range
+	// refusal follows this replan's own request: it only changes the
+	// progressive URL this replan publishes.
+	mode := withNativeDeliveryFeaturesV3(r, headerAuthenticatedMediaV3(start.ClientFeatures), start)
 	if !seekReanchor {
 		// A freshly planned replan can land on the same refused progressive
 		// remux a start would have; escalate it identically. A seek reanchor

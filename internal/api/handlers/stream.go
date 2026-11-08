@@ -253,6 +253,12 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case playback.PlayRemux:
+		// A refused mid-stream range leaves the session as it is: the client
+		// reopens it at its current position.
+		if playback.RefusesRemuxRange(r) {
+			writeError(w, http.StatusConflict, "conflict", playback.RemuxRangeRefusedMessage)
+			return
+		}
 		if setter, ok := h.sessionMgr.(interface {
 			SetOutputFormat(string, string, string) error
 		}); ok {
