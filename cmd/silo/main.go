@@ -2750,7 +2750,17 @@ func main() {
 	if watchProviderService != nil {
 		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
-		watchProviderScopes := access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		// A sync's episodes follow what the profile may open, as any viewer
+		// read does, so it resolves scope the same way.
+		var watchProviderScopes interface {
+			Resolve(context.Context, access.ResolveInput) (access.Scope, error)
+		}
+		if policySystem != nil {
+			watchProviderScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		} else {
+			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path.
+			watchProviderScopes = access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		}
 		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
@@ -2771,7 +2781,7 @@ func main() {
 				return watchsync.ProfileAccess{
 					AllowedLibraryIDs: allowed,
 					Accessible: func(ctx context.Context, contentIDs []string) (map[string]bool, error) {
-						return watchProviderLibrary.FilterAccessibleContentIDs(ctx, contentIDs, allowed, nil, scope.MaturityLimits)
+						return watchProviderLibrary.FilterAccessibleContentIDs(ctx, contentIDs, allowed, scope.DisabledLibraryIDs, scope.MaturityLimits)
 					},
 				}, nil
 			}).
