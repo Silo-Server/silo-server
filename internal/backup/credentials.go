@@ -440,7 +440,7 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 	}
 	_, _ = fmt.Fprintf(out, "Kept this server's %s in place of the backup's: %s.\n", carriedKinds, strings.Join(kept, ", "))
 	if len(carriedRows.Dropped) > 0 {
-		_, _ = fmt.Fprintf(out, "Dropped %d whose owner is not in the backup or has more authority there than here: %s\n",
+		_, _ = fmt.Fprintf(out, "Dropped %d whose owner is not in the backup or has more authority there than here, or that the backup's older schema cannot hold beside another account's: %s\n",
 			len(carriedRows.Dropped), strings.Join(carriedRows.Dropped, ", "))
 	}
 	if len(carriedRows.Cleared) > 0 {
@@ -710,26 +710,42 @@ func tableColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error
 // that are not the same as a carried live one, upserts the live ones whose
 // owner exists, and moves an identity sequence past the ids it wrote. Only
 // the columns the restored schema has are written, so a backup taken
-// before a column was added still restores.
+// before a column was added still restores. A backup taken before a table's
+// key widened (notification_email_prefs gained user_id) is upserted on the
+// key it has, and live rows that would share one of its keys are dropped:
+// it cannot hold them all, and keeping one would hand it the others'.
 func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, result *CarriedCredentials) error {
 	c := t.carry
 	rows := fmt.Sprintf(`json_populate_recordset(NULL::%s, $1::json) r`, t.name)
-	dropped, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE NOT (%s)`, c.describe, rows, c.owned), live)
-	if err != nil {
-		return err
-	}
-	result.Dropped = append(result.Dropped, dropped...)
 	columns, err := tableColumns(ctx, tx, t.name)
 	if err != nil {
 		return err
 	}
+	keyColumns := strings.Split(c.key, ", ")
+	owned := c.owned
+	restoredKey, err := primaryKeyColumns(ctx, tx, t.name)
+	if err != nil {
+		return err
+	}
+	if len(restoredKey) > 0 && !sameColumns(restoredKey, keyColumns) {
+		owned = fmt.Sprintf(`(%s) AND NOT EXISTS (SELECT 1 FROM json_populate_recordset(NULL::%s, $1::json) o
+			WHERE ROW(%s) = ROW(%s) AND ROW(%s) IS DISTINCT FROM ROW(%s))`,
+			c.owned, t.name, prefixed("o.", restoredKey), prefixed("r.", restoredKey),
+			prefixed("o.", keyColumns), prefixed("r.", keyColumns))
+		keyColumns = restoredKey
+	}
+	key := strings.Join(keyColumns, ", ")
+	dropped, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE NOT (%s)`, c.describe, rows, owned), live)
+	if err != nil {
+		return err
+	}
+	result.Dropped = append(result.Dropped, dropped...)
 	same := slices.DeleteFunc(slices.Clone(c.same), func(col string) bool { return !slices.Contains(columns, col) })
 	if _, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s t WHERE %s AND NOT EXISTS (
 		SELECT 1 FROM %s WHERE (%s) AND (%s) = (%s))`,
-		t.name, c.credential, rows, c.owned, prefixed("r.", same), prefixed("t.", same)), live); err != nil {
+		t.name, c.credential, rows, owned, prefixed("r.", same), prefixed("t.", same)), live); err != nil {
 		return err
 	}
-	keyColumns := strings.Split(c.key, ", ")
 	var set []string
 	for _, col := range columns {
 		if !slices.Contains(keyColumns, col) {
@@ -741,7 +757,7 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		values[i] = "r." + col
 		if l := c.limit; l != nil && col == l.column {
 			values[i] = fmt.Sprintf("(r.%s AND (%s))", col, l.keep)
-			limited, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE (%s) AND r.%s AND NOT (%s)`, c.describe, rows, c.owned, col, l.keep), live)
+			limited, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE (%s) AND r.%s AND NOT (%s)`, c.describe, rows, owned, col, l.keep), live)
 			if err != nil {
 				return err
 			}
@@ -753,7 +769,7 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 	tag, err := tx.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (%s) OVERRIDING SYSTEM VALUE
 		SELECT %s FROM %s WHERE %s
 		ON CONFLICT (%s) DO UPDATE SET %s`,
-		t.name, strings.Join(columns, ", "), strings.Join(values, ", "), rows, c.owned, c.key, strings.Join(set, ", ")), live)
+		t.name, strings.Join(columns, ", "), strings.Join(values, ", "), rows, owned, key, strings.Join(set, ", ")), live)
 	if err != nil {
 		return err
 	}
@@ -765,12 +781,28 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		return nil
 	}
 	var seq *string
-	if err := tx.QueryRow(ctx, `SELECT pg_get_serial_sequence($1, $2)`, t.name, c.key).Scan(&seq); err != nil || seq == nil {
+	if err := tx.QueryRow(ctx, `SELECT pg_get_serial_sequence($1, $2)`, t.name, key).Scan(&seq); err != nil || seq == nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, fmt.Sprintf(`SELECT setval($1::regclass, GREATEST(
-		coalesce(pg_sequence_last_value($1::regclass), 0), (SELECT coalesce(max(%s), 0) FROM %s), 1))`, c.key, t.name), *seq)
+		coalesce(pg_sequence_last_value($1::regclass), 0), (SELECT coalesce(max(%s), 0) FROM %s), 1))`, key, t.name), *seq)
 	return err
+}
+
+// primaryKeyColumns lists the columns of table's primary key, in key order;
+// none when it has no primary key.
+func primaryKeyColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error) {
+	return collectStrings(ctx, tx, `
+		SELECT a.attname::text
+		FROM pg_index i
+		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+		WHERE i.indrelid = $1::regclass AND i.indisprimary
+		ORDER BY array_position(i.indkey::int2[], a.attnum)`, table)
+}
+
+// sameColumns reports whether a and b name the same columns in any order.
+func sameColumns(a, b []string) bool {
+	return len(a) == len(b) && !slices.ContainsFunc(a, func(col string) bool { return !slices.Contains(b, col) })
 }
 
 func prefixed(prefix string, columns []string) string {

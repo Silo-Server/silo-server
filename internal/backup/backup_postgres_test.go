@@ -1841,3 +1841,51 @@ func TestCustomPoliciesComeFromTheLiveServerDB(t *testing.T) {
 		t.Fatalf("with no live policy: %d enabled (%v), reported %v; want the backup's off and reported", enabled, err, off)
 	}
 }
+
+// A backup taken before notification_email_prefs was keyed by account holds
+// one row per profile id. The carry upserts on the key that backup has, and
+// drops the live rows two accounts' profiles with the same id hold instead
+// of keeping one of them there.
+func TestCarryOntoAnOlderKeyDropsSharedRowsDB(t *testing.T) {
+	pool, dsn := testDB(t)
+	ctx := t.Context()
+	conn, err := pgx.Connect(ctx, createDatabase(t, pool, dsn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err = tx.Exec(ctx, `
+		CREATE TABLE notification_email_prefs (
+			profile_id text PRIMARY KEY, user_id integer NOT NULL, custom_email text NOT NULL DEFAULT '');
+		CREATE TABLE user_profiles (id text, user_id integer);
+		CREATE TEMP TABLE carried_owners (id bigint);
+		INSERT INTO notification_email_prefs VALUES ('default', 1, 'stale@example.test');
+		INSERT INTO user_profiles VALUES ('default', 1), ('default', 2), ('kids', 1);
+		INSERT INTO carried_owners VALUES (1), (2)`); err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(secretTables, func(s secretTable) bool { return s.name == "notification_email_prefs" })
+	live := `[{"user_id": 1, "profile_id": "default", "custom_email": "a@example.test"},
+		{"user_id": 2, "profile_id": "default", "custom_email": "b@example.test"},
+		{"user_id": 1, "profile_id": "kids", "custom_email": "kids@example.test"}]`
+	result := CarriedCredentials{Kept: map[string]int{}}
+	if err = secretTables[i].carryInto(ctx, tx, live, &result); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Query(ctx, `SELECT profile_id || ' ' || user_id || ' ' || custom_email FROM notification_email_prefs ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []string{"kids 1 kids@example.test"}) || len(result.Dropped) != 2 || result.Kept["notification_email_prefs"] != 1 {
+		t.Fatalf("carried %v, dropped %v, kept %v", got, result.Dropped, result.Kept)
+	}
+}

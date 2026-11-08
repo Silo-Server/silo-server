@@ -13,16 +13,20 @@
 -- the account that took it over. Such rows are reset to unconfigured (mode
 -- off, no verified or pending address, no unsubscribe token) rather than
 -- guessing an owner. Each account's profile then verifies its own address
--- again. The unsubscribe token goes too: links already sent to the old
--- address would otherwise switch off the reset row's future mail. The
--- accounts that use a profile id come from user_profiles and the
--- account-keyed notification tables, as in 20261016161203.
+-- again, so the verification-send rate limit restarts too: the other
+-- account's sends would otherwise count against it. The unsubscribe token
+-- goes as well: links already sent to the old address would otherwise switch
+-- off the reset row's future mail. The accounts that use a profile id come
+-- from user_profiles and the account-keyed notification tables, as in
+-- 20261016161203; a deleted account does not count.
 UPDATE public.notification_email_prefs p SET
     mode = 'off',
     custom_email = '',
     pending_email = '',
     pending_token_hash = '',
     pending_expires_at = NULL,
+    pending_last_sent_at = NULL,
+    verify_sends_today = 0,
     unsubscribe_token = '',
     updated_at = now()
 WHERE EXISTS (
@@ -33,6 +37,7 @@ WHERE EXISTS (
         UNION SELECT user_id, profile_id FROM public.notification_preferences
         UNION SELECT user_id, profile_id FROM public.notification_email_verifications
     ) owner
+    JOIN public.users u ON u.id = owner.user_id
     WHERE owner.profile_id = p.profile_id AND owner.user_id <> p.user_id
 );
 

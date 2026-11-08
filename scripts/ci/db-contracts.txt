@@ -865,6 +865,7 @@
 # a restored library whose setup partly failed, or whose provider placement
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
 ./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestFullRestoresAreSerializedDB
 ./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB

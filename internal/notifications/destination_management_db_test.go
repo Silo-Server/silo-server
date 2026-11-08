@@ -237,10 +237,13 @@ func TestEmailPrefsAccountKeyMigrationResetsSharedRowsDB(t *testing.T) {
 	ctx := t.Context()
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO notification_email_prefs
-			(profile_id, user_id, mode, custom_email, pending_email, pending_token_hash, pending_expires_at, unsubscribe_token)
-		VALUES ('default', 1, 'per_episode', 'b@example.test', 'b2@example.test', 'hash', now() + interval '1 hour', 'unsubscribe-shared'),
-		       ('kids', 1, 'daily_digest', 'kids@example.test', '', '', NULL, 'unsubscribe-kids');
-		INSERT INTO user_profiles VALUES (1, 'default'), (1, 'kids'), (2, 'default')`); err != nil {
+			(profile_id, user_id, mode, custom_email, pending_email, pending_token_hash, pending_expires_at,
+			 pending_last_sent_at, verify_sends_today, unsubscribe_token)
+		VALUES ('default', 1, 'per_episode', 'b@example.test', 'b2@example.test', 'hash', now() + interval '1 hour',
+		        now(), 3, 'unsubscribe-shared'),
+		       ('kids', 1, 'daily_digest', 'kids@example.test', '', '', NULL, NULL, 0, 'unsubscribe-kids');
+		-- Account 9 was deleted; its leftover profile id does not make "kids" shared.
+		INSERT INTO user_profiles VALUES (1, 'default'), (1, 'kids'), (2, 'default'), (9, 'kids')`); err != nil {
 		t.Fatal(err)
 	}
 	up, down := emailAccountKeyMigration(t)
@@ -249,14 +252,16 @@ func TestEmailPrefsAccountKeyMigrationResetsSharedRowsDB(t *testing.T) {
 	}
 	type row struct {
 		Mode, Custom, Pending, PendingHash, Unsubscribe string
-		Expires                                         *time.Time
+		Expires, LastSent                               *time.Time
+		SendsToday                                      int
 	}
 	read := func(profile string) row {
 		t.Helper()
 		var r row
-		if err := pool.QueryRow(ctx, `SELECT mode, custom_email, pending_email, pending_token_hash, unsubscribe_token, pending_expires_at
+		if err := pool.QueryRow(ctx, `SELECT mode, custom_email, pending_email, pending_token_hash, unsubscribe_token,
+			       pending_expires_at, pending_last_sent_at, verify_sends_today
 			FROM notification_email_prefs WHERE user_id = 1 AND profile_id = $1`, profile).
-			Scan(&r.Mode, &r.Custom, &r.Pending, &r.PendingHash, &r.Unsubscribe, &r.Expires); err != nil {
+			Scan(&r.Mode, &r.Custom, &r.Pending, &r.PendingHash, &r.Unsubscribe, &r.Expires, &r.LastSent, &r.SendsToday); err != nil {
 			t.Fatal(err)
 		}
 		return r
