@@ -18,6 +18,8 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useProfiles } from "@/hooks/queries/profiles";
+import { canAddProfile } from "@/lib/profile-management";
 import { useUnreadNotificationCount } from "@/hooks/queries/notifications";
 import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
@@ -198,6 +200,15 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   const params = useParams<{ libraryId: string }>();
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
+  const household = useProfiles({ enabled: profile != null });
+  // Switch Profile leads to the picker, which is pointless with one profile
+  // and no room for another. Until the household loads (or when it fails to)
+  // the item stays, as it always did.
+  const showSwitchProfile =
+    profile != null &&
+    (!household.isSuccess ||
+      household.data.length > 1 ||
+      canAddProfile(household.data.length, household.maxProfiles));
   const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
@@ -1069,7 +1080,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               <DropdownMenuSeparator />
 
               <div className="flex flex-col gap-1 pt-0.5">
-                {profile && (
+                {showSwitchProfile && (
                   <DropdownMenuItem
                     onClick={() => {
                       clearProfile();

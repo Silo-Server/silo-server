@@ -32053,6 +32053,12 @@ export interface components {
        * @example true
        */
       max_advisory_age_supported: boolean;
+      /**
+       * Format: int64
+       * @description How many profiles this account may have, from its effective access policy; createProfile answers 409 once the household holds this many. Omitted when the server could not read the limit, and on a remote-playback handoff, which lists only its own profile; a client then keeps offering new profiles
+       * @example 5
+       */
+      max_profiles?: number;
       /** @description Cursor state; absent for bounded unpaginated collections */
       page?: components["schemas"]["PageInfo"];
       /**
