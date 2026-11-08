@@ -1,5 +1,13 @@
 import { serverText, t } from "@/i18n";
-import type { SettingDefinition } from "@/lib/settingsContract";
+import { SETTING_KEYS, type SettingDefinition } from "@/lib/settingsContract";
+
+/** The skip intervals, whose choices print the seconds in the screen's digits. */
+const SKIP_INTERVAL_KEYS: ReadonlySet<string> = new Set([
+  SETTING_KEYS.PLAYER_VIDEO_SKIP_BACK_SECONDS,
+  SETTING_KEYS.PLAYER_VIDEO_SKIP_FORWARD_SECONDS,
+  SETTING_KEYS.PLAYER_AUDIOBOOK_SKIP_BACK_SECONDS,
+  SETTING_KEYS.PLAYER_AUDIOBOOK_SKIP_FORWARD_SECONDS,
+]);
 
 /** A manifest text's catalog key: `settingsManifest.<key>.<field>`, with "-" as "_" in segments. */
 function manifestKey(definition: Pick<SettingDefinition, "key">, field: string): string {
@@ -44,6 +52,11 @@ export function settingOptionLabel(
 ): string {
   const value = String(member.value);
   if (!member.label) return value;
+  // The manifest writes "10 seconds" as text; the catalog's message formats
+  // the number, so it follows the screen's digits.
+  if (SKIP_INTERVAL_KEYS.has(definition.key)) {
+    return t("player.seekInterval.choice", { seconds: Number(member.value) });
+  }
   return serverText(
     manifestKey(definition, `option.${value.replace(/-/g, "_")}`),
     undefined,
