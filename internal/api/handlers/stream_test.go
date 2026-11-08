@@ -313,6 +313,7 @@ func TestHandleStream_RemuxRangeRefusal(t *testing.T) {
 	}{
 		{name: "resumed range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusConflict},
 		{name: "suffix range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=-500", wantStatus: http.StatusConflict},
+		{name: "range set reaching past the origin", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-1,5000-", wantStatus: http.StatusConflict},
 		{name: "range from the origin", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-", wantStatus: http.StatusOK},
 		{name: "byte-range probe", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-1", wantStatus: http.StatusOK},
 		{name: "no range", method: http.MethodGet, query: optIn, wantStatus: http.StatusOK},

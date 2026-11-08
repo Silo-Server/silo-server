@@ -18,7 +18,8 @@ const (
 // refused rather than streamed: its URL opted in with RemuxRangeQueryParam and
 // it asks for bytes the response cannot start at. A remux always streams from
 // the URL's seek origin, so the only range it can honor is one that starts at
-// byte zero (`bytes=0-` from a browser, `bytes=0-1` from a probe). A request
+// byte zero (`bytes=0-` from a browser, `bytes=0-1` from a probe); a range past
+// byte zero or a suffix range, anywhere in the set, is refused. A request
 // without a Range header, or with one that does not parse, streams as before.
 //
 // Without the opt-in every request streams from the origin and the client
@@ -32,13 +33,24 @@ func RefusesRemuxRange(r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	first, _, _ := strings.Cut(spec, ",")
-	start, end, ok := strings.Cut(strings.TrimSpace(first), "-")
+	// Any range in the set that the response cannot start with refuses the
+	// request; browsers send one.
+	for _, part := range strings.Split(spec, ",") {
+		if remuxRangeNeedsResume(part) {
+			return true
+		}
+	}
+	return false
+}
+
+// remuxRangeNeedsResume reports whether one range spec asks for bytes past the
+// start of the stream: a start past byte zero, or a suffix range (`bytes=-500`),
+// which names the end of a stream whose length is not known yet.
+func remuxRangeNeedsResume(part string) bool {
+	start, end, ok := strings.Cut(strings.TrimSpace(part), "-")
 	if !ok {
 		return false
 	}
-	// A suffix range (`bytes=-500`) names the end of a stream whose length
-	// is not known yet.
 	if start == "" {
 		return strings.TrimSpace(end) != ""
 	}
