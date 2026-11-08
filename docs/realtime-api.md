@@ -550,10 +550,10 @@ answer `404`.
 - `GET /api/v2/watch-together/visitor-invites/{token}`
   (`getWatchPartyVisitorInvite`) returns `host_name` and `expires_at`.
 - `POST /api/v2/watch-together/visitor-invites/{token}/accept`
-  (`acceptWatchPartyVisitorInvite`) takes `{display_name}` (1 to 40 characters;
-  no control or invisible format characters; otherwise `422`) and answers `201`. A room with 10 visitors answers `409`.
-  Each call admits another visitor, so a client must not retry it
-  automatically. The body carries `room_id`, `visitor_id`, `display_name`,
+  (`acceptWatchPartyVisitorInvite`) takes `{display_name}` (1 to 40 characters
+  after trimming, with no control or invisible format characters; otherwise
+  `422`) and answers `201`. A room with 10 visitors answers `409`. Each call
+  admits another visitor, so a client must not retry it automatically. The body carries `room_id`, `visitor_id`, `display_name`,
   `member_profile_id` (the visitor's `profile_id` in the roster),
   `access_token`, `refresh_token`, `expires_in`, `profile_id` and, when that
   profile has a PIN, `profile_token`, plus `room_token` and `session_ends_at`.
