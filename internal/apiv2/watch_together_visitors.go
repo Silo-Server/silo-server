@@ -88,7 +88,7 @@ type WatchPartyVisitorAcceptInput struct {
 	Body      struct {
 		// maxLength bounds the raw value; the server trims surrounding
 		// space and then allows 1 to 40 characters (MaxVisitorNameRunes).
-		DisplayName string `json:"display_name" minLength:"1" maxLength:"160" doc:"Name the room shows for the visitor: 1 to 40 characters after surrounding space is trimmed. Longer values are refused with 422."`
+		DisplayName string `json:"display_name" minLength:"1" maxLength:"160" doc:"Name the room shows for the visitor: 1 to 40 characters after surrounding space is trimmed, with no control or invisible format characters. Other values are refused with 422."`
 	}
 }
 

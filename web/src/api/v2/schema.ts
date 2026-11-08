@@ -35895,7 +35895,7 @@ export interface components {
       visitor_id: string;
     };
     WatchPartyVisitorAcceptInputBody: {
-      /** @description Name the room shows for the visitor: 1 to 40 characters after surrounding space is trimmed. Longer values are refused with 422. */
+      /** @description Name the room shows for the visitor: 1 to 40 characters after surrounding space is trimmed, with no control or invisible format characters. Other values are refused with 422. */
       display_name: string;
     };
     WatchPartyVisitorInvite: {
