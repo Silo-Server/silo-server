@@ -277,7 +277,7 @@ var secretTables = []secretTable{
 		describe: `format('notification webhook %s %L (account %s)', r.id, r.name, r.user_id)`,
 	}},
 	{name: "notification_email_prefs", handling: secretCarried, why: "notification email addresses", carry: &carrySpec{
-		key: columnProfileID, same: []string{columnProfileID, columnUserID}, credential: everyRow,
+		key: columnUserID + ", " + columnProfileID, same: []string{columnUserID, columnProfileID}, credential: everyRow,
 		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,
 		describe: `format('notification email of profile %s (account %s)', r.profile_id, r.user_id)`,
 	}},
