@@ -362,6 +362,26 @@ func parseBitDepth(stream Stream) int {
 	return parseNumeric(string(stream.BitsPerSample))
 }
 
+// StreamBitrateKbps returns a stream's bitrate in kbps, or 0 when unknown.
+// Matroska has no per-stream bitrate field, so ffprobe reports bit_rate as
+// N/A there; mkvmerge writes the measured rate as a BPS statistics tag
+// (BPS-eng in older muxers), which is the fallback.
+func StreamBitrateKbps(stream Stream) int {
+	if bps := parseNumeric(stream.BitRate); bps > 0 {
+		return bps / 1000
+	}
+	for _, key := range []string{"BPS", "BPS-eng"} {
+		for tag, value := range stream.Tags {
+			if strings.EqualFold(tag, key) {
+				if bps := parseNumeric(strings.TrimSpace(value)); bps > 0 {
+					return bps / 1000
+				}
+			}
+		}
+	}
+	return 0
+}
+
 func parseNumeric(raw string) int {
 	value, _ := strconv.Atoi(raw)
 	return value
