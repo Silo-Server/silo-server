@@ -390,10 +390,13 @@ stream is the exception: it is one forward-only response from its `seek`
 origin, so it answers `200` from that origin whatever the `Range`. A client that
 lists `progressive_range_refusal_v1` in `deliveries.progressive.features` gets
 `remux_range=refuse` on that URL, and a GET whose range starts past byte 0, or
-is a suffix range such as `bytes=-500`, is then `409 conflict` before any work
-starts; the client reopens the stream at
-its current position. The web player opts in; native players, which skip the
-bytes they already have, keep the `200`. A failure before the first
+is a suffix range such as `bytes=-500`, is then `409` before any work starts;
+the client reopens the stream at its current position. The API answers it as a
+v2 `conflict` problem and a proxy as plain text, so a client should act on the
+status. A proxy that does not advertise `remux_range_refusal_v1` would ignore
+the parameter, so the plan leaves it off that proxy's URL and the stream keeps
+the `200`. The web player opts in; native players, which skip the bytes they
+already have, keep the `200`. A failure before the first
 byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
