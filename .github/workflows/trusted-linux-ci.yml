@@ -120,17 +120,29 @@ jobs:
             !/web/assets-source/
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      # GitHub release downloads can fail for hours with 504s while the rest of
+      # Actions works, which stopped every run at the step below. Keep the
+      # archives in the Actions cache so most runs never fetch them. The
+      # checksums still verify every archive, cached or downloaded. Change the
+      # key whenever a tool version changes.
+      - name: Restore pinned workflow and shell tool archives
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/workflow-tool-archives
+          key: workflow-tool-archives-actionlint-1.7.12-shellcheck-0.11.0
       - name: Install pinned workflow and shell tools
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/workflow-tools"
-          cd "$RUNNER_TEMP/workflow-tools"
-          curl -fsSL --retry 3 -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          archives="$RUNNER_TEMP/workflow-tool-archives"
+          mkdir -p "$archives" "$RUNNER_TEMP/workflow-tools"
+          cd "$archives"
+          [ -f actionlint.tar.gz ] || curl -fsSL --retry 3 -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
           echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | sha256sum -c -
-          tar -xzf actionlint.tar.gz actionlint
-          curl -fsSL --retry 3 -o shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          [ -f shellcheck.tar.xz ] || curl -fsSL --retry 3 -o shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
           echo '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  shellcheck.tar.xz' | sha256sum -c -
-          tar -xJf shellcheck.tar.xz --strip-components=1 shellcheck-v0.11.0/shellcheck
+          cd "$RUNNER_TEMP/workflow-tools"
+          tar -xzf "$archives/actionlint.tar.gz" actionlint
+          tar -xJf "$archives/shellcheck.tar.xz" --strip-components=1 shellcheck-v0.11.0/shellcheck
           echo "$RUNNER_TEMP/workflow-tools" >> "$GITHUB_PATH"
       - name: Test CI helper changes
         run: |
