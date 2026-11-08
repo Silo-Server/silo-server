@@ -32,7 +32,11 @@ import {
   buildPlexAuthURL,
   getPreferredPlexServerURL,
   getPlexFallbackURLs,
+  loadPlexHome,
+  resolvePlexHomeUserServer,
   type BrowserPlexServer,
+  type PlexHome,
+  type PlexHomeUser,
 } from "@/lib/plexAuth";
 import {
   canStartEmbyImport,
@@ -87,6 +91,14 @@ const STATUS_CONFIG = {
   },
 } as const;
 
+const emptyPlexHome: PlexHome = { accountUUID: "", users: [] };
+
+function plexHomeUserLabel(user: PlexHomeUser, accountUUID: string): string {
+  if (user.uuid === accountUUID) return `${user.title} (you)`;
+  if (user.restricted) return `${user.title} (managed)`;
+  return user.title;
+}
+
 export default function HistoryImportSettings() {
   useEventChannel("history_import");
   const navigate = useNavigate();
@@ -131,6 +143,13 @@ export default function HistoryImportSettings() {
   const [plexToken, setPlexToken] = useState("");
   const [plexAuthPending, setPlexAuthPending] = useState(false);
   const [plexAuthError, setPlexAuthError] = useState<string | null>(null);
+  // Plex Home: plexAccountToken outlives a started run, so after one import
+  // finishes the next Home member can be picked without signing in again.
+  const [plexHome, setPlexHome] = useState<PlexHome>(emptyPlexHome);
+  const [plexHomeUserId, setPlexHomeUserId] = useState("");
+  const [plexHomeUserPin, setPlexHomeUserPin] = useState("");
+  const [plexSwitchPending, setPlexSwitchPending] = useState(false);
+  const [plexSwitchError, setPlexSwitchError] = useState<string | null>(null);
 
   const loginMutation = useLoginEmbyConnect();
   const createRunMutation = useCreateHistoryImportRun();
@@ -141,7 +160,8 @@ export default function HistoryImportSettings() {
   } = useHistoryImportRun(activeRunId ?? recentRuns[0]?.id);
 
   const displayRun = activeRun ?? recentRuns[0] ?? null;
-  const pending = loginMutation.isPending || createRunMutation.isPending || plexAuthPending;
+  const pending =
+    loginMutation.isPending || createRunMutation.isPending || plexAuthPending || plexSwitchPending;
   const effectiveProfileId = canImportForOthers
     ? profileId || profile?.id || ""
     : (profile?.id ?? "");
@@ -168,16 +188,14 @@ export default function HistoryImportSettings() {
     () => plexServers.find((server) => server.clientIdentifier === plexServerId),
     [plexServerId, plexServers],
   );
+  // Undefined means the signed-in account itself; no switch is needed.
+  const selectedPlexHomeUser = plexHome.users.find(
+    (user) => user.uuid === plexHomeUserId && user.uuid !== plexHome.accountUUID,
+  );
   const selectedPlexOAuthServerURL = selectedPlexOAuthServer
     ? getPreferredPlexServerURL(selectedPlexOAuthServer)
     : "";
-  // The server races these and keeps the first that answers, so a server whose
-  // preferred address is blocked by a reverse proxy still imports.
   const { data: importCapability } = useHistoryImportCapability();
-  const selectedPlexOAuthFallbackURLs =
-    selectedPlexOAuthServer && importCapability?.plex_connection_fallback
-      ? getPlexFallbackURLs(selectedPlexOAuthServer)
-      : [];
 
   useEffect(() => {
     if (returnedPlexAuth !== "1") {
@@ -211,12 +229,16 @@ export default function HistoryImportSettings() {
           pinID,
           returnedPlexPinCode,
         );
+        const home = await loadPlexHome(accountToken);
         if (cancelled) {
           return;
         }
         setPlexAccountToken(accountToken);
         setPlexServers(servers);
         setPlexServerId(servers[0]?.clientIdentifier ?? "");
+        setPlexHome(home);
+        setPlexHomeUserId(home.accountUUID);
+        setPlexHomeUserPin("");
       } catch (error) {
         if (cancelled) {
           return;
@@ -224,6 +246,8 @@ export default function HistoryImportSettings() {
         setPlexAccountToken("");
         setPlexServers([]);
         setPlexServerId("");
+        setPlexHome(emptyPlexHome);
+        setPlexHomeUserId("");
         setPlexAuthError(error instanceof Error ? error.message : "Failed to finish Plex sign-in");
       } finally {
         if (!cancelled) {
@@ -252,6 +276,10 @@ export default function HistoryImportSettings() {
     setPlexAuthError(null);
     setPlexServers([]);
     setPlexServerId("");
+    setPlexHome(emptyPlexHome);
+    setPlexHomeUserId("");
+    setPlexHomeUserPin("");
+    setPlexSwitchError(null);
 
     try {
       const pin = await createPlexPin();
@@ -298,17 +326,46 @@ export default function HistoryImportSettings() {
 
     if (sourceType === "plex") {
       if (plexMode === "oauth" && selectedPlexOAuthServerURL && selectedPlexOAuthServer) {
+        let server = selectedPlexOAuthServer;
+        let accountToken = plexAccountToken;
+        if (selectedPlexHomeUser) {
+          // Import as the Home member: their own server token and plex.tv
+          // token, so the run reads their watch state and watchlist.
+          setPlexSwitchError(null);
+          setPlexSwitchPending(true);
+          try {
+            const resolved = await resolvePlexHomeUserServer(
+              plexAccountToken,
+              selectedPlexHomeUser,
+              plexHomeUserPin.trim(),
+              selectedPlexOAuthServer.clientIdentifier,
+            );
+            server = resolved.server;
+            accountToken = resolved.accountToken;
+          } catch (error) {
+            setPlexSwitchError(
+              error instanceof Error ? error.message : "Could not switch to this Plex Home user.",
+            );
+            return;
+          } finally {
+            setPlexSwitchPending(false);
+          }
+        }
+        // The server races these and keeps the first that answers, so a server whose
+        // preferred address is blocked by a reverse proxy still imports.
+        const fallbackURLs = importCapability?.plex_connection_fallback
+          ? getPlexFallbackURLs(server)
+          : [];
         const run = await createRunMutation.mutateAsync({
           profile_id: effectiveProfileId,
           source: "plex",
-          plex_base_url: selectedPlexOAuthServerURL,
-          ...(selectedPlexOAuthFallbackURLs.length > 0
-            ? { plex_base_urls: selectedPlexOAuthFallbackURLs }
-            : {}),
-          plex_token: selectedPlexOAuthServer.accessToken,
-          plex_account_token: plexAccountToken || undefined,
+          plex_base_url: getPreferredPlexServerURL(server),
+          ...(fallbackURLs.length > 0 ? { plex_base_urls: fallbackURLs } : {}),
+          plex_token: server.accessToken,
+          plex_account_token: accountToken || undefined,
         });
         setActiveRunId(run.id);
+        setPlexHomeUserPin("");
       } else if (plexMode === "saved" && selectedPlexSavedSource) {
         const run = await createRunMutation.mutateAsync({
           profile_id: effectiveProfileId,
@@ -346,7 +403,10 @@ export default function HistoryImportSettings() {
         )
       : sourceType === "plex"
         ? plexMode === "oauth"
-          ? !!effectiveProfileId && !!selectedPlexOAuthServer && !!selectedPlexOAuthServerURL
+          ? !!effectiveProfileId &&
+            !!selectedPlexOAuthServer &&
+            !!selectedPlexOAuthServerURL &&
+            (!selectedPlexHomeUser?.protected || plexHomeUserPin.trim() !== "")
           : !!effectiveProfileId && !!selectedPlexSavedSource && !!plexToken
         : canStartJellyfinImport(
             effectiveProfileId,
@@ -557,6 +617,49 @@ export default function HistoryImportSettings() {
                         </SelectContent>
                       </Select>
                     </div>
+                    {plexHome.users.length > 1 && (
+                      <div className="space-y-2">
+                        <Label>Plex Home user</Label>
+                        <Select
+                          value={plexHomeUserId}
+                          onValueChange={(value) => {
+                            setPlexHomeUserId(value);
+                            setPlexHomeUserPin("");
+                            setPlexSwitchError(null);
+                          }}
+                        >
+                          <SelectTrigger aria-label="Plex Home user">
+                            <SelectValue placeholder="Choose a Plex Home user" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {plexHome.users.map((user) => (
+                              <SelectItem key={user.uuid} value={user.uuid}>
+                                {plexHomeUserLabel(user, plexHome.accountUUID)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-muted-foreground text-xs leading-relaxed">
+                          Imports one person at a time. When an import finishes, choose the next
+                          Plex Home user and the profile their history goes into.
+                        </p>
+                      </div>
+                    )}
+                    {selectedPlexHomeUser?.protected && (
+                      <div className="space-y-2">
+                        <Label htmlFor="plex-home-user-pin">
+                          {selectedPlexHomeUser.title}'s Plex Home PIN
+                        </Label>
+                        <Input
+                          id="plex-home-user-pin"
+                          type="password"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          value={plexHomeUserPin}
+                          onChange={(e) => setPlexHomeUserPin(e.target.value)}
+                        />
+                      </div>
+                    )}
                     <Button onClick={handlePlexLogin} disabled={plexAuthPending} variant="outline">
                       Reconnect Plex Account
                     </Button>
@@ -671,7 +774,7 @@ export default function HistoryImportSettings() {
             disabled={!canStart || pending}
             className="sm:px-8"
           >
-            {createRunMutation.isPending ? "Starting\u2026" : "Start Import"}
+            {createRunMutation.isPending || plexSwitchPending ? "Starting\u2026" : "Start Import"}
           </Button>
         </div>
         {startError && (
@@ -680,6 +783,11 @@ export default function HistoryImportSettings() {
                 others only ever targets itself, so its 403 is some other refusal
                 (demo mode, say), and the cross-profile refusal already explains itself. */}
             {startError.message}
+          </p>
+        )}
+        {plexSwitchError && sourceType === "plex" && (
+          <p role="alert" className="text-destructive text-sm">
+            {plexSwitchError}
           </p>
         )}
       </SettingsGroup>
