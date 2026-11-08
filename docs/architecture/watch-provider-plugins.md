@@ -161,6 +161,10 @@ watches instead.
   listing a connection's rows drops those of any other account. After a reconnect to a
   different account, no watch from the old one imports, even from a sync of the old
   account that was still running.
+- A connection keeps at most 50,000 rows (`maxPendingWatches`). Past that the oldest by
+  `last_watched_at` go, so a provider history that matches little of the library can't
+  grow what every sync reloads without bound. Listing returns nothing to a caller whose
+  account is no longer the connection's.
 - Every watched import matches the kept rows again after the provider's own rows, in
   batched catalog reads (`historyimport.MatchAllOn`). A kept row that matches imports
   like a fresh one and is deleted. One that still matches nothing adds no warning. A

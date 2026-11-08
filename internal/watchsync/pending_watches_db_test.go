@@ -178,3 +178,30 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 		t.Fatalf("kept %d watches of the previous account, want none", rows)
 	}
 }
+
+// A connection keeps at most maxPendingWatches; past it the oldest go.
+func TestSavePendingWatchesKeepsTheNewestDB(t *testing.T) {
+	ctx := t.Context()
+	repo, conn, _ := newSyncStateTestConnection(t)
+	oldest := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+	watches := make([]RemoteWatch, maxPendingWatches+1)
+	for i := range watches {
+		at := oldest.Add(time.Duration(i) * time.Minute)
+		watches[i] = RemoteWatch{
+			Provider: conn.Provider, ProviderItemKey: "tmdb:" + strconv.Itoa(i), Kind: historyimport.KindMovie,
+			TMDBID: strconv.Itoa(i), PlayCount: 1, LastWatchedAt: &at,
+		}
+	}
+	if err := repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, watches); err != nil {
+		t.Fatal(err)
+	}
+	var kept int
+	var earliest time.Time
+	if err := repo.pool.QueryRow(ctx, `SELECT count(*), min(last_watched_at) FROM watch_provider_pending_watches WHERE connection_id=$1`,
+		conn.ID).Scan(&kept, &earliest); err != nil {
+		t.Fatal(err)
+	}
+	if kept != maxPendingWatches || !earliest.After(oldest) {
+		t.Fatalf("kept %d watches from %v, want %d without the oldest", kept, earliest, maxPendingWatches)
+	}
+}
