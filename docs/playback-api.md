@@ -395,8 +395,9 @@ the client reopens the stream at its current position. The API answers it as a
 v2 `conflict` problem and a proxy as plain text, so a client should act on the
 status. A proxy that does not advertise `remux_range_refusal_v1` would ignore
 the parameter, so the plan leaves it off that proxy's URL and the stream keeps
-the `200`. The web player opts in; native players, which skip the bytes they
-already have, keep the `200`. A failure before the first
+the `200`. The web player opts in on Chromium browsers only. Firefox, Safari
+and native players keep the `200`; native players skip the bytes they already
+have. A failure before the first
 byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
