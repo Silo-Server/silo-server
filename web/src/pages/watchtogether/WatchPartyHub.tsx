@@ -1,7 +1,16 @@
 import { captureRoomCreationDraft, type RoomCreationDraft } from "@/api/v2/watchTogetherCreate";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { ClipboardPaste, Crown, Loader2, Sparkles, Ticket, UsersRound, Vote } from "lucide-react";
+import {
+  ClipboardPaste,
+  Crown,
+  Globe,
+  Loader2,
+  Sparkles,
+  Ticket,
+  UsersRound,
+  Vote,
+} from "lucide-react";
 import { V2ProblemError, V2TransportError } from "@/api/v2/request";
 import {
   ApiClientError,
@@ -14,12 +23,16 @@ import { Input } from "@/components/ui/input";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useOptionalAuth } from "@/hooks/useAuth";
+import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import {
   createWatchTogetherRoom,
   getWatchTogetherRoom,
   joinWatchTogetherRoom,
+  type WatchTogetherPublicRoom,
   type WatchTogetherSelectionMode,
 } from "@/lib/watchTogether";
+import { usePublicRooms } from "./hooks/usePublicRooms";
+import { itemHeadline } from "./room/stage/StagedHero";
 import {
   forgetRecentRoom,
   markRecentRoomEnded,
@@ -231,6 +244,19 @@ export default function WatchPartyHub() {
       setPendingCreation((current) => (current?.run === run ? null : current));
     }
   }, [enterRoom, selectionMode]);
+
+  // ── Open parties ────────────────────────────────────────────────────
+  const enterApprovedRoom = useCallback(
+    (response: Awaited<ReturnType<typeof joinWatchTogetherRoom>>) => {
+      const authority = captureProfileRequestContext();
+      if (authority) enterRoom(response, authority);
+    },
+    [enterRoom],
+  );
+  const openParties = usePublicRooms({
+    profileKey: userId !== null && profileId !== null ? `${userId}:${profileId}` : null,
+    onApproved: enterApprovedRoom,
+  });
 
   // ── Recent parties ──────────────────────────────────────────────────
   const recent = useRecentRooms();
@@ -475,6 +501,51 @@ export default function WatchPartyHub() {
         </section>
       </div>
 
+      {openParties.unavailable ? null : (
+        <section aria-labelledby="hub-open" className="flex flex-col gap-3">
+          <h2
+            id="hub-open"
+            className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase"
+          >
+            Open watch parties
+          </h2>
+          {openParties.error ? (
+            <p role="alert" className="text-sm text-red-300">
+              {openParties.error}
+            </p>
+          ) : null}
+          {openParties.rooms === null ? (
+            <p className="text-muted-foreground text-sm">
+              {openParties.listFailed
+                ? "Couldn't load open parties. Trying again shortly."
+                : "Looking for open parties…"}
+            </p>
+          ) : openParties.rooms.length === 0 ? (
+            <p className="text-muted-foreground text-sm leading-6">
+              No open parties right now. Hosts can make a room public from inside it, and anyone on
+              this server can then ask to join.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {openParties.rooms.map((party) => (
+                <OpenPartyRow
+                  key={party.room_id}
+                  party={party}
+                  asking={openParties.requesting === party.room_id}
+                  disabled={busy}
+                  onAsk={() => void openParties.requestToJoin(party.room_id)}
+                  onEnter={() =>
+                    party.join_request
+                      ? void openParties.checkRequest(party.room_id, party.join_request.id)
+                      : undefined
+                  }
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       {visibleRecent.length > 0 ? (
         <section className="flex flex-col gap-3">
           <h2 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
@@ -562,6 +633,100 @@ function RecentRoomRow({
         <span className="text-muted-foreground text-[11px] font-semibold tracking-[0.14em] uppercase">
           {status === "checking" ? "" : "Ended"}
         </span>
+      )}
+    </li>
+  );
+}
+
+/** Where an open party is: still choosing in the lobby, or already watching. */
+function OpenPartyStatus({ party }: { party: WatchTogetherPublicRoom }) {
+  // The catalog read applies this profile's library access, so a title it
+  // cannot see stays unnamed.
+  const detail = useCatalogItemDetail(party.selected_content_id);
+  const title = detail.data ? itemHeadline(detail.data) : null;
+  if (party.phase === "playing") {
+    return (
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-emerald-400" />
+        <span className="truncate">{title ? `Watching ${title}` : "In progress"}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-sky-400" />
+      <span className="truncate">{title ? `In menu · up next ${title}` : "In menu"}</span>
+    </span>
+  );
+}
+
+function OpenPartyRow({
+  party,
+  asking,
+  disabled,
+  onAsk,
+  onEnter,
+}: {
+  party: WatchTogetherPublicRoom;
+  asking: boolean;
+  disabled: boolean;
+  onAsk: () => void;
+  onEnter: () => void;
+}) {
+  const status = party.join_request?.status;
+  return (
+    <li className="surface-panel-subtle flex items-center gap-3 rounded-xl px-4 py-3">
+      <div className="bg-surface-raised flex size-10 shrink-0 items-center justify-center rounded-lg">
+        <Globe className="text-muted-foreground size-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold">
+          {party.is_host ? "Your party" : `${party.host_display_name}'s party`}
+        </div>
+        <div className="text-muted-foreground mt-0.5 flex min-w-0 items-center gap-2 text-xs">
+          <OpenPartyStatus party={party} />
+          <span aria-hidden="true">·</span>
+          <span className="shrink-0">{party.member_count} here</span>
+          {!party.host_connected ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="shrink-0">Host away</span>
+            </>
+          ) : null}
+        </div>
+        {status === "denied" ? (
+          <div className="text-muted-foreground mt-0.5 text-xs">
+            The host turned this request down.
+          </div>
+        ) : null}
+      </div>
+      {party.is_host ? (
+        <span className="text-muted-foreground text-[11px] font-semibold tracking-[0.14em] uppercase">
+          Hosting
+        </span>
+      ) : status === "pending" ? (
+        <span
+          role="status"
+          className="text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs"
+        >
+          <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+          <span className="hidden sm:inline">Waiting for the host</span>
+          <span className="sm:hidden">Waiting</span>
+        </span>
+      ) : status === "approved" ? (
+        <Button type="button" size="sm" onClick={onEnter} disabled={disabled}>
+          Join
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onAsk}
+          disabled={disabled || asking}
+        >
+          {asking ? "Asking…" : status === "denied" ? "Ask again" : "Ask to join"}
+        </Button>
       )}
     </li>
   );

@@ -558,7 +558,11 @@ export const v2Operations = {
   "GET /api/v2/watch-providers/{provider}/connection/settings": "getWatchProviderSettings",
   "GET /api/v2/watch-providers/{provider}/sync-runs": "listWatchProviderSyncRuns",
   "GET /api/v2/watch-together/capabilities": "getWatchTogetherCapabilities",
+  "GET /api/v2/watch-together/public-rooms": "listWatchTogetherPublicRooms",
   "GET /api/v2/watch-together/rooms/{room_id}": "getWatchTogetherRoom",
+  "GET /api/v2/watch-together/rooms/{room_id}/join-requests": "listWatchTogetherJoinRequests",
+  "GET /api/v2/watch-together/rooms/{room_id}/join-requests/{request_id}":
+    "getWatchTogetherJoinRequest",
   "GET /api/v2/watch-together/rooms/{room_id}/picker": "getWatchTogetherRoomPicker",
   "GET /api/v2/watch-together/rooms/{room_id}/suggestions": "listWatchTogetherSuggestions",
   "GET /api/v2/watch-together/rooms/{room_id}/ws": "connectWatchTogetherSocket",
@@ -609,9 +613,12 @@ export const v2Operations = {
   "PATCH /api/v2/library-playback-prefs/{library_id}": "updateLibraryPlaybackPreference",
   "PATCH /api/v2/profiles/{id}": "updateProfile",
   "PATCH /api/v2/watch-providers/{provider}/connection": "updateWatchProviderConnection",
+  "PATCH /api/v2/watch-together/rooms/{room_id}/join-requests/{request_id}":
+    "decideWatchTogetherJoinRequest",
   "PATCH /api/v2/watch-together/rooms/{room_id}/policy": "updateWatchTogetherRoomPolicy",
   "PATCH /api/v2/watch-together/rooms/{room_id}/selection-mode":
     "updateWatchTogetherRoomSelectionMode",
+  "PATCH /api/v2/watch-together/rooms/{room_id}/visibility": "updateWatchTogetherRoomVisibility",
   "POST /api/v2/account/identities/link-complete": "completeAccountIdentityLink",
   "POST /api/v2/account/identities/link-credentials": "linkAccountIdentityWithCredentials",
   "POST /api/v2/account/identities/link-network": "linkAccountIdentityWithNetwork",
@@ -879,6 +886,7 @@ export const v2Operations = {
   "POST /api/v2/watch-providers/{provider}/sync": "triggerWatchProviderSync",
   "POST /api/v2/watch-together/join": "joinWatchTogetherRoom",
   "POST /api/v2/watch-together/rooms": "createWatchTogetherRoom",
+  "POST /api/v2/watch-together/rooms/{room_id}/join-requests": "createWatchTogetherJoinRequest",
   "POST /api/v2/watch-together/rooms/{room_id}/member-state": "queryWatchTogetherMemberState",
   "POST /api/v2/watch-together/rooms/{room_id}/playback/start": "startWatchTogetherRoomPlayback",
   "POST /api/v2/watch-together/rooms/{room_id}/playback/stop": "stopWatchTogetherRoomPlayback",

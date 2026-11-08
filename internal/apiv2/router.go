@@ -130,6 +130,7 @@ type Dependencies struct {
 	WatchTogetherPicker             WatchTogetherPickerService
 	WatchTogetherCapability         WatchTogetherCapabilityService
 	WatchTogetherSuggestions        WatchTogetherSuggestionService
+	WatchTogetherPublicRooms        WatchTogetherPublicRoomsService
 	AdminDashboardStats             AdminDashboardStatsService
 	AdminHardwareAcceleration       AdminHardwareAccelerationService
 	AdminDashboardLayout            AdminDashboardLayoutService

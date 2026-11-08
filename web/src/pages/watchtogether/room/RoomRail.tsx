@@ -3,8 +3,9 @@ import { Check } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
-import type { WatchTogetherRoomSnapshot } from "@/lib/watchTogether";
+import type { WatchTogetherJoinRequest, WatchTogetherRoomSnapshot } from "@/lib/watchTogether";
 import type { ActivityEntry } from "../hooks/useActivityFeed";
+import { JoinRequestList } from "./JoinRequestList";
 import { MemberAvatar } from "./MemberAvatar";
 import { memberKey, memberTints } from "./members";
 
@@ -178,17 +179,24 @@ export function ActivityFeed({ entries, now }: { entries: ActivityEntry[]; now: 
   );
 }
 
+type JoinRequestProps = {
+  joinRequests?: WatchTogetherJoinRequest[];
+  onDecideJoinRequest?: (requestId: string, approve: boolean) => Promise<void>;
+};
+
 export function RoomRailBody({
   room,
   entries,
   now,
   footer,
+  joinRequests = [],
+  onDecideJoinRequest,
 }: {
   room: WatchTogetherRoomSnapshot | null;
   entries: ActivityEntry[];
   now: number;
   footer?: string;
-}) {
+} & JoinRequestProps) {
   return (
     <Tabs defaultValue="people" className="flex h-full min-h-0 flex-col gap-0">
       <TabsList variant="line" className="border-border/60 w-full justify-start border-b px-2">
@@ -203,6 +211,9 @@ export function RoomRailBody({
         <TabsTrigger value="activity">Activity</TabsTrigger>
       </TabsList>
       <TabsContent value="people" className="overlay-scroll min-h-0 flex-1 overflow-y-auto">
+        {onDecideJoinRequest ? (
+          <JoinRequestList requests={joinRequests} onDecide={onDecideJoinRequest} />
+        ) : null}
         <PeopleList room={room} />
       </TabsContent>
       <TabsContent value="activity" className="overlay-scroll min-h-0 flex-1 overflow-y-auto">
@@ -221,14 +232,17 @@ export function RoomRailBody({
  * The rail: a side column on wide screens, a bottom sheet with a peek handle
  * on narrow ones. Same content either way.
  */
-export function RoomRail(props: {
-  room: WatchTogetherRoomSnapshot | null;
-  entries: ActivityEntry[];
-  now: number;
-  footer?: string;
-}) {
+export function RoomRail(
+  props: {
+    room: WatchTogetherRoomSnapshot | null;
+    entries: ActivityEntry[];
+    now: number;
+    footer?: string;
+  } & JoinRequestProps,
+) {
   const [open, setOpen] = useState(false);
   const latest = props.entries[0];
+  const asking = props.onDecideJoinRequest ? (props.joinRequests?.length ?? 0) : 0;
   return (
     <>
       <aside className="border-border/60 hidden min-h-0 w-80 shrink-0 border-l md:flex md:flex-col">
@@ -242,6 +256,11 @@ export function RoomRail(props: {
           aria-label="Open people and activity"
         >
           <span className="font-semibold">People · {props.room?.member_count ?? 0}</span>
+          {asking > 0 ? (
+            <span className="bg-primary text-primary-foreground shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold">
+              {asking} asking
+            </span>
+          ) : null}
           <span className="text-muted-foreground truncate text-xs">
             {latest ? <ActivityLine entry={latest} /> : "Activity"}
           </span>

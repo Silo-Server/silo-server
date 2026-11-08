@@ -180,6 +180,7 @@ var secretTables = []secretTable{
 	{name: "watch_together_rooms", handling: secretLeftOut, why: watchTogether},
 	{name: "watch_together_suggestions", handling: secretLeftOut, why: watchTogether},
 	{name: "watch_together_votes", handling: secretLeftOut, why: watchTogether},
+	{name: "watch_together_join_requests", handling: secretLeftOut, why: watchTogether},
 	{name: "history_import_run_credentials", handling: secretLeftOut, why: "the provider credentials of a history import in progress"},
 	{name: "backup_status", handling: secretLeftOut, why: "describes the backup being taken, which would read as a stale run after a restore"},
 

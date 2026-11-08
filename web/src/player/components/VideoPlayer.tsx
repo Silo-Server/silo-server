@@ -1118,6 +1118,9 @@ export function VideoPlayer({
       vote: async () => {},
       unvote: async () => {},
       promoteSuggestion: async () => null,
+      joinRequests: [],
+      updateVisibility: async () => null,
+      decideJoinRequest: async () => {},
     } satisfies WatchTogetherRoomConnectionResult);
   const connectionReplacedRef = useRef(false);
   connectionReplacedRef.current = Boolean(watchTogether.replacementReason);
@@ -5244,6 +5247,14 @@ export function VideoPlayer({
           onToggleGuestControl={(policy) => void handleToggleGuestControl(policy)}
           onEndRoom={() => void handleEndRoom()}
           onStopPlayback={() => void handleStopRoomPlayback()}
+          joinRequests={watchTogether.joinRequests.filter(
+            (request) => request.room_id === watchTogetherRoomId,
+          )}
+          onDecideJoinRequest={(requestId, approve) =>
+            void watchTogether.decideJoinRequest(requestId, approve).catch((error: unknown) => {
+              toast.error(error instanceof Error ? error.message : "Could not answer that request");
+            })
+          }
         />
       ) : null}
 

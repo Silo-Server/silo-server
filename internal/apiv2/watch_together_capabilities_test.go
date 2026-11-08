@@ -61,6 +61,7 @@ func wireWatchTogetherCapabilityFakes(deps *Dependencies) {
 	deps.WatchTogetherPicker = new(fakePicker)
 	deps.WatchTogetherSuggestionPromote = new(fakePromotion)
 	deps.WatchTogetherSocket = new(fakeRoomSocket)
+	deps.WatchTogetherPublicRooms = new(fakePublicRooms)
 	deps.CatalogAccess = new(fakeCatalog)
 }
 

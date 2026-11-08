@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Copy, Link as LinkIcon, LogOut } from "lucide-react";
+import { ChevronDown, Copy, Globe, Link as LinkIcon, Lock, LogOut } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,7 +15,11 @@ import {
 } from "@/components/watchtogether/ConnectionStatusDot";
 import { EndWatchPartyDialog } from "@/components/watchtogether/EndWatchPartyDialog";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import type { WatchTogetherRoomSnapshot, WatchTogetherSelectionMode } from "@/lib/watchTogether";
+import type {
+  WatchTogetherRoomSnapshot,
+  WatchTogetherRoomVisibility,
+  WatchTogetherSelectionMode,
+} from "@/lib/watchTogether";
 
 const modeLabels: Record<WatchTogetherSelectionMode, string> = {
   host_pick: "Host picks",
@@ -32,6 +36,7 @@ export function RoomStatusStrip({
   onEnd,
   ending,
   onCopyInvite,
+  onSetVisibility,
 }: {
   room: WatchTogetherRoomSnapshot | null;
   connectionState: WatchTogetherConnectionState;
@@ -42,8 +47,11 @@ export function RoomStatusStrip({
   onEnd: () => Promise<void>;
   ending: boolean;
   onCopyInvite?: () => void;
+  /** Host only. Pass it only when the room snapshot carries `visibility`. */
+  onSetVisibility?: (visibility: WatchTogetherRoomVisibility) => void;
 }) {
   const [endOpen, setEndOpen] = useState(false);
+  const isPublic = room?.visibility === "public";
   const count = room?.member_count ?? 0;
   const phaseLabel =
     room?.phase === "playing"
@@ -124,6 +132,36 @@ export function RoomStatusStrip({
           )
         ) : null}
       </div>
+
+      {room && isHost && onSetVisibility ? (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isPublic}
+          onClick={() => onSetVisibility(isPublic ? "private" : "public")}
+          title={
+            isPublic
+              ? "Listed in Open watch parties. Anyone on this server can ask to join."
+              : "Only people with the code or invite link can join."
+          }
+          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs whitespace-nowrap transition-colors ${
+            isPublic
+              ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300"
+              : "text-muted-foreground hover:text-foreground border-white/10"
+          }`}
+          aria-label={
+            isPublic ? "Room is public. Make it private" : "Room is private. Make it public"
+          }
+        >
+          {isPublic ? <Globe className="size-3" /> : <Lock className="size-3" />}
+          <span className="hidden sm:inline">{isPublic ? "Public" : "Private"}</span>
+        </button>
+      ) : room && isPublic ? (
+        <span className="text-muted-foreground hidden shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-xs whitespace-nowrap sm:flex">
+          <Globe className="size-3" />
+          Public
+        </span>
+      ) : null}
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <span className="text-muted-foreground flex items-center gap-1.5 text-xs">

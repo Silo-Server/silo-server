@@ -57,6 +57,9 @@ export function normalizeRoomResponse(
     room_access_token: result.room_access_token,
     room: {
       ...room,
+      // Absent on servers without public rooms; the toggle hides then.
+      visibility:
+        room.visibility === "public" || room.visibility === "private" ? room.visibility : undefined,
       selected_file_id:
         room.selected_file_id === undefined ? undefined : numericID(room.selected_file_id),
       selected_library_id:

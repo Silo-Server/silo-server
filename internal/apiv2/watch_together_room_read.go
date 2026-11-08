@@ -40,6 +40,7 @@ type WatchTogetherRoomSnapshot struct {
 	SelectedLibraryID       *ID                              `json:"selected_library_id,omitempty"`
 	Code                    string                           `json:"code"`
 	GuestControlPolicy      watchtogether.GuestControlPolicy `json:"guest_control_policy" enum:"host_only,guest_play_pause"`
+	Visibility              watchtogether.RoomVisibility     `json:"visibility" enum:"private,public" doc:"public rooms are listed to every profile on the server, which may ask the host to join"`
 	IsPaused                bool                             `json:"is_paused"`
 	AnchorPositionSeconds   float64                          `json:"anchor_position_seconds"`
 	AnchorUpdatedAt         Instant                          `json:"anchor_updated_at"`
@@ -84,6 +85,7 @@ func watchTogetherRoomSnapshotOf(row watchtogether.Snapshot) (WatchTogetherRoomS
 		SelectionRevision:       row.SelectionRevision,
 		Code:                    row.Code,
 		GuestControlPolicy:      row.GuestControlPolicy,
+		Visibility:              row.Visibility,
 		IsPaused:                row.IsPaused,
 		AnchorPositionSeconds:   row.AnchorPositionSeconds,
 		Generation:              row.Generation,

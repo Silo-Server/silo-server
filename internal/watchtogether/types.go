@@ -36,6 +36,16 @@ const (
 	RoomSelectionModeVote     RoomSelectionMode = "vote"
 )
 
+// RoomVisibility says who can find a room. A private room is reached only
+// with its code or invite link; a public one is also listed to every profile
+// on the server, which may ask the host to let it in.
+type RoomVisibility string
+
+const (
+	RoomVisibilityPrivate RoomVisibility = "private"
+	RoomVisibilityPublic  RoomVisibility = "public"
+)
+
 type MemberRole string
 
 const (
@@ -66,6 +76,7 @@ type Room struct {
 	SelectedFileID        *int
 	SelectedLibraryID     *int
 	GuestControlPolicy    GuestControlPolicy
+	Visibility            RoomVisibility
 	AnchorPositionSeconds float64
 	IsPaused              bool
 	AnchorUpdatedAt       time.Time
@@ -101,6 +112,7 @@ type Snapshot struct {
 	SelectedLibraryID       *int               `json:"selected_library_id,omitempty"`
 	Code                    string             `json:"code"`
 	GuestControlPolicy      GuestControlPolicy `json:"guest_control_policy"`
+	Visibility              RoomVisibility     `json:"visibility"`
 	IsPaused                bool               `json:"is_paused"`
 	AnchorPositionSeconds   float64            `json:"anchor_position_seconds"`
 	AnchorUpdatedAt         string             `json:"anchor_updated_at"`

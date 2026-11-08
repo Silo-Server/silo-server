@@ -26,6 +26,8 @@ export type WatchTogetherRoomPhase = "lobby" | "playing" | "ended";
 export type WatchTogetherPlaybackState = "idle" | "waiting" | "paused" | "playing";
 export type WatchTogetherSelectionMode = "host_pick" | "vote";
 export type WatchTogetherTransportAction = "play" | "pause" | "seek";
+export type WatchTogetherRoomVisibility = "private" | "public";
+export type WatchTogetherJoinRequestStatus = "pending" | "approved" | "denied";
 
 export interface WatchTogetherRoomMember {
   user_id: number;
@@ -52,6 +54,8 @@ export interface WatchTogetherRoomSnapshot {
   selected_library_id?: number;
   code: string;
   guest_control_policy: GuestControlPolicy;
+  /** Public rooms are listed to everyone on the server. Older servers omit it (private). */
+  visibility?: WatchTogetherRoomVisibility;
   is_paused: boolean;
   anchor_position_seconds: number;
   anchor_updated_at: string;
@@ -66,6 +70,35 @@ export interface WatchTogetherRoomSnapshot {
   invite_path?: string;
   /** Optional additive field; absent on older servers. Host is listed first. */
   members?: WatchTogetherRoomMember[];
+}
+
+/** A profile asking the host of a public room to let it in. */
+export interface WatchTogetherJoinRequest {
+  id: string;
+  room_id: string;
+  user_id: number;
+  profile_id: string;
+  display_name: string;
+  status: WatchTogetherJoinRequestStatus;
+  created_at: string;
+  decided_at?: string;
+}
+
+/** An open public room as another profile sees it. It never carries the code. */
+export interface WatchTogetherPublicRoom {
+  room_id: string;
+  host_user_id: number;
+  host_profile_id: string;
+  host_display_name: string;
+  host_connected: boolean;
+  phase: "lobby" | "playing";
+  playback_state: WatchTogetherPlaybackState;
+  selection_mode: WatchTogetherSelectionMode;
+  selected_content_id?: string;
+  member_count: number;
+  created_at: string;
+  is_host: boolean;
+  join_request?: WatchTogetherJoinRequest;
 }
 
 export interface WatchTogetherTransportCommand {

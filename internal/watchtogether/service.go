@@ -410,6 +410,12 @@ type Service struct {
 	hostDisconnectTTL time.Duration
 	now               func() time.Time
 
+	// joinRequests lists public rooms and keeps their join requests; nil
+	// leaves public rooms unavailable.
+	joinRequests JoinRequestStore
+	// joinRequestSendMu orders join_requests_update frames to hosts.
+	joinRequestSendMu sync.Mutex
+
 	// guestControlPreferences is the host's saved guest-control policy; nil
 	// starts every room host-only.
 	guestControlPreferences GuestControlPreferences
@@ -2340,6 +2346,7 @@ func (s *Service) buildSnapshotLocked(live *liveRoom, userID int, profileID stri
 		SelectedLibraryID:       live.room.SelectedLibraryID,
 		Code:                    live.room.Code,
 		GuestControlPolicy:      live.room.GuestControlPolicy,
+		Visibility:              live.room.visibility(),
 		IsPaused:                live.room.IsPaused,
 		AnchorPositionSeconds:   s.expectedPositionLocked(live),
 		AnchorUpdatedAt:         live.room.AnchorUpdatedAt.UTC().Format(time.RFC3339),

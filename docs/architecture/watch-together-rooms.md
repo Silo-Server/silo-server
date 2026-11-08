@@ -157,3 +157,47 @@ one small request costs. Both create paths (v1 `CreateSuggestion`, v2
 `CreateSuggestionOnce`) count the room's rows after locking its
 `watch_together_rooms` row `FOR UPDATE`, which keeps the cap exact when
 API servers create concurrently.
+
+## Public rooms and join requests
+
+`watch_together_rooms.visibility` is `private` (the default) or `public`. It is
+a room-row field like the guest-control policy: the host changes it through
+`Service.SetRoomVisibility` under the room operation lock, the change advances
+the generation, and every member receives the snapshot. Visibility only
+decides whether the room is listed. It grants nothing. The room code and
+invite token still let anyone in, and a listed room never shows them.
+
+A join request (`watch_together_join_requests`, code in
+`internal/watchtogether/public_rooms.go`) is the only way into a public room
+without the code. The rules:
+
+- One row per room and profile. Asking again returns the same row. Only a
+  `denied` row moves back to `pending`, and only a new or reopened row
+  notifies the host, so retries cannot flood the host.
+- The insert re-checks `visibility = 'public' AND phase <> 'ended'` in SQL, so
+  a room unlisted or ended after the service's check takes no new request.
+- Only the host account and profile list or decide requests. Unlisting the
+  room keeps pending requests, so the host can still answer them.
+- An approval is final. The requester gets room proof and, with the
+  snapshot, the room code, and there is no way to take those back, so denying
+  an approved request is refused. A denied request may be approved later.
+- The requester reads only its own request; another profile, even on the same
+  account, gets not found. Room proof is minted on that read once the request
+  is `approved`, through the same path as joining by code, and only while the
+  room is open.
+
+Requests live in their own table, not in the room runtime. Deciding one does
+not change room state or the generation. The host learns about changes from
+`join_requests_update` frames: the server that changed the list sends the
+pending list to a host socket it holds and publishes
+`watch_together_join_requests`, and the server holding the host socket reloads
+the list and sends it. A server reads and writes these frames under one lock,
+so the host never receives an older list after a newer one. That event is a nudge, not state. A host that was
+disconnected reads the list over HTTP on reconnect. Requesters hold no socket
+and poll their request.
+
+The open-party list reads public, open rooms and their runtime in one query.
+It counts members whose presence lease is still live, so rooms served by any
+API server show the same count. It takes the host's display name from the
+runtime, and looks up a host who has never connected once per list. It returns only the selected content id; clients resolve the title
+through the catalog with the viewer's own library access.

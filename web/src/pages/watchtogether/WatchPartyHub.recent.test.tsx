@@ -95,18 +95,25 @@ describe("WatchPartyHub recent parties", () => {
   it("verifies a remembered room and offers Rejoin when it is still live", async () => {
     remember();
     let resolve!: (r: Response) => void;
-    const fetch = vi.fn().mockImplementation(() => new Promise<Response>((r) => (resolve = r)));
+    const fetch = vi
+      .fn()
+      .mockImplementation((url: unknown) =>
+        String(url).endsWith("/watch-together/public-rooms")
+          ? Promise.resolve(json({ rooms: [] }))
+          : new Promise<Response>((r) => (resolve = r)),
+      );
+    const roomReads = () =>
+      fetch.mock.calls.filter(([url]) => /\/watch-together\/rooms\/room-1$/.test(String(url)));
     vi.stubGlobal("fetch", fetch);
     render(<WatchPartyHub />);
     expect(screen.getByText("Checking…")).toBeInTheDocument();
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
-    expect(String(fetch.mock.calls[0]![0])).toMatch(/\/watch-together\/rooms\/room-1$/);
+    await waitFor(() => expect(roomReads()).toHaveLength(1));
     // A late answer must still land: the hook republishes the list on mount,
     // which used to cancel the in-flight check and strand the row.
     resolve(json(room("playing")));
     expect(await screen.findByRole("button", { name: "Rejoin" })).toBeInTheDocument();
     expect(screen.getByText("Live")).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(roomReads()).toHaveLength(1);
   });
 
   it("marks the room ended when the read says so", async () => {

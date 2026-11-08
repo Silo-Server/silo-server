@@ -6,6 +6,11 @@ import { useOptionalAuth } from "@/hooks/useAuth";
 import { mintRoomSocketTicket, roomSocketURL } from "@/api/v2/watchTogetherSocket";
 import type { SuggestionCreationDraft } from "@/api/v2/watchTogetherSuggestionCreate";
 import { V2ProblemError } from "@/api/v2/request";
+import {
+  decideJoinRequest as decideRoomJoinRequest,
+  listJoinRequests,
+  updateRoomVisibility,
+} from "@/api/v2/watchTogetherPublicRooms";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   addRoomClockSample,
@@ -40,7 +45,9 @@ import {
   updateWatchTogetherRoomPolicy,
   voteWatchTogetherSuggestion,
   type WatchTogetherTransportCommand,
+  type WatchTogetherJoinRequest,
   type WatchTogetherRoomSnapshot,
+  type WatchTogetherRoomVisibility,
   type WatchTogetherSuggestion,
 } from "@/lib/watchTogether";
 
@@ -59,6 +66,8 @@ export interface WatchTogetherRoomConnectionResult {
   connectionState: WatchTogetherConnectionState;
   room: WatchTogetherRoomSnapshot | null;
   suggestions: WatchTogetherSuggestion[];
+  /** Pending requests to join a public room. Only the host receives them. */
+  joinRequests: WatchTogetherJoinRequest[];
   closedReason: string | null;
   replacementReason: string | null;
   rejoinRoom: () => void;
@@ -66,6 +75,12 @@ export interface WatchTogetherRoomConnectionResult {
   serverTimeOffsetMs: number;
   sendRoomMessage: (message: Record<string, unknown>) => SendRoomMessageResult;
   updatePolicy: (policy: GuestControlPolicy) => Promise<WatchTogetherRoomSnapshot | null>;
+  /** Lists or unlists the room in the server's open watch parties. Host only. */
+  updateVisibility: (
+    visibility: WatchTogetherRoomVisibility,
+  ) => Promise<WatchTogetherRoomSnapshot | null>;
+  /** Lets a requester in, or turns them away. Host only. */
+  decideJoinRequest: (requestId: string, approve: boolean) => Promise<void>;
   selectItem: (
     input: SelectWatchTogetherRoomItemInput,
   ) => Promise<WatchTogetherRoomSnapshot | null>;
@@ -124,6 +139,7 @@ export function useWatchTogetherRoomConnection({
     useState<WatchTogetherConnectionState>("disconnected");
   const [room, setRoom] = useState<WatchTogetherRoomSnapshot | null>(null);
   const [suggestions, setSuggestions] = useState<WatchTogetherSuggestion[]>([]);
+  const [joinRequests, setJoinRequests] = useState<WatchTogetherJoinRequest[]>([]);
   const [closedReason, setClosedReason] = useState<string | null>(null);
   const [replacement, setReplacement] = useState<{ scope: string; reason: string } | null>(null);
   const [rejoinAttempt, setRejoinAttempt] = useState(0);
@@ -425,6 +441,11 @@ export function useWatchTogetherRoomConnection({
             }
             return;
           }
+          case "join_requests_update": {
+            const payload = message.join_requests as WatchTogetherJoinRequest[] | undefined;
+            if (Array.isArray(payload)) setJoinRequests(payload);
+            return;
+          }
           case "room_closed":
             setRoom(null);
             markClosed(typeof message.reason === "string" ? message.reason : "room_closed");
@@ -566,6 +587,52 @@ export function useWatchTogetherRoomConnection({
       return response.room;
     },
     [roomId, policyAuthority, applyHTTPRoomSnapshot],
+  );
+
+  // The host reads pending requests on entry and after each reconnect; the
+  // socket pushes later changes. Requests made while it was away are not lost.
+  const isHost = room?.self_can_manage_room === true;
+  useEffect(() => {
+    if (!roomId || !isHost || connectionState !== "connected") {
+      if (!isHost) {
+        const resetTimer = window.setTimeout(() => setJoinRequests([]), 0);
+        return () => window.clearTimeout(resetTimer);
+      }
+      return;
+    }
+    const authority = captureProfileRequestContext();
+    let cancelled = false;
+    void listJoinRequests(roomId, authority)
+      .then((rows) => {
+        if (!cancelled) setJoinRequests(rows);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, isHost, connectionState]);
+
+  const visibilityAuthority = captureProfileRequestContext();
+  const updateVisibility = useCallback(
+    async (visibility: WatchTogetherRoomVisibility) => {
+      if (!roomId) return null;
+      const socketVersionAtRequest = socketSnapshotVersion.current;
+      const response = await updateRoomVisibility(roomId, visibility, visibilityAuthority);
+      if (!visibilityAuthority || !isCapturedProfileAuthorityActive(visibilityAuthority))
+        return null;
+      applyHTTPRoomSnapshot(response.room, socketVersionAtRequest);
+      return response.room;
+    },
+    [roomId, visibilityAuthority, applyHTTPRoomSnapshot],
+  );
+
+  const decideJoinRequest = useCallback(
+    async (requestId: string, approve: boolean) => {
+      if (!roomId) return;
+      await decideRoomJoinRequest(roomId, requestId, approve ? "approved" : "denied");
+      setJoinRequests((current) => current.filter((request) => request.id !== requestId));
+    },
+    [roomId],
   );
 
   const selectionAuthority = captureProfileRequestContext();
@@ -819,6 +886,7 @@ export function useWatchTogetherRoomConnection({
     connectionState,
     room,
     suggestions,
+    joinRequests,
     closedReason,
     replacementReason,
     rejoinRoom,
@@ -826,6 +894,8 @@ export function useWatchTogetherRoomConnection({
     serverTimeOffsetMs,
     sendRoomMessage,
     updatePolicy,
+    updateVisibility,
+    decideJoinRequest,
     selectItem,
     fallbackSource,
     stageItem,

@@ -76,6 +76,8 @@ func (response watchTogetherRoomResponse) MarshalJSON() ([]byte, error) {
 type watchTogetherRoomSnapshotV1 struct {
 	watchtogether.Snapshot
 	Members []watchTogetherMemberV1 `json:"members,omitempty"`
+	// Visibility shadows the v2-only snapshot field; left empty, it is omitted.
+	Visibility string `json:"visibility,omitempty"`
 }
 
 // Keep the frozen v1 roster independent of new coordinator and v2 member fields.

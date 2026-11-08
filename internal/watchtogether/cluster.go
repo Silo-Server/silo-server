@@ -107,6 +107,10 @@ func (s *Service) handleClusterEvent(event cache.Event) {
 		s.runDispatches(dispatches)
 		return
 	}
+	if event.Type == clusterJoinRequestsEventType {
+		s.handleClusterJoinRequests(event.Payload)
+		return
+	}
 	if event.Type != "watch_together_room_state" {
 		return
 	}

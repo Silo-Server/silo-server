@@ -1698,6 +1698,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				watchtogether.NewProfileNameResolver(deps.UserStoreProvider),
 			)
 			watchTogetherService.SetPlaybackAttemptStore(playbackHandler.PlanStoreV3)
+			watchTogetherService.SetJoinRequestStore(watchtogether.NewJoinRequestRepository(deps.DB))
 			if settingValuesHandler != nil {
 				watchTogetherService.SetGuestControlPreferences(settingValuesHandler.WatchPartyGuestControlPreferences())
 			}
@@ -2872,6 +2873,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.WatchTogetherStart = watchTogetherHandler
 		v2deps.WatchTogetherStop = watchTogetherHandler
 		v2deps.WatchTogetherSelectionMode = watchTogetherHandler
+		if watchTogetherHandler.PublicRoomsAvailable() {
+			v2deps.WatchTogetherPublicRooms = watchTogetherHandler
+		}
 		if watchTogetherHandler.MemberState != nil && watchTogetherHandler.MemberStateCatalog != nil {
 			v2deps.WatchTogetherMemberState = watchTogetherHandler
 		}

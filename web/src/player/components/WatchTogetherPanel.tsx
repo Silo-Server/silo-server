@@ -1,11 +1,18 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+/** How long a new request keeps the panel up while the controls are hidden. */
+const REQUEST_ATTENTION_MS = 8_000;
 import {
   ConnectionStateLabel,
   ConnectionStatusDot,
   type WatchTogetherConnectionState,
 } from "@/components/watchtogether/ConnectionStatusDot";
 import { EndWatchPartyDialog } from "@/components/watchtogether/EndWatchPartyDialog";
-import type { GuestControlPolicy, WatchTogetherRoomSnapshot } from "@/lib/watchTogether";
+import type {
+  GuestControlPolicy,
+  WatchTogetherJoinRequest,
+  WatchTogetherRoomSnapshot,
+} from "@/lib/watchTogether";
 
 interface WatchTogetherPanelProps {
   room: WatchTogetherRoomSnapshot | null;
@@ -15,6 +22,9 @@ interface WatchTogetherPanelProps {
   onToggleGuestControl: (policy: GuestControlPolicy) => void;
   onEndRoom: () => void;
   onStopPlayback: () => void;
+  /** Pending requests to join a public room; shown to the host only. */
+  joinRequests?: WatchTogetherJoinRequest[];
+  onDecideJoinRequest?: (requestId: string, approve: boolean) => void;
 }
 
 export function WatchTogetherPanel({
@@ -25,9 +35,32 @@ export function WatchTogetherPanel({
   onToggleGuestControl,
   onEndRoom,
   onStopPlayback,
+  joinRequests = [],
+  onDecideJoinRequest,
 }: WatchTogetherPanelProps) {
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
   const isHost = room?.self_can_manage_room === true;
+  const asking = isHost && onDecideJoinRequest ? joinRequests : [];
+  // A new request shows the panel for a few seconds so a host watching full
+  // screen notices it; after that the panel follows the controls again.
+  const [attention, setAttention] = useState(false);
+  const seenRequests = useRef(new Set<string>());
+  const askingKey = asking
+    .map((request) => `${request.id}:${Date.parse(request.created_at)}`)
+    .join(",");
+  useEffect(() => {
+    const keys = askingKey ? askingKey.split(",") : [];
+    const fresh = keys.some((key) => !seenRequests.current.has(key));
+    keys.forEach((key) => seenRequests.current.add(key));
+    if (!fresh) return;
+    const show = window.setTimeout(() => setAttention(true), 0);
+    const hide = window.setTimeout(() => setAttention(false), REQUEST_ATTENTION_MS);
+    return () => {
+      window.clearTimeout(show);
+      window.clearTimeout(hide);
+    };
+  }, [askingKey]);
+  const shown = visible || (attention && asking.length > 0);
   const policy = room?.guest_control_policy ?? "host_only";
 
   const policyLabel = isHost
@@ -40,10 +73,10 @@ export function WatchTogetherPanel({
 
   return (
     <div
-      aria-hidden={!visible}
-      inert={!visible}
+      aria-hidden={!shown}
+      inert={!shown}
       className={`absolute top-4 right-4 z-50 w-56 rounded-xl border border-white/10 bg-black/80 p-3 text-white shadow-2xl backdrop-blur-xl transition-opacity duration-300 ${
-        visible ? "opacity-100" : "pointer-events-none opacity-0"
+        shown ? "opacity-100" : "pointer-events-none opacity-0"
       }`}
     >
       {/* Label + status */}
@@ -94,6 +127,32 @@ export function WatchTogetherPanel({
                       ? "Ready"
                       : "Connected"}
               </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {asking.length > 0 ? (
+        <ul aria-label="Asking to join" className="mt-3 space-y-1.5 border-t border-white/8 pt-2.5">
+          {asking.map((request) => (
+            <li key={request.id} className="flex items-center gap-1.5 text-xs">
+              <span className="min-w-0 flex-1 truncate">{request.display_name} wants in</span>
+              <button
+                type="button"
+                onClick={() => onDecideJoinRequest?.(request.id, false)}
+                aria-label={`Turn away ${request.display_name}`}
+                className="rounded-md bg-white/12 px-2 py-1 text-[11px] text-white/90 hover:bg-white/20"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={() => onDecideJoinRequest?.(request.id, true)}
+                aria-label={`Let ${request.display_name} in`}
+                className="rounded-md bg-emerald-500/30 px-2 py-1 text-[11px] font-medium text-emerald-50 hover:bg-emerald-500/45"
+              >
+                Let in
+              </button>
             </li>
           ))}
         </ul>

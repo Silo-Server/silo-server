@@ -13,7 +13,11 @@ import {
   endWatchTogetherRoom,
   setWatchTogetherGuestControl,
 } from "@/lib/watchTogetherActions";
-import { isRoomStaged, type WatchTogetherSuggestion } from "@/lib/watchTogether";
+import {
+  isRoomStaged,
+  type WatchTogetherRoomVisibility,
+  type WatchTogetherSuggestion,
+} from "@/lib/watchTogether";
 import { storage } from "@/utils/storage";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "@/player/hooks/useWatchTogetherRoomConnection";
@@ -346,6 +350,57 @@ export default function WatchTogetherRoomPage() {
       if (!copied) toast.error("Invite link isn't ready yet");
     });
   }, [room?.code, room?.invite_path]);
+  const handleSetVisibility = useCallback(
+    async (visibility: WatchTogetherRoomVisibility) => {
+      try {
+        const next = await connection.updateVisibility(visibility);
+        if (next)
+          toast.success(
+            next.visibility === "public"
+              ? "Room is public. People on this server can ask to join."
+              : "Room is private again.",
+          );
+      } catch (error) {
+        if (!(error instanceof StaleApiRequestContextError))
+          toast.error(error instanceof Error ? error.message : "Could not change who can join");
+      }
+    },
+    [connection],
+  );
+  const handleDecideJoinRequest = useCallback(
+    async (requestId: string, approve: boolean) => {
+      try {
+        await connection.decideJoinRequest(requestId, approve);
+      } catch (error) {
+        if (!(error instanceof StaleApiRequestContextError))
+          toast.error(error instanceof Error ? error.message : "Could not answer that request");
+      }
+    },
+    [connection],
+  );
+  const joinRequests = useMemo(
+    () => connection.joinRequests.filter((request) => request.room_id === roomId),
+    [connection.joinRequests, roomId],
+  );
+  // Tell the host once per new request, wherever they are on the page.
+  const announcedRequests = useRef(new Set<string>());
+  useEffect(() => {
+    if (!isHost) return;
+    for (const request of joinRequests) {
+      // A request turned down and asked again keeps its id; created_at moves.
+      // Parse it: the HTTP list and socket frames may format it differently.
+      const key = `${request.id}:${Date.parse(request.created_at)}`;
+      if (announcedRequests.current.has(key)) continue;
+      announcedRequests.current.add(key);
+      toast(`${request.display_name} wants to join`, {
+        id: `join-request-${request.id}`,
+        action: {
+          label: "Let in",
+          onClick: () => void handleDecideJoinRequest(request.id, true),
+        },
+      });
+    }
+  }, [handleDecideJoinRequest, isHost, joinRequests]);
   const handleEnd = useCallback(async () => {
     setEnding(true);
     try {
@@ -407,6 +462,11 @@ export default function WatchTogetherRoomPage() {
         onEnd={handleEnd}
         ending={ending}
         onCopyInvite={room?.invite_path ? handleCopyInvite : undefined}
+        onSetVisibility={
+          isHost && room?.visibility
+            ? (visibility) => void handleSetVisibility(visibility)
+            : undefined
+        }
       />
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -517,6 +577,8 @@ export default function WatchTogetherRoomPage() {
           room={room}
           entries={entries}
           now={now}
+          joinRequests={joinRequests}
+          onDecideJoinRequest={isHost ? handleDecideJoinRequest : undefined}
           footer={
             isHost
               ? "If you drop, the room waits 2 minutes for you before it ends."

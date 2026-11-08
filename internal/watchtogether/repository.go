@@ -114,6 +114,26 @@ func (r *Repository) UpdatePolicy(
 	return r.scanConditionalUpdate(ctx, query, roomID, policy, generation, expectedGeneration)
 }
 
+// UpdateVisibility lists or unlists an open room.
+func (r *Repository) UpdateVisibility(
+	ctx context.Context,
+	roomID string,
+	visibility RoomVisibility,
+	generation int64,
+	expectedGeneration int64,
+) (*Room, error) {
+	const query = `
+		UPDATE watch_together_rooms
+		SET visibility = $2,
+		    generation = $3
+		WHERE id = $1
+		  AND generation = $4
+		  AND phase <> 'ended'
+		RETURNING ` + roomColumns
+
+	return r.scanConditionalUpdate(ctx, query, roomID, visibility, generation, expectedGeneration)
+}
+
 func (r *Repository) UpdateAnchor(
 	ctx context.Context,
 	roomID string,
@@ -316,7 +336,7 @@ const roomColumns = `
 	selected_content_id, selected_file_id, selected_library_id,
 	guest_control_policy,
 	anchor_position_seconds, is_paused, anchor_updated_at,
-	generation, created_at, closed_at
+	generation, created_at, closed_at, visibility
 `
 
 func (r *Repository) getRoom(ctx context.Context, query string, arg string) (*Room, error) {
@@ -349,6 +369,7 @@ func scanRoom(row pgx.Row) (*Room, error) {
 		&room.Generation,
 		&room.CreatedAt,
 		&room.ClosedAt,
+		&room.Visibility,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrRoomNotFound

@@ -543,6 +543,7 @@ func registerAll(reg *Registry) {
 	registerWatchTogetherCapabilities(reg)
 	registerWatchTogetherCreate(reg)
 	registerWatchTogetherSocket(reg)
+	registerWatchTogetherPublicRooms(reg)
 	registerOrderedAndroidPush(reg)
 	registerOrderedApplePush(reg)
 	registerEmailVerification(reg)
