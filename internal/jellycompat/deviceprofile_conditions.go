@@ -549,8 +549,7 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 		rounded := int(math.Round(frameRate))
 		values["videoframerate"] = conditionValue{text: strconv.Itoa(rounded), number: rounded, hasNum: true}
 	}
-	// Track and file bitrates are kbps; profile conditions are bits per second.
-	videoBitrate := video.Bitrate * 1000
+	videoBitrate := video.Bitrate
 	if videoBitrate == 0 && version.Bitrate > 0 {
 		videoBitrate = version.Bitrate * 1000
 	}
@@ -558,7 +557,7 @@ func buildConditionValues(version catalog.FileVersion, audioStreamIndex *int) co
 		values["videobitrate"] = intConditionValue(videoBitrate)
 	}
 	if audio.Bitrate > 0 {
-		values["audiobitrate"] = intConditionValue(audio.Bitrate * 1000)
+		values["audiobitrate"] = intConditionValue(audio.Bitrate)
 	}
 	if audio.SampleRate > 0 {
 		values["audiosamplerate"] = intConditionValue(audio.SampleRate)

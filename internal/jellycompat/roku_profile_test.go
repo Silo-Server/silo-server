@@ -37,7 +37,7 @@ func rokuProfile(t *testing.T) DeviceProfile {
 func rokuTestVersion(audio models.AudioTrack) catalog.FileVersion {
 	return catalog.FileVersion{
 		FileID: 7, Container: "mkv", CodecVideo: "h264", CodecAudio: audio.Codec, Resolution: "1080p", Bitrate: 8000, Duration: 3600,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 41, BitDepth: 8, Width: 1920, Height: 1080, VideoRangeType: "SDR", Bitrate: 7_500}},
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Profile: "High", Level: 41, BitDepth: 8, Width: 1920, Height: 1080, VideoRangeType: "SDR", Bitrate: 7_500_000}},
 		AudioTracks: []models.AudioTrack{audio},
 	}
 }
@@ -171,8 +171,8 @@ func TestRoku1080pProfileEncodesWithinItsLimits(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			video, audio := tc.video, tc.audio
-			video.BitDepth, video.VideoRangeType, video.Bitrate = 8, "SDR", tc.bitrateKbps-400
-			audio.Default, audio.Bitrate = true, 384
+			video.BitDepth, video.VideoRangeType, video.Bitrate = 8, "SDR", (tc.bitrateKbps-400)*1000
+			audio.Default, audio.Bitrate = true, 384_000
 			version := catalog.FileVersion{FileID: 1, Container: "mkv", CodecVideo: video.Codec, CodecAudio: audio.Codec, Bitrate: tc.bitrateKbps, Duration: 2700,
 				VideoTracks: []models.VideoTrack{video}, AudioTracks: []models.AudioTrack{audio}}
 			source := h.buildPlaybackSource("item", "play", version, roku1080pProfile(t), req, true)

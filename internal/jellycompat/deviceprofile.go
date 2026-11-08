@@ -425,11 +425,11 @@ func (p DeviceProfile) supportsVideoTranscodingOutput(version catalog.FileVersio
 		video.Profile, video.Level = h264EncodeFacts(video, videoBitrateKbps, version)
 	}
 	if videoBitrateKbps > 0 {
-		video.Bitrate = videoBitrateKbps
+		video.Bitrate = videoBitrateKbps * 1000
 		output.Bitrate = videoBitrateKbps + audioBitrateKbps
 	}
 	output.VideoTracks = []models.VideoTrack{video}
-	output.AudioTracks = []models.AudioTrack{{Codec: compatTargetAudioCodec, Profile: compatTargetAudioProfile, Channels: channels, Bitrate: audioBitrateKbps}}
+	output.AudioTracks = []models.AudioTrack{{Codec: compatTargetAudioCodec, Profile: compatTargetAudioProfile, Channels: channels, Bitrate: audioBitrateKbps * 1000}}
 	audioIndex := len(output.VideoTracks)
 	// Both encoded outputs use HLS. Apply codec profiles scoped to its
 	// segment container, including Container=hls with SubContainer=mp4/ts.
@@ -549,7 +549,7 @@ func (p DeviceProfile) supportsHLSRemuxWithAudioTranscodeIn(version catalog.File
 	outputAudio := compatAudioTrack(version, audioStreamIndex)
 	outputAudio.Codec = compatTargetAudioCodec
 	outputAudio.Profile = compatTargetAudioProfile
-	outputAudio.Bitrate = audioBitrateKbps
+	outputAudio.Bitrate = audioBitrateKbps * 1000
 	outputAudio.Channels = targetAudioChannels
 	outputAudio.Default = true
 	outputVersion.CodecAudio = compatTargetAudioCodec
