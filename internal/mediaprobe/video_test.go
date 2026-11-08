@@ -125,12 +125,12 @@ func TestStreamBitrateKbps(t *testing.T) {
 		want   int
 	}{
 		{name: "bit_rate", stream: Stream{BitRate: "640000"}, want: 640},
-		{name: "bit_rate wins over tag", stream: Stream{BitRate: "640000", Tags: map[string]string{"BPS": "1"}}, want: 640},
+		{name: "bit_rate wins over tag", stream: Stream{BitRate: "640000", Tags: map[string]string{matroskaBPSTag: "1"}}, want: 640},
 		// Matroska reports bit_rate N/A and keeps the rate in mkvmerge's tags.
-		{name: "matroska BPS tag", stream: Stream{BitRate: "N/A", Tags: map[string]string{"BPS": "1509000"}}, want: 1509},
-		{name: "older BPS-eng tag", stream: Stream{Tags: map[string]string{"BPS-eng": "448000"}}, want: 448},
-		{name: "BPS-eng wins over BPS", stream: Stream{Tags: map[string]string{"BPS-eng": "448000", "BPS": "640000"}}, want: 448},
-		{name: "unparseable tag", stream: Stream{Tags: map[string]string{"BPS": "fast"}}, want: 0},
+		{name: "matroska BPS tag", stream: Stream{BitRate: "N/A", Tags: map[string]string{matroskaBPSTag: "1509000"}}, want: 1509},
+		{name: "older BPS-eng tag", stream: Stream{Tags: map[string]string{matroskaBPSEngTag: "448000"}}, want: 448},
+		{name: "BPS-eng wins over BPS", stream: Stream{Tags: map[string]string{matroskaBPSEngTag: "448000", matroskaBPSTag: "640000"}}, want: 448},
+		{name: "unparseable tag", stream: Stream{Tags: map[string]string{matroskaBPSTag: "fast"}}, want: 0},
 		{name: "unknown", stream: Stream{}, want: 0},
 	}
 	for _, tt := range tests {
