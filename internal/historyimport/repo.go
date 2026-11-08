@@ -2,11 +2,14 @@ package historyimport
 
 import (
 	"context"
+	"crypto/md5" //nolint:gosec // LeafSetHash is a change fingerprint
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -1141,37 +1144,50 @@ const seriesLeafFilter = `
 	AND (%[2]s::timestamptz IS NULL OR e.air_date IS NULL OR e.air_date <= (%[2]s::timestamptz AT TIME ZONE 'UTC')::date)
 	AND EXISTS (SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id)`
 
-// CountSeriesLeaves counts, for each whole-series marker (series id and
-// watched time, by index), the episodes MatchEpisodesBySeries would return,
-// in one query.
-func CountSeriesLeaves(ctx context.Context, q lookupQuerier, seriesIDs []string, watchedAt []time.Time) ([]int, error) {
-	counts := make([]int, len(seriesIDs))
+// LeafSetHash identifies a set of matched episodes by their content ids:
+// the MD5 of the ids in byte order, joined by commas. SeriesLeafHashes
+// computes the same value in SQL.
+func LeafSetHash(matches []Match) string {
+	ids := make([]string, len(matches))
+	for i, match := range matches {
+		ids[i] = match.MediaItemID
+	}
+	sort.Strings(ids)
+	sum := md5.Sum([]byte(strings.Join(ids, ","))) //nolint:gosec // a change fingerprint, not a security boundary
+	return hex.EncodeToString(sum[:])
+}
+
+// SeriesLeafHashes returns, for each whole-series marker (series id and
+// watched time, by index), the LeafSetHash of the episodes
+// MatchEpisodesBySeries would return, in one query.
+func SeriesLeafHashes(ctx context.Context, q lookupQuerier, seriesIDs []string, watchedAt []time.Time) ([]string, error) {
+	hashes := make([]string, len(seriesIDs))
 	if len(seriesIDs) == 0 {
-		return counts, nil
+		return hashes, nil
 	}
 	rows, err := q.Query(ctx, `
-		SELECT m.idx, count(e.content_id)
+		SELECT m.idx, md5(COALESCE(string_agg(e.content_id, ',' ORDER BY e.content_id COLLATE "C"), ''))
 		FROM unnest($1::text[], $2::timestamptz[]) WITH ORDINALITY AS m(series_id, cutoff, idx)
 		LEFT JOIN episodes e ON e.series_id = m.series_id AND `+fmt.Sprintf(seriesLeafFilter, "NULL", "m.cutoff")+`
 		GROUP BY m.idx`,
 		seriesIDs, watchedAt,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("counting series episodes: %w", err)
+		return nil, fmt.Errorf("hashing series episodes: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var idx int64
-		var count int
-		if err := rows.Scan(&idx, &count); err != nil {
-			return nil, fmt.Errorf("scanning series episode count: %w", err)
+		var hash string
+		if err := rows.Scan(&idx, &hash); err != nil {
+			return nil, fmt.Errorf("scanning series episode hash: %w", err)
 		}
-		counts[idx-1] = count
+		hashes[idx-1] = hash
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterating series episode counts: %w", err)
+		return nil, fmt.Errorf("iterating series episode hashes: %w", err)
 	}
-	return counts, nil
+	return hashes, nil
 }
 
 func (l catalogLookup) MatchEpisodesBySeries(

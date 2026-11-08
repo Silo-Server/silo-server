@@ -196,12 +196,12 @@ func TestImportWatchedSeriesMarkerDB(t *testing.T) {
 	if got := sync(); got.Imported != 0 || len(watchState.targetIDs) != marked {
 		t.Fatalf("sync with nothing new = %+v, marked %v", got, watchState.targetIDs)
 	}
-	// An episode leaves the library, and later another arrives: the marker
-	// covers as many episodes as before, and still marks the new one.
+	// Between two syncs an episode leaves the library and another arrives:
+	// the marker covers as many episodes as before, and still marks the new
+	// one.
 	if _, err := pool.Exec(ctx, `DELETE FROM episode_libraries WHERE episode_id=$1`, first); err != nil {
 		t.Fatal(err)
 	}
-	sync()
 	inLibrary(fourth)
 	before = len(watchState.targetIDs)
 	if sync(); !slices.Contains(watchState.targetIDs[before:], fourth) {

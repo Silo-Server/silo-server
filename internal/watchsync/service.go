@@ -1175,14 +1175,18 @@ func (s *Service) ImportWatched(
 			if reason != "" {
 				result.Warnings = append(result.Warnings, reason)
 			}
-			keep = append(keep, PendingWatch{Watch: row})
+			pending := PendingWatch{Watch: row}
+			if aggregateMarker(row) {
+				pending.AppliedEpisodes = historyimport.LeafSetHash(nil)
+			}
+			keep = append(keep, pending)
 			continue
 		}
 		if row.LastWatchedAt == nil {
 			continue
 		}
 		if aggregateMarker(row) {
-			keep = append(keep, PendingWatch{Watch: row, AppliedLeaves: len(matches)})
+			keep = append(keep, PendingWatch{Watch: row, AppliedEpisodes: historyimport.LeafSetHash(matches)})
 		} else {
 			applied = append(applied, row)
 		}
@@ -1250,11 +1254,11 @@ func (s *Service) ImportWatched(
 // retryPendingWatches matches the watches kept from earlier syncs again and
 // passes each match to add. It skips a kept watch the provider returned again
 // this sync. It returns the movie and episode watches that matched, which
-// leave the store, and the aggregate markers whose episode count changed, with
-// their new count. A marker is applied again only when it covers more
-// episodes than when last applied; a smaller count is only recorded, so
-// episodes a library gains after losing some are marked too. A kept watch that
-// still matches nothing adds no warning: its sync already reported it.
+// leave the store, and the aggregate markers whose set of covered episodes
+// changed since they were last applied, applied again and with the new set.
+// Applying again is safe: an episode already marked keeps its play. A kept
+// watch that still matches nothing adds no warning: its sync already
+// reported it.
 func (s *Service) retryPendingWatches(
 	ctx context.Context,
 	store pendingWatchStore,
@@ -1266,23 +1270,20 @@ func (s *Service) retryPendingWatches(
 	if err != nil {
 		return nil, nil, err
 	}
-	// reapply applies a marker covering count episodes now, when that
-	// differs from the count it was last applied with.
-	reapply := func(pending PendingWatch, count int) error {
-		if count == pending.AppliedLeaves {
+	// reapply applies a marker again when the episodes it covers (hash,
+	// a historyimport.LeafSetHash) differ from those it was last applied to.
+	reapply := func(pending PendingWatch, hash string) error {
+		if hash == pending.AppliedEpisodes {
 			return nil
 		}
-		if count > pending.AppliedLeaves {
-			matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch)
-			if err != nil {
-				return err
-			}
-			for _, match := range matches {
-				add(match, *pending.Watch.LastWatchedAt)
-			}
-			count = len(matches)
+		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch)
+		if err != nil {
+			return err
 		}
-		changed = append(changed, PendingWatch{Watch: pending.Watch, AppliedLeaves: count})
+		for _, match := range matches {
+			add(match, *pending.Watch.LastWatchedAt)
+		}
+		changed = append(changed, PendingWatch{Watch: pending.Watch, AppliedEpisodes: historyimport.LeafSetHash(matches)})
 		return nil
 	}
 	var batched []PendingWatch
@@ -1300,7 +1301,7 @@ func (s *Service) retryPendingWatches(
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := reapply(pending, len(matches)); err != nil {
+		if err := reapply(pending, historyimport.LeafSetHash(matches)); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -1318,7 +1319,7 @@ func (s *Service) retryPendingWatches(
 		pending := batched[i]
 		if pending.Watch.Kind == historyimport.KindSeries {
 			if match == nil {
-				if err := reapply(pending, 0); err != nil {
+				if err := reapply(pending, historyimport.LeafSetHash(nil)); err != nil {
 					return nil, nil, err
 				}
 				continue
@@ -1334,12 +1335,12 @@ func (s *Service) retryPendingWatches(
 		add(*match, *pending.Watch.LastWatchedAt)
 		retried = append(retried, pending.Watch)
 	}
-	counts, err := store.CountSeriesLeaves(ctx, seriesIDs, cutoffs)
+	hashes, err := store.SeriesLeafHashes(ctx, seriesIDs, cutoffs)
 	if err != nil {
 		return nil, nil, err
 	}
 	for i, pending := range markers {
-		if err := reapply(pending, counts[i]); err != nil {
+		if err := reapply(pending, hashes[i]); err != nil {
 			return nil, nil, err
 		}
 	}

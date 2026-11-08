@@ -528,7 +528,7 @@
 
 # A whole-series watched marker marks the aired regular episodes in a library,
 # not specials, and marks an episode a library gains later on the next sync,
-# also after another of its episodes left the library.
+# also when another of its episodes left the library since the last one.
 ./internal/watchsync TestImportWatchedSeriesMarkerDB
 
 # A pending-watch save from a connection's previous provider account that runs

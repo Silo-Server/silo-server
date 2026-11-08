@@ -32,17 +32,17 @@ type pendingWatchStore interface {
 	// batched catalog reads, nil for no match, so a large kept set costs a
 	// few queries per sync rather than several per watch.
 	MatchPendingWatches(ctx context.Context, records []historyimport.Record) ([]*historyimport.Match, error)
-	// CountSeriesLeaves counts the episodes each whole-series marker covers
-	// (historyimport.CountSeriesLeaves), in one query.
-	CountSeriesLeaves(ctx context.Context, seriesIDs []string, watchedAt []time.Time) ([]int, error)
+	// SeriesLeafHashes identifies the episodes each whole-series marker
+	// covers (historyimport.SeriesLeafHashes), in one query.
+	SeriesLeafHashes(ctx context.Context, seriesIDs []string, watchedAt []time.Time) ([]string, error)
 }
 
-// PendingWatch is a kept watch. AppliedLeaves is how many local episodes an
-// aggregate marker covered when it was last applied, and 0 for a watch that
-// has not matched.
+// PendingWatch is a kept watch. AppliedEpisodes identifies the local episodes
+// an aggregate marker covered when it was last applied
+// (historyimport.LeafSetHash), and is empty for a movie or episode watch.
 type PendingWatch struct {
-	Watch         RemoteWatch
-	AppliedLeaves int
+	Watch           RemoteWatch
+	AppliedEpisodes string
 }
 
 // pendingWatchKey identifies a kept watch within a connection. Provider item
@@ -85,7 +85,7 @@ func (r *PostgresRepository) ListPendingWatches(ctx context.Context, connectionI
 		return nil, fmt.Errorf("drop pending watches of another account: %w", err)
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT watch, applied_leaves FROM watch_provider_pending_watches
+		SELECT watch, applied_episodes FROM watch_provider_pending_watches
 		WHERE connection_id = $1::uuid AND provider_account_id = $2
 		ORDER BY kind, provider_item_key
 	`, connectionID, providerAccountID)
@@ -96,7 +96,7 @@ func (r *PostgresRepository) ListPendingWatches(ctx context.Context, connectionI
 	var watches []PendingWatch
 	for rows.Next() {
 		var raw []byte
-		var applied int
+		var applied string
 		if err := rows.Scan(&raw, &applied); err != nil {
 			return nil, fmt.Errorf("scan pending watch: %w", err)
 		}
@@ -105,7 +105,7 @@ func (r *PostgresRepository) ListPendingWatches(ctx context.Context, connectionI
 			return nil, fmt.Errorf("decode pending watch: %w", err)
 		}
 		if keepable(watch) {
-			watches = append(watches, PendingWatch{Watch: watch, AppliedLeaves: applied})
+			watches = append(watches, PendingWatch{Watch: watch, AppliedEpisodes: applied})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -148,15 +148,15 @@ func (r *PostgresRepository) SavePendingWatches(ctx context.Context, connectionI
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO watch_provider_pending_watches
-			(connection_id, provider_account_id, kind, provider_item_key, last_watched_at, watch, applied_leaves, updated_at)
+			(connection_id, provider_account_id, kind, provider_item_key, last_watched_at, watch, applied_episodes, updated_at)
 		SELECT DISTINCT ON (w.kind, w.key) $1::uuid, $2, w.kind, w.key, w.watched_at, w.watch, w.applied, now()
-		FROM unnest($3::text[], $4::text[], $5::timestamptz[], $6::jsonb[], $7::integer[]) AS w(kind, key, watched_at, watch, applied)
-		ORDER BY w.kind, w.key, w.watched_at DESC, w.applied DESC
+		FROM unnest($3::text[], $4::text[], $5::timestamptz[], $6::jsonb[], $7::text[]) AS w(kind, key, watched_at, watch, applied)
+		ORDER BY w.kind, w.key, w.watched_at DESC
 		ON CONFLICT (connection_id, kind, provider_item_key) DO UPDATE
 		SET provider_account_id = EXCLUDED.provider_account_id,
 		    last_watched_at = EXCLUDED.last_watched_at,
 		    watch = EXCLUDED.watch,
-		    applied_leaves = EXCLUDED.applied_leaves,
+		    applied_episodes = EXCLUDED.applied_episodes,
 		    updated_at = now()
 		WHERE EXCLUDED.last_watched_at >= watch_provider_pending_watches.last_watched_at
 		   OR EXCLUDED.provider_account_id <> watch_provider_pending_watches.provider_account_id
@@ -194,12 +194,12 @@ func (r *PostgresRepository) MatchPendingWatches(ctx context.Context, records []
 	return historyimport.MatchAllOn(ctx, r.pool, records)
 }
 
-func (r *PostgresRepository) CountSeriesLeaves(ctx context.Context, seriesIDs []string, watchedAt []time.Time) ([]int, error) {
-	return historyimport.CountSeriesLeaves(ctx, r.pool, seriesIDs, watchedAt)
+func (r *PostgresRepository) SeriesLeafHashes(ctx context.Context, seriesIDs []string, watchedAt []time.Time) ([]string, error) {
+	return historyimport.SeriesLeafHashes(ctx, r.pool, seriesIDs, watchedAt)
 }
 
 // pendingWatchColumns returns the keepable watches as parallel columns.
-func pendingWatchColumns(watches []PendingWatch) (kinds, keys []string, times []time.Time, encoded [][]byte, applied []int, err error) {
+func pendingWatchColumns(watches []PendingWatch) (kinds, keys []string, times []time.Time, encoded [][]byte, applied []string, err error) {
 	for _, pending := range watches {
 		watch := pending.Watch
 		if !keepable(watch) {
@@ -213,7 +213,7 @@ func pendingWatchColumns(watches []PendingWatch) (kinds, keys []string, times []
 		keys = append(keys, watch.ProviderItemKey)
 		times = append(times, watch.LastWatchedAt.UTC())
 		encoded = append(encoded, raw)
-		applied = append(applied, pending.AppliedLeaves)
+		applied = append(applied, pending.AppliedEpisodes)
 	}
 	return kinds, keys, times, encoded, applied, nil
 }
