@@ -1,6 +1,6 @@
 import type { DisplayRating, SectionItem } from "@/api/types";
 import { primaryCardRating } from "@/components/ratings/ratings";
-import { t } from "@/i18n";
+import { codeNumber, t } from "@/i18n";
 
 function isPositiveFinite(value: number | undefined | null): value is number {
   return value != null && Number.isFinite(value) && value > 0;
@@ -52,8 +52,8 @@ export function formatHeroMetadata(item: SectionItem): HeroMetadataEntry[] {
       entries.push({
         key: "episode-identity",
         label: t("web.home.hero.episodeIdentity", {
-          season: item.season_number,
-          episode: item.episode_number,
+          season: codeNumber(item.season_number),
+          episode: codeNumber(item.episode_number),
         }),
       });
     }

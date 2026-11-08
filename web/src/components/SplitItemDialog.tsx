@@ -22,7 +22,7 @@ import type {
 } from "@/api/types";
 import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
 import { useItemFiles, useSearchItemMatchCandidates, useSplitItem } from "@/hooks/queries/items";
-import { useT, type MessageKey } from "@/i18n";
+import { codeNumber, useT, type MessageKey } from "@/i18n";
 import { libraryIdsOfFiles } from "@/lib/itemLibraries";
 import { cn } from "@/lib/utils";
 
@@ -276,8 +276,8 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                             {file.season_number && file.episode_number ? (
                               <Badge variant="outline" className="text-[10px]">
                                 {t("web.item.split.episodeCode", {
-                                  season: file.season_number,
-                                  episode: file.episode_number,
+                                  season: codeNumber(file.season_number),
+                                  episode: codeNumber(file.episode_number),
                                 })}
                               </Badge>
                             ) : null}

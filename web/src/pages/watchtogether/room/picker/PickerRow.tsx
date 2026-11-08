@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import MediaCarousel from "@/components/MediaCarousel";
-import { useT, type Translate } from "@/i18n";
+import { codeNumber, useT, type Translate } from "@/i18n";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import type { PickerEntry } from "@/api/v2/watchTogetherPicker";
 import type { WatchTogetherRoomMember } from "@/lib/watchTogether";
@@ -141,8 +141,8 @@ export function PosterTile({
 function pickerCaption(entry: PickerEntry, t: Translate) {
   if (entry.next_up) {
     return t("web.watchTogether.common.episodeCode", {
-      season: entry.next_up.season_number,
-      episode: entry.next_up.episode_number,
+      season: codeNumber(entry.next_up.season_number),
+      episode: codeNumber(entry.next_up.episode_number),
     });
   }
   return undefined;

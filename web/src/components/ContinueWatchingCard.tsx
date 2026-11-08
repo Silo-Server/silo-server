@@ -155,7 +155,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   // Detail-page link target for the card's image and meta lines: manga
   // chapters head to the series page like the heading does.
   const detailHref = isMangaChapter ? headingHref : card.itemHref;
-  const episodeNumbers = { season: String(card.seasonNumber), episode: String(card.episodeNumber) };
+  const episodeNumbers = { season: card.seasonNumber, episode: card.episodeNumber };
   const episodeMeta = hasEpisodeMeta
     ? card.seriesTitle && card.title
       ? t("web.home.continueWatching.episodeLabelWithTitle", {

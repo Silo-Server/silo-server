@@ -19,14 +19,14 @@ export function episodeCardTitle(episode: EpisodeIdentity): string {
  * letters of "S01E02".
  */
 export function episodeCardSpokenTitle(episode: EpisodeIdentity): string {
-  const episodeNumber = String(episode.episode_number);
+  const episodeNumber = episode.episode_number;
   const title = episode.title?.trim();
   if (episode.season_number === 0) {
     return title
       ? t("web.detail.episodes.spokenSpecialTitled", { episode: episodeNumber, title })
       : t("web.detail.episodes.spokenSpecial", { episode: episodeNumber });
   }
-  const season = String(episode.season_number);
+  const season = episode.season_number;
   return title
     ? t("web.detail.episodes.spokenTitled", { season, episode: episodeNumber, title })
     : t("web.detail.episodes.spoken", { season, episode: episodeNumber });

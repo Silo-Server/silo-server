@@ -14,6 +14,7 @@ export {
 } from "./catalog";
 export {
   appIntl,
+  codeNumber,
   createAppIntl,
   englishText,
   messageNumberingSystem,

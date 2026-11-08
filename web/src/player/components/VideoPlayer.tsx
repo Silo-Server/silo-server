@@ -143,7 +143,7 @@ import {
   setWatchTogetherGuestControl,
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
-import { numberText, useT, type Translate } from "@/i18n";
+import { codeNumber, numberText, useT, type Translate } from "@/i18n";
 import { MediaDataMeter } from "../media-data-meter";
 import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
@@ -2465,7 +2465,7 @@ export function VideoPlayer({
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
   const hudSubtitle = seriesContext
-    ? `S${numberText(seriesContext.currentSeason)} · E${numberText(seriesContext.currentEpisode)}${title ? ` — ${title}` : ""}`
+    ? `S${codeNumber(seriesContext.currentSeason)} · E${codeNumber(seriesContext.currentEpisode)}${title ? ` — ${title}` : ""}`
     : year
       ? numberText(year)
       : undefined;
@@ -5303,13 +5303,13 @@ export function VideoPlayer({
                 <span>
                   {title
                     ? t("web.player.episode.codeWithTitle", {
-                        season: seriesContext.currentSeason,
-                        episode: seriesContext.currentEpisode,
+                        season: codeNumber(seriesContext.currentSeason),
+                        episode: codeNumber(seriesContext.currentEpisode),
                         title,
                       })
                     : t("web.player.episode.code", {
-                        season: seriesContext.currentSeason,
-                        episode: seriesContext.currentEpisode,
+                        season: codeNumber(seriesContext.currentSeason),
+                        episode: codeNumber(seriesContext.currentEpisode),
                       })}
                 </span>
               </>

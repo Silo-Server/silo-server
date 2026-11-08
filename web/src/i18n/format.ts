@@ -189,6 +189,16 @@ export function numberText(value: number | string, intl: IntlShape = current): s
   return value.replace(/[0-9]/g, (digit) => local.digits[Number(digit)] ?? digit);
 }
 
+/**
+ * A season or episode number inside a code ("S2", "E05", "S2021E01"), padded
+ * with zeros to `width`: ASCII digits in every language, because codes are
+ * technical. Pass it where a message prints a code; a phrase ("Season 2",
+ * "5 episodes") passes the number itself and follows the screen's digits.
+ */
+export function codeNumber(value: number, width = 0): string {
+  return String(value).padStart(width, "0");
+}
+
 /** A bare number ("01"), which takes its direction from the letters around it. */
 const DIGITS = /^\p{Nd}+$/u;
 

@@ -17,7 +17,7 @@ import { useOptionalAuth } from "@/hooks/useAuth";
 import { useSettingValue } from "@/hooks/queries/settingValues";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useSeasonEpisodes, useSeasons } from "@/hooks/queries/episodes";
-import { useT, type MessageKey } from "@/i18n";
+import { codeNumber, useT, type MessageKey } from "@/i18n";
 import { createWatchTogetherRoom, type WatchTogetherSelectionMode } from "@/lib/watchTogether";
 import { copyWatchTogetherInvite } from "@/lib/watchTogetherActions";
 import { decodeThumbhash } from "@/lib/thumbhash";
@@ -124,7 +124,7 @@ function EpisodeChooser({
             >
               <span className="text-muted-foreground w-7 shrink-0 text-xs font-semibold tabular-nums">
                 {t("web.watchTogether.common.episodeNumber", {
-                  number: episode.episode_number,
+                  number: codeNumber(episode.episode_number),
                 })}
               </span>
               <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>

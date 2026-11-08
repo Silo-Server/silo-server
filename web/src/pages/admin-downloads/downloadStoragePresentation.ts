@@ -297,7 +297,7 @@ export function storageFileTitle(file: AdminDownloadStorageFile): string {
 
 export function storageFileSubtitle(file: AdminDownloadStorageFile): string {
   if (file.season_number != null && file.episode_number != null) {
-    const values = { season: String(file.season_number), episode: String(file.episode_number) };
+    const values = { season: file.season_number, episode: file.episode_number };
     return file.episode_title
       ? t("web.admin.downloads.presentation.file.episodeWithTitle", {
           ...values,

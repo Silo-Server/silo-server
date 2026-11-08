@@ -56,7 +56,9 @@ function Dialog({ row }: { row: HomeRow }) {
   string is never changed, so pass a number that is shown as a number, not
   `String(n)`; a plain `{n}` prints it without grouping in every language. A number
   shown outside a message, such as a year, goes through `numberText()`; a value
-  that is sent, matched or put in a URL never does.
+  that is sent, matched or put in a URL never does. A season or episode number
+  inside a code ("S01E05", "E5") goes through `codeNumber()` and stays Latin in
+  every language; "Season 2" in words passes the number.
 - **Apostrophes:** the catalog validator rejects an ASCII `'` next to a brace or `#`
   (`{name}'s`, `'{title}'`). Extraction can't change English, so such a string stays
   literal, with an `eslint-disable` comment saying why, until a wording change replaces it.

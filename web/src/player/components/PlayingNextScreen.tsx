@@ -7,7 +7,7 @@ import { useAutoPlayNextSetting } from "@/hooks/queries/autoPlayNext";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
-import { useT } from "@/i18n";
+import { codeNumber, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { parseCalendarDate, preferredDateLocale } from "@/lib/datetime";
@@ -265,8 +265,8 @@ export function PlayingNextScreen({
                   <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5">
                     <span className="text-xs font-medium text-white/60 sm:text-sm">
                       {t("web.player.episode.code", {
-                        season: nextEpisode.seasonNumber,
-                        episode: nextEpisode.episodeNumber,
+                        season: codeNumber(nextEpisode.seasonNumber),
+                        episode: codeNumber(nextEpisode.episodeNumber),
                       })}
                     </span>
                     <span className="hidden text-sm text-white/25 sm:inline">{EM_DASH}</span>

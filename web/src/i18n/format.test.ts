@@ -3,6 +3,7 @@ import type { MessageFormatElement } from "react-intl";
 
 import { ENGLISH_APP_LOCALE, setAppLocale } from "@/lib/appLocale";
 import { formatDate } from "@/lib/datetime";
+import { formatEpisodeCode } from "@/lib/episodeCardLabels";
 
 import { createAppIntl, formatWith, serverTextWith, setAppIntl } from "./format";
 
@@ -204,5 +205,19 @@ describe("Arabic digits follow the format locale", () => {
       "Add to 3 pages",
     );
     expect(formatWith(intl, "web.item.dialog.yearInParens", { year: 1999 })).toBe("(1999)");
+  });
+
+  it("keeps an episode code Latin beside a year in Arabic-Indic digits", () => {
+    const intl = createAppIntl(
+      "ar",
+      {
+        ...arabic,
+        "web.detail.episodeCode": [text("م"), arg("season"), text("ح"), arg("episode")],
+      },
+      "ar-EG",
+    );
+    setAppIntl(intl);
+    expect(formatEpisodeCode(1, 5)).toBe("م01ح05");
+    expect(formatWith(intl, "web.item.dialog.yearInParens", { year: 1999 })).toBe("(١٩٩٩)");
   });
 });

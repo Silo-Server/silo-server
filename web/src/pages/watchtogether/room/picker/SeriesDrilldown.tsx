@@ -7,7 +7,7 @@ import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import MachineTranslatedLabel from "@/pages/ItemDetail/components/MachineTranslatedLabel";
 import { hasMachineTranslation } from "@/pages/ItemDetail/components/machineTranslation";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
-import { useT, type Translate } from "@/i18n";
+import { codeNumber, useT, type Translate } from "@/i18n";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { cn } from "@/lib/utils";
@@ -405,7 +405,7 @@ export function SeriesDrilldown({
                           <span className="flex items-baseline gap-2">
                             <span className="text-muted-foreground shrink-0 text-xs font-semibold tabular-nums">
                               {t("web.watchTogether.common.episodeNumber", {
-                                number: episode.episode_number,
+                                number: codeNumber(episode.episode_number),
                               })}
                             </span>
                             <span className="truncate text-sm font-medium">{episode.title}</span>

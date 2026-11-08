@@ -1,4 +1,4 @@
-import { t, type MessageKey } from "@/i18n";
+import { codeNumber, t, type MessageKey } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate, formatTime, preferredDateLocale } from "@/lib/datetime";
 import { activityMethodMeta, formatDecisionLabel } from "@/pages/adminActivityPresentation";
@@ -83,10 +83,9 @@ export function episodeCode(
   episode: number | null | undefined,
 ): string {
   if (season == null || episode == null) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
   return t("web.admin.users.detail.common.episodeCode", {
-    season: pad(season),
-    episode: pad(episode),
+    season: codeNumber(season, 2),
+    episode: codeNumber(episode, 2),
   });
 }
 

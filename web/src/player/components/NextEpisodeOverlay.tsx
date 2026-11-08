@@ -1,4 +1,4 @@
-import { useT } from "@/i18n";
+import { codeNumber, useT } from "@/i18n";
 import type { EpisodeRef } from "../types";
 
 interface NextEpisodeOverlayProps {
@@ -25,8 +25,8 @@ export function NextEpisodeOverlay({
       </div>
       <div className="text-sm font-medium">
         {t("web.player.nextEpisode.episodeLine", {
-          season: episode.seasonNumber,
-          episode: episode.episodeNumber,
+          season: codeNumber(episode.seasonNumber),
+          episode: codeNumber(episode.episodeNumber),
           title: episode.title,
         })}
       </div>
