@@ -1287,12 +1287,13 @@ func (s *Service) ImportWatched(
 		}
 	}
 	// The kept watches are settled before the cursor moves past them, so a
-	// failure here leaves the provider's rows to be read again.
+	// failure here leaves the provider's rows to be read again. Imported ones
+	// leave first, so a save at the cap trims only what is still unmatched.
 	if keepsPending {
-		if err := pending.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, keep); err != nil {
+		if err := pending.DeletePendingWatches(ctx, conn.ID, conn.ProviderAccountID, applied); err != nil {
 			return result, err
 		}
-		if err := pending.DeletePendingWatches(ctx, conn.ID, conn.ProviderAccountID, applied); err != nil {
+		if err := pending.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, keep); err != nil {
 			return result, err
 		}
 	}
