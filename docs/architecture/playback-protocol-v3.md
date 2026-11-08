@@ -841,6 +841,11 @@ proxy-executed progressive remux requires only the proxy's execution capability
 and remains eligible when relay capability is absent. During a rolling upgrade,
 an older node is therefore excluded from only the shapes it cannot serve before
 a client receives a URL rather than failing the stream on its first request.
+Proxies also publish `remux_range_refusal_v1`: a proxy-served progressive remux
+URL carries `remux_range=refuse` (`progressive_range_refusal_v1`) only when its
+proxy advertises it, because an older proxy streams a mid-stream range from the
+origin. The proxy refuses before it relays, so a transcode node needs no marker
+for it.
 The transcode-executed shape also requires the shared node-recipe store. The API
 writes the plan-scoped transport record before publishing the proxy URL; the
 transcode node validates it before starting each progressive response, and stop

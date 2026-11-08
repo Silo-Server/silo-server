@@ -263,6 +263,20 @@ func headerAuthenticatedMediaV3(clientFeatures []string) mediaAuthModeV3 {
 	}
 }
 
+// egressRefusesRemuxRangeV3 reports whether the stream's egress refuses a
+// mid-stream range on a URL carrying playback.RemuxRangeQueryParam. The API
+// always does; a proxy does only when it advertises
+// TransportFeatureRemuxRangeRefusalV1, because an older one streams the range
+// from the origin. A remux relayed from a transcode node is refused at the
+// proxy, so the node's version does not matter.
+func (h *PlaybackHandler) egressRefusesRemuxRangeV3(ctx context.Context, servedByProxy bool, proxyNode *nodepool.Node) bool {
+	if !servedByProxy || proxyNode == nil {
+		return true
+	}
+	capabilities, err := h.lookupRemoteCapabilitiesV3(ctx, proxyNode.URL, false)
+	return err == nil && slices.Contains(capabilities.transportFeatures, playback.TransportFeatureRemuxRangeRefusalV1)
+}
+
 // recipeCardStoreV3 is the shared control-plane store central keeps a recipe
 // card in for another Silo process, or for itself after a restart
 // (*noderecipe.Store). One instance owns one key space; the handler holds three
@@ -3300,7 +3314,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 		if seek := timeline.seekSeconds; seek > 0 {
 			streamURL = appendPlaybackQueryV3(streamURL, "seek", strconv.FormatFloat(seek, 'f', -1, 64))
 		}
-		if mode.progressiveRangeRefusal {
+		if mode.progressiveRangeRefusal && h.egressRefusesRemuxRangeV3(r.Context(), servedByProxy, proxyNode) {
 			streamURL = appendPlaybackQueryV3(streamURL, playback.RemuxRangeQueryParam, playback.RemuxRangeRefuse)
 		}
 	}
