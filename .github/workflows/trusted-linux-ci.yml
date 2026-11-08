@@ -120,9 +120,9 @@ jobs:
             !/web/assets-source/
           sparse-checkout-cone-mode: false
           persist-credentials: false
-      # GitHub release downloads can fail for hours with 504s while the rest of
-      # Actions works, which stopped every run at the step below. Keep the
-      # archives in the Actions cache so most runs never fetch them. The
+      # GitHub release downloads sometimes return 504s for a stretch while the
+      # rest of Actions works, and that stops every run at the step below. Keep
+      # the archives in the Actions cache so most runs never fetch them. The
       # checksums still verify every archive, cached or downloaded. Change the
       # key whenever a tool version changes.
       - name: Restore pinned workflow and shell tool archives
