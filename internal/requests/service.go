@@ -2622,9 +2622,12 @@ func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, 
 			status = StatusQueued // coerce unknown/empty status to the DB-valid default
 		}
 		if status == StatusCompleted {
+			// The plugin has already acted, so a failed check must not drop
+			// its targets: hold the target and let reconcile check again.
 			stands, err := s.pluginCompletionStands(ctx, req)
 			if err != nil {
-				return nil, err
+				slog.WarnContext(ctx, "requests: could not check the requested seasons; holding the target", "component", "requests",
+					"request_id", req.ID, "quality", string(rt.Quality), "err", err)
 			}
 			if !stands {
 				// Reconcile completes the target once the seasons are in.
