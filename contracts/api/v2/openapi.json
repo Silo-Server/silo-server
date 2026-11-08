@@ -246124,6 +246124,9 @@
           "auto_fallback_ready": {
             "type": "boolean"
           },
+          "copy_audio_codec": {
+            "type": "string"
+          },
           "copy_fmp4_recipe_version": {
             "type": "string"
           },
@@ -246285,6 +246288,9 @@
         "additionalProperties": false,
         "properties": {
           "audio_recipe_version": {
+            "type": "string"
+          },
+          "copy_audio_codec": {
             "type": "string"
           },
           "copy_fmp4_recipe_version": {
