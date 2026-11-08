@@ -3,8 +3,11 @@ package watchsync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 )
@@ -99,17 +102,36 @@ func (r *PostgresRepository) SavePendingWatches(ctx context.Context, connectionI
 	}
 	// Only the connection's current provider account writes, so a sync still
 	// running for the account it was rebound from cannot replace the new
-	// account's watches. Within an account the newest watch per key wins, so
-	// an overlapping older sync cannot replace a newer one.
-	if _, err := r.pool.Exec(ctx, `
+	// account's watches. The account is checked under a lock on the
+	// connection row, which a rebind's update waits for, and held through the
+	// write: checked in the write's own statement, a rebind and the new
+	// account's write could both commit between the check and the conflict.
+	// Within an account the newest watch per key wins, so an overlapping older
+	// sync cannot replace a newer one.
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin saving pending watches: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var current string
+	if err := tx.QueryRow(ctx, `
+		SELECT provider_account_id FROM watch_provider_connections
+		WHERE id = $1::uuid
+		FOR NO KEY UPDATE
+	`, connectionID).Scan(&current); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lock connection for pending watches: %w", err)
+	}
+	if current != providerAccountID {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO watch_provider_pending_watches
 			(connection_id, provider_account_id, kind, provider_item_key, last_watched_at, watch, updated_at)
 		SELECT DISTINCT ON (w.kind, w.key) $1::uuid, $2, w.kind, w.key, w.watched_at, w.watch, now()
 		FROM unnest($3::text[], $4::text[], $5::timestamptz[], $6::jsonb[]) AS w(kind, key, watched_at, watch)
-		WHERE EXISTS (
-			SELECT 1 FROM watch_provider_connections c
-			WHERE c.id = $1::uuid AND c.provider_account_id = $2
-		)
 		ORDER BY w.kind, w.key, w.watched_at DESC
 		ON CONFLICT (connection_id, kind, provider_item_key) DO UPDATE
 		SET provider_account_id = EXCLUDED.provider_account_id,
@@ -120,6 +142,9 @@ func (r *PostgresRepository) SavePendingWatches(ctx context.Context, connectionI
 		   OR EXCLUDED.provider_account_id <> watch_provider_pending_watches.provider_account_id
 	`, connectionID, providerAccountID, kinds, keys, times, encoded); err != nil {
 		return fmt.Errorf("save pending watches: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit pending watches: %w", err)
 	}
 	return nil
 }

@@ -116,3 +116,64 @@ func TestImportWatchedRetriesPendingWatchesDB(t *testing.T) {
 		t.Fatalf("sync of the new account = %+v, want its kept watch imported", got)
 	}
 }
+
+// A save from the connection's previous provider account that runs while the
+// connection is being rebound waits for the rebind, then writes nothing.
+func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
+	ctx := t.Context()
+	repo, conn, _ := newSyncStateTestConnection(t)
+	pool := repo.pool
+	watchedAt := time.Date(2026, 9, 6, 3, 21, 0, 0, time.UTC)
+	stale := RemoteWatch{
+		Provider: conn.Provider, ProviderItemKey: "tmdb:1", Kind: historyimport.KindMovie,
+		TMDBID: "1", PlayCount: 1, LastWatchedAt: &watchedAt,
+	}
+	rebind, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rebind.Rollback(context.Background()) }()
+	if _, err := rebind.Exec(ctx, `UPDATE watch_provider_connections SET provider_account_id='another-account' WHERE id=$1`, conn.ID); err != nil {
+		t.Fatal(err)
+	}
+	saved := make(chan error, 1)
+	go func() { saved <- repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, []RemoteWatch{stale}) }()
+	// Wait until the save either finished or is waiting on the rebind's lock.
+	var done error
+	finished := false
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); {
+		select {
+		case done = <-saved:
+			finished = true
+		default:
+		}
+		if finished {
+			break
+		}
+		var waiting bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%FOR NO KEY UPDATE%')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := rebind.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !finished {
+		done = <-saved
+	}
+	if done != nil {
+		t.Fatalf("SavePendingWatches: %v", done)
+	}
+	var rows int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM watch_provider_pending_watches WHERE connection_id=$1`, conn.ID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 0 {
+		t.Fatalf("kept %d watches of the previous account, want none", rows)
+	}
+}
