@@ -63,8 +63,8 @@ func (am *AuthMiddleware) RequireApplePushDisplayAuth(
 			}
 			// A remote-playback handoff never registers for push; a display
 			// token an older release minted for one is refused.
-			if authority.IsRemotePlayback() {
-				writeForbidden(w, "A remote-playback session cannot read notifications")
+			if authority.IsBound() {
+				writeForbidden(w, "A remote-playback or Watch Party visitor session cannot read notifications")
 				return
 			}
 			// A display token lives as long as the session and is not

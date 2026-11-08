@@ -24,7 +24,7 @@ func TestReconnectPreservesPlayingSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host-session")
+	snapshot, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", "host-session")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestReconnectSyncSupersedesTheRoomCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest-session"); err != nil {
+	if _, err := s.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest", "guest-session"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.reconcileRoom(t.Context(), repo.room.ID); err != nil {
@@ -106,7 +106,7 @@ func TestReplacementSessionSyncsWithoutPausingTheRoom(t *testing.T) {
 				live.members[buildMemberKey(8, "guest")] = &memberState{userID: 8, profileID: "guest", sessionID: "guest-session", connection: new(recordingConn), isReady: true}
 			}
 			reg := registrationFor(room.ID, 7, "host", conn)
-			snapshot, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "replacement-session")
+			snapshot, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", "replacement-session")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,7 +147,7 @@ func TestAttachDuringSeekRequiresSeekPosition(t *testing.T) {
 	if _, err := s.HandleTransportRequestForConnection(t.Context(), reg, 7, "host", TransportRequest{Action: TransportActionSeek, PositionSeconds: new(1500.0)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "replacement-session"); err != nil {
+	if _, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", "replacement-session"); err != nil {
 		t.Fatal(err)
 	}
 	command := conn.payloads[len(conn.payloads)-1]["command"].(TransportCommand)
@@ -179,16 +179,16 @@ func TestAttachUsesDurablePlaybackOwnership(t *testing.T) {
 	}
 	record := &playback.AttemptRecordV3{SessionID: "remote-session", UserID: 7, ProfileID: "host", EffectiveMediaFileID: 1}
 	s.SetPlaybackAttemptStore(attemptLookup{record: record})
-	if _, err = s.AttachSessionForConnection(t.Context(), reg, 7, "host", record.SessionID); err != nil {
+	if _, err = s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", record.SessionID); err != nil {
 		t.Fatalf("durable session on another node: %v", err)
 	}
 	record.ProfileID = "someone-else"
-	if _, err = s.AttachSessionForConnection(t.Context(), reg, 7, "host", record.SessionID); !errors.Is(err, ErrSessionMismatch) {
+	if _, err = s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", record.SessionID); !errors.Is(err, ErrSessionMismatch) {
 		t.Fatalf("ownership bypass: %v", err)
 	}
 	record.ProfileID = "host"
 	record.StoppedAt = &now
-	if _, err = s.AttachSessionForConnection(t.Context(), reg, 7, "host", record.SessionID); !errors.Is(err, playback.ErrSessionNotFound) {
+	if _, err = s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", record.SessionID); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("stopped session accepted: %v", err)
 	}
 }

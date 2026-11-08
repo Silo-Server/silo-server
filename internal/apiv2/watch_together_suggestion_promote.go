@@ -29,7 +29,7 @@ func registerWatchTogetherSuggestionPromote(reg *Registry) {
 		if svc == nil {
 			return nil, unavailable("suggestion promotion")
 		}
-		user, profile, p := viewerIdentity(ctx)
+		user, profile, p := watchPartyMember(ctx)
 		if p != nil {
 			return nil, p
 		}

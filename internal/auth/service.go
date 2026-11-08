@@ -1218,8 +1218,8 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 		ImpersonatorUserID:     session.ImpersonatorUserID,
 		PasswordChangeRequired: user.PasswordChangeRequired && session.ImpersonatorUserID == nil,
 	}
-	if session.IsRemotePlayback() {
-		refreshed = remotePlaybackClaims(refreshed, session)
+	if session.IsRemotePlayback() || session.IsWatchPartyVisitor() {
+		refreshed = boundSessionClaims(refreshed, session)
 	}
 	return s.generateTokenPair(refreshed)
 }
@@ -1256,6 +1256,21 @@ func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*
 		// The schema refuses such a row; fail closed rather than refresh a
 		// handoff that names no profile or no end.
 		return nil, ErrSessionRevoked
+	}
+	if session.IsWatchPartyVisitor() {
+		if session.BoundProfileID == "" || session.BoundRoomID == "" || session.BoundVisitorID == "" ||
+			session.AbsoluteExpiresAt == nil {
+			return nil, ErrSessionRevoked
+		}
+		// A visitor's session lasts only while its room is open and the
+		// host has not removed it.
+		live, err := s.sessions.VisitorBindingLive(ctx, session.ID)
+		if err != nil {
+			return nil, sessionCheckUnavailable("checking watch party visitor", err)
+		}
+		if !live {
+			return nil, ErrSessionRevoked
+		}
 	}
 
 	user, err := s.users.GetByID(ctx, session.UserID)
@@ -1338,7 +1353,7 @@ func (s *Service) RenewPluginAccess(ctx context.Context, claims *Claims, ttl tim
 	session, user := standing.session, standing.user
 	// Plugins are not part of a remote-playback handoff, and a session that
 	// must change its password may only do that.
-	if session.UserID != claims.UserID || session.IsRemotePlayback() ||
+	if session.UserID != claims.UserID || session.IsRemotePlayback() || session.IsWatchPartyVisitor() ||
 		(user.PasswordChangeRequired && session.ImpersonatorUserID == nil) {
 		return "", ErrSessionRevoked
 	}

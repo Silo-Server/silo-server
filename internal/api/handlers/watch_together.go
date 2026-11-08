@@ -38,6 +38,8 @@ type WatchTogetherHandler struct {
 	MemberStateCatalog interface {
 		GetSearchItemsByIDsWithAccess(context.Context, []string, catalog.AccessFilter) ([]*models.MediaItem, error)
 	}
+	// visitors enables Watch Party visitor invites; see SetVisitorDeps.
+	visitors *WatchPartyVisitorDeps
 }
 
 type createWatchTogetherRoomRequest struct {
@@ -929,7 +931,7 @@ func (h *WatchTogetherHandler) handleRoomClientMessage(
 		if msg.SessionID == "" {
 			return errors.New("session_id is required")
 		}
-		_, err := h.Service.AttachSessionForConnection(ctx, reg, userID, profileID, msg.SessionID)
+		_, err := h.Service.AttachSessionForConnection(ctx, reg, userID, profileID, apimw.GetProfileID(ctx), msg.SessionID)
 		return err
 	case "transport_request":
 		var msg watchTogetherTransportRequestMessage

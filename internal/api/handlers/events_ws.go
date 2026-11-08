@@ -293,7 +293,7 @@ func (h *EventsHandler) closeOnSessionChange(ctx context.Context, cancel context
 func (h *EventsHandler) sessionChanged(ctx context.Context, claims *auth.Claims, stillActingAdmin func(context.Context) (bool, error)) bool {
 	authority, active, err := h.sessionRoles.ActiveSession(ctx, claims.SessionID, claims.UserID)
 	// A remote-playback handoff never holds a v1 socket.
-	if err == nil && (!active || authority.Role != claims.Role || authority.IsRemotePlayback()) {
+	if err == nil && (!active || authority.Role != claims.Role || authority.IsBound()) {
 		return true
 	}
 	if stillActingAdmin == nil {

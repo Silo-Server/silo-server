@@ -47,6 +47,9 @@ type SocketIdentity struct {
 	// DeviceID is the minting request's X-Silo-Device-Id, which the
 	// acting-admin decision reads as the HTTP admin gate does.
 	DeviceID string `json:"device_id,omitempty"`
+	// WatchPartyVisitorID is the visitor a Watch Party visitor session's
+	// room ticket was minted for; empty for every other session.
+	WatchPartyVisitorID string `json:"watch_party_visitor_id,omitempty"`
 	// Audience is the socket the ticket opens. The store stamps it at mint
 	// and refuses a ticket minted for another audience at consume.
 	Audience string `json:"audience"`

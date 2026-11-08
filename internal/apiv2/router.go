@@ -117,6 +117,7 @@ type Dependencies struct {
 	AndroidPushRetirement           AndroidPushRetirementService
 	WatchTogetherSuggestionDelete   WatchTogetherSuggestionDeleteService
 	WatchTogetherClose              WatchTogetherCloseService
+	WatchPartyVisitors              WatchPartyVisitorService
 	WatchTogetherRoomRead           WatchTogetherRoomReadService
 	WatchTogetherPolicy             WatchTogetherPolicyService
 	WatchTogetherJoin               WatchTogetherJoinService

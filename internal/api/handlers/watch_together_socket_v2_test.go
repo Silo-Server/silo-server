@@ -335,3 +335,46 @@ func TestRoomSocketV2MintValidatesRoomAndCurrentPIN(t *testing.T) {
 		t.Fatal("lost PIN")
 	}
 }
+
+// A Watch Party visitor holds only its own room's socket, as its visitor
+// member, and no other socket validates its session.
+func TestRoomSocketV2AdmitsVisitorToItsRoomOnly(t *testing.T) {
+	h, _, _ := roomSocketHandler(t)
+	users := &socketUserFixture{user: models.User{ID: 7, Role: "admin", Enabled: true}}
+	sessions := &socketSessionFixture{valid: true, account: users, visitor: &auth.SessionAuthority{
+		Role: models.RoleUser, Purpose: models.SessionPurposeWatchPartyVisitor, BoundProfileID: "profile", RoomID: "room", VisitorID: "v1"}}
+	viewer := &socketViewerFixture{scope: access.Scope{UserID: 7, ProfileID: "profile", ProfileVerified: true, PolicyRevision: 1}}
+	acting := apimw.NewActingAdminDecider(func(context.Context, int, string) (bool, bool, error) { return false, true, nil }, nil)
+	h.Validate = refuseRemotePlaybackSocket(newRoomSocketAuthorityValidator(sessions, users, viewer, acting))
+	identity := evt.SocketIdentity{UserID: 7, SessionID: "session", Role: "user", ProfileID: "profile", WatchPartyVisitorID: "v1", AccessExpiresAt: time.Now().Add(time.Minute)}
+	member := watchtogether.VisitorMemberProfileID("v1")
+	proof := func(room, profile string) string {
+		t.Helper()
+		token, _, err := h.Room.TokenService.Mint(watchtogether.RoomTokenClaims{RoomID: room, UserID: 7, ProfileID: profile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	if _, _, err := h.MintRoomSocket(t.Context(), "room", proof("room", member), identity); err != nil {
+		t.Fatalf("own room as its visitor member: %v", err)
+	}
+	if _, _, err := h.MintRoomSocket(t.Context(), "room", proof("room", "profile"), identity); err == nil {
+		t.Fatal("visitor minted a socket as the host's profile")
+	}
+	if _, _, err := h.MintRoomSocket(t.Context(), "other", proof("other", member), identity); err == nil {
+		t.Fatal("visitor minted a socket for another room")
+	}
+	other := identity
+	other.WatchPartyVisitorID = "v2"
+	if _, _, err := h.Validate(t.Context(), other); err == nil {
+		t.Fatal("ticket naming another visitor validated")
+	}
+	if _, _, err := newSocketAuthorityValidator(sessions, users, viewer, acting)(t.Context(), identity); err == nil {
+		t.Fatal("events socket validator admitted a visitor")
+	}
+	sessions.visitor = nil
+	if _, _, err := h.Validate(t.Context(), identity); err == nil {
+		t.Fatal("account session validated a visitor ticket")
+	}
+}

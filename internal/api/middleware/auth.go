@@ -185,6 +185,12 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 					writeForbidden(w, "A remote-playback session can only play on its approved profile")
 					return
 				}
+			} else if authority.IsWatchPartyVisitor() {
+				// See watch_party_visitor.go.
+				if !narrowWatchPartyVisitor(r, claims, authority) {
+					writeForbidden(w, "A Watch Party visitor can only take part in its own room")
+					return
+				}
 			} else if authority.Role != claims.Role {
 				writeUnauthorized(w, "The account's role changed; refresh the access token", ReasonTokenRefreshRequired)
 				return
@@ -248,6 +254,11 @@ func (am *AuthMiddleware) sessionClaims(r *http.Request) *auth.Claims {
 	}
 	authority, active, err := am.sessionValidator.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
 	if err != nil || !active {
+		return nil
+	}
+	if authority.IsWatchPartyVisitor() {
+		// A visitor is not a signed-in person of the host's account: public
+		// routes answer it anonymously.
 		return nil
 	}
 	if authority.IsRemotePlayback() {

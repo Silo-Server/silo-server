@@ -337,6 +337,9 @@ func (h *PlaybackHandler) StartPlaybackV2(ctx context.Context, caller PlaybackCa
 	if err := h.validatePlaybackCaller(ctx, caller); err != nil {
 		return playback.DecisionResponseV3{}, err
 	}
+	if err := h.checkVisitorStart(ctx, request); err != nil {
+		return playback.DecisionResponseV3{}, err
+	}
 	body, err := json.Marshal(request)
 	if err != nil {
 		return playback.DecisionResponseV3{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid playback request")

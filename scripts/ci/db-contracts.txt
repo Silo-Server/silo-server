@@ -785,6 +785,12 @@
 # playback choice is saved.
 ./internal/watchtogether TestSlowGuestControlSaveDoesNotHoldTheRoomPG
 
+# A Watch Party visitor's session is live only while its invite was usable at
+# acceptance, its room is open and the host has not removed it; a room admits
+# at most ten visitors.
+./internal/watchtogether TestWatchPartyVisitorLifecycleDB
+./internal/watchtogether TestWatchPartyVisitorLimitsDB
+
 # The catalog item change outbox: what each membership and file write queues
 # (and what routine scan writes do not), key moves, coalescing, the cluster-wide
 # drain spacing, and retention.

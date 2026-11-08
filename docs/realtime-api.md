@@ -513,7 +513,57 @@ Rows are resolved to catalog cards through the caller's access filter; a row who
 
 ### Watch-together capabilities
 
-`GET /api/v2/watch-together/capabilities` (`getWatchTogetherCapabilities`) requires an authenticated account and follows the shared capability document conventions (opaque `revision`, `state`, `allowed`, private revalidation with `ETag`). When rooms are served, each feature flag reflects its wired operation dependencies. `max_member_state_ids` is 200 when member-state is available and zero otherwise. `lobby_ready`, `connection_replaced` and `socket_protocol` (`silo.room.v2`) require the v2 socket; the protocol is an empty string when the socket is unavailable. When the room service is not wired the state is `not_configured` and every flag is `false`. Clients decide whether to show the staged lobby, the ready check, the mode switch and the shared picker from this document, not from the server version.
+`GET /api/v2/watch-together/capabilities` (`getWatchTogetherCapabilities`) requires an authenticated account and follows the shared capability document conventions (opaque `revision`, `state`, `allowed`, private revalidation with `ETag`). When rooms are served, each feature flag reflects its wired operation dependencies. `max_member_state_ids` is 200 when member-state is available and zero otherwise. `lobby_ready`, `connection_replaced` and `socket_protocol` (`silo.room.v2`) require the v2 socket; the protocol is an empty string when the socket is unavailable. `visitor_invites` requires the v2 socket and the visitor store (see [Watch Party visitors](#watch-party-visitors)). When the room service is not wired the state is `not_configured` and every flag is `false`. Clients decide whether to show the staged lobby, the ready check, the mode switch and the shared picker from this document, not from the server version.
+
+### Watch Party visitors
+
+A host can invite people without an account into one room. The design and its
+security boundary are in
+[Watch Party visitors](architecture/watch-party-visitors.md).
+`visitor_invites` in the capabilities document says whether this server offers
+it.
+
+Host operations require authenticated profile authority and both the host
+account and profile; anyone else gets `403`, a missing room `404` and a closed
+room `409`. Responses are `no-store`.
+
+- `POST /api/v2/watch-together/rooms/{room_id}/visitor-invites`
+  (`createWatchPartyVisitorInvite`) returns `201` with `invite` (`id`,
+  `created_at`, `expires_at`), the secret `token` and `invite_path`
+  (`/rooms/visit?token=...`). The token is shown only here; keep it out of
+  durable caches. A room with 5 usable links answers `409`.
+- `GET .../visitor-invites` (`listWatchPartyVisitorInvites`) lists usable links
+  without tokens.
+- `DELETE .../visitor-invites/{invite_id}` (`revokeWatchPartyVisitorInvite`)
+  answers `204` and stops the link from admitting anyone else. Visitors already
+  in stay.
+- `DELETE .../visitors/{visitor_id}` (`removeWatchPartyVisitor`) answers `204`,
+  removes the visitor and ends its session. Its room socket closes at the next
+  authority check.
+
+The public operations need no credential and use the `invitation` rate-limit
+bucket. Unknown, revoked and expired links, and links to a closed room, all
+answer `404`.
+
+- `GET /api/v2/watch-together/visitor-invites/{token}`
+  (`getWatchPartyVisitorInvite`) returns `host_name` and `expires_at`.
+- `POST /api/v2/watch-together/visitor-invites/{token}/accept`
+  (`acceptWatchPartyVisitorInvite`) takes `{display_name}` (1 to 40 characters;
+  otherwise `422`) and answers `201`. A room with 10 visitors answers `409`.
+  Each call admits another visitor, so a client must not retry it
+  automatically. The body carries `room_id`, `visitor_id`, `display_name`,
+  `member_profile_id` (the visitor's `profile_id` in the roster),
+  `access_token`, `refresh_token`, `expires_in`, `profile_id` and, when that
+  profile has a PIN, `profile_token`, plus `room_token` and `session_ends_at`.
+
+A visitor client sends `Authorization`, `X-Profile-Id: <profile_id>` and
+`X-Profile-Token` when given, and the room proof as any member does. It then
+uses the ordinary room read, socket, suggestion, vote, member-state and
+source-fallback operations for its own room. It plays the room's
+`selected_file_id` with `allow_alternate_versions: false` and
+`progress_persistence: client`; any other start is refused with `403`. Refresh
+works as for any session until the room closes, the host removes the visitor or
+`session_ends_at` passes.
 
 ### Suggestion creation receipt storage
 

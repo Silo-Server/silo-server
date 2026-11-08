@@ -59,6 +59,10 @@ func (am *AuthMiddleware) RevalidateCurrent(ctx context.Context, bearer string, 
 			!remotePlaybackAllowsRoute(method, path)) {
 			return ErrCurrentCredentialForbidden
 		}
+		if authority.IsWatchPartyVisitor() && (expected.ProfileID != authority.BoundProfileID ||
+			!watchPartyVisitorAllowsRoute(method, path, authority.RoomID)) {
+			return ErrCurrentCredentialForbidden
+		}
 	}
 	if am.apiKeyUserLoader == nil {
 		return ErrCurrentCredentialInvalid

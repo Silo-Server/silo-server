@@ -213,6 +213,10 @@ func (r *MemberStateReader) MemberState(ctx context.Context, members []MemberSum
 		byID[id] = &out[len(out)-1]
 	}
 	for _, member := range members {
+		if IsVisitorMember(member.ProfileID) {
+			// A visitor has no watch history or watchlist of its own.
+			continue
+		}
 		store, err := r.provider.ForUser(ctx, member.UserID)
 		if err != nil || store == nil {
 			return nil, err

@@ -491,15 +491,23 @@ func (s *Service) Disconnect(reg *Registration, explicit bool) {
 	live.pendingDisconnects[reg.memberKey] = pendingDisconnect{registration: reg, explicit: explicit}
 }
 
-func (s *Service) AttachSessionForConnection(ctx context.Context, reg *Registration, user int, profile, sessionID string) (Snapshot, error) {
+// AttachSessionForConnection attaches a playback session to the member
+// (user, profile) of reg. playbackProfile is the profile the connection's
+// credential acts as: the member's own profile, or for a visitor member the
+// host profile its session is bound to. The playback session must belong to
+// that profile.
+func (s *Service) AttachSessionForConnection(ctx context.Context, reg *Registration, user int, profile, playbackProfile, sessionID string) (Snapshot, error) {
 	if reg == nil {
 		return Snapshot{}, ErrRoomForbidden
+	}
+	if playbackProfile == "" || (!IsVisitorMember(profile) && playbackProfile != profile) {
+		return Snapshot{}, ErrSessionMismatch
 	}
 	session, err := s.lookupSession(ctx, sessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if session == nil || session.UserID != user || session.ProfileID != profile || s.files == nil {
+	if session == nil || session.UserID != user || session.ProfileID != playbackProfile || s.files == nil {
 		return Snapshot{}, ErrSessionMismatch
 	}
 	file, err := s.files.GetByID(ctx, session.MediaFileID)

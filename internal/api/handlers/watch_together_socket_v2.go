@@ -10,6 +10,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
 	"github.com/go-chi/chi/v5"
@@ -31,7 +32,7 @@ type WatchTogetherSocketV2 struct {
 }
 
 func NewWatchTogetherSocketV2(room *WatchTogetherHandler, tickets *watchtogether.RoomSocketCredentialStore, sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, publicURL string) *WatchTogetherSocketV2 {
-	return &WatchTogetherSocketV2{Room: room, Tickets: tickets, Validate: refuseRemotePlaybackSocket(newSocketAuthorityValidator(sessions, users, resolver, actingAdmin)), PublicOrigin: publicURL}
+	return &WatchTogetherSocketV2{Room: room, Tickets: tickets, Validate: refuseRemotePlaybackSocket(newRoomSocketAuthorityValidator(sessions, users, resolver, actingAdmin)), PublicOrigin: publicURL}
 }
 func (h *WatchTogetherSocketV2) available() bool {
 	return h != nil && h.Room != nil && h.Room.Service != nil && h.Room.TokenService != nil && h.Tickets != nil && h.Validate != nil
@@ -41,11 +42,11 @@ func (h *WatchTogetherSocketV2) MintRoomSocket(ctx context.Context, roomID, proo
 		return "", time.Time{}, apiError(503, "unavailable", "Room socket is unavailable")
 	}
 	claims, expiry, err := h.Room.TokenService.ValidateSocketProof(proof)
-	if err != nil || claims.RoomID != roomID || claims.UserID != identity.UserID || claims.ProfileID != identity.ProfileID || identity.ProfileID == "" {
+	if err != nil || claims.RoomID != roomID || claims.UserID != identity.UserID || claims.ProfileID != roomMemberProfile(identity) || identity.ProfileID == "" {
 		return "", time.Time{}, apiError(403, "forbidden", "Room proof is required")
 	}
 	validated, effective, err := h.Validate(ctx, identity)
-	if err != nil {
+	if err != nil || !visitorRoomMatches(effective, roomID) {
 		return "", time.Time{}, apiError(403, "forbidden", "Current room authority is required")
 	}
 	scope, ok := access.GetScope(validated)
@@ -111,7 +112,7 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	validated, claims, err := h.Validate(r.Context(), credential.Session)
-	if err != nil {
+	if err != nil || !visitorRoomMatches(claims, roomID) {
 		http.Error(w, "room authority expired", http.StatusUnauthorized)
 		return
 	}
@@ -162,7 +163,22 @@ func (h *WatchTogetherSocketV2) ServeHTTP(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}()
-	h.Room.serveRoomConnection(ctx, conn, roomID, claims.UserID, credential.Session.ProfileID)
+	h.Room.serveRoomConnection(ctx, conn, roomID, claims.UserID, roomMemberProfile(credential.Session))
+}
+
+// roomMemberProfile is the member profile a socket identity has in a room:
+// its own profile, or for a Watch Party visitor its visitor member id.
+func roomMemberProfile(identity evt.SocketIdentity) string {
+	if identity.WatchPartyVisitorID != "" {
+		return watchtogether.VisitorMemberProfileID(identity.WatchPartyVisitorID)
+	}
+	return identity.ProfileID
+}
+
+// visitorRoomMatches reports whether validated claims may hold roomID's
+// socket: every claim but a visitor's, and a visitor's for its own room.
+func visitorRoomMatches(claims *auth.Claims, roomID string) bool {
+	return claims != nil && (!claims.IsWatchPartyVisitor() || claims.WatchPartyRoomID == roomID)
 }
 
 func (h *WatchTogetherSocketV2) currentPublicOrigin() string {

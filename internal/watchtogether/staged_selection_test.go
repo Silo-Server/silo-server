@@ -264,7 +264,7 @@ func TestAttachSessionRefusedWhileStaged(t *testing.T) {
 	)
 	service.rooms[room.ID].members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", connection: stubConn{}}
 	reg := registrationFor(room.ID, 7, "host", stubConn{})
-	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host-session"); !errors.Is(err, ErrSessionMismatch) {
+	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host", "host-session"); !errors.Is(err, ErrSessionMismatch) {
 		t.Fatalf("AttachSessionForConnection() error = %v, want ErrSessionMismatch", err)
 	}
 }

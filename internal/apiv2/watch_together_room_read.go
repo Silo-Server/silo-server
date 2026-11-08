@@ -118,7 +118,7 @@ func registerWatchTogetherRoomRead(reg *Registry) {
 		if reg.deps.WatchTogetherRoomRead == nil {
 			return nil, unavailable("watch together")
 		}
-		user, profile, p := viewerIdentity(ctx)
+		user, profile, p := watchPartyMember(ctx)
 		if p != nil {
 			return nil, p
 		}

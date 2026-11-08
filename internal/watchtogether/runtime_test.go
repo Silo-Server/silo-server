@@ -54,14 +54,14 @@ func newRoomClusterFixture(t *testing.T) *roomClusterFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.host.AttachSessionForConnection(t.Context(), f.hostReg, 7, "host", "host-session"); err != nil {
+	if _, err = f.host.AttachSessionForConnection(t.Context(), f.hostReg, 7, "host", "host", "host-session"); err != nil {
 		t.Fatal(err)
 	}
 	f.guestReg, _, err = f.guest.Connect(t.Context(), room.ID, 8, "guest", f.guestConn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.guest.AttachSessionForConnection(t.Context(), f.guestReg, 8, "guest", "guest-session"); err != nil {
+	if _, err = f.guest.AttachSessionForConnection(t.Context(), f.guestReg, 8, "guest", "guest", "guest-session"); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -142,7 +142,7 @@ func TestRoomRuntimeExpiresFailedNodeAndFencesReplacedSocketPG(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := f.repo.GetRoomByID(t.Context(), f.roomID)
-	snapshot, err = f.guest.AttachSessionForConnection(t.Context(), reg, 7, "host", "host-session")
+	snapshot, err = f.guest.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", "host-session")
 	if err != nil || snapshot.PlaybackState != RoomPlaybackStatePlaying || snapshot.Generation != before.Generation {
 		t.Fatalf("cross-node reattach paused room: %+v %v", snapshot, err)
 	}
@@ -221,7 +221,7 @@ func TestRoomRuntimeRemoteBarrierInvalidatesOldDeadlinePG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.guest.AttachSessionForConnection(t.Context(), reg, 7, "host", "host-session"); err != nil {
+	if _, err = f.guest.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", "host-session"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = f.guest.HandleTransportRequestForConnection(t.Context(), reg, 7, "host", TransportRequest{Action: TransportActionPlay}); err != nil {
@@ -309,7 +309,7 @@ func TestRoomRuntimeReconnectDuringSeekKeepsDestinationCheckPG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.host.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest-session"); err != nil {
+	if _, err = f.host.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest", "guest-session"); err != nil {
 		t.Fatal(err)
 	}
 	attached := lastTransport(t, replacement)
@@ -340,7 +340,7 @@ func TestRoomRuntimeWaitingDeadlineStartsWithAttachmentPG(t *testing.T) {
 	if room.PlaybackState != RoomPlaybackStateWaiting {
 		t.Fatal("room resumed before anyone attached playback")
 	}
-	if _, err := f.host.AttachSessionForConnection(t.Context(), f.hostReg, 7, "host", "host-session"); err != nil {
+	if _, err := f.host.AttachSessionForConnection(t.Context(), f.hostReg, 7, "host", "host", "host-session"); err != nil {
 		t.Fatal(err)
 	}
 	f.now = f.now.Add(waitingResumeDeadline + time.Second)
@@ -352,7 +352,7 @@ func TestRoomRuntimeWaitingDeadlineStartsWithAttachmentPG(t *testing.T) {
 		t.Fatal("room started without anyone ready to watch")
 	}
 	// Once someone is ready, the attached straggler no longer holds the room.
-	if _, err := f.guest.AttachSessionForConnection(t.Context(), f.guestReg, 8, "guest", "guest-session"); err != nil {
+	if _, err := f.guest.AttachSessionForConnection(t.Context(), f.guestReg, 8, "guest", "guest", "guest-session"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.guest.HandleReadyForConnection(t.Context(), f.guestReg, 8, "guest", StateReport{SessionID: "guest-session", PositionSeconds: 0}); err != nil {

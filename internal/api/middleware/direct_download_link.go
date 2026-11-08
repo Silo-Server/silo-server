@@ -54,8 +54,8 @@ func (am *AuthMiddleware) RequireDirectDownloadAuth(next http.Handler) http.Hand
 		}
 		// A remote-playback handoff cannot mint download links; one an
 		// older release minted for it is refused.
-		if authority.IsRemotePlayback() {
-			writeForbidden(w, "A remote-playback session cannot download files")
+		if authority.IsBound() {
+			writeForbidden(w, "A remote-playback or Watch Party visitor session cannot download files")
 			return
 		}
 		// A link lasts minutes and grants nothing role-gated, so a role

@@ -17,7 +17,7 @@ func socketIdentity(ctx context.Context) (evt.SocketIdentity, *Problem) {
 	if claims == nil || claims.TokenType != auth.TokenTypeAccess || claims.SessionID == "" || claims.ExpiresAt == nil || !claims.ExpiresAt.After(time.Now()) {
 		return evt.SocketIdentity{}, NewProblem(TypePermissionDenied, "A current login session is required.")
 	}
-	identity := evt.SocketIdentity{ImpersonatorUserID: claims.ImpersonatorUserID, UserID: claims.UserID, SessionID: claims.SessionID, Role: claims.Role, ProfileID: profileFrom(ctx), AccessExpiresAt: claims.ExpiresAt.Time}
+	identity := evt.SocketIdentity{ImpersonatorUserID: claims.ImpersonatorUserID, UserID: claims.UserID, SessionID: claims.SessionID, Role: claims.Role, ProfileID: profileFrom(ctx), AccessExpiresAt: claims.ExpiresAt.Time, WatchPartyVisitorID: claims.WatchPartyVisitorID}
 	if r := requestFrom(ctx); r != nil {
 		identity.ProfileToken = r.Header.Get(profileTokenHeader)
 		identity.DeviceID = socketDeviceID(r)

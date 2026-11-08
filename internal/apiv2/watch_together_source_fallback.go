@@ -32,7 +32,7 @@ func registerWatchTogetherSourceFallback(reg *Registry) {
 		if reg.deps.WatchTogetherSourceFallback == nil {
 			return nil, unavailable("watch together")
 		}
-		user, profile, p := viewerIdentity(ctx)
+		user, profile, p := watchPartyMember(ctx)
 		if p != nil {
 			return nil, p
 		}

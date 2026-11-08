@@ -389,7 +389,22 @@ func refuseRemotePlaybackSocket(validate EventsSocketValidator) EventsSocketVali
 // actingAdmin allows it, the decision the HTTP admin routes apply: as the
 // account's primary profile, or with no profile while the household does not
 // require one. Otherwise the identity validates with the user role.
+//
+// A Watch Party visitor session never validates here; only the room socket,
+// through newRoomSocketAuthorityValidator, admits one.
 func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider) EventsSocketValidator {
+	return socketAuthorityValidator(sessions, users, resolver, actingAdmin, false)
+}
+
+// newRoomSocketAuthorityValidator is newSocketAuthorityValidator for the
+// Watch Party room socket, which also admits a visitor session whose ticket
+// names its own visitor and the host profile it is bound to. The room socket
+// checks the room itself.
+func newRoomSocketAuthorityValidator(sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider) EventsSocketValidator {
+	return socketAuthorityValidator(sessions, users, resolver, actingAdmin, true)
+}
+
+func socketAuthorityValidator(sessions eventsSessionValidator, users access.UserRepository, resolver apimw.ViewerResolver, actingAdmin apimw.ActingAdminDecider, admitVisitors bool) EventsSocketValidator {
 	if sessions == nil || users == nil || resolver == nil || actingAdmin == nil {
 		return nil
 	}
@@ -413,6 +428,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 			// An older release minted it without the bound profile; the
 			// client fetches a new ticket.
 			return ctx, nil, errSocketAccessChanged
+		}
+		if !visitorTicketMatches(authority, identity, admitVisitors) {
+			return ctx, nil, evt.ErrSocketTicket
 		}
 		user, err := users.GetByID(checkCtx, identity.UserID)
 		if err != nil || user == nil || !user.Enabled {
@@ -457,6 +475,17 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		ctx = access.SetScope(ctx, scope)
 		return ctx, claims, nil
 	}
+}
+
+// visitorTicketMatches reports whether a ticket's visitor binding agrees with
+// its session: a Watch Party visitor session validates only where visitors
+// are admitted, for the host profile it is bound to and its own visitor, and
+// no other session may present a visitor ticket.
+func visitorTicketMatches(authority auth.SessionAuthority, identity evt.SocketIdentity, admitVisitors bool) bool {
+	if !authority.IsWatchPartyVisitor() {
+		return identity.WatchPartyVisitorID == ""
+	}
+	return admitVisitors && identity.ProfileID == authority.BoundProfileID && identity.WatchPartyVisitorID == authority.VisitorID
 }
 
 func eventsScopeFingerprint(scope access.Scope) string {

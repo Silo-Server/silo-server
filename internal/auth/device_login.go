@@ -941,7 +941,7 @@ func (s *DeviceLoginService) deviceLoginSession(record *deviceLoginRecord, user 
 		session.Purpose = models.SessionPurposeRemotePlayback
 		session.BoundProfileID = profileID
 		session.AbsoluteExpiresAt = &sessionExpiresAt
-		claims = remotePlaybackClaims(claims, &session)
+		claims = boundSessionClaims(claims, &session)
 	}
 	return session, claims
 }

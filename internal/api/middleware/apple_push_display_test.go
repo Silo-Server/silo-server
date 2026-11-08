@@ -19,14 +19,18 @@ import (
 // remote-playback session to its bound profile. err, when set, is a store
 // failure every lookup returns.
 type fakeSessionValidator struct {
-	roles  map[string]string
-	remote map[string]string
-	err    error
+	roles    map[string]string
+	remote   map[string]string
+	visitors map[string]auth.SessionAuthority
+	err      error
 }
 
 func (f *fakeSessionValidator) ActiveSession(_ context.Context, id string, _ int) (auth.SessionAuthority, bool, error) {
 	if f.err != nil {
 		return auth.SessionAuthority{}, false, f.err
+	}
+	if authority, ok := f.visitors[id]; ok {
+		return authority, true, nil
 	}
 	if profile, ok := f.remote[id]; ok {
 		return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: profile}, true, nil

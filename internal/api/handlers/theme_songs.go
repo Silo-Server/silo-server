@@ -86,7 +86,7 @@ func (h *ThemeSongsHandler) OpenGrant(ctx context.Context, owner, id, token stri
 		return themesongs.File{}, "", nil, themesongs.ErrUnavailable
 	}
 	authority, valid, err := h.Sessions.ActiveSession(ctx, grant.SessionID, grant.UserID)
-	if err != nil || !valid || (authority.IsRemotePlayback() && grant.ProfileID != authority.BoundProfileID) {
+	if err != nil || !valid || authority.IsWatchPartyVisitor() || (authority.IsRemotePlayback() && grant.ProfileID != authority.BoundProfileID) {
 		return themesongs.File{}, "", nil, themesongs.ErrGrant
 	}
 	user, err := h.Users.GetByID(ctx, grant.UserID)

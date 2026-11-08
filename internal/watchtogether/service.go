@@ -407,6 +407,7 @@ type Service struct {
 	files             MediaFileLookup
 	selectionResolver WatchTogetherSelectionResolver
 	profileNames      ProfileNameResolver
+	visitors          *VisitorStore
 	hostDisconnectTTL time.Duration
 	now               func() time.Time
 

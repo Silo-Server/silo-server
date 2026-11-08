@@ -236,6 +236,9 @@ type PlaybackHandler struct {
 	// WatchTogetherAvailable is set when the room service and authenticated
 	// socket are wired, so capability discovery reflects their dependencies.
 	WatchTogetherAvailable bool
+	// VisitorRooms names the file a Watch Party visitor may play: its room's
+	// current selection. Nil refuses every visitor start.
+	VisitorRooms VisitorRoomFiles
 	// progressSideEffectLocks serializes v2 progress side effects per session
 	// (see persistProgressV2).
 	progressSideEffectLocks sync.Map

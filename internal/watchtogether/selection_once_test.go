@@ -316,7 +316,7 @@ func TestStopPlaybackOncePG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "session"); err != nil {
+	if _, err := s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", "session"); err != nil {
 		t.Fatal(err)
 	}
 	hostSession := func() string {

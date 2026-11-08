@@ -118,8 +118,9 @@ func (s *Server) authorizeGrant(w http.ResponseWriter, r *http.Request) (*playba
 		writeGrantError(w, http.StatusForbidden, "forbidden", "Session belongs to another user")
 		return nil, false
 	}
-	// A remote-playback handoff plays only its bound profile's sessions.
-	if authority.IsRemotePlayback() && card.ProfileID != authority.BoundProfileID {
+	// A remote-playback handoff or Watch Party visitor plays only its bound
+	// profile's sessions.
+	if authority.IsBound() && card.ProfileID != authority.BoundProfileID {
 		writeGrantError(w, http.StatusForbidden, "forbidden", "Session belongs to another profile")
 		return nil, false
 	}

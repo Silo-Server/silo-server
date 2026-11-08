@@ -124,7 +124,7 @@ func (p *pluginAccessResolver) resolve(r *http.Request) pluginAccess {
 	// A remote-playback handoff only plays on its device; plugins are not
 	// part of that.
 	authority, active, err := p.sessions.ActiveSession(r.Context(), claims.SessionID, claims.UserID)
-	if err != nil || !active || authority.IsRemotePlayback() {
+	if err != nil || !active || authority.IsBound() {
 		return pluginAccess{}
 	}
 	current := *claims

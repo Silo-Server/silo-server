@@ -397,7 +397,7 @@ func TestReconnectKeepsTheStallCooldown(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.conns["guest"] = conn
-	if _, err = f.s.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest-session"); err != nil {
+	if _, err = f.s.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest", "guest-session"); err != nil {
 		t.Fatal(err)
 	}
 	f.now = f.now.Add(time.Minute)
@@ -461,7 +461,7 @@ func TestStallHistoryIsSharedAcrossNodesPG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.host.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest-session"); err != nil {
+	if _, err = f.host.AttachSessionForConnection(t.Context(), reg, 8, "guest", "guest", "guest-session"); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err = f.host.HandleBufferingForConnection(t.Context(), reg, 8, "guest", StateReport{SessionID: "guest-session", PositionSeconds: 90})
@@ -510,7 +510,7 @@ func TestLoneViewerIsWaitedForPastTheDeadline(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.conns["host"] = conn
-	if _, err = f.s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host-session"); err != nil {
+	if _, err = f.s.AttachSessionForConnection(t.Context(), reg, 7, "host", "host", "host-session"); err != nil {
 		t.Fatal(err)
 	}
 	if command := lastTransport(t, conn); command.PlaybackState != RoomPlaybackStateWaiting || command.PositionSeconds != 100 {

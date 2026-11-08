@@ -661,7 +661,7 @@ func TestHostAttachKeepsRoomSelectionAnchor(t *testing.T) {
 	}
 
 	reg := registrationFor(repo.room.ID, 7, "host", conn)
-	snapshot, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "session-1")
+	snapshot, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host", "session-1")
 	if err != nil {
 		t.Fatalf("AttachSessionForConnection() error = %v", err)
 	}
@@ -713,7 +713,7 @@ func TestAttachSessionAcceptsEpisodeContentID(t *testing.T) {
 	}
 
 	reg := registrationFor(repo.room.ID, 7, "host", stubConn{})
-	snapshot, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host-session")
+	snapshot, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host", "host-session")
 	if err != nil {
 		t.Fatalf("AttachSessionForConnection() error = %v", err)
 	}
@@ -823,7 +823,7 @@ func TestAttachSessionEnforcesSelectedFileID(t *testing.T) {
 	}
 
 	reg := registrationFor(repo.room.ID, 7, "host", stubConn{})
-	_, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host-session")
+	_, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host", "host-session")
 	if !errors.Is(err, ErrSessionMismatch) {
 		t.Fatalf("AttachSessionForConnection() error = %v, want ErrSessionMismatch", err)
 	}
@@ -1192,7 +1192,7 @@ func TestHostRejoinReportsDoNotRewindTheRoomUntilSynced(t *testing.T) {
 	service.now = func() time.Time { return current }
 	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", connection: conn}
 	reg := registrationFor(repo.room.ID, 7, "host", conn)
-	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "session-1"); err != nil {
+	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host", "session-1"); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	if len(conn.payloads) == 0 {
@@ -1259,7 +1259,7 @@ func TestHostTransportRequestEndsRejoinSync(t *testing.T) {
 	)
 	service.rooms[repo.room.ID].members[buildMemberKey(7, "host")] = &memberState{userID: 7, profileID: "host", connection: conn}
 	reg := registrationFor(repo.room.ID, 7, "host", conn)
-	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "session-1"); err != nil {
+	if _, err := service.AttachSessionForConnection(context.Background(), reg, 7, "host", "host", "session-1"); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	position := 30.0

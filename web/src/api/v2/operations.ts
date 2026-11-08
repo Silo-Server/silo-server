@@ -103,6 +103,9 @@ export const v2Operations = {
     "deleteWatchTogetherSuggestion",
   "DELETE /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote":
     "unvoteWatchTogetherSuggestion",
+  "DELETE /api/v2/watch-together/rooms/{room_id}/visitor-invites/{invite_id}":
+    "revokeWatchPartyVisitorInvite",
+  "DELETE /api/v2/watch-together/rooms/{room_id}/visitors/{visitor_id}": "removeWatchPartyVisitor",
   "DELETE /api/v2/watched/{id}": "unmarkWatched",
   "DELETE /api/v2/watchlist/titles/{media_type}/{tmdb_id}": "deleteWatchlistTitle",
   "DELETE /api/v2/watchlist/{item_id}": "deleteWatchlistEntry",
@@ -561,7 +564,9 @@ export const v2Operations = {
   "GET /api/v2/watch-together/rooms/{room_id}": "getWatchTogetherRoom",
   "GET /api/v2/watch-together/rooms/{room_id}/picker": "getWatchTogetherRoomPicker",
   "GET /api/v2/watch-together/rooms/{room_id}/suggestions": "listWatchTogetherSuggestions",
+  "GET /api/v2/watch-together/rooms/{room_id}/visitor-invites": "listWatchPartyVisitorInvites",
   "GET /api/v2/watch-together/rooms/{room_id}/ws": "connectWatchTogetherSocket",
+  "GET /api/v2/watch-together/visitor-invites/{token}": "getWatchPartyVisitorInvite",
   "GET /api/v2/watch/{id}": "getWatchState",
   "GET /api/v2/watch/{id}/trickplay": "getWatchTrickplay",
   "GET /api/v2/watchlist": "listWatchlist",
@@ -888,7 +893,9 @@ export const v2Operations = {
     "promoteWatchTogetherSuggestion",
   "POST /api/v2/watch-together/rooms/{room_id}/suggestions/{suggestion_id}/vote":
     "voteWatchTogetherSuggestion",
+  "POST /api/v2/watch-together/rooms/{room_id}/visitor-invites": "createWatchPartyVisitorInvite",
   "POST /api/v2/watch-together/rooms/{room_id}/ws-ticket": "createWatchTogetherSocketTicket",
+  "POST /api/v2/watch-together/visitor-invites/{token}/accept": "acceptWatchPartyVisitorInvite",
   "POST /api/v2/watched/{id}": "markWatched",
   "POST /api/v2/webhook-sync/connections": "createWebhookConnection",
   "POST /api/v2/webhook-sync/connections/{id}/webhook/rotate": "rotateWebhookConnection",

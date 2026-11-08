@@ -59,7 +59,7 @@ func (reg *Registry) suggestionProof(ctx context.Context, room, token string) (i
 	if reg.deps.WatchTogetherSuggestions == nil {
 		return 0, "", unavailable("watch together")
 	}
-	user, profile, p := viewerIdentity(ctx)
+	user, profile, p := watchPartyMember(ctx)
 	if p != nil {
 		return 0, "", p
 	}

@@ -1698,6 +1698,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 				watchtogether.NewProfileNameResolver(deps.UserStoreProvider),
 			)
 			watchTogetherService.SetPlaybackAttemptStore(playbackHandler.PlanStoreV3)
+			watchTogetherService.SetVisitorStore(watchtogether.NewVisitorStore(deps.DB))
+			playbackHandler.VisitorRooms = watchTogetherService
 			if settingValuesHandler != nil {
 				watchTogetherService.SetGuestControlPreferences(settingValuesHandler.WatchPartyGuestControlPreferences())
 			}
@@ -1717,6 +1719,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				)
 				watchTogetherHandler.Details = detailSvc
 				watchTogetherHandler.MemberStateCatalog = itemRepo
+			}
+			if authService != nil && profileTokenService != nil && deps.UserStoreProvider != nil {
+				watchTogetherHandler.SetVisitorDeps(handlers.WatchPartyVisitorDeps{Auth: authService, ProfileTokens: profileTokenService, Profiles: deps.UserStoreProvider})
 			}
 		}
 	}
@@ -2880,6 +2885,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		v2deps.WatchTogetherCapability = watchTogetherHandler
 		v2deps.WatchTogetherCreate = watchTogetherHandler
+		if watchTogetherHandler.WatchPartyVisitorsAvailable() {
+			v2deps.WatchPartyVisitors = watchTogetherHandler
+		}
 		if deps.RedisClient != nil && sessionRepo != nil && userRepo != nil {
 			socket := handlers.NewWatchTogetherSocketV2(watchTogetherHandler, watchtogether.NewRoomSocketCredentialStore(deps.RedisClient), sessionRepo, userRepo, viewerResolver, actingAdmin, deps.PublicURL)
 			v2deps.WatchTogetherSocket = socket

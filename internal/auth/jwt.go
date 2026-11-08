@@ -44,6 +44,11 @@ type Claims struct {
 	// authority: RequireAuth sets both from it, so a token issued before the
 	// session was bound (by an older release) is restricted the same way.
 	SessionPurpose string `json:"session_purpose,omitempty"`
+	// WatchPartyRoomID and WatchPartyVisitorID are, for a Watch Party
+	// visitor session, the one room it may reach and the visitor it is.
+	// RequireAuth sets them from the session row; never serialized.
+	WatchPartyRoomID    string `json:"-"`
+	WatchPartyVisitorID string `json:"-"`
 	// SessionEndsAt, when set, caps the expiry of tokens generated from
 	// these claims at the session's absolute end. Never serialized.
 	SessionEndsAt time.Time `json:"-"`
@@ -87,13 +92,19 @@ const DirectDownloadLinkTTL = 5 * time.Minute
 // sign-in, provider logout, handing over ownership) admit only these.
 func (c *Claims) IsOwnLoginSession() bool {
 	return c != nil && c.TokenType != TokenTypeAPIKey && c.SessionID != "" && c.ImpersonatorUserID == nil &&
-		!c.IsRemotePlayback()
+		!c.IsRemotePlayback() && !c.IsWatchPartyVisitor()
 }
 
 // IsRemotePlayback reports whether the claims belong to a remote-playback
 // handoff session.
 func (c *Claims) IsRemotePlayback() bool {
 	return c != nil && c.SessionPurpose == models.SessionPurposeRemotePlayback
+}
+
+// IsWatchPartyVisitor reports whether the claims belong to a Watch Party
+// visitor session.
+func (c *Claims) IsWatchPartyVisitor() bool {
+	return c != nil && c.SessionPurpose == models.SessionPurposeWatchPartyVisitor
 }
 
 const PluginAccessCookieName = "silo_plugin_access"

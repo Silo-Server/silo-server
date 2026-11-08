@@ -60,7 +60,7 @@ func registerWatchTogetherPicker(reg *Registry) {
 		if reg.deps.CatalogAccess == nil {
 			return nil, unavailable("catalog access")
 		}
-		user, profile, p := viewerIdentity(ctx)
+		user, profile, p := watchPartyMember(ctx)
 		if p != nil {
 			return nil, p
 		}

@@ -30,7 +30,7 @@ func IsSessionNotFound(err error) bool {
 }
 
 // sessionColumns is the list of columns returned by all session SELECT queries.
-const sessionColumns = `id, user_id, device_name, COALESCE(device_id, '') AS device_id, COALESCE(device_platform, '') AS device_platform, COALESCE(host(ip_address), '') AS ip_address, created_at, expires_at, revoked_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, last_seen_at, purpose, COALESCE(bound_profile_id, '') AS bound_profile_id, absolute_expires_at`
+const sessionColumns = `id, user_id, device_name, COALESCE(device_id, '') AS device_id, COALESCE(device_platform, '') AS device_platform, COALESCE(host(ip_address), '') AS ip_address, created_at, expires_at, revoked_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, last_seen_at, purpose, COALESCE(bound_profile_id, '') AS bound_profile_id, absolute_expires_at, COALESCE(bound_room_id, '') AS bound_room_id, COALESCE(bound_visitor_id, '') AS bound_visitor_id`
 
 // SessionRepository provides CRUD operations for the auth_sessions table.
 type SessionRepository struct {
@@ -63,6 +63,8 @@ func scanSession(row pgx.Row) (*models.AuthSession, error) {
 		&s.Purpose,
 		&s.BoundProfileID,
 		&s.AbsoluteExpiresAt,
+		&s.BoundRoomID,
+		&s.BoundVisitorID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -139,8 +141,8 @@ func (r *SessionRepository) createWithQuerier(
 	}
 
 	query := `INSERT INTO auth_sessions
-		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform, purpose, bound_profile_id, absolute_expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), $14)`
+		(id, user_id, device_name, ip_address, expires_at, impersonator_user_id, impersonation_started_at, identity_id, provider_since, device_id, device_platform, purpose, bound_profile_id, absolute_expires_at, bound_room_id, bound_visitor_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NULLIF($10, ''), NULLIF($11, ''), $12, NULLIF($13, ''), $14, NULLIF($15, ''), NULLIF($16, ''))`
 
 	// ip_address is a Postgres inet column; an empty string fails the
 	// inet input parser (SQLSTATE 22P02). Pass NULL when the caller
@@ -166,6 +168,8 @@ func (r *SessionRepository) createWithQuerier(
 		session.Purpose,
 		session.BoundProfileID,
 		session.AbsoluteExpiresAt,
+		session.BoundRoomID,
+		session.BoundVisitorID,
 	)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
@@ -319,14 +323,19 @@ func (r *SessionRepository) IsValid(ctx context.Context, id string) (bool, error
 // SessionAuthority is what an active login session may act with.
 type SessionAuthority struct {
 	// Role is the account's current role, or "user" for a remote-playback
-	// session whatever the account's role is.
+	// or Watch Party visitor session whatever the account's role is.
 	Role string
-	// Purpose is the session's purpose (models.SessionPurposeAccount or
-	// models.SessionPurposeRemotePlayback).
+	// Purpose is the session's purpose (models.SessionPurposeAccount,
+	// models.SessionPurposeRemotePlayback or
+	// models.SessionPurposeWatchPartyVisitor).
 	Purpose string
-	// BoundProfileID is the only profile a remote-playback session may act
-	// as; empty for an ordinary sign-in.
+	// BoundProfileID is the only profile a remote-playback or visitor session
+	// may act as; empty for an ordinary sign-in.
 	BoundProfileID string
+	// RoomID and VisitorID are the Watch Party room and visitor a visitor
+	// session is bound to; empty for every other session.
+	RoomID    string
+	VisitorID string
 }
 
 // IsRemotePlayback reports whether the session is a remote-playback handoff.
@@ -334,46 +343,98 @@ func (a SessionAuthority) IsRemotePlayback() bool {
 	return a.Purpose == models.SessionPurposeRemotePlayback
 }
 
+// IsWatchPartyVisitor reports whether the session is a Watch Party visitor's.
+func (a SessionAuthority) IsWatchPartyVisitor() bool {
+	return a.Purpose == models.SessionPurposeWatchPartyVisitor
+}
+
+// IsBound reports whether the session is restricted to one profile: a
+// remote-playback handoff or a Watch Party visitor.
+func (a SessionAuthority) IsBound() bool {
+	return a.IsRemotePlayback() || a.IsWatchPartyVisitor()
+}
+
 // Narrow applies the session's authority to claims read from one of its
-// tokens. A remote-playback session acts as its bound profile with the
-// account role "user", whatever its token says: tokens an older release
-// issued before the session was bound say nothing about it.
+// tokens. A bound session acts as its bound profile with the account role
+// "user", whatever its token says: tokens an older release issued before the
+// session was bound say nothing about it. A visitor session also carries its
+// room and visitor.
 func (a SessionAuthority) Narrow(claims *Claims) {
-	if claims == nil || !a.IsRemotePlayback() {
+	if claims == nil || !a.IsBound() {
 		return
 	}
 	claims.Role = models.RoleUser
-	claims.SessionPurpose = models.SessionPurposeRemotePlayback
+	claims.SessionPurpose = a.Purpose
 	claims.ProfileID = a.BoundProfileID
+	claims.WatchPartyRoomID = a.RoomID
+	claims.WatchPartyVisitorID = a.VisitorID
 }
 
 // ActiveSession reports whether a session of account userID is active, as
 // IsValid does, and returns its authority: the current role of the account it
-// belongs to and, for a remote-playback session, the profile it is bound to.
-// All of it comes from one indexed lookup, so the per-request authentication
-// check costs no extra round trip. userID is the account the credential
-// names: every token Silo mints names its session's own account, so a token
-// pairing one account with another account's session authenticates nobody.
-// For an impersonation session the account is the one being viewed as.
-// active is false, with no error, for a missing, revoked or expired session,
-// a session of another account, and a remote-playback session that names no
-// profile.
+// belongs to and, for a bound session, the profile (and for a visitor the room
+// and visitor) it is bound to. All of it comes from one indexed lookup, so the
+// per-request authentication check costs no extra round trip. userID is the
+// account the credential names: every token Silo mints names its session's
+// own account, so a token pairing one account with another account's session
+// authenticates nobody. For an impersonation session the account is the one
+// being viewed as. active is false, with no error, for a missing, revoked or
+// expired session, a session of another account, and a bound session missing
+// its binding.
 func (r *SessionRepository) ActiveSession(ctx context.Context, id string, userID int) (authority SessionAuthority, active bool, err error) {
-	query := `SELECT u.role, s.purpose, COALESCE(s.bound_profile_id, '') FROM auth_sessions s
+	query := `SELECT u.role, s.purpose, COALESCE(s.bound_profile_id, ''), COALESCE(s.bound_room_id, ''), COALESCE(s.bound_visitor_id, '') FROM auth_sessions s
 		JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > NOW()`
-	err = r.pool.QueryRow(ctx, query, id, userID).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID)
+		WHERE s.id = $1 AND s.user_id = $2 AND s.revoked_at IS NULL AND s.expires_at > NOW()
+		AND (s.purpose <> '` + models.SessionPurposeWatchPartyVisitor + `' OR ` + visitorBindingLive + `)`
+	err = r.pool.QueryRow(ctx, query, id, userID).Scan(&authority.Role, &authority.Purpose, &authority.BoundProfileID, &authority.RoomID, &authority.VisitorID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SessionAuthority{}, false, nil
 	}
 	if err != nil {
 		return SessionAuthority{}, false, fmt.Errorf("checking session validity: %w", err)
 	}
-	if authority.IsRemotePlayback() {
+	return checkedAuthority(authority)
+}
+
+// visitorBindingLive is the SQL condition, over auth_sessions s, that a Watch
+// Party visitor session's room is still open and its visitor still in it.
+// Closing a room (however it closes) or removing the visitor therefore ends
+// the session at its next check, with no revocation write on those paths.
+const visitorBindingLive = `EXISTS (
+		SELECT 1 FROM watch_together_visitors v
+		JOIN watch_together_rooms wr ON wr.id = v.room_id
+		WHERE v.id = s.bound_visitor_id AND v.room_id = s.bound_room_id
+			AND v.auth_session_id = s.id AND v.removed_at IS NULL AND wr.closed_at IS NULL AND wr.phase <> 'ended')`
+
+// VisitorBindingLive reports whether the visitor session id still has an open
+// room and a visitor that was not removed. Refresh asks it before issuing
+// tokens from a visitor session.
+func (r *SessionRepository) VisitorBindingLive(ctx context.Context, id string) (bool, error) {
+	var live bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.id = $1 AND `+visitorBindingLive+`)`, id).Scan(&live)
+	if err != nil {
+		return false, fmt.Errorf("checking watch party visitor binding: %w", err)
+	}
+	return live, nil
+}
+
+// checkedAuthority fails closed on a bound session whose binding is
+// incomplete (the schema refuses such a row) and gives bound sessions the
+// user role.
+func checkedAuthority(authority SessionAuthority) (SessionAuthority, bool, error) {
+	switch {
+	case authority.IsRemotePlayback():
 		if authority.BoundProfileID == "" {
 			return SessionAuthority{}, false, nil
 		}
 		authority.Role = models.RoleUser
+	case authority.IsWatchPartyVisitor():
+		if authority.BoundProfileID == "" || authority.RoomID == "" || authority.VisitorID == "" {
+			return SessionAuthority{}, false, nil
+		}
+		authority.Role = models.RoleUser
+	default:
+		authority.RoomID, authority.VisitorID = "", ""
 	}
 	return authority, true, nil
 }

@@ -10,6 +10,12 @@ const (
 	// session bound to one profile, with no admin or account-management
 	// powers, that ends at AbsoluteExpiresAt.
 	SessionPurposeRemotePlayback = "remote_playback"
+	// SessionPurposeWatchPartyVisitor is a Watch Party visitor: someone
+	// without an account who joined one room through the host's invite link.
+	// The session belongs to the host's account, acts only as the host's
+	// profile inside that room, carries no account powers, and ends at
+	// AbsoluteExpiresAt.
+	SessionPurposeWatchPartyVisitor = "watch_party_visitor"
 )
 
 // AuthSession represents a row in the auth_sessions table.
@@ -50,9 +56,18 @@ type AuthSession struct {
 	// AbsoluteExpiresAt is the latest ExpiresAt may reach: a refresh never
 	// extends the session past it. nil for a session without a fixed end.
 	AbsoluteExpiresAt *time.Time
+	// BoundRoomID and BoundVisitorID name the Watch Party room and the
+	// visitor a watch-party-visitor session belongs to; empty otherwise.
+	BoundRoomID    string
+	BoundVisitorID string
 }
 
 // IsRemotePlayback reports whether the session is a remote-playback handoff.
 func (s *AuthSession) IsRemotePlayback() bool {
 	return s != nil && s.Purpose == SessionPurposeRemotePlayback
+}
+
+// IsWatchPartyVisitor reports whether the session is a Watch Party visitor's.
+func (s *AuthSession) IsWatchPartyVisitor() bool {
+	return s != nil && s.Purpose == SessionPurposeWatchPartyVisitor
 }

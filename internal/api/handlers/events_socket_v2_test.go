@@ -134,6 +134,7 @@ type socketSessionFixture struct {
 	valid         bool
 	account       *socketUserFixture
 	remoteProfile string
+	visitor       *auth.SessionAuthority
 }
 
 func (s *socketSessionFixture) ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error) {
@@ -142,6 +143,9 @@ func (s *socketSessionFixture) ActiveSession(context.Context, string, int) (auth
 	}
 	if s.remoteProfile != "" {
 		return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeRemotePlayback, BoundProfileID: s.remoteProfile}, true, nil
+	}
+	if s.visitor != nil {
+		return *s.visitor, true, nil
 	}
 	return auth.SessionAuthority{Role: s.account.user.Role, Purpose: models.SessionPurposeAccount}, true, nil
 }

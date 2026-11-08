@@ -22,6 +22,7 @@ type WatchTogetherCapabilities struct {
 	Picker              bool   `json:"picker"`
 	VoteHostOverride    bool   `json:"vote_host_override" doc:"The host may promote any suggestion in a vote room, not only the leader"`
 	StopPlayback        bool   `json:"stop_playback" doc:"The host may stop playback and return the room to the lobby without ending it"`
+	VisitorInvites      bool   `json:"visitor_invites" doc:"The host may create invite links that let people without an account join the room as visitors"`
 	MaxMemberStateIDs   int    `json:"max_member_state_ids"`
 	SocketProtocol      string `json:"socket_protocol"`
 }
@@ -58,6 +59,7 @@ func registerWatchTogetherCapabilities(reg *Registry) {
 			Picker:              reg.deps.WatchTogetherPicker != nil && reg.deps.CatalogAccess != nil,
 			VoteHostOverride:    reg.deps.WatchTogetherSuggestionPromote != nil,
 			StopPlayback:        reg.deps.WatchTogetherStop != nil,
+			VisitorInvites:      reg.deps.WatchTogetherSocket != nil && reg.deps.WatchPartyVisitors != nil && reg.deps.WatchPartyVisitors.WatchPartyVisitorsAvailable(),
 			MaxMemberStateIDs:   maxIDs,
 			SocketProtocol:      socketProtocol,
 		}}, nil
@@ -69,4 +71,22 @@ func (c WatchTogetherCapabilities) capabilityState() string {
 		return c.State
 	}
 	return StateAvailable
+}
+
+// watchPartyMember is the caller as a room member: the profile-scoped viewer,
+// or for a Watch Party visitor session the host's account with the
+// visitor's member profile id. The auth gate already confined a visitor to
+// its own room's routes.
+func watchPartyMember(ctx context.Context) (int, string, *Problem) {
+	user, profile, p := viewerIdentity(ctx)
+	if p != nil {
+		return 0, "", p
+	}
+	if claims := claimsFrom(ctx); claims.IsWatchPartyVisitor() {
+		if claims.WatchPartyVisitorID == "" {
+			return 0, "", NewProblem(TypePermissionDenied, "This visitor session names no visitor.")
+		}
+		return user, watchtogether.VisitorMemberProfileID(claims.WatchPartyVisitorID), nil
+	}
+	return user, profile, nil
 }
