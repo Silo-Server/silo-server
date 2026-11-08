@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
@@ -35,9 +34,8 @@ type WatchPartyVisitorInvite struct {
 
 // WatchPartyVisitorInviteCreated is a new invite link.
 type WatchPartyVisitorInviteCreated struct {
-	Invite     WatchPartyVisitorInvite `json:"invite"`
-	Token      string                  `json:"token" doc:"The link's secret token. Shown only here; keep it out of durable caches."`
-	InvitePath string                  `json:"invite_path" doc:"Web path of the link, relative to the server's public origin" example:"/rooms/visit?token=abc"`
+	Invite WatchPartyVisitorInvite `json:"invite"`
+	Token  string                  `json:"token" doc:"The link's secret token. Shown only here; keep it out of durable caches. Clients build the link to their own visitor join screen from it."`
 }
 
 type WatchPartyVisitorInviteList struct {
@@ -187,7 +185,7 @@ func registerWatchPartyVisitors(reg *Registry) {
 			return nil, visitorProblem(err)
 		}
 		return &WatchPartyVisitorInviteCreatedOutput{CacheControl: noStore, Body: WatchPartyVisitorInviteCreated{
-			Invite: visitorInviteOf(created.Invite), Token: created.Token, InvitePath: "/rooms/visit?token=" + url.QueryEscape(created.Token),
+			Invite: visitorInviteOf(created.Invite), Token: created.Token,
 		}}, nil
 	})
 	list := hostOp(http.MethodGet, "/visitor-invites", "listWatchPartyVisitorInvites", "List the room's usable invite links as its host, without their tokens.")

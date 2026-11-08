@@ -120,19 +120,31 @@ func (h *WatchTogetherHandler) AcceptWatchPartyVisitorInvite(ctx context.Context
 			DeviceName: deviceName, IPAddress: ipAddress,
 		}
 	}
-	var hostProfile *userstore.Profile
-	accepted, err := h.Service.AcceptVisitorInvite(ctx, token, displayName, func(ctx context.Context, tx pgx.Tx, v watchtogether.AcceptedVisitor) error {
-		profile, err := h.hostProfile(ctx, v.HostUserID, v.HostProfileID)
-		if err != nil {
-			return err
-		}
-		hostProfile = profile
-		return h.visitors.Auth.CreateWatchPartyVisitorSession(ctx, tx, sessionInput(v))
-	})
+	// The host account and profile are read before the acceptance
+	// transaction, so it never waits on a second pooled connection. A room's
+	// host never changes, and the transaction checks that the link still
+	// leads to this host's room.
+	preview, err := h.Service.PreviewVisitorInvite(ctx, token)
 	if err != nil {
+		return VisitorAcceptance{}, err
+	}
+	if err := h.visitors.Auth.CheckWatchPartyHost(ctx, preview.HostUserID); err != nil {
 		if errors.Is(err, auth.ErrVisitorHostUnavailable) {
 			return VisitorAcceptance{}, watchtogether.ErrVisitorInviteNotFound
 		}
+		return VisitorAcceptance{}, err
+	}
+	hostProfile, err := h.hostProfile(ctx, preview.HostUserID, preview.HostProfileID)
+	if err != nil {
+		return VisitorAcceptance{}, err
+	}
+	accepted, err := h.Service.AcceptVisitorInvite(ctx, token, displayName, func(ctx context.Context, tx pgx.Tx, v watchtogether.AcceptedVisitor) error {
+		if v.RoomID != preview.RoomID || v.HostUserID != preview.HostUserID || v.HostProfileID != preview.HostProfileID {
+			return watchtogether.ErrVisitorInviteNotFound
+		}
+		return h.visitors.Auth.CreateWatchPartyVisitorSession(ctx, tx, sessionInput(v))
+	})
+	if err != nil {
 		return VisitorAcceptance{}, err
 	}
 	in := sessionInput(accepted)

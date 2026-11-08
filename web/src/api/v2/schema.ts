@@ -35914,12 +35914,7 @@ export interface components {
     };
     WatchPartyVisitorInviteCreated: {
       invite: components["schemas"]["WatchPartyVisitorInvite"];
-      /**
-       * @description Web path of the link, relative to the server's public origin
-       * @example /rooms/visit?token=abc
-       */
-      invite_path: string;
-      /** @description The link's secret token. Shown only here; keep it out of durable caches. */
+      /** @description The link's secret token. Shown only here; keep it out of durable caches. Clients build the link to their own visitor join screen from it. */
       token: string;
     };
     WatchPartyVisitorInviteList: {
