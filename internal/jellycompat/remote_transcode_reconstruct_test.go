@@ -845,6 +845,7 @@ func fakeTranscodeNode(t *testing.T, received *transcodenode.TranscodeStartReque
 			RequireAudioTrack:     request.RequireAudioTrack,
 			CopyFMP4RecipeVersion: request.CopyFMP4RecipeVersion,
 			ThrottleSeconds:       request.ThrottleSeconds,
+			CopyAudioCodec:        request.CopyAudioCodec,
 		})
 	}))
 	t.Cleanup(srv.Close)

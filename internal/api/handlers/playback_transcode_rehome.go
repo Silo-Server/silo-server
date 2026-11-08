@@ -502,6 +502,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 			transcodenode.ValidateAudioRecipeAttestation(req, response),
 			transcodenode.ValidateCopyFMP4RecipeAttestation(req, response),
 			transcodenode.ValidateCopyVideoMPEGTSAttestation(req, response),
+			transcodenode.ValidateCopyAudioCodecAttestation(req, response),
 			transcodenode.ValidateThrottleAttestation(req, response),
 			transcodenode.ValidateSubtitleRenditionAttestation(req, response),
 		)

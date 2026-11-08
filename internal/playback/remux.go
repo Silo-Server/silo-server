@@ -499,10 +499,14 @@ func containerMIME(format string) string {
 // added for a copied AAC track. An empty codec (older tokens and recipes)
 // keeps the plain copy.
 func appendCopiedAACToMP4Args(args []string, copyAudioCodec string) []string {
-	if !strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac") {
+	if !copiedAudioIsAAC(copyAudioCodec) {
 		return args
 	}
 	return append(args, "-bsf:a", "aac_adtstoasc")
+}
+
+func copiedAudioIsAAC(copyAudioCodec string) bool {
+	return strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac")
 }
 
 // RemuxServeOptions carries the optional serving concerns that not every

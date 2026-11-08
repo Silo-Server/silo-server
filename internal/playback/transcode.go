@@ -963,8 +963,7 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 	// Audio codec.
 	args = appendAudioArgs(args, opts)
-	if isAudioCopy && HLSOutputContainer(opts) == OutputContainerFMP4 {
-		// MPEG-TS segments carry ADTS as it is; only fMP4 needs the filter.
+	if HLSCopiesAACIntoFMP4(opts) {
 		args = appendCopiedAACToMP4Args(args, opts.CopyAudioCodec)
 	}
 
@@ -1119,6 +1118,16 @@ func HLSOutputContainer(opts TranscodeOpts) string {
 		return OutputContainerFMP4
 	}
 	return OutputContainerMPEGTS
+}
+
+// HLSCopiesAACIntoFMP4 reports whether an HLS run copies an AAC track into
+// fMP4 segments, the one case that adds aac_adtstoasc. MPEG-TS segments carry
+// ADTS as it is. Remote executors must confirm the copied codec for such a run
+// because an older one ignores it and fails after the first segment.
+func HLSCopiesAACIntoFMP4(opts TranscodeOpts) bool {
+	return opts.TargetCodecAudio == "copy" &&
+		HLSOutputContainer(opts) == OutputContainerFMP4 &&
+		copiedAudioIsAAC(opts.CopyAudioCodec)
 }
 
 // copyVideoUsesFMP4 reports whether copied video is packaged as fragmented MP4
