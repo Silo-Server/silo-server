@@ -45,6 +45,10 @@ type PendingWatch struct {
 	AppliedEpisodes string
 }
 
+// maxPendingWatches bounds the watches kept per connection. Past it the oldest
+// go: a title watched longest ago is the least likely to reach a library.
+const maxPendingWatches = 50_000
+
 // pendingWatchKey identifies a kept watch within a connection. Provider item
 // keys are unique per media kind only (a movie and a series can both be
 // tmdb:42).
@@ -85,10 +89,14 @@ func (r *PostgresRepository) ListPendingWatches(ctx context.Context, connectionI
 	`, connectionID); err != nil {
 		return nil, fmt.Errorf("drop pending watches of another account: %w", err)
 	}
+	// A caller whose account is no longer the connection's gets nothing, so a
+	// sync that a rebind overtook does not import the previous account's kept
+	// watches either.
 	rows, err := r.pool.Query(ctx, `
-		SELECT watch, applied_episodes FROM watch_provider_pending_watches
-		WHERE connection_id = $1::uuid AND provider_account_id = $2
-		ORDER BY kind, provider_item_key
+		SELECT p.watch, p.applied_episodes FROM watch_provider_pending_watches p
+		JOIN watch_provider_connections c ON c.id = p.connection_id AND c.provider_account_id = $2
+		WHERE p.connection_id = $1::uuid AND p.provider_account_id = $2
+		ORDER BY p.kind, p.provider_item_key
 	`, connectionID, providerAccountID)
 	if err != nil {
 		return nil, fmt.Errorf("list pending watches: %w", err)
@@ -164,6 +172,22 @@ func (r *PostgresRepository) SavePendingWatches(ctx context.Context, connectionI
 		   OR EXCLUDED.provider_account_id <> watch_provider_pending_watches.provider_account_id
 	`, connectionID, providerAccountID, kinds, keys, times, encoded, applied); err != nil {
 		return fmt.Errorf("save pending watches: %w", err)
+	}
+	// Keep the newest maxPendingWatches, so a provider history that matches
+	// little of the library cannot grow what every sync reloads without bound.
+	// The subquery names the oldest row kept; with fewer rows it is NULL and
+	// nothing goes.
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM watch_provider_pending_watches p
+		WHERE p.connection_id = $1::uuid
+		  AND (p.last_watched_at, p.kind, p.provider_item_key) < (
+			SELECT last_watched_at, kind, provider_item_key FROM watch_provider_pending_watches
+			WHERE connection_id = $1::uuid
+			ORDER BY last_watched_at DESC, kind DESC, provider_item_key DESC
+			OFFSET $2 - 1 LIMIT 1
+		  )
+	`, connectionID, maxPendingWatches); err != nil {
+		return fmt.Errorf("trim pending watches: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit pending watches: %w", err)

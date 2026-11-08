@@ -181,6 +181,10 @@ watches instead.
   covered episodes changed is applied again. That marks an episode a library gains
   later, even when another left between the same two syncs, and an episode already
   marked keeps its play.
+- A connection keeps at most 50,000 rows (`maxPendingWatches`). Past that the oldest by
+  `last_watched_at` go, so a provider history that matches little of the library can't
+  grow what every sync reloads without bound. Listing returns nothing to a caller whose
+  account is no longer the connection's.
 - Every watched import matches the kept rows again after the provider's own rows, in
   batched catalog reads (`historyimport.MatchAllOn`). A kept row that matches imports
   like a fresh one and is deleted. One that still matches nothing adds no warning. A
