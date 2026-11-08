@@ -223,7 +223,7 @@ func TestPluginCompletionWaitsForTheRequestedSeasons(t *testing.T) {
 				store.requests[req.ID] = &req
 				seedDownloadTarget(t, store, req.ID, "router-1", Quality1080p, StatusDownloading, nil)
 				targets, _ := store.ListTargets(ctx, req.ID)
-				if _, err := svc.applyTargetStatuses(ctx, req, targets, []RouterTargetStatus{{
+				if _, err := svc.applyTargetStatuses(ctx, newCompletionCheck(req, nil), targets, []RouterTargetStatus{{
 					Quality: reported.Quality, ConnectionID: reported.ConnectionID, Status: reported.Status, ExternalStatus: reported.ExternalStatus,
 				}}); err != nil {
 					t.Fatalf("applyTargetStatuses: %v", err)
@@ -244,6 +244,36 @@ func TestPluginCompletionWaitsForTheRequestedSeasons(t *testing.T) {
 				t.Fatalf("request status = %s with targets %+v", r.Status, targets)
 			}
 		})
+	}
+}
+
+// A completion that cannot be checked against the library is held, and the
+// request's other targets still take their statuses.
+func TestUncheckableCompletionHoldsOnlyThatTarget(t *testing.T) {
+	ctx := context.Background()
+	store := newFakeStore()
+	presence := severanceInLibrary()
+	presence.seasonErr = errors.New("library unavailable")
+	svc := seasonService(store, presence)
+	req := Request{ID: "req-1", MediaType: MediaTypeSeries, TMDBID: 95396, Seasons: []int{1}, Status: StatusDownloading, Outcome: OutcomeActive}
+	store.requests[req.ID] = &req
+	seedDownloadTarget(t, store, req.ID, "router-1", Quality1080p, StatusDownloading, nil)
+	seedDownloadTarget(t, store, req.ID, "router-1", Quality2160p, StatusDownloading, nil)
+	targets, _ := store.ListTargets(ctx, req.ID)
+
+	_, err := svc.applyTargetStatuses(ctx, newCompletionCheck(req, nil), targets, []RouterTargetStatus{
+		{Quality: Quality1080p, ConnectionID: "router-1", Status: StatusCompleted},
+		{Quality: Quality2160p, ConnectionID: "router-1", Status: StatusFailed},
+	})
+	if !errors.Is(err, presence.seasonErr) {
+		t.Fatalf("err = %v, want the library error", err)
+	}
+	targets, _ = store.ListTargets(ctx, req.ID)
+	want := map[Quality]Status{Quality1080p: StatusDownloading, Quality2160p: StatusFailed}
+	for _, got := range targets {
+		if got.Status != want[got.Quality] {
+			t.Errorf("%s target = %s, want %s", got.Quality, got.Status, want[got.Quality])
+		}
 	}
 }
 

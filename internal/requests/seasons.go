@@ -126,7 +126,7 @@ func seasonsDelivered(progress []SeasonProgress, serverDone bool) bool {
 // not in the library, or a library that cannot report seasons, holds the
 // target open.
 func (s *Service) pluginCompletionStands(ctx context.Context, req Request) (bool, error) {
-	if req.MediaType != MediaTypeSeries || len(req.Seasons) == 0 {
+	if !isSeasonRequest(req) {
 		return true, nil
 	}
 	matches, err := s.lookupPresence(ctx, req.MediaType, []PresenceCandidate{requestPresenceCandidate(req)})
@@ -138,6 +138,48 @@ func (s *Service) pluginCompletionStands(ctx context.Context, req Request) (bool
 		return false, err
 	}
 	return seasonsDelivered(seasonProgress(req.Seasons, counts), false), nil
+}
+
+// completionCheck answers pluginCompletionStands for one request while its
+// targets' statuses are applied, reading the library at most once.
+type completionCheck struct {
+	req    Request
+	known  bool
+	stands bool
+	err    error
+}
+
+// newCompletionCheck starts a check for req. present, when set, is the
+// reconcile pass's batched answer for req (presentRequests). For an in-flight
+// season request that answer is the same full-rule check, so it is used
+// instead of a second library read.
+func newCompletionCheck(req Request, present *bool) *completionCheck {
+	c := &completionCheck{req: req}
+	if present != nil && isSeasonRequest(req) && req.Status != StatusCompleted {
+		c.known, c.stands = true, *present
+	}
+	return c
+}
+
+// reported returns the status a router's report moves a target to: the one
+// reported, except that a completion that does not stand, or that could not be
+// checked, keeps the target's status. The check's error is kept for the caller.
+func (c *completionCheck) reported(ctx context.Context, s *Service, current, reported Status) Status {
+	if reported != StatusCompleted || current == StatusCompleted {
+		return reported
+	}
+	if !c.known {
+		c.stands, c.err = s.pluginCompletionStands(ctx, c.req)
+		c.known = true
+	}
+	if c.err != nil || !c.stands {
+		return current
+	}
+	return reported
+}
+
+func isSeasonRequest(req Request) bool {
+	return req.MediaType == MediaTypeSeries && len(req.Seasons) > 0
 }
 
 // requestFulfilled reports whether a request's media is in the library: a

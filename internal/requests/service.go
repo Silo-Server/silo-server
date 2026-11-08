@@ -2921,7 +2921,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 		return reconcileUnchanged, nil
 	}
 	statuses, checkErr := s.checkTargetStatuses(ctx, req, targets, fc)
-	change, err := s.applyTargetStatuses(ctx, req, targets, statuses)
+	change, err := s.applyTargetStatuses(ctx, newCompletionCheck(req, &present), targets, statuses)
 	if err != nil {
 		return reconcileUnchanged, err
 	}
@@ -2937,13 +2937,12 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 // until it goes stale; see settleUnansweredDownload. Both reconcile and the
 // download refresh pass apply statuses here. A completion the plugin reports
 // for a season request stands only once the requested seasons are in the
-// library (see pluginCompletionStands); until then the target keeps its status
-// and only the raw status is written.
-func (s *Service) applyTargetStatuses(ctx context.Context, req Request, targets []Target, statuses []RouterTargetStatus) (reconcileChange, error) {
+// library (see completionCheck); until then the target keeps its status and
+// only the raw status is written. When the library cannot be read, the other
+// statuses are still applied and the error is returned afterwards.
+func (s *Service) applyTargetStatuses(ctx context.Context, check *completionCheck, targets []Target, statuses []RouterTargetStatus) (reconcileChange, error) {
 	change := reconcileUnchanged
 	answered := make([]bool, len(targets))
-	// Read once, and only when a status reports a completion.
-	var completionStands *bool
 	for _, st := range statuses {
 		// Match the returned status to the live target by (quality, connection).
 		var target *Target
@@ -2958,36 +2957,12 @@ func (s *Service) applyTargetStatuses(ctx context.Context, req Request, targets 
 			continue
 		}
 		status := target.Status
-		newStatus := st.Status
-		if newStatus == StatusCompleted && newStatus != target.Status {
-			if completionStands == nil {
-				stands, err := s.pluginCompletionStands(ctx, req)
-				if err != nil {
-					return reconcileUnchanged, err
-				}
-				completionStands = &stands
-			}
-			if !*completionStands {
-				newStatus = target.Status
-			}
-		}
-		if newStatus != "" && newStatus != target.Status {
+		if newStatus := check.reported(ctx, s, target.Status, st.Status); newStatus != "" && newStatus != target.Status {
 			if _, err := s.store.UpdateTargetStatus(ctx, target.ID, newStatus, "", st.ExternalStatus, st.Message, Viewer{}); err != nil {
 				return reconcileUnchanged, err
 			}
 			status = newStatus
-			switch newStatus {
-			case StatusCompleted:
-				change = reconcileCompleted
-			case StatusDownloading:
-				if change == reconcileUnchanged {
-					change = reconcileDownloading
-				}
-			case StatusFailed:
-				if change == reconcileUnchanged {
-					change = reconcileFailed
-				}
-			}
+			change = mergeReconcileChange(change, newStatus)
 		} else if st.ExternalStatus != "" && st.ExternalStatus != target.ExternalStatus {
 			// The server's own state moved without changing the target's
 			// status (say, a download went from importing to stalled). Keep
@@ -3010,7 +2985,23 @@ func (s *Service) applyTargetStatuses(ctx context.Context, req Request, targets 
 			return reconcileUnchanged, err
 		}
 	}
-	return change, nil
+	return change, check.err
+}
+
+// mergeReconcileChange folds a target's new status into a pass's change: a
+// completion wins, and otherwise the first change seen stands.
+func mergeReconcileChange(change reconcileChange, status Status) reconcileChange {
+	switch {
+	case status == StatusCompleted:
+		return reconcileCompleted
+	case change != reconcileUnchanged:
+		return change
+	case status == StatusDownloading:
+		return reconcileDownloading
+	case status == StatusFailed:
+		return reconcileFailed
+	}
+	return change
 }
 
 // checkTargetStatuses asks each live target's plugin for its status. Targets
