@@ -175,19 +175,26 @@ func (r *PostgresRepository) SavePendingWatches(ctx context.Context, connectionI
 	}
 	// Keep the newest maxPendingWatches, so a provider history that matches
 	// little of the library cannot grow what every sync reloads without bound.
-	// The subquery names the oldest row kept; with fewer rows it is NULL and
-	// nothing goes.
-	if _, err := tx.Exec(ctx, `
-		DELETE FROM watch_provider_pending_watches p
-		WHERE p.connection_id = $1::uuid
-		  AND (p.last_watched_at, p.kind, p.provider_item_key) < (
-			SELECT last_watched_at, kind, provider_item_key FROM watch_provider_pending_watches
-			WHERE connection_id = $1::uuid
-			ORDER BY last_watched_at DESC, kind DESC, provider_item_key DESC
-			OFFSET $2 - 1 LIMIT 1
-		  )
-	`, connectionID, maxPendingWatches); err != nil {
-		return fmt.Errorf("trim pending watches: %w", err)
+	// Only a connection over the cap pays for the sort; counting it is a
+	// primary-key scan. The subquery names the oldest row kept.
+	var kept int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM watch_provider_pending_watches WHERE connection_id = $1::uuid`,
+		connectionID).Scan(&kept); err != nil {
+		return fmt.Errorf("count pending watches: %w", err)
+	}
+	if kept > maxPendingWatches {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM watch_provider_pending_watches p
+			WHERE p.connection_id = $1::uuid
+			  AND (p.last_watched_at, p.kind, p.provider_item_key) < (
+				SELECT last_watched_at, kind, provider_item_key FROM watch_provider_pending_watches
+				WHERE connection_id = $1::uuid
+				ORDER BY last_watched_at DESC, kind DESC, provider_item_key DESC
+				OFFSET $2 - 1 LIMIT 1
+			  )
+		`, connectionID, maxPendingWatches); err != nil {
+			return fmt.Errorf("trim pending watches: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit pending watches: %w", err)
