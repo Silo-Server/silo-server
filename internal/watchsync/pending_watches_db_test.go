@@ -236,11 +236,10 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 	go func() {
 		saved <- repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, []PendingWatch{{Watch: stale}})
 	}()
-	// Wait until the save is blocked by the rebind, or has finished without
-	// waiting for it, which the check below then catches.
-	var done error
-	finished, blocked := false, false
-	for deadline := time.Now().Add(10 * time.Second); !finished && !blocked && time.Now().Before(deadline); {
+	// The save must wait for the rebind. The rebind holds only this test's
+	// connection row, so a session it blocks is the save.
+	blocked := false
+	for deadline := time.Now().Add(10 * time.Second); !blocked && time.Now().Before(deadline); {
 		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
 			WHERE $1::integer = ANY(pg_blocking_pids(pid)))`, rebindPID).Scan(&blocked); err != nil {
 			t.Fatal(err)
@@ -249,22 +248,19 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 			break
 		}
 		select {
-		case done = <-saved:
-			finished = true
+		case err := <-saved:
+			t.Fatalf("the save finished without waiting for the rebind (err=%v)", err)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	if !finished && !blocked {
-		t.Fatal("the save neither finished nor waited for the rebind")
+	if !blocked {
+		t.Fatal("the save never waited for the rebind")
 	}
 	if err := rebind.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !finished {
-		done = <-saved
-	}
-	if done != nil {
-		t.Fatalf("SavePendingWatches: %v", done)
+	if err := <-saved; err != nil {
+		t.Fatalf("SavePendingWatches: %v", err)
 	}
 	var rows int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM watch_provider_pending_watches WHERE connection_id=$1`, conn.ID).Scan(&rows); err != nil {
