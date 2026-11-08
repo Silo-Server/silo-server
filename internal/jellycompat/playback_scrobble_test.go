@@ -24,8 +24,18 @@ type compatScrobbleCall struct {
 	event  watchsync.ScrobbleEvent
 }
 
+// recordingCompatWatchScrobbler records scrobbles. Recovery can deliver stops
+// in parallel, so calls are appended under mu; tests read calls once the
+// delivery they wait for has finished.
 type recordingCompatWatchScrobbler struct {
+	mu    sync.Mutex
 	calls []compatScrobbleCall
+}
+
+func (s *recordingCompatWatchScrobbler) record(action string, event watchsync.ScrobbleEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, compatScrobbleCall{action: action, event: event})
 }
 
 type channelCompatWatchScrobbler struct {
@@ -179,17 +189,17 @@ func (s *terminalReleaseObservingStore) ReleaseTerminalClaim(
 }
 
 func (s *recordingCompatWatchScrobbler) ScrobbleStart(_ context.Context, event watchsync.ScrobbleEvent) error {
-	s.calls = append(s.calls, compatScrobbleCall{action: "start", event: event})
+	s.record("start", event)
 	return nil
 }
 
 func (s *recordingCompatWatchScrobbler) ScrobblePause(_ context.Context, event watchsync.ScrobbleEvent) error {
-	s.calls = append(s.calls, compatScrobbleCall{action: "pause", event: event})
+	s.record("pause", event)
 	return nil
 }
 
 func (s *recordingCompatWatchScrobbler) ScrobbleStop(_ context.Context, event watchsync.ScrobbleEvent) error {
-	s.calls = append(s.calls, compatScrobbleCall{action: "stop", event: event})
+	s.record("stop", event)
 	return nil
 }
 
@@ -1594,43 +1604,72 @@ func (s *stallingCompatWatchScrobbler) ScrobbleStopConfirmed(_ context.Context, 
 }
 
 func TestTerminalScrobbleRecoveryIsNotHeldByStalledProvider(t *testing.T) {
-	store := NewPlaybackSessionStore(time.Hour, nil)
-	for _, id := range []string{"play-1", "play-2"} {
-		store.Put(PlaybackSession{ID: id, CompatToken: "token-1"})
-		event := watchsync.ScrobbleEvent{PlaybackSessionID: "upstream-" + id, OccurredAt: time.Now()}
-		if _, err := store.StageTerminal(id, "token-1", event, true); err != nil {
-			t.Fatalf("stage terminal event %s: %v", id, err)
-		}
+	tests := []struct {
+		name string
+		scan func(context.Context, *PlaybackHandler) error
+		// The startup sweep of open scrobbles runs after the initial scan, so
+		// that scan must not finish while a recovered stop is in flight.
+		waitsForStalled bool
+	}{
+		{name: "periodic scan", scan: recoverPendingTerminalScrobbles},
+		{name: "initial scan", scan: recoverInitialPendingTerminalScrobbles, waitsForStalled: true},
 	}
-	scrobbler := &stallingCompatWatchScrobbler{
-		stalledSessionID: "upstream-play-1",
-		release:          make(chan struct{}),
-		delivered:        make(chan string, 2),
-	}
-	handler := &PlaybackHandler{playbackStore: store, WatchScrobbler: scrobbler, terminalRequestWait: 10 * time.Millisecond}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			for _, id := range []string{"play-1", "play-2"} {
+				store.Put(PlaybackSession{ID: id, CompatToken: "token-1"})
+				event := watchsync.ScrobbleEvent{PlaybackSessionID: "upstream-" + id, OccurredAt: time.Now()}
+				if _, err := store.StageTerminal(id, "token-1", event, true); err != nil {
+					t.Fatalf("stage terminal event %s: %v", id, err)
+				}
+			}
+			scrobbler := &stallingCompatWatchScrobbler{
+				stalledSessionID: "upstream-play-1",
+				release:          make(chan struct{}),
+				delivered:        make(chan string, 2),
+			}
+			handler := &PlaybackHandler{playbackStore: store, WatchScrobbler: scrobbler, terminalRequestWait: 10 * time.Millisecond}
+			released := false
+			release := func() {
+				if !released {
+					released = true
+					close(scrobbler.release)
+				}
+			}
+			t.Cleanup(release)
 
-	scanned := make(chan error, 1)
-	go func() { scanned <- recoverPendingTerminalScrobbles(context.Background(), handler) }()
-	select {
-	case err := <-scanned:
-		if err != nil {
-			t.Fatalf("recover terminal events: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		close(scrobbler.release)
-		t.Fatal("recovery scan waited for the stalled provider")
+			scanned := make(chan error, 1)
+			go func() { scanned <- tt.scan(context.Background(), handler) }()
+			select {
+			case id := <-scrobbler.delivered:
+				if id != "upstream-play-2" {
+					t.Fatalf("delivered %s while the first stop was stalled", id)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the second stop was not delivered while the first was stalled")
+			}
+			if tt.waitsForStalled {
+				select {
+				case <-scanned:
+					t.Fatal("initial scan finished while a recovered stop was in flight")
+				default:
+				}
+				release()
+			}
+			select {
+			case err := <-scanned:
+				if err != nil {
+					t.Fatalf("recover terminal events: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("recovery scan did not finish")
+			}
+			release()
+			awaitTerminalCompleted(t, store, "play-1", "token-1", "stalled stop remained after the provider took it")
+			awaitTerminalCompleted(t, store, "play-2", "token-1", "second stop remained after the provider took it")
+		})
 	}
-	select {
-	case id := <-scrobbler.delivered:
-		if id != "upstream-play-2" {
-			t.Fatalf("delivered %s while the first stop was stalled", id)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the second stop was not delivered while the first was stalled")
-	}
-	close(scrobbler.release)
-	awaitTerminalCompleted(t, store, "play-1", "token-1", "stalled stop remained after the provider took it")
-	awaitTerminalCompleted(t, store, "play-2", "token-1", "second stop remained after the provider took it")
 }
 
 func TestTerminalScrobbleRecoveryRetainsEventWithoutConfirmationSupport(t *testing.T) {
