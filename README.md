@@ -172,7 +172,7 @@ future project costs. Bug reports, code, and documentation help just as much.
 Code review is supported by [Macroscope](https://macroscope.com) through its
 open source program.
 
-<p>
+<p align="center">
   <a href="https://macroscope.com">
     <img alt="Sponsored by Macroscope" src="assets/macroscope-banner.png" width="400">
   </a>
