@@ -205,3 +205,54 @@ func TestSavePendingWatchesKeepsTheNewestDB(t *testing.T) {
 		t.Fatalf("kept %d watches from %v, want %d without the oldest", kept, earliest, maxPendingWatches)
 	}
 }
+
+// At the cap, a sync that imports a kept watch and keeps a new one drops no
+// older kept watch: the imported one leaves before the new one is saved.
+func TestImportWatchedAtTheCapKeepsOlderWatchesDB(t *testing.T) {
+	ctx := t.Context()
+	repo, conn, _ := newSyncStateTestConnection(t)
+	pool := repo.pool
+	oldest := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := 700_000_000 + rand.IntN(99_000_000)
+	watch := func(i int, at time.Time) RemoteWatch {
+		id := strconv.Itoa(base + i)
+		return RemoteWatch{
+			Provider: conn.Provider, ProviderItemKey: "tmdb:" + id, Kind: historyimport.KindMovie,
+			TMDBID: id, PlayCount: 1, LastWatchedAt: &at,
+		}
+	}
+	kept := make([]RemoteWatch, maxPendingWatches)
+	for i := range kept {
+		kept[i] = watch(i, oldest.Add(time.Duration(i)*time.Minute))
+	}
+	if err := repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, kept); err != nil {
+		t.Fatal(err)
+	}
+	// The newest kept watch's title arrives, and the provider returns a new
+	// watch of a title the library lacks.
+	arrived := kept[len(kept)-1]
+	movie := "movie-tmdb-" + arrived.TMDBID
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id,type,title,genres,tmdb_id,status) VALUES ($1,'movie','Arrived','{}',$2,'matched')`,
+		movie, arrived.TMDBID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, movie) })
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(historyimport.NewMatcherOn(pool)).
+		WithWatchState(&recordingWatchState{})
+	if _, err := service.ImportWatched(ctx, conn, ServerConfig{}, watchedImporterStub{
+		historyStubBase: historyStubBase{key: conn.Provider, source: userstore.WatchHistorySourceTrakt},
+		rows:            []RemoteWatch{watch(maxPendingWatches, oldest.Add(time.Duration(maxPendingWatches)*time.Minute))},
+	}); err != nil {
+		t.Fatalf("ImportWatched: %v", err)
+	}
+	var count int
+	var earliest time.Time
+	if err := pool.QueryRow(ctx, `SELECT count(*), min(last_watched_at) FROM watch_provider_pending_watches WHERE connection_id=$1`,
+		conn.ID).Scan(&count, &earliest); err != nil {
+		t.Fatal(err)
+	}
+	if count != maxPendingWatches || !earliest.Equal(oldest) {
+		t.Fatalf("kept %d watches from %v, want %d with the oldest from %v", count, earliest, maxPendingWatches, oldest)
+	}
+}
