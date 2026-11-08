@@ -34,7 +34,7 @@ type pendingWatchStore interface {
 	MatchPendingWatches(ctx context.Context, records []historyimport.Record) ([]*historyimport.Match, error)
 	// SeriesLeafHashes identifies the episodes each whole-series marker
 	// covers (historyimport.SeriesLeafHashes), in one query.
-	SeriesLeafHashes(ctx context.Context, seriesIDs []string, watchedAt []time.Time) ([]string, error)
+	SeriesLeafHashes(ctx context.Context, seriesIDs []string, watchedAt []time.Time, allowedLibraryIDs []int) ([]string, error)
 }
 
 // PendingWatch is a kept watch. AppliedEpisodes identifies the local episodes
@@ -194,8 +194,8 @@ func (r *PostgresRepository) MatchPendingWatches(ctx context.Context, records []
 	return historyimport.MatchAllOn(ctx, r.pool, records)
 }
 
-func (r *PostgresRepository) SeriesLeafHashes(ctx context.Context, seriesIDs []string, watchedAt []time.Time) ([]string, error) {
-	return historyimport.SeriesLeafHashes(ctx, r.pool, seriesIDs, watchedAt)
+func (r *PostgresRepository) SeriesLeafHashes(ctx context.Context, seriesIDs []string, watchedAt []time.Time, allowedLibraryIDs []int) ([]string, error) {
+	return historyimport.SeriesLeafHashes(ctx, r.pool, seriesIDs, watchedAt, allowedLibraryIDs)
 }
 
 // pendingWatchColumns returns the keepable watches as parallel columns.

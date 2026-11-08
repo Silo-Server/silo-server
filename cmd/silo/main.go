@@ -2750,8 +2750,24 @@ func main() {
 	if watchProviderService != nil {
 		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
+		watchProviderScopes := access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
+			WithLibraryScope(func(ctx context.Context, userID int, profileID string) ([]int, error) {
+				// A sync runs for the connection's profile without a viewer,
+				// so a PIN does not apply; the profile's hidden-library
+				// preference is not an access rule.
+				scope, err := watchProviderScopes.Resolve(ctx, access.ResolveInput{
+					UserID: userID, ProfileID: profileID, SkipPINVerification: true, ContentAccessOnly: true,
+				})
+				if err != nil {
+					return nil, err
+				}
+				if scope.LibrariesRestricted && scope.AllowedLibraryIDs == nil {
+					return []int{}, nil
+				}
+				return scope.AllowedLibraryIDs, nil
+			}).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
 			WithRatingStore(catalog.NewRatingsRepo(deps.DB)).

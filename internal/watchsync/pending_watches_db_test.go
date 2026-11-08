@@ -267,3 +267,79 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 		t.Fatalf("kept %d watches of the previous account, want none", rows)
 	}
 }
+
+// A whole-series marker marks only episodes in the libraries the profile may
+// see, on its first sync and when a kept marker is applied again.
+func TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB(t *testing.T) {
+	ctx := t.Context()
+	repo, conn, _ := newSyncStateTestConnection(t)
+	pool := repo.pool
+	finishedAt := time.Date(2021, 9, 19, 5, 17, 0, 0, time.UTC)
+	tvdbID := strconv.Itoa(900_000_000 + rand.IntN(99_999_999))
+	series := "series-tvdb-" + tvdbID
+	visible, hidden, later := series+"-s1e1", series+"-s1e2", series+"-s1e3"
+	folder := func(name string) int {
+		t.Helper()
+		var id int
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name) VALUES('tv',$1) RETURNING id`, name+"-"+tvdbID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, id) })
+		return id
+	}
+	allowed, other := folder("allowed"), folder("other")
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id,type,title,year,genres,tvdb_id,status)
+		VALUES ($1,'series','Brooklyn Nine-Nine',2013,'{}',$2,'matched')`, series, tvdbID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series) })
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2),($1,$3)`, series, allowed, other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title,air_date) VALUES
+		($2,$1,1,1,'Pilot','2013-09-17'),($3,$1,1,2,'Two','2013-09-24'),($4,$1,1,3,'Three','2013-10-01')`,
+		series, visible, hidden, later); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id IN ($1,$2,$3)`, visible, hidden, later)
+	})
+	inLibrary := func(episode string, folder int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1,$2)`, episode, folder); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inLibrary(visible, allowed)
+	inLibrary(hidden, other)
+
+	watchState := &recordingWatchState{}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(historyimport.NewMatcherOn(pool)).
+		WithWatchState(watchState).
+		WithLibraryScope(func(context.Context, int, string) ([]int, error) { return []int{allowed}, nil })
+	sync := func(rows ...RemoteWatch) {
+		t.Helper()
+		if _, err := service.ImportWatched(ctx, conn, ServerConfig{}, watchedImporterStub{
+			historyStubBase: historyStubBase{key: conn.Provider, source: userstore.WatchHistorySourceTrakt},
+			rows:            rows,
+		}); err != nil {
+			t.Fatalf("ImportWatched: %v", err)
+		}
+	}
+	sync(RemoteWatch{
+		Provider: conn.Provider, ProviderItemKey: "tvdb:" + tvdbID, Kind: historyimport.KindSeries,
+		Title: "Brooklyn Nine-Nine", Year: 2013, TVDBID: tvdbID, PlayCount: 1, LastWatchedAt: &finishedAt,
+	})
+	if !reflect.DeepEqual(watchState.targetIDs, []string{visible}) {
+		t.Fatalf("marked %v, want only %s from the profile's library", watchState.targetIDs, visible)
+	}
+	// Episodes reach both libraries; the kept marker marks only the allowed one.
+	inLibrary(later, other)
+	sync()
+	inLibrary(later, allowed)
+	sync()
+	if slices.Contains(watchState.targetIDs, hidden) || !slices.Contains(watchState.targetIDs, later) {
+		t.Fatalf("marked %v, want %s and never %s", watchState.targetIDs, later, hidden)
+	}
+}

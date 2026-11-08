@@ -167,6 +167,13 @@ watches instead.
   skipped with a warning. The marker covers every regular-season episode in a library
   that had aired by then, or that has no air date. Specials are not covered. Simkl
   reports completed shows this way, because it lists no episodes for them.
+- A marker covers only episodes in the libraries the connection's profile may see,
+  with the series in one of them too (`Service.WithLibraryScope`, resolved through
+  `access.Resolver` once per sync; the profile's PIN and hidden-library preference
+  don't apply). Without that limit, one marker would record, and a second provider's
+  export would send, episodes of a library the profile can't open. The kept-marker
+  hash uses the same libraries, so a change in what the profile may see re-applies
+  the marker to the new set.
 - Whole-series and whole-season markers stay kept after they match, with
   `applied_episodes`, a hash of the episodes they covered (`historyimport.LeafSetHash`).
   Each sync computes the same hash for every kept series marker in one query

@@ -26,6 +26,7 @@ type Service struct {
 	ratings        ratingStore
 	signals        SignalsChangedNotifier
 	dropped        droppedStore
+	libraryScope   LibraryScopeFunc
 	locks          sync.Map
 	scrobbleQueues sync.Map
 }
@@ -109,6 +110,22 @@ func (s *Service) WithUserStoreProvider(provider userstore.UserStoreProvider) *S
 
 func (s *Service) WithDefaultWatchState(provider userstore.UserStoreProvider) *Service {
 	return s.WithUserStoreProvider(provider).WithWatchState(watchstate.NewService(provider))
+}
+
+// LibraryScopeFunc returns the libraries a profile may see: nil for every
+// library, an empty slice for none.
+type LibraryScopeFunc func(ctx context.Context, userID int, profileID string) ([]int, error)
+
+// WithLibraryScope installs how a watched import learns which libraries the
+// connection's profile may see. A whole-series marker expands only to
+// episodes there, so a provider marker cannot record, or a second provider's
+// export reveal, episodes of a library the profile can't open. Without it a
+// marker expands across every library.
+func (s *Service) WithLibraryScope(scope LibraryScopeFunc) *Service {
+	if s != nil {
+		s.libraryScope = scope
+	}
+	return s
 }
 
 // WithSignalsChangedNotifier installs where a sync run reports that its
@@ -1149,6 +1166,12 @@ func (s *Service) ImportWatched(
 	}
 	rows := batch.Rows
 	result := ImportWatchedResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
+	var allowedLibraries []int
+	if s.libraryScope != nil {
+		if allowedLibraries, err = s.libraryScope(ctx, conn.UserID, conn.ProfileID); err != nil {
+			return result, fmt.Errorf("resolve the profile's libraries: %w", err)
+		}
+	}
 	matchedLeaves := make(map[string]matchedWatchedLeaf)
 	addLeaf := func(match historyimport.Match, watchedAt time.Time) {
 		existing, ok := matchedLeaves[match.MediaItemID]
@@ -1166,7 +1189,7 @@ func (s *Service) ImportWatched(
 	var applied []RemoteWatch
 	for _, row := range rows {
 		fresh[pendingKeyOf(row)] = true
-		matches, reason, err := s.matchWatchedLeaves(ctx, row)
+		matches, reason, err := s.matchWatchedLeaves(ctx, row, allowedLibraries)
 		if err != nil {
 			return result, err
 		}
@@ -1196,7 +1219,7 @@ func (s *Service) ImportWatched(
 	}
 	pending, keepsPending := s.repo.(pendingWatchStore)
 	if keepsPending {
-		retried, changed, err := s.retryPendingWatches(ctx, pending, conn, fresh, addLeaf)
+		retried, changed, err := s.retryPendingWatches(ctx, pending, conn, allowedLibraries, fresh, addLeaf)
 		if err != nil {
 			return result, err
 		}
@@ -1263,6 +1286,7 @@ func (s *Service) retryPendingWatches(
 	ctx context.Context,
 	store pendingWatchStore,
 	conn Connection,
+	allowedLibraries []int,
 	fresh map[pendingWatchKey]bool,
 	add func(historyimport.Match, time.Time),
 ) (retried []RemoteWatch, changed []PendingWatch, err error) {
@@ -1276,7 +1300,7 @@ func (s *Service) retryPendingWatches(
 		if hash == pending.AppliedEpisodes {
 			return nil
 		}
-		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch)
+		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch, allowedLibraries)
 		if err != nil {
 			return err
 		}
@@ -1297,7 +1321,7 @@ func (s *Service) retryPendingWatches(
 			records = append(records, pending.Watch.HistoryRecord())
 			continue
 		}
-		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch)
+		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch, allowedLibraries)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1335,7 +1359,7 @@ func (s *Service) retryPendingWatches(
 		add(*match, *pending.Watch.LastWatchedAt)
 		retried = append(retried, pending.Watch)
 	}
-	hashes, err := store.SeriesLeafHashes(ctx, seriesIDs, cutoffs)
+	hashes, err := store.SeriesLeafHashes(ctx, seriesIDs, cutoffs, allowedLibraries)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1347,8 +1371,11 @@ func (s *Service) retryPendingWatches(
 	return retried, changed, nil
 }
 
-func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch) ([]historyimport.Match, string, error) {
+// matchWatchedLeaves matches a provider watch to library items. An aggregate
+// marker expands only to episodes in allowedLibraries (nil for every library).
+func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch, allowedLibraries []int) ([]historyimport.Match, string, error) {
 	record := row.HistoryRecord()
+	record.AllowedLibraryIDs = allowedLibraries
 	if row.Kind == historyimport.KindSeries || row.Kind == historyimport.KindSeason {
 		matcher, ok := s.matcher.(watchedLeafMatcher)
 		if !ok {
