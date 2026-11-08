@@ -678,6 +678,8 @@ func mergeExportFailures(result ExportResult, failures map[string]string) Export
 	return result
 }
 
+// remoteWatchFromProto converts a plugin's watched row, or reports why the
+// host skips it.
 func remoteWatchFromProto(provider string, state *pluginv1.WatchSyncRemoteState) (RemoteWatch, error) {
 	identity, err := remoteIdentityFromProto(state)
 	if err != nil {

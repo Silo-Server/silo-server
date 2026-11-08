@@ -1200,6 +1200,8 @@ func SeriesLeafHashes(ctx context.Context, q lookupQuerier, seriesIDs []string, 
 	return hashes, nil
 }
 
+// MatchEpisodesBySeries returns the series' episodes a watched marker covers
+// (seriesLeafFilter), in season and episode order.
 func (l catalogLookup) MatchEpisodesBySeries(
 	ctx context.Context,
 	seriesID string,

@@ -72,6 +72,7 @@ func batchMatchable(w RemoteWatch) bool {
 	return w.Kind == historyimport.KindMovie || w.Kind == historyimport.KindEpisode || w.Kind == historyimport.KindSeries
 }
 
+// ListPendingWatches implements pendingWatchStore.
 func (r *PostgresRepository) ListPendingWatches(ctx context.Context, connectionID, providerAccountID string) ([]PendingWatch, error) {
 	// Rows of any account but the connection's current one go, judged by the
 	// stored connection rather than the caller, so a sync still running for
@@ -114,6 +115,7 @@ func (r *PostgresRepository) ListPendingWatches(ctx context.Context, connectionI
 	return watches, nil
 }
 
+// SavePendingWatches implements pendingWatchStore.
 func (r *PostgresRepository) SavePendingWatches(ctx context.Context, connectionID, providerAccountID string, watches []PendingWatch) error {
 	kinds, keys, times, encoded, applied, err := pendingWatchColumns(watches)
 	if err != nil || len(kinds) == 0 {
