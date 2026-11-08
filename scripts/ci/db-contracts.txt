@@ -531,8 +531,8 @@
 # also when another of its episodes left the library since the last one.
 ./internal/watchsync TestImportWatchedSeriesMarkerDB
 
-# A whole-series watched marker marks only episodes in libraries the profile
-# may see, also when a kept marker is applied again.
+# A whole-series watched marker marks only episodes the profile may open (its
+# libraries, its maturity limits), also when a kept marker is applied again.
 ./internal/watchsync TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB
 
 # A pending-watch save from a connection's previous provider account that runs

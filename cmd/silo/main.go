@@ -2750,10 +2750,11 @@ func main() {
 	if watchProviderService != nil {
 		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
-		watchProviderScopes := access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore)
+		watchProviderScopes := access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
-			WithLibraryScope(func(ctx context.Context, userID int, profileID string) ([]int, error) {
+			WithProfileAccess(func(ctx context.Context, userID int, profileID string) (watchsync.ProfileAccess, error) {
 				// A sync runs for the connection's profile without a viewer,
 				// so a PIN does not apply; the profile's hidden-library
 				// preference is not an access rule.
@@ -2761,12 +2762,18 @@ func main() {
 					UserID: userID, ProfileID: profileID, SkipPINVerification: true, ContentAccessOnly: true,
 				})
 				if err != nil {
-					return nil, err
+					return watchsync.ProfileAccess{}, err
 				}
-				if scope.LibrariesRestricted && scope.AllowedLibraryIDs == nil {
-					return []int{}, nil
+				allowed := scope.AllowedLibraryIDs
+				if scope.LibrariesRestricted && allowed == nil {
+					allowed = []int{}
 				}
-				return scope.AllowedLibraryIDs, nil
+				return watchsync.ProfileAccess{
+					AllowedLibraryIDs: allowed,
+					Accessible: func(ctx context.Context, contentIDs []string) (map[string]bool, error) {
+						return watchProviderLibrary.FilterAccessibleContentIDs(ctx, contentIDs, allowed, nil, scope.MaturityLimits)
+					},
+				}, nil
 			}).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).

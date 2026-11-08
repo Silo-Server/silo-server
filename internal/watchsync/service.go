@@ -26,7 +26,7 @@ type Service struct {
 	ratings        ratingStore
 	signals        SignalsChangedNotifier
 	dropped        droppedStore
-	libraryScope   LibraryScopeFunc
+	profileAccess  ProfileAccessFunc
 	locks          sync.Map
 	scrobbleQueues sync.Map
 }
@@ -112,20 +112,52 @@ func (s *Service) WithDefaultWatchState(provider userstore.UserStoreProvider) *S
 	return s.WithUserStoreProvider(provider).WithWatchState(watchstate.NewService(provider))
 }
 
-// LibraryScopeFunc returns the libraries a profile may see: nil for every
-// library, an empty slice for none.
-type LibraryScopeFunc func(ctx context.Context, userID int, profileID string) ([]int, error)
+// ProfileAccess is what a connection's profile may open.
+type ProfileAccess struct {
+	// AllowedLibraryIDs are the libraries it may see: nil for every library,
+	// an empty slice for none.
+	AllowedLibraryIDs []int
+	// Accessible reports which of the content IDs it may open, by every
+	// access rule (libraries, maturity limits). Nil allows all.
+	Accessible func(ctx context.Context, contentIDs []string) (map[string]bool, error)
+}
 
-// WithLibraryScope installs how a watched import learns which libraries the
-// connection's profile may see. A whole-series marker expands only to
-// episodes there, so a provider marker cannot record, or a second provider's
-// export reveal, episodes of a library the profile can't open. Without it a
-// marker expands across every library.
-func (s *Service) WithLibraryScope(scope LibraryScopeFunc) *Service {
+// ProfileAccessFunc resolves a profile's ProfileAccess.
+type ProfileAccessFunc func(ctx context.Context, userID int, profileID string) (ProfileAccess, error)
+
+// WithProfileAccess installs how a watched import learns what the
+// connection's profile may open. A whole-series marker expands only to
+// episodes the profile may open, so a provider marker cannot record, or a
+// second provider's export reveal, episodes of a library it can't see or a
+// series above its maturity limits. Without it a marker expands to every
+// episode.
+func (s *Service) WithProfileAccess(resolve ProfileAccessFunc) *Service {
 	if s != nil {
-		s.libraryScope = scope
+		s.profileAccess = resolve
 	}
 	return s
+}
+
+// accessibleLeaves keeps the matched episodes the profile may open.
+func accessibleLeaves(ctx context.Context, profile ProfileAccess, matches []historyimport.Match) ([]historyimport.Match, error) {
+	if profile.Accessible == nil || len(matches) == 0 {
+		return matches, nil
+	}
+	ids := make([]string, len(matches))
+	for i, match := range matches {
+		ids[i] = match.MediaItemID
+	}
+	open, err := profile.Accessible(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("check the profile's access: %w", err)
+	}
+	kept := matches[:0:0]
+	for _, match := range matches {
+		if open[match.MediaItemID] {
+			kept = append(kept, match)
+		}
+	}
+	return kept, nil
 }
 
 // WithSignalsChangedNotifier installs where a sync run reports that its
@@ -1166,10 +1198,10 @@ func (s *Service) ImportWatched(
 	}
 	rows := batch.Rows
 	result := ImportWatchedResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
-	var allowedLibraries []int
-	if s.libraryScope != nil {
-		if allowedLibraries, err = s.libraryScope(ctx, conn.UserID, conn.ProfileID); err != nil {
-			return result, fmt.Errorf("resolve the profile's libraries: %w", err)
+	var profile ProfileAccess
+	if s.profileAccess != nil {
+		if profile, err = s.profileAccess(ctx, conn.UserID, conn.ProfileID); err != nil {
+			return result, fmt.Errorf("resolve the profile's access: %w", err)
 		}
 	}
 	matchedLeaves := make(map[string]matchedWatchedLeaf)
@@ -1189,7 +1221,7 @@ func (s *Service) ImportWatched(
 	var applied []RemoteWatch
 	for _, row := range rows {
 		fresh[pendingKeyOf(row)] = true
-		matches, reason, err := s.matchWatchedLeaves(ctx, row, allowedLibraries)
+		matches, reason, err := s.matchWatchedLeaves(ctx, row, profile)
 		if err != nil {
 			return result, err
 		}
@@ -1219,7 +1251,7 @@ func (s *Service) ImportWatched(
 	}
 	pending, keepsPending := s.repo.(pendingWatchStore)
 	if keepsPending {
-		retried, changed, err := s.retryPendingWatches(ctx, pending, conn, allowedLibraries, fresh, addLeaf)
+		retried, changed, err := s.retryPendingWatches(ctx, pending, conn, profile, fresh, addLeaf)
 		if err != nil {
 			return result, err
 		}
@@ -1286,7 +1318,7 @@ func (s *Service) retryPendingWatches(
 	ctx context.Context,
 	store pendingWatchStore,
 	conn Connection,
-	allowedLibraries []int,
+	profile ProfileAccess,
 	fresh map[pendingWatchKey]bool,
 	add func(historyimport.Match, time.Time),
 ) (retried []RemoteWatch, changed []PendingWatch, err error) {
@@ -1300,7 +1332,7 @@ func (s *Service) retryPendingWatches(
 		if hash == pending.AppliedEpisodes {
 			return nil
 		}
-		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch, allowedLibraries)
+		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch, profile)
 		if err != nil {
 			return err
 		}
@@ -1321,7 +1353,7 @@ func (s *Service) retryPendingWatches(
 			records = append(records, pending.Watch.HistoryRecord())
 			continue
 		}
-		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch, allowedLibraries)
+		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch, profile)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1359,7 +1391,19 @@ func (s *Service) retryPendingWatches(
 		add(*match, *pending.Watch.LastWatchedAt)
 		retried = append(retried, pending.Watch)
 	}
-	hashes, err := store.SeriesLeafHashes(ctx, seriesIDs, cutoffs, allowedLibraries)
+	// A series the profile may not open covers nothing for it.
+	if profile.Accessible != nil && len(seriesIDs) > 0 {
+		open, err := profile.Accessible(ctx, seriesIDs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("check the profile's access: %w", err)
+		}
+		for i, id := range seriesIDs {
+			if !open[id] {
+				seriesIDs[i] = ""
+			}
+		}
+	}
+	hashes, err := store.SeriesLeafHashes(ctx, seriesIDs, cutoffs, profile.AllowedLibraryIDs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1372,16 +1416,21 @@ func (s *Service) retryPendingWatches(
 }
 
 // matchWatchedLeaves matches a provider watch to library items. An aggregate
-// marker expands only to episodes in allowedLibraries (nil for every library).
-func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch, allowedLibraries []int) ([]historyimport.Match, string, error) {
+// marker expands only to episodes the profile may open.
+func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch, profile ProfileAccess) ([]historyimport.Match, string, error) {
 	record := row.HistoryRecord()
-	record.AllowedLibraryIDs = allowedLibraries
+	record.AllowedLibraryIDs = profile.AllowedLibraryIDs
 	if row.Kind == historyimport.KindSeries || row.Kind == historyimport.KindSeason {
 		matcher, ok := s.matcher.(watchedLeafMatcher)
 		if !ok {
 			return nil, "watch provider matcher cannot expand aggregate watched state", nil
 		}
-		return matcher.MatchLeaves(ctx, record)
+		matches, reason, err := matcher.MatchLeaves(ctx, record)
+		if err != nil || len(matches) == 0 {
+			return matches, reason, err
+		}
+		matches, err = accessibleLeaves(ctx, profile, matches)
+		return matches, "", err
 	}
 	match, reason, err := s.matcher.Match(ctx, record)
 	if err != nil || match == nil {

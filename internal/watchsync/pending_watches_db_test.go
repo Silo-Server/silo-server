@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -271,8 +273,9 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 	}
 }
 
-// A whole-series marker marks only episodes in the libraries the profile may
-// see, on its first sync and when a kept marker is applied again.
+// A whole-series marker marks only episodes the profile may open: in the
+// libraries it may see, of a series within its maturity limits, on its first
+// sync and when a kept marker is applied again.
 func TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB(t *testing.T) {
 	ctx := t.Context()
 	repo, conn, _ := newSyncStateTestConnection(t)
@@ -281,6 +284,9 @@ func TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB(t *testing.T) {
 	tvdbID := strconv.Itoa(900_000_000 + rand.IntN(99_999_999))
 	series := "series-tvdb-" + tvdbID
 	visible, hidden, later := series+"-s1e1", series+"-s1e2", series+"-s1e3"
+	matureTVDBID := strconv.Itoa(800_000_000 + rand.IntN(99_999_999))
+	mature := "series-tvdb-" + matureTVDBID
+	matureEpisode := mature + "-s1e1"
 	folder := func(name string) int {
 		t.Helper()
 		var id int
@@ -291,21 +297,26 @@ func TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB(t *testing.T) {
 		return id
 	}
 	allowed, other := folder("allowed"), folder("other")
-	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id,type,title,year,genres,tvdb_id,status)
-		VALUES ($1,'series','Brooklyn Nine-Nine',2013,'{}',$2,'matched')`, series, tvdbID); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series) })
-	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$2),($1,$3)`, series, allowed, other); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title,air_date) VALUES
-		($2,$1,1,1,'Pilot','2013-09-17'),($3,$1,1,2,'Two','2013-09-24'),($4,$1,1,3,'Three','2013-10-01')`,
-		series, visible, hidden, later); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id,type,title,year,genres,tvdb_id,status,content_rating,content_rating_age)
+		VALUES ($1,'series','Brooklyn Nine-Nine',2013,'{}',$2,'matched','TV-14',14),($3,'series','A mature show',2015,'{}',$4,'matched','TV-MA',17)`,
+		series, tvdbID, mature, matureTVDBID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id IN ($1,$2,$3)`, visible, hidden, later)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN ($1,$2)`, series, mature)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$3),($1,$4),($2,$3)`,
+		series, mature, allowed, other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title,air_date) VALUES
+		($2,$1,1,1,'Pilot','2013-09-17'),($3,$1,1,2,'Two','2013-09-24'),($4,$1,1,3,'Three','2013-10-01'),
+		($6,$5,1,1,'Mature pilot','2015-01-01')`,
+		series, visible, hidden, later, mature, matureEpisode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id IN ($1,$2,$3,$4)`, visible, hidden, later, matureEpisode)
 	})
 	inLibrary := func(episode string, folder int) {
 		t.Helper()
@@ -315,12 +326,22 @@ func TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB(t *testing.T) {
 	}
 	inLibrary(visible, allowed)
 	inLibrary(hidden, other)
+	inLibrary(matureEpisode, allowed)
 
 	watchState := &recordingWatchState{}
 	service := NewService(repo, NewRegistry()).
 		WithMatcher(historyimport.NewMatcherOn(pool)).
 		WithWatchState(watchState).
-		WithLibraryScope(func(context.Context, int, string) ([]int, error) { return []int{allowed}, nil })
+		WithProfileAccess(func(context.Context, int, string) (ProfileAccess, error) {
+			libraries := []int{allowed}
+			limits := access.MaturityLimits{MaxContentRating: "TV-14"}
+			return ProfileAccess{
+				AllowedLibraryIDs: libraries,
+				Accessible: func(ctx context.Context, ids []string) (map[string]bool, error) {
+					return catalog.NewLibraryItemRepository(pool).FilterAccessibleContentIDs(ctx, ids, libraries, nil, limits)
+				},
+			}, nil
+		})
 	sync := func(rows ...RemoteWatch) {
 		t.Helper()
 		if _, err := service.ImportWatched(ctx, conn, ServerConfig{}, watchedImporterStub{
@@ -333,17 +354,21 @@ func TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB(t *testing.T) {
 	sync(RemoteWatch{
 		Provider: conn.Provider, ProviderItemKey: "tvdb:" + tvdbID, Kind: historyimport.KindSeries,
 		Title: "Brooklyn Nine-Nine", Year: 2013, TVDBID: tvdbID, PlayCount: 1, LastWatchedAt: &finishedAt,
+	}, RemoteWatch{
+		Provider: conn.Provider, ProviderItemKey: "tvdb:" + matureTVDBID, Kind: historyimport.KindSeries,
+		Title: "A mature show", Year: 2015, TVDBID: matureTVDBID, PlayCount: 1, LastWatchedAt: &finishedAt,
 	})
 	if !reflect.DeepEqual(watchState.targetIDs, []string{visible}) {
-		t.Fatalf("marked %v, want only %s from the profile's library", watchState.targetIDs, visible)
+		t.Fatalf("marked %v, want only %s: in the profile's library and within its maturity limits", watchState.targetIDs, visible)
 	}
 	// Episodes reach both libraries; the kept marker marks only the allowed one.
 	inLibrary(later, other)
 	sync()
 	inLibrary(later, allowed)
 	sync()
-	if slices.Contains(watchState.targetIDs, hidden) || !slices.Contains(watchState.targetIDs, later) {
-		t.Fatalf("marked %v, want %s and never %s", watchState.targetIDs, later, hidden)
+	if slices.Contains(watchState.targetIDs, hidden) || slices.Contains(watchState.targetIDs, matureEpisode) ||
+		!slices.Contains(watchState.targetIDs, later) {
+		t.Fatalf("marked %v, want %s and never %s or %s", watchState.targetIDs, later, hidden, matureEpisode)
 	}
 }
 
