@@ -254,8 +254,9 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 
 	case playback.PlayRemux:
 		// A refused mid-stream range leaves the session as it is: the client
-		// reopens it at its current position.
-		if playback.RefusesRemuxRange(r) {
+		// reopens it at its current position. The refusal is /api/v2 only; the
+		// frozen /api/v1 route keeps streaming from the origin.
+		if isNativeAPIV2(r.Context()) && playback.RefusesRemuxRange(r) {
 			writeError(w, http.StatusConflict, "conflict", playback.RemuxRangeRefusedMessage)
 			return
 		}

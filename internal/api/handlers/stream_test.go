@@ -309,6 +309,7 @@ func TestHandleStream_RemuxRangeRefusal(t *testing.T) {
 	const optIn = "?" + playback.RemuxRangeQueryParam + "=" + playback.RemuxRangeRefuse
 	for _, tc := range []struct {
 		name, method, query, rangeHeader string
+		v1                               bool
 		wantStatus                       int
 	}{
 		{name: "resumed range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusConflict},
@@ -320,6 +321,7 @@ func TestHandleStream_RemuxRangeRefusal(t *testing.T) {
 		{name: "unparseable range", method: http.MethodGet, query: optIn, rangeHeader: "items=5-", wantStatus: http.StatusOK},
 		{name: "head", method: http.MethodHead, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
 		{name: "resumed range without the opt-in", method: http.MethodGet, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+		{name: "resumed range on the v1 route", v1: true, method: http.MethodGet, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := models.MediaFile{
@@ -345,7 +347,11 @@ func TestHandleStream_RemuxRangeRefusal(t *testing.T) {
 			if tc.rangeHeader != "" {
 				req.Header.Set("Range", tc.rangeHeader)
 			}
-			req = req.WithContext(newAuthorizedPlaybackContext())
+			ctx := newAuthorizedPlaybackContext()
+			if !tc.v1 {
+				ctx = WithNativeAPIV2(ctx)
+			}
+			req = req.WithContext(ctx)
 			req = withPlaybackRouteParam(req, "session_id", session.ID)
 			rr := httptest.NewRecorder()
 			handler.HandleStream(rr, req)
