@@ -200,7 +200,10 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   const params = useParams<{ libraryId: string }>();
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
-  const household = useProfiles({ enabled: profile != null });
+  // The sidebar stays mounted, so it refetches a stale household on focus:
+  // otherwise a limit raised elsewhere would keep Switch Profile hidden
+  // until a reload.
+  const household = useProfiles({ enabled: profile != null, refetchOnWindowFocus: true });
   // Switch Profile leads to the picker, which is pointless with one profile
   // and no room for another. Until the household loads (or when it fails to)
   // the item stays, as it always did.

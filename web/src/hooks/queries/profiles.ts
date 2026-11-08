@@ -175,11 +175,12 @@ export function useHouseholdSessions(enabled = true) {
   });
 }
 
-export function useProfiles(options?: { enabled?: boolean }) {
+export function useProfiles(options?: { enabled?: boolean; refetchOnWindowFocus?: boolean }) {
   const query = useQuery({
     queryKey: profileKeys.list(),
     queryFn: listProfiles,
     enabled: options?.enabled ?? true,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus ?? false,
   });
 
   return {
