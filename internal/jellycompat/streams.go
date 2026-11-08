@@ -1962,6 +1962,7 @@ func (h *PlaybackHandler) teardownPlaySession(
 				playSession.CompatToken,
 				playSession.TerminalAuthoritative,
 				playSession.ExpiresAt,
+				true,
 			)
 		}
 	default:
@@ -2219,7 +2220,7 @@ func (h *PlaybackHandler) finishCompatTerminalStage(
 		h.cleanupPlaySession(ctx, staged, upstreamSession, transcodeNodeURL)
 	}
 	if authoritative {
-		h.deliverCompatTerminalDetached(ctx, staged.ID, staged.CompatToken, true, staged.ExpiresAt)
+		h.deliverCompatTerminalDetached(ctx, staged.ID, staged.CompatToken, true, staged.ExpiresAt, true)
 		return
 	}
 	h.scheduleCompatTerminalDelivery(
@@ -2380,16 +2381,18 @@ func (h *PlaybackHandler) deliverCompatTerminal(
 }
 
 // deliverCompatTerminalDetached delivers a staged stop off the caller's
-// request. A confirmed stop can take up to compatConfirmedStopTimeout, so the
-// caller waits only compatTerminalRequestWait: a provider that answers in time
-// still has the stop before the client's next report, and a slow one does not
-// hold the request open.
+// request or recovery scan. A confirmed stop can take up to
+// compatConfirmedStopTimeout, so the caller waits only
+// compatTerminalRequestWait: a provider that answers in time still has the stop
+// before the client's next report, and a stalled one holds neither the request
+// nor the rest of a recovery batch.
 func (h *PlaybackHandler) deliverCompatTerminalDetached(
 	ctx context.Context,
 	playSessionID string,
 	compatToken string,
 	requireAuthoritative bool,
 	expiresAt time.Time,
+	retry bool,
 ) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -2398,7 +2401,7 @@ func (h *PlaybackHandler) deliverCompatTerminalDetached(
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.deliverCompatTerminal(detached, playSessionID, compatToken, requireAuthoritative, expiresAt, 0, true)
+		h.deliverCompatTerminal(detached, playSessionID, compatToken, requireAuthoritative, expiresAt, 0, retry)
 	}()
 	timer := time.NewTimer(h.compatTerminalRequestWait())
 	defer timer.Stop()

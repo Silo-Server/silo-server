@@ -1572,6 +1572,67 @@ func TestStoppedReportDoesNotWaitForSlowConfirmedStop(t *testing.T) {
 		"stop record remained after the provider took the stop")
 }
 
+// stallingCompatWatchScrobbler holds one session's confirmed stop until
+// released and records every other stop it takes.
+type stallingCompatWatchScrobbler struct {
+	unconfirmedCompatWatchScrobbler
+	stalledSessionID string
+	release          chan struct{}
+	delivered        chan string
+}
+
+func (s *stallingCompatWatchScrobbler) ScrobbleStop(context.Context, watchsync.ScrobbleEvent) error {
+	return nil
+}
+
+func (s *stallingCompatWatchScrobbler) ScrobbleStopConfirmed(_ context.Context, event watchsync.ScrobbleEvent) error {
+	if event.PlaybackSessionID == s.stalledSessionID {
+		<-s.release
+	}
+	s.delivered <- event.PlaybackSessionID
+	return nil
+}
+
+func TestTerminalScrobbleRecoveryIsNotHeldByStalledProvider(t *testing.T) {
+	store := NewPlaybackSessionStore(time.Hour, nil)
+	for _, id := range []string{"play-1", "play-2"} {
+		store.Put(PlaybackSession{ID: id, CompatToken: "token-1"})
+		event := watchsync.ScrobbleEvent{PlaybackSessionID: "upstream-" + id, OccurredAt: time.Now()}
+		if _, err := store.StageTerminal(id, "token-1", event, true); err != nil {
+			t.Fatalf("stage terminal event %s: %v", id, err)
+		}
+	}
+	scrobbler := &stallingCompatWatchScrobbler{
+		stalledSessionID: "upstream-play-1",
+		release:          make(chan struct{}),
+		delivered:        make(chan string, 2),
+	}
+	handler := &PlaybackHandler{playbackStore: store, WatchScrobbler: scrobbler, terminalRequestWait: 10 * time.Millisecond}
+
+	scanned := make(chan error, 1)
+	go func() { scanned <- recoverPendingTerminalScrobbles(context.Background(), handler) }()
+	select {
+	case err := <-scanned:
+		if err != nil {
+			t.Fatalf("recover terminal events: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		close(scrobbler.release)
+		t.Fatal("recovery scan waited for the stalled provider")
+	}
+	select {
+	case id := <-scrobbler.delivered:
+		if id != "upstream-play-2" {
+			t.Fatalf("delivered %s while the first stop was stalled", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second stop was not delivered while the first was stalled")
+	}
+	close(scrobbler.release)
+	awaitTerminalCompleted(t, store, "play-1", "token-1", "stalled stop remained after the provider took it")
+	awaitTerminalCompleted(t, store, "play-2", "token-1", "second stop remained after the provider took it")
+}
+
 func TestTerminalScrobbleRecoveryRetainsEventWithoutConfirmationSupport(t *testing.T) {
 	store := NewPlaybackSessionStore(time.Hour, nil)
 	store.Put(PlaybackSession{ID: "play-1", CompatToken: "token-1"})

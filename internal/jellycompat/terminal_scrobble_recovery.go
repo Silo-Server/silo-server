@@ -108,13 +108,13 @@ func recoverPendingTerminalScrobbleBatch(
 				continue
 			}
 		}
-		handler.deliverCompatTerminal(
+		// A stalled provider holds its own stop, not the rest of the batch.
+		handler.deliverCompatTerminalDetached(
 			ctx,
 			session.ID,
 			session.CompatToken,
 			session.TerminalAuthoritative,
 			session.ExpiresAt,
-			0,
 			false,
 		)
 	}
