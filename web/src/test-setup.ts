@@ -1,21 +1,22 @@
 import "@testing-library/jest-dom";
 import { vi } from "vitest";
 
-// Components render inside the app's IntlProvider. Tests render them alone, so
-// every render and renderHook gets an English provider with no catalog: each
-// message shows its English default, as before extraction. A test's own
+// Components render inside the app's message provider. Tests render them alone,
+// so every render and renderHook gets the English one, which formats from the
+// generated English catalog and throws on a formatting error. A test's own
 // wrapper still applies, inside this one, and rerender keeps both.
 vi.mock("@testing-library/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@testing-library/react")>();
   const { createElement } = await import("react");
-  const { IntlProvider } = await import("react-intl");
+  const { AppIntlProvider, createAppIntl } = await import("@/i18n");
+  const english = createAppIntl("en", {});
   type Wrapper = React.JSXElementConstructor<{ children: React.ReactNode }>;
 
   function withEnglish(wrapper: Wrapper | undefined): Wrapper {
     return function EnglishIntl({ children }) {
       return createElement(
-        IntlProvider,
-        { locale: "en", defaultLocale: "en", messages: {} },
+        AppIntlProvider,
+        { intl: english },
         wrapper ? createElement(wrapper, null, children) : children,
       );
     };

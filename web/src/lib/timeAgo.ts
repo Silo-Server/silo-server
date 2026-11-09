@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import { appLanguage } from "@/lib/appLocale";
 
 let relative: { language: string; format: Intl.RelativeTimeFormat } | null = null;
@@ -24,12 +25,13 @@ export function timeAgo(iso: string): string | null {
   if (Number.isNaN(date.getTime())) return null;
 
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < MINUTE) return "Added just now";
+  if (seconds < MINUTE) return t("web.itemCard.addedJustNow");
 
-  const ago = relativeFormat();
-  if (seconds < HOUR) return `Added ${ago.format(-Math.floor(seconds / MINUTE), "minute")}`;
-  if (seconds < DAY) return `Added ${ago.format(-Math.floor(seconds / HOUR), "hour")}`;
+  const added = (value: number, unit: Intl.RelativeTimeFormatUnit) =>
+    t("web.itemCard.addedAgo", { ago: relativeFormat().format(-value, unit) });
+  if (seconds < HOUR) return added(Math.floor(seconds / MINUTE), "minute");
+  if (seconds < DAY) return added(Math.floor(seconds / HOUR), "hour");
 
   const days = Math.floor(seconds / DAY);
-  return days <= 30 ? `Added ${ago.format(-days, "day")}` : null;
+  return days <= 30 ? added(days, "day") : null;
 }

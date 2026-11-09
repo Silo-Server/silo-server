@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useAppLanguage } from "@/i18n";
 import { Check, Layers } from "lucide-react";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCardArtwork, {
@@ -111,6 +112,8 @@ function mangaStatusChip(item: BrowseItem): { label: string; tone: string } | nu
 }
 
 function SortMeta({ item, sortField }: { item: BrowseItem; sortField?: string }) {
+  // "Added 3 minutes ago" comes from a plain helper; follow language changes.
+  useAppLanguage();
   const episodeLabels = buildEpisodeCardLabels(item);
   const defaultLabel = [item.year || "", item.type === "series" ? "Series" : ""]
     .filter(Boolean)

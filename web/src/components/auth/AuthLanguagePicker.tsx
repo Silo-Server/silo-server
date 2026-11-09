@@ -9,7 +9,9 @@ import {
 } from "@/components/ui/select";
 import { setSignedOutLanguage, useSignedOutLanguage } from "@/hooks/useAppLocale";
 import { useAuth } from "@/hooks/useAuth";
-import { matchShippedLanguage, SHIPPED_LANGUAGES } from "@/lib/appLocale";
+import { PSEUDO_LOCALES_ENABLED } from "@/i18n";
+import { getLanguageName } from "@/lib/languageNames";
+import { matchAppLanguage, pickerLanguages } from "@/lib/appLocale";
 
 const MATCH_DEVICE = "device";
 
@@ -24,7 +26,9 @@ export function AuthLanguagePicker() {
   const { user, profile } = useAuth();
   if (user && profile) return null;
   // The cache can hold a profile's regional or unshipped tag; show what applies.
-  const value = matchShippedLanguage(signedOutLanguage) ?? MATCH_DEVICE;
+  const value = matchAppLanguage(signedOutLanguage, PSEUDO_LOCALES_ENABLED) ?? MATCH_DEVICE;
+  const languages = pickerLanguages(PSEUDO_LOCALES_ENABLED);
+  const offered = value === MATCH_DEVICE || languages.some((language) => language.tag === value);
 
   return (
     <div className="absolute end-4 top-4 z-10">
@@ -38,7 +42,8 @@ export function AuthLanguagePicker() {
         </SelectTrigger>
         <SelectContent position="popper" align="end">
           <SelectItem value={MATCH_DEVICE}>Match device</SelectItem>
-          {SHIPPED_LANGUAGES.map((language) => (
+          {!offered && <SelectItem value={value}>{getLanguageName(value)}</SelectItem>}
+          {languages.map((language) => (
             <SelectItem key={language.tag} value={language.tag} lang={language.tag}>
               {language.endonym}
             </SelectItem>

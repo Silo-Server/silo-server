@@ -15,6 +15,7 @@ import { useCalendarWeek } from "@/hooks/queries/calendar";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import WeekNavigator from "@/components/calendar/WeekNavigator";
 import DayGroup from "@/components/calendar/DayGroup";
+import { useAppLanguage } from "@/i18n";
 import { addWeeks, formatDayHeading, getWeekDays, getWeekStart } from "@/lib/calendarWeek";
 import { storage } from "@/utils/storage";
 
@@ -67,6 +68,8 @@ function parseCalendarParams(searchParams: URLSearchParams) {
 
 export default function Calendar() {
   useDocumentTitle("Calendar");
+  // The day heading comes from a plain helper; follow language changes.
+  useAppLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const { weekStart, filter, libraryId } = parseCalendarParams(searchParams);
   const libraries = useUserLibraries();

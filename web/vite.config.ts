@@ -238,10 +238,16 @@ export default defineConfig(({ mode }) => {
       include: ["jassub > throughput", "jassub > rvfc-polyfill"],
     },
     resolve: {
-      alias: {
-        "@": path.resolve(__dirname, "./src"),
-        "@pdfjs": path.resolve(__dirname, "./public/vendor/pdfjs"),
-      },
+      alias: [
+        { find: "@", replacement: path.resolve(__dirname, "./src") },
+        { find: "@pdfjs", replacement: path.resolve(__dirname, "./public/vendor/pdfjs") },
+        // Catalog messages arrive precompiled (src/locales), so the ICU parser
+        // never runs; its no-parser build keeps it out of the bundle.
+        {
+          find: /^@formatjs\/icu-messageformat-parser$/,
+          replacement: "@formatjs/icu-messageformat-parser/no-parser.js",
+        },
+      ],
     },
     server: {
       host: "0.0.0.0",

@@ -1,3 +1,4 @@
+import { appIntl } from "@/i18n";
 import { getLanguageName, namesLanguage } from "@/lib/languageNames";
 
 export { canonicalLanguageTag, getLanguageName, normalizeLanguageCode } from "@/lib/languageNames";
@@ -58,7 +59,8 @@ let cachedOptions: { language: string; options: LanguageOption[] } | null = null
  * data arriving, relabels it.
  */
 export function languageOptions(): LanguageOption[] {
-  const language = namesLanguage();
+  // Names follow the name data; the "Language (Region)" wording follows the messages.
+  const language = `${namesLanguage()}|${appIntl().locale}`;
   if (cachedOptions?.language !== language) {
     const options = COMMON_LANGUAGE_CODES.map((code) => ({
       code,

@@ -20,6 +20,7 @@ function applyLanguage(stored: string) {
       navigatorLanguages: [],
       runtimeLocale: "en-US",
       hasCatalog: () => true,
+      pseudoLocales: false,
     }),
   );
 }

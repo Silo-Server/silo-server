@@ -1,5 +1,6 @@
 import "@formatjs/intl-displaynames/polyfill-force.js";
 import "@formatjs/intl-displaynames/locale-data/en.js";
+import { t } from "@/i18n";
 import { appLanguage, type AppLanguage } from "@/lib/appLocale";
 import { canonicalLanguageTag } from "@/lib/languageTags";
 
@@ -104,13 +105,15 @@ function cldrLanguageName(names: NameSet, value: string): string | null {
   if (!language) return null;
 
   const exact = displayName(names.language, canonical);
-  const qualifiers = [
-    locale.script ? displayName(names.script, locale.script) : null,
-    locale.region ? displayName(names.region, locale.region) : null,
-  ].filter((part): part is string => Boolean(part));
+  const script = locale.script ? displayName(names.script, locale.script) : null;
+  const region = locale.region ? displayName(names.region, locale.region) : null;
 
-  if (exact && (qualifiers.length === 0 || exact !== language)) return exact;
-  return qualifiers.length > 0 ? `${language} (${qualifiers.join(", ")})` : language;
+  if (exact && ((!script && !region) || exact !== language)) return exact;
+  if (script && region)
+    return t("web.languageName.withScriptAndRegion", { language, script, region });
+  if (script) return t("web.languageName.withScript", { language, script });
+  if (region) return t("web.languageName.withRegion", { language, region });
+  return language;
 }
 
 /** The name in the interface language, or null for an unassigned or invalid tag. */
@@ -121,8 +124,8 @@ export function displayLanguageName(value: string): string | null {
 /** User-facing name with an explicit fallback for unassigned or invalid tags. */
 export function getLanguageName(value: string): string {
   const trimmed = value.trim();
-  if (!trimmed) return "Unknown";
-  return displayLanguageName(trimmed) ?? `Unknown language (${trimmed})`;
+  if (!trimmed) return t("web.languageName.unknown");
+  return displayLanguageName(trimmed) ?? t("web.languageName.unknownTag", { tag: trimmed });
 }
 
 /** Empty-preserving variant for optional metadata and filter labels. */
