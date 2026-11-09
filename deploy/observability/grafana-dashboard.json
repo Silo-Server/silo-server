@@ -1037,7 +1037,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (operation_id, error_code) (rate(streamapp_apiv2_requests_total{status_class=~\"4xx|5xx\"}[5m]))",
+          "expr": "sum by (operation_id, error_code) (rate(streamapp_apiv2_requests_total{status_class=~\"4xx|5xx|aborted\"}[5m]))",
           "legendFormat": "{{operation_id}} {{error_code}}"
         }
       ],

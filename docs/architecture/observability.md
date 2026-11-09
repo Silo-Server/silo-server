@@ -431,6 +431,25 @@ instruments use `silo_`; Go/process collectors retain upstream names. One
 only GC, scheduler, memory classes, CPU classes and synchronization families.
 Audit the emitted families when upgrading Go.
 
+### Aborted responses
+
+A handler that has sent its status and cannot finish the body breaks the
+connection with `panic(http.ErrAbortHandler)`, so the client sees a truncated
+response instead of a clean end. The request recorders (the `api request`,
+`apiv2 request` and `jellycompat request` lines and the native, v2 and compat
+request metrics) run through `httpstream.Serve`, which records the request while
+that panic unwinds and then re-raises it for net/http. While the client is still
+waiting, the request is marked aborted: the `api request` and
+`jellycompat request` lines keep their `status` field and add
+`outcome=aborted`, the `apiv2 request` line has `status_class=aborted`, the
+native counter's `status` label is `aborted` (no longer only numeric), the v2
+and compat `status_class` label is `aborted`, and the v2 and compat spans set
+`http.response.outcome` to `aborted` with an error status. A request whose
+client has gone, including one whose write to the client failed (net/http
+cancels the request context then, a write deadline included), is recorded the
+way a returned request would be. The activity log still records only requests
+that return, so an aborted request has no activity row.
+
 ## Jellyfin-compatible listener
 
 The Jellyfin-compatible listener runs on its own `http.Server`, so the native
@@ -449,7 +468,8 @@ fallback, the CORS preflight, or a middleware that refused the request.
   never the raw path or an ID. A request that matched no route is `unmatched`.
 - `method` is a standard method or `other`.
 - `status_class` is `1xx` to `5xx`, `hijacked` when the session socket took
-  over the connection, or `other`.
+  over the connection, `aborted` when the handler broke a response it had
+  started (see [Aborted responses](#aborted-responses)), or `other`.
 - `client` comes from the MediaBrowser `Client` field, then the User-Agent:
   `infuse`, `swiftfin`, `findroid`, `streamyfin`, `wholphin`, `fladder`,
   `moonfin`, `senplayer`, `vidhub`, `kodi`, `jellyfin-web`,
@@ -482,7 +502,8 @@ the per-scrape sample limit in the
 Latency for one client on one route lives on the trace. Each request opens a
 server span named `jellycompat <METHOD> <route>` with `http.request.method`,
 `http.route`, `http.response.status_code` (or `http.response.outcome` set to
-`hijacked`) and `jellycompat.client`. Postgres, Redis and S3 dependency spans
+`hijacked`; `aborted` is set alongside the status code) and
+`jellycompat.client`. Postgres, Redis and S3 dependency spans
 started during the request are its children instead of separate root traces.
 The span carries no path, query, header value or body. A `/socket` span stays
 open for the life of the connection, as the native v2 socket spans do. It holds

@@ -6,16 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -217,4 +220,101 @@ func headerValuesContain(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// A stream that commits its response and then breaks it with
+// panic(http.ErrAbortHandler) is still logged and counted once, marked
+// aborted, and the panic still reaches net/http so the client sees a broken
+// body instead of a clean end.
+func TestBaseMiddlewareRecordsAbortedStream(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatalf("LoadFromDB: %v", err)
+	}
+	logs := &lockedBuffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const route = "/api/v1/test-aborted-stream/{id}"
+	root := chi.NewRouter()
+	useBaseMiddleware(root, Dependencies{Config: cfg})
+	root.Get(route, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = w.Write([]byte("partial"))
+		http.NewResponseController(w).Flush() //nolint:errcheck // the abort below is the point
+		panic(http.ErrAbortHandler)
+	})
+	before := legacyRequestCount(t, route, "aborted")
+	server := httptest.NewServer(root)
+	resp, err := server.Client().Get(server.URL + "/api/v1/test-aborted-stream/1")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	body, readErr := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	server.Close() // waits for the handler goroutine to finish unwinding
+	if resp.StatusCode != http.StatusOK || string(body) != "partial" || !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		t.Fatalf("client got %d %q, read error %v; want 200, the partial body and a broken connection", resp.StatusCode, body, readErr)
+	}
+
+	if got := legacyRequestCount(t, route, "aborted") - before; got != 1 {
+		t.Fatalf("aborted request counted %v times, want 1", got)
+	}
+	var logged int
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		var rec map[string]any
+		if json.Unmarshal([]byte(line), &rec) != nil || rec["msg"] != "api request" || rec["path_pattern"] != route {
+			continue
+		}
+		logged++
+		if rec["outcome"] != "aborted" || rec["status"] != float64(http.StatusOK) {
+			t.Fatalf("request log line = %s, want outcome aborted and status 200", line)
+		}
+	}
+	if logged != 1 {
+		t.Fatalf("request logged %d times, want 1; log:\n%s", logged, logs.String())
+	}
+}
+
+// legacyRequestCount reads the native request counter from the default
+// registry; the middleware package keeps the vector unexported.
+func legacyRequestCount(t *testing.T, path, status string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, family := range families {
+		if family.GetName() != "streamapp_http_requests_total" {
+			continue
+		}
+		for _, metric := range family.GetMetric() {
+			labels := map[string]string{}
+			for _, pair := range metric.GetLabel() {
+				labels[pair.GetName()] = pair.GetValue()
+			}
+			if labels["method"] == http.MethodGet && labels["path"] == path && labels["status"] == status {
+				return metric.GetCounter().GetValue()
+			}
+		}
+	}
+	return 0
 }

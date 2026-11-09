@@ -46,38 +46,42 @@ func RequestLogger(nodeID string) func(http.Handler) http.Handler {
 				r = r.WithContext(activitylog.SetPlaybackLogContext(r.Context(), playbackLC))
 			}
 
-			next.ServeHTTP(wrapped, r)
-
-			pathPattern := r.URL.Path
-			if routeCtx := chi.RouteContext(r.Context()); routeCtx != nil {
-				if route := routeCtx.RoutePattern(); route != "" {
-					pathPattern = route
+			httpstream.Serve(next, wrapped, r, func(aborted bool) {
+				pathPattern := r.URL.Path
+				if routeCtx := chi.RouteContext(r.Context()); routeCtx != nil {
+					if route := routeCtx.RoutePattern(); route != "" {
+						pathPattern = route
+					}
 				}
-			}
 
-			attrs := []any{
-				"component", "api",
-				"request_id", chimw.GetReqID(r.Context()),
-				"method", r.Method,
-				"path", activitylog.RedactSecretPathParams(r, r.URL.Path),
-				"path_pattern", pathPattern,
-				"status", activitylog.RecordedStatus(r, wrapped.status, wrapped.wroteHeader),
-				"duration_ms", time.Since(start).Milliseconds(),
-				"client_ip", clientip.FromContext(r.Context()),
-				"user_agent", r.UserAgent(),
-				"node_id", nodeID,
-			}
-			if lc.UserID != nil {
-				attrs = append(attrs, "user_id", *lc.UserID)
-			}
-			if lc.SessionID != "" {
-				attrs = append(attrs, "session_id", lc.SessionID)
-			}
-			if playbackLC.PlaybackSessionID != "" {
-				attrs = append(attrs, "playback_session_id", playbackLC.PlaybackSessionID)
-			}
-			attrs = append(attrs, db.LogAttrs()...)
-			slog.InfoContext(r.Context(), "api request", append([]any{"component", "api"}, attrs...)...)
+				//nolint:goconst // slog keys, spelled out like every other request log line
+				attrs := []any{
+					"component", "api",
+					"request_id", chimw.GetReqID(r.Context()),
+					"method", r.Method,
+					"path", activitylog.RedactSecretPathParams(r, r.URL.Path),
+					"path_pattern", pathPattern,
+					"status", activitylog.RecordedStatus(r, wrapped.status, wrapped.wroteHeader),
+					"duration_ms", time.Since(start).Milliseconds(),
+					"client_ip", clientip.FromContext(r.Context()),
+					"user_agent", r.UserAgent(),
+					"node_id", nodeID,
+				}
+				if lc.UserID != nil {
+					attrs = append(attrs, "user_id", *lc.UserID)
+				}
+				if lc.SessionID != "" {
+					attrs = append(attrs, "session_id", lc.SessionID)
+				}
+				if playbackLC.PlaybackSessionID != "" {
+					attrs = append(attrs, "playback_session_id", playbackLC.PlaybackSessionID)
+				}
+				attrs = append(attrs, db.LogAttrs()...)
+				if aborted {
+					attrs = append(attrs, "outcome", "aborted")
+				}
+				slog.InfoContext(r.Context(), "api request", append([]any{"component", "api"}, attrs...)...)
+			})
 		})
 	}
 }
