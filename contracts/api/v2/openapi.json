@@ -31902,6 +31902,7 @@
             "examples": [
               "https://silo.example.test/activate"
             ],
+            "format": "uri",
             "type": "string"
           },
           "verification_uri_complete": {
