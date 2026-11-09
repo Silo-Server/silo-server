@@ -34,8 +34,6 @@ import {
   ADD_A_RULE_THEN_CREATE,
   CHANGED_BEFORE_DELETE,
   CHECK_BEFORE_DELETE_FAILED,
-  COLLECTION_CREATED,
-  COLLECTION_SAVED,
   DRAFT_FIELD_LABEL,
   NAME_FILLED_HELP,
   NAME_IT_THEN_CREATE,
@@ -251,12 +249,12 @@ function syncedTouched(synced: SyncedDraft | undefined) {
 /**
  * Where a save that worked goes once it settles: Save and Create back to the
  * list (`created`: the new collection's edit page instead, when Create left
- * something unsaved), Save and continue on to its detour. `titlesFailed`: a
- * title write had already failed, with its message on screen, when Save was
- * pressed.
+ * something unsaved), Save and continue on to its detour. `failuresBefore`:
+ * the Titles panel's failed writes when Save was pressed, so only one that
+ * fails while Save waits holds the page.
  */
 type AfterSave =
-  | { to: "list"; created?: string; titlesFailed?: boolean }
+  | { to: "list"; created?: string; failuresBefore?: number }
   | { to: "detour"; path: string };
 
 /**
@@ -316,7 +314,7 @@ export function CollectionEditor<Raw extends WireCollection>({
   const [afterSave, setAfterSave] = useState<AfterSave | null>(null);
   // The Titles panel's own writes: Save waits for one still running, and stays
   // when it fails, so its message isn't lost with the page.
-  const [titleWrites, setTitleWrites] = useState<TitleWrites>({ writing: false, failed: false });
+  const [titleWrites, setTitleWrites] = useState<TitleWrites>({ writing: false, failures: 0 });
   const [openEdit, setOpenEdit] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const location = useLocation();
@@ -430,9 +428,9 @@ export function CollectionEditor<Raw extends WireCollection>({
     } else if (
       !editor.isDirty &&
       staged.length === 0 &&
-      (!titleWrites.failed || afterSave.titlesFailed)
+      titleWrites.failures === (afterSave.failuresBefore ?? titleWrites.failures)
     ) {
-      setLeftSaved(afterSave.created ? COLLECTION_CREATED : COLLECTION_SAVED);
+      setLeftSaved(afterSave.created ? "Collection created" : "Collection saved");
       setLeaving(listPath);
     } else if (afterSave.created) {
       setOpenEdit(afterSave.created);
@@ -518,8 +516,8 @@ export function CollectionEditor<Raw extends WireCollection>({
     if (saved) setAfterSave({ to: "detour", path: savingFirst.path });
   }
   async function save() {
-    const titlesFailed = titleWrites.failed;
-    if (await editor.save()) setAfterSave({ to: "list", titlesFailed });
+    const failuresBefore = titleWrites.failures;
+    if (await editor.save()) setAfterSave({ to: "list", failuresBefore });
   }
   // Only a hidden server collection waits to be shown: a personal row's See all
   // opens however its Collections tab switch is set.

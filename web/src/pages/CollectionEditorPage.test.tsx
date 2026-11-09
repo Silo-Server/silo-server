@@ -248,6 +248,38 @@ describe("titles save as you change them", () => {
     expect(router.state.location.pathname).toBe("/collections/c1/edit");
   });
 
+  it("stays when a title fails while Save waits, even after a later title clears its message", async () => {
+    members = [];
+    let release: (() => void) | undefined;
+    v2Recorder.answer(
+      "PATCH /api/v2/collections/{id}",
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(getCollectionOk);
+        }),
+    );
+    v2Recorder.answer("PUT /api/v2/collections/{id}/items/{item_id}", (call: RecordedCall) => {
+      const id = call.path.split("/").pop()!;
+      if (id === HEAT.content_id) throw new Error("Not available");
+      if (!members.includes(id)) members.push(id);
+    });
+    const router = showEditorPage("/collections/c1/edit");
+    fireEvent.change(await nameField(), { target: { value: "Renamed" } });
+    await save();
+    await waitFor(() => expect(release).toBeDefined());
+    await addTitle("heat", "Heat");
+    expect(await screen.findByText(/Couldn't add Heat/)).toBeTruthy();
+    // Adding Alien clears Heat's message; Heat is still missing.
+    await addTitle("alien", "Alien");
+    await waitFor(() => expect(screen.queryByText(/Couldn't add Heat/)).toBeNull());
+    await screen.findByText("Saved");
+    await act(async () => release!());
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull(),
+    );
+    expect(router.state.location.pathname).toBe("/collections/c1/edit");
+  });
+
   it("keeps waiting for a slower title write after a quicker one finishes", async () => {
     members = [];
     let refuse: ((error: Error) => void) | undefined;

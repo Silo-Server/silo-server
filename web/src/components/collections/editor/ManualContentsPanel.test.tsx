@@ -209,9 +209,9 @@ it("reports its writes finished only once two overlapping reorders have both set
   await moveSecondUp(1);
   await moveSecondUp(2);
   await act(async () => releases[0]!());
-  expect(onWritesChange).toHaveBeenLastCalledWith({ writing: true, failed: false });
+  expect(onWritesChange).toHaveBeenLastCalledWith({ writing: true, failures: 0 });
   await act(async () => releases[1]!());
-  expect(onWritesChange).toHaveBeenLastCalledWith({ writing: false, failed: false });
+  expect(onWritesChange).toHaveBeenLastCalledWith({ writing: false, failures: 0 });
   rects.mockRestore();
   mocks.mutateAsync.mockImplementation(() => Promise.resolve());
 });

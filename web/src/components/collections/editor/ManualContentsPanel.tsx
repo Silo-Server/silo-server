@@ -459,13 +459,14 @@ export interface ManualContentsPanelProps {
   itemCount?: number;
   /** After every title write, so the editor refreshes its save token. */
   onItemsChanged: () => void;
-  /** Whether a title write is running, and whether the last one failed. */
+  /** Whether a title write is running, and how many have failed so far. */
   onWritesChange?: (writes: TitleWrites) => void;
 }
 
 export interface TitleWrites {
   writing: boolean;
-  failed: boolean;
+  /** Title writes that have failed since the panel opened; it only goes up. */
+  failures: number;
 }
 
 /**
@@ -511,11 +512,12 @@ export function ManualContentsPanel({
   // Title writes still running: several can overlap, and the first to finish
   // sets `saved`, so Save waits on the count instead.
   const [running, setRunning] = useState(0);
-  // The last reorder failed; its toast says so, and Save stays on the editor.
-  const [orderFailed, setOrderFailed] = useState(false);
+  // Failed title writes so far. A count, not the message on screen: a later
+  // write clears the message, and Save must still see the earlier failure.
+  const [failures, setFailures] = useState(0);
+  const failedWrite = () => setFailures((count) => count + 1);
   const writing = running > 0;
-  const failed = problem !== null || orderFailed;
-  useEffect(() => onWritesChange?.({ writing, failed }), [onWritesChange, writing, failed]);
+  useEffect(() => onWritesChange?.({ writing, failures }), [onWritesChange, writing, failures]);
   const dragOrder = useRef<typeof orderSnapshot>(undefined);
 
   // Posters and years for titles saved before the editor opened.
@@ -612,6 +614,7 @@ export function ManualContentsPanel({
         await afterWrite();
       } catch (error) {
         setSaved("idle");
+        failedWrite();
         setProblem(
           `Couldn't add ${item.title}. ${error instanceof Error ? error.message : "Try again."}`,
         );
@@ -640,6 +643,7 @@ export function ManualContentsPanel({
         await afterWrite();
       } catch (error) {
         setSaved("idle");
+        failedWrite();
         setProblem(
           `Couldn't remove ${row.info?.title || row.id}. ${error instanceof Error ? error.message : ""}`.trim(),
         );
@@ -657,6 +661,7 @@ export function ManualContentsPanel({
         await afterWrite();
       } catch (error) {
         setSaved("idle");
+        failedWrite();
         setProblem(
           `Couldn't put back ${removed.title}. ${error instanceof Error ? error.message : ""}`.trim(),
         );
@@ -707,7 +712,6 @@ export function ManualContentsPanel({
     const token = dragOrder.current;
     if (!canReorder || !token) return;
     setSaved("saving");
-    setOrderFailed(false);
     // Per-call `mutate` callbacks run only for the latest call, so each
     // reorder settles its own count through its promise.
     void tracked(() =>
@@ -716,9 +720,10 @@ export function ManualContentsPanel({
           setSaved("saved");
           onItemsChanged();
         },
+        // The reorder hook's toast says what went wrong.
         () => {
           setSaved("idle");
-          setOrderFailed(true);
+          failedWrite();
         },
       ),
     );
