@@ -381,17 +381,24 @@ func (keyEchoResolver) ResolveURLs(_ context.Context, keys []string) map[string]
 }
 
 // A collection page draws the backdrop across the page, so it gets the widest
-// variant an upload stores while the poster stays a card thumbnail.
+// variant an upload stores while the poster stays a card thumbnail. A backdrop
+// set to another stored key, whose ladder may lack that width, keeps the card
+// thumbnail.
 func TestLibraryCollectionResponseArtworkWidths(t *testing.T) {
 	h := &LibraryCollectionHandler{ArtworkResolver: keyEchoResolver{}}
-	got := h.libraryCollectionResponseOf(t.Context(), &models.LibraryCollection{
-		PosterURL:   "collection-images/c1/poster/original.r1.webp",
-		BackdropURL: "collection-images/c1/backdrop/original.r2.webp",
-	})
-	if want := "resolved:collection-images/c1/poster/w300.r1.webp"; got.PosterURL != want {
-		t.Errorf("poster = %q, want %q", got.PosterURL, want)
-	}
-	if want := "resolved:collection-images/c1/backdrop/w1280.r2.webp"; got.BackdropURL != want {
-		t.Errorf("backdrop = %q, want %q", got.BackdropURL, want)
+	for _, tc := range []struct{ backdrop, want string }{
+		{"collection-images/c1/backdrop/original.r2.webp", "resolved:collection-images/c1/backdrop/w1280.r2.webp"},
+		{"collection-images/c1/poster/original.r1.webp", "resolved:collection-images/c1/poster/w300.r1.webp"},
+	} {
+		got := h.libraryCollectionResponseOf(t.Context(), &models.LibraryCollection{
+			PosterURL:   "collection-images/c1/poster/original.r1.webp",
+			BackdropURL: tc.backdrop,
+		})
+		if want := "resolved:collection-images/c1/poster/w300.r1.webp"; got.PosterURL != want {
+			t.Errorf("poster = %q, want %q", got.PosterURL, want)
+		}
+		if got.BackdropURL != tc.want {
+			t.Errorf("backdrop %q = %q, want %q", tc.backdrop, got.BackdropURL, tc.want)
+		}
 	}
 }

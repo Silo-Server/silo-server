@@ -25,6 +25,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/artworkkey"
 	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -2741,7 +2742,14 @@ func (h *LibraryCollectionHandler) presignBackdropURLCtx(ctx context.Context, pa
 	return h.presignArtworkCtx(ctx, path, collectionBackdropPath)
 }
 
+// collectionBackdropPath asks for the wide variant only for a key in a
+// backdrop directory, where it is stored. A backdrop may be any stored
+// artwork reference, such as the collection's own poster key, whose ladder
+// has no rung that wide; those keep the card thumbnail every key has.
 func collectionBackdropPath(path string) string {
+	if artworkkey.ImageTypeOf(path, "") != artworkkey.ImageBackdrop {
+		return cardThumbnailPath(path)
+	}
 	return catalog.BackdropVariantPath(path, "w"+strconv.Itoa(collectionBackdropWidths[0]))
 }
 
