@@ -226,33 +226,35 @@ func (c *EmbyClient) AuthenticateServerUser(ctx context.Context, baseURL, userna
 	return nil, fmt.Errorf("authenticating against Emby server: no reachable server URL")
 }
 
-func (c *EmbyClient) FetchItems(ctx context.Context, auth embyLocalAuth, filter string) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, "Items", filter, "Movie,Episode")
-}
+// Emby item listings. Favorites include seasons so the provider can report the
+// ones Silo has no target for, rather than dropping them silently. The resume
+// row leaves out items the user hid from it, which the IsResumable filter
+// still returns with unchanged user data, and shows at most one episode per
+// series; it needs a type filter, without one Emby 4.10 answers with no items.
+const (
+	embyPlayableTypes  = "Movie,Episode"
+	embyFavoriteTypes  = "Movie,Series,Season,Episode"
+	embyEndpointItems  = "Items"
+	embyEndpointResume = "Items/Resume"
+)
 
-// FetchFavoriteItems includes seasons so the provider can report the season
-// favorites Silo has no target for, rather than dropping them silently.
-func (c *EmbyClient) FetchFavoriteItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, "Items", "IsFavorite", "Movie,Series,Season,Episode")
-}
-
-// FetchResumeItems pages through the user's Continue Watching row. Emby leaves
-// out items the user hid from it, which the IsResumable filter still returns
-// with unchanged user data, and shows at most one episode per series. The
-// endpoint needs a type filter: without one Emby 4.10 answers with no items.
-func (c *EmbyClient) FetchResumeItems(ctx context.Context, auth embyLocalAuth) ([]embyItem, error) {
-	return c.fetchItems(ctx, auth, "Items/Resume", "", "Movie,Episode")
-}
-
-// fetchItems pages through one of the user's item lists (endpoint is relative
-// to /Users/{id}) so a large library is read in bounded responses instead of
-// one body racing the client timeout.
-func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string) ([]embyItem, error) {
+// fetchAllItems reads a short listing whole. Only held lists may use it.
+func (c *EmbyClient) fetchAllItems(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string) ([]embyItem, error) {
 	var items []embyItem
+	err := c.forEachItemsPage(ctx, auth, endpoint, filter, includeItemTypes, 0, func(page []embyItem, _ int) error {
+		items = append(items, page...)
+		return nil
+	})
+	return items, err
+}
+
+// forEachItemsPage visits one of the user's item lists (endpoint is relative
+// to /Users/{id}) page by page from startIndex.
+func (c *EmbyClient) forEachItemsPage(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string, startIndex int, visit func(items []embyItem, pageStart int) error) error {
 	var budget listingBudget
-	for startIndex := 0; ; {
+	for {
 		if err := budget.startPage(); err != nil {
-			return nil, fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
+			return fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
 		}
 		query := url.Values{}
 		query.Set("Recursive", "true")
@@ -268,25 +270,24 @@ func (c *EmbyClient) fetchItems(ctx context.Context, auth embyLocalAuth, endpoin
 		if err == nil {
 			err = budget.addItems(len(payload.Items))
 		}
-		if err == nil {
-			err = retainItems(ctx, payload.Items)
-		}
 		if err != nil {
-			return nil, fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
+			return fmt.Errorf("fetching Emby %s with filter %q: %w", endpoint, filter, err)
 		}
-		items = append(items, payload.Items...)
+		if err := visit(payload.Items, startIndex); err != nil {
+			return err
+		}
 		startIndex += len(payload.Items)
 		if len(payload.Items) == 0 {
-			return items, nil
+			return nil
 		}
 		// Trust the reported total so a server capping page size below the
 		// request is still read to the end; without one, a short page is last.
 		if payload.TotalRecordCount > 0 {
 			if startIndex >= payload.TotalRecordCount {
-				return items, nil
+				return nil
 			}
 		} else if len(payload.Items) < embyPageSize {
-			return items, nil
+			return nil
 		}
 	}
 }
@@ -308,11 +309,7 @@ func (c *EmbyClient) FetchItemsByIDs(ctx context.Context, auth embyLocalAuth, id
 		if err != nil {
 			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
 		}
-		kept := keepRequested(payload.Items, chunk, func(item embyItem) string { return item.ID })
-		if err := retainItems(ctx, kept); err != nil {
-			return nil, fmt.Errorf("fetching Emby items by ids: %w", err)
-		}
-		items = append(items, kept...)
+		items = append(items, keepRequested(payload.Items, chunk, func(item embyItem) string { return item.ID })...)
 	}
 	return items, nil
 }

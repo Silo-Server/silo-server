@@ -102,21 +102,75 @@ func (c *PlexClient) fetchMetadataByKey(ctx context.Context, baseURL, token stri
 	return sweep, nil
 }
 
-// fetchPlexSeriesMetadata resolves the shows episodes belong to, keyed by
-// grandparent rating key, so episodes can match on series ids plus
-// season/episode numbers when they carry no usable ids of their own.
-func fetchPlexSeriesMetadata(ctx context.Context, client *PlexClient, baseURL, token string, seriesKeys []string, warnings *[]string) (map[string]*PlexItem, error) {
-	keys := uniqueNonEmpty(seriesKeys)
-	sweep, err := client.fetchMetadataByKey(ctx, baseURL, token, keys)
+// plexSeriesLookup resolves the shows episodes belong to, a page at a time
+// through a fixed-size cache, so episodes can match on series ids plus
+// season/episode numbers when they carry no usable ids of their own. It stops
+// asking after a sweep gives up, so a broken server does not cost a run of
+// timeouts on every page.
+type plexSeriesLookup struct {
+	client         *PlexClient
+	baseURL, token string
+	cache          *lookupCache[*PlexItem]
+	stopped        bool
+	asked, missing int
+	firstErr       error
+	aborted        bool
+}
+
+func newPlexSeriesLookup(client *PlexClient, baseURL, token string) *plexSeriesLookup {
+	return &plexSeriesLookup{client: client, baseURL: baseURL, token: token, cache: newLookupCache[*PlexItem](seriesLookupCacheEntries)}
+}
+
+func (l *plexSeriesLookup) resolve(ctx context.Context, keys []string) (map[string]*PlexItem, error) {
+	unique := uniqueNonEmpty(keys)
+	result := make(map[string]*PlexItem, len(unique))
+	var pending []string
+	for _, key := range unique {
+		if meta, ok := l.cache.get(key); ok {
+			result[key] = meta
+		} else {
+			pending = append(pending, key)
+		}
+	}
+	if len(pending) == 0 || l.stopped {
+		return result, nil
+	}
+	sweep, err := l.client.fetchMetadataByKey(ctx, l.baseURL, l.token, pending)
 	if err != nil {
 		return nil, err
 	}
-	if missing := len(keys) - len(sweep.items); missing > 0 && sweep.firstErr != nil {
-		*warnings = append(*warnings, fmt.Sprintf(
-			warnPlexSeriesMetadataUnavailable+"; their episodes can only match on their own ids%s (first error: %v)",
-			missing, len(keys), plexSweepAbortedSuffix(sweep.aborted), sweep.firstErr))
+	l.asked += len(pending)
+	if sweep.firstErr != nil {
+		l.missing += len(pending) - len(sweep.items)
+		if l.firstErr == nil {
+			l.firstErr = sweep.firstErr
+		}
 	}
-	return sweep.items, nil
+	if sweep.aborted {
+		l.aborted, l.stopped = true, true
+	}
+	for _, key := range pending {
+		// A failed key is not cached, so a later page can still resolve it.
+		meta, ok := sweep.items[key]
+		if !ok && sweep.firstErr != nil {
+			continue
+		}
+		if ok {
+			meta = &PlexItem{RatingKey: meta.RatingKey, Title: meta.Title, Year: meta.Year, Guid: meta.Guid}
+		}
+		l.cache.put(key, meta)
+		result[key] = meta
+	}
+	return result, nil
+}
+
+// warning summarizes the run's failed lookups, or "" when none failed.
+func (l *plexSeriesLookup) warning() string {
+	if l.missing == 0 || l.firstErr == nil {
+		return ""
+	}
+	return fmt.Sprintf(warnPlexSeriesMetadataUnavailable+"; their episodes can only match on their own ids%s (first error: %v)",
+		l.missing, l.asked, plexSweepAbortedSuffix(l.aborted), l.firstErr)
 }
 
 func uniqueNonEmpty(values []string) []string {

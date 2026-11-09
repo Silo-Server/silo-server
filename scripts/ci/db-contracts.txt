@@ -725,6 +725,9 @@
 # values fails the run without allocating it.
 ./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+./internal/historyimport TestInterruptedRunResumesWithoutDuplicates
+./internal/historyimport TestStaleSweepRequeuesOnlyRunsThatCanContinue
+./internal/historyimport TestOnlyOneLargeImportSlot
 
 # Buffering quality: a learned limit expires after seven days, a reset keeps the
 # probe and plan summary, rows go with the device's last registration (in either

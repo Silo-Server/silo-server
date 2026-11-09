@@ -69,6 +69,11 @@ type Service struct {
 	// signals hears once per run that the profile's signals changed. Nil
 	// reports nothing.
 	signals SignalsChangedNotifier
+
+	// largeImportThreshold and largeImportPoll override the large-run gate's
+	// defaults in tests; zero uses the defaults.
+	largeImportThreshold int
+	largeImportPoll      time.Duration
 }
 
 func NewService(bgContext context.Context, repo *Repository, storeProvider userstore.UserStoreProvider) *Service {
@@ -397,6 +402,18 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 	s.notifyRunByID(ctx, run.ID)
 	stopHeartbeat := s.startClaimHeartbeat(ctx, claim, cancel)
 	defer stopHeartbeat()
+
+	var from *StreamPosition
+	if claim.Generation > 0 {
+		checkpoint, err := s.repo.loadRunCheckpoint(ctx, claim)
+		if err != nil {
+			s.failClaim(ctx, claim, summary, err)
+			return
+		}
+		if checkpoint != nil {
+			from, summary = &checkpoint.Position, checkpoint.Summary
+		}
+	}
 	slog.Info(
 		"history import: started",
 		"run_id", run.ID,
@@ -404,147 +421,38 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		"profile_id", run.ProfileID,
 		"source_type", run.SourceType,
 		"connection_mode", run.ConnectionMode,
+		"resumed", from != nil,
 	)
 
+	reporter, _ := provider.(ContinueWatchingRowReporter)
+	apply := runApplier{service: s, run: run, claim: claim, summary: &summary, hiddenWarningAt: -1}
+	if reporter != nil {
+		apply.shows = newImportedShows()
+	}
 	// One budget covers every request the provider makes for this run, so a
 	// source cannot multiply the per-listing limits across lookups or sections.
-	records, warnings, err := provider.Fetch(withRunBudget(ctx))
+	err := provider.Stream(withRunBudget(ctx), from, func(batch RecordBatch) error { return apply.apply(ctx, batch) })
 	if err != nil {
-		summary.Warnings = append(summary.Warnings, warnings...)
 		if cause := context.Cause(ctx); cause != nil {
 			err = cause
+		}
+		// A deploy or shutdown is not the run's failure: it continues from
+		// its checkpoint on the next start.
+		if s.bgContext.Err() != nil && s.repo.requeueInterruptedRun(context.WithoutCancel(ctx), claim) {
+			return
 		}
 		s.failClaim(ctx, claim, summary, err)
 		return
 	}
-	summary.Warnings = append(summary.Warnings, warnings...)
-	summary.Fetched = len(records)
-	slog.Info(
-		"history import: fetched source records",
-		"run_id", run.ID,
-		"count", len(records),
-	)
-	s.persistClaimProgress(ctx, claim, summary)
+	slog.Info("history import: source read", "run_id", run.ID, "count", summary.Fetched)
 
-	hiddenSuppressed := 0
-	hiddenWarningAt := -1
-	var importedEpisodes []importedEpisode
-	for i, record := range records {
-		if err := s.repo.validateRunClaim(ctx, claim); err != nil {
-			s.failClaim(ctx, claim, summary, err)
-			return
-		}
-		match, reason, err := s.matcher.Match(ctx, record)
-		if err != nil {
-			summary.Warnings = append(summary.Warnings, err.Error())
-			s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
-			continue
-		}
-		if match == nil {
-			summary.Unmatched++
-			if reason != "" {
-				if summary.UnmatchedReasonCounts == nil {
-					summary.UnmatchedReasonCounts = make(map[string]int)
-				}
-				// Reasons name the item's IDs; count by cause so one warning
-				// covers every item that failed the same way. Samples and logs
-				// keep the full reason.
-				summary.UnmatchedReasonCounts[PublicUnmatchedReason(reason)]++
-			}
-			if len(summary.UnmatchedSamples) < maxUnmatchedSamples {
-				summary.UnmatchedSamples = append(summary.UnmatchedSamples, UnmatchedSample{
-					Kind:   record.Kind,
-					Title:  recordTitle(record),
-					Year:   record.Year,
-					Reason: reason,
-				})
-			}
-			if summary.Unmatched <= maxUnmatchedLogSamples {
-				s.logUnmatched(run.ID, i+1, len(records), record, reason)
-			}
-			s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
-			continue
-		}
-		summary.Matched++
-
-		if record.Favorite {
-			if err := s.repo.validateRunClaim(ctx, claim); err != nil {
-				s.failClaim(ctx, claim, summary, err)
-				return
-			}
-			inserted, err := s.addFavorite(ctx, run.UserID, run.ProfileID, match.MediaItemID)
-			if err != nil {
-				summary.Warnings = append(summary.Warnings, err.Error())
-			} else if inserted {
-				summary.FavoritesImported++
-			}
-		}
-		// Watchlist entries carry no watch state: the matched item joins the
-		// importing profile's watchlist and the progress pipeline is skipped.
-		if record.Watchlisted {
-			if err := s.repo.validateRunClaim(ctx, claim); err != nil {
-				s.failClaim(ctx, claim, summary, err)
-				return
-			}
-			inserted, err := s.addToWatchlist(ctx, run.UserID, run.ProfileID, match.MediaItemID, record.UpdatedAt)
-			if err != nil {
-				summary.Warnings = append(summary.Warnings, err.Error())
-			} else if inserted {
-				summary.WatchlistAdded++
-			}
-			s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
-			continue
-		}
-		if record.FavoriteOnly {
-			s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
-			continue
-		}
-
-		if err := s.repo.validateRunClaim(ctx, claim); err != nil {
-			s.failClaim(ctx, claim, summary, err)
-			return
-		}
-		outcome, err := s.applyImportedWatch(ctx, run.UserID, run.ProfileID, match.MediaItemID, record)
-		// A write that landed counts even when a later step for the record
-		// failed, so a run that then fails still reports the signal change.
-		if outcome.ProgressWritten {
-			summary.ProgressUpdated++
-		}
-		if outcome.HistoryCreated {
-			summary.HistoryCreated++
-		}
-		if err != nil {
-			summary.Warnings = append(summary.Warnings, err.Error())
-		} else {
-			if record.Kind == KindEpisode {
-				importedEpisodes = append(importedEpisodes, newImportedEpisode(match.MediaItemID, record))
-			}
-			if !outcome.ProgressWritten {
-				summary.Skipped++
-			}
-			if outcome.HiddenSuppressed {
-				hiddenSuppressed++
-				summary.Warnings, hiddenWarningAt = upsertHiddenHistoryWarning(
-					summary.Warnings, hiddenWarningAt, hiddenSuppressed)
-			}
-		}
-
-		s.persistClaimProgressMaybe(ctx, claim, summary, i+1, len(records))
-	}
-
-	if reporter, ok := provider.(ContinueWatchingRowReporter); ok {
+	if reporter != nil {
 		if row, ok := reporter.ContinueWatchingRow(); ok {
 			if err := s.repo.validateRunClaim(ctx, claim); err != nil {
 				s.failClaim(ctx, claim, summary, err)
 				return
 			}
-			dropped, err := s.reconcileContinueWatching(ctx, run.UserID, run.ProfileID, row, importedEpisodes)
-			if err != nil {
-				slog.WarnContext(ctx, "history import: hiding shows hidden at the source failed", "run_id", run.ID, "dropped", dropped, "error", err)
-				summary.Warnings = append(summary.Warnings, warnContinueWatchingNotReconciled)
-			} else if dropped > 0 {
-				slog.InfoContext(ctx, "history import: hid shows hidden from the source's continue watching", "run_id", run.ID, "dropped", dropped)
-			}
+			s.reconcileRun(ctx, run, row, apply.shows, from != nil, &summary)
 		}
 	}
 
@@ -583,6 +491,166 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		if err := s.repo.TouchMappingLastImported(s.bgContext, *run.MappingID); err != nil {
 			slog.Warn("history import: failed to touch mapping last_imported_at", "mapping_id", *run.MappingID, "error", err)
 		}
+	}
+}
+
+// reconcileRun runs the Continue Watching pass. A resumed run imported only
+// part of the shows in this process, so judging the rest would be guesswork: it
+// skips the pass and warns, and the next import of the source reconciles them.
+func (s *Service) reconcileRun(ctx context.Context, run *Run, row ContinueWatchingRow, shows *importedShows, resumed bool, summary *ExecutionSummary) {
+	if resumed || shows.failed != nil {
+		slog.WarnContext(ctx, "history import: continue watching pass skipped", "run_id", run.ID, "resumed", resumed, "error", shows.failed)
+		addRunWarning(summary, warnContinueWatchingNotReconciled)
+		return
+	}
+	dropped, err := s.reconcileContinueWatching(ctx, run.UserID, run.ProfileID, row, shows)
+	if err != nil {
+		slog.WarnContext(ctx, "history import: hiding shows hidden at the source failed", "run_id", run.ID, "dropped", dropped, "error", err)
+		addRunWarning(summary, warnContinueWatchingNotReconciled)
+	} else if dropped > 0 {
+		slog.InfoContext(ctx, "history import: hid shows hidden from the source's continue watching", "run_id", run.ID, "dropped", dropped)
+	}
+}
+
+// runApplier applies one run's batches.
+type runApplier struct {
+	service          *Service
+	run              *Run
+	claim            RunClaim
+	summary          *ExecutionSummary
+	hiddenSuppressed int
+	hiddenWarningAt  int
+	// shows is nil when the provider has no Continue Watching row to compare.
+	shows     *importedShows
+	largeSlot bool
+}
+
+// apply matches a batch with one round of catalog reads, writes its records,
+// and checkpoints. Claim validity is checked per batch; the heartbeat also
+// cancels ctx when the claim is lost, which stops the record loop.
+func (a *runApplier) apply(ctx context.Context, batch RecordBatch) error {
+	s := a.service
+	addRunWarning(a.summary, batch.Warnings...)
+	if len(batch.Records) == 0 && batch.Resume.Stage == "" {
+		return nil
+	}
+	if err := s.repo.validateRunClaim(ctx, a.claim); err != nil {
+		return err
+	}
+	if err := a.awaitLargeSlot(ctx); err != nil {
+		return err
+	}
+	matches, reasons, err := matchAllWithReasons(ctx, s.repo.pool, batch.Records)
+	if err != nil {
+		return err
+	}
+	// The checkpoint keeps the totals from before this batch, because a
+	// resume reads the batch again and would otherwise count it twice.
+	before := a.summary.snapshot()
+	var episodes []importedEpisode
+	for i, record := range batch.Records {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		a.applyRecord(ctx, record, matches[i], reasons[i], &episodes)
+		workmetrics.Progress("history_import")
+	}
+	if a.shows != nil {
+		a.shows.add(ctx, s.seriesDrops, episodes)
+	}
+	s.persistClaimProgress(ctx, a.claim, *a.summary)
+	if a.claim.Generation > 0 && batch.Resume.Stage != "" {
+		if err := s.repo.saveRunCheckpoint(ctx, a.claim, runCheckpoint{Position: batch.Resume, Summary: before}); err != nil {
+			slog.WarnContext(ctx, "history import: checkpoint write failed", "run_id", a.run.ID, "error", err)
+		}
+	}
+	return nil
+}
+
+// applyRecord writes one matched record. Its failures become warnings, so one
+// bad item does not end the run.
+func (a *runApplier) applyRecord(ctx context.Context, record Record, match *Match, reason string, episodes *[]importedEpisode) {
+	s, run, summary := a.service, a.run, a.summary
+	if !record.RepeatOfWatch {
+		summary.Fetched++
+	}
+	if match == nil {
+		if record.RepeatOfWatch {
+			return
+		}
+		summary.Unmatched++
+		if reason != "" {
+			if summary.UnmatchedReasonCounts == nil {
+				summary.UnmatchedReasonCounts = make(map[string]int)
+			}
+			// Reasons name the item's IDs; count by cause so one warning
+			// covers every item that failed the same way. Samples and logs
+			// keep the full reason.
+			summary.UnmatchedReasonCounts[PublicUnmatchedReason(reason)]++
+		}
+		if len(summary.UnmatchedSamples) < maxUnmatchedSamples {
+			summary.UnmatchedSamples = append(summary.UnmatchedSamples, UnmatchedSample{
+				Kind:   record.Kind,
+				Title:  recordTitle(record),
+				Year:   record.Year,
+				Reason: reason,
+			})
+		}
+		if summary.Unmatched <= maxUnmatchedLogSamples {
+			s.logUnmatched(run.ID, summary.Fetched, record, reason)
+		}
+		return
+	}
+	if !record.RepeatOfWatch {
+		summary.Matched++
+	}
+
+	if record.Favorite {
+		inserted, err := s.addFavorite(ctx, run.UserID, run.ProfileID, match.MediaItemID)
+		if err != nil {
+			addRunWarning(summary, err.Error())
+		} else if inserted {
+			summary.FavoritesImported++
+		}
+	}
+	// Watchlist entries carry no watch state: the matched item joins the
+	// importing profile's watchlist and the progress pipeline is skipped.
+	if record.Watchlisted {
+		inserted, err := s.addToWatchlist(ctx, run.UserID, run.ProfileID, match.MediaItemID, record.UpdatedAt)
+		if err != nil {
+			addRunWarning(summary, err.Error())
+		} else if inserted {
+			summary.WatchlistAdded++
+		}
+		return
+	}
+	if record.FavoriteOnly {
+		return
+	}
+
+	outcome, err := s.applyImportedWatch(ctx, run.UserID, run.ProfileID, match.MediaItemID, record)
+	// A write that landed counts even when a later step for the record
+	// failed, so a run that then fails still reports the signal change.
+	if outcome.ProgressWritten {
+		summary.ProgressUpdated++
+	}
+	if outcome.HistoryCreated {
+		summary.HistoryCreated++
+	}
+	if err != nil {
+		addRunWarning(summary, err.Error())
+		return
+	}
+	if record.Kind == KindEpisode && a.shows != nil {
+		*episodes = append(*episodes, newImportedEpisode(match.MediaItemID, record))
+	}
+	if !outcome.ProgressWritten {
+		summary.Skipped++
+	}
+	if outcome.HiddenSuppressed {
+		a.hiddenSuppressed++
+		summary.Warnings, a.hiddenWarningAt = upsertHiddenHistoryWarning(
+			summary.Warnings, a.hiddenWarningAt, a.hiddenSuppressed)
 	}
 }
 
@@ -799,12 +867,11 @@ func importedPosition(record Record) float64 {
 	return record.PositionSeconds
 }
 
-func (s *Service) logUnmatched(runID string, processed, total int, record Record, reason string) {
+func (s *Service) logUnmatched(runID string, processed int, record Record, reason string) {
 	slog.Info(
 		"history import: unmatched item",
 		"run_id", runID,
 		"processed", processed,
-		"total", total,
 		"kind", record.Kind,
 		"title", record.Title,
 		"year", record.Year,
@@ -849,10 +916,4 @@ func (s *Service) persistClaimProgress(ctx context.Context, claim RunClaim, summ
 		return
 	}
 	s.notifyRunByID(ctx, claim.RunID)
-}
-func (s *Service) persistClaimProgressMaybe(ctx context.Context, claim RunClaim, summary ExecutionSummary, processed, total int) {
-	workmetrics.Progress("history_import")
-	if processed == total || processed%25 == 0 {
-		s.persistClaimProgress(ctx, claim, summary)
-	}
 }

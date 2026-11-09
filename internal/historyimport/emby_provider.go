@@ -5,13 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 )
-
-type Provider interface {
-	Fetch(ctx context.Context) ([]Record, []string, error)
-}
 
 type EmbyProvider struct {
 	client *EmbyClient
@@ -20,6 +17,15 @@ type EmbyProvider struct {
 	// could not be read reliably.
 	row *ContinueWatchingRow
 }
+
+// Stages of an Emby listing, in order.
+const (
+	embyStagePlayed    = "played"
+	embyStageRemainder = "resumable"
+	embyStageFavorites = "favorites"
+)
+
+var embyStages = []string{embyStagePlayed, embyStageRemainder, embyStageFavorites}
 
 // ContinueWatchingRow reports the shows in Emby's Continue Watching row as
 // of the last Fetch. ok is false when the row could not be read reliably,
@@ -39,25 +45,79 @@ func NewEmbyProvider(client *EmbyClient, auth embyLocalAuth) *EmbyProvider {
 // to; a wider range is imported as its first episode only.
 const maxEmbyEpisodeRange = 10
 
-func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
-	p.row = nil
-	playedItems, err := p.client.FetchItems(ctx, p.auth, "IsPlayed")
-	if err != nil {
+// embySeriesLookup resolves a page's series through a fixed-size cache. A
+// failed lookup stops further ones for the run: Emby answers them the same
+// way, and episodes carrying their own provider IDs still match without it.
+type embySeriesLookup struct {
+	provider *EmbyProvider
+	cache    *lookupCache[embyItem]
+	failed   bool
+	// unfinished holds every looked-up series Emby counts as having episodes
+	// left, which the Continue Watching pass needs for the whole run.
+	unfinished map[string]bool
+}
+
+func (l *embySeriesLookup) resolve(ctx context.Context, items []embyItem) (map[string]embyItem, []string, error) {
+	result := make(map[string]embyItem)
+	var pending []string
+	seen := make(map[string]struct{})
+	for _, item := range items {
+		id := strings.TrimSpace(item.SeriesID)
+		if !strings.EqualFold(item.Type, "episode") || id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if series, ok := l.cache.get(id); ok {
+			result[id] = series
+		} else {
+			pending = append(pending, id)
+		}
+	}
+	if len(pending) == 0 || l.failed {
+		return result, nil, nil
+	}
+	seriesItems, err := l.provider.client.FetchItemsByIDs(ctx, l.provider.auth, pending, "Series")
+	if errors.Is(err, ErrUpstreamResponseTooLarge) || ctx.Err() != nil {
 		return nil, nil, err
 	}
-	resumableItems, err := p.client.FetchItems(ctx, p.auth, "IsResumable")
 	if err != nil {
-		return nil, nil, err
+		slog.WarnContext(ctx, "emby history import: series metadata unavailable", "component", "historyimport", "error", warningLogError("emby", err))
+		l.failed = true
+		return result, []string{warnEmbySeriesUnavailable}, nil
+	}
+	for _, series := range seriesItems {
+		l.cache.put(series.ID, series)
+		result[series.ID] = series
+		if unplayed := series.UserData.UnplayedItemCount; unplayed != nil && *unplayed > 0 && len(l.unfinished) < maxTrackedSeries {
+			l.unfinished[series.ID] = true
+		}
+	}
+	return result, nil, nil
+}
+
+// Stream reads the short lists first (resumable items, the Continue Watching
+// row), then the played pages merged against them, what was only resumable,
+// and favorites. A favorite needs no merge: it only adds to favorites, while
+// the same item's watch state is imported from its played or resumable record.
+func (p *EmbyProvider) Stream(ctx context.Context, from *StreamPosition, sink RecordSink) error {
+	sink = markSinkErrors(sink)
+	p.row = nil
+	resumable, err := p.client.fetchAllItems(ctx, p.auth, embyEndpointItems, "IsResumable", embyPlayableTypes)
+	if err != nil {
+		return err
 	}
 	var warnings []string
 	// The row is read even when nothing is resumable: a show between
 	// episodes has no resumable episode, and the row is the only place Emby
 	// shows whether it was hidden.
-	listed, err := p.client.FetchResumeItems(ctx, p.auth)
+	listed, err := p.client.fetchAllItems(ctx, p.auth, embyEndpointResume, "", embyPlayableTypes)
 	// A source over the size limits fails the run here and below, rather
 	// than importing without the list it sent.
 	if errors.Is(err, ErrUpstreamResponseTooLarge) {
-		return nil, nil, err
+		return err
 	}
 	rowRead := err == nil
 	if err != nil {
@@ -65,82 +125,141 @@ func (p *EmbyProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
 		warnings = append(warnings, warnEmbyResumeListUnavailable)
 		listed = nil
 	}
-	hidden := hiddenFromResume(resumableItems, listed, rowRead)
-	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
-	// can carry the server's response body. The error itself is logged.
-	favoriteItems, err := p.client.FetchFavoriteItems(ctx, p.auth)
-	if errors.Is(err, ErrUpstreamResponseTooLarge) {
-		return nil, nil, err
-	}
+	hidden := hiddenFromResume(resumable, listed, rowRead)
+	held, err := holdItems(ctx, resumable, func(item embyItem) string { return item.ID })
 	if err != nil {
-		slog.WarnContext(ctx, "emby history import: favorites unavailable", "component", "historyimport", "error", warningLogError("emby", err))
-		warnings = append(warnings, warnEmbyFavoritesUnavailable)
-		favoriteItems = nil
+		return fmt.Errorf("holding Emby resumable items: %w", err)
+	}
+	defer held.release(ctx)
+
+	series := &embySeriesLookup{provider: p, cache: newLookupCache[embyItem](seriesLookupCacheEntries), unfinished: map[string]bool{}}
+	listedSeries, lookupWarnings, err := series.resolve(ctx, listed)
+	if err != nil {
+		return err
+	}
+	warnings = append(warnings, lookupWarnings...)
+	if len(warnings) > 0 {
+		if err := sink(RecordBatch{Warnings: warnings}); err != nil {
+			return err
+		}
+	}
+
+	if stageReached(from, embyStages, embyStagePlayed) {
+		err := p.client.forEachItemsPage(ctx, p.auth, embyEndpointItems, "IsPlayed", embyPlayableTypes, stageOffset(from, embyStagePlayed), func(page []embyItem, start int) error {
+			return p.emitWatched(ctx, page, held, hidden, series, StreamPosition{Stage: embyStagePlayed, Offset: start}, sink)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if stageReached(from, embyStages, embyStageRemainder) {
+		for page := range slices.Chunk(held.remaining(), embyPageSize) {
+			if err := p.emitWatched(ctx, page, nil, hidden, series, StreamPosition{Stage: embyStageRemainder}, sink); err != nil {
+				return err
+			}
+		}
+	}
+	if err := p.streamFavorites(ctx, from, series, sink); err != nil {
+		return err
+	}
+
+	// Without the series' provider IDs a show in the row that the import
+	// matched under another Emby series could not be recognized, and with too
+	// many shows to track the unfinished counts would be partial, so the row
+	// is only reported when both are complete.
+	if rowRead && !series.failed && len(series.unfinished) < maxTrackedSeries {
+		p.row = continueWatchingRow(listed, listedSeries)
+		if p.row == nil {
+			slog.WarnContext(ctx, "emby history import: continue watching lists an episode without a series; shows hidden there stay visible", "component", "historyimport")
+		} else {
+			maps.Copy(p.row.UnfinishedSourceSeries, series.unfinished)
+		}
+	}
+	return nil
+}
+
+// emitWatched normalizes one page of watch items, merging held resumable
+// state, and hands it to sink.
+func (p *EmbyProvider) emitWatched(ctx context.Context, page []embyItem, held *heldItems[embyItem], hidden map[string]bool, series *embySeriesLookup, resume StreamPosition, sink RecordSink) error {
+	meta, warnings, err := series.resolve(ctx, page)
+	if err != nil {
+		return err
+	}
+	records := make([]Record, 0, len(page))
+	for _, item := range page {
+		expanded := embyWatchedRecords(item, meta[item.SeriesID])
+		if held != nil {
+			if progress, ok := held.take(item.ID); ok {
+				expanded = mergeWatchedRecords(expanded, embyWatchedRecords(progress, meta[progress.SeriesID]))
+			}
+		}
+		for _, record := range expanded {
+			record.HiddenFromResume = hidden[item.ID]
+			records = append(records, record)
+		}
+	}
+	return sink(RecordBatch{Records: records, Warnings: warnings, Resume: resume})
+}
+
+// mergeWatchedRecords merges an item's in-progress records into its played
+// ones by external ID. A multi-episode file expands when played, so the played
+// side holds every episode and a partly watched copy merges into its first.
+func mergeWatchedRecords(played, progress []Record) []Record {
+	for _, update := range progress {
+		for i := range played {
+			if played[i].ExternalID == update.ExternalID {
+				played[i] = mergeRecords(played[i], update)
+			}
+		}
+	}
+	return played
+}
+
+func (p *EmbyProvider) streamFavorites(ctx context.Context, from *StreamPosition, series *embySeriesLookup, sink RecordSink) error {
+	if !stageReached(from, embyStages, embyStageFavorites) {
+		return nil
 	}
 	// Silo has no season favorites, so report them rather than drop them.
 	seasonFavorites := 0
-	favoriteItems = slices.DeleteFunc(favoriteItems, func(item embyItem) bool {
-		isSeason := strings.EqualFold(item.Type, "season")
-		if isSeason {
-			seasonFavorites++
+	err := p.client.forEachItemsPage(ctx, p.auth, embyEndpointItems, "IsFavorite", embyFavoriteTypes, stageOffset(from, embyStageFavorites), func(page []embyItem, start int) error {
+		page = slices.DeleteFunc(page, func(item embyItem) bool {
+			isSeason := strings.EqualFold(item.Type, "season")
+			if isSeason {
+				seasonFavorites++
+			}
+			return isSeason
+		})
+		meta, warnings, err := series.resolve(ctx, page)
+		if err != nil {
+			return err
 		}
-		return isSeason
+		records := make([]Record, 0, len(page))
+		for _, item := range page {
+			record := normalizeEmbyItem(item, meta[item.SeriesID])
+			record.Favorite = true
+			record.FavoriteOnly = true
+			record.PreferTMDB = true
+			// Watch records own the runtime; a favorite's full file runtime must
+			// not replace a multi-episode file's per-episode share.
+			record.DurationSeconds = 0
+			record.RepeatOfWatch = item.UserData.Played || item.UserData.PlaybackPositionTicks > 0
+			records = append(records, record)
+		}
+		return sink(RecordBatch{Records: records, Warnings: warnings, Resume: StreamPosition{Stage: embyStageFavorites, Offset: start}})
 	})
-	if seasonFavorites > 0 {
-		warnings = append(warnings, fmt.Sprintf(warnEmbySeasonFavorites, seasonFavorites))
-	}
-
-	watchedItems := slices.Concat(playedItems, resumableItems)
-	seriesMeta, err := p.fetchSeriesMetadata(ctx, slices.Concat(watchedItems, favoriteItems, listed))
-	if errors.Is(err, ErrUpstreamResponseTooLarge) {
-		return nil, nil, err
-	}
-	seriesMetaRead := err == nil
 	if err != nil {
-		// Episodes carrying their own provider IDs still match without it.
-		slog.WarnContext(ctx, "emby history import: series metadata unavailable", "component", "historyimport", "error", warningLogError("emby", err))
-		warnings = append(warnings, warnEmbySeriesUnavailable)
-		seriesMeta = map[string]embyItem{}
-	}
-	// Without the series' provider IDs a show in the row that the import
-	// matched under another Emby series could not be recognized, so the row
-	// is only reported when they were read.
-	if rowRead && seriesMetaRead {
-		p.row = continueWatchingRow(listed, seriesMeta)
-		if p.row == nil {
-			slog.WarnContext(ctx, "emby history import: continue watching lists an episode without a series; shows hidden there stay visible", "component", "historyimport")
+		if errors.Is(err, ErrUpstreamResponseTooLarge) || ctx.Err() != nil || isSinkError(err) {
+			return err
 		}
+		// Warnings store fixed text: v1 returns them verbatim, and upstream
+		// errors can carry the server's response body. The error is logged.
+		slog.WarnContext(ctx, "emby history import: favorites unavailable", "component", "historyimport", "error", warningLogError("emby", err))
+		return sink(RecordBatch{Warnings: []string{warnEmbyFavoritesUnavailable}})
 	}
-
-	merged := make(map[string]Record, len(watchedItems)+len(favoriteItems))
-	add := func(record Record) {
-		if existing, ok := merged[record.ExternalID]; ok {
-			record = mergeRecords(existing, record)
-		}
-		merged[record.ExternalID] = record
+	if seasonFavorites > 0 {
+		return sink(RecordBatch{Warnings: []string{fmt.Sprintf(warnEmbySeasonFavorites, seasonFavorites)}})
 	}
-	for _, item := range watchedItems {
-		for _, record := range embyWatchedRecords(item, seriesMeta[item.SeriesID]) {
-			record.HiddenFromResume = hidden[item.ID]
-			add(record)
-		}
-	}
-	for _, item := range favoriteItems {
-		record := normalizeEmbyItem(item, seriesMeta[item.SeriesID])
-		record.Favorite = true
-		record.FavoriteOnly = true
-		record.PreferTMDB = true
-		// Watch records own the runtime; a favorite's full file runtime must
-		// not replace a multi-episode file's per-episode share.
-		record.DurationSeconds = 0
-		add(record)
-	}
-
-	records := make([]Record, 0, len(merged))
-	for _, record := range merged {
-		records = append(records, record)
-	}
-	return records, warnings, nil
+	return nil
 }
 
 // embyWatchedRecords expands a played multi-episode file (S01E01-E02) into
@@ -260,33 +379,6 @@ func continueWatchingRow(listed []embyItem, seriesMeta map[string]embyItem) *Con
 		})
 	}
 	return row
-}
-
-func (p *EmbyProvider) fetchSeriesMetadata(ctx context.Context, items []embyItem) (map[string]embyItem, error) {
-	seriesIDs := make([]string, 0)
-	seen := make(map[string]struct{})
-	for _, item := range items {
-		if strings.ToLower(item.Type) != "episode" || strings.TrimSpace(item.SeriesID) == "" {
-			continue
-		}
-		if _, ok := seen[item.SeriesID]; ok {
-			continue
-		}
-		seen[item.SeriesID] = struct{}{}
-		seriesIDs = append(seriesIDs, item.SeriesID)
-	}
-	if len(seriesIDs) == 0 {
-		return map[string]embyItem{}, nil
-	}
-	seriesItems, err := p.client.FetchItemsByIDs(ctx, p.auth, seriesIDs, "Series")
-	if err != nil {
-		return nil, err
-	}
-	result := make(map[string]embyItem, len(seriesItems))
-	for _, item := range seriesItems {
-		result[item.ID] = item
-	}
-	return result, nil
 }
 
 func normalizeEmbyItem(item embyItem, series embyItem) Record {

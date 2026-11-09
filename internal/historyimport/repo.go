@@ -655,6 +655,7 @@ func (r *Repository) completeRun(ctx context.Context, claim RunClaim, summary Ex
 			warnings = $11,
 			unmatched_samples = $12,
 			error_message = NULL,
+			checkpoint = NULL,
 			completed_at = NOW(),
 			last_heartbeat_at = NOW()
 		WHERE id = $1 AND status='running' AND claim_generation=$13 AND cancel_requested_at IS NULL`,

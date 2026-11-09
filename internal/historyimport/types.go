@@ -221,6 +221,9 @@ type Record struct {
 	// profile gets a matching Continue Watching dismissal. A show between
 	// episodes has no such item; see ContinueWatchingRow.
 	HiddenFromResume bool
+	// RepeatOfWatch marks a favorite whose item was already delivered as a
+	// watch record, so one item counts once in the run's totals.
+	RepeatOfWatch bool
 	// SourceSeriesID is the source's own ID of an episode's series, which
 	// ties the episode to the source's Continue Watching row.
 	SourceSeriesID string

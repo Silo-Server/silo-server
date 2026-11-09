@@ -122,12 +122,12 @@ type privateNetworkProvider struct {
 	Provider
 }
 
-func (p privateNetworkProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
-	return p.Provider.Fetch(netguard.WithPrivateAccess(ctx))
+func (p privateNetworkProvider) Stream(ctx context.Context, from *StreamPosition, sink RecordSink) error {
+	return p.Provider.Stream(netguard.WithPrivateAccess(ctx), from, sink)
 }
 
 // ContinueWatchingRow passes through the wrapped provider's row. The embedded
-// interface only carries Fetch, so without it the run would never see the
+// interface only carries Stream, so without it the run would never see the
 // row of a wrapped provider.
 func (p privateNetworkProvider) ContinueWatchingRow() (ContinueWatchingRow, bool) {
 	if reporter, ok := p.Provider.(ContinueWatchingRowReporter); ok {

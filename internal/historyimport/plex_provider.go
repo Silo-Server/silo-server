@@ -95,96 +95,153 @@ var plexSectionMediaTypes = map[string]struct {
 	plexSectionShow:  {mediaType: 4, noun: "episodes"},
 }
 
-func (p *PlexServerProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
+// Stages of a Plex server listing: each section's watched pages, then what is
+// only in progress in that section, and last the account watchlist.
+const (
+	plexStageWatched   = "watched"
+	plexStageRemainder = "in-progress"
+	plexStageWatchlist = "watchlist"
+)
+
+// Stream reads every section's watched pages, merging each section's held
+// in-progress list into them, then emits what was only in progress. A rewatch
+// appears in both listings and imports as played.
+func (p *PlexServerProvider) Stream(ctx context.Context, from *StreamPosition, sink RecordSink) error {
+	sink = markSinkErrors(sink)
 	sections, err := p.fetchLibrarySections(ctx)
 	if err != nil {
-		return nil, nil, err
+		return err
 	}
-
-	var allItems []PlexItem
-	var warnings []string
-
-	// Watched items include titles marked watched without playback, and whole
-	// shows or seasons marked watched, which Plex records on every episode.
-	// Plex counts started-but-unfinished items as unwatched, so they come from
-	// their own listing. A rewatch appears in both and imports as played.
-	for _, section := range sections {
-		kind, ok := plexSectionMediaTypes[section.Type]
-		if !ok {
-			continue
+	series := newPlexSeriesLookup(p.client, p.baseURL, p.token)
+	if from == nil || from.Stage != plexStageWatchlist {
+		first := 0
+		if from != nil {
+			// A section that is gone restarts the listing; re-applying is safe.
+			first = max(0, slices.IndexFunc(sections, func(s struct{ Key, Type, Title string }) bool { return s.Key == from.Section }))
 		}
-		watched, err := p.client.FetchWatchedItems(ctx, p.baseURL, p.token, section.Key, kind.mediaType)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, warnings, ctx.Err()
+		for i, section := range sections[first:] {
+			kind, ok := plexSectionMediaTypes[section.Type]
+			if !ok {
+				continue
 			}
-			// A source over the size limits fails the run rather than
-			// importing without the section.
-			if errors.Is(err, ErrUpstreamResponseTooLarge) {
-				return nil, warnings, err
+			var resume *StreamPosition
+			if i == 0 && from != nil && from.Section == section.Key {
+				resume = from
 			}
-			warnings = append(warnings, fmt.Sprintf(warnPlexSectionUnavailable, "watched", kind.noun, section.Title, err))
-		}
-		allItems = append(allItems, watched...)
-		inProgress, err := p.client.FetchInProgressItems(ctx, p.baseURL, p.token, section.Key, kind.mediaType)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, warnings, ctx.Err()
+			if err := p.streamSection(ctx, section.Key, section.Title, kind.mediaType, kind.noun, series, resume, sink); err != nil {
+				return err
 			}
-			if errors.Is(err, ErrUpstreamResponseTooLarge) {
-				return nil, warnings, err
-			}
-			warnings = append(warnings, fmt.Sprintf(warnPlexSectionUnavailable, "in-progress", kind.noun, section.Title, err))
 		}
-		allItems = append(allItems, inProgress...)
 	}
+	if warning := series.warning(); warning != "" {
+		if err := sink(RecordBatch{Warnings: []string{warning}}); err != nil {
+			return err
+		}
+	}
+	return p.streamWatchlist(ctx, sink)
+}
 
-	var seriesKeys []string
-	for _, item := range allItems {
-		if item.Type == KindEpisode {
-			seriesKeys = append(seriesKeys, item.GrandparentRatingKey)
+func (p *PlexServerProvider) streamSection(ctx context.Context, key, title string, mediaType int, noun string, series *plexSeriesLookup, from *StreamPosition, sink RecordSink) error {
+	unavailable := func(listing string, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-	}
-	seriesMeta, err := fetchPlexSeriesMetadata(ctx, p.client, p.baseURL, p.token, seriesKeys, &warnings)
-	if err != nil {
-		return nil, warnings, err
-	}
-
-	merged := make(map[string]Record, len(allItems))
-	for _, item := range allItems {
-		record := NormalizePlexItem(item, seriesMeta[item.GrandparentRatingKey])
-		if !record.Played && record.PositionSeconds <= 0 {
-			continue
-		}
-		existing, ok := merged[record.ExternalID]
-		if !ok {
-			merged[record.ExternalID] = record
-			continue
-		}
-		merged[record.ExternalID] = mergeRecords(existing, record)
-	}
-
-	records := make([]Record, 0, len(merged))
-	for _, record := range merged {
-		records = append(records, record)
-	}
-	// The account watchlist rides along with the history import. Best
-	// effort: a watchlist fetch failure downgrades to a warning so the
-	// watch-history import still completes (issue #245).
-	if p.accountToken != "" {
-		items, watchlistWarnings, err := p.client.FetchWatchlist(ctx, p.accountToken)
+		// A source over the size limits fails the run rather than importing
+		// without the section.
 		if errors.Is(err, ErrUpstreamResponseTooLarge) {
-			return nil, warnings, err
+			return err
+		}
+		return sink(RecordBatch{Warnings: []string{fmt.Sprintf(warnPlexSectionUnavailable, listing, noun, title, err)}})
+	}
+
+	items, err := p.client.fetchInProgressItems(ctx, p.baseURL, p.token, key, mediaType)
+	if err != nil {
+		if err := unavailable("in-progress", err); err != nil {
+			return err
+		}
+		items = nil
+	}
+	held, err := holdItems(ctx, items, func(item PlexItem) string { return item.RatingKey })
+	if err != nil {
+		return fmt.Errorf("holding Plex in-progress items (section %s): %w", key, err)
+	}
+	defer held.release(ctx)
+
+	if from == nil || from.Stage == plexStageWatched {
+		offset := stageOffset(from, plexStageWatched)
+		err := p.client.forEachSectionPage(ctx, p.baseURL, p.token, key, mediaType, plexFilterWatched, offset, func(page []PlexItem, start int) error {
+			records, err := p.normalizePage(ctx, page, held, series)
+			if err != nil {
+				return err
+			}
+			return sink(RecordBatch{Records: records, Resume: StreamPosition{Stage: plexStageWatched, Section: key, Offset: start}})
+		})
+		if err != nil && (ctx.Err() != nil || isSinkError(err)) {
+			return err
 		}
 		if err != nil {
-			warnings = append(warnings, warnPlexWatchlistUnavailablePrefix+err.Error())
-		} else {
-			warnings = append(warnings, watchlistWarnings...)
-			for _, item := range items {
-				records = append(records, NormalizePlexWatchlistItem(item))
+			if err := unavailable("watched", err); err != nil {
+				return err
 			}
 		}
 	}
 
-	return records, warnings, nil
+	for page := range slices.Chunk(held.remaining(), plexPageSize) {
+		records, err := p.normalizePage(ctx, page, nil, series)
+		if err != nil {
+			return err
+		}
+		if err := sink(RecordBatch{Records: records, Resume: StreamPosition{Stage: plexStageRemainder, Section: key}}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// normalizePage turns one page into records, merging held in-progress state.
+func (p *PlexServerProvider) normalizePage(ctx context.Context, page []PlexItem, held *heldItems[PlexItem], series *plexSeriesLookup) ([]Record, error) {
+	keys := make([]string, 0, len(page))
+	for _, item := range page {
+		if item.Type == KindEpisode {
+			keys = append(keys, item.GrandparentRatingKey)
+		}
+	}
+	meta, err := series.resolve(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]Record, 0, len(page))
+	for _, item := range page {
+		record := NormalizePlexItem(item, meta[item.GrandparentRatingKey])
+		if held != nil {
+			if progress, ok := held.take(item.RatingKey); ok {
+				record = mergeRecords(record, NormalizePlexItem(progress, meta[progress.GrandparentRatingKey]))
+			}
+		}
+		if record.Played || record.PositionSeconds > 0 {
+			records = append(records, record)
+		}
+	}
+	return records, nil
+}
+
+// streamWatchlist delivers the account watchlist, which rides along with the
+// history import. Best effort: a fetch failure downgrades to a warning so the
+// watch-history import still completes (issue #245).
+func (p *PlexServerProvider) streamWatchlist(ctx context.Context, sink RecordSink) error {
+	if p.accountToken == "" {
+		return nil
+	}
+	items, warnings, err := p.client.FetchWatchlist(ctx, p.accountToken)
+	if errors.Is(err, ErrUpstreamResponseTooLarge) {
+		return err
+	}
+	if err != nil {
+		return sink(RecordBatch{Warnings: []string{warnPlexWatchlistUnavailablePrefix + err.Error()}})
+	}
+	records := make([]Record, 0, len(items))
+	for _, item := range items {
+		records = append(records, NormalizePlexWatchlistItem(item))
+	}
+	return sink(RecordBatch{Records: records, Warnings: warnings, Resume: StreamPosition{Stage: plexStageWatchlist}})
 }

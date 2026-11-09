@@ -1000,7 +1000,6 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
 
   // Skipped items were matched first, so they are already in run.matched.
   const processed = run.matched + run.unmatched;
-  const progressPct = run.fetched > 0 ? Math.min(100, (processed / run.fetched) * 100) : 0;
   const isActive = run.status === "running" || run.status === "queued";
 
   return (
@@ -1032,13 +1031,10 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
       {isActive && run.fetched > 0 && (
         <div className="space-y-1.5">
           <div className="bg-muted h-1.5 overflow-hidden rounded-full">
-            <div
-              className="h-full rounded-full bg-amber-400 transition-all duration-700 ease-out"
-              style={{ width: `${progressPct}%` }}
-            />
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-amber-400" />
           </div>
           <div className="text-muted-foreground text-xs tabular-nums">
-            {processed} / {run.fetched} processed
+            {processed.toLocaleString()} processed so far
           </div>
         </div>
       )}

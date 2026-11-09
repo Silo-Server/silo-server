@@ -257,8 +257,8 @@ type staticWatchlistProvider struct {
 	records []Record
 }
 
-func (p staticWatchlistProvider) Fetch(context.Context) ([]Record, []string, error) {
-	return p.records, nil, nil
+func (p staticWatchlistProvider) Stream(ctx context.Context, _ *StreamPosition, sink RecordSink) error {
+	return streamOf(ctx, sink, p.records, nil, nil)
 }
 
 func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
@@ -320,7 +320,7 @@ func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {
 			created_at timestamptz NOT NULL DEFAULT now(),
 			started_at timestamptz,
 			completed_at timestamptz,
-			last_heartbeat_at timestamptz,
+			last_heartbeat_at timestamptz, checkpoint jsonb,
  claim_generation bigint NOT NULL DEFAULT 0, dispatch_version integer, dispatch_kind text NOT NULL DEFAULT 'admin', cancel_requested_at timestamptz,
  dispatch_source_id integer,dispatch_source_revision bigint,dispatch_mapping_id integer,dispatch_mapping_revision bigint,dispatch_external_user_id text
 		) ON COMMIT PRESERVE ROWS`,

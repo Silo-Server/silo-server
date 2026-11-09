@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -33,97 +32,144 @@ func (p *JellyfinProvider) WithPlayedSince(since *time.Time) *JellyfinProvider {
 	return p
 }
 
-// Fetch reads played and resumable movies and episodes plus favorite movies,
+// Stages of a Jellyfin listing, in order. A lookback restarts from its first
+// page on resume: it is short, and its order checks need the whole read.
+const (
+	jellyfinStageLookback  = "played-since"
+	jellyfinStagePlayed    = "played"
+	jellyfinStageRemainder = "resumable"
+	jellyfinStageFavorites = "favorites"
+)
+
+var jellyfinStages = []string{jellyfinStageLookback, jellyfinStagePlayed, jellyfinStageRemainder, jellyfinStageFavorites}
+
+// Stream reads played and resumable movies and episodes plus favorite movies,
 // shows, and episodes. Jellyfin records a whole-show or whole-season "mark
-// played" on each episode, so episode leaves carry those markers too.
-func (p *JellyfinProvider) Fetch(ctx context.Context) ([]Record, []string, error) {
-	var warnings []string
-	var played []jellyfinItem
-	sorted := false
-	var err error
-	if p.playedSince != nil {
-		played, sorted, err = p.client.FetchPlayedSince(ctx, p.auth, *p.playedSince)
-		if err == nil && !sorted {
+// played" on each episode, so episode leaves carry those markers too. The
+// resumable list is held and merged into the played pages; favorites follow on
+// their own, because a favorite only adds to favorites.
+func (p *JellyfinProvider) Stream(ctx context.Context, from *StreamPosition, sink RecordSink) error {
+	sink = markSinkErrors(sink)
+	// Resume positions are secondary to the played history: a slow or failing
+	// resume query must not discard it. Cancellation still ends the run, and so
+	// does a source over the size limits. Warnings store fixed text: v1 returns
+	// them verbatim, and upstream errors can carry the server's response body.
+	resumable, err := p.client.FetchResumableItems(ctx, p.auth)
+	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, ErrUpstreamResponseTooLarge) {
+			return err
+		}
+		slog.WarnContext(ctx, "jellyfin history import: resume positions unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
+		if err := sink(RecordBatch{Warnings: []string{warnJellyfinResumeUnavailable}}); err != nil {
+			return err
+		}
+		resumable = nil
+	}
+	held, err := holdItems(ctx, resumable, func(item jellyfinItem) string { return item.ID })
+	if err != nil {
+		return fmt.Errorf("holding Jellyfin resumable items: %w", err)
+	}
+	defer held.release(ctx)
+
+	series := newLookupCache[jellyfinItem](seriesLookupCacheEntries)
+	readFull := true
+	if p.playedSince != nil && (from == nil || from.Stage == jellyfinStageLookback) {
+		sorted, err := p.client.streamPlayedSince(ctx, p.auth, *p.playedSince, func(page []jellyfinItem) error {
+			return p.emitWatched(ctx, page, held, series, StreamPosition{Stage: jellyfinStageLookback}, sink)
+		})
+		if err != nil {
+			return err
+		}
+		readFull = !sorted
+		if !sorted {
 			// The server ignored the newest-first sort, or the list kept
 			// moving during the read, so the early stop could miss recent
 			// plays. Read the whole played history instead.
 			slog.WarnContext(ctx, "jellyfin history import: played items not newest first or kept moving; reading the full played history", "component", "historyimport")
-			warnings = append(warnings, warnJellyfinLookbackUnsorted)
+			if err := sink(RecordBatch{Warnings: []string{warnJellyfinLookbackUnsorted}}); err != nil {
+				return err
+			}
 		}
 	}
-	if err == nil && !sorted {
-		played, err = p.client.FetchItems(ctx, p.auth, "IsPlayed", jellyfinPlayableItemTypes)
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	// Warnings store fixed text: v1 returns them verbatim, and upstream errors
-	// can carry the server's response body. The error itself is logged.
-	// Resume positions are secondary to the played history: a slow or failing
-	// resume query must not discard it. Cancellation still ends the run, and so
-	// does a source over the size limits.
-	resumable, err := p.client.FetchResumableItems(ctx, p.auth)
-	if err != nil {
-		if ctx.Err() != nil || errors.Is(err, ErrUpstreamResponseTooLarge) {
-			return nil, nil, err
-		}
-		slog.WarnContext(ctx, "jellyfin history import: resume positions unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
-		warnings = append(warnings, warnJellyfinResumeUnavailable)
-		resumable = nil
-	}
-	favorites, err := p.client.FetchItems(ctx, p.auth, "IsFavorite", jellyfinFavoriteItemTypes)
-	if errors.Is(err, ErrUpstreamResponseTooLarge) {
-		return nil, nil, err
-	}
-	if err != nil {
-		slog.WarnContext(ctx, "jellyfin history import: favorites unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
-		warnings = append(warnings, warnJellyfinFavoritesUnavailable)
-		favorites = nil
-	}
-	watched := slices.Concat(played, resumable)
-	seriesMeta, err := p.fetchSeriesMetadata(ctx, watched)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Series that only favorites need are looked up separately so that, like
-	// the favorites query, a failure there cannot discard the watch history.
-	// Favorite episodes then keep only their own provider IDs.
-	favoriteSeries := slices.DeleteFunc(slices.Clone(favorites), func(item jellyfinItem) bool {
-		_, ok := seriesMeta[item.SeriesID]
-		return ok
-	})
-	extra, err := p.fetchSeriesMetadata(ctx, favoriteSeries)
-	switch {
-	case errors.Is(err, ErrUpstreamResponseTooLarge):
-		return nil, nil, err
-	case err != nil:
-		slog.WarnContext(ctx, "jellyfin history import: favorite series metadata unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
-		warnings = append(warnings, warnJellyfinFavoriteSeriesUnavailable)
-	default:
-		maps.Copy(seriesMeta, extra)
-	}
-	merged := map[string]Record{}
-	add := func(record Record) {
-		if existing, ok := merged[record.ExternalID]; ok {
-			merged[record.ExternalID] = mergeRecords(existing, record)
-		} else {
-			merged[record.ExternalID] = record
+	if readFull && stageReached(from, jellyfinStages, jellyfinStagePlayed) {
+		err := p.client.forEachItemsPage(ctx, p.auth, "IsPlayed", jellyfinPlayableItemTypes, stageOffset(from, jellyfinStagePlayed), func(page []jellyfinItem, start int) error {
+			return p.emitWatched(ctx, page, held, series, StreamPosition{Stage: jellyfinStagePlayed, Offset: start}, sink)
+		})
+		if err != nil {
+			return err
 		}
 	}
-	for _, item := range watched {
-		add(normalizeJellyfinItem(item, seriesMeta[item.SeriesID]))
+	if stageReached(from, jellyfinStages, jellyfinStageRemainder) {
+		for page := range slices.Chunk(held.remaining(), jellyfinPageSize) {
+			if err := p.emitWatched(ctx, page, nil, series, StreamPosition{Stage: jellyfinStageRemainder}, sink); err != nil {
+				return err
+			}
+		}
 	}
-	for _, item := range favorites {
-		record := normalizeJellyfinItem(item, seriesMeta[item.SeriesID])
-		record.Favorite = true
-		record.FavoriteOnly = true
-		add(record)
+	return p.streamFavorites(ctx, from, series, sink)
+}
+
+func (p *JellyfinProvider) emitWatched(ctx context.Context, page []jellyfinItem, held *heldItems[jellyfinItem], series *lookupCache[jellyfinItem], resume StreamPosition, sink RecordSink) error {
+	meta, err := p.resolveSeries(ctx, page, series)
+	if err != nil {
+		return err
 	}
-	records := make([]Record, 0, len(merged))
-	for _, record := range merged {
+	records := make([]Record, 0, len(page))
+	for _, item := range page {
+		record := normalizeJellyfinItem(item, meta[item.SeriesID])
+		if held != nil {
+			if progress, ok := held.take(item.ID); ok {
+				record = mergeRecords(record, normalizeJellyfinItem(progress, meta[progress.SeriesID]))
+			}
+		}
 		records = append(records, record)
 	}
-	return records, warnings, nil
+	return sink(RecordBatch{Records: records, Resume: resume})
+}
+
+func (p *JellyfinProvider) streamFavorites(ctx context.Context, from *StreamPosition, series *lookupCache[jellyfinItem], sink RecordSink) error {
+	if !stageReached(from, jellyfinStages, jellyfinStageFavorites) {
+		return nil
+	}
+	seriesFailed := false
+	err := p.client.forEachItemsPage(ctx, p.auth, "IsFavorite", jellyfinFavoriteItemTypes, stageOffset(from, jellyfinStageFavorites), func(page []jellyfinItem, start int) error {
+		var warnings []string
+		meta := map[string]jellyfinItem{}
+		if !seriesFailed {
+			var err error
+			meta, err = p.resolveSeries(ctx, page, series)
+			switch {
+			case errors.Is(err, ErrUpstreamResponseTooLarge) || ctx.Err() != nil:
+				return err
+			case err != nil:
+				// Like the favorites query, a failure here cannot discard the
+				// watch history. Favorite episodes keep only their own IDs.
+				slog.WarnContext(ctx, "jellyfin history import: favorite series metadata unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
+				warnings = append(warnings, warnJellyfinFavoriteSeriesUnavailable)
+				seriesFailed = true
+				meta = map[string]jellyfinItem{}
+			}
+		}
+		records := make([]Record, 0, len(page))
+		for _, item := range page {
+			record := normalizeJellyfinItem(item, meta[item.SeriesID])
+			record.Favorite = true
+			record.FavoriteOnly = true
+			// A lookback may have skipped this item's play, so only a full read
+			// has already counted it.
+			record.RepeatOfWatch = p.playedSince == nil && (item.UserData.Played || item.UserData.PlaybackPositionTicks > 0)
+			records = append(records, record)
+		}
+		return sink(RecordBatch{Records: records, Warnings: warnings, Resume: StreamPosition{Stage: jellyfinStageFavorites, Offset: start}})
+	})
+	if err != nil {
+		if errors.Is(err, ErrUpstreamResponseTooLarge) || ctx.Err() != nil || isSinkError(err) {
+			return err
+		}
+		slog.WarnContext(ctx, "jellyfin history import: favorites unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
+		return sink(RecordBatch{Warnings: []string{warnJellyfinFavoritesUnavailable}})
+	}
+	return nil
 }
 
 func jellyfinWarningLogError(err error) string {
@@ -141,28 +187,34 @@ func warningLogError(source string, err error) string {
 	return logredact.SanitizeText(logredact.SanitizeURLError(err).Error())
 }
 
-func (p *JellyfinProvider) fetchSeriesMetadata(ctx context.Context, items []jellyfinItem) (map[string]jellyfinItem, error) {
+// resolveSeries returns the series of a page's episodes, through the cache.
+func (p *JellyfinProvider) resolveSeries(ctx context.Context, items []jellyfinItem, cache *lookupCache[jellyfinItem]) (map[string]jellyfinItem, error) {
+	result := map[string]jellyfinItem{}
 	seen := map[string]struct{}{}
 	ids := []string{}
 	for _, item := range items {
-		if strings.ToLower(item.Type) != "episode" || strings.TrimSpace(item.SeriesID) == "" {
+		if !strings.EqualFold(item.Type, "episode") || strings.TrimSpace(item.SeriesID) == "" {
 			continue
 		}
 		if _, ok := seen[item.SeriesID]; ok {
 			continue
 		}
 		seen[item.SeriesID] = struct{}{}
-		ids = append(ids, item.SeriesID)
+		if series, ok := cache.get(item.SeriesID); ok {
+			result[item.SeriesID] = series
+		} else {
+			ids = append(ids, item.SeriesID)
+		}
 	}
 	if len(ids) == 0 {
-		return map[string]jellyfinItem{}, nil
+		return result, nil
 	}
 	seriesItems, err := p.client.FetchItemsByIDs(ctx, p.auth, ids, "Series")
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]jellyfinItem, len(seriesItems))
 	for _, item := range seriesItems {
+		cache.put(item.ID, item)
 		result[item.ID] = item
 	}
 	return result, nil

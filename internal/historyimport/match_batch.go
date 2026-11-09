@@ -23,27 +23,35 @@ const maxMatchPasses = 6
 // left to read. A lookup that finds nothing is remembered as such. The
 // result holds each record's match, nil for none.
 func MatchAllOn(ctx context.Context, q lookupQuerier, records []Record) ([]*Match, error) {
+	matches, _, err := matchAllWithReasons(ctx, q, records)
+	return matches, err
+}
+
+// matchAllWithReasons is MatchAllOn that also says why each unmatched record
+// did not match, as Match does.
+func matchAllWithReasons(ctx context.Context, q lookupQuerier, records []Record) ([]*Match, []string, error) {
 	b := &batchLookup{q: q, media: map[mediaKey][]mediaLookupRow{}, episodes: map[columnValue][]mediaLookupRow{},
 		seriesEpisodes: map[seriesIDEpisode][]mediaLookupRow{}, bySeries: map[seriesEpisode]*Match{}}
 	m := NewMatcher(b)
 	for range maxMatchPasses {
 		b.pending = pendingLookups{}
 		out := make([]*Match, len(records))
+		reasons := make([]string, len(records))
 		for i, r := range records {
-			match, _, err := m.Match(ctx, r)
+			match, reason, err := m.Match(ctx, r)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			out[i] = match
+			out[i], reasons[i] = match, reason
 		}
 		if b.pending.empty() {
-			return out, nil
+			return out, reasons, nil
 		}
 		if err := b.read(ctx); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return nil, errors.New("matching items did not settle")
+	return nil, nil, errors.New("matching items did not settle")
 }
 
 type (
