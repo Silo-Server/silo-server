@@ -582,16 +582,26 @@ func TestCorrectedNFOKeepsTheNewMatchsOriginalLanguageText(t *testing.T) {
 func TestCorrectionFailingToClearCanBeRetried(t *testing.T) {
 	const contentID = "146000000000000100"
 	cleared := errors.New("connection lost")
+	type failures struct {
+		h    *testHarness
+		repo *localPipelineItemRepo
+		locs *fakeItemLocalizationRepo
+	}
 	for _, tc := range []struct {
-		name string
-		fail func(*testHarness, *fakeItemLocalizationRepo, error)
+		name   string
+		locked []MetadataField
+		fail   func(failures, error)
 	}{
-		{"localized text", func(_ *testHarness, locs *fakeItemLocalizationRepo, err error) { locs.clearErr = err }},
-		{"credits", func(h *testHarness, _ *fakeItemLocalizationRepo, err error) { h.itemRepo.replacePeopleErr = err }},
+		{name: "localized text", fail: func(f failures, err error) { f.locs.clearErr = err }},
+		{name: "credits", fail: func(f failures, err error) { f.h.itemRepo.replacePeopleErr = err }},
+		// With one group locked, the stored credits must be read to drop the other.
+		{name: "credit read", locked: []MetadataField{FieldCast}, fail: func(f failures, err error) { f.repo.peopleErr = err }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newTestHarness()
-			seedDescribedWrongMatch(t, h, contentID)
+			h, repo := newLocalPipelineHarness()
+			h.service.personRepo = stubPersonRepo{ids: []int64{1, 2}}
+			seedDescribedWrongMatch(t, h, contentID, tc.locked...)
+			repo.people[contentID] = []models.ItemPerson{actor("Wrong Actor", "Lead"), crewMember("Wrong Director", models.PersonKindDirector)}
 			locs := newFakeItemLocalizationRepo()
 			h.service.itemLocalizationRepo = locs
 			locs.rows[contentID+"/fr"] = &models.MediaItemLocalization{ContentID: contentID, Language: "fr", Tagline: "Mauvaise accroche."}
@@ -600,7 +610,8 @@ func TestCorrectionFailingToClearCanBeRetried(t *testing.T) {
 			}}
 			request := ProcessRequest{ContentID: contentID, ProviderIDs: map[string]string{"tmdb": "200"}, Language: "en", Mode: ModeIdentify}
 
-			tc.fail(h, locs, cleared)
+			f := failures{h: h, repo: repo, locs: locs}
+			tc.fail(f, cleared)
 			if _, err := h.service.ProcessWithProviders(t.Context(), request, []Provider{provider}); !errors.Is(err, cleared) {
 				t.Fatalf("ProcessWithProviders = %v, want the clear's error", err)
 			}
@@ -608,15 +619,19 @@ func TestCorrectionFailingToClearCanBeRetried(t *testing.T) {
 				t.Fatalf("stored tmdb id = %q, want the old match until the clear succeeds", got)
 			}
 
-			tc.fail(h, locs, nil)
+			tc.fail(f, nil)
 			if _, err := h.service.ProcessWithProviders(t.Context(), request, []Provider{provider}); err != nil {
 				t.Fatalf("retry: %v", err)
 			}
 			if got := locs.rows[contentID+"/fr"].Tagline; got != "" {
 				t.Errorf("fr tagline after the retry = %q, want it cleared", got)
 			}
-			if _, replaced := h.itemRepo.replacedPeople[contentID]; !replaced {
+			people, replaced := h.itemRepo.replacedPeople[contentID]
+			if !replaced {
 				t.Error("retry did not clear the credits")
+			}
+			if slices.Contains(personNames(people), "Wrong Director") {
+				t.Errorf("credits after the retry = %v, want the wrong title's crew gone", personNames(people))
 			}
 		})
 	}

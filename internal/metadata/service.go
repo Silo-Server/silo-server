@@ -2957,7 +2957,18 @@ func (s *MetadataService) mergeAndPersist(
 			s.keepStoredLocalCredits(ctx, contentID, accumulator)
 		}
 		if !req.enrichmentOnly {
-			mergeLocked = s.peopleLocksForMerge(ctx, contentID, locked, existingResult, accumulator)
+			var creditsErr error
+			mergeLocked, creditsErr = s.peopleLocksForMerge(ctx, contentID, locked, existingResult, accumulator)
+			if creditsErr != nil {
+				// A correction must drop the previous match's unlocked group
+				// before the new identity is stored; afterwards a retry is no
+				// correction and keeps it.
+				if corrected {
+					return nil, creditsErr
+				}
+				slog.WarnContext(ctx, "metadata: leaving credits unchanged", "component", "metadata",
+					"content_id", contentID, "error", creditsErr)
+			}
 		}
 		if corrected {
 			clearPreviousMatch(existingResult, mergeLocked)
