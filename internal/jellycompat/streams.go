@@ -2084,8 +2084,9 @@ const (
 	// compatConfirmedStopRetryWindow is how long a staged stop that keeps
 	// failing is retried, measured from when the play stopped. After it the
 	// stop is dropped with one warning, as a play that ends by expiry drops a
-	// stop the provider refuses. A completed play still reaches a provider that
-	// exports watched history, through history export.
+	// stop the provider refuses. History export can still deliver a dropped
+	// completed play, but only when watched export is on for that connection
+	// and the play was recorded in local watch history.
 	compatConfirmedStopRetryWindow     = time.Hour
 	compatTerminalInitialRetryDelay    = 250 * time.Millisecond
 	compatTerminalMaxRetryDelay        = 30 * time.Second
