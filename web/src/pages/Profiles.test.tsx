@@ -319,7 +319,7 @@ describe("Profiles", () => {
       }
 
       const profileContext = { profileId: "primary", profileToken: token };
-      expect(mocks.listUserLibraries).toHaveBeenCalledWith({ profileContext });
+      expect(mocks.listUserLibraries).toHaveBeenCalledWith({ profileContext, includeHidden: true });
       expect(mocks.editorProps).toMatchObject({ profileContext, libraries: primaryLibraries });
 
       await click(findButton(container, "save-editor"));

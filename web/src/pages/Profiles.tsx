@@ -114,7 +114,7 @@ export default function Profiles() {
     }
     setPreparingAdd(true);
     try {
-      const libraries = await listUserLibraries({ profileContext });
+      const libraries = await listUserLibraries({ profileContext, includeHidden: true });
       setAddSession({ profileContext, libraries });
     } catch (err) {
       if (!(err instanceof StaleApiRequestContextError)) {
@@ -206,6 +206,7 @@ export default function Profiles() {
 
         <ProfileEditorDialog
           open={editorOpen}
+          createsPrimary
           libraries={libraries}
           avatarUploadEnabled={avatarUploadEnabled}
           advisoryAgeSupported={maxAdvisoryAgeSupported}

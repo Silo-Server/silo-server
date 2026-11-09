@@ -52,7 +52,9 @@ export default function ProfilesSettings() {
     requireAdvisoryAgeSupported,
     maxProfiles,
   } = useProfiles();
-  const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
+  const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries({
+    includeHidden: true,
+  });
   const { profile: activeProfile, selectProfile, verifyProfilePin } = useAuth();
   const deleteMutation = useDeleteProfile();
 
@@ -96,7 +98,7 @@ export default function ProfilesSettings() {
         subtitle="Manage profile names, PINs, and access rules."
         actions={
           householdFull ? undefined : (
-            <Button onClick={openCreateDialog}>
+            <Button onClick={openCreateDialog} disabled={profilesLoading}>
               <Plus className="h-4 w-4" />
               New profile
             </Button>
@@ -211,6 +213,7 @@ export default function ProfilesSettings() {
       <ProfileEditorDialog
         open={editorOpen}
         profile={editingProfile}
+        createsPrimary={!profilesLoading && profiles.length === 0}
         libraries={libraries}
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}

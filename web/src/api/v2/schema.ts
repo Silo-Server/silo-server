@@ -31994,7 +31994,10 @@ export interface components {
        * @example en
        */
       language: string;
-      /** @example false */
+      /**
+       * @description Whether the profile is limited to allowed_library_ids within its account's libraries. The primary profile is never limited: it sees every library its account can access and hides libraries through its settings instead
+       * @example false
+       */
       library_restrictions_enabled: boolean;
       /**
        * Format: int64
@@ -32084,7 +32087,7 @@ export interface components {
     };
     ProfileCreate: {
       /**
-       * @description Unique library identifiers the profile may see when restrictions are enabled
+       * @description Unique library identifiers the profile may see when restrictions are enabled. Must be empty on an account's first profile, which becomes its primary profile, even with restrictions off
        * @example [
        *       "1",
        *       "2"
@@ -32111,7 +32114,10 @@ export interface components {
        * @example en
        */
       language?: string;
-      /** @example false */
+      /**
+       * @description Limits the profile to allowed_library_ids. Must be false or omitted on an account's first profile, which becomes its primary profile
+       * @example false
+       */
       library_restrictions_enabled?: boolean;
       /**
        * Format: int64
@@ -32332,7 +32338,10 @@ export interface components {
        * @example en
        */
       language?: string | null;
-      /** @example false */
+      /**
+       * @description Limits the profile to allowed_library_ids. The primary profile can't be limited: true, or a non-empty allowed_library_ids, fails validation on it
+       * @example false
+       */
       library_restrictions_enabled?: boolean;
       /**
        * Format: int64

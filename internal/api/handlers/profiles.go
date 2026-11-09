@@ -311,6 +311,21 @@ func isAllowedSelfServiceProfileUpdate(req ProfileUpdateRequest) bool {
 		req.MaxPlaybackQuality == nil
 }
 
+// primaryLibraryLimitError rejects a library limit on the primary profile. The
+// primary inherits its account's libraries (access.ProfileLibraryLimit) and
+// hides the ones it doesn't want instead; turning the limit off, or an empty
+// allowlist, stays accepted so a client that always sends both still saves.
+func primaryLibraryLimitError(enabled bool, allowed []int) *APIError {
+	const message = "The primary profile can't be limited to some libraries; it can hide libraries instead"
+	switch {
+	case enabled:
+		return fieldError("library_restrictions_enabled", message)
+	case len(allowed) > 0:
+		return fieldError("allowed_library_ids", message)
+	}
+	return nil
+}
+
 // --- Handler methods ---
 
 // HandleListProfiles handles GET /profiles.
@@ -537,6 +552,12 @@ func (h *ProfileHandler) CreateProfile(ctx context.Context, cmd ProfileCreateCom
 			req.MaxPlaybackQuality != "") {
 		return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
 	}
+	// The first profile becomes the primary.
+	if isBootstrap {
+		if apiErr := primaryLibraryLimitError(req.LibraryRestrictionsEnabled, req.AllowedLibraryIDs); apiErr != nil {
+			return none, apiErr
+		}
+	}
 	// profileLimit is the account's household limit (0 = unlimited). This
 	// early check answers a full household before the name check, as it always
 	// has; the guarantee under concurrency is the re-count inside the creating
@@ -748,6 +769,16 @@ func (h *ProfileHandler) UpdateProfile(ctx context.Context, cmd ProfileUpdateCom
 		}
 		if !isAllowedSelfServiceProfileUpdate(req) {
 			return none, apiError(http.StatusForbidden, "forbidden", "Profile access settings require the primary profile or admin access")
+		}
+	}
+
+	if currentProfile.IsPrimary {
+		var allowed []int
+		if req.AllowedLibraryIDs != nil {
+			allowed = *req.AllowedLibraryIDs
+		}
+		if apiErr := primaryLibraryLimitError(req.LibraryRestrictionsEnabled != nil && *req.LibraryRestrictionsEnabled, allowed); apiErr != nil {
+			return none, apiErr
 		}
 	}
 
@@ -1238,6 +1269,12 @@ func (h *ProfileHandler) profileResponseWith(
 	ctx context.Context, p userstore.Profile, prefs profilePreferences,
 ) ProfileView {
 	avatarSource, avatarURL := h.ResolveAvatar(ctx, p.Avatar)
+	// A primary profile has no library limit (access.ProfileLibraryLimit); a
+	// stored one, from an older server or a restored backup, is not reported.
+	libraryRestricted, allowedLibraryIDs := p.LibraryRestrictionsEnabled, p.AllowedLibraryIDs
+	if p.IsPrimary {
+		libraryRestricted, allowedLibraryIDs = false, nil
+	}
 	return ProfileView{
 		ID:                         p.ID,
 		Name:                       p.Name,
@@ -1260,8 +1297,8 @@ func (h *ProfileHandler) profileResponseWith(
 		AutoSkipRecap:              p.AutoSkipRecap,
 		AutoPlayNextPreview:        p.AutoPlayNextPreview,
 		ShowForcedSubtitles:        prefs.ShowForcedSubtitles,
-		LibraryRestrictionsEnabled: p.LibraryRestrictionsEnabled,
-		AllowedLibraryIDs:          append([]int(nil), p.AllowedLibraryIDs...),
+		LibraryRestrictionsEnabled: libraryRestricted,
+		AllowedLibraryIDs:          append([]int(nil), allowedLibraryIDs...),
 		MaxPlaybackQuality:         access.NormalizePlaybackQuality(p.MaxPlaybackQuality),
 		CreatedAt:                  p.CreatedAt,
 		UpdatedAt:                  p.UpdatedAt,

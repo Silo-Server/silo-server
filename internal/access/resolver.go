@@ -276,17 +276,30 @@ func ProfileLibraries(accountLibraryIDs []int, profile *userstore.Profile) ([]in
 	return effectiveLibraries(accountLibraryIDs, profile)
 }
 
+// ProfileLibraryLimit is the profile's own library limit: the libraries it is
+// limited to, and whether it has a limit. The primary profile never has one:
+// it inherits its account's libraries and narrows what it browses only by
+// hiding libraries (ui.disabled_library_ids), which it can undo. A limit
+// stored on a primary profile, by an older server or a restored backup, is
+// ignored.
+func ProfileLibraryLimit(profile *userstore.Profile) ([]int, bool) {
+	if profile == nil || profile.IsPrimary || !profile.LibraryRestrictionsEnabled {
+		return nil, false
+	}
+	return profile.AllowedLibraryIDs, true
+}
+
 func effectiveLibraries(accountLibraryIDs []int, profile *userstore.Profile) ([]int, bool) {
 	accountRestricted := accountLibraryIDs != nil
-	profileRestricted := profile.LibraryRestrictionsEnabled
+	profileLibraryIDs, profileRestricted := ProfileLibraryLimit(profile)
 
 	switch {
 	case accountRestricted && profileRestricted:
-		return intersectInts(accountLibraryIDs, profile.AllowedLibraryIDs), true
+		return intersectInts(accountLibraryIDs, profileLibraryIDs), true
 	case accountRestricted:
 		return cloneInts(accountLibraryIDs), true
 	case profileRestricted:
-		return sortedUniqueInts(profile.AllowedLibraryIDs), true
+		return sortedUniqueInts(profileLibraryIDs), true
 	default:
 		return nil, false
 	}
