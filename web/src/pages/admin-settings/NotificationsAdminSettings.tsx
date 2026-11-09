@@ -706,7 +706,7 @@ function DiscordAppCredentials({
       const response = await testNotificationDiscord(authority);
       const values = {
         outcome: response.ok ? "ok" : "failed",
-        duration_ms: String(response.duration_ms),
+        duration_ms: response.duration_ms,
       };
       setTestResult({
         success: response.ok,

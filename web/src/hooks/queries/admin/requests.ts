@@ -332,7 +332,7 @@ export function useBulkRequestAction() {
         const values = {
           count: total,
           count_text: total,
-          failed: String(failures.length),
+          failed: failures.length,
         };
         toast.error(
           approved

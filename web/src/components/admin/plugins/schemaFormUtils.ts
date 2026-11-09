@@ -92,9 +92,9 @@ export function validateSchemaValues(
       const n = Number(raw);
       if (Number.isNaN(n)) errors[field.key] = t("web.common.schemaForm.notNumber", { label });
       else if (v?.has_min && n < (v.min ?? 0))
-        errors[field.key] = t("web.common.schemaForm.min", { label, min: String(v.min) });
+        errors[field.key] = t("web.common.schemaForm.min", { label, min: v.min ?? 0 });
       else if (v?.has_max && n > (v.max ?? 0))
-        errors[field.key] = t("web.common.schemaForm.max", { label, max: String(v.max) });
+        errors[field.key] = t("web.common.schemaForm.max", { label, max: v.max ?? 0 });
     }
   }
   return errors;

@@ -287,7 +287,7 @@ function testResultValues(result: NotificationWebhookTestResult) {
   return {
     outcome: result.ok ? "ok" : "failed",
     status: result.http_status ? String(result.http_status) : "none",
-    duration_ms: String(result.duration_ms),
+    duration_ms: result.duration_ms,
   };
 }
 

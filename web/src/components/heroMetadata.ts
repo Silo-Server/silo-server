@@ -1,6 +1,6 @@
 import type { DisplayRating, SectionItem } from "@/api/types";
 import { primaryCardRating } from "@/components/ratings/ratings";
-import { codeNumber, t } from "@/i18n";
+import { codeNumber, numberText, t } from "@/i18n";
 
 function isPositiveFinite(value: number | undefined | null): value is number {
   return value != null && Number.isFinite(value) && value > 0;
@@ -63,7 +63,7 @@ export function formatHeroMetadata(item: SectionItem): HeroMetadataEntry[] {
   }
 
   if (Number.isInteger(item.year) && item.year > 0) {
-    entries.push({ key: "year", label: String(item.year) });
+    entries.push({ key: "year", label: numberText(item.year) });
   }
   if (runtime) entries.push({ key: "runtime", label: runtime });
   const rating = primaryCardRating(item);

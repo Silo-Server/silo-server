@@ -7,7 +7,7 @@ import {
   formatSampleRate,
   mapAudioLabel,
 } from "@/lib/mediaFormat";
-import { t, type MessageKey } from "@/i18n";
+import { type MessageKey, numberText, t } from "@/i18n";
 import { formatAddedAt, formatLanguageName } from "./versionFormatUtils";
 
 export interface MediaSpecRow {
@@ -222,7 +222,7 @@ export function buildVideoSections(version: FileVersion): MediaSpecSection[] {
       rows,
       "web.detail.mediaInfo.row.frameRateLabel",
       track.frame_rate
-        ? t("web.detail.mediaInfo.frameRate", { rate: String(track.frame_rate) })
+        ? t("web.detail.mediaInfo.frameRate", { rate: numberText(track.frame_rate) })
         : "",
     );
     pushRow(rows, "web.detail.mediaInfo.row.bitrate", formatBitrate(track.bitrate));

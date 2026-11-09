@@ -118,7 +118,7 @@ interface AITestState {
 /** A passed test's message with how long ago it ran and how long it took. */
 function testedLabel(t: Translate, test: AITestState): string {
   const seconds = Math.max(0, Math.round((Date.now() - test.at) / 1000));
-  const values = { message: test.message, duration_ms: String(test.durationMs) };
+  const values = { message: test.message, duration_ms: test.durationMs };
   if (seconds < 60) return t("web.admin.settings.ai.test.testedSeconds", { ...values, seconds });
   const minutes = Math.round(seconds / 60);
   return t("web.admin.settings.ai.test.testedMinutes", {
