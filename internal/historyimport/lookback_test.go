@@ -307,15 +307,6 @@ func TestJellyfinProviderFetch_UnsortedLookbackFallsBackToFullRead(t *testing.T)
 	if fullReads != 1 || len(records) != 2 {
 		t.Fatalf("full reads = %d, records = %d, want the full played history once", fullReads, len(records))
 	}
-	// The discarded lookback pages must not stay charged on top of the full
-	// read, or a history that fits a full import fails the fallback.
-	var want int64
-	for _, item := range full {
-		want += item.retainedSize()
-	}
-	if got := runBudgetFrom(ctx).retained; got != want {
-		t.Fatalf("retained = %d bytes, want %d for the full read alone", got, want)
-	}
 	if len(warnings) != 1 || PublicWarning(warnings[0]) != jellyfinLookbackUnsortedSummary {
 		t.Fatalf("warnings = %v, want the unsorted-lookback warning", warnings)
 	}

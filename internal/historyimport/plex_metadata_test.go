@@ -29,7 +29,7 @@ func sweepMetadata(t *testing.T, keys []string, handler http.HandlerFunc) plexMe
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	client := &PlexClient{httpClient: server.Client()}
-	sweep, err := client.fetchMetadataByKey(trustLoopback(t.Context()), server.URL, "token", keys)
+	sweep, err := client.fetchMetadataByKey(trustLoopback(t.Context()), server.URL, "token", keys, new(int))
 	if err != nil {
 		t.Fatalf("fetchMetadataByKey: %v", err)
 	}
@@ -63,6 +63,37 @@ func TestFetchMetadataByKeyStopsAfterSystematicFailures(t *testing.T) {
 	if requests != plexMetadataFailureStreakLimit {
 		t.Errorf("requests = %d, want %d — the sweep asked past the failure streak",
 			requests, plexMetadataFailureStreakLimit)
+	}
+}
+
+// A streamed import looks series up a page at a time, and one page rarely needs
+// enough batches to reach the limit on its own. The streak has to carry across
+// pages, or a failing server costs a timeout on every page of the run.
+func TestPlexSeriesLookupStopsAfterFailuresAcrossPages(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	lookup := newPlexSeriesLookup(&PlexClient{httpClient: server.Client()}, server.URL, "token")
+	ctx := trustLoopback(t.Context())
+	for page := range 10 {
+		keys := []string{fmt.Sprintf("show-%d-a", page), fmt.Sprintf("show-%d-b", page)}
+		if _, err := lookup.resolve(ctx, keys); err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if requests != plexMetadataFailureStreakLimit {
+		t.Errorf("requests = %d, want %d: lookups continued past the failure streak", requests, plexMetadataFailureStreakLimit)
+	}
+	if !lookup.aborted {
+		t.Error("lookup.aborted = false, want true")
 	}
 }
 
