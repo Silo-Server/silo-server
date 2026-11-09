@@ -308,7 +308,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressBufferV1)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
