@@ -284,7 +284,8 @@ does not carry the field.
 in whole media seconds. `delivered_through_seconds` is the end of the contiguous
 range sent to the client that contains the playback position. For Direct Play it
 is a linear estimate from the file bytes the server delivered (offset ÷ file size
-× duration), so it describes what was sent, not what the client has buffered;
+× duration), so it describes what was sent, not what the client has buffered, and it advances
+as each 4 MiB slice of the response is sent;
 ranges a player reads elsewhere, such as an index at the end of the file or the
 media before a seek, do not count. For HLS it is the end of the run of segments
 the client finished downloading. `produced_through_seconds` is the end of the
