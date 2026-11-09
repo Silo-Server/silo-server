@@ -36,7 +36,7 @@ type accountAuthority struct {
 
 // profileLimits are a profile's protections and restrictions: its PIN,
 // whether it manages the household (the primary profile), a child
-// profile, its rating and advisory-age ceilings, its library restriction,
+// profile, its rating and advisory-age ceilings, its block from requests, its library restriction,
 // its playback-quality ceiling, and the titles allowed above its ceilings.
 type profileLimits struct {
 	pin                bool
@@ -45,6 +45,7 @@ type profileLimits struct {
 	ceiling            string
 	advisoryAge        *int
 	requireAdvisoryAge bool
+	requestsBlocked    bool
 	restricted         bool
 	libraries          []int
 	quality            string
@@ -126,7 +127,7 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT p.id, coalesce(p.pin_hash, '') <> '', p.is_primary, p.is_child, coalesce(p.max_content_rating, ''), p.max_advisory_age::int,
-			p.require_advisory_age, p.library_restrictions_enabled,
+			p.require_advisory_age, p.requests_blocked, p.library_restrictions_enabled,
 			coalesce((SELECT array_agg(a.library_id ORDER BY a.library_id) FROM user_profile_allowed_libraries a WHERE a.user_id = p.user_id AND a.profile_id = p.id), '{}'),
 			coalesce(p.max_playback_quality, ''),
 			`+allowedTitles+`, `+directTitles+`, `+allowedCollections+`, `+collectionTitles+`
@@ -139,7 +140,7 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 	for rows.Next() {
 		var id string
 		var p profileLimits
-		if err := rows.Scan(&id, &p.pin, &p.primary, &p.child, &p.ceiling, &p.advisoryAge, &p.requireAdvisoryAge, &p.restricted, &p.libraries,
+		if err := rows.Scan(&id, &p.pin, &p.primary, &p.child, &p.ceiling, &p.advisoryAge, &p.requireAdvisoryAge, &p.requestsBlocked, &p.restricted, &p.libraries,
 			&p.quality, &p.allowedTitles, &p.directTitles, &p.allowedCollections, &p.collectionTitles); err != nil {
 			return nil, err
 		}
@@ -213,7 +214,8 @@ func (a accountAuthority) openManager() bool {
 }
 
 func (p profileLimits) looserThan(live profileLimits) bool {
-	if live.pin && !p.pin || p.primary && !live.primary || live.child && !p.child || live.requireAdvisoryAge && !p.requireAdvisoryAge {
+	if live.pin && !p.pin || p.primary && !live.primary || live.child && !p.child || live.requireAdvisoryAge && !p.requireAdvisoryAge ||
+		live.requestsBlocked && !p.requestsBlocked {
 		return true
 	}
 	if ceiling := access.NormalizePlaybackQuality(live.quality); ceiling != "" {

@@ -636,6 +636,7 @@ type RestoredProfile struct {
 	MaxContentRating           string
 	MaxAdvisoryAge             int
 	RequireAdvisoryAge         bool
+	RequestsBlocked            bool
 	LibraryRestrictionsEnabled bool
 	AllowedLibraryIDs          []int
 	MaxPlaybackQuality         string
@@ -672,10 +673,10 @@ func CreateRestoredProfileInTx(ctx context.Context, tx pgx.Tx, userID int, p Res
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_profiles (id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
-			require_advisory_age, library_restrictions_enabled, max_playback_quality)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12)`,
+			require_advisory_age, requests_blocked, library_restrictions_enabled, max_playback_quality)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12, $13)`,
 		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary && !hasPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
-		p.RequireAdvisoryAge, p.LibraryRestrictionsEnabled, p.MaxPlaybackQuality); err != nil {
+		p.RequireAdvisoryAge, p.RequestsBlocked, p.LibraryRestrictionsEnabled, p.MaxPlaybackQuality); err != nil {
 		return fmt.Errorf("inserting restored profile: %w", err)
 	}
 	return replaceProfileAllowedLibraries(ctx, tx, userID, p.ID, p.AllowedLibraryIDs)

@@ -81,7 +81,7 @@ var accessFieldNames = func() map[string]bool {
 	out := map[string]bool{}
 	for _, name := range strings.Fields(`account accounts profiles profile username email password_hash pin_hash role
 		permissions policy group effective_policy library_ids allowed_library_ids library_restrictions_enabled
-		max_content_rating max_advisory_age require_advisory_age max_playback_quality is_child is_primary is_owner`) {
+		max_content_rating max_advisory_age require_advisory_age requests_blocked max_playback_quality is_child is_primary is_owner`) {
 		out[name] = true
 	}
 	return out

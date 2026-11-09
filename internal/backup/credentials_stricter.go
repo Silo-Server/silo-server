@@ -125,6 +125,8 @@ var stricterFlags = func() []stricterFlag {
 			describe: `format('profile %s kept its library restriction', t.name)`},
 		{table: tableUserProfiles, column: "require_advisory_age", stricter: true, key: profileKey, scope: everyRow,
 			describe: `format('profile %s kept its advisory-age requirement', t.name)`},
+		{table: tableUserProfiles, column: "requests_blocked", stricter: true, key: profileKey, scope: everyRow,
+			describe: `format('profile %s kept its block from requests', t.name)`},
 		// A collection its owner stopped sharing stays private, and one
 		// deleted since comes back unshared.
 		{table: tablePersonalCollections, column: "is_shared", stricter: false, key: noKey, scope: everyRow,
