@@ -6,6 +6,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -171,6 +172,43 @@ function patches() {
   return writes().filter((call) => call.operation.startsWith("PATCH"));
 }
 
+/** Gives each title row a 60px slot, so the keyboard drag can measure them. */
+function layOutTitleRows() {
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    const row = this.closest("li[data-title-id]");
+    const index = row ? Array.from(row.parentElement!.children).indexOf(row) : 0;
+    const top = row ? index * 60 : 0;
+    const height = row ? 60 : 0;
+    return {
+      x: 0,
+      y: top,
+      top,
+      left: 0,
+      right: 800,
+      bottom: top + height,
+      width: 800,
+      height,
+      toJSON: () => ({}),
+    } as DOMRect;
+  });
+}
+
+/** Moves Alien above Heat with the keyboard. */
+async function dragAlienUp() {
+  const grip = await screen.findByRole("button", { name: "Move Alien" });
+  await waitFor(() =>
+    expect(v2Recorder.callsOf("GET /api/v2/collections/{id}/items/order").length).toBeGreaterThan(
+      1,
+    ),
+  );
+  grip.focus();
+  fireEvent.keyDown(grip, { code: "Space", key: " " });
+  await screen.findByText(/Picked up Alien/);
+  fireEvent.keyDown(grip, { code: "ArrowUp", key: "ArrowUp" });
+  await screen.findByText(/Alien is now at position 1 of 2/);
+  fireEvent.keyDown(grip, { code: "Space", key: " " });
+}
+
 describe("titles save as you change them", () => {
   it("sends the rename's PATCH with the token the title add left behind, then returns to the list", async () => {
     const router = showEditorPage("/collections/c1/edit");
@@ -210,6 +248,36 @@ describe("titles save as you change them", () => {
     expect(router.state.location.pathname).toBe("/collections/c1/edit");
   });
 
+  it("keeps waiting for a slower title write after a quicker one finishes", async () => {
+    members = [];
+    let refuse: ((error: Error) => void) | undefined;
+    v2Recorder.answer("PUT /api/v2/collections/{id}/items/{item_id}", (call: RecordedCall) => {
+      const id = call.path.split("/").pop()!;
+      if (id === HEAT.content_id) {
+        return new Promise((_, reject) => {
+          refuse = reject;
+        });
+      }
+      if (!members.includes(id)) members.push(id);
+    });
+    const router = showEditorPage("/collections/c1/edit");
+    fireEvent.change(await nameField(), { target: { value: "Renamed" } });
+    await addTitle("heat", "Heat");
+    await waitFor(() => expect(refuse).toBeDefined());
+    await addTitle("alien", "Alien");
+    // Alien's add answers first; Heat's is still running.
+    await screen.findByText("Saved");
+    await save();
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull(),
+    );
+    expect(router.state.location.pathname).toBe("/collections/c1/edit");
+    act(() => refuse!(new Error("Not available")));
+    expect(await screen.findByText(/Couldn't add Heat/)).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/collections/c1/edit");
+  });
+
   it("puts a removed title back at its position with Undo", async () => {
     members = [HEAT.content_id, ALIEN.content_id];
     showEditorPage("/collections/c1/edit");
@@ -227,40 +295,11 @@ describe("titles save as you change them", () => {
   });
 
   it("drags titles with the token read after the last title write, then saves the rename", async () => {
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
-      this: Element,
-    ) {
-      const row = this.closest("li[data-title-id]");
-      const index = row ? Array.from(row.parentElement!.children).indexOf(row) : 0;
-      const top = row ? index * 60 : 0;
-      const height = row ? 60 : 0;
-      return {
-        x: 0,
-        y: top,
-        top,
-        left: 0,
-        right: 800,
-        bottom: top + height,
-        width: 800,
-        height,
-        toJSON: () => ({}),
-      } as DOMRect;
-    });
+    layOutTitleRows();
     showEditorPage("/collections/c1/edit");
     fireEvent.change(await nameField(), { target: { value: "Renamed" } });
     await addTitle("alien", "Alien");
-    const grip = await screen.findByRole("button", { name: "Move Alien" });
-    await waitFor(() =>
-      expect(v2Recorder.callsOf("GET /api/v2/collections/{id}/items/order").length).toBeGreaterThan(
-        1,
-      ),
-    );
-    grip.focus();
-    fireEvent.keyDown(grip, { code: "Space", key: " " });
-    await screen.findByText(/Picked up Alien/);
-    fireEvent.keyDown(grip, { code: "ArrowUp", key: "ArrowUp" });
-    await screen.findByText(/Alien is now at position 1 of 2/);
-    fireEvent.keyDown(grip, { code: "Space", key: " " });
+    await dragAlienUp();
     await waitFor(() =>
       expect(v2Recorder.callsOf("PUT /api/v2/collections/{id}/items/order")).toHaveLength(1),
     );
@@ -275,6 +314,32 @@ describe("titles save as you change them", () => {
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull(),
     );
+  });
+
+  it("waits for a reorder still running before Save leaves, and stays when it fails", async () => {
+    layOutTitleRows();
+    let refuse: ((error: Error) => void) | undefined;
+    v2Recorder.answer(
+      "PUT /api/v2/collections/{id}/items/order",
+      () =>
+        new Promise((_, reject) => {
+          refuse = reject;
+        }),
+    );
+    const router = showEditorPage("/collections/c1/edit");
+    fireEvent.change(await nameField(), { target: { value: "Renamed" } });
+    await addTitle("alien", "Alien");
+    await dragAlienUp();
+    await waitFor(() => expect(refuse).toBeDefined());
+    await save();
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull(),
+    );
+    expect(router.state.location.pathname).toBe("/collections/c1/edit");
+    act(() => refuse!(new Error("Not available")));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(router.state.location.pathname).toBe("/collections/c1/edit");
   });
 });
 

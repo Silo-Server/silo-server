@@ -291,6 +291,7 @@ describe("personal Synced list editor", () => {
 
       await act(() => router.navigate("/collections/c1/edit"));
       await screen.findByLabelText("Name");
+      expect(within(await artworkTile("poster")).queryByRole("img")).toBeNull();
 
       // The next save sends the ETag the first one left, so it is not a 412.
       const savedETag = v2Recorder.etag("/api/v2/collections/c1");

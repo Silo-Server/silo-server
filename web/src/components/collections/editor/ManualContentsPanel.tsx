@@ -508,8 +508,13 @@ export function ManualContentsPanel({
   const [expanded, setExpanded] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [undo, setUndo] = useState<{ id: string; title: string; position: number } | null>(null);
-  const writing = saved === "saving";
-  const failed = problem !== null;
+  // Title writes still running: several can overlap, and the first to finish
+  // sets `saved`, so Save waits on the count instead.
+  const [running, setRunning] = useState(0);
+  // The last reorder failed; its toast says so, and Save stays on the editor.
+  const [orderFailed, setOrderFailed] = useState(false);
+  const writing = running > 0;
+  const failed = problem !== null || orderFailed;
   useEffect(() => onWritesChange?.({ writing, failed }), [onWritesChange, writing, failed]);
   const dragOrder = useRef<typeof orderSnapshot>(undefined);
 
@@ -575,6 +580,16 @@ export function ManualContentsPanel({
   // so an add picked before the list refreshes goes after the one before it.
   const claimed = useRef(0);
 
+  /** Counts a title write while it runs. */
+  async function tracked(write: () => Promise<void>) {
+    setRunning((count) => count + 1);
+    try {
+      await write();
+    } finally {
+      setRunning((count) => count - 1);
+    }
+  }
+
   async function afterWrite() {
     await scope.invalidate(queryClient, collectionId);
     setSaved("saved");
@@ -591,15 +606,17 @@ export function ManualContentsPanel({
     setSaved("saving");
     const position = Math.max(nextPosition, claimed.current);
     claimed.current = position + 1;
-    try {
-      await putCollectionItem(scope, collectionId, item.content_id, position);
-      await afterWrite();
-    } catch (error) {
-      setSaved("idle");
-      setProblem(
-        `Couldn't add ${item.title}. ${error instanceof Error ? error.message : "Try again."}`,
-      );
-    }
+    await tracked(async () => {
+      try {
+        await putCollectionItem(scope, collectionId, item.content_id, position);
+        await afterWrite();
+      } catch (error) {
+        setSaved("idle");
+        setProblem(
+          `Couldn't add ${item.title}. ${error instanceof Error ? error.message : "Try again."}`,
+        );
+      }
+    });
   }
 
   async function remove(row: Row) {
@@ -609,38 +626,42 @@ export function ManualContentsPanel({
       return;
     }
     setSaved("saving");
-    try {
-      await v2(
-        source === "user"
-          ? "DELETE /api/v2/collections/{id}/items/{item_id}"
-          : "DELETE /api/v2/admin/collections/{id}/items/{item_id}",
-        { path: { id: collectionId, item_id: row.id } },
-      );
-      setUndo({ id: row.id, title: row.info?.title || row.id, position: row.position ?? 0 });
-      if (row.info) setKnown((current) => ({ ...current, [row.id]: row.info! }));
-      setPage({ collectionId, cursor: "" });
-      await afterWrite();
-    } catch (error) {
-      setSaved("idle");
-      setProblem(
-        `Couldn't remove ${row.info?.title || row.id}. ${error instanceof Error ? error.message : ""}`.trim(),
-      );
-    }
+    await tracked(async () => {
+      try {
+        await v2(
+          source === "user"
+            ? "DELETE /api/v2/collections/{id}/items/{item_id}"
+            : "DELETE /api/v2/admin/collections/{id}/items/{item_id}",
+          { path: { id: collectionId, item_id: row.id } },
+        );
+        setUndo({ id: row.id, title: row.info?.title || row.id, position: row.position ?? 0 });
+        if (row.info) setKnown((current) => ({ ...current, [row.id]: row.info! }));
+        setPage({ collectionId, cursor: "" });
+        await afterWrite();
+      } catch (error) {
+        setSaved("idle");
+        setProblem(
+          `Couldn't remove ${row.info?.title || row.id}. ${error instanceof Error ? error.message : ""}`.trim(),
+        );
+      }
+    });
   }
 
   async function restore(removed: NonNullable<typeof undo>) {
     setUndo(null);
     if (!collectionId) return;
     setSaved("saving");
-    try {
-      await putCollectionItem(scope, collectionId, removed.id, removed.position);
-      await afterWrite();
-    } catch (error) {
-      setSaved("idle");
-      setProblem(
-        `Couldn't put back ${removed.title}. ${error instanceof Error ? error.message : ""}`.trim(),
-      );
-    }
+    await tracked(async () => {
+      try {
+        await putCollectionItem(scope, collectionId, removed.id, removed.position);
+        await afterWrite();
+      } catch (error) {
+        setSaved("idle");
+        setProblem(
+          `Couldn't put back ${removed.title}. ${error instanceof Error ? error.message : ""}`.trim(),
+        );
+      }
+    });
   }
 
   const sensors = useSensors(
@@ -686,6 +707,8 @@ export function ManualContentsPanel({
     const token = dragOrder.current;
     if (!canReorder || !token) return;
     setSaved("saving");
+    setOrderFailed(false);
+    setRunning((count) => count + 1);
     reorder.mutate(
       { orderedIds: next, etag: token.etag },
       {
@@ -693,7 +716,11 @@ export function ManualContentsPanel({
           setSaved("saved");
           onItemsChanged();
         },
-        onError: () => setSaved("idle"),
+        onError: () => {
+          setSaved("idle");
+          setOrderFailed(true);
+        },
+        onSettled: () => setRunning((count) => count - 1),
       },
     );
   }
