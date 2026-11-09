@@ -142,7 +142,9 @@ export function SeekBar({
   );
 
   const [dragTime, setDragTime] = useState<number | null>(null);
-  useEffect(() => onScrubTimeChange?.(dragTime), [dragTime, onScrubTimeChange]);
+  useEffect(() => {
+    onScrubTimeChange?.(dragTime);
+  }, [dragTime, onScrubTimeChange]);
   // The preview follows the pointer while hovering and the scrub position
   // while dragging (mouse or touch); a marker handle drag shows its own.
   const previewTime = edgeDrag !== null ? null : (dragTime ?? hoverTime);
