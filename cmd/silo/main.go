@@ -141,6 +141,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"github.com/Silo-Server/silo-server/internal/themesongs"
 	"github.com/Silo-Server/silo-server/internal/transcodenode"
+	"github.com/Silo-Server/silo-server/internal/transcodeproxy"
 	"github.com/Silo-Server/silo-server/internal/trickplay"
 	"github.com/Silo-Server/silo-server/internal/tuning"
 	"github.com/Silo-Server/silo-server/internal/usercollections"
@@ -2861,8 +2862,13 @@ func main() {
 	var reconciler *worker.Reconciler
 	var heartbeatWriter *worker.HeartbeatWriter
 	if needsWorkers && deps.DB != nil {
+		fetchNodeDelivery := func(ctx context.Context, nodeURL string) (map[string]playback.HLSDeliveryProgress, error) {
+			return transcodenode.FetchDeliveryProgress(ctx, transcodeproxy.NodeClient(), nodeURL, cfg.Auth.JWTSecret)
+		}
 		sessionProvider := func() []worker.SessionSync {
-			return buildLiveSessionSyncs(sessionMgr.AllSessions(), nodeIdentity, localTranscodes)
+			sessions := sessionMgr.AllSessions()
+			delivery := sessionDelivery{local: localTranscodes, remote: fetchRemoteDelivery(appCtx, sessions, fetchNodeDelivery)}
+			return buildLiveSessionSyncs(sessions, nodeIdentity, delivery)
 		}
 		reconciler = worker.NewReconciler(deps.DB, nodeIdentity, sessionProvider)
 		reconciler.EventBus = deps.EventBus
@@ -2877,7 +2883,7 @@ func main() {
 		}
 		deps.SessionSyncer = reconciler
 		deps.LiveSessionRowJSON = func(s *playback.Session) (json.RawMessage, error) {
-			return worker.SessionSyncRowJSON(buildLiveSessionSync(s, nodeIdentity, localTranscodes), nodeIdentity)
+			return worker.SessionSyncRowJSON(buildLiveSessionSync(s, nodeIdentity, sessionDelivery{local: localTranscodes}), nodeIdentity)
 		}
 
 		nodeURL := fmt.Sprintf("http://%s%s", nodeIdentity, cfg.Server.Listen)

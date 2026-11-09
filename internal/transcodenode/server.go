@@ -1062,6 +1062,7 @@ func (s *Server) router() chi.Router {
 		r.Get("/transcode/{session_id}/master.m3u8", observeNode(s.telemetry, http.MethodGet, "/transcode/{session_id}/master.m3u8", s.handleManifest))
 		r.Get("/transcode/{session_id}/segment/{name}", observeNode(s.telemetry, http.MethodGet, "/transcode/{session_id}/segment/{name}", s.handleSegment))
 		r.Post("/transcode/{session_id}/segment/{name}/downloaded", s.handleSegmentDownloaded)
+		r.Get("/transcode/delivery-progress", s.handleDeliveryProgress)
 		r.Post("/admin/force-reload", s.handleForceReload)
 		r.Post("/admin/reload-config", s.handleReloadConfig)
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)

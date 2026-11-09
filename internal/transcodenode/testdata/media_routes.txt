@@ -16,6 +16,7 @@ GET /metrics	non-media
 GET /remux/{session_id}	media	playback	internal_relay	false	true
 HEAD /remux/{session_id}	media	playback	internal_relay	false	true
 GET /status	non-media
+GET /transcode/delivery-progress	non-media
 POST /transcode/start	non-media
 DELETE /transcode/{session_id}	non-media
 GET /transcode/{session_id}/master.m3u8	media	manifest	internal_relay	false	true
@@ -40,6 +41,7 @@ GET /metrics	non-media
 GET /remux/{session_id}	media	playback	internal_relay	false	true
 HEAD /remux/{session_id}	media	playback	internal_relay	false	true
 GET /status	non-media
+GET /transcode/delivery-progress	non-media
 POST /transcode/start	non-media
 DELETE /transcode/{session_id}	non-media
 GET /transcode/{session_id}/master.m3u8	media	manifest	internal_relay	false	true

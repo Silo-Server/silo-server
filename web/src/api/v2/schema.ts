@@ -19502,7 +19502,7 @@ export interface components {
       content_id?: string;
       /**
        * Format: double
-       * @description End, in whole media seconds, of the contiguous range most recently sent to the client. For Direct Play it is the end of the file range the server last extended, a linear byte-to-time estimate of what was sent rather than what the client has buffered; on a variable-bitrate file it can lead or trail the playback position. For HLS it is the end of the run of segments the client finished downloading, absent while that run does not contain the playback position. Absent when unknown, and for now always for sessions on remote transcode nodes, proxy-served Direct Play, and progressive remux.
+       * @description End, in whole media seconds, of the contiguous range most recently sent to the client. For Direct Play it is the end of the file range the server last extended, a linear byte-to-time estimate of what was sent rather than what the client has buffered; on a variable-bitrate file it can lead or trail the playback position. For HLS it is the end of the run of segments the client finished downloading, absent while that run does not contain the playback position. Absent when unknown, and for now always for proxy-served Direct Play and progressive remux.
        */
       delivered_through_seconds?: number;
       /** @description Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared. */
@@ -19543,7 +19543,7 @@ export interface components {
       poster_url?: string;
       /**
        * Format: double
-       * @description End, in whole media seconds, of the last segment the current transcode process has produced. Absent when unknown, for sessions that do not transcode, and for now always for sessions on remote transcode nodes.
+       * @description End, in whole media seconds, of the last segment the current transcode process has produced. Absent when unknown and for sessions that do not transcode.
        */
       produced_through_seconds?: number;
       profile_id: string;

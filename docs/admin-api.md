@@ -294,9 +294,11 @@ such as an index at the end of the file, shows until the playing response sends
 its next slice. For HLS it is the end of the run of segments the client finished
 downloading, omitted while that run does not contain the playback position.
 `produced_through_seconds` is the end of the
-last segment the current transcode process wrote. The API server reports both
-only for streams it serves or transcodes itself: sessions on remote transcode
-nodes, proxy-served Direct Play, and progressive remux omit them for now. The
+last segment the current transcode process wrote. For an HLS session on a
+remote transcode node, the API server that owns the session reads both from the
+node during its session sync; a node that does not answer within 2 seconds, or
+runs a build without the read, leaves them out for that sync. Proxy-served
+Direct Play and progressive remux omit them for now. The
 frozen `/api/v1` bridge does not carry these fields.
 
 `silo_playback_routing_decisions_total` counts routing outcomes with bounded

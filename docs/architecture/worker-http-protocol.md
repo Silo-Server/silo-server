@@ -180,6 +180,13 @@ Repeating the exact acknowledgement is naturally idempotent; this is not a
 durable completion receipt and the generation header is never forwarded to the
 end client. Runtime acknowledgement and pruning behavior remain unchanged.
 
+The transcode `GET /transcode/delivery-progress` lists, under node bearer
+authentication, each HLS session's fetched segment run and produced head in
+media seconds, keyed by transport session id. It is observation for the admin
+dashboard and feeds no playback decision. Each API server reads it once per
+session sync from the nodes running its HLS sessions, with a 2 second bound; a
+node that predates the read answers 404 and its sessions report no progress.
+
 The retained transcode `POST /downloads/prepare` synchronously prepares or reuses
 an MP4 on that node. It requires node bearer authorization and an approved input
 path. The 64 KiB JSON decoder ignores unknown keys and defaults omitted options;

@@ -15774,7 +15774,7 @@
             "type": "string"
           },
           "delivered_through_seconds": {
-            "description": "End, in whole media seconds, of the contiguous range most recently sent to the client. For Direct Play it is the end of the file range the server last extended, a linear byte-to-time estimate of what was sent rather than what the client has buffered; on a variable-bitrate file it can lead or trail the playback position. For HLS it is the end of the run of segments the client finished downloading, absent while that run does not contain the playback position. Absent when unknown, and for now always for sessions on remote transcode nodes, proxy-served Direct Play, and progressive remux.",
+            "description": "End, in whole media seconds, of the contiguous range most recently sent to the client. For Direct Play it is the end of the file range the server last extended, a linear byte-to-time estimate of what was sent rather than what the client has buffered; on a variable-bitrate file it can lead or trail the playback position. For HLS it is the end of the run of segments the client finished downloading, absent while that run does not contain the playback position. Absent when unknown, and for now always for proxy-served Direct Play and progressive remux.",
             "format": "double",
             "type": "number"
           },
@@ -15855,7 +15855,7 @@
             "type": "string"
           },
           "produced_through_seconds": {
-            "description": "End, in whole media seconds, of the last segment the current transcode process has produced. Absent when unknown, for sessions that do not transcode, and for now always for sessions on remote transcode nodes.",
+            "description": "End, in whole media seconds, of the last segment the current transcode process has produced. Absent when unknown and for sessions that do not transcode.",
             "format": "double",
             "type": "number"
           },
@@ -239791,6 +239791,36 @@
         }
       },
       {
+        "description": "Report each HLS session's fetched segment run and produced head for the admin dashboard. Observation only; no playback decision reads it.",
+        "listener": "transcode_node",
+        "method": "GET",
+        "path": "/transcode/delivery-progress",
+        "handler": "(*internal/transcodenode.Server).handleDeliveryProgress",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/transcodenode_DeliveryProgressResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        }
+      },
+      {
         "requestBody": {
           "content": {
             "application/json": {
@@ -246067,6 +246097,21 @@
         ],
         "type": "object"
       },
+      "transcodenode_DeliveryProgressResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "additionalProperties": {
+              "$ref": "#/x-silo-worker-protocols/schemas/transcodenode_SessionDeliveryProgress"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "sessions"
+        ],
+        "type": "object"
+      },
       "transcodenode_ReprobeCapabilitiesResponse": {
         "additionalProperties": false,
         "properties": {
@@ -246081,6 +246126,27 @@
           "resolved",
           "capability_hash"
         ],
+        "type": "object"
+      },
+      "transcodenode_SessionDeliveryProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "fetched_end_seconds": {
+            "description": "End of that run.",
+            "format": "double",
+            "type": "number"
+          },
+          "fetched_start_seconds": {
+            "description": "Start of the run of segments the client most recently finished downloading.",
+            "format": "double",
+            "type": "number"
+          },
+          "produced_through_seconds": {
+            "description": "End of the last segment the current ffmpeg generation wrote.",
+            "format": "double",
+            "type": "number"
+          }
+        },
         "type": "object"
       },
       "transcodenode_StatusResponse": {

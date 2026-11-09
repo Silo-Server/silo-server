@@ -3424,3 +3424,36 @@ func TestPruneStopFencesRunsAtMostOncePerInterval(t *testing.T) {
 		t.Fatal("sweep after the interval left an expired fence")
 	}
 }
+
+// The API reads every session's delivery progress with a signed request, an
+// unsigned one is refused, and a node built before the read reports nothing
+// rather than an error.
+func TestDeliveryProgressRead(t *testing.T) {
+	server := newTestServer(t)
+	server.sessions["live-1"] = playback.NewTranscodeSessionForTest(t.TempDir())
+	node := httptest.NewServer(server.Handler())
+	defer node.Close()
+
+	listing, err := FetchDeliveryProgress(t.Context(), node.Client(), node.URL, testSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := listing["live-1"]; !ok || got.FetchedOK || got.ProducedOK {
+		t.Fatalf("listing = %+v, want live-1 with nothing fetched or produced", listing)
+	}
+
+	unsigned, err := http.Get(node.URL + "/transcode/delivery-progress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unsigned.Body.Close()
+	if unsigned.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unsigned status = %d, want 401", unsigned.StatusCode)
+	}
+
+	older := httptest.NewServer(http.NotFoundHandler())
+	defer older.Close()
+	if listing, err := FetchDeliveryProgress(t.Context(), older.Client(), older.URL, testSecret); err != nil || listing != nil {
+		t.Fatalf("older node = (%v, %v), want (nil, nil)", listing, err)
+	}
+}

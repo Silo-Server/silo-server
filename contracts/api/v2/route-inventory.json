@@ -56,11 +56,11 @@
       "id": "transcode_node",
       "entrypoint": "internal/transcodenode.(*Server).Handler",
       "description": "Transcode node listener: transcode/remux session control, artifacts, and probes.",
-      "route_count": 23
+      "route_count": 24
     }
   ],
   "totals": {
-    "routes": 889,
+    "routes": 890,
     "conditional_routes": 692,
     "streaming_routes": 45,
     "websocket_routes": 4
@@ -28780,6 +28780,33 @@
       "route_group": "/",
       "handler": "(*internal/transcodenode.Server).handleStatus",
       "handler_expr": "s.handleStatus",
+      "handler_kind": "method",
+      "handler_resolved": true,
+      "middleware_chain": 29,
+      "auth_class": "node_bearer",
+      "auth_traits": [
+        "node_bearer"
+      ],
+      "conditions": [],
+      "conditional": false,
+      "request_kind": "none",
+      "response_media_kind": "json",
+      "delegates_to": "",
+      "streams": false,
+      "upgrades_websocket": false,
+      "method_origin": "explicit",
+      "success_statuses": null,
+      "error_codes": null,
+      "source_file": "internal/transcodenode/server.go"
+    },
+    {
+      "listener": "transcode_node",
+      "namespace": "legacy_unversioned",
+      "method": "GET",
+      "path": "/transcode/delivery-progress",
+      "route_group": "/",
+      "handler": "(*internal/transcodenode.Server).handleDeliveryProgress",
+      "handler_expr": "s.handleDeliveryProgress",
       "handler_kind": "method",
       "handler_resolved": true,
       "middleware_chain": 29,
