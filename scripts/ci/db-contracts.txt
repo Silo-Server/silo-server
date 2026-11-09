@@ -95,6 +95,9 @@
 # caller but the web on Home and library pages, and clears with the hero.
 ./internal/api/handlers TestWebOnlyHeroRowsDB
 
+# The v2 aggregate Home and library section reads leave out rows the viewer has nothing in.
+./internal/api/handlers TestAggregateSectionsOmitRowsWithNoAccessibleItemsDB
+
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
 
