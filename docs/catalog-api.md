@@ -62,8 +62,8 @@ taste-match section shows a new profile (`home.section.popularOnServer`,
 `home.section.topGenre` with `genre`). The key names a message in the shared translation
 catalog, and `title_args` fills its placeholders by name. A client that has the key shows
 its translation; otherwise, and whenever the fields are absent, it shows `title`.
-`title_args` is left out when the message has no placeholders, so a client must not
-require it to use a key.
+`title_args` and `default_title_args` are left out when the message has no placeholders,
+so a client must not require them to use a key.
 
 The fields are absent when an administrator or the profile typed the title, and when the
 server replaced the stored title with one of an item or season (a seasonal row's in-season
