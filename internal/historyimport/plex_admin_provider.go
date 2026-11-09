@@ -148,6 +148,7 @@ type plexItemIDLookup struct {
 	asked, unresolved int
 	firstErr          error
 	aborted           bool
+	failureStreak     int
 }
 
 // fetchItemMetadata resolves external provider IDs omitted by Plex's session-history
@@ -179,7 +180,7 @@ func (p *PlexAdminProvider) fetchItemMetadata(
 		ids.unresolved += len(pending)
 		return nil, nil
 	}
-	sweep, err := p.client.fetchMetadataByKey(ctx, p.baseURL, p.token, pending)
+	sweep, err := p.client.fetchMetadataByKey(ctx, p.baseURL, p.token, pending, &ids.failureStreak)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +193,7 @@ func (p *PlexAdminProvider) fetchItemMetadata(
 	if ids.firstErr == nil {
 		ids.firstErr = sweep.firstErr
 	}
-	ids.aborted = ids.aborted || sweep.aborted
+	ids.aborted = ids.aborted || sweep.aborted || ids.failureStreak >= plexMetadataFailureStreakLimit
 	return sweep.items, nil
 }
 

@@ -8,12 +8,14 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/workmetrics"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -421,6 +423,9 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 
 	reporter := continueWatchingReporter(provider)
 	apply := runApplier{service: s, run: run, claim: claim, summary: &summary, hiddenWarningAt: -1}
+	if from != nil {
+		apply.checkpointAt = *from
+	}
 	if summary.HiddenSuppressed > 0 {
 		apply.hiddenWarningAt = 0 // restored by the checkpoint; the warning stays first
 	}
@@ -521,6 +526,11 @@ type runApplier struct {
 	// shows is nil when the provider has no Continue Watching row to compare.
 	shows     *importedShows
 	largeSlot bool
+	// checkpointAt is the position of the last checkpoint written. A stage
+	// that restarts from its first page reports one position for all its
+	// pages, so only its first page writes one: the totals saved must be from
+	// where a resume starts reading again.
+	checkpointAt StreamPosition
 }
 
 // apply matches a batch with one round of catalog reads, writes its records,
@@ -539,6 +549,12 @@ func (a *runApplier) apply(ctx context.Context, batch RecordBatch) error {
 		return err
 	}
 	matches, reasons, err := matchAllWithReasons(ctx, s.repo.pool, batch.Records)
+	if err != nil && matchFailsAgain(err) {
+		// The database rejected a value, so this batch would fail the same
+		// way on every resume. Match its records one at a time instead, and keep
+		// each record's failure as a warning.
+		matches, reasons, err = a.matchEach(ctx, batch.Records)
+	}
 	if err != nil {
 		return fmt.Errorf("%w: %w", errRunInterrupted, err)
 	}
@@ -557,12 +573,44 @@ func (a *runApplier) apply(ctx context.Context, batch RecordBatch) error {
 		a.shows.add(ctx, s.seriesDrops, episodes)
 	}
 	s.persistClaimProgress(ctx, a.claim, *a.summary)
-	if a.claim.Generation > 0 && batch.Resume.Stage != "" {
+	if a.claim.Generation > 0 && batch.Resume.Stage != "" && batch.Resume != a.checkpointAt {
 		if err := s.repo.saveRunCheckpoint(ctx, a.claim, runCheckpoint{Position: batch.Resume, Summary: before}); err != nil {
 			slog.WarnContext(ctx, "history import: checkpoint write failed", "run_id", a.run.ID, "error", err)
+		} else {
+			a.checkpointAt = batch.Resume
 		}
 	}
 	return nil
+}
+
+// matchFailsAgain reports a match error that retrying will not clear: the
+// database rejected a value from the source (a data exception or a program
+// limit), or matching did not settle. Anything else, such as a lost
+// connection or a shutdown, is the server's failure and the run resumes later.
+func matchFailsAgain(err error) bool {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
+		return strings.HasPrefix(pgErr.Code, "22") || strings.HasPrefix(pgErr.Code, "54")
+	}
+	return errors.Is(err, errMatchUnsettled)
+}
+
+// matchEach matches records one at a time. A record whose own match fails the
+// same way is left unmatched with a warning; any other error stops the batch.
+func (a *runApplier) matchEach(ctx context.Context, records []Record) ([]*Match, []string, error) {
+	matches := make([]*Match, len(records))
+	reasons := make([]string, len(records))
+	for i, record := range records {
+		match, reason, err := a.service.matcher.Match(ctx, record)
+		switch {
+		case err == nil:
+			matches[i], reasons[i] = match, reason
+		case matchFailsAgain(err):
+			addRunWarning(a.summary, err.Error())
+		default:
+			return nil, nil, err
+		}
+	}
+	return matches, reasons, nil
 }
 
 func (a *runApplier) recordUnmatched(record Record, reason string) {

@@ -1774,8 +1774,11 @@ worker acknowledges cancellation at its next boundary. Pending cancellation retu
 202, an already cancelled run returns 200, and completed or failed runs return
 409 `job_not_cancelable`. Already committed external
 history effects are not undone. Editing a source or mapping invalidates previously
-captured execution configuration rather than retargeting its run. Stale executions
-fail without automatic replay. See [History import execution](architecture/history-import-execution.md)
+captured execution configuration rather than retargeting its run. A stale or interrupted
+execution with a checkpoint returns to `queued` and resumes near where it stopped, with its
+counts so far; one without a checkpoint, or past five restarts without progress, fails.
+While a run is active, `fetched` counts the source items read so far, not the listing's
+total. See [History import execution](architecture/history-import-execution.md)
 for the persistence and cancellation boundaries. Run monitor errors and warnings use safe summaries; stored source
 credentials are never returned. The explicit Plex login exchange returns its newly
 issued token so the administrator can assign it to a source.

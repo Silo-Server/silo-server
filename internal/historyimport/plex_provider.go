@@ -1,10 +1,12 @@
 package historyimport
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 )
 
 type PlexServerProvider struct {
@@ -127,6 +129,11 @@ func (p *PlexServerProvider) Stream(ctx context.Context, from *StreamPosition, s
 }
 
 func (p *PlexServerProvider) streamSections(ctx context.Context, sections []struct{ Key, Type, Title string }, series *plexSeriesLookup, from *StreamPosition, sink RecordSink) error {
+	// Walk sections in key order, not the server's listing order, so a resume
+	// that continues from its section never skips one listed earlier this
+	// time. Plex gives new sections higher keys, so one added since lands after.
+	sections = slices.Clone(sections)
+	slices.SortStableFunc(sections, func(a, b struct{ Key, Type, Title string }) int { return comparePlexKeys(a.Key, b.Key) })
 	first := 0
 	if from != nil {
 		// A section that is gone restarts the listing; re-applying is safe.
@@ -146,6 +153,17 @@ func (p *PlexServerProvider) streamSections(ctx context.Context, sections []stru
 		}
 	}
 	return nil
+}
+
+// comparePlexKeys orders section keys numerically, as Plex assigns them, and
+// falls back to text for a key that is not a number.
+func comparePlexKeys(a, b string) int {
+	x, errA := strconv.Atoi(a)
+	y, errB := strconv.Atoi(b)
+	if errA == nil && errB == nil {
+		return cmp.Compare(x, y)
+	}
+	return cmp.Compare(a, b)
 }
 
 func (p *PlexServerProvider) streamSection(ctx context.Context, key, title string, mediaType int, noun string, series *plexSeriesLookup, from *StreamPosition, sink RecordSink) error {

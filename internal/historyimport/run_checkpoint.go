@@ -113,15 +113,19 @@ func (r *Repository) requeueInterruptedRun(ctx context.Context, claim RunClaim) 
 
 // tryLargeImportSlot claims the single slot for very large runs. The partial
 // unique index makes that atomic across nodes, and a dead holder frees it when
-// its row stops being running.
+// its row stops being running. A run that lost its claim or was canceled while
+// waiting gets ErrRunClaimLost rather than the slot.
 func (r *Repository) tryLargeImportSlot(ctx context.Context, claim RunClaim) (bool, error) {
-	_, err := r.pool.Exec(ctx, `UPDATE history_import_runs SET large_import=true
-		WHERE id=$1 AND status='running' AND claim_generation=$2`, claim.RunID, claim.Generation)
+	tag, err := r.pool.Exec(ctx, `UPDATE history_import_runs SET large_import=true
+		WHERE id=$1 AND status='running' AND claim_generation=$2 AND cancel_requested_at IS NULL`, claim.RunID, claim.Generation)
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("claiming large import slot: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, ErrRunClaimLost
 	}
 	return true, nil
 }

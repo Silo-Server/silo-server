@@ -27,6 +27,10 @@ func MatchAllOn(ctx context.Context, q lookupQuerier, records []Record) ([]*Matc
 	return matches, err
 }
 
+// errMatchUnsettled reports a batch whose lookups kept asking for more after
+// maxMatchPasses reads. Reading the same records again would not settle it.
+var errMatchUnsettled = errors.New("matching items did not settle")
+
 // matchAllWithReasons is MatchAllOn that also says why each unmatched record
 // did not match, as Match does.
 func matchAllWithReasons(ctx context.Context, q lookupQuerier, records []Record) ([]*Match, []string, error) {
@@ -51,7 +55,7 @@ func matchAllWithReasons(ctx context.Context, q lookupQuerier, records []Record)
 			return nil, nil, err
 		}
 	}
-	return nil, nil, errors.New("matching items did not settle")
+	return nil, nil, errMatchUnsettled
 }
 
 type (

@@ -65,7 +65,9 @@ func newImportedEpisode(itemID string, record Record) importedEpisode {
 // a page at a time. Past maxTrackedSeries it stops, and the pass is skipped
 // rather than judging shows from a partial picture.
 type importedShows struct {
-	episodes  int
+	episodes int
+	// links counts source-series-to-Silo-series pairs in bySource and sourcesOf.
+	links     int
 	shows     map[string]*importedShow
 	bySource  map[string][]string
 	sourcesOf map[string][]string
@@ -103,6 +105,13 @@ func (a *importedShows) add(ctx context.Context, drops SeriesDropStore, episodes
 			continue
 		}
 		if episode.sourceSeriesID != "" && !slices.Contains(a.bySource[episode.sourceSeriesID], seriesID) {
+			// The source names its series, so it can name a new one for every
+			// episode; the same cap as for shows keeps the links bounded.
+			if a.links >= maxTrackedSeries {
+				a.failed = errors.New("too many shows to track")
+				return
+			}
+			a.links++
 			a.bySource[episode.sourceSeriesID] = append(a.bySource[episode.sourceSeriesID], seriesID)
 			a.sourcesOf[seriesID] = append(a.sourcesOf[seriesID], episode.sourceSeriesID)
 		}

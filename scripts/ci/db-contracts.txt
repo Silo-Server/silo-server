@@ -727,6 +727,7 @@
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
 ./internal/historyimport TestInterruptedRunResumesWithoutDuplicates
 ./internal/historyimport TestMatchFailureRequeuesTheRun
+./internal/historyimport TestRejectedMatchValueStaysOnItsRecord
 ./internal/historyimport TestStaleSweepRequeuesOnlyRunsThatCanContinue
 ./internal/historyimport TestOnlyOneLargeImportSlot
 

@@ -2,6 +2,7 @@ package historyimport
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -19,6 +20,9 @@ type pagedProvider struct {
 	// breakAt runs before delivering that page, to fail what the page needs.
 	breakAt int
 	broken  func()
+	// restart reports every page at offset 0, as a stage that a resume reads
+	// again from its first page does.
+	restart bool
 }
 
 func (p *pagedProvider) Stream(ctx context.Context, from *StreamPosition, sink RecordSink) error {
@@ -33,7 +37,11 @@ func (p *pagedProvider) Stream(ctx context.Context, from *StreamPosition, sink R
 			<-ctx.Done()
 			return ctx.Err()
 		}
-		if err := sink(RecordBatch{Records: p.records[i : i+1], Resume: StreamPosition{Stage: "listing", Offset: i}}); err != nil {
+		offset := i
+		if p.restart {
+			offset = 0
+		}
+		if err := sink(RecordBatch{Records: p.records[i : i+1], Resume: StreamPosition{Stage: "listing", Offset: offset}}); err != nil {
 			return err
 		}
 	}
@@ -65,8 +73,22 @@ func runRow(t *testing.T, repo *Repository, id string) Run {
 }
 
 // A run stopped by a deploy goes back to the queue with its place kept, and
-// finishing it leaves the totals and history a single uninterrupted run would.
+// finishing it leaves the totals and history a single uninterrupted run would,
+// including in a stage that a resume reads again from its first page.
 func TestInterruptedRunResumesWithoutDuplicates(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		restart  bool
+		wantFrom int
+	}{
+		{"paged", false, 1},
+		{"stage restarts", true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testInterruptedRunResumes(t, tc.restart, tc.wantFrom) })
+	}
+}
+
+func testInterruptedRunResumes(t *testing.T, restart bool, wantFrom int) {
 	repo := limitsRepository(t)
 	ctx := t.Context()
 	records := checkpointRecords(time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC))
@@ -81,7 +103,7 @@ func TestInterruptedRunResumesWithoutDuplicates(t *testing.T) {
 
 	serverCtx, shutdown := context.WithCancel(ctx)
 	defer shutdown()
-	checkpointService(serverCtx, repo).executeRunWithClaim(claimed, &pagedProvider{records: records, stopAt: 2, stop: shutdown}, claim, true)
+	checkpointService(serverCtx, repo).executeRunWithClaim(claimed, &pagedProvider{records: records, stopAt: 2, stop: shutdown, restart: restart}, claim, true)
 
 	if got := runRow(t, repo, queued.ID); got.Status != RunStatusQueued {
 		t.Fatalf("after shutdown status = %s (%q), want queued", got.Status, got.ErrorMessage)
@@ -91,11 +113,14 @@ func TestInterruptedRunResumesWithoutDuplicates(t *testing.T) {
 	if err != nil || reclaimed == nil {
 		t.Fatalf("reclaim: %v %v", reclaimed, err)
 	}
-	provider := &pagedProvider{records: records, stopAt: -1}
+	if !reclaimed.StartedAt.Equal(*claimed.StartedAt) {
+		t.Errorf("started_at = %v after resume, want the first start %v", reclaimed.StartedAt, claimed.StartedAt)
+	}
+	provider := &pagedProvider{records: records, stopAt: -1, restart: restart}
 	checkpointService(ctx, repo).executeRunWithClaim(reclaimed, provider, claim, true)
 
-	if provider.from == nil || provider.from.Offset != 1 {
-		t.Fatalf("resumed from %+v, want the last applied page, offset 1", provider.from)
+	if provider.from == nil || provider.from.Offset != wantFrom {
+		t.Fatalf("resumed from %+v, want offset %d", provider.from, wantFrom)
 	}
 	got := runRow(t, repo, queued.ID)
 	if got.Status != RunStatusCompleted || got.Fetched != 3 || got.Matched != 2 || got.Unmatched != 1 {
@@ -200,6 +225,31 @@ func TestStaleSweepRequeuesOnlyRunsThatCanContinue(t *testing.T) {
 	}
 }
 
+// A value the database rejects fails the same way on every resume, so it
+// stays that record's warning and the rest of the run imports.
+func TestRejectedMatchValueStaysOnItsRecord(t *testing.T) {
+	repo := limitsRepository(t)
+	ctx := t.Context()
+	queued, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, claim, err := repo.claimAdminRun(ctx)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
+	records := checkpointRecords(time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC))
+	records[1].TMDBID = "99\x009" // Postgres text cannot hold a NUL byte
+	checkpointService(ctx, repo).executeRunWithClaim(claimed, &pagedProvider{records: records, stopAt: -1}, claim, true)
+	got := runRow(t, repo, queued.ID)
+	if got.Status != RunStatusCompleted || got.Matched != 2 || len(got.Warnings) == 0 {
+		t.Fatalf("run = %s matched=%d warnings=%v (%q)", got.Status, got.Matched, got.Warnings, got.ErrorMessage)
+	}
+	if history := limitsHistory(t, repo); len(history) != 2 {
+		t.Fatalf("history = %v, want the two matched items", history)
+	}
+}
+
 // Only one very large run proceeds at a time, and its slot frees with it.
 func TestOnlyOneLargeImportSlot(t *testing.T) {
 	repo := limitsRepository(t)
@@ -231,6 +281,12 @@ func TestOnlyOneLargeImportSlot(t *testing.T) {
 	}
 	if _, err := repo.pool.Exec(ctx, `UPDATE history_import_runs SET status='completed',completed_at=now() WHERE id=$1`, first.ID); err != nil {
 		t.Fatal(err)
+	}
+	// A worker whose claim moved on while it waited must not take the slot.
+	stale := claimSecond
+	stale.Generation++
+	if ok, err := repo.tryLargeImportSlot(ctx, stale); !errors.Is(err, ErrRunClaimLost) || ok {
+		t.Fatalf("stale claim = %v %v, want ErrRunClaimLost", ok, err)
 	}
 	if ok, err := repo.tryLargeImportSlot(ctx, claimSecond); err != nil || !ok {
 		t.Fatalf("second after release = %v %v", ok, err)
