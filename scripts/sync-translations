@@ -34,7 +34,7 @@ sha256() {
 
 root=${SILO_TRANSLATIONS_ROOT:-$(git rev-parse --show-toplevel)}
 config=$root/.silo-translations
-platform= version= sha= local=
+platform='' version='' sha='' local=''
 
 if [ -f "$config" ]; then
   platform=$(sed -n 's/^platform=//p' "$config")
