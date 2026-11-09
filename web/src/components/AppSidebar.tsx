@@ -205,11 +205,14 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   // until a reload.
   const household = useProfiles({ enabled: profile != null, refetchOnWindowFocus: true });
   // Switch Profile leads to the picker, which is pointless with one profile
-  // and no room for another. Until the household loads (or when it fails to)
-  // the item stays, as it always did.
+  // and no room for another. A PIN-protected profile keeps it: going back to
+  // the picker locks the profile without signing out. Until the household
+  // loads (or when it fails to) the item stays, as it always did.
   const showSwitchProfile =
     profile != null &&
-    (!household.isSuccess || canSwitchProfile(household.data.length, household.maxProfiles));
+    (profile.has_pin ||
+      !household.isSuccess ||
+      canSwitchProfile(household.data.length, household.maxProfiles));
   const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
