@@ -1072,7 +1072,11 @@ because the playlist has no bytes for positions FFmpeg has not reached yet.
 
 **Progressive remux** is a freshly generated chunked response with no byte-range
 support, so it uses the same resolved keyframe origin and player pre-roll offset;
-the window is open-ended and seeks go through the server.
+the window is open-ended and seeks go through the server. The response ends
+cleanly only when FFmpeg read the source to its end. If reading the source fails
+partway, or FFmpeg fails, the server aborts the response instead (no final chunk
+on HTTP/1.1, a stream reset on HTTP/2). A client must treat an incomplete
+response as a transport failure, never as the end of the title.
 
 ### `source.duration_seconds`
 
