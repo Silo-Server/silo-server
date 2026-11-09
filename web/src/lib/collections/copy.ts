@@ -397,7 +397,7 @@ export function batchResult(
   total: number,
   warned = 0,
 ): { tone: "success" | "warning" | "error"; message: string } {
-  const warnings = String(warned);
+  const warnings = warned;
   if (done === total)
     return {
       tone: warned > 0 ? "warning" : "success",

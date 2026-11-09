@@ -36,7 +36,7 @@ export default function MetadataBadges({
 }: MetadataBadgesProps) {
   const t = useT();
   const advisoryLabel = advisorySource ? ADVISORY_SOURCE_LABELS[advisorySource] : undefined;
-  const age = String(advisoryAge);
+  const age = advisoryAge ?? 0;
   return (
     <div className="flex flex-wrap items-center gap-2">
       {year && <span className="metadata-badge">{numberText(year)}</span>}

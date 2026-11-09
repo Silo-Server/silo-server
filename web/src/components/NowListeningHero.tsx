@@ -89,8 +89,8 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
   const timeLeft = formatListeningTimeLeft(positionSeconds, durationSeconds);
   let chapterLine = durationSeconds > 0 ? formatHoursMinutes(durationSeconds) : "";
   if (chapter) {
-    const index = String(chapter.index);
-    const total = String(chapters.length);
+    const index = chapter.index;
+    const total = chapters.length;
     // Whether the chapter has a title of its own is decided on the English
     // data, as before, not by comparing translated text (D44).
     const entry = chapters[chapter.index - 1];

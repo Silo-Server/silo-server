@@ -1039,7 +1039,7 @@ function describeMemory(system: HostSystemStats): ResourceMetric {
 
   const value = formatUsedOfTotal(used, total, mebibytesToBytes) ?? DASH;
   const percent = clampPercent((used / total) * 100);
-  const percentText = String(percent);
+  const percentText = percent;
   return {
     label: t("web.admin.nodes.metric.memory"),
     value,
