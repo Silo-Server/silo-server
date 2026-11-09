@@ -8,6 +8,7 @@ import { buildMediaPlayHref, isVideoWatchHref } from "@/lib/mediaNavigation";
 import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 interface CardPlayOverlayProps {
   contentId: string;
@@ -26,6 +27,7 @@ export default function CardPlayOverlay({
   size = "standard",
   onPlaybackStart,
 }: CardPlayOverlayProps) {
+  const t = useT();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const watchHref = buildMediaPlayHref({ contentId, type: mediaType, libraryId });
@@ -68,7 +70,7 @@ export default function CardPlayOverlay({
     <ViewTransitionLink
       to={watchHref}
       onClick={handleClick}
-      aria-label={`Play ${title}`}
+      aria-label={t("web.item.card.play", { title })}
       className={cn(MEDIA_CARD_CENTER_ACTION_CLASS, size === "compact" ? "h-6 w-6" : "h-9 w-9")}
     >
       <Play

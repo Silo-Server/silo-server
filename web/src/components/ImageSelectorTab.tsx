@@ -6,14 +6,39 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { ItemDetail, RemoteImage } from "@/api/types";
 import { useItemImages, useApplyItemImage, useUploadItemImage } from "@/hooks/queries/items";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 type ImageTab = "poster" | "backdrop" | "logo";
 
-const IMAGE_TABS: { key: ImageTab; label: string; singular: string; aspect: string }[] = [
-  { key: "poster", label: "Posters", singular: "poster", aspect: "aspect-[2/3]" },
-  { key: "backdrop", label: "Backdrops", singular: "backdrop", aspect: "aspect-video" },
-  { key: "logo", label: "Logos", singular: "logo", aspect: "aspect-video" },
+const IMAGE_TABS: {
+  key: ImageTab;
+  label: MessageKey;
+  upload: MessageKey;
+  apply: MessageKey;
+  aspect: string;
+}[] = [
+  {
+    key: "poster",
+    label: "web.item.images.posters",
+    upload: "web.item.images.uploadPoster",
+    apply: "web.item.images.applyPoster",
+    aspect: "aspect-[2/3]",
+  },
+  {
+    key: "backdrop",
+    label: "web.item.images.backdrops",
+    upload: "web.item.images.uploadBackdrop",
+    apply: "web.item.images.applyBackdrop",
+    aspect: "aspect-video",
+  },
+  {
+    key: "logo",
+    label: "web.item.images.logos",
+    upload: "web.item.images.uploadLogo",
+    apply: "web.item.images.applyLogo",
+    aspect: "aspect-video",
+  },
 ];
 
 // Seasons store a poster and a backdrop; the server rejects logos for them.
@@ -42,6 +67,7 @@ export default function ImageSelectorTab({
   onImageApplied,
   onApplyPendingChange,
 }: ImageSelectorTabProps) {
+  const t = useT();
   const availableTabs = item.type === "season" ? SEASON_TABS : IMAGE_TABS;
   const [activeTab, setActiveTab] = useState<ImageTab>("poster");
   const [textlessOnly, setTextlessOnly] = useState(false);
@@ -67,7 +93,7 @@ export default function ImageSelectorTab({
   const current = data?.current;
   const providerErrors = data?.provider_errors;
 
-  const tabConfig = IMAGE_TABS.find((t) => t.key === activeTab)!;
+  const tabConfig = IMAGE_TABS.find((tab) => tab.key === activeTab)!;
 
   const { providers, visibleImages, filteredImages, activeProvider } = useMemo(() => {
     const ofType = images.filter((img) => img.type === activeTab);
@@ -140,11 +166,11 @@ export default function ImageSelectorTab({
     // A browser that cannot name the type leaves it empty; the server checks
     // those bytes itself.
     if (file.type && !UPLOAD_TYPES.includes(file.type)) {
-      toast.error("Choose a JPEG, PNG or WebP image");
+      toast.error(t("web.item.images.wrongType"));
       return;
     }
     if (file.size > MAX_UPLOAD_BYTES) {
-      toast.error("Images can be at most 10 MiB");
+      toast.error(t("web.item.images.tooLarge"));
       return;
     }
     const type = activeTab;
@@ -169,16 +195,13 @@ export default function ImageSelectorTab({
     <div className="flex h-full flex-col gap-3">
       {/* Info banner */}
       <div className="bg-muted/50 text-muted-foreground shrink-0 rounded-lg px-3 py-2 text-[11px]">
-        Image changes apply immediately and are not affected by Cancel.
+        {t("web.item.images.immediateNotice")}
       </div>
 
       {item.type === "season" && (
         <div className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
           <AlertCircle className="size-3.5 shrink-0" />
-          <span>
-            Only seeing one poster? Check for plugin updates and update TMDB and TVDB to load full
-            season artwork galleries.
-          </span>
+          <span>{t("web.item.images.seasonNotice")}</span>
         </div>
       )}
 
@@ -201,7 +224,7 @@ export default function ImageSelectorTab({
                 : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
-            {tab.label}
+            {t(tab.label)}
           </button>
         ))}
 
@@ -222,7 +245,7 @@ export default function ImageSelectorTab({
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              Textless
+              {t("web.item.images.textless")}
             </button>
           )}
 
@@ -231,7 +254,7 @@ export default function ImageSelectorTab({
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={pending}
-            aria-label={`Upload ${tabConfig.singular}`}
+            aria-label={t(tabConfig.upload)}
             className="text-muted-foreground hover:bg-muted hover:text-foreground flex items-center gap-1 rounded-md px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-50"
           >
             {uploadMutation.isPending ? (
@@ -239,7 +262,9 @@ export default function ImageSelectorTab({
             ) : (
               <Upload className="size-3.5" />
             )}
-            {uploadMutation.isPending ? "Uploading..." : "Upload"}
+            {uploadMutation.isPending
+              ? t("web.item.images.uploading")
+              : t("web.item.images.upload")}
           </button>
           <input
             ref={fileInputRef}
@@ -258,7 +283,7 @@ export default function ImageSelectorTab({
       {providers.length > 1 && (
         <div
           role="group"
-          aria-label="Filter by provider"
+          aria-label={t("web.item.images.filterByProvider")}
           className="flex shrink-0 flex-wrap items-center gap-1"
         >
           {[{ id: null, count: visibleImages.length }, ...providers].map((p) => (
@@ -274,7 +299,7 @@ export default function ImageSelectorTab({
                   : "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
             >
-              {p.id === null ? "All" : p.id.toUpperCase()}
+              {p.id === null ? t("web.item.images.allProviders") : p.id.toUpperCase()}
               <span className="tabular-nums opacity-60">{p.count}</span>
             </button>
           ))}
@@ -286,10 +311,11 @@ export default function ImageSelectorTab({
         <div className="flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400">
           <AlertCircle className="size-3.5 shrink-0" />
           <span>
-            Could not load from{" "}
-            {Object.keys(providerErrors)
-              .map((k) => k.toUpperCase())
-              .join(", ")}
+            {t("web.item.images.providerErrors", {
+              providers: Object.keys(providerErrors)
+                .map((k) => k.toUpperCase())
+                .join(", "),
+            })}
           </span>
         </div>
       )}
@@ -301,12 +327,12 @@ export default function ImageSelectorTab({
         </div>
       ) : isError ? (
         <div className="flex flex-1 items-center justify-center">
-          <p className="text-muted-foreground text-sm">Failed to load images.</p>
+          <p className="text-muted-foreground text-sm">{t("web.item.images.loadFailed")}</p>
         </div>
       ) : filteredImages.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <p className="text-muted-foreground text-sm">
-            {textlessOnly ? "No textless images available." : "No images available."}
+            {textlessOnly ? t("web.item.images.noTextless") : t("web.item.images.noImages")}
           </p>
         </div>
       ) : (
@@ -354,7 +380,7 @@ export default function ImageSelectorTab({
                   {isCurrent && (
                     <div className="bg-primary/90 text-primary-foreground absolute top-1 left-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
                       <Check className="size-2.5" />
-                      Current
+                      {t("web.item.images.current")}
                     </div>
                   )}
 
@@ -388,10 +414,10 @@ export default function ImageSelectorTab({
             {applyMutation.isPending ? (
               <>
                 <Loader2 className="size-4 animate-spin" />
-                Applying...
+                {t("web.item.dialog.applying")}
               </>
             ) : (
-              `Apply ${activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}`
+              t(tabConfig.apply)
             )}
           </Button>
         </div>

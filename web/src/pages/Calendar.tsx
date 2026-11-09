@@ -15,7 +15,7 @@ import { useCalendarWeek } from "@/hooks/queries/calendar";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import WeekNavigator from "@/components/calendar/WeekNavigator";
 import DayGroup from "@/components/calendar/DayGroup";
-import { useAppLanguage } from "@/i18n";
+import { useAppLanguage, useT, type MessageKey } from "@/i18n";
 import { addWeeks, formatDayHeading, getWeekDays, getWeekStart } from "@/lib/calendarWeek";
 import { storage } from "@/utils/storage";
 
@@ -24,10 +24,10 @@ type CalendarFilter = "following" | "popular" | "trending" | "everything";
 // "popular" (server-wide most-watched) is hidden for now — it's sparse until the
 // server has enough watch history. Re-add the entry here and in KNOWN_FILTERS to
 // surface it; the backend filter remains supported.
-const PRESET_OPTIONS: { value: CalendarFilter; label: string }[] = [
-  { value: "following", label: "Following" },
-  { value: "trending", label: "Trending" },
-  { value: "everything", label: "All" },
+const PRESET_OPTIONS: { value: CalendarFilter; label: MessageKey }[] = [
+  { value: "following", label: "web.calendar.presetFollowing" },
+  { value: "trending", label: "web.calendar.presetTrending" },
+  { value: "everything", label: "web.calendar.presetAll" },
 ];
 
 const DEFAULT_PRESET: CalendarFilter = "following";
@@ -67,7 +67,8 @@ function parseCalendarParams(searchParams: URLSearchParams) {
 }
 
 export default function Calendar() {
-  useDocumentTitle("Calendar");
+  const t = useT();
+  useDocumentTitle(t("web.calendar.title"));
   // The day heading comes from a plain helper; follow language changes.
   useAppLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -129,12 +130,14 @@ export default function Calendar() {
       {/* Same horizontal rhythm as Recommendations: one page gutter; MediaCarousel row padding aligns with it */}
       <div className="px-4 pt-4 pb-4 sm:px-6 sm:pt-6 lg:px-10 xl:px-12">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Calendar</h1>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            {t("web.calendar.title")}
+          </h1>
           <div className="flex flex-wrap items-center gap-2">
             {/* Preset pills (desktop) */}
             <div
               role="group"
-              aria-label="Calendar preset"
+              aria-label={t("web.calendar.presetLabel")}
               className="surface-panel-subtle hidden items-center gap-0.5 rounded-full p-1 lg:flex"
             >
               {PRESET_OPTIONS.map((opt) => (
@@ -149,7 +152,7 @@ export default function Calendar() {
                       : "text-muted-foreground hover:bg-surface-hover hover:text-foreground"
                   }`}
                 >
-                  {opt.label}
+                  {t(opt.label)}
                 </button>
               ))}
             </div>
@@ -158,12 +161,12 @@ export default function Calendar() {
             <div className="lg:hidden">
               <Select value={filter} onValueChange={setFilter}>
                 <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[130px] rounded-full text-[12px] font-semibold backdrop-blur-sm sm:text-[13px]">
-                  <SelectValue placeholder="Following" />
+                  <SelectValue placeholder={t("web.calendar.presetFollowing")} />
                 </SelectTrigger>
                 <SelectContent>
                   {PRESET_OPTIONS.map((opt) => (
                     <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
+                      {t(opt.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -174,10 +177,10 @@ export default function Calendar() {
             {libraries.data && libraries.data.length > 1 && (
               <Select value={libraryId ? String(libraryId) : "all"} onValueChange={setLibrary}>
                 <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[120px] rounded-full text-[12px] font-semibold backdrop-blur-sm sm:min-w-[140px] sm:text-[13px]">
-                  <SelectValue placeholder="All Libraries" />
+                  <SelectValue placeholder={t("web.calendar.allLibraries")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Libraries</SelectItem>
+                  <SelectItem value="all">{t("web.calendar.allLibraries")}</SelectItem>
                   {libraries.data.map((lib) => (
                     <SelectItem key={lib.id} value={String(lib.id)}>
                       {lib.name}
@@ -213,11 +216,10 @@ export default function Calendar() {
             className="surface-panel-subtle text-muted-foreground rounded-2xl px-4 py-3 text-[13px]"
             role="status"
           >
-            Nothing scheduled for{" "}
-            <span className="text-foreground font-semibold">
-              {formatDayHeading(activeSelectedDay!)}
-            </span>
-            .
+            {t("web.calendar.nothingScheduledFor", {
+              date: formatDayHeading(activeSelectedDay!),
+              day: (chunks) => <span className="text-foreground font-semibold">{chunks}</span>,
+            })}
           </div>
         </div>
       )}
@@ -240,12 +242,13 @@ export default function Calendar() {
 }
 
 function CalendarSkeleton() {
+  const t = useT();
   return (
     <div className="space-y-6">
       {Array.from({ length: CALENDAR_SKELETON_DAY_ROWS }).map((_, i) => (
         <MediaCarousel
           key={i}
-          title="Loading..."
+          title={t("web.calendar.loading")}
           loading
           skeletonCount={CALENDAR_SKELETON_ITEMS_PER_ROW}
         >
@@ -258,22 +261,22 @@ function CalendarSkeleton() {
 
 // Links in the empty state always lead to the other preset views, never the
 // one on screen. "all" is the legacy spelling of "everything".
-const EMPTY_STATE_LINKS: { value: CalendarFilter; label: string }[] = [
-  { value: "following", label: "Following" },
-  { value: "trending", label: "Trending" },
-  { value: "everything", label: "Show everything" },
+const EMPTY_STATE_LINKS: { value: CalendarFilter; label: MessageKey }[] = [
+  { value: "following", label: "web.calendar.presetFollowing" },
+  { value: "trending", label: "web.calendar.presetTrending" },
+  { value: "everything", label: "web.calendar.showEverything" },
 ];
 
-function calendarEmptyMessage(view: string) {
+function calendarEmptyMessage(view: string): MessageKey {
   switch (view) {
     case "following":
-      return "Nothing upcoming from shows you follow this week.";
+      return "web.calendar.emptyFollowing";
     case "trending":
-      return "Nothing trending this week.";
+      return "web.calendar.emptyTrending";
     case "everything":
-      return "Nothing scheduled this week.";
+      return "web.calendar.emptyEverything";
     default:
-      return "No events this week for this view.";
+      return "web.calendar.emptyFallback";
   }
 }
 
@@ -284,12 +287,13 @@ function CalendarEmpty({
   filter: string;
   onSelectPreset: (f: string) => void;
 }) {
+  const t = useT();
   const view = filter === "all" ? "everything" : filter;
   const links = EMPTY_STATE_LINKS.filter((link) => link.value !== view);
   return (
     <div className="surface-panel flex min-h-[300px] flex-col items-center justify-center gap-3 rounded-[1.8rem] border-0 px-6 py-16 text-center">
       <CalendarDays className="text-muted-foreground h-10 w-10" strokeWidth={1.5} />
-      <p className="text-muted-foreground text-sm">{calendarEmptyMessage(view)}</p>
+      <p className="text-muted-foreground text-sm">{t(calendarEmptyMessage(view))}</p>
       <div className="flex flex-wrap items-center justify-center gap-2">
         {links.map((link) => (
           <Button
@@ -299,7 +303,7 @@ function CalendarEmpty({
             className="text-primary text-sm"
             onClick={() => onSelectPreset(link.value)}
           >
-            {link.label}
+            {t(link.label)}
           </Button>
         ))}
       </div>

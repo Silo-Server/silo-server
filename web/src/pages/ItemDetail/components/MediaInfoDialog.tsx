@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useAppLanguage, useT } from "@/i18n";
 import { buildDetailLine, buildQualitySummary, sortByResolution } from "./VersionFlyout";
 import { buildMediaSpecSections, type MediaSpecSection } from "./mediaSpecSections";
 
@@ -26,6 +27,7 @@ interface MediaInfoDialogProps {
 }
 
 function VersionSpecSheet({ sections }: { sections: MediaSpecSection[] }) {
+  useAppLanguage();
   return (
     <div className="space-y-4">
       {sections.map((section) => (
@@ -57,6 +59,7 @@ export default function MediaInfoDialog({
   title,
   initialFileId,
 }: MediaInfoDialogProps) {
+  const t = useT();
   const sorted = useMemo(() => sortByResolution(versions), [versions]);
   const initialValue = useMemo(() => {
     const target = sorted.find((version) => version.file_id === initialFileId) ?? sorted[0];
@@ -68,7 +71,7 @@ export default function MediaInfoDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-w-2xl flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader className="min-w-0">
-          <DialogTitle>Media Info</DialogTitle>
+          <DialogTitle>{t("web.detail.mediaInfo.title")}</DialogTitle>
           <DialogDescription className="truncate">{title}</DialogDescription>
         </DialogHeader>
 
@@ -80,7 +83,9 @@ export default function MediaInfoDialog({
             <Accordion type="multiple" defaultValue={initialValue ? [initialValue] : []}>
               {sorted.map((version, index) => {
                 const summary =
-                  buildQualitySummary(version) || version.file_name || `Version ${index + 1}`;
+                  buildQualitySummary(version) ||
+                  version.file_name ||
+                  t("web.detail.versions.numbered", { number: String(index + 1) });
                 const detail = buildDetailLine(version);
 
                 return (
@@ -107,7 +112,7 @@ export default function MediaInfoDialog({
           )}
           {sorted.length === 0 && (
             <div className="text-muted-foreground rounded-xl border border-dashed px-4 py-6 text-center text-sm">
-              No media files for this item.
+              {t("web.detail.mediaInfo.noFiles")}
             </div>
           )}
         </div>

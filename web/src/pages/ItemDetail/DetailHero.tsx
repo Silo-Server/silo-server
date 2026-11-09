@@ -4,6 +4,7 @@ import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
 import { HeroBackdropArtwork } from "@/components/HeroBackdropArtwork";
+import { useT } from "@/i18n";
 
 import "./detailLayout.css";
 import DetailOverview from "./components/DetailOverview";
@@ -87,6 +88,7 @@ export default function DetailHero({
   shortHero = false,
   topNav,
 }: DetailHeroProps) {
+  const t = useT();
   const {
     loaded: posterLoaded,
     onLoad: onPosterLoad,
@@ -229,7 +231,7 @@ export default function DetailHero({
                 className={isViewportBounded ? "detail-hero-information" : "contents"}
                 tabIndex={isViewportBounded ? 0 : undefined}
                 role={isViewportBounded ? "region" : undefined}
-                aria-label={isViewportBounded ? "Media details" : undefined}
+                aria-label={isViewportBounded ? t("web.detail.hero.mediaDetailsRegion") : undefined}
               >
                 {context && !eyebrowType && (
                   <div className="detail-hero-context text-muted-foreground mb-4 text-sm font-medium">

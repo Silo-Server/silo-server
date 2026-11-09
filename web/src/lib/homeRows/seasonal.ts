@@ -1,3 +1,6 @@
+import { t } from "@/i18n";
+import { appLanguage } from "@/lib/appLocale";
+
 type Config = Record<string, unknown>;
 
 /** A holiday a user adds to a Seasonal Picks row (the server's SeasonalCustomHoliday). */
@@ -34,32 +37,31 @@ function validMonthDay(value: string): boolean {
   return month >= 1 && month <= 12 && day >= 1 && day <= MONTH_DAYS[month - 1]!;
 }
 
-const MONTH_NAMES = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-function monthDayParts(value: string): [string, number] {
-  return [MONTH_NAMES[Number(value.slice(0, 2)) - 1]!, Number(value.slice(3))];
+/** The month's short name in the interface language ("Oct"), from MM-DD. */
+function monthName(value: string): string {
+  // Mid-month in UTC, so no time zone moves it into another month.
+  const date = new Date(Date.UTC(2000, Number(value.slice(0, 2)) - 1, 15));
+  return new Intl.DateTimeFormat(appLanguage(), { month: "short", timeZone: "UTC" }).format(date);
 }
 
 /** A window in the catalog's style: "Oct 20–Nov 2", or "Oct 15–31" within a month. */
 export function holidayDatesLabel(dates: HolidayDates): string {
-  const [startMonth, startDay] = monthDayParts(dates.start);
-  const [endMonth, endDay] = monthDayParts(dates.end);
-  return startMonth === endMonth && startDay <= endDay
-    ? `${startMonth} ${startDay}–${endDay}`
-    : `${startMonth} ${startDay}–${endMonth} ${endDay}`;
+  const startDay = Number(dates.start.slice(3));
+  const endDay = Number(dates.end.slice(3));
+  const startMonth = monthName(dates.start);
+  const sameMonth = dates.start.slice(0, 2) === dates.end.slice(0, 2) && startDay <= endDay;
+  return sameMonth
+    ? t("web.home.rows.seasonal.datesSameMonth", {
+        month: startMonth,
+        start_day: String(startDay),
+        end_day: String(endDay),
+      })
+    : t("web.home.rows.seasonal.datesSpan", {
+        start_month: startMonth,
+        start_day: String(startDay),
+        end_month: monthName(dates.end),
+        end_day: String(endDay),
+      });
 }
 
 /** A row's own yearly window for a built-in holiday (the server's SeasonalDates). */
@@ -87,7 +89,7 @@ export function themeDatesOf(config: Config): Record<string, HolidayDates> {
 /** Why the server would refuse a holiday's own dates, or null when they're complete. */
 export function holidayDatesProblem(dates: HolidayDates): string | null {
   if (validMonthDay(dates.start) && validMonthDay(dates.end)) return null;
-  return "Enter both dates as MM-DD, or clear them to use the usual dates.";
+  return t("web.home.rows.seasonal.ownDatesInvalid");
 }
 
 function isMDBListList(value: string): boolean {
@@ -115,12 +117,12 @@ function isMDBListList(value: string): boolean {
 
 /** Why the server would refuse this holiday, or null when it's complete. */
 export function customHolidayProblem(holiday: CustomHoliday): string | null {
-  if (holiday.name.trim() === "") return "Give the holiday a name.";
+  if (holiday.name.trim() === "") return t("web.home.rows.seasonal.nameMissing");
   if (!validMonthDay(holiday.start) || !validMonthDay(holiday.end)) {
-    return "Enter the start and end as MM-DD, such as 07-04.";
+    return t("web.home.rows.seasonal.datesInvalid");
   }
   if (!isMDBListList(holiday.list_url)) {
-    return "Use a public MDBList list link (https://mdblist.com/lists/…).";
+    return t("web.home.rows.seasonal.listInvalid");
   }
   return null;
 }

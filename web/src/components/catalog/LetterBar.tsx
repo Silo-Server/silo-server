@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import type { CatalogLetter } from "@/hooks/queries/catalog";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-import { LETTER_BAR_LETTERS, spokenLetter, titleCount } from "./letterIndex";
+import { LETTER_BAR_LETTERS } from "./letterIndex";
 
 export interface LetterBarProps {
   /**
@@ -25,6 +26,9 @@ export interface LetterBarProps {
  * it doesn't pop in after the grid.
  */
 export default function LetterBar({ letters, activeLetter, onJump }: LetterBarProps) {
+  const t = useT();
+  const spokenLetter = (letter: string) =>
+    letter === "#" ? t("web.catalog.letters.numbersAndSymbols") : letter;
   const loading = letters === undefined;
   const byLetter = useMemo(
     () => new Map((letters ?? []).map((letter) => [letter.letter, letter])),
@@ -51,7 +55,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
     const target = byLetter.get(letter);
     if (!target) return;
     onJump(target);
-    setAnnouncement(`Showing titles under ${spokenLetter(letter)}`);
+    setAnnouncement(t("web.catalog.letters.showing", { letter: spokenLetter(letter) }));
   };
 
   const focusLetter = (letter: string | undefined) => {
@@ -112,7 +116,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
   return (
     <div
       role="toolbar"
-      aria-label="Jump to letter"
+      aria-label={t("web.catalog.letters.toolbar")}
       aria-orientation="vertical"
       aria-busy={loading || undefined}
       onKeyDown={onKeyDown}
@@ -155,7 +159,13 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
             aria-label={
               loading
                 ? spokenLetter(letter)
-                : `${spokenLetter(letter)}, ${entry ? titleCount(entry.count) : "no titles"}`
+                : entry
+                  ? t("web.catalog.letters.letterTitles", {
+                      letter: spokenLetter(letter),
+                      count: entry.count,
+                      shown: String(entry.count),
+                    })
+                  : t("web.catalog.letters.letterNoTitles", { letter: spokenLetter(letter) })
             }
             onFocus={() => setFocused(letter)}
             onClick={() => jump(letter)}

@@ -9,6 +9,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/i18n";
 import { titleCount } from "@/lib/homeRows/describe";
 
 /** Most Home rows hold up to 50 titles; the editor has always allowed up to 100. */
@@ -42,6 +43,7 @@ export function MoreOptions({
   /** Kind-specific fields, shown above the common ones. */
   children?: ReactNode;
 }) {
+  const t = useT();
   const id = useId();
   // What the box holds while it is being typed in; it may be blank or out of
   // range for a moment. Only a whole number from 1 to 100 reaches the draft.
@@ -53,30 +55,25 @@ export function MoreOptions({
           <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5">
             <span className="inline-flex items-center gap-2.5 font-semibold">
               <SlidersHorizontal aria-hidden className="text-muted-foreground size-4 self-center" />
-              More options
+              {t("web.home.addRow.more.title")}
             </span>
             <span className="text-muted-foreground text-[13px] font-normal">
-              {summary ? (
-                <>
-                  {summary}
+              {t("web.home.addRow.more.summary", {
+                has_summary: summary ? "yes" : "no",
+                summary: summary ?? "",
+                titles: titleCount(itemLimit),
+                has_hero: onHeroChange ? "yes" : "no",
+                hero: hero
+                  ? webOnly
+                    ? t("web.home.addRow.more.heroWebOnly")
+                    : t("web.home.addRow.more.hero")
+                  : t("web.home.addRow.more.notHero"),
+                dot: (chunks) => (
                   <span aria-hidden className="mx-1.5">
-                    ·
+                    {chunks}
                   </span>
-                </>
-              ) : null}
-              {titleCount(itemLimit)}
-              {onHeroChange ? (
-                <>
-                  <span aria-hidden className="mx-1.5">
-                    ·
-                  </span>
-                  {hero
-                    ? webOnly
-                      ? "the hero banner on the web only"
-                      : "the hero banner"
-                    : "not the hero banner"}
-                </>
-              ) : null}
+                ),
+              })}
             </span>
           </span>
         </AccordionTrigger>
@@ -84,9 +81,9 @@ export function MoreOptions({
           {children}
           <div className="flex items-center justify-between gap-4">
             <div>
-              <Label htmlFor={`${id}-limit`}>Number of titles</Label>
+              <Label htmlFor={`${id}-limit`}>{t("web.home.addRow.more.itemLimit")}</Label>
               <p className="text-muted-foreground mt-1 text-[13px]">
-                The most titles the row shows.
+                {t("web.home.addRow.more.itemLimitHint")}
               </p>
             </div>
             <Input
@@ -109,11 +106,11 @@ export function MoreOptions({
           {onHeroChange ? (
             <div className="border-border/70 flex items-center justify-between gap-4 border-t pt-4">
               <div>
-                <Label htmlFor={`${id}-hero`}>Hero banner</Label>
+                <Label htmlFor={`${id}-hero`}>{t("web.home.addRow.more.heroBanner")}</Label>
                 <p className="text-muted-foreground mt-1 text-[13px]">
                   {onWebOnlyChange
-                    ? "The web shows this row as a banner."
-                    : "The web shows this row as a banner. The apps show it as a regular row."}
+                    ? t("web.home.addRow.more.heroHintWeb")
+                    : t("web.home.addRow.more.heroHint")}
                 </p>
               </div>
               <Switch
@@ -126,11 +123,11 @@ export function MoreOptions({
           {hero && onHeroChange && onWebOnlyChange ? (
             <div className="border-border/70 ml-4 flex items-center justify-between gap-4 border-l-2 pl-4">
               <div>
-                <Label htmlFor={`${id}-apps`}>Show in the apps</Label>
+                <Label htmlFor={`${id}-apps`}>{t("web.home.addRow.more.showInApps")}</Label>
                 <p className="text-muted-foreground mt-1 text-[13px]">
                   {webOnly
-                    ? "Only the web shows this row. The apps don't get it."
-                    : "The apps show this row too."}
+                    ? t("web.home.addRow.more.webOnlyHint")
+                    : t("web.home.addRow.more.appsHint")}
                 </p>
               </div>
               <Switch

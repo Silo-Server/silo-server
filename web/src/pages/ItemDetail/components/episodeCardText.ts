@@ -2,6 +2,7 @@ import type { EpisodeListItem } from "@/api/types";
 import { formatEpisodeCode } from "@/lib/episodeCardLabels";
 import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
+import { t } from "@/i18n";
 
 type EpisodeIdentity = Pick<EpisodeListItem, "season_number" | "episode_number" | "title">;
 
@@ -18,10 +19,17 @@ export function episodeCardTitle(episode: EpisodeIdentity): string {
  * letters of "S01E02".
  */
 export function episodeCardSpokenTitle(episode: EpisodeIdentity): string {
-  const season = episode.season_number === 0 ? "Specials" : `Season ${episode.season_number}`;
-  const code = `${season}, Episode ${episode.episode_number}`;
+  const episodeNumber = String(episode.episode_number);
   const title = episode.title?.trim();
-  return title ? `${code}, ${title}` : code;
+  if (episode.season_number === 0) {
+    return title
+      ? t("web.detail.episodes.spokenSpecialTitled", { episode: episodeNumber, title })
+      : t("web.detail.episodes.spokenSpecial", { episode: episodeNumber });
+  }
+  const season = String(episode.season_number);
+  return title
+    ? t("web.detail.episodes.spokenTitled", { season, episode: episodeNumber, title })
+    : t("web.detail.episodes.spoken", { season, episode: episodeNumber });
 }
 
 /**

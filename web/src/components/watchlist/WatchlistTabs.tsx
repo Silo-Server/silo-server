@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useT } from "@/i18n";
 import {
   parseWatchlistTab,
   WATCHLIST_NOT_IN_LIBRARY_TAB,
@@ -34,6 +35,7 @@ export default function WatchlistTabs({
   count?: number;
   attention: boolean;
 }) {
+  const t = useT();
   return (
     <Tabs value={value} onValueChange={(next) => onValueChange(parseWatchlistTab(next))}>
       <TabsList variant="line" className="border-border w-full justify-start border-b">
@@ -43,7 +45,7 @@ export default function WatchlistTabs({
           aria-controls={panelId(idBase, "library")}
           className="flex-none px-3"
         >
-          In your library
+          {t("web.library.watchlist.inLibraryTab")}
         </TabsTrigger>
         <TabsTrigger
           value={WATCHLIST_NOT_IN_LIBRARY_TAB}
@@ -51,8 +53,8 @@ export default function WatchlistTabs({
           aria-controls={panelId(idBase, WATCHLIST_NOT_IN_LIBRARY_TAB)}
           className="flex-none px-3"
         >
-          <span className="sm:hidden">Not in library</span>
-          <span className="hidden sm:inline">Not in your library yet</span>
+          <span className="sm:hidden">{t("web.library.watchlist.notInLibraryTabShort")}</span>
+          <span className="hidden sm:inline">{t("web.library.watchlist.notInLibraryTab")}</span>
           {count !== undefined && count > 0 ? (
             <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[0.625rem] font-semibold tabular-nums">
               {count}
@@ -65,7 +67,7 @@ export default function WatchlistTabs({
                 data-testid="watchlist-attention-dot"
                 className="ml-1.5 inline-block size-2 rounded-full bg-amber-400"
               />
-              <span className="sr-only">, some need attention</span>
+              <span className="sr-only">{t("web.library.watchlist.needsAttention")}</span>
             </>
           ) : null}
         </TabsTrigger>

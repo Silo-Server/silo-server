@@ -7,6 +7,7 @@ import MediaCardArtwork, {
 import type { BoxSetSummary } from "@/api/types";
 import { boxSetFilmCount, boxSetYears } from "@/lib/boxSets";
 import { buildBoxSetHref } from "@/lib/mediaNavigation";
+import { useAppLanguage, useT } from "@/i18n";
 
 /**
  * The card of a movie box set: one poster for the movies TMDB lists in one
@@ -14,11 +15,17 @@ import { buildBoxSetHref } from "@/lib/mediaNavigation";
  * apart from a single movie and from curated collections.
  */
 export default function BoxSetCard({ boxSet }: { boxSet: BoxSetSummary }) {
+  const t = useT();
+  // The film count comes from a plain helper; follow language changes.
+  useAppLanguage();
   const href = buildBoxSetHref({ id: boxSet.id, libraryId: boxSet.library_id });
   const progress = boxSet.movie_count > 0 ? boxSet.played_count / boxSet.movie_count : 0;
   const meta =
     boxSet.played_count > 0
-      ? `${boxSet.played_count} / ${boxSet.movie_count} watched`
+      ? t("web.detail.boxSet.watchedFraction", {
+          played: String(boxSet.played_count),
+          total: String(boxSet.movie_count),
+        })
       : boxSetYears(boxSet) || boxSetFilmCount(boxSet.movie_count);
 
   return (
@@ -35,7 +42,10 @@ export default function BoxSetCard({ boxSet }: { boxSet: BoxSetSummary }) {
         />
         <ViewTransitionLink
           to={href}
-          aria-label={`${boxSet.title}, box set of ${boxSetFilmCount(boxSet.movie_count)}`}
+          aria-label={t("web.detail.boxSet.cardLabel", {
+            title: boxSet.title,
+            films: boxSetFilmCount(boxSet.movie_count),
+          })}
           className="relative block overflow-hidden rounded-xl"
         >
           <MediaCardArtwork
@@ -46,7 +56,7 @@ export default function BoxSetCard({ boxSet }: { boxSet: BoxSetSummary }) {
             scrim="background"
           >
             <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
-              Box set
+              {t("web.detail.boxSet.label")}
             </span>
             <span className="bg-background/60 text-foreground absolute right-2 bottom-2.5 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
               {boxSetFilmCount(boxSet.movie_count)}
@@ -54,7 +64,7 @@ export default function BoxSetCard({ boxSet }: { boxSet: BoxSetSummary }) {
             {progress > 0 ? (
               <div
                 role="progressbar"
-                aria-label="Films watched"
+                aria-label={t("web.detail.boxSet.filmsWatched")}
                 aria-valuemin={0}
                 aria-valuemax={boxSet.movie_count}
                 aria-valuenow={boxSet.played_count}

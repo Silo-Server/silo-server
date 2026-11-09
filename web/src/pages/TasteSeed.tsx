@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import DefaultArtwork from "@/components/DefaultArtwork";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/useAuth";
+import { useT } from "@/i18n";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import type { SectionItem } from "@/api/types";
@@ -17,7 +18,8 @@ export default function TasteSeed() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { profile } = useAuth();
-  useDocumentTitle("Pick what you love");
+  const t = useT();
+  useDocumentTitle(t("web.home.tasteSeed.title"));
 
   const isReturning = searchParams.get("from") === "settings";
   // Finishing the picker opens the recommendations it just shaped; skipping
@@ -108,7 +110,7 @@ export default function TasteSeed() {
 
   const handleSubmit = useCallback(async () => {
     if (selected.size < MIN_PICKS) {
-      toast.error(`Pick at least ${MIN_PICKS} to continue`);
+      toast.error(t("web.home.tasteSeed.minPicks", { count: MIN_PICKS }));
       return;
     }
     // Only submit IDs that aren't already favorited — the server will skip
@@ -133,16 +135,12 @@ export default function TasteSeed() {
       if (profile) {
         setTasteSeedDismissed(profile.id);
       }
-      toast.success(
-        result.added === 1
-          ? "Added 1 favorite — personalizing your recommendations"
-          : `Added ${result.added} favorites — personalizing your recommendations`,
-      );
+      toast.success(t("web.home.tasteSeed.added", { count: result.added }));
       navigate(donePath, { replace: true });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save your picks");
+      toast.error(err instanceof Error ? err.message : t("web.home.tasteSeed.saveFailed"));
     }
-  }, [selected, items, submit, navigate, profile, donePath]);
+  }, [selected, items, submit, navigate, profile, donePath, t]);
 
   const submitDisabled = selected.size < MIN_PICKS || submit.isPending;
 
@@ -154,26 +152,31 @@ export default function TasteSeed() {
           <div className="min-w-0 flex-1">
             <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight sm:text-2xl">
               <Sparkles className="text-primary h-5 w-5" aria-hidden="true" />
-              Pick what you love
+              {t("web.home.tasteSeed.title")}
             </h1>
             <p className="text-muted-foreground mt-0.5 text-sm">
               {selected.size === 0
-                ? `Select at least ${MIN_PICKS} titles to personalize your recommendations`
-                : `${selected.size} selected${selected.size < MIN_PICKS ? ` — ${MIN_PICKS - selected.size} more to continue` : ""}`}
+                ? t("web.home.tasteSeed.prompt", { count: MIN_PICKS })
+                : selected.size < MIN_PICKS
+                  ? t("web.home.tasteSeed.selectedCountMore", {
+                      remaining: MIN_PICKS - selected.size,
+                      count: String(selected.size),
+                    })
+                  : t("web.home.tasteSeed.selectedCount", { count: selected.size })}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button variant="ghost" onClick={handleSkip} disabled={submit.isPending}>
-              {isReturning ? "Cancel" : "Skip"}
+              {isReturning ? t("common.cancel") : t("web.home.tasteSeed.skip")}
             </Button>
             <Button onClick={handleSubmit} disabled={submitDisabled}>
               {submit.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
+                  {t("web.home.tasteSeed.saving")}
                 </>
               ) : (
-                "Done"
+                t("web.home.tasteSeed.done")
               )}
             </Button>
           </div>
@@ -185,12 +188,10 @@ export default function TasteSeed() {
           <TasteSeedGridSkeleton />
         ) : items.length === 0 ? (
           <div className="text-muted-foreground flex flex-col items-center gap-3 py-24 text-center">
-            <p className="text-base font-medium">No items to show yet</p>
-            <p className="text-sm">
-              Once your library has matched content, you'll see popular titles here.
-            </p>
+            <p className="text-base font-medium">{t("web.home.tasteSeed.emptyTitle")}</p>
+            <p className="text-sm">{t("web.home.tasteSeed.emptyBody")}</p>
             <Button variant="ghost" className="mt-4" onClick={handleSkip}>
-              Continue
+              {t("web.home.tasteSeed.continue")}
             </Button>
           </div>
         ) : (
@@ -198,7 +199,7 @@ export default function TasteSeed() {
             <div
               role="listbox"
               aria-multiselectable="true"
-              aria-label="Popular titles to choose from"
+              aria-label={t("web.home.tasteSeed.gridLabel")}
               className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
             >
               {items.map((item) => (
@@ -215,12 +216,12 @@ export default function TasteSeed() {
             {isFetchingNextPage && (
               <div className="text-muted-foreground flex justify-center py-4 text-sm">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Loading more
+                {t("web.home.tasteSeed.loadingMore")}
               </div>
             )}
             {!hasNextPage && !isFetching && items.length > 0 && (
               <p className="text-muted-foreground py-6 text-center text-xs">
-                That's everything popular on this server.
+                {t("web.home.tasteSeed.end")}
               </p>
             )}
           </>
@@ -239,6 +240,7 @@ function TasteSeedCard({
   selected: boolean;
   onToggle: (contentId: string) => void;
 }) {
+  const t = useT();
   const [loaded, setLoaded] = useState(false);
   // Keyed by URL so a re-signed poster is tried again.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
@@ -249,7 +251,10 @@ function TasteSeedCard({
       type="button"
       role="option"
       aria-selected={selected}
-      aria-label={selected ? `Deselect ${item.title}` : `Select ${item.title}`}
+      aria-label={t(
+        selected ? "web.home.tasteSeed.deselectTitle" : "web.home.tasteSeed.selectTitle",
+        { title: item.title },
+      )}
       onClick={() => onToggle(item.content_id)}
       className="group focus-visible:ring-ring relative block overflow-hidden rounded-xl text-left focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
     >

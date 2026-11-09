@@ -6,6 +6,7 @@ import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { extraKindGroupLabel } from "@/lib/extraKinds";
 import { formatClock } from "@/lib/markers";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { useAppLanguage, useT } from "@/i18n";
 
 interface ExtrasSectionProps {
   extras: ItemExtra[];
@@ -17,6 +18,7 @@ interface ExtrasSectionProps {
  * is a first-class watch target.
  */
 export default function ExtrasSection({ extras }: ExtrasSectionProps) {
+  const t = useT();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
   const currentHref = `${location.pathname}${location.search}`;
@@ -49,7 +51,9 @@ export default function ExtrasSection({ extras }: ExtrasSectionProps) {
 
   return (
     <div>
-      <h2 className="mb-5 text-xl font-semibold tracking-tight">Extras</h2>
+      <h2 className="mb-5 text-xl font-semibold tracking-tight">
+        {t("web.detail.extras.heading")}
+      </h2>
       <div className="space-y-6">
         {groups.map(([kind, groupExtras]) => (
           <div key={kind}>
@@ -74,6 +78,7 @@ export default function ExtrasSection({ extras }: ExtrasSectionProps) {
 }
 
 function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) {
+  useAppLanguage();
   const title = extra.title || extraKindGroupLabel(extra.kind);
   const thumbhashUrl = extra.still_thumbhash ? decodeThumbhash(extra.still_thumbhash) : "";
   // A still that fails to load (an expired URL, a deleted file) falls back to

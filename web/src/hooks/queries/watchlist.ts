@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { v2 } from "@/api/v2/request";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import {
   cancelItemDetailQueries,
   scheduleMediaSurfaceInvalidation,
@@ -50,10 +51,14 @@ export function useToggleWatchlist(itemId: string) {
           in_watchlist: currentlyInWatchlist,
         },
       }));
-      toast.error("Failed to update watchlist");
+      toast.error(t("web.library.watchlist.updateFailed"));
     },
     onSuccess: (_data, currentlyInWatchlist) => {
-      toast.success(currentlyInWatchlist ? "Removed from watchlist" : "Added to watchlist");
+      toast.success(
+        currentlyInWatchlist
+          ? t("web.library.watchlist.removed")
+          : t("web.library.watchlist.added"),
+      );
     },
     onSettled: () => {
       scheduleMediaSurfaceInvalidation(queryClient, {

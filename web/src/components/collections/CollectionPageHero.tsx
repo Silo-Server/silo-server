@@ -6,6 +6,7 @@ import {
   CollectionPageActions,
 } from "@/components/collections/CollectionPageActions";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
+import { useT } from "@/i18n";
 import type { CollectionPageAccess } from "@/hooks/useCollectionPageAccess";
 import type { CollectionPageHeader } from "@/hooks/useCollectionPageHeader";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,7 @@ export function CollectionPageHero({
   libraryId,
   shuffle,
 }: CollectionPageHeroProps) {
+  const t = useT();
   const backdrop =
     header.status === "ready" && (header.backdropUrl || header.backdropThumbhash) ? header : null;
   useAmbientColor(backdrop?.backdropThumbhash);
@@ -109,7 +111,7 @@ export function CollectionPageHero({
             className="pill pill-primary focus-visible:ring-ring/50 flex-1 outline-none focus-visible:ring-[3px] disabled:pointer-events-none disabled:opacity-60 sm:flex-none [&_svg]:size-4"
           >
             <Shuffle aria-hidden="true" />
-            Shuffle
+            {t("web.catalog.page.shuffle")}
           </button>
         ) : null}
         <CollectionPageActions access={access} libraryId={libraryId} />

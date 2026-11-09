@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Sparkles, RefreshCw } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
+import { useT, type MessageKey } from "@/i18n";
 
 /** Rows built from the profile's own history; the others are shared rows. */
 const PERSONAL_ROW_TYPES = new Set(["cluster", "similar_users_liked"]);
@@ -16,10 +17,10 @@ const PERSONAL_ROW_TYPES = new Set(["cluster", "similar_users_liked"]);
  * The page's subtitle. A profile with no personal row yet sees the default
  * rows, so it is not told they come from its history.
  */
-function pageSubtitle(rows: DiscoverRow[]): string {
+function pageSubtitle(rows: DiscoverRow[]): MessageKey {
   return rows.some((row) => PERSONAL_ROW_TYPES.has(row.type))
-    ? "Personalized picks based on your viewing history and ratings."
-    : "Highly rated and recently added titles from your library. Watch and rate titles to personalize this page.";
+    ? "web.recommendations.subtitlePersonal"
+    : "web.recommendations.subtitleDefault";
 }
 
 function buildSectionHref(row: DiscoverRow): string | undefined {
@@ -40,6 +41,7 @@ function TasteProfileCard({
     | undefined;
   isLoading: boolean;
 }) {
+  const t = useT();
   if (isLoading) {
     return (
       <div className="glass-subtle space-y-3 rounded-xl p-5">
@@ -55,12 +57,12 @@ function TasteProfileCard({
 
   return (
     <div className="glass-subtle space-y-4 rounded-xl p-5">
-      <h2 className="text-base font-semibold">Your Taste Profile</h2>
+      <h2 className="text-base font-semibold">{t("web.recommendations.tasteProfile")}</h2>
 
       {profile.top_genres.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Top Genres
+            {t("web.recommendations.topGenres")}
           </p>
           <div className="flex flex-wrap gap-1.5">
             {profile.top_genres.map((genre) => (
@@ -78,7 +80,7 @@ function TasteProfileCard({
       {profile.favorite_directors.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Favorite Directors
+            {t("web.recommendations.favoriteDirectors")}
           </p>
           <div className="flex flex-wrap gap-1.5">
             {profile.favorite_directors.map((director) => (
@@ -97,13 +99,14 @@ function TasteProfileCard({
 }
 
 function DiscoverEmptyState() {
+  const t = useT();
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
       <Sparkles className="text-muted-foreground/50 h-10 w-10" />
       <div className="space-y-1">
-        <p className="text-sm font-medium">Nothing to show yet</p>
+        <p className="text-sm font-medium">{t("web.recommendations.emptyTitle")}</p>
         <p className="text-muted-foreground max-w-sm text-xs">
-          Movies and series appear here once your libraries have titles you can watch.
+          {t("web.recommendations.emptyBody")}
         </p>
       </div>
     </div>
@@ -111,15 +114,16 @@ function DiscoverEmptyState() {
 }
 
 function DiscoverErrorState({ onRetry }: { onRetry: () => void }) {
+  const t = useT();
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
-      <p className="text-muted-foreground text-sm">Failed to load recommendations.</p>
+      <p className="text-muted-foreground text-sm">{t("web.recommendations.loadFailed")}</p>
       <button
         onClick={onRetry}
         className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
       >
         <RefreshCw className="h-4 w-4" />
-        Retry
+        {t("common.retry")}
       </button>
     </div>
   );
@@ -151,7 +155,8 @@ function DiscoverSkeletons({ posterWidthClasses }: { posterWidthClasses: string 
 export default function Recommendations() {
   // The viewer-facing name, as on the native apps; admin and setup screens
   // keep "Recommendations" for the server feature.
-  useDocumentTitle("For You");
+  const t = useT();
+  useDocumentTitle(t("web.recommendations.title"));
 
   const tasteProfileQuery = useTasteProfile();
   const { data, isLoading, isError, refetch } = useDiscover();
@@ -168,10 +173,10 @@ export default function Recommendations() {
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">
-              For You
+              {t("web.recommendations.title")}
             </h1>
             {rows.length > 0 && (
-              <p className="text-muted-foreground mt-1 text-sm">{pageSubtitle(rows)}</p>
+              <p className="text-muted-foreground mt-1 text-sm">{t(pageSubtitle(rows))}</p>
             )}
           </div>
           <TasteProfileCard

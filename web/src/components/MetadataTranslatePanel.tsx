@@ -14,6 +14,7 @@ import {
 } from "@/hooks/queries/items";
 import { useMetadataAIStatus } from "@/hooks/queries/metadataAI";
 import { invalidateMediaSurfaceQueries } from "@/hooks/queries/mediaSurfaceRefresh";
+import { useT } from "@/i18n";
 import { languageOptions } from "@/player/utils/languageNames";
 
 function isActive(job: MetadataTranslationJob): boolean {
@@ -28,6 +29,7 @@ function isActive(job: MetadataTranslationJob): boolean {
  * other way around. Rendered only when the server has metadata AI enabled.
  */
 export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data: status } = useMetadataAIStatus();
   const enabled = Boolean(status?.enabled);
@@ -56,29 +58,33 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
     if (lastJob.status === "completed") {
       toast.success(
         lastJob.fields_total === 0
-          ? "Nothing to translate — all descriptions are already localized."
-          : `Translated ${lastJob.fields_done} description${lastJob.fields_done === 1 ? "" : "s"}.`,
+          ? t("web.item.translate.nothingToTranslate")
+          : t("web.item.translate.translated", {
+              count: lastJob.fields_done,
+              field_count: String(lastJob.fields_done),
+            }),
       );
       void invalidateMediaSurfaceQueries(queryClient, { itemId: item.content_id });
     } else if (lastJob.status === "failed") {
-      toast.error(lastJob.error_message || "Translation failed.");
+      toast.error(lastJob.error_message || t("web.item.translate.failed"));
     }
-  }, [activeJob, lastJob, queryClient, item.content_id]);
+  }, [activeJob, lastJob, queryClient, item.content_id, t]);
 
   if (!enabled) return null;
 
   const busy = translateMutation.isPending || Boolean(activeJob);
   const translatesChildren = item.type === "series";
-  const description =
+  const description = t(
     item.type === "series"
-      ? "Translates the overview and tagline plus all season and episode overviews"
+      ? "web.item.translate.bodySeries"
       : item.type === "movie"
-        ? "Translates the overview and tagline"
-        : "Translates the overview";
+        ? "web.item.translate.bodyMovie"
+        : "web.item.translate.bodyOther",
+  );
 
   function start() {
     if (!targetLang) {
-      toast.error("Pick a target language first.");
+      toast.error(t("web.item.translate.pickLanguage"));
       return;
     }
     translateMutation.mutate(
@@ -91,16 +97,13 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
     <div className="border-border bg-muted/30 space-y-3 rounded-md border px-3 py-3">
       <div className="flex items-center gap-2">
         <Languages className="text-muted-foreground h-4 w-4" />
-        <span className="text-sm font-medium">Translate with AI</span>
+        <span className="text-sm font-medium">{t("web.item.translate.heading")}</span>
       </div>
-      <p className="text-muted-foreground text-xs">
-        {description} into the chosen language. Descriptions a provider or a person already supplied
-        in that language are kept, and provider data replaces AI text when it becomes available.
-      </p>
+      <p className="text-muted-foreground text-xs">{description}</p>
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <Label htmlFor="translate-target" className="text-xs">
-            Language
+            {t("web.item.translate.language")}
           </Label>
           <select
             id="translate-target"
@@ -109,7 +112,7 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
             onChange={(e) => setTargetLang(e.target.value)}
             disabled={busy}
           >
-            <option value="">Select…</option>
+            <option value="">{t("web.item.translate.selectLanguage")}</option>
             {languageOptions().map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {lang.label}
@@ -120,18 +123,24 @@ export function MetadataTranslatePanel({ item }: { item: ItemDetail }) {
         <div className="flex h-9 items-center gap-2">
           <Switch id="translate-force" checked={force} onCheckedChange={setForce} disabled={busy} />
           <Label htmlFor="translate-force" className="text-xs">
-            Re-translate AI text
+            {t("web.item.translate.force")}
           </Label>
         </div>
         <Button type="button" size="sm" onClick={start} disabled={busy}>
-          {busy ? "Translating…" : "Translate"}
+          {busy ? t("web.item.translate.translating") : t("web.item.translate.translate")}
         </Button>
       </div>
       {activeJob && (
         <p className="text-muted-foreground text-xs">
-          {activeJob.progress_message || "Working"}…{" "}
-          {activeJob.fields_total > 0 &&
-            `${activeJob.fields_done}/${activeJob.fields_total} fields`}
+          {activeJob.fields_total > 0
+            ? t("web.item.translate.statusWithFields", {
+                status: activeJob.progress_message || t("web.item.translate.working"),
+                done: String(activeJob.fields_done),
+                total: String(activeJob.fields_total),
+              })
+            : t("web.item.translate.status", {
+                status: activeJob.progress_message || t("web.item.translate.working"),
+              })}
         </p>
       )}
     </div>

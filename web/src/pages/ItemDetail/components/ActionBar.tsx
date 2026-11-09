@@ -44,6 +44,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useT, type Translate } from "@/i18n";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -300,7 +301,7 @@ export default function ActionBar({
   secondaryActions,
   links,
   playHref,
-  playLabel = "Play",
+  playLabel: playLabelProp,
   playProgress,
   restartHref,
   onMarkUnwatched,
@@ -317,7 +318,7 @@ export default function ActionBar({
   onToggleNotInterested,
   notInterested = false,
   onAllowForProfiles,
-  allowForLabel = "Allow for…",
+  allowForLabel: allowForLabelProp,
   onRefresh,
   isRefreshing = false,
   onRedetectMarkers,
@@ -356,6 +357,10 @@ export default function ActionBar({
   subtitleMode,
   showForcedSubtitles,
 }: ActionBarProps) {
+  const t = useT();
+  const resumeLabel = t("web.detail.actions.resume");
+  const playLabel = playLabelProp ?? t("web.detail.actions.play");
+  const allowForLabel = allowForLabelProp ?? t("web.detail.actions.allowFor");
   const navigate = useNavigate();
   const location = useLocation();
   const playbackController = useWatchPlaybackController();
@@ -385,13 +390,13 @@ export default function ActionBar({
   const showMarkerEditor = canEditMarkers && !!contentId;
   const hasMultipleVersions = (playbackVariants?.length ?? 0) > 1 || (versions?.length ?? 0) > 1;
   const showPlayChoiceDialog =
-    !hasMultipleVersions && playLabel === "Resume" && !!playHref && !!restartHref;
-  const displayedPlayLabel = showPlayChoiceDialog ? "Play" : playLabel;
+    !hasMultipleVersions && playLabel === resumeLabel && !!playHref && !!restartHref;
+  const displayedPlayLabel = showPlayChoiceDialog ? t("web.detail.actions.play") : playLabel;
   const playText = compactMobile ? (
     <>
       <span className="detail-full-label">{displayedPlayLabel}</span>
       <span className="detail-short-label">
-        {displayedPlayLabel === "Resume" ? "Resume" : "Play"}
+        {displayedPlayLabel === resumeLabel ? resumeLabel : t("web.detail.actions.play")}
       </span>
     </>
   ) : (
@@ -713,7 +718,7 @@ export default function ActionBar({
     onShuffle && (
       <DetailOverflowMenuItem key="shuffle" closeMenu={closeOverflowMenu} onAction={onShuffle}>
         <Shuffle className="size-4" />
-        Shuffle
+        {t("web.detail.actions.shuffle")}
       </DetailOverflowMenuItem>
     ),
     showRestartInMenu && (
@@ -723,7 +728,7 @@ export default function ActionBar({
         onAction={handleRestartPlayback}
       >
         <RotateCcw className="size-4" />
-        Play from Beginning
+        {t("web.detail.actions.playFromBeginning")}
       </DetailOverflowMenuItem>
     ),
     onMarkUnwatched && (
@@ -733,7 +738,7 @@ export default function ActionBar({
         onAction={onMarkUnwatched}
       >
         <Eye className="size-4" />
-        Mark Unwatched
+        {t("web.detail.actions.markUnwatched")}
       </DetailOverflowMenuItem>
     ),
   ];
@@ -745,7 +750,9 @@ export default function ActionBar({
         onAction={onToggleWatchlist}
       >
         {inWatchlist ? <Check className="size-4" /> : <Plus className="size-4" />}
-        {inWatchlist ? "Remove from Watchlist" : "Add to Watchlist"}
+        {inWatchlist
+          ? t("web.detail.actions.removeFromWatchlist")
+          : t("web.detail.actions.addToWatchlist")}
       </DetailOverflowMenuItem>
     ),
     contentId && canAddToCollection && (
@@ -755,13 +762,13 @@ export default function ActionBar({
         onAction={() => setAddToCollectionOpen(true)}
       >
         <FolderPlus className="size-4" />
-        Add to Collection
+        {t("web.detail.actions.addToCollection")}
       </DetailOverflowMenuItem>
     ),
     onDownload && (
       <DetailOverflowMenuItem key="download" closeMenu={closeOverflowMenu} onAction={onDownload}>
         <Download className="size-4" />
-        Download
+        {t("web.detail.actions.download")}
       </DetailOverflowMenuItem>
     ),
     onRequestSeasons && (
@@ -771,7 +778,7 @@ export default function ActionBar({
         onAction={onRequestSeasons}
       >
         <Inbox className="size-4" />
-        Request Seasons
+        {t("web.detail.actions.requestSeasons")}
       </DetailOverflowMenuItem>
     ),
     onToggleNotInterested && (
@@ -781,7 +788,9 @@ export default function ActionBar({
         onAction={onToggleNotInterested}
       >
         <ThumbsDown className={cn("size-4", notInterested && "fill-current")} />
-        {notInterested ? "Show in Recommendations" : "Not Interested"}
+        {notInterested
+          ? t("web.detail.actions.showInRecommendations")
+          : t("web.detail.actions.notInterested")}
       </DetailOverflowMenuItem>
     ),
     onAllowForProfiles && (
@@ -803,7 +812,7 @@ export default function ActionBar({
           onAction={watchTogether.onStartParty}
         >
           <UsersRound className="size-4" />
-          Start a Watch Party
+          {t("web.detail.actions.startWatchParty")}
         </DetailOverflowMenuItem>,
         watchTogether.liveRoom && (
           <DetailOverflowMenuItem
@@ -812,7 +821,7 @@ export default function ActionBar({
             onAction={watchTogether.liveRoom.onSuggest}
           >
             <Hand className="size-4" />
-            Suggest to {watchTogether.liveRoom.code}
+            {t("web.detail.actions.suggestToRoom", { code: watchTogether.liveRoom.code })}
           </DetailOverflowMenuItem>
         ),
         watchTogether.liveRoom?.onPlay && (
@@ -822,7 +831,7 @@ export default function ActionBar({
             onAction={watchTogether.liveRoom.onPlay}
           >
             <Zap className="size-4" />
-            Play in {watchTogether.liveRoom.code}
+            {t("web.detail.actions.playInRoom", { code: watchTogether.liveRoom.code })}
           </DetailOverflowMenuItem>
         ),
       ]
@@ -836,13 +845,13 @@ export default function ActionBar({
           onAction={onEditMetadata}
         >
           <MediaActionIcon action="editMetadata" />
-          Edit Metadata
+          {t("web.detail.actions.editMetadata")}
         </DetailOverflowMenuItem>
       ),
       canCurateMetadata && onMatchItem && (
         <DetailOverflowMenuItem key="match" closeMenu={closeOverflowMenu} onAction={onMatchItem}>
           <MediaActionIcon action="matchItem" />
-          Match Item
+          {t("web.detail.actions.matchItem")}
         </DetailOverflowMenuItem>
       ),
       canCurateMetadata && onRefresh && (
@@ -853,7 +862,7 @@ export default function ActionBar({
           onAction={() => setRefreshDialogOpen(true)}
         >
           <MediaActionIcon action="refreshMetadata" isPending={isRefreshing} />
-          Refresh Metadata
+          {t("web.detail.actions.refreshMetadata")}
         </DetailOverflowMenuItem>
       ),
     ],
@@ -865,7 +874,7 @@ export default function ActionBar({
           onAction={() => setMarkerEditorOpen(true)}
         >
           <Tags className="size-4" />
-          Edit Markers
+          {t("web.detail.actions.editMarkers")}
         </DetailOverflowMenuItem>
       ),
       isAdmin && onRedetectMarkers && (
@@ -879,10 +888,10 @@ export default function ActionBar({
         >
           <RefreshCw className={`size-4 ${isRedetectingMarkers ? "animate-spin" : ""}`} />
           {redetectKind === "credits"
-            ? "Re-detect Credits"
+            ? t("web.detail.actions.redetectCredits")
             : redetectKind === "intro"
-              ? "Re-detect Intro Markers"
-              : "Re-detect Markers"}
+              ? t("web.detail.actions.redetectIntro")
+              : t("web.detail.actions.redetectMarkers")}
         </DetailOverflowMenuItem>
       ),
       showTrickplay && (
@@ -892,13 +901,13 @@ export default function ActionBar({
           onAction={() => setTrickplayOpen(true)}
         >
           <GalleryHorizontal className="size-4" />
-          Seek Previews
+          {t("web.detail.actions.seekPreviews")}
         </DetailOverflowMenuItem>
       ),
       canCurateMetadata && onSplitItem && (
         <DetailOverflowMenuItem key="split" closeMenu={closeOverflowMenu} onAction={onSplitItem}>
           <Scissors className="size-4" />
-          Split Versions
+          {t("web.detail.actions.splitVersions")}
         </DetailOverflowMenuItem>
       ),
     ],
@@ -910,7 +919,7 @@ export default function ActionBar({
           onAction={onShowMediaInfo}
         >
           <Info className="size-4" />
-          Media Info
+          {t("web.detail.mediaInfo.title")}
         </DetailOverflowMenuItem>
       ),
       isAdmin && contentId && (
@@ -920,7 +929,7 @@ export default function ActionBar({
           onAction={() => navigate(`/admin/history?media_item_id=${encodeURIComponent(contentId)}`)}
         >
           <MediaActionIcon action="viewPlayHistory" />
-          View Play History
+          {t("web.detail.actions.viewPlayHistory")}
         </DetailOverflowMenuItem>
       ),
     ],
@@ -944,7 +953,7 @@ export default function ActionBar({
             onAction={() => openManageMenu(true)}
           >
             <Wrench className="size-4" />
-            Manage
+            {t("web.detail.actions.manage")}
             <ChevronRight className="ml-auto size-4" />
           </DetailOverflowMenuItem>,
         ]
@@ -974,7 +983,7 @@ export default function ActionBar({
         ? Math.round((resumePositionSeconds / resumeDurationSeconds) * 100)
         : null;
   const dialogDescription = showPlayChoiceDialog
-    ? buildPlayChoiceDescription(formattedResumeTime, percentComplete)
+    ? buildPlayChoiceDescription(t, formattedResumeTime, percentComplete)
     : "";
 
   // When a version is explicitly selected (multi-version), play it directly.
@@ -1094,7 +1103,9 @@ export default function ActionBar({
               <>
                 <span className="detail-full-label">{watchedLabel}</span>
                 <span className="detail-short-label">
-                  {isWatched ? "Mark Unwatched" : "Mark Watched"}
+                  {isWatched
+                    ? t("web.detail.actions.markUnwatched")
+                    : t("web.detail.actions.markWatched")}
                 </span>
               </>
             ) : (
@@ -1109,8 +1120,14 @@ export default function ActionBar({
             variant="glass"
             size="icon-lg"
             onClick={onToggleFavorite}
-            title={isFavorite ? "Unfavorite" : "Favorite"}
-            aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+            title={
+              isFavorite ? t("web.detail.actions.unfavorite") : t("web.detail.actions.favorite")
+            }
+            aria-label={
+              isFavorite
+                ? t("web.detail.actions.removeFromFavorites")
+                : t("web.detail.actions.addToFavorites")
+            }
             className={`${staticGlassActionClass} detail-secondary-action size-11 cursor-pointer rounded-full`}
           >
             <Heart
@@ -1130,8 +1147,8 @@ export default function ActionBar({
             ref={overflowTriggerRef}
             variant="glass"
             size="icon-lg"
-            title="More"
-            aria-label="More actions"
+            title={t("web.detail.actions.more")}
+            aria-label={t("web.detail.actions.moreActions")}
             aria-haspopup="menu"
             aria-expanded={overflowOpen}
             aria-controls={overflowOpen ? overflowMenuId : undefined}
@@ -1166,12 +1183,20 @@ export default function ActionBar({
                       onAction={onToggleFavorite}
                     >
                       <Heart className="size-4" />
-                      {isFavorite ? "Remove from favorites" : "Add to favorites"}
+                      {isFavorite
+                        ? t("web.detail.actions.removeFromFavorites")
+                        : t("web.detail.actions.addToFavorites")}
                     </DetailOverflowMenuItem>
                   )}
                   {onRatingChange && (
-                    <div className="px-2 py-2" role="group" aria-label="Your rating">
-                      <span className="mb-2 block text-sm">Your rating</span>
+                    <div
+                      className="px-2 py-2"
+                      role="group"
+                      aria-label={t("web.detail.actions.yourRating")}
+                    >
+                      <span className="mb-2 block text-sm">
+                        {t("web.detail.actions.yourRating")}
+                      </span>
                       {/* ArrowUp/ArrowDown keep moving through the menu; only
                               ArrowLeft/ArrowRight change the rating here. */}
                       <StarRating
@@ -1204,7 +1229,7 @@ export default function ActionBar({
               }}
               className={overflowMenuClass}
               role="menu"
-              aria-label="Manage"
+              aria-label={t("web.detail.actions.manage")}
               onKeyDown={handleOverflowKeyDown}
             >
               <DetailOverflowGroups groups={manageGroups} />
@@ -1215,7 +1240,9 @@ export default function ActionBar({
           <Dialog open={playChoiceOpen} onOpenChange={setPlayChoiceOpen}>
             <DialogContent className="max-w-xs gap-3 p-5">
               <DialogHeader className="gap-1.5">
-                <DialogTitle className="text-base">Resume Playback?</DialogTitle>
+                <DialogTitle className="text-base">
+                  {t("web.detail.actions.resumeDialogTitle")}
+                </DialogTitle>
                 <DialogDescription className="text-xs">{dialogDescription}</DialogDescription>
               </DialogHeader>
               <div className="grid gap-2">
@@ -1224,7 +1251,7 @@ export default function ActionBar({
                   className="h-9 justify-start gap-2.5 px-3 text-sm"
                 >
                   <Play className="size-3.5 fill-current" />
-                  Resume at {formattedResumeTime}
+                  {t("web.detail.actions.resumeAt", { time: formattedResumeTime })}
                 </Button>
                 <Button
                   variant="outline"
@@ -1232,7 +1259,7 @@ export default function ActionBar({
                   className="h-9 justify-start gap-2.5 px-3 text-sm"
                 >
                   <RotateCcw className="size-3.5" />
-                  Play from Beginning
+                  {t("web.detail.actions.playFromBeginning")}
                 </Button>
               </div>
             </DialogContent>
@@ -1338,12 +1365,16 @@ function formatPlaybackTime(totalSeconds: number): string {
 }
 
 function buildPlayChoiceDescription(
+  t: Translate,
   formattedResumeTime: string,
   percentComplete: number | null,
 ): string {
   if (percentComplete != null && percentComplete > 0) {
-    return `You're ${formattedResumeTime} in, about ${percentComplete}% through.`;
+    return t("web.detail.actions.resumeDescriptionPercent", {
+      time: formattedResumeTime,
+      percent: String(percentComplete),
+    });
   }
 
-  return `You're ${formattedResumeTime} in. Resume where you left off or start over.`;
+  return t("web.detail.actions.resumeDescription", { time: formattedResumeTime });
 }

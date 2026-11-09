@@ -20,6 +20,7 @@ import {
 } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { useOptionalAuth } from "@/hooks/useAuth";
+import { useAppLanguage } from "@/i18n";
 import { collectionKind, profilePageName, type CollectionSummary } from "@/lib/homeRows/describe";
 import { pageLabel } from "@/lib/homeRows/pages";
 import type { HomeRow } from "@/lib/homeRows/types";
@@ -80,7 +81,7 @@ export default function HomeScreenSettings() {
   const { data: libraries } = useUserLibraries();
   const focus = useRowFocus(adapter.rows, adapter.pending);
   const label = pageLabel(adapter.page, adapter.pages);
-  const pageName = profilePageName(label);
+  const pageName = profilePageName(adapter.page, label);
   const layoutExport = useHomeLayoutExport();
   const [importOpen, setImportOpen] = useState(false);
   const [rowDialog, setRowDialog] = useRowDialog();
@@ -107,6 +108,8 @@ export default function HomeScreenSettings() {
 
   const profileId = useOptionalAuth()?.profile?.id;
   const collectionOptions = adapter.collections?.options;
+  // Each summary's collection type is translated text; rebuild it on a language change.
+  const language = useAppLanguage();
   const collectionSummaries = useMemo(
     () =>
       new Map<string, CollectionSummary>(
@@ -120,7 +123,8 @@ export default function HomeScreenSettings() {
           },
         ]),
       ),
-    [collectionOptions, profileId],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- language: the kinds' language
+    [collectionOptions, profileId, language],
   );
 
   function openRow(row: HomeRow) {
@@ -335,14 +339,16 @@ export default function HomeScreenSettings() {
 
       <RemoveRowDialog
         row={removing}
-        pageName={pageName}
+        page={adapter.page}
+        pageLabel={label}
         onConfirm={confirmRemove}
         onOpenChange={(open) => !open && setRemoving(null)}
         skipReturnFocus={skipReturnFocus}
       />
       <ResetProfileDialog
         open={resetOpen}
-        pageName={pageName}
+        page={adapter.page}
+        pageLabel={label}
         ownTitles={adapter.rows.filter((row) => row.own).map((row) => row.title)}
         onConfirm={() => {
           setResetOpen(false);

@@ -1,6 +1,7 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import type { CrewMember } from "@/api/types";
 import { buildPersonCatalogHref } from "@/pages/catalogSearchParams";
+import { useT } from "@/i18n";
 
 interface HeroCrewLineProps {
   crew: CrewMember[];
@@ -22,11 +23,12 @@ interface CrewPerson {
 }
 
 function CrewNames({ people }: { people: CrewPerson[] }) {
+  const t = useT();
   return (
     <>
       {people.map((p, i) => (
         <span key={p.name}>
-          {i > 0 && ", "}
+          {i > 0 && t("web.detail.separator.list")}
           {p.personId ? (
             <ViewTransitionLink
               to={buildPersonCatalogHref(p.personId)}
@@ -46,9 +48,11 @@ function CrewNames({ people }: { people: CrewPerson[] }) {
 export default function HeroCrewLine({
   crew,
   genres,
-  jobLabel = "Directed by",
+  jobLabel,
   leadJobs = DEFAULT_LEAD_JOBS,
 }: HeroCrewLineProps) {
+  const t = useT();
+  const leadLabel = jobLabel ?? t("web.detail.overview.directedBy");
   const leadJob = leadJobs.find((job) => crew.some((c) => c.job === job));
   const directors = crew
     .filter((c) => c.job === leadJob)
@@ -78,30 +82,30 @@ export default function HeroCrewLine({
     <div className="text-muted-foreground text-[0.8125rem]">
       {hasAuthors && (
         <>
-          <span className="text-muted-foreground/60">By </span>
+          <span className="text-muted-foreground/60">{t("web.detail.overview.byAuthors")} </span>
           <CrewNames people={authors} />
         </>
       )}
       {hasAuthors && (hasDirectors || hasWriters || hasGenres) && (
-        <span className="text-muted-foreground/40 mx-2">&middot;</span>
+        <span className="text-muted-foreground/40 mx-2">{t("web.detail.separator.dot")}</span>
       )}
       {hasDirectors && (
         <>
-          <span className="text-muted-foreground/60">{jobLabel} </span>
+          <span className="text-muted-foreground/60">{leadLabel} </span>
           <CrewNames people={directors} />
         </>
       )}
       {hasDirectors && hasWriters && (
-        <span className="text-muted-foreground/40 mx-2">&middot;</span>
+        <span className="text-muted-foreground/40 mx-2">{t("web.detail.separator.dot")}</span>
       )}
       {hasWriters && (
         <>
-          <span className="text-muted-foreground/60">Written by </span>
+          <span className="text-muted-foreground/60">{t("web.detail.overview.writtenBy")} </span>
           <CrewNames people={writers} />
         </>
       )}
       {(hasDirectors || hasWriters) && hasGenres && (
-        <span className="text-muted-foreground/40 mx-2">&middot;</span>
+        <span className="text-muted-foreground/40 mx-2">{t("web.detail.separator.dot")}</span>
       )}
       {hasGenres &&
         genres.map((g, i) => (
@@ -111,7 +115,9 @@ export default function HeroCrewLine({
                 separator spans alone leave the whole list one unbreakable word. */}
             {i < genres.length - 1 && (
               <>
-                <span className="text-muted-foreground/40 mx-1.5">&middot;</span>
+                <span className="text-muted-foreground/40 mx-1.5">
+                  {t("web.detail.separator.dot")}
+                </span>
                 <wbr />
               </>
             )}

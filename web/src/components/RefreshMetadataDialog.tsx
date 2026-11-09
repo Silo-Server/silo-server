@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { RefreshItemMetadataMode } from "@/hooks/queries/items";
+import { useT } from "@/i18n";
 
 interface RefreshMetadataDialogProps {
   open: boolean;
@@ -22,14 +23,13 @@ export default function RefreshMetadataDialog({
   onConfirm,
   isPending = false,
 }: RefreshMetadataDialogProps) {
+  const t = useT();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Refresh Metadata</DialogTitle>
-          <DialogDescription>
-            Choose whether to refresh the existing item or rebuild it from the files on disk.
-          </DialogDescription>
+          <DialogTitle>{t("web.item.dialog.refreshMetadataTitle")}</DialogTitle>
+          <DialogDescription>{t("web.item.refresh.description")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
@@ -45,10 +45,8 @@ export default function RefreshMetadataDialog({
               <RefreshCw className="text-muted-foreground mt-0.5 size-5" />
             )}
             <div className="space-y-1">
-              <div className="text-sm font-semibold">Quick Refresh</div>
-              <div className="text-muted-foreground text-sm">
-                Keep the current item and refresh metadata using the existing scan scope.
-              </div>
+              <div className="text-sm font-semibold">{t("web.item.refresh.quickTitle")}</div>
+              <div className="text-muted-foreground text-sm">{t("web.item.refresh.quickBody")}</div>
             </div>
           </button>
 
@@ -64,10 +62,9 @@ export default function RefreshMetadataDialog({
               <RotateCcw className="text-muted-foreground mt-0.5 size-5" />
             )}
             <div className="space-y-1">
-              <div className="text-sm font-semibold">Complete Refresh</div>
+              <div className="text-sm font-semibold">{t("web.item.refresh.completeTitle")}</div>
               <div className="text-muted-foreground text-sm">
-                Clear the current match, re-scan, and rebuild the item from disk context. This can
-                recreate the item with a new ID or type.
+                {t("web.item.refresh.completeBody")}
               </div>
             </div>
           </button>
@@ -75,7 +72,7 @@ export default function RefreshMetadataDialog({
 
         <div className="flex justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       </DialogContent>

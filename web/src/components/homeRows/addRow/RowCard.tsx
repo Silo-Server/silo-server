@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from "react";
 import { Check, ChevronRight, type LucideIcon } from "lucide-react";
+import { useT } from "@/i18n";
 import type { PickerCard, RowGroup } from "@/lib/homeRows/catalog";
 import { cn } from "@/lib/utils";
 import { GROUP_ICONS, GROUP_TINTS, KIND_ICONS } from "../rowIcons";
@@ -111,6 +112,7 @@ export function RowCard({
   compact: boolean;
   onPick: (presetKey?: string) => void;
 }) {
+  const t = useT();
   const summary = compact ? variantSummary(card.type) : null;
   return (
     <KindCard
@@ -118,7 +120,14 @@ export function RowCard({
       group={card.group}
       label={card.label}
       sentence={card.sentence}
-      tag={onPage ? { label: `On ${pageLabel}`, note: `Already on ${pageLabel}.` } : undefined}
+      tag={
+        onPage
+          ? {
+              label: t("web.home.addRow.onPage", { page: pageLabel }),
+              note: t("web.home.addRow.picker.alreadyOn", { page: pageLabel }),
+            }
+          : undefined
+      }
       compact={compact}
       onPick={() => onPick()}
     >

@@ -25,11 +25,19 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatBirthDate, computeAge } from "@/lib/date";
 import { getInitials } from "@/lib/text";
+import { useT, type MessageKey } from "@/i18n";
 
 type TypeFilter = "all" | "movie" | "series";
 
+const TYPE_FILTER_LABELS: Record<TypeFilter, MessageKey> = {
+  all: "web.person.filterAll",
+  movie: "web.person.filterMovies",
+  series: "web.person.filterSeries",
+};
+
 export default function PersonDetail() {
   const { id } = useParams<{ id: string }>();
+  const t = useT();
   const queryClient = useQueryClient();
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [editOpen, setEditOpen] = useState(false);
@@ -58,7 +66,11 @@ export default function PersonDetail() {
   const personNotFound = isNotFoundProblem(personError);
   const person = personNotFound ? undefined : cachedPerson;
 
-  useDocumentTitle(personNotFound ? "Not found" : (person?.name ?? "Person"));
+  useDocumentTitle(
+    personNotFound
+      ? t("web.person.notFoundTitle")
+      : (person?.name ?? t("web.person.fallbackTitle")),
+  );
 
   const hasPerson = !!person;
   useEffect(() => {
@@ -113,8 +125,8 @@ export default function PersonDetail() {
     if (personError && !isNotFoundProblem(personError)) {
       return (
         <PageUnavailable
-          title="Couldn't load this person"
-          description="Something went wrong while loading them. Try again in a moment."
+          title={t("web.person.loadFailedTitle")}
+          description={t("web.person.loadFailedBody")}
           onRetry={() => void refetchPerson()}
           retrying={personFetching}
         />
@@ -122,8 +134,8 @@ export default function PersonDetail() {
     }
     return (
       <PageUnavailable
-        title="This person isn't available"
-        description="They may have been removed from the catalog, or the link may be wrong."
+        title={t("web.person.unavailableTitle")}
+        description={t("web.person.unavailableBody")}
       />
     );
   }
@@ -169,11 +181,11 @@ export default function PersonDetail() {
                     />
                     {refreshMutation.isPending
                       ? isAdmin
-                        ? "Refreshing..."
-                        : "Queueing..."
+                        ? t("web.person.refreshing")
+                        : t("web.person.queueing")
                       : isAdmin
-                        ? "Refresh now"
-                        : "Refresh metadata"}
+                        ? t("web.person.refreshNow")
+                        : t("web.person.refreshMetadata")}
                   </Button>
                   {isAdmin ? (
                     <Button
@@ -183,7 +195,7 @@ export default function PersonDetail() {
                       onClick={() => setEditOpen(true)}
                     >
                       <Pencil className="h-3.5 w-3.5" />
-                      Edit metadata
+                      {t("web.person.editMetadata")}
                     </Button>
                   ) : null}
                 </div>
@@ -193,15 +205,21 @@ export default function PersonDetail() {
             {/* Metadata badges */}
             <div className="mb-4 flex flex-wrap items-center gap-2">
               {person.birth_date && (
-                <span className="metadata-badge">Born {formatBirthDate(person.birth_date)}</span>
+                <span className="metadata-badge">
+                  {t("web.person.born", { date: formatBirthDate(person.birth_date) })}
+                </span>
               )}
               {person.birth_date && !person.death_date && (
-                <span className="metadata-badge">{computeAge(person.birth_date)} years old</span>
+                <span className="metadata-badge">
+                  {t("web.person.age", { age: computeAge(person.birth_date) })}
+                </span>
               )}
               {person.death_date && person.birth_date && (
                 <span className="metadata-badge">
-                  Died {formatBirthDate(person.death_date)} (age{" "}
-                  {computeAge(person.birth_date, person.death_date)})
+                  {t("web.person.died", {
+                    date: formatBirthDate(person.death_date),
+                    age: String(computeAge(person.birth_date, person.death_date)),
+                  })}
                 </span>
               )}
               {person.birthplace && <span className="metadata-badge">{person.birthplace}</span>}
@@ -223,23 +241,23 @@ export default function PersonDetail() {
       {/* Filmography */}
       <div className="page-shell space-y-6 py-6 sm:py-8">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold tracking-tight">Filmography</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{t("web.person.filmography")}</h2>
           <div className="flex gap-1.5">
-            {(["all", "movie", "series"] as const).map((t) => (
+            {(["all", "movie", "series"] as const).map((filter) => (
               <button
-                key={t}
+                key={filter}
                 type="button"
                 onClick={() => {
-                  setTypeFilter(t);
+                  setTypeFilter(filter);
                   setVisibleRange([0, limit - 1]);
                 }}
                 className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  typeFilter === t
+                  typeFilter === filter
                     ? "border-border/20 bg-foreground/10 text-foreground"
                     : "border-border/10 text-muted-foreground hover:text-foreground"
                 }`}
               >
-                {t === "all" ? "All" : t === "movie" ? "Movies" : "Series"}
+                {t(TYPE_FILTER_LABELS[filter])}
               </button>
             ))}
           </div>
