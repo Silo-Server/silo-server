@@ -290,26 +290,20 @@ func discordEmbedColor(flags ReasonFlags) int {
 	}
 }
 
-// discordEmbedLen sums length over the embed text Discord's 6,000-character
-// limit counts: title, description, field names and values, footer, and
-// author name.
-func discordEmbedLen(embed *discordEmbed, length func(string) int) int {
-	total := length(embed.Title) + length(embed.Description)
+// discordEmbedTotal counts the embed text Discord's 6,000-character limit
+// covers: title, description, field names and values, footer, and author name.
+func discordEmbedTotal(embed *discordEmbed) int {
+	total := discordTextLen(embed.Title) + discordTextLen(embed.Description)
 	if embed.Author != nil {
-		total += length(embed.Author.Name)
+		total += discordTextLen(embed.Author.Name)
 	}
 	if embed.Footer != nil {
-		total += length(embed.Footer.Text)
+		total += discordTextLen(embed.Footer.Text)
 	}
 	for _, field := range embed.Fields {
-		total += length(field.Name) + length(field.Value)
+		total += discordTextLen(field.Name) + discordTextLen(field.Value)
 	}
 	return total
-}
-
-// discordEmbedTotal counts one embed's characters toward the 6,000 limit.
-func discordEmbedTotal(embed *discordEmbed) int {
-	return discordEmbedLen(embed, discordTextLen)
 }
 
 // enforceDiscordTotalLimit applies the 6,000-char total cap: truncate the
@@ -376,7 +370,7 @@ func discordRuneLen(r rune) int {
 func discordMessageChars(embeds []discordEmbed) int {
 	total := 0
 	for i := range embeds {
-		total += discordEmbedLen(&embeds[i], discordTextLen)
+		total += discordEmbedTotal(&embeds[i])
 	}
 	return total
 }

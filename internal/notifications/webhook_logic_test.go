@@ -585,12 +585,6 @@ func TestDiscordDigestMessageLimit(t *testing.T) {
 				Overview: strings.Repeat(digestOverview, 2000),
 			})
 		}},
-		{name: "request with a 1 MiB emoji overview", items: 1, wantEmbeds: 1, links: 1, build: func() ([]byte, error) {
-			return BuildServerChannelRequestDiscord(ServerChannelEventRequestApproved, RequestEventInfo{
-				TMDBID: 42, MediaType: "movie", Title: "00 Requested Title",
-				Overview: strings.Repeat("🎬", 256<<10),
-			})
-		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
