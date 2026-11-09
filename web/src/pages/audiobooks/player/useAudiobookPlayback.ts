@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback, type RefObject } from "react";
 import { toast } from "sonner";
-import { t } from "@/i18n";
+import { t, useAppLanguage } from "@/i18n";
 import { useReportMediaProgress } from "@/hooks/queries/progress";
 import { buildPlayerChapters, nextChapterStart, prevChapterStart } from "@/lib/audiobooks/chapters";
 import type { AudiobookFile } from "@/lib/audiobooks/types";
@@ -238,7 +238,12 @@ export function useAudiobookPlayback({
   const audioRef = useRef<HTMLAudioElement>(null);
   const parts = useMemo(() => buildParts(files), [files]);
   const duration = useMemo(() => totalDuration(parts), [parts]);
-  const chapters = useMemo(() => buildPlayerChapters(files), [files]);
+  const language = useAppLanguage();
+  const chapters = useMemo(
+    () => buildPlayerChapters(files),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- untitled chapters get a translated fallback title
+    [files, language],
+  );
   const [activeFileIndex, setActiveFileIndex] = useState(() => {
     return findPartIndex(parts, initialPositionSeconds);
   });

@@ -18,7 +18,7 @@ import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiob
 import { coldResumePosition } from "@/pages/audiobooks/player/smartRewind";
 import { getAudiobookSmartRewind } from "@/pages/audiobooks/player/useAudiobookPrefs";
 import { hasMachineTranslation } from "./components/machineTranslation";
-import { useT, type Translate } from "@/i18n";
+import { useAppLanguage, useT, type Translate } from "@/i18n";
 
 function formatSeconds(t: Translate, totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "";
@@ -106,7 +106,12 @@ export default function AudiobookContent({
     durationTotal > 0 &&
     (progress.is_in_progress ?? !progress.played),
   );
-  const chapters = useMemo(() => buildChapterList(files), [files]);
+  const language = useAppLanguage();
+  const chapters = useMemo(
+    () => buildChapterList(files),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- untitled chapters get a translated fallback title
+    [files, language],
+  );
   const isPlayerOpen = audiobookPlayback?.activeRequest?.contentId === item.content_id;
   const activePlayback = isPlayerOpen ? audiobookPlayback?.active : null;
   const currentPlayerSeconds =
