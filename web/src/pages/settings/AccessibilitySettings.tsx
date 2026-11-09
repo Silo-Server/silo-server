@@ -67,7 +67,10 @@ function AppLanguageSetting() {
       <Select
         value={tag ?? MATCH_DEVICE}
         disabled={stored === undefined}
-        onValueChange={(next) =>
+        onValueChange={(next) => {
+          // One save at a time: two in flight could land in either order and
+          // leave the earlier choice stored. The select shows the pending one.
+          if (mutation.isPending) return;
           mutation.mutate(
             {
               key: SETTING_KEYS.UI_APP_LANGUAGE,
@@ -75,8 +78,8 @@ function AppLanguageSetting() {
               identity: PROFILE_SCOPE,
             },
             { onError: () => toast.error("Couldn’t save the app language") },
-          )
-        }
+          );
+        }}
       >
         <SelectTrigger aria-labelledby={labelId} className="w-full sm:w-64">
           <SelectValue />
