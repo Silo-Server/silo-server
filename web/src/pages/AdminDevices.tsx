@@ -45,7 +45,7 @@ import { SETTING_KEYS } from "@/lib/settingsContract";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { AdminSubtitleAppearanceDialog } from "@/components/admin/AdminSubtitleAppearanceDialog";
 import { cn } from "@/lib/utils";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import { formatDecimal } from "@/lib/numberFormat";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1788,7 +1788,7 @@ function DeviceDetailPanel({
       <div className="border-border/60 grid grid-cols-2 gap-x-6 gap-y-3 border-b px-5 py-4 sm:grid-cols-4 sm:px-6">
         <ReadoutCell
           label={t("web.admin.devices.readout.overrides")}
-          value={String(totalOverrides)}
+          value={numberText(totalOverrides)}
           sub={t("web.admin.devices.readout.acrossProfiles", {
             count: profileTabs.length,
             count_text: profileTabs.length,
@@ -1808,7 +1808,7 @@ function DeviceDetailPanel({
               ? t("web.admin.devices.readout.moreProfiles", {
                   count: profileTabs.length - 2,
                 })
-              : profileTabs.map((p) => `${p.settings.length}`).join(" / ")
+              : profileTabs.map((p) => numberText(p.settings.length)).join(" / ")
           }
         />
         <ReadoutCell
