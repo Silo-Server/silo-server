@@ -316,6 +316,9 @@ func (c *PlexClient) FetchLibrarySections(ctx context.Context, baseURL, token st
 // /library/onDeck that has no Continue Watching age window and never adds
 // unstarted next-up episodes.
 const (
+	plexSectionExcludedElements = "Media,Genre,Role,Director,Writer,Country,Rating"
+	plexSectionExcludedFields   = "summary,thumb,art,grandparentArt,grandparentThumb,parentThumb,tagline"
+
 	plexFilterWatched    = "unwatched"
 	plexFilterInProgress = "inProgress"
 )
@@ -344,6 +347,10 @@ func (c *PlexClient) forEachSectionPage(ctx context.Context, baseURL, token, sec
 			query.Set(filterKey, plexFilterValue(filterKey))
 		}
 		query.Set("includeGuids", "1")
+		// Only watch state and ids are read; Plex answers the page without the
+		// rest, which also makes a page cheaper for it to build.
+		query.Set("excludeElements", plexSectionExcludedElements)
+		query.Set("excludeFields", plexSectionExcludedFields)
 		query.Set("X-Plex-Container-Start", strconv.Itoa(offset))
 		query.Set("X-Plex-Container-Size", strconv.Itoa(plexPageSize))
 		reqURL := fmt.Sprintf("%s/library/sections/%s/all?%s", baseURL, url.PathEscape(sectionKey), query.Encode())
