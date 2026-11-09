@@ -708,20 +708,19 @@ export function ManualContentsPanel({
     if (!canReorder || !token) return;
     setSaved("saving");
     setOrderFailed(false);
-    setRunning((count) => count + 1);
-    reorder.mutate(
-      { orderedIds: next, etag: token.etag },
-      {
-        onSuccess: () => {
+    // Per-call `mutate` callbacks run only for the latest call, so each
+    // reorder settles its own count through its promise.
+    void tracked(() =>
+      reorder.mutateAsync({ orderedIds: next, etag: token.etag }).then(
+        () => {
           setSaved("saved");
           onItemsChanged();
         },
-        onError: () => {
+        () => {
           setSaved("idle");
           setOrderFailed(true);
         },
-        onSettled: () => setRunning((count) => count - 1),
-      },
+      ),
     );
   }
 

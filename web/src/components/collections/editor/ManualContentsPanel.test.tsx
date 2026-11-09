@@ -2,11 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PERSONAL_SCOPE } from "@/lib/collections/scope";
-import { ManualContentsPanel } from "./ManualContentsPanel";
+import { ManualContentsPanel, type TitleWrites } from "./ManualContentsPanel";
 
 const mocks = vi.hoisted(() => ({
   page: vi.fn(),
-  mutate: vi.fn(),
+  mutateAsync: vi.fn((_variables: { orderedIds: string[]; etag: string }) => Promise.resolve()),
   capabilities: vi.fn(),
   search: vi.fn(),
   v2: vi.fn(),
@@ -27,7 +27,7 @@ vi.mock("@/hooks/queries/collections", () => ({
   useCollectionItemOrderSnapshot: () => ({
     data: { ordered_ids: mocks.orderedIds, has_more: false, etag: '"order-one"' },
   }),
-  useReorderCollectionItems: () => ({ mutate: mocks.mutate }),
+  useReorderCollectionItems: () => ({ mutateAsync: mocks.mutateAsync }),
 }));
 const item = (id: string, position = 0) => ({
   collection_id: "c",
@@ -35,7 +35,7 @@ const item = (id: string, position = 0) => ({
   position,
   added_at: "2026-09-05T00:00:00Z",
 });
-function show(staged: string[] = []) {
+function show(staged: string[] = [], onWritesChange?: (writes: TitleWrites) => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
@@ -46,6 +46,7 @@ function show(staged: string[] = []) {
         staged={staged}
         onStagedChange={vi.fn()}
         onItemsChanged={vi.fn()}
+        onWritesChange={onWritesChange}
       />
     </QueryClientProvider>,
   );
@@ -74,7 +75,7 @@ describe("manual collection paging", () => {
     expect(screen.queryByLabelText("Move second")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "First page" }));
     expect(screen.getByText("first")).toBeTruthy();
-    expect(mocks.mutate).not.toHaveBeenCalled();
+    expect(mocks.mutateAsync).not.toHaveBeenCalled();
   });
   it("hides reordering while preserving removals when the store lacks reorder support", () => {
     mocks.capabilities.mockReturnValue({ data: { item_reorder: false } });
@@ -166,10 +167,51 @@ it("reorders only the saved titles when some couldn't be added", async () => {
   fireEvent.keyDown(grip, { code: "ArrowUp", key: "ArrowUp" });
   await screen.findByText(/is now at position 1 of 3/);
   fireEvent.keyDown(grip, { code: "Space", key: " " });
-  await vi.waitFor(() => expect(mocks.mutate).toHaveBeenCalled());
-  expect(mocks.mutate.mock.calls[0]![0]).toEqual({
+  await vi.waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalled());
+  expect(mocks.mutateAsync.mock.calls[0]![0]).toEqual({
     orderedIds: ["second", "first"],
     etag: '"order-one"',
   });
   rects.mockRestore();
+});
+
+it("reports its writes finished only once two overlapping reorders have both settled", async () => {
+  mocks.capabilities.mockReturnValue({ data: { item_reorder: true } });
+  mocks.orderedIds = ["first", "second"];
+  mocks.page.mockReturnValue({
+    data: { items: [item("first", 0), item("second", 1)], page: { has_more: false } },
+    isLoading: false,
+  });
+  const rects = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: Element,
+  ) {
+    const row = this.closest("li[data-title-id]");
+    const top = row ? Array.from(row.parentElement!.children).indexOf(row) * 60 : 0;
+    const height = row ? 60 : 0;
+    return { x: 0, y: top, top, left: 0, right: 800, bottom: top + height, width: 800, height };
+  } as () => DOMRect);
+  const releases: Array<() => void> = [];
+  mocks.mutateAsync.mockClear();
+  mocks.mutateAsync.mockImplementation(
+    () => new Promise<void>((resolve) => releases.push(resolve)),
+  );
+  const onWritesChange = vi.fn();
+  show([], onWritesChange);
+  async function moveSecondUp(calls: number) {
+    const grip = screen.getByRole("button", { name: "Move second" });
+    grip.focus();
+    fireEvent.keyDown(grip, { code: "Space", key: " " });
+    await screen.findAllByText(/Picked up .*, position 2 of 2/);
+    fireEvent.keyDown(grip, { code: "ArrowUp", key: "ArrowUp" });
+    fireEvent.keyDown(grip, { code: "Space", key: " " });
+    await vi.waitFor(() => expect(mocks.mutateAsync).toHaveBeenCalledTimes(calls));
+  }
+  await moveSecondUp(1);
+  await moveSecondUp(2);
+  await act(async () => releases[0]!());
+  expect(onWritesChange).toHaveBeenLastCalledWith({ writing: true, failed: false });
+  await act(async () => releases[1]!());
+  expect(onWritesChange).toHaveBeenLastCalledWith({ writing: false, failed: false });
+  rects.mockRestore();
+  mocks.mutateAsync.mockImplementation(() => Promise.resolve());
 });
