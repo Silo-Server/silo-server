@@ -728,16 +728,19 @@ func checkLiveReleasesAndNodes(t *testing.T, loader PGLoader, pool *pgxpool.Pool
 	install(restored, same, "release-plugin", "1.0.0", "backup")
 	install(pool, other, "live-plugin", "1.0.0", "live")
 	install(restored, other, "backup-plugin", "1.0.0", "backup")
+	// The backup refused an update the live server has since installed.
+	exec(restored, `UPDATE plugin_installations SET update_failed_version = '2.0.0', update_failure_reason = 'refused', update_failed_at = now() WHERE id = $1`, same)
 	off, err := loader.CarryPluginReleases(ctx, into, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var version, checksum, capability string
+	var refused *string
 	var enabled bool
-	if err := restored.QueryRow(ctx, `SELECT i.version, a.checksum, c.capability_id FROM plugin_installations i
+	if err := restored.QueryRow(ctx, `SELECT i.version, a.checksum, c.capability_id, i.update_failed_version FROM plugin_installations i
 		JOIN plugin_archives a ON a.plugin_installation_id = i.id JOIN plugin_capabilities c ON c.plugin_installation_id = i.id
-		WHERE i.id = $1`, same).Scan(&version, &checksum, &capability); err != nil || version != "2.0.0" || checksum != "live" || capability != "2.0.0" {
-		t.Fatalf("a plugin both have runs %s %s %s (%v), want the live release", version, checksum, capability, err)
+		WHERE i.id = $1`, same).Scan(&version, &checksum, &capability, &refused); err != nil || version != "2.0.0" || checksum != "live" || capability != "2.0.0" || refused != nil {
+		t.Fatalf("a plugin both have runs %s %s %s, refused update %v (%v), want the live release", version, checksum, capability, refused, err)
 	}
 	if err := restored.QueryRow(ctx, `SELECT enabled FROM plugin_installations WHERE id = $1`, other).Scan(&enabled); err != nil || enabled ||
 		!slices.ContainsFunc(off, func(s string) bool { return strings.Contains(s, "backup-plugin") }) {
