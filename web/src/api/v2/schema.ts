@@ -32087,7 +32087,7 @@ export interface components {
     };
     ProfileCreate: {
       /**
-       * @description Unique library identifiers the profile may see when restrictions are enabled
+       * @description Unique library identifiers the profile may see when restrictions are enabled. Must be empty on an account's first profile, which becomes its primary profile, even with restrictions off
        * @example [
        *       "1",
        *       "2"
@@ -32115,7 +32115,7 @@ export interface components {
        */
       language?: string;
       /**
-       * @description Limits the profile to allowed_library_ids. Not allowed on an account's first profile, which becomes its primary profile
+       * @description Limits the profile to allowed_library_ids. Must be false or omitted on an account's first profile, which becomes its primary profile
        * @example false
        */
       library_restrictions_enabled?: boolean;
