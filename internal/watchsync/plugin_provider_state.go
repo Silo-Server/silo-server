@@ -14,7 +14,11 @@ import (
 )
 
 const (
-	pluginWatchedCursorKey   = "plugin.remote.watched"
+	// pluginWatchedCursorKey carries a version: watched imports before
+	// pending watches (watch_provider_pending_watches) dropped unmatched rows,
+	// so each connection reads its watched history once more in full. A node
+	// still on the old version writes the old key, which this one ignores.
+	pluginWatchedCursorKey   = "plugin.remote.watched.v2"
 	pluginProgressCursorKey  = "plugin.remote.progress"
 	pluginFavoritesCursorKey = "plugin.remote.favorites"
 	pluginWatchlistCursorKey = "plugin.remote.watchlist"

@@ -147,6 +147,40 @@ All API nodes must use this admission boundary for the guarantee to hold; older
 nodes can still insert independently during a mixed-version rollout. Dispatch
 remains process-local, without durable replay or exactly-once provider effects.
 
+## Pending watches
+
+Watched imports read a provider incrementally. After a sync, the cursor is past every
+row it returned, so the provider never returns a watch again unless that title's
+entry changes. A watch that matched no library item when it was read would be lost
+for good once the title is added later. `watch_provider_pending_watches` keeps those
+watches instead.
+
+- Each row is keyed by `(connection_id, kind, provider_item_key)`. The kind is part of
+  the key because provider item keys repeat across kinds. A row belongs to the provider
+  account that returned it. Only the connection's current account writes rows, and
+  listing a connection's rows drops those of any other account. After a reconnect to a
+  different account, no watch from the old one imports, even from a sync of the old
+  account that was still running.
+- A connection keeps at most 50,000 rows (`maxPendingWatches`). Past that the oldest by
+  `last_watched_at` go, so a provider history that matches little of the library can't
+  grow what every sync reloads without bound. Listing returns nothing to a caller whose
+  account is no longer the connection's.
+- Every watched import matches the kept rows again after the provider's own rows, in
+  batched catalog reads (`historyimport.MatchAllOn`). A kept row that matches imports
+  like a fresh one and is deleted. One that still matches nothing adds no warning. A
+  provider row with the same kind and key replaces the kept row for that sync.
+- Writes are guarded by `last_watched_at`: an overlapping older sync cannot replace a
+  newer kept watch, and deleting a matched watch never removes a newer one. The rows are
+  written before the cursor is saved. If that write fails, the sync fails, and the
+  provider's rows are read again.
+- The plugin watched cursor key is `plugin.remote.watched.v2`. The rename made every
+  connection read its watched history once more in full, so watches skipped before the
+  table existed are kept too. A node still running the old version writes the old key,
+  which is ignored, so a rolling deploy can't undo the re-read. Imports never re-add a
+  play the profile removed (`user_history_hidden_items`).
+- A restore keeps the live connection's cursors and takes the kept rows from the backup.
+  A watch first kept after the backup was taken is not read again.
+
 ## Watched-history export
 
 A sync drains a connection's whole pending history-export backlog, oldest play
