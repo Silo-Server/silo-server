@@ -350,9 +350,10 @@ export function PlayerControls({
                   {title}
                 </div>
               ) : null}
+              {/* Left to right inside, but placed at the column's start like the title. */}
               <div
                 dir="ltr"
-                className="font-mono text-[11px] tracking-[0.12em] text-white/75 tabular-nums"
+                className="self-start font-mono text-[11px] tracking-[0.12em] text-white/75 tabular-nums"
               >
                 {formatTime(currentTime)}
                 <span className="mx-1 text-white/30">{TIME_SEPARATOR}</span>
