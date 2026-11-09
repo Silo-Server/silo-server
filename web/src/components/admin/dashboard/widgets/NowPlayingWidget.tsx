@@ -9,6 +9,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   activityMethodMeta,
   classifyActivityMethod,
+  formatPlaybackPosition,
   getSessionClientLabel,
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
@@ -334,7 +335,10 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {username.charAt(0).toUpperCase()}
           </div>
           <span className="min-w-0 truncate text-xs font-medium">{username}</span>
-          <span className="text-muted-foreground ml-auto shrink-0 text-[10px]">{elapsed}</span>
+          <span className="text-muted-foreground ml-auto shrink-0 text-[10px] tabular-nums">
+            {formatPlaybackPosition(session)}
+          </span>
+          <span className="text-muted-foreground shrink-0 text-[10px]">· {elapsed}</span>
         </div>
       </div>
     </div>
