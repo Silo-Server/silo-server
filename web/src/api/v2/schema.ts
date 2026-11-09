@@ -25813,6 +25813,7 @@ export interface components {
        */
       user_code: string;
       /**
+       * Format: uri
        * @description Page on this server where the approver enters the user code; server.public_url when configured, otherwise the address the device used
        * @example https://silo.example.test/activate
        */
