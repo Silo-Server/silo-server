@@ -326,13 +326,16 @@ function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
             step="any"
             className="w-full sm:w-[100px]"
             placeholder="None"
-            value={trigger.max_runtime_ms ? trigger.max_runtime_ms / 60_000 : ""}
+            value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
             onChange={(e) => {
               // Fractional minutes keep sub-minute limits saved through the API.
-              const ms = Math.round(Number(e.target.value) * 60_000);
+              // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
+              // empty field clears it.
+              const raw = e.target.value;
               onChange({
                 ...trigger,
-                max_runtime_ms: ms > 0 ? ms : undefined,
+                max_runtime_ms:
+                  raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000)),
               });
             }}
           />
