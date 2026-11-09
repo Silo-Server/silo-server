@@ -299,17 +299,18 @@ receipt is `{outcome, accepted?}`, where `accepted` is the latest committed
 | Attempt ended by an administrator | 410 `playback_session_ended` |
 | Attempt already stopped otherwise, or unknown | 404 |
 
-With `progress_buffer_v1`, a sample may also carry `buffered_through`: the
-media time, on the same timeline as `position`, that the player holds buffered
-through. It is display data for administrators (`client_buffered_through_seconds`
-in `docs/admin-api.md`). It is not part of the committed sample, so it never
-affects sequencing, `accepted`, or conflict detection, and a retry may carry a
-different value. An applied or replayed sample replaces the value on the live
-session when this replica holds it, and a sample without it clears it; a stale
-sample leaves it alone. A negative or non-finite value is refused with 400. A
-server without the feature refuses the unknown field, so a client sends it only
-when the capabilities or its start decision advertise `progress_buffer_v1`. The
-stop body does not take it.
+With `progress_buffer_v1`, a sample may also carry `buffered_through`: the media
+time, on the same timeline as `position`, that the player holds buffered
+through. It is display data for administrators
+(`client_buffered_through_seconds` in `docs/admin-api.md`). It is not part of
+the committed sample, so it never affects sequencing, `accepted`, or conflict
+detection, and a retry may carry a different value. An applied or replayed
+sample replaces the value on the live session when this replica holds it, and a
+sample without it clears it; a stale sample leaves it alone. A negative value is
+refused with 422 `validation_failed` at `body.buffered_through`. A server
+without the feature refuses the unknown field, so a client sends it only when
+the capabilities or its start decision advertise `progress_buffer_v1`. The stop
+body does not take it.
 
 An applied sample is persisted through the same writers v1 uses (resume
 position, scrobbles), from the live session when this replica holds it and from
