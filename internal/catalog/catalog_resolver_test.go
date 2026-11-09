@@ -40,6 +40,16 @@ func TestCatalogScopedLibraryRequestPreservesGlobalDisabledLibraries(t *testing.
 	}
 }
 
+func TestCatalogSearchAccessPreservesAccountID(t *testing.T) {
+	searchAccess, _, earlyEmpty := catalogSearchAccess(CatalogRequest{}, AccessFilter{UserID: 7})
+	if earlyEmpty {
+		t.Fatal("catalogSearchAccess returned early empty")
+	}
+	if searchAccess.UserID != 7 {
+		t.Fatalf("search account = %d, want 7", searchAccess.UserID)
+	}
+}
+
 func TestValidateCatalogQueryRequest_RejectsPersonalizedSortWithoutProfileScopedSurface(t *testing.T) {
 	req := CatalogRequest{
 		Source: CatalogSourceQuery,
