@@ -9,6 +9,7 @@ import MediaCardArtwork, {
 import type { BrowseItem } from "@/api/types";
 import { timeAgo } from "@/lib/timeAgo";
 import MediaItemMenu from "@/components/MediaItemMenu";
+import { homeDismissalForCard } from "@/hooks/queries/homeDismissals";
 import CardOverlays from "@/components/overlays/CardOverlays";
 import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { overlayDataFromBrowseItem, type CardOverlayPrefs } from "@/lib/overlays";
@@ -312,6 +313,7 @@ export default function ItemCard({
           quickActionMode={quickActionMode}
           longPressRef={cardRef}
           itemTitle={displayTitle}
+          dismissAction={homeDismissalForCard(item)}
         />
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>

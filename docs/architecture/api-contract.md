@@ -698,10 +698,12 @@ values older than canonicalization, carry none.
 
 Enums are lowercase strings, never numbers. Request enums are closed and reject unknown values
 with `422`; response enums are additive and clients retain an unknown/raw fallback. Existing
-values are never renamed or repurposed. Polymorphic objects use a required string discriminator
-and named schemas. Request variants are closed; response variants are additive and native clients
-retain an unknown-variant representation. Untyped maps are limited to intentional named extension
-bags.
+values are never renamed or repurposed. A nullable enum lists `null` among its values, because
+JSON Schema applies `type` and `enum` separately: the generator adds it, and the spec lint fails a
+nullable enum anywhere in a component schema without it unless `apiv2.NullEnumWithheld` names the
+member. Polymorphic objects use a required string discriminator and named schemas. Request
+variants are closed; response variants are additive and native clients retain an unknown-variant
+representation. Untyped maps are limited to intentional named extension bags.
 
 ### Query and pagination conventions
 

@@ -78,8 +78,8 @@ type Claims struct {
 	RequireAudioTrack      bool    `json:"rat,omitempty"`
 	AudioOnly              bool    `json:"ao,omitempty"`
 	// CopyAudioCodec is the codec of the source audio track a remux copies.
-	// The remux adds aac_adtstoasc for a copied AAC track. Absent in older
-	// tokens, whose remux keeps the plain copy.
+	// The progressive remux and fMP4 HLS segments add aac_adtstoasc for a
+	// copied AAC track. Absent in older tokens, which keep the plain copy.
 	CopyAudioCodec string `json:"cac,omitempty"`
 	// DVProfile is the file's Dolby Vision profile (0 = none); remux nodes
 	// use it to strip dangling profile 7 RPUs. Absent in older tokens, which

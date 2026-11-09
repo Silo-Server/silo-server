@@ -24,6 +24,7 @@ import {
 import { goldens } from "@/test/fixtures/collectionBodies";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
 import {
+  addGenreRule,
   nameField,
   prepareEditorPage,
   saveBar,
@@ -128,6 +129,7 @@ describe("admin smart collections on the editor page", () => {
   it("creates a smart collection with its rules and sort", async () => {
     const router = showEditorPage("/admin/collections/new?type=smart&libraryId=1");
     fireEvent.change(await nameField(), { target: { value: "New this month" } });
+    await addGenreRule();
     fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/admin/collections"));
     expect(writes()).toEqual(goldens.adminSmartCreate);
@@ -184,6 +186,7 @@ describe("personal manual and smart collections", () => {
   it("creates a smart collection on the editor page, then uploads its poster", async () => {
     const router = showEditorPage("/collections/new?type=smart");
     fireEvent.change(await nameField(), { target: { value: "Comfort" } });
+    await addGenreRule();
     await chooseEditorFile("Poster", "poster.png");
     fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/collections"));

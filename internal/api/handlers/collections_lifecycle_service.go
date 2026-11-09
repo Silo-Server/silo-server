@@ -80,6 +80,11 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
+		if !cmd.V1Rules && existing.CollectionType == collectionTypeSmart {
+			if err := requireSmartCollectionRule(normalized); err != nil {
+				return none, err
+			}
+		}
 		value := string(normalized)
 		input.QueryDefinition = &value
 	}

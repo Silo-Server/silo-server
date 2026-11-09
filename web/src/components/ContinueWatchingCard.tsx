@@ -3,6 +3,7 @@ import { BookOpen, Play } from "lucide-react";
 import { memo, useCallback, useRef } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
+import { homeDismissalForCard } from "@/hooks/queries/homeDismissals";
 import type { ProgressListEntry } from "@/hooks/queries/progress";
 import MediaItemMenu from "@/components/MediaItemMenu";
 import CardOverlays from "@/components/overlays/CardOverlays";
@@ -121,23 +122,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   const isNextUp = "sectionItem" in props && props.sectionItem?.item_source === "next_up";
   const dismissAction =
     "sectionItem" in props && props.sectionItem
-      ? props.sectionItem.item_source === "next_up"
-        ? props.sectionItem.series_id
-          ? {
-              itemId: props.sectionItem.content_id,
-              surface: "next_up" as const,
-              mediaType: props.sectionItem.type,
-              seriesId: props.sectionItem.series_id,
-            }
-          : undefined
-        : props.sectionItem.progress_updated_at
-          ? {
-              itemId: props.sectionItem.content_id,
-              surface: "continue_watching" as const,
-              mediaType: props.sectionItem.type,
-              progressUpdatedAt: props.sectionItem.progress_updated_at,
-            }
-          : undefined
+      ? homeDismissalForCard(props.sectionItem)
       : {
           itemId: props.detail.content_id,
           surface: "continue_watching" as const,
