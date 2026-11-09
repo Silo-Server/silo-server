@@ -107,6 +107,14 @@ jobs:
   repo-checks:
     name: Repository checks
     runs-on: ubuntu-24.04
+    # The cache key, download URLs and checksums below all read these, so a
+    # version or checksum change also changes the key. The Makefile's
+    # verify-actionlint and verify-shellcheck targets pin the same versions.
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      SHELLCHECK_VERSION: 0.11.0
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -123,26 +131,25 @@ jobs:
       # GitHub release downloads sometimes return 504s for a stretch while the
       # rest of Actions works, and that stops every run at the step below. Keep
       # the archives in the Actions cache so most runs never fetch them. The
-      # checksums still verify every archive, cached or downloaded. Change the
-      # key whenever a tool version changes.
+      # checksums still verify every archive, cached or downloaded.
       - name: Restore pinned workflow and shell tool archives
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/workflow-tool-archives
-          key: workflow-tool-archives-actionlint-1.7.12-shellcheck-0.11.0
+          key: workflow-tool-archives-actionlint-${{ env.ACTIONLINT_VERSION }}-${{ env.ACTIONLINT_SHA256 }}-shellcheck-${{ env.SHELLCHECK_VERSION }}-${{ env.SHELLCHECK_SHA256 }}
       - name: Install pinned workflow and shell tools
         shell: bash
         run: |
           archives="$RUNNER_TEMP/workflow-tool-archives"
           mkdir -p "$archives" "$RUNNER_TEMP/workflow-tools"
           cd "$archives"
-          [ -f actionlint.tar.gz ] || curl -fsSL --retry 3 -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | sha256sum -c -
-          [ -f shellcheck.tar.xz ] || curl -fsSL --retry 3 -o shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
-          echo '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  shellcheck.tar.xz' | sha256sum -c -
+          [ -f actionlint.tar.gz ] || curl -fsSL --retry 3 -o actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          [ -f shellcheck.tar.xz ] || curl -fsSL --retry 3 -o shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
           cd "$RUNNER_TEMP/workflow-tools"
           tar -xzf "$archives/actionlint.tar.gz" actionlint
-          tar -xJf "$archives/shellcheck.tar.xz" --strip-components=1 shellcheck-v0.11.0/shellcheck
+          tar -xJf "$archives/shellcheck.tar.xz" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           echo "$RUNNER_TEMP/workflow-tools" >> "$GITHUB_PATH"
       - name: Test CI helper changes
         run: |
