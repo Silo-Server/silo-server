@@ -1,6 +1,8 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { useLocation } from "react-router";
 
+import { useT } from "@/i18n";
+
 interface ErrorBoundaryProps {
   children: ReactNode;
   resetKeys?: unknown[];
@@ -51,36 +53,42 @@ class ErrorBoundaryInner extends Component<ErrorBoundaryProps, ErrorBoundaryStat
 
   override render() {
     if (this.state.hasError) {
-      return (
-        <div className="bg-background flex min-h-screen items-center justify-center p-8">
-          <div className="max-w-md text-center">
-            <h1 className="text-foreground mb-4 text-2xl font-bold">Something went wrong</h1>
-            <p className="text-muted-foreground mb-6">
-              An unexpected error occurred. Try refreshing the page.
-            </p>
-            <div className="flex items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => this.setState({ hasError: false })}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-md px-4 py-2"
-              >
-                Try again
-              </button>
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="border-border hover:bg-muted/40 rounded-md border px-4 py-2"
-              >
-                Refresh Page
-              </button>
-            </div>
-          </div>
-        </div>
-      );
+      return <ErrorFallback onRetry={() => this.setState({ hasError: false })} />;
     }
 
     return this.props.children;
   }
+}
+
+/** The full-page error screen; a function component so its text follows the language. */
+function ErrorFallback({ onRetry }: { onRetry: () => void }) {
+  const t = useT();
+  return (
+    <div className="bg-background flex min-h-screen items-center justify-center p-8">
+      <div className="max-w-md text-center">
+        <h1 className="text-foreground mb-4 text-2xl font-bold">
+          {t("web.shell.errorBoundary.title")}
+        </h1>
+        <p className="text-muted-foreground mb-6">{t("web.shell.errorBoundary.description")}</p>
+        <div className="flex items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={onRetry}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 rounded-md px-4 py-2"
+          >
+            {t("common.tryAgain")}
+          </button>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="border-border hover:bg-muted/40 rounded-md border px-4 py-2"
+          >
+            {t("web.shell.errorBoundary.refresh")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 /** Wrapper that passes location.pathname as a resetKey so errors clear on navigation. */

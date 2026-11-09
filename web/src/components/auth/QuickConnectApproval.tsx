@@ -7,10 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
 import { tooManyCodesMessage } from "@/lib/deviceCode";
+import { useT } from "@/i18n";
 
 interface QuickConnectApprovalProps {
   /** The six-digit code being approved. */
   code: string;
+  /** The requesting device's name; empty when it sent none. */
   deviceName: string;
   /** The profile the browser is using now, picked first. */
   activeProfileId: string | null;
@@ -41,6 +43,7 @@ export function QuickConnectApproval({
   const [pin, setPin] = useState("");
   const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const t = useT();
 
   const selectedId =
     chosenId ??
@@ -64,23 +67,21 @@ export function QuickConnectApproval({
           // A PIN lockout is the profile's own limit, not the code budget.
           if (err instanceof V2ProblemError && err.status === 429) {
             const minutes = Math.max(1, Math.ceil((err.retryAfterSeconds ?? 60) / 60));
-            setError(
-              `Too many incorrect PINs. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
-            );
+            setError(t("web.auth.quickConnect.pinLockout", { count: minutes }));
             return null;
           }
           throw err;
         });
         if (!verified) return;
         if (!verified.valid || !verified.profile_token) {
-          setError("That PIN isn't right.");
+          setError(t("web.auth.quickConnect.wrongPin"));
           return;
         }
         profileToken = verified.profile_token;
       }
       const context = captureProfileRequestContextAs(selected.id, profileToken);
       if (!context) {
-        setError("Your session ended. Sign in again to approve.");
+        setError(t("web.auth.quickConnect.sessionEnded"));
         return;
       }
       await v2("POST /api/v2/auth/device/approve-handoff", {
@@ -94,9 +95,9 @@ export function QuickConnectApproval({
       } else if (err instanceof V2ProblemError && [404, 409, 410].includes(err.status)) {
         onMoved();
       } else if (err instanceof V2ProblemError && err.problemType === "permission_denied") {
-        setError("Only the account itself can approve a device, not an admin viewing as it.");
+        setError(t("web.auth.quickConnect.impersonating"));
       } else {
-        setError("Couldn't sign in the device. Try again.");
+        setError(t("web.auth.quickConnect.approveFailed"));
       }
     } finally {
       setPin("");
@@ -105,16 +106,18 @@ export function QuickConnectApproval({
   }
 
   if (isLoading) {
-    return <p className="text-muted-foreground text-sm">Loading your profiles...</p>;
+    return (
+      <p className="text-muted-foreground text-sm">{t("web.auth.quickConnect.loadingProfiles")}</p>
+    );
   }
   if (isError || profiles.length === 0) {
     return (
       <div className="space-y-3">
         <p className="text-sm" role="alert">
-          Couldn&apos;t load your profiles.
+          {t("web.auth.quickConnect.loadFailed")}
         </p>
         <Button type="button" className="w-full" onClick={() => void refetch()}>
-          Try again
+          {t("common.tryAgain")}
         </Button>
       </div>
     );
@@ -124,7 +127,11 @@ export function QuickConnectApproval({
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label id="quick-connect-profile">Sign {deviceName} in as</Label>
+        <Label id="quick-connect-profile">
+          {deviceName
+            ? t("web.auth.quickConnect.profileLabel", { device: deviceName })
+            : t("web.auth.quickConnect.profileLabelUnknown")}
+        </Label>
         <RadioGroup
           aria-labelledby="quick-connect-profile"
           value={selectedId ?? undefined}
@@ -140,14 +147,16 @@ export function QuickConnectApproval({
               key={profile.id}
               value={profile.id}
               label={profile.name}
-              hint={profile.has_pin ? "Needs the profile's PIN" : undefined}
+              hint={profile.has_pin ? t("web.auth.quickConnect.needsPin") : undefined}
             />
           ))}
         </RadioGroup>
       </div>
       {needsPin ? (
         <div className="space-y-2">
-          <Label htmlFor="quick-connect-pin">{selected?.name} PIN</Label>
+          <Label htmlFor="quick-connect-pin">
+            {t("web.auth.quickConnect.pinLabel", { profile: selected?.name ?? "" })}
+          </Label>
           <Input
             id="quick-connect-pin"
             type="password"
@@ -170,10 +179,10 @@ export function QuickConnectApproval({
           disabled={disabled || !selected || (needsPin && pin.trim() === "")}
           onClick={() => void approve()}
         >
-          {acting ? "Signing in..." : "Sign in"}
+          {acting ? t("web.auth.login.signingIn") : t("web.auth.signIn")}
         </Button>
         <Button variant="outline" className="w-full" disabled={disabled} onClick={onDeny}>
-          Not now
+          {t("web.auth.activate.notNow")}
         </Button>
       </div>
     </div>

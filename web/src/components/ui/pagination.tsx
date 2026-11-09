@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 
 import { pageWindow } from "@/components/ui/pagination.utils";
@@ -9,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_PAGE_SIZE_OPTIONS = [25, 50, 100];
@@ -23,12 +25,33 @@ export interface TablePaginationProps {
   /** When provided, renders a rows-per-page selector. */
   onPageSizeChange?: (size: number) => void;
   pageSizeOptions?: number[];
-  /** Singular noun for the summary, e.g. "scan" → "Showing 1–25 of 240 scans". */
+  /**
+   * Singular English noun for the summary, e.g. "scan" → "Showing 1–25 of 240
+   * scans". English only; without it the summary counts translated "items".
+   */
   itemNoun?: string;
   /** Dims the summary while a background refetch is in flight. */
   isFetching?: boolean;
   className?: string;
 }
+
+/* eslint-disable formatjs/no-literal-string-in-jsx -- English-only itemNoun summary */
+/** The `itemNoun` summary, English only until its callers convert. */
+function legacySummary(
+  num: (chunks: ReactNode) => ReactNode,
+  from: number,
+  to: number,
+  total: number,
+  noun: string,
+): ReactNode {
+  return (
+    <>
+      Showing {num(from)}–{num(to)} of {num(total)} {total === 1 ? noun : `${noun}s`}
+    </>
+  );
+}
+
+/* eslint-enable formatjs/no-literal-string-in-jsx -- end of the itemNoun path */
 
 export function TablePagination({
   page,
@@ -37,10 +60,11 @@ export function TablePagination({
   onPageChange,
   onPageSizeChange,
   pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
-  itemNoun = "item",
+  itemNoun,
   isFetching = false,
   className,
 }: TablePaginationProps) {
+  const t = useT();
   if (total <= 0) return null;
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -48,7 +72,13 @@ export function TablePagination({
   const from = safePage * pageSize + 1;
   const to = Math.min((safePage + 1) * pageSize, total);
   const window = pageWindow(safePage, pageCount);
-  const noun = total === 1 ? itemNoun : `${itemNoun}s`;
+  const num = (chunks: ReactNode) => (
+    <span className="text-foreground font-medium tabular-nums">{chunks}</span>
+  );
+  const range = { from: String(from), to: String(to), total: String(total), num };
+  const summaryText = itemNoun
+    ? legacySummary(num, from, to, total, itemNoun)
+    : t("web.ui.pagination.summary", { ...range, count: total });
 
   const goTo = (next: number) => {
     const clamped = Math.min(Math.max(next, 0), pageCount - 1);
@@ -63,14 +93,10 @@ export function TablePagination({
       )}
     >
       <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-        <span className={cn("transition-opacity", isFetching && "opacity-60")}>
-          Showing <span className="text-foreground font-medium tabular-nums">{from}</span>–
-          <span className="text-foreground font-medium tabular-nums">{to}</span> of{" "}
-          <span className="text-foreground font-medium tabular-nums">{total}</span> {noun}
-        </span>
+        <span className={cn("transition-opacity", isFetching && "opacity-60")}>{summaryText}</span>
         {onPageSizeChange ? (
           <label className="flex items-center gap-2">
-            <span className="hidden sm:inline">Rows</span>
+            <span className="hidden sm:inline">{t("web.ui.pagination.rows")}</span>
             <Select
               value={String(pageSize)}
               onValueChange={(value) => onPageSizeChange(Number(value))}
@@ -91,13 +117,13 @@ export function TablePagination({
       </div>
 
       {pageCount > 1 ? (
-        <nav aria-label="Pagination" className="flex items-center gap-1">
+        <nav aria-label={t("web.ui.pagination.label")} className="flex items-center gap-1">
           <Button
             variant="outline"
             size="icon-sm"
             onClick={() => goTo(0)}
             disabled={safePage === 0}
-            aria-label="First page"
+            aria-label={t("web.ui.pagination.first")}
           >
             <ChevronsLeft />
           </Button>
@@ -106,7 +132,7 @@ export function TablePagination({
             size="icon-sm"
             onClick={() => goTo(safePage - 1)}
             disabled={safePage === 0}
-            aria-label="Previous page"
+            aria-label={t("web.ui.pagination.previous")}
           >
             <ChevronLeft />
           </Button>
@@ -120,7 +146,8 @@ export function TablePagination({
                   className="text-muted-foreground/60 px-1 text-sm select-none"
                   aria-hidden="true"
                 >
-                  …
+                  {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a decorative gap between page numbers, hidden from assistive tech */}
+                  {"…"}
                 </span>
               ) : (
                 <Button
@@ -129,7 +156,7 @@ export function TablePagination({
                   size="icon-sm"
                   className="tabular-nums"
                   onClick={() => goTo(entry)}
-                  aria-label={`Page ${entry + 1}`}
+                  aria-label={t("web.ui.pagination.page", { page: String(entry + 1) })}
                   aria-current={entry === safePage ? "page" : undefined}
                 >
                   {entry + 1}
@@ -138,7 +165,10 @@ export function TablePagination({
             )}
           </div>
           <span className="text-muted-foreground px-2 text-xs tabular-nums sm:hidden">
-            {safePage + 1} / {pageCount}
+            {t("web.ui.pagination.compact", {
+              page: String(safePage + 1),
+              pages: String(pageCount),
+            })}
           </span>
 
           <Button
@@ -146,7 +176,7 @@ export function TablePagination({
             size="icon-sm"
             onClick={() => goTo(safePage + 1)}
             disabled={safePage >= pageCount - 1}
-            aria-label="Next page"
+            aria-label={t("web.ui.pagination.next")}
           >
             <ChevronRight />
           </Button>
@@ -155,7 +185,7 @@ export function TablePagination({
             size="icon-sm"
             onClick={() => goTo(pageCount - 1)}
             disabled={safePage >= pageCount - 1}
-            aria-label="Last page"
+            aria-label={t("web.ui.pagination.last")}
           >
             <ChevronsRight />
           </Button>

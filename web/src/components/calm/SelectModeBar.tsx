@@ -1,6 +1,7 @@
 import { Fragment, useId, type ReactNode, type Ref } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { SelectCheckbox } from "./SelectCheckbox";
 
@@ -17,6 +18,14 @@ export interface SelectModeAction {
   /** The bar's note says what it passes over, so a screen reader reads it with the button. */
   explainedByNote?: boolean;
 }
+
+// English only: callers pass an English plural noun ("rows", "collections"),
+// so these lines convert with those callers.
+const nounText = {
+  group: (noun: string) => `Selected ${noun}`,
+  tooMany: (limit: number, noun: string) => `Select up to ${limit} ${noun} at a time.`,
+  limit: (limit: number, noun: string) => `Up to ${limit} ${noun} at a time`,
+};
 
 /**
  * The floating bar of select mode: how many items are picked and what can be
@@ -44,6 +53,7 @@ export function SelectModeBar({
   /** One line under the bar about what the actions will pass over. */
   note?: ReactNode;
 }) {
+  const t = useT();
   const noteId = useId();
   const tooMany = count > limit;
   const disabled = busy || count === 0 || tooMany;
@@ -51,15 +61,13 @@ export function SelectModeBar({
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col items-center gap-1.5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:left-[240px]">
       <div
         role="group"
-        aria-label={`Selected ${noun}`}
+        aria-label={nounText.group(noun)}
         className="bg-popover/95 border-border pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-2xl border py-[7px] pr-[7px] pl-4 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.9)] backdrop-blur"
       >
         <span role="status" className="mr-2 text-sm font-semibold whitespace-nowrap">
-          {count} selected
+          {t("web.ui.selectedCount", { count, shown: String(count) })}
           {tooMany ? (
-            <span className="text-warning ml-2 font-normal">
-              Select up to {limit} {noun} at a time.
-            </span>
+            <span className="text-warning ml-2 font-normal">{nounText.tooMany(limit, noun)}</span>
           ) : null}
         </span>
         {actions.map((action) => (
@@ -116,6 +124,7 @@ export function SelectAllHeader({
   onDone: () => void;
   ref?: Ref<HTMLButtonElement>;
 }) {
+  const t = useT();
   let checked: boolean | "indeterminate" = false;
   if (count > 0 && selectedCount === count) checked = true;
   else if (selectedCount > 0) checked = "indeterminate";
@@ -124,20 +133,18 @@ export function SelectAllHeader({
       <span className="grid w-7 place-items-center">
         <SelectCheckbox
           ref={ref}
-          label="Select all"
+          label={t("web.ui.selectMode.selectAll")}
           disabled={count === 0}
           checked={checked}
           onChange={onSelectAll}
         />
       </span>
       <span aria-hidden className="font-medium">
-        Select all
+        {t("web.ui.selectMode.selectAll")}
       </span>
-      <span className="text-muted-foreground text-[13px]">
-        Up to {limit} {noun} at a time
-      </span>
+      <span className="text-muted-foreground text-[13px]">{nounText.limit(limit, noun)}</span>
       <Button size="sm" variant="ghost" className="ml-auto" onClick={onDone}>
-        Done
+        {t("common.done")}
       </Button>
     </div>
   );

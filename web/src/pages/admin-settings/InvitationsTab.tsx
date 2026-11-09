@@ -67,7 +67,7 @@ import {
 import { Link } from "react-router";
 import { toast } from "sonner";
 import { copyTextToClipboard } from "@/lib/clipboard";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { formatDate } from "@/lib/datetime";
 
 // The claim-link box shown after create/resend. min-w-0 + overflow-hidden on
@@ -786,7 +786,7 @@ function CreateInvitationForm({
           />
           {emailInvalid ? (
             <p id="invitation-email-error" className="text-destructive text-xs">
-              {INVALID_EMAIL_MESSAGE}
+              {invalidEmailMessage()}
             </p>
           ) : null}
           <p className="text-muted-foreground text-xs">

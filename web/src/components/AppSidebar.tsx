@@ -8,11 +8,13 @@ import {
   isSidebarExpanded,
   isSidebarRailCollapsed,
   sidebarSurfaceStyle,
+  UNCATEGORIZED_APP_GROUP,
   type AppNavLink,
 } from "@/components/AppSidebar.logic";
 import { SiloBrand } from "@/components/SiloBrand";
 import { findLibraryType } from "@/components/admin/libraries/libraryTypes";
 import { useAuth } from "@/hooks/useAuth";
+import { useT } from "@/i18n";
 import { useSidebarEntrance, type SidebarSwap } from "@/hooks/useSidebarSwap";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -113,6 +115,7 @@ function SidebarSectionHeader({
   expanded?: boolean;
   onToggle?: () => void;
 }) {
+  const t = useT();
   const textClass =
     "text-muted-foreground text-[0.625rem] font-semibold tracking-[0.22em] uppercase";
 
@@ -140,7 +143,9 @@ function SidebarSectionHeader({
           disabled={!show}
           aria-hidden={!show}
           aria-expanded={expanded}
-          aria-label={expanded ? `Collapse ${String(children)}` : `Expand ${String(children)}`}
+          aria-label={t(expanded ? "web.shell.sidebar.collapse" : "web.shell.sidebar.expand", {
+            name: String(children),
+          })}
           tabIndex={show ? 0 : -1}
           className={`${textClass} sidebar-fade hover:text-sidebar-foreground flex h-5 w-full items-center gap-1 px-3 ${
             show ? "opacity-100" : "pointer-events-none opacity-0"
@@ -194,6 +199,7 @@ interface ResolvedPrimaryMenuLink {
 }
 
 export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppSidebarProps) {
+  const t = useT();
   const entrance = useSidebarEntrance(swap);
   const location = useLocation();
   const navigate = useViewTransitionNavigate();
@@ -213,6 +219,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
     (profile.has_pin ||
       !household.isSuccess ||
       canSwitchProfile(household.data.length, household.maxProfiles));
+  const displayName = profile?.name ?? user?.username ?? t("web.shell.profile.fallbackName");
   const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
@@ -316,7 +323,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             {
               key,
               href: "/",
-              label: "Home",
+              label: t("web.shell.sidebar.home"),
               icon: <Home className="h-[18px] w-[18px] shrink-0" />,
             },
           ];
@@ -325,7 +332,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             {
               key,
               href: "/recommendations",
-              label: "For You",
+              label: t("web.shell.sidebar.forYou"),
               icon: <Sparkles className="h-[18px] w-[18px] shrink-0" />,
             },
           ];
@@ -334,7 +341,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             {
               key,
               href: "/calendar",
-              label: "Calendar",
+              label: t("web.shell.sidebar.calendar"),
               icon: <CalendarDays className="h-[18px] w-[18px] shrink-0" />,
             },
           ];
@@ -350,7 +357,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
           return [];
       }
     });
-  }, [libraries, primaryMenu]);
+  }, [libraries, primaryMenu, t]);
   const showDiscoverNav = primaryMenuLinks === null || showRequestsNav || showNotificationsNav;
 
   const catalogState = useMemo(
@@ -504,7 +511,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
         <ViewTransitionLink
           to="/"
           onClick={onNavigate}
-          aria-label="Go to home"
+          aria-label={t("web.shell.sidebar.goHome")}
           className="sidebar-logo focus-visible:ring-ring/50 relative flex h-24 items-center transition-opacity hover:opacity-85 focus-visible:ring-[3px] focus-visible:outline-none"
         >
           <span
@@ -523,7 +530,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
 
         {/* Main nav */}
         <nav
-          aria-label="Main navigation"
+          aria-label={t("web.shell.sidebar.mainNavigation")}
           className="sidebar-nav sidebar-scroll flex-1 space-y-7 overflow-y-auto px-3 pb-5"
         >
           {/* Home and Search open the sidebar. A customized primary menu replaces
@@ -581,7 +588,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     />
                   )}
                   <Home className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Home</SidebarLabel>
+                  <SidebarLabel show={showLabels}>{t("web.shell.sidebar.home")}</SidebarLabel>
                 </ViewTransitionLink>
               </li>
             )}
@@ -599,7 +606,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                   />
                 )}
                 <Search className="h-[18px] w-[18px] shrink-0" />
-                <SidebarLabel show={showLabels}>Search</SidebarLabel>
+                <SidebarLabel show={showLabels}>{t("web.shell.sidebar.search")}</SidebarLabel>
                 <kbd
                   aria-hidden={!showLabels}
                   className={`bg-muted text-muted-foreground sidebar-fade pointer-events-none ml-auto hidden rounded border px-1.5 py-0.5 text-[0.625rem] font-medium select-none lg:inline-flex ${
@@ -621,7 +628,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 expanded={librariesExpanded}
                 onToggle={() => setLibrariesExpanded((v) => !v)}
               >
-                Libraries
+                {t("web.shell.sidebar.libraries")}
               </SidebarSectionHeader>
               {(showLabels ? librariesExpanded : true) && (
                 <ul className="list-none space-y-0.5">
@@ -676,9 +683,12 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                               className={`sidebar-fade flex items-center self-stretch px-3 ${
                                 showLabels ? "opacity-100" : "pointer-events-none opacity-0"
                               }`}
-                              aria-label={
-                                isExpanded ? `Collapse ${lib.name}` : `Expand ${lib.name}`
-                              }
+                              aria-label={t(
+                                isExpanded
+                                  ? "web.shell.sidebar.collapse"
+                                  : "web.shell.sidebar.expand",
+                                { name: lib.name },
+                              )}
                               aria-expanded={isExpanded}
                             >
                               {isExpanded ? (
@@ -739,7 +749,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                                         })
                                       }
                                       className="text-muted-foreground hover:text-destructive absolute right-1 rounded p-1 opacity-0 transition-opacity group-hover/pin:opacity-100"
-                                      title="Unpin"
+                                      title={t("web.shell.sidebar.unpin")}
                                     >
                                       <PinOff className="h-3 w-3" />
                                     </button>
@@ -761,7 +771,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               the section can be left with nothing to show. */}
           {showDiscoverNav && (
             <div>
-              <SidebarSectionHeader show={showLabels}>Discover</SidebarSectionHeader>
+              <SidebarSectionHeader show={showLabels}>
+                {t("web.shell.sidebar.discover")}
+              </SidebarSectionHeader>
               <ul className="list-none space-y-0.5">
                 {primaryMenuLinks === null ? (
                   <li>
@@ -778,7 +790,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         />
                       )}
                       <Sparkles className="h-[18px] w-[18px] shrink-0" />
-                      <SidebarLabel show={showLabels}>For You</SidebarLabel>
+                      <SidebarLabel show={showLabels}>{t("web.shell.sidebar.forYou")}</SidebarLabel>
                     </ViewTransitionLink>
                   </li>
                 ) : null}
@@ -797,7 +809,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         />
                       )}
                       <Send className="h-[18px] w-[18px] shrink-0" />
-                      <SidebarLabel show={showLabels}>Requests</SidebarLabel>
+                      <SidebarLabel show={showLabels}>
+                        {t("web.shell.sidebar.requests")}
+                      </SidebarLabel>
                     </ViewTransitionLink>
                   </li>
                 )}
@@ -816,7 +830,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                         />
                       )}
                       <CalendarDays className="h-[18px] w-[18px] shrink-0" />
-                      <SidebarLabel show={showLabels}>Calendar</SidebarLabel>
+                      <SidebarLabel show={showLabels}>
+                        {t("web.shell.sidebar.calendar")}
+                      </SidebarLabel>
                     </ViewTransitionLink>
                   </li>
                 ) : null}
@@ -846,7 +862,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                           />
                         )}
                       </span>
-                      <SidebarLabel show={showLabels}>Notifications</SidebarLabel>
+                      <SidebarLabel show={showLabels}>
+                        {t("web.shell.sidebar.notifications")}
+                      </SidebarLabel>
                       {(unreadNotifications ?? 0) > 0 && (
                         <span
                           className={`sidebar-fade ml-auto rounded-full px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold ${
@@ -857,7 +875,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                             color: "var(--primary-foreground)",
                           }}
                         >
-                          {(unreadNotifications ?? 0) > 99 ? "99+" : unreadNotifications}
+                          {(unreadNotifications ?? 0) > 99
+                            ? t("web.shell.sidebar.unreadOverflow")
+                            : unreadNotifications}
                         </span>
                       )}
                     </ViewTransitionLink>
@@ -869,7 +889,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
 
           {/* Your Stuff */}
           <div className="sidebar-personal">
-            <SidebarSectionHeader show={showLabels}>Your Stuff</SidebarSectionHeader>
+            <SidebarSectionHeader show={showLabels}>
+              {t("web.shell.sidebar.yourStuff")}
+            </SidebarSectionHeader>
             <ul className="list-none space-y-0.5">
               <li>
                 <ViewTransitionLink
@@ -885,7 +907,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     />
                   )}
                   <Heart className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Favorites</SidebarLabel>
+                  <SidebarLabel show={showLabels}>{t("web.shell.sidebar.favorites")}</SidebarLabel>
                 </ViewTransitionLink>
               </li>
               <li>
@@ -902,7 +924,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     />
                   )}
                   <List className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Watchlist</SidebarLabel>
+                  <SidebarLabel show={showLabels}>{t("web.shell.sidebar.watchlist")}</SidebarLabel>
                 </ViewTransitionLink>
               </li>
               <li>
@@ -919,7 +941,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     />
                   )}
                   <UsersRound className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Watch Party</SidebarLabel>
+                  <SidebarLabel show={showLabels}>{t("web.shell.sidebar.watchParty")}</SidebarLabel>
                 </ViewTransitionLink>
               </li>
               <li>
@@ -936,7 +958,9 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     />
                   )}
                   <FolderOpen className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>Collections</SidebarLabel>
+                  <SidebarLabel show={showLabels}>
+                    {t("web.shell.sidebar.collections")}
+                  </SidebarLabel>
                 </ViewTransitionLink>
               </li>
               <li>
@@ -953,7 +977,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     />
                   )}
                   <Clock className="h-[18px] w-[18px] shrink-0" />
-                  <SidebarLabel show={showLabels}>History</SidebarLabel>
+                  <SidebarLabel show={showLabels}>{t("web.shell.sidebar.history")}</SidebarLabel>
                 </ViewTransitionLink>
               </li>
             </ul>
@@ -964,13 +988,17 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             distinct categories exist; flat list otherwise. */}
           {pluginNavLinks.length > 0 && (
             <div className="sidebar-apps">
-              <SidebarSectionHeader show={showLabels}>Apps</SidebarSectionHeader>
+              <SidebarSectionHeader show={showLabels}>
+                {t("web.shell.sidebar.apps")}
+              </SidebarSectionHeader>
               {pluginNavGroups ? (
                 <div className="space-y-3">
                   {pluginNavGroups.map((group) => (
                     <div key={group.category} className="sidebar-apps-group">
                       <SidebarSectionHeader show={showLabels}>
-                        {group.category}
+                        {group.category === UNCATEGORIZED_APP_GROUP
+                          ? t("web.shell.sidebar.otherApps")
+                          : group.category}
                       </SidebarSectionHeader>
                       {renderAppNavList(group.links)}
                     </div>
@@ -993,7 +1021,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               aria-current={isActive("/admin") ? "page" : undefined}
             >
               <Shield className="h-[18px] w-[18px] shrink-0" />
-              <SidebarLabel show={showLabels}>Admin</SidebarLabel>
+              <SidebarLabel show={showLabels}>{t("web.shell.sidebar.admin")}</SidebarLabel>
             </Link>
           )}
 
@@ -1011,7 +1039,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                aria-label={`${profile?.name ?? user?.username ?? "User"} menu`}
+                aria-label={t("web.shell.sidebar.profileMenu", { name: displayName })}
                 // Left-anchored in both states: `mx-auto` would centre the avatar
                 // in the 260px surface, i.e. far outside the 64px rail, and any
                 // width swap here would pop at the start of the collapse.
@@ -1030,6 +1058,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold shadow-[0_14px_32px_-20px_rgba(0,0,0,0.8)]">
                       {profile?.name?.charAt(0).toUpperCase() ??
                         user?.username?.charAt(0).toUpperCase() ??
+                        // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- placeholder initial, not a word
                         "?"}
                     </AvatarFallback>
                   </Avatar>
@@ -1039,7 +1068,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     showLabels ? "opacity-100" : "opacity-0"
                   }`}
                 >
-                  {profile?.name ?? user?.username ?? "User"}
+                  {displayName}
                 </span>
               </button>
             </DropdownMenuTrigger>
@@ -1058,9 +1087,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-[0.875rem] font-semibold">
-                    {profile?.name ?? user?.username ?? "User"}
-                  </span>
+                  <span className="truncate text-[0.875rem] font-semibold">{displayName}</span>
                   {profile && user?.username && user.username !== profile.name && (
                     <span className="text-muted-foreground truncate text-[0.6875rem] font-normal">
                       {user.username}
@@ -1078,7 +1105,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                 className="gap-2.5 rounded-lg px-2.5 py-2 text-[0.8125rem]"
               >
                 <Settings className="h-[18px] w-[18px]" />
-                Settings
+                {t("web.shell.sidebar.settings")}
               </DropdownMenuItem>
 
               <DropdownMenuSeparator />
@@ -1093,7 +1120,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                     className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[0.8125rem] font-semibold"
                   >
                     <UserCircle className="h-[18px] w-[18px]" />
-                    Switch Profile
+                    {t("web.shell.sidebar.switchProfile")}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
@@ -1101,7 +1128,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                   className="border-sidebar-border/60 bg-sidebar-accent/40 hover:bg-sidebar-accent focus:bg-sidebar-accent gap-3 rounded-xl border px-3 py-3 text-[0.8125rem] font-semibold"
                 >
                   <LogOut className="h-[18px] w-[18px]" />
-                  Logout
+                  {t("web.shell.sidebar.logout")}
                 </DropdownMenuItem>
               </div>
             </DropdownMenuContent>

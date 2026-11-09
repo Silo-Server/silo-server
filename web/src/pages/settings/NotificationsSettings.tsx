@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page/PageHeader";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import type {
   NotificationChannelMode,
   NotificationEmailPreferences,
@@ -243,7 +243,7 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
       return;
     }
     if (!isValidEmail(trimmed)) {
-      toast.error(INVALID_EMAIL_MESSAGE);
+      toast.error(invalidEmailMessage());
       return;
     }
     requestAddress.mutate(trimmed, {

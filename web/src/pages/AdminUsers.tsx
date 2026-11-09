@@ -87,7 +87,7 @@ import {
   setAssignedPermission,
 } from "@/lib/permissions";
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { formatLocale } from "@/lib/appLocale";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
@@ -796,7 +796,7 @@ function CreateUserForm({
     )
       return;
     if (!isValidEmail(email)) {
-      setError(INVALID_EMAIL_MESSAGE);
+      setError(invalidEmailMessage());
       return;
     }
     // A cleared or half-typed limit is not in the policy state, which still

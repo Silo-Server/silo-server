@@ -8,10 +8,12 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 /** "Step 1 of 2 · note": the progress line for a footer. Phones show only the count. */
 export function StepCount({ step, children }: { step: 1 | 2; children: string }) {
+  const t = useT();
   return (
     <span className="text-muted-foreground inline-flex min-w-0 items-center gap-2 text-[13px]">
       <i aria-hidden className="bg-foreground h-1 w-[18px] shrink-0 rounded-full" />
@@ -22,10 +24,13 @@ export function StepCount({ step, children }: { step: 1 | 2; children: string })
           step === 2 ? "bg-foreground" : "bg-border",
         )}
       />
-      <span className="shrink-0">Step {step} of 2</span>
+      <span className="shrink-0">
+        {t("web.ui.stepDialog.stepCount", { step: String(step), total: "2" })}
+      </span>
       {/* Phones only fit the step count; screen readers still hear the note. */}
       <span aria-hidden className="max-sm:hidden">
-        ·
+        {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a decorative separator, hidden from assistive tech */}
+        {"·"}
       </span>
       <span className="truncate max-sm:sr-only">{children}</span>
     </span>
@@ -78,6 +83,7 @@ export function StepDialog({
   /** The footer's buttons after Cancel. */
   actions?: ReactNode;
 }) {
+  const t = useT();
   const [returnFocus] = useState(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const from = opener?.closest("[data-step-dialog]");
@@ -148,7 +154,7 @@ export function StepDialog({
           <div className="flex shrink-0 gap-2">
             <DialogClose asChild>
               <Button type="button" variant="outline">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             {actions}
@@ -157,7 +163,7 @@ export function StepDialog({
 
         <DialogClose className="text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 absolute top-[18px] right-[18px] grid size-11 place-items-center rounded-[10px] outline-none focus-visible:ring-[3px] lg:size-[34px]">
           <X aria-hidden className="size-[18px]" />
-          <span className="sr-only">Close</span>
+          <span className="sr-only">{t("web.ui.close")}</span>
         </DialogClose>
       </DialogContent>
     </Dialog>

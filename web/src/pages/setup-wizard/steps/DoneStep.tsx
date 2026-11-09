@@ -4,21 +4,23 @@ import { ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useUpdateServerSettings } from "@/hooks/queries/admin/settings";
+import { useT, type MessageKey } from "@/i18n";
 
 import { librarySummary } from "../librarySummary";
 import { WIZARD_STEP_LABELS } from "../useWizardSteps";
 import { useWizardContext } from "../WizardContext";
 import { SKIPPABLE_STEPS } from "../setupStorage";
 
-const AFTER_SETUP_LINKS = [
-  { to: "/admin/libraries", label: "Scan and manage libraries" },
-  { to: "/admin/users", label: "Invite people" },
-  { to: "/admin/nodes", label: "Add transcode or proxy nodes" },
-  { to: "/admin/settings/general", label: "Server settings" },
+const AFTER_SETUP_LINKS: { to: string; label: MessageKey }[] = [
+  { to: "/admin/libraries", label: "web.setup.done.linkLibraries" },
+  { to: "/admin/users", label: "web.setup.done.linkUsers" },
+  { to: "/admin/nodes", label: "web.setup.done.linkNodes" },
+  { to: "/admin/settings/general", label: "web.setup.done.linkSettings" },
 ];
 
 export function DoneStep() {
   const navigate = useNavigate();
+  const t = useT();
   const {
     clearProgress,
     profile,
@@ -57,17 +59,15 @@ export function DoneStep() {
   // a reload the recap shrinks rather than guessing at what a step chose.
   const recap = SKIPPABLE_STEPS.flatMap((step) => {
     const value = step === "library" ? librarySummary(libraries) : summaries[step];
-    return value ? [{ step, label: WIZARD_STEP_LABELS[step], value }] : [];
+    return value ? [{ step, label: t(WIZARD_STEP_LABELS[step]), value }] : [];
   });
 
   return (
     <div className="setup-step">
       <header className="setup-step-header">
-        <h1 className="setup-step-title">Silo is ready</h1>
+        <h1 className="setup-step-title">{t("web.setup.done.title")}</h1>
         <p className="setup-step-lede">
-          {libraries.length > 0
-            ? "Your libraries are scanning in the background. Start browsing, or head to the admin area to keep going."
-            : "Add a library from the admin area when you're ready and Silo will start scanning."}
+          {libraries.length > 0 ? t("web.setup.done.ledeLibraries") : t("web.setup.done.ledeEmpty")}
         </p>
       </header>
 
@@ -94,14 +94,14 @@ export function DoneStep() {
               void completeSetup(link.to);
             }}
           >
-            {link.label}
+            {t(link.label)}
           </Link>
         ))}
       </div>
 
       <div className="setup-actions">
         <Button onClick={() => void completeSetup("/")} disabled={finishing} className="min-w-40">
-          {finishing ? "Starting…" : "Start using Silo"}
+          {finishing ? t("web.setup.done.starting") : t("web.setup.done.start")}
           <ChevronRight className="ml-1 size-4" />
         </Button>
         <Button
@@ -110,7 +110,7 @@ export function DoneStep() {
           onClick={() => void completeSetup("/admin/libraries")}
           disabled={finishing}
         >
-          Go to admin
+          {t("web.setup.done.goToAdmin")}
         </Button>
       </div>
     </div>

@@ -14,8 +14,9 @@ import { useServerBranding } from "@/hooks/useServerBranding";
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { toast } from "sonner";
+import { useT } from "@/i18n";
 
 export default function Signup() {
   const [searchParams] = useSearchParams();
@@ -29,6 +30,7 @@ export default function Signup() {
   const navigate = useNavigate();
   const { serverName } = useServerBranding();
   const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
+  const t = useT();
 
   const statusQuery = useQuery({
     queryKey: ["auth", "signup-status"],
@@ -56,7 +58,7 @@ export default function Signup() {
               {serverName}
             </CardTitle>
             <CardDescription className="mt-2 text-sm leading-6">
-              Public signups are currently closed.
+              {t("web.auth.signup.closed")}
             </CardDescription>
           </CardHeader>
         </Card>
@@ -67,11 +69,11 @@ export default function Signup() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!isValidEmail(email)) {
-      toast.error(INVALID_EMAIL_MESSAGE);
+      toast.error(invalidEmailMessage());
       return;
     }
     if (password !== confirmPassword) {
-      toast.error("Passwords do not match");
+      toast.error(t("web.auth.passwordRules.mismatch"));
       return;
     }
     setSubmitting(true);
@@ -95,7 +97,7 @@ export default function Signup() {
       }
       navigate("/profiles");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Signup failed");
+      toast.error(err instanceof Error ? err.message : t("web.auth.signup.failed"));
     } finally {
       setSubmitting(false);
     }
@@ -109,13 +111,13 @@ export default function Signup() {
         <CardHeader>
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">{serverName}</CardTitle>
           <CardDescription className="mt-2 text-sm leading-6">
-            Create a new account to get started.
+            {t("web.auth.signup.description")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="signup-username">Username</Label>
+              <Label htmlFor="signup-username">{t("web.auth.username")}</Label>
               <Input
                 id="signup-username"
                 value={username}
@@ -126,7 +128,7 @@ export default function Signup() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="signup-email">Email</Label>
+              <Label htmlFor="signup-email">{t("web.auth.email")}</Label>
               <Input
                 id="signup-email"
                 type="email"
@@ -137,8 +139,10 @@ export default function Signup() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="signup-password">Password</Label>
-              <p className="text-muted-foreground text-xs">At least 8 characters</p>
+              <Label htmlFor="signup-password">{t("web.auth.password")}</Label>
+              <p className="text-muted-foreground text-xs">
+                {t("web.auth.passwordRules.minLength")}
+              </p>
               <PasswordInput
                 id="signup-password"
                 value={password}
@@ -148,7 +152,7 @@ export default function Signup() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="signup-confirm-password">Confirm password</Label>
+              <Label htmlFor="signup-confirm-password">{t("web.auth.confirmPassword")}</Label>
               <PasswordInput
                 id="signup-confirm-password"
                 value={confirmPassword}
@@ -157,33 +161,40 @@ export default function Signup() {
                 required
               />
               {confirmPassword && password !== confirmPassword && (
-                <p className="text-destructive text-xs">Passwords do not match</p>
+                <p className="text-destructive text-xs">{t("web.auth.passwordRules.mismatch")}</p>
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="signup-invite-code">Invite code</Label>
+              <Label htmlFor="signup-invite-code">{t("web.auth.signup.inviteCodeLabel")}</Label>
               <Input
                 id="signup-invite-code"
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value)}
-                placeholder="Enter your invite code"
+                placeholder={t("web.auth.signup.inviteCodePlaceholder")}
                 required
               />
             </div>
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Creating account..." : "Create account"}
+              {submitting
+                ? t("web.auth.passwordRules.creatingAccount")
+                : t("web.auth.createAccount")}
             </Button>
           </form>
           <p className="text-muted-foreground mt-4 text-center text-sm">
-            Already have an account?{" "}
-            <Link
-              to={
-                redirectTarget ? `/login?redirect=${encodeURIComponent(redirectTarget)}` : "/login"
-              }
-              className="text-foreground underline hover:no-underline"
-            >
-              Sign in
-            </Link>
+            {t("web.auth.passwordRules.alreadyHaveAccount", {
+              link: (chunks) => (
+                <Link
+                  to={
+                    redirectTarget
+                      ? `/login?redirect=${encodeURIComponent(redirectTarget)}`
+                      : "/login"
+                  }
+                  className="text-foreground underline hover:no-underline"
+                >
+                  {chunks}
+                </Link>
+              ),
+            })}
           </p>
         </CardContent>
       </Card>

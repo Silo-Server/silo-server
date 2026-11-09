@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import "@/styles/admin-settings.css";
 
@@ -37,10 +38,6 @@ interface SaveBarProps {
   className?: string;
 }
 
-function plural(count: number, word: string) {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
-}
-
 /**
  * The floating save bar: what is staged and the two actions. Hidden while
  * the page is clean (unless a page bar is shown on purpose, as in create mode),
@@ -54,19 +51,22 @@ export function SaveBar({
   onSave,
   onDiscard,
   isSaving,
-  saveLabel = "Save",
-  discardLabel = "Discard",
+  saveLabel,
+  discardLabel,
   canSave = true,
   message,
   placement = "settings",
   visible = dirtyCount > 0,
   tone = "pending",
-  label = "Unsaved changes",
+  label,
   className,
 }: SaveBarProps) {
-  const text = message ?? plural(dirtyCount, "unsaved change");
+  const t = useT();
+  const text =
+    message ?? t("web.shell.saveBar.count", { count: dirtyCount, shown: String(dirtyCount) });
   const saveDisabled = isSaving || !canSave;
-  const saveText = isSaving ? "Saving..." : saveLabel;
+  const saveText = isSaving ? t("web.ui.saving") : (saveLabel ?? t("common.save"));
+  const discardText = discardLabel ?? t("web.shell.unsavedChanges.discard");
 
   if (placement === "page") {
     return (
@@ -100,7 +100,7 @@ export function SaveBar({
         >
           <div
             role={visible ? "region" : undefined}
-            aria-label={visible ? label : undefined}
+            aria-label={visible ? (label ?? t("web.shell.saveBar.regionLabel")) : undefined}
             className={
               visible
                 ? cn(
@@ -127,7 +127,7 @@ export function SaveBar({
             {visible && (
               <span className="flex shrink-0 items-center gap-2">
                 <Button variant="ghost" className="h-11 lg:h-8" onClick={onDiscard}>
-                  {discardLabel}
+                  {discardText}
                 </Button>
                 <Button
                   className="h-11 lg:h-8"
@@ -169,7 +169,7 @@ export function SaveBar({
           <span className="min-w-0 truncate text-[13px] font-medium">{text}</span>
           <span className="flex shrink-0 items-center gap-1.5">
             <Button variant="ghost" size="sm" className="rounded-full" onClick={onDiscard}>
-              {discardLabel}
+              {discardText}
             </Button>
             <Button
               size="sm"
