@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useRef } from "react";
 import { toast } from "sonner";
 import { captureProfileRequestContext, isProfileRequestContextCurrent } from "@/api/client";
 import { PageHeader } from "@/components/page/PageHeader";
@@ -64,24 +64,32 @@ function AppLanguageSetting() {
   });
   const mutation = useSetSettingValue();
   const clearDevice = useClearSettingValue();
+  const saving = useRef(false);
   // mutateAsync, not mutate: the clear must still run if the page closes first.
   async function save(next: string) {
     // One save at a time: two in flight could land in either order and
-    // leave the earlier choice stored. The select shows the pending one.
-    if (mutation.isPending || clearDevice.isPending) return;
-    // The clear runs later; skip it if the person switched profile meanwhile.
-    const requestContext = captureProfileRequestContext();
+    // leave the earlier choice stored. The select shows the pending one. The
+    // ref is set synchronously, so a second choice before the next render is
+    // refused too.
+    if (saving.current || mutation.isPending || clearDevice.isPending) return;
+    saving.current = true;
     try {
-      await mutation.mutateAsync({
-        key: SETTING_KEYS.UI_APP_LANGUAGE,
-        value: next === MATCH_DEVICE ? null : next,
-        identity: PROFILE_SCOPE,
-      });
-    } catch {
-      toast.error(t("web.settings.accessibility.appLanguageSaveFailed"));
-      return;
+      // The clear runs later; skip it if the person switched profile meanwhile.
+      const requestContext = captureProfileRequestContext();
+      try {
+        await mutation.mutateAsync({
+          key: SETTING_KEYS.UI_APP_LANGUAGE,
+          value: next === MATCH_DEVICE ? null : next,
+          identity: PROFILE_SCOPE,
+        });
+      } catch {
+        toast.error(t("web.settings.accessibility.appLanguageSaveFailed"));
+        return;
+      }
+      await clearThisBrowser(requestContext);
+    } finally {
+      saving.current = false;
     }
-    await clearThisBrowser(requestContext);
   }
   // Deletes this browser's own value so the profile's applies here. Skipped if
   // the profile or session changed since the save; a failure offers a retry,
