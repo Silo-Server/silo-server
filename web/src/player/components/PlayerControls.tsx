@@ -19,6 +19,7 @@ import {
 import { CircleButton } from "./CircleButton";
 import { SeekBar } from "./SeekBar";
 import { formatTime } from "../utils/formatTime";
+import { PlayerEndTime } from "./PlayerEndTime";
 import { VolumeControl } from "./VolumeControl";
 import { QualityMenu } from "./QualityMenu";
 import { SubtitleMenu } from "./SubtitleMenu";
@@ -199,6 +200,20 @@ export function PlayerControls({
   const controlsRef = useRef<HTMLDivElement>(null);
   const [narrowPlayer, setNarrowPlayer] = useState(false);
   const compactControls = isCoarsePointer || narrowPlayer;
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
+  const timeText = (
+    <>
+      {formatTime(currentTime)}
+      <span className="mx-1 text-white/30">/</span>
+      {formatTime(duration)}
+      <PlayerEndTime
+        position={scrubTime ?? currentTime}
+        duration={duration}
+        speed={playbackSpeed}
+        visible={visible}
+      />
+    </>
+  );
 
   useLayoutEffect(() => {
     const element = controlsRef.current;
@@ -328,6 +343,7 @@ export function PlayerControls({
           onRegionEdgeChange={onRegionEdgeChange}
           onSeek={onSeek}
           onSkip={onSkip}
+          onScrubTimeChange={setScrubTime}
         />
 
         {compactControls ? (
@@ -342,9 +358,7 @@ export function PlayerControls({
                 </div>
               ) : null}
               <div className="font-mono text-[11px] tracking-[0.12em] text-white/75 tabular-nums">
-                {formatTime(currentTime)}
-                <span className="mx-1 text-white/30">/</span>
-                {formatTime(duration)}
+                {timeText}
               </div>
             </div>
             <SubtitleMenu
@@ -427,9 +441,7 @@ export function PlayerControls({
                   </>
                 ) : null}
                 <span className="shrink-0 font-mono text-[11px] tracking-[0.12em] whitespace-nowrap text-white/75 normal-case tabular-nums">
-                  {formatTime(currentTime)}
-                  <span className="mx-1 text-white/30">/</span>
-                  {formatTime(duration)}
+                  {timeText}
                 </span>
               </div>
             </div>

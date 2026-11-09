@@ -5664,7 +5664,7 @@ export function VideoPlayer({
                 }
               : undefined
           }
-          playbackSpeed={playbackSpeed}
+          playbackSpeed={baseRate}
           onPlaybackSpeedChange={roomPlaybackActive ? undefined : setPlaybackSpeed}
           onTogglePiP={browserEngineActive ? undefined : handleTogglePiP}
           onPlayPause={handlePlayPause}

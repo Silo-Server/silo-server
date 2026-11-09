@@ -18,6 +18,8 @@ interface SeekBarProps {
   /** Fires continuously while a handle is dragged. */
   onRegionEdgeChange?: (kind: MarkerKind, edge: "start" | "end", seconds: number) => void;
   onSeek: (seconds: number) => void;
+  /** Reports the position under a drag in progress, then null when it ends. */
+  onScrubTimeChange?: (seconds: number | null) => void;
   /** Unmodified arrow keys skip by the profile's intervals; Shift+Arrow nudges 5s. */
   onSkip: { back: () => void; forward: () => void };
   /** Seek-bar previews of the file being played, when it has them. */
@@ -103,6 +105,7 @@ export function SeekBar({
   activeEditKind = null,
   onRegionEdgeChange,
   onSeek,
+  onScrubTimeChange,
   onSkip,
   trickplay = null,
   trickplayUpdatedAt,
@@ -139,6 +142,7 @@ export function SeekBar({
   );
 
   const [dragTime, setDragTime] = useState<number | null>(null);
+  useEffect(() => onScrubTimeChange?.(dragTime), [dragTime, onScrubTimeChange]);
   // The preview follows the pointer while hovering and the scrub position
   // while dragging (mouse or touch); a marker handle drag shows its own.
   const previewTime = edgeDrag !== null ? null : (dragTime ?? hoverTime);
