@@ -83,60 +83,6 @@
       "value": "\u200F\u202ESunday\u202C"
     }
   ],
-  "catalog.sort.added": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDate Added\u202C"
-    }
-  ],
-  "catalog.sort.author": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAuthor\u202C"
-    }
-  ],
-  "catalog.sort.imdbRating": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIMDb Rating\u202C"
-    }
-  ],
-  "catalog.sort.narrator": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENarrator\u202C"
-    }
-  ],
-  "catalog.sort.released": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERelease Date\u202C"
-    }
-  ],
-  "catalog.sort.resolution": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EResolution\u202C"
-    }
-  ],
-  "catalog.sort.series": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESeries\u202C"
-    }
-  ],
-  "catalog.sort.title": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETitle\u202C"
-    }
-  ],
-  "catalog.sort.year": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EYear\u202C"
-    }
-  ],
   "common.back": [
     {
       "type": 0,
@@ -593,16 +539,6 @@
       "value": "\u200F\u202ESome values aren’t valid. Check them and try again.\u202C"
     }
   ],
-  "home.section.becauseYouEnjoy": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBecause you enjoy \u202C"
-    },
-    {
-      "type": 1,
-      "value": "genres"
-    }
-  ],
   "home.section.becauseYouWatched": [
     {
       "type": 0,
@@ -637,12 +573,6 @@
       "value": "\u200F\u202EContinue Watching\u202C"
     }
   ],
-  "home.section.forYou": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFor You\u202C"
-    }
-  ],
   "home.section.hiddenGems": [
     {
       "type": 0,
@@ -667,22 +597,10 @@
       "value": "\u200F\u202ENext Up\u202C"
     }
   ],
-  "home.section.pickedFromYourHistory": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPicked from your history\u202C"
-    }
-  ],
   "home.section.popularOnServer": [
     {
       "type": 0,
       "value": "\u200F\u202EPopular on This Server\u202C"
-    }
-  ],
-  "home.section.profilesLikeYouEnjoyed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProfiles Like You Enjoyed\u202C"
     }
   ],
   "home.section.randomPicks": [
@@ -839,12 +757,6 @@
       "value": "\u200F\u202ETop Rated TV\u202C"
     }
   ],
-  "home.section.trendingOnServer": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETrending on Server\u202C"
-    }
-  ],
   "home.section.trendingThisWeek": [
     {
       "type": 0,
@@ -869,198 +781,6 @@
       "value": "\u200F\u202EIntro skipped\u202C"
     }
   ],
-  "language.ar": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EArabic\u202C"
-    }
-  ],
-  "language.cs": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECzech\u202C"
-    }
-  ],
-  "language.da": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDanish\u202C"
-    }
-  ],
-  "language.de": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGerman\u202C"
-    }
-  ],
-  "language.el": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGreek\u202C"
-    }
-  ],
-  "language.en": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EEnglish\u202C"
-    }
-  ],
-  "language.es": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESpanish\u202C"
-    }
-  ],
-  "language.fa": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPersian\u202C"
-    }
-  ],
-  "language.fi": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFinnish\u202C"
-    }
-  ],
-  "language.fr": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFrench\u202C"
-    }
-  ],
-  "language.he": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHebrew\u202C"
-    }
-  ],
-  "language.hi": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHindi\u202C"
-    }
-  ],
-  "language.hu": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHungarian\u202C"
-    }
-  ],
-  "language.id": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIndonesian\u202C"
-    }
-  ],
-  "language.is": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIcelandic\u202C"
-    }
-  ],
-  "language.it": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EItalian\u202C"
-    }
-  ],
-  "language.ja": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EJapanese\u202C"
-    }
-  ],
-  "language.ko": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EKorean\u202C"
-    }
-  ],
-  "language.nl": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDutch\u202C"
-    }
-  ],
-  "language.no": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENorwegian\u202C"
-    }
-  ],
-  "language.pl": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPolish\u202C"
-    }
-  ],
-  "language.pt": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPortuguese\u202C"
-    }
-  ],
-  "language.ro": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERomanian\u202C"
-    }
-  ],
-  "language.ru": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERussian\u202C"
-    }
-  ],
-  "language.sv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESwedish\u202C"
-    }
-  ],
-  "language.ta": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETamil\u202C"
-    }
-  ],
-  "language.te": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETelugu\u202C"
-    }
-  ],
-  "language.th": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThai\u202C"
-    }
-  ],
-  "language.tr": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETurkish\u202C"
-    }
-  ],
-  "language.uk": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUkrainian\u202C"
-    }
-  ],
-  "language.vi": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EVietnamese\u202C"
-    }
-  ],
-  "language.zh": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EChinese\u202C"
-    }
-  ],
   "marker.skipCredits": [
     {
       "type": 0,
@@ -1077,58 +797,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EGo Back\u202C"
-    }
-  ],
-  "player.seekInterval.choice": [
-    {
-      "type": 6,
-      "value": "seconds",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E second\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E seconds\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "requests.error.create": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to submit request\u202C"
-    }
-  ],
-  "requests.error.follow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to update notification\u202C"
     }
   ],
   "settings.appLanguage.matchDevice": [
@@ -2563,30 +2231,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EShow title art\u202C"
-    }
-  ],
-  "settingsManifest.watch_party.guest_control_policy.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWho can play and pause in Watch Parties you host. Changing it in a party saves it for your next one.\u202C"
-    }
-  ],
-  "settingsManifest.watch_party.guest_control_policy.label": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWatch Party playback controls\u202C"
-    }
-  ],
-  "settingsManifest.watch_party.guest_control_policy.option.guest_play_pause": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHost and guests\u202C"
-    }
-  ],
-  "settingsManifest.watch_party.guest_control_policy.option.host_only": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHost only\u202C"
     }
   ],
   "subtitleSearch.hearingImpaired": [
@@ -5475,6 +5119,66 @@
       "value": "\u200F\u202ELookup\u202C"
     }
   ],
+  "web.admin.activity.method.direct.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe original file is delivered without modification.\u202C"
+    }
+  ],
+  "web.admin.activity.method.direct.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect Play\u202C"
+    }
+  ],
+  "web.admin.activity.method.directStream.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EVideo is copied without re-encoding; audio is transcoded.\u202C"
+    }
+  ],
+  "web.admin.activity.method.directStream.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect Stream\u202C"
+    }
+  ],
+  "web.admin.activity.method.remux.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAudio and video are copied into a streaming container without re-encoding.\u202C"
+    }
+  ],
+  "web.admin.activity.method.remux.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemux\u202C"
+    }
+  ],
+  "web.admin.activity.method.transcode.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EVideo is re-encoded; audio may be copied or transcoded.\u202C"
+    }
+  ],
+  "web.admin.activity.method.transcode.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETranscode\u202C"
+    }
+  ],
+  "web.admin.activity.method.unknown.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe server has not reported a recognized playback method.\u202C"
+    }
+  ],
+  "web.admin.activity.method.unknown.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnknown\u202C"
+    }
+  ],
   "web.admin.activity.page.liveCount": [
     {
       "type": 6,
@@ -5853,6 +5557,18 @@
       "value": "\u200F\u202ESort\u202C"
     }
   ],
+  "web.admin.activity.subtitle.movie": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMovie\u202C"
+    }
+  ],
+  "web.admin.activity.subtitle.series": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESeries\u202C"
+    }
+  ],
   "web.admin.activity.summary.byNode": [
     {
       "type": 0,
@@ -5931,6 +5647,16 @@
     {
       "type": 0,
       "value": "\u200F\u202EUnknown source\u202C"
+    }
+  ],
+  "web.admin.activity.title.file": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFile #\u202C"
+    },
+    {
+      "type": 1,
+      "value": "id"
     }
   ],
   "web.admin.activity.toneMap.hardware": [
@@ -14043,8 +13769,9 @@
               "value": "\u202ERestore from \u202C"
             },
             {
-              "type": 1,
-              "value": "name"
+              "type": 8,
+              "value": "name",
+              "children": []
             },
             {
               "type": 0,
@@ -17335,8 +17062,9 @@
       "value": "\u200F\u202EHide \u202C"
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "name",
+      "children": []
     },
     {
       "type": 0,
@@ -17507,8 +17235,9 @@
       "value": "\u200F\u202EShow \u202C"
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "name",
+      "children": []
     },
     {
       "type": 0,
@@ -17709,8 +17438,9 @@
         "weekday": {
           "value": [
             {
-              "type": 1,
-              "value": "day"
+              "type": 8,
+              "value": "day",
+              "children": []
             },
             {
               "type": 0,
@@ -17811,8 +17541,9 @@
         "weekday": {
           "value": [
             {
-              "type": 1,
-              "value": "day"
+              "type": 8,
+              "value": "day",
+              "children": []
             },
             {
               "type": 0,
@@ -21143,50 +20874,6 @@
       "value": "\u200F\u202ECouldn't change it\u202C"
     }
   ],
-  "web.admin.common.accounts.role": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 5,
-      "value": "role",
-      "options": {
-        "owner": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u202Eowner\u202C"
-            }
-          ]
-        },
-        "admin": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u202Eadmin\u202C"
-            }
-          ]
-        },
-        "user": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u202Euser\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "role"
-            }
-          ]
-        }
-      }
-    }
-  ],
   "web.admin.common.adminUserSignIn.breakGlass.failed": [
     {
       "type": 0,
@@ -21859,138 +21546,6 @@
       "value": "\u202E.\u202C"
     }
   ],
-  "web.admin.common.autoscan.connectionCreateUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EConnection creation could not be confirmed. Refresh connections before submitting again.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.connectionCreated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan connection created\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.connectionDeleteUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EConnection deletion could not be confirmed. Refresh connections and check source bindings before submitting again.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.connectionDeleted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan connection deleted\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.connectionUpdateUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EConnection update could not be confirmed. Refresh connections before submitting again.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.connectionUpdated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan connection updated\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.pollAlreadyRunning": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EA poll is already running and may skip recently polled sources. Press Run now again when it finishes to poll every source.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.pollStartUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan start could not be confirmed. Check task and activity state before running again.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.pollStarted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan poll started on this server process. Check activity for source outcomes.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.rewriteSuggestionsFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECould not read rewrite suggestions\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.settingsSaved": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan settings saved\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.settingsSavedNoRescheduler": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettings saved; no poll-task rescheduler is configured on this server.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.settingsSavedRescheduleFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettings saved, but poll-task rescheduling failed. Runtime may retain its previous schedule until restart.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.settingsUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettings persistence could not be confirmed. Reload settings before submitting again.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.sourceCreated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan source created\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.sourceDeleteUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESource deletion could not be confirmed. Refresh sources before submitting again; running work may continue.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.sourceDeleted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan source deleted\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.sourceSaved": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan source saved\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.sourceWriteUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESource write could not be confirmed. Refresh sources before another explicit submission.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.webhookCreated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook endpoint created or already configured\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.webhookRotated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook URL rotated. Copy the new URL into Sonarr or Radarr; the old one no longer works.\u202C"
-    }
-  ],
-  "web.admin.common.autoscan.webhookUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook change could not be confirmed. Refresh source state before another explicit submission.\u202C"
-    }
-  ],
   "web.admin.common.brandingAssetField.previewAlt": [
     {
       "type": 0,
@@ -22633,6 +22188,36 @@
       "value": "\u200F\u202EOverride is set on this device\u202C"
     }
   ],
+  "web.admin.common.deviceOverrides.platformKind.desktop": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDesktop\u202C"
+    }
+  ],
+  "web.admin.common.deviceOverrides.platformKind.mobile": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMobile\u202C"
+    }
+  ],
+  "web.admin.common.deviceOverrides.platformKind.tablet": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETablet\u202C"
+    }
+  ],
+  "web.admin.common.deviceOverrides.platformKind.tv": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETV\u202C"
+    }
+  ],
+  "web.admin.common.deviceOverrides.platformKind.unknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOther\u202C"
+    }
+  ],
   "web.admin.common.deviceOverrides.reset": [
     {
       "type": 0,
@@ -22719,8 +22304,9 @@
       "value": "\u200F\u202Efrom \u202C"
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "name",
+      "children": []
     },
     {
       "type": 0,
@@ -22887,6 +22473,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EUnnamed\u202C"
+    }
+  ],
+  "web.admin.common.deviceOverrides.unknownPlatform": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnknown platform\u202C"
     }
   ],
   "web.admin.common.deviceOverrides.value.default": [
@@ -24819,844 +24411,6 @@
       "value": "\u200F\u202ESeries\u202C"
     }
   ],
-  "web.admin.common.pagination.polls": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EShowing \u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "from"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E–\u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "to"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E of \u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "total"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E poll\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EShowing \u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "from"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E–\u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "to"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E of \u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "total"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E polls\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.pagination.scans": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EShowing \u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "from"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E–\u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "to"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E of \u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "total"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E scan\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EShowing \u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "from"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E–\u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "to"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E of \u202C"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "total"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "\u202E scans\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.policy.changedConflict": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThe policy changed. Your draft and original revision are kept. Review the current policy before submitting a new change.\u202C"
-    }
-  ],
-  "web.admin.common.policy.outcomeUnknown": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "fallback"
-    },
-    {
-      "type": 0,
-      "value": "\u202E The outcome may be unknown. Review the saved state before trying again.\u202C"
-    }
-  ],
-  "web.admin.common.policy.revisionUnavailable": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReload this policy before editing; its revision is unavailable.\u202C"
-    }
-  ],
-  "web.admin.common.policy.savedLoaded": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPolicy change saved at generation \u202C"
-    },
-    {
-      "type": 1,
-      "value": "generation"
-    },
-    {
-      "type": 0,
-      "value": "\u202E. This server loaded generation \u202C"
-    },
-    {
-      "type": 1,
-      "value": "loaded"
-    },
-    {
-      "type": 0,
-      "value": "\u202E. Other servers apply changes independently.\u202C"
-    }
-  ],
-  "web.admin.common.policy.savedNotReloaded": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPolicy change saved at generation \u202C"
-    },
-    {
-      "type": 1,
-      "value": "generation"
-    },
-    {
-      "type": 0,
-      "value": "\u202E. This server could not reload it. Do not repeat the write; check the policy service before relying on the change.\u202C"
-    }
-  ],
-  "web.admin.common.policy.savedNotifyFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPolicy change saved at generation \u202C"
-    },
-    {
-      "type": 1,
-      "value": "generation"
-    },
-    {
-      "type": 0,
-      "value": "\u202E. This server reloaded generation \u202C"
-    },
-    {
-      "type": 1,
-      "value": "loaded"
-    },
-    {
-      "type": 0,
-      "value": "\u202E, but notification failed. Other servers may still use an earlier policy.\u202C"
-    }
-  ],
-  "web.admin.common.policy.unsupportedDomain": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnsupported policy domain\u202C"
-    }
-  ],
-  "web.admin.common.rateLimits.changedElsewhere": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERate limit settings changed. Reload and review them before saving again.\u202C"
-    }
-  ],
-  "web.admin.common.rateLimits.reloadBeforeEditing": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReload rate limit settings before editing.\u202C"
-    }
-  ],
-  "web.admin.common.rateLimits.saveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to save rate limit settings\u202C"
-    }
-  ],
-  "web.admin.common.rateLimits.saved": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERate limit settings saved\u202C"
-    }
-  ],
-  "web.admin.common.rateLimits.savedRestartRequired": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERate limit settings saved — restart the server to apply them\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.adminApproves": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Ean admin approves\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.approvedAutomatically": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Eapproved automatically\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.blockedAccount": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Ecan't request, because Media Requests is off for this account\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.blockedGroup": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Ecan't request, because \u202C"
-    },
-    {
-      "type": 1,
-      "value": "group"
-    },
-    {
-      "type": 0,
-      "value": "\u202E has requests turned off\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.blockedLegacy": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Ecan't request, because an old request setting blocks this account\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.blockedServerOff": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Ecan't request, because requests are turned off server-wide\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.errorMaxRequests": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EEnter a whole number of requests, 0 or more.\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.errorWindowDays": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUse at least 1 day.\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.group": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "name"
-    },
-    {
-      "type": 0,
-      "value": "\u202E group\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.inheritedFromGroup": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "group"
-    },
-    {
-      "type": 0,
-      "value": "\u202E: \u202C"
-    },
-    {
-      "type": 1,
-      "value": "value"
-    }
-  ],
-  "web.admin.common.requestAccess.inheritedFromServer": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EServer default: \u202C"
-    },
-    {
-      "type": 1,
-      "value": "value"
-    }
-  ],
-  "web.admin.common.requestAccess.inheritedViaGroup": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "group"
-    },
-    {
-      "type": 0,
-      "value": "\u202E uses the server default: \u202C"
-    },
-    {
-      "type": 1,
-      "value": "value"
-    }
-  ],
-  "web.admin.common.requestAccess.noLimit": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Eno limit\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.noLimitFrom": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Eno limit (\u202C"
-    },
-    {
-      "type": 1,
-      "value": "source"
-    },
-    {
-      "type": 0,
-      "value": "\u202E)\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.noNewRequests": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Eno new requests (0 \u202C"
-    },
-    {
-      "type": 1,
-      "value": "per_window"
-    },
-    {
-      "type": 0,
-      "value": "\u202E)\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.noNewRequestsFrom": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Eno new requests (0 \u202C"
-    },
-    {
-      "type": 1,
-      "value": "per_window"
-    },
-    {
-      "type": 0,
-      "value": "\u202E, \u202C"
-    },
-    {
-      "type": 1,
-      "value": "source"
-    },
-    {
-      "type": 0,
-      "value": "\u202E)\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.perWindow": [
-    {
-      "type": 6,
-      "value": "days",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202Eper day\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202Eper \u202C"
-            },
-            {
-              "type": 1,
-              "value": "days_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E days\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.policy": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "quota"
-    },
-    {
-      "type": 0,
-      "value": "\u202E, \u202C"
-    },
-    {
-      "type": 1,
-      "value": "approval"
-    },
-    {
-      "type": 0,
-      "value": "\u202E (\u202C"
-    },
-    {
-      "type": 1,
-      "value": "source"
-    },
-    {
-      "type": 0,
-      "value": "\u202E)\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.quota": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E request \u202C"
-            },
-            {
-              "type": 1,
-              "value": "per_window"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E requests \u202C"
-            },
-            {
-              "type": 1,
-              "value": "per_window"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.quotaFrom": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E request \u202C"
-            },
-            {
-              "type": 1,
-              "value": "per_window"
-            },
-            {
-              "type": 0,
-              "value": "\u202E (\u202C"
-            },
-            {
-              "type": 1,
-              "value": "source"
-            },
-            {
-              "type": 0,
-              "value": "\u202E)\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E requests \u202C"
-            },
-            {
-              "type": 1,
-              "value": "per_window"
-            },
-            {
-              "type": 0,
-              "value": "\u202E (\u202C"
-            },
-            {
-              "type": 1,
-              "value": "source"
-            },
-            {
-              "type": 0,
-              "value": "\u202E)\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.sourceAccount": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Eset on this account\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.sourceGroup": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Efrom \u202C"
-    },
-    {
-      "type": 1,
-      "value": "group"
-    }
-  ],
-  "web.admin.common.requestAccess.sourceServer": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Eserver default\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryAdminApproves": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin approves\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryAutoApproves": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAuto-approves\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryCount": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E request\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E requests\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryNoLimit": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENo request limit\u202C"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryPerWindow": [
-    {
-      "type": 6,
-      "value": "days",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "max"
-            },
-            {
-              "type": 0,
-              "value": "\u202E per day\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "max"
-            },
-            {
-              "type": 0,
-              "value": "\u202E per \u202C"
-            },
-            {
-              "type": 1,
-              "value": "days_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E days\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.unknownGroup": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Eits access group\u202C"
-    }
-  ],
   "web.admin.common.requestLimits.approval": [
     {
       "type": 0,
@@ -25769,302 +24523,6 @@
       }
     }
   ],
-  "web.admin.common.requests.country.ar": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EArgentina\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.at": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAustria\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.au": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAustralia\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.be": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBelgium\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.br": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBrazil\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.ca": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECanada\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.ch": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESwitzerland\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.cn": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EChina\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.cz": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECzechia\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.de": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGermany\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.dk": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDenmark\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.eg": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EEgypt\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.es": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESpain\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.fi": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFinland\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.fr": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFrance\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.gb": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnited Kingdom\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.gr": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGreece\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.hk": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHong Kong\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.hu": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHungary\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.id": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIndonesia\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.ie": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIreland\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.il": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIsrael\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.in": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIndia\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.ir": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIran\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.is": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIceland\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.it": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EItaly\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.jp": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EJapan\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.kr": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESouth Korea\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.mx": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMexico\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.ng": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENigeria\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.nl": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENetherlands\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.no": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENorway\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.nz": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENew Zealand\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.ph": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPhilippines\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.pl": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPoland\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.pt": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPortugal\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.ru": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERussia\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.se": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESweden\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.th": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThailand\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.tr": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETurkey\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.tw": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETaiwan\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.ua": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUkraine\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.us": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnited States\u202C"
-    }
-  ],
-  "web.admin.common.requests.country.za": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESouth Africa\u202C"
-    }
-  ],
-  "web.admin.common.requests.decade": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "decade"
-    },
-    {
-      "type": 0,
-      "value": "\u202Es\u202C"
-    }
-  ],
-  "web.admin.common.requests.language.cn": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECantonese\u202C"
-    }
-  ],
-  "web.admin.common.requests.language.ml": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMalayalam\u202C"
-    }
-  ],
-  "web.admin.common.requests.language.tl": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETagalog\u202C"
-    }
-  ],
   "web.admin.common.restartBanner.description": [
     {
       "type": 0,
@@ -26129,386 +24587,6 @@
     {
       "type": 0,
       "value": "\u200F\u202ESilo is shutting down to restart.\u202C"
-    }
-  ],
-  "web.admin.common.scans.entireLibrary": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EEntire library\u202C"
-    }
-  ],
-  "web.admin.common.scans.mode.file": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESingle file scan\u202C"
-    }
-  ],
-  "web.admin.common.scans.mode.library": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFull library scan\u202C"
-    }
-  ],
-  "web.admin.common.scans.mode.subtree": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESubtree scan\u202C"
-    }
-  ],
-  "web.admin.common.scans.processingFiles": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProcessing files\u202C"
-    }
-  ],
-  "web.admin.common.scans.progress": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "message"
-    },
-    {
-      "type": 0,
-      "value": "\u202E · \u202C"
-    },
-    {
-      "type": 1,
-      "value": "processed"
-    },
-    {
-      "type": 0,
-      "value": "\u202E / \u202C"
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": "\u202E (\u202C"
-    },
-    {
-      "type": 1,
-      "value": "percent"
-    },
-    {
-      "type": 0,
-      "value": "\u202E%)\u202C"
-    }
-  ],
-  "web.admin.common.scans.started": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EStarted\u202C"
-    }
-  ],
-  "web.admin.common.scans.startedDaysAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EStarted \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Ed ago\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EStarted \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Ed ago\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.scans.startedHoursAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EStarted \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202Eh ago\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EStarted \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202Eh ago\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.scans.startedJustNow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EStarted just now\u202C"
-    }
-  ],
-  "web.admin.common.scans.startedMinutesAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EStarted \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202Em ago\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EStarted \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202Em ago\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.scans.trigger.autoscan": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan\u202C"
-    }
-  ],
-  "web.admin.common.scans.trigger.created": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECreated\u202C"
-    }
-  ],
-  "web.admin.common.scans.trigger.fileChange": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFile change\u202C"
-    }
-  ],
-  "web.admin.common.scans.trigger.manual": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EManual\u202C"
-    }
-  ],
-  "web.admin.common.scans.trigger.scheduled": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EScheduled\u202C"
-    }
-  ],
-  "web.admin.common.scans.trigger.updated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUpdated\u202C"
-    }
-  ],
-  "web.admin.common.sections.deleteFailed": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EFailed to delete \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E section\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EFailed to delete \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E sections\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.sections.deleted": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EDeleted \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E section\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EDeleted \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E sections\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.sections.partiallyDeleted": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EDeleted \u202C"
-            },
-            {
-              "type": 1,
-              "value": "deleted"
-            },
-            {
-              "type": 0,
-              "value": "\u202E of \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E section\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EDeleted \u202C"
-            },
-            {
-              "type": 1,
-              "value": "deleted"
-            },
-            {
-              "type": 0,
-              "value": "\u202E of \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E sections\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
     }
   ],
   "web.admin.common.serverActivity.connecting": [
@@ -27141,6 +25219,42 @@
       "value": "\u200F\u202EView all\u202C"
     }
   ],
+  "web.admin.common.signingSecret.copied": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESigning secret copied\u202C"
+    }
+  ],
+  "web.admin.common.signingSecret.copy": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECopy signing secret\u202C"
+    }
+  ],
+  "web.admin.common.signingSecret.copyFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFailed to copy to clipboard\u202C"
+    }
+  ],
+  "web.admin.common.signingSecret.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo signs every delivery with this secret so your receiver can verify it. It is shown only once — store it on the receiving service now. You can rotate it later if it is lost.\u202C"
+    }
+  ],
+  "web.admin.common.signingSecret.saved": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EI've saved it\u202C"
+    }
+  ],
+  "web.admin.common.signingSecret.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESave your signing secret\u202C"
+    }
+  ],
   "web.admin.common.subtitleAppearanceDialog.createsOverride": [
     {
       "type": 0,
@@ -27605,372 +25719,6 @@
       "value": "\u200F\u202Efailed\u202C"
     }
   ],
-  "web.admin.common.title.header.accessGroups": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAccess Groups\u202C"
-    }
-  ],
-  "web.admin.common.title.header.activity": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EActivity\u202C"
-    }
-  ],
-  "web.admin.common.title.header.apiKeys": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAPI Keys\u202C"
-    }
-  ],
-  "web.admin.common.title.header.autoscan": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan\u202C"
-    }
-  ],
-  "web.admin.common.title.header.autoscanActivity": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAutoscan Activity\u202C"
-    }
-  ],
-  "web.admin.common.title.header.backups": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBackups\u202C"
-    }
-  ],
-  "web.admin.common.title.header.collections": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECollections\u202C"
-    }
-  ],
-  "web.admin.common.title.header.devices": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDevices\u202C"
-    }
-  ],
-  "web.admin.common.title.header.diagnostics": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EClient Diagnostics\u202C"
-    }
-  ],
-  "web.admin.common.title.header.downloads": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDownloads\u202C"
-    }
-  ],
-  "web.admin.common.title.header.history": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPlayback History\u202C"
-    }
-  ],
-  "web.admin.common.title.header.historyImport": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHistory Import\u202C"
-    }
-  ],
-  "web.admin.common.title.header.libraries": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELibraries\u202C"
-    }
-  ],
-  "web.admin.common.title.header.logs": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELogs\u202C"
-    }
-  ],
-  "web.admin.common.title.header.maintenance": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMaintenance\u202C"
-    }
-  ],
-  "web.admin.common.title.header.markerHistory": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMarker History\u202C"
-    }
-  ],
-  "web.admin.common.title.header.nodes": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENodes\u202C"
-    }
-  ],
-  "web.admin.common.title.header.plugin": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPlugin\u202C"
-    }
-  ],
-  "web.admin.common.title.header.plugins": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPlugins\u202C"
-    }
-  ],
-  "web.admin.common.title.header.policy": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPolicy\u202C"
-    }
-  ],
-  "web.admin.common.title.header.recommendations": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERecommendations\u202C"
-    }
-  ],
-  "web.admin.common.title.header.requests": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERequests\u202C"
-    }
-  ],
-  "web.admin.common.title.header.sections": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESections\u202C"
-    }
-  ],
-  "web.admin.common.title.header.settings": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettings\u202C"
-    }
-  ],
-  "web.admin.common.title.header.subtitles": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESubtitles\u202C"
-    }
-  ],
-  "web.admin.common.title.header.task": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETask\u202C"
-    }
-  ],
-  "web.admin.common.title.header.tasks": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETasks\u202C"
-    }
-  ],
-  "web.admin.common.title.header.user": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUser\u202C"
-    }
-  ],
-  "web.admin.common.title.header.users": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUsers\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.accessGroups": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Access Groups\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.activity": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Activity\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.admin": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.apiKeys": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin API Keys\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.autoscan": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Autoscan\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.autoscanActivity": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Autoscan Activity\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.backups": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Backups\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.collectionEdit": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EEdit Admin Collection\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.collectionNew": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENew Admin Collection\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.collections": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Collections\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.devices": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Devices\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.diagnostics": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Client Diagnostics\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.downloads": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Downloads\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.history": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Playback History\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.historyImport": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin History Import\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.libraries": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Libraries\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.logs": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Logs\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.maintenance": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Maintenance\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.markerHistory": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Marker History\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.nodes": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Nodes\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.plugin": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Plugin\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.plugins": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Plugins\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.policy": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Policy\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.recommendations": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Recommendations\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.requests": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Requests\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.sections": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Sections\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.settings": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Settings\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.subtitles": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Subtitles\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.task": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Task\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.tasks": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Tasks\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.user": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin User\u202C"
-    }
-  ],
-  "web.admin.common.title.tab.users": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdmin Users\u202C"
-    }
-  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -28381,174 +26129,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EFailed\u202C"
-    }
-  ],
-  "web.admin.common.userProfiles.createFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECouldn't create the profile\u202C"
-    }
-  ],
-  "web.admin.common.userProfiles.created": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProfile created\u202C"
-    }
-  ],
-  "web.admin.common.userProfiles.deleteFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECouldn't delete the profile\u202C"
-    }
-  ],
-  "web.admin.common.userProfiles.deleted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProfile deleted\u202C"
-    }
-  ],
-  "web.admin.common.userProfiles.saveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECouldn't save the profile\u202C"
-    }
-  ],
-  "web.admin.common.users.clearLearnedLimitFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to clear learned limit\u202C"
-    }
-  ],
-  "web.admin.common.users.deviceOverrideReset": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDevice override reset\u202C"
-    }
-  ],
-  "web.admin.common.users.deviceOverrideResetFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to reset override\u202C"
-    }
-  ],
-  "web.admin.common.users.deviceOverrideSaveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to save device override\u202C"
-    }
-  ],
-  "web.admin.common.users.deviceOverrideUpdated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDevice override updated\u202C"
-    }
-  ],
-  "web.admin.common.users.resetAllDone": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAll device overrides reset\u202C"
-    }
-  ],
-  "web.admin.common.users.resetAllFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to reset device\u202C"
-    }
-  ],
-  "web.admin.common.users.resetAllRemainingFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThe remaining override could not be reset.\u202C"
-    }
-  ],
-  "web.admin.common.users.resetAllStopped": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EReset stopped after \u202C"
-            },
-            {
-              "type": 1,
-              "value": "completed"
-            },
-            {
-              "type": 0,
-              "value": "\u202E of \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E override. Reload the settings before continuing. \u202C"
-            },
-            {
-              "type": 1,
-              "value": "reason"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EReset stopped after \u202C"
-            },
-            {
-              "type": 1,
-              "value": "completed"
-            },
-            {
-              "type": 0,
-              "value": "\u202E of \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E overrides. Reload the settings before continuing. \u202C"
-            },
-            {
-              "type": 1,
-              "value": "reason"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.users.settingReset": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUser setting reset\u202C"
-    }
-  ],
-  "web.admin.common.users.settingResetFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to reset setting\u202C"
-    }
-  ],
-  "web.admin.common.users.settingSaveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to save setting\u202C"
-    }
-  ],
-  "web.admin.common.users.settingUpdated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUser setting updated\u202C"
     }
   ],
   "web.admin.dashboard.addSheet.description": [
@@ -34993,8 +32573,14 @@
               "value": "\u200F\u202EThe Silo app on \u202C"
             },
             {
-              "type": 1,
-              "value": "profile"
+              "type": 8,
+              "value": "owner",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "profile"
+                }
+              ]
             },
             {
               "type": 0,
@@ -35017,8 +32603,14 @@
               "value": "\u200F\u202EThe Silo app on \u202C"
             },
             {
-              "type": 1,
-              "value": "profile"
+              "type": 8,
+              "value": "owner",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "profile"
+                }
+              ]
             },
             {
               "type": 0,
@@ -41642,8 +39234,14 @@
       "value": "\u200F\u202ECouldn't list \u202C"
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "location",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        }
+      ]
     },
     {
       "type": 0,
@@ -51767,6 +49365,224 @@
       "value": "\u200F\u202ERepository URL\u202C"
     }
   ],
+  "web.admin.plugins.schemaForm.hideSection": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide\u202C"
+    }
+  ],
+  "web.admin.plugins.schemaForm.invalid": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is invalid\u202C"
+    }
+  ],
+  "web.admin.plugins.schemaForm.max": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "\u202E must be ≤ \u202C"
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
+  "web.admin.plugins.schemaForm.maxLength": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": "\u202E must be at most \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E character\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": "\u202E must be at most \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E characters\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.plugins.schemaForm.min": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "\u202E must be ≥ \u202C"
+    },
+    {
+      "type": 1,
+      "value": "min"
+    }
+  ],
+  "web.admin.plugins.schemaForm.minLength": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": "\u202E must be at least \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E character\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": "\u202E must be at least \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E characters\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.plugins.schemaForm.noOptions": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo options available.\u202C"
+    }
+  ],
+  "web.admin.plugins.schemaForm.notNumber": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "\u202E must be a number\u202C"
+    }
+  ],
+  "web.admin.plugins.schemaForm.required": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is required\u202C"
+    }
+  ],
+  "web.admin.plugins.schemaForm.selectPlaceholder": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESelect\u202C"
+    }
+  ],
+  "web.admin.plugins.schemaForm.showSection": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow\u202C"
+    }
+  ],
   "web.admin.plugins.settings.defaultSchedule": [
     {
       "type": 0,
@@ -56063,6 +53879,398 @@
     {
       "type": 0,
       "value": "\u200F\u202Evia watchlist\u202C"
+    }
+  ],
+  "web.admin.sessions.login.admin.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo active sign-ins for this account.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.admin.groupDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign out one client, or end all of this account’s sign-ins.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.admin.groupTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EActive sign-ins\u202C"
+    }
+  ],
+  "web.admin.sessions.login.admin.ownerOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOnly the server owner can sign out another admin or the owner.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionClient": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis client will lose access on its next authenticated request. Its other sessions and password stay unchanged.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionClientOfUser": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis client on \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account will lose access on its next authenticated request. Its other sessions and password stay unchanged.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionEverywhere": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEvery active sign-in to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account will lose access on its next authenticated request, including sessions beyond this list. The password stays the same and other accounts stay signed in.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionEverywhereThisBrowser": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEvery active sign-in to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account will lose access on its next authenticated request, including sessions beyond this list. The password stays the same and other accounts stay signed in. This includes the browser you’re using.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionThisBrowser": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYou’ll return to the sign-in screen. You can sign in again with the same password or sign-in provider.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.playbackNote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA video already playing may continue until its next request. Saved device settings are kept.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.signingOut": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESigning out…\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.titleDevice": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign out \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E?\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.titleEverywhere": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E out everywhere?\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.titleFallback": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign out this session?\u202C"
+    }
+  ],
+  "web.admin.sessions.login.dialog.titleThisBrowser": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign out this browser?\u202C"
+    }
+  ],
+  "web.admin.sessions.login.error.signOutFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn't sign out the session. Try again.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.footer.admin": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast seen records authenticated activity, updated at most once a minute. Older sessions may have no recorded activity yet. Signing out keeps the password and saved device settings. Other accounts stay signed in.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.footer.self": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast seen records authenticated activity, updated at most once a minute. Older sessions may have no recorded activity yet. Signing out keeps the password and saved device settings. \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202EManage your account’s password\u202C"
+        }
+      ]
+    }
+  ],
+  "web.admin.sessions.login.heading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESigned-in sessions\u202C"
+    }
+  ],
+  "web.admin.sessions.login.loadError": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load sessions. Try again.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.loadMore": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoad more sessions\u202C"
+    }
+  ],
+  "web.admin.sessions.login.loading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading sessions…\u202C"
+    }
+  ],
+  "web.admin.sessions.login.loadingMore": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading…\u202C"
+    }
+  ],
+  "web.admin.sessions.login.refresh": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefresh\u202C"
+    }
+  ],
+  "web.admin.sessions.login.refreshAriaLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefresh sessions\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.details": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDetails\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.detailsAriaLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDetails for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.admin.sessions.login.row.expires": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EExpires\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.ipAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIP address at sign-in\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.lastSeen": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast seen\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.notRecorded": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot recorded yet\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.notSent": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot sent\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.signOutAriaLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign out \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.admin.sessions.login.row.signOutThisBrowser": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign out this browser\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.signedIn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESigned in\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.summary": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "status",
+      "children": [
+        {
+          "type": 1,
+          "value": "last_seen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E · Signed in \u202C"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.sessions.login.row.thisBrowserBadge": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis browser\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.unknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnknown\u202C"
+    }
+  ],
+  "web.admin.sessions.login.row.userAgent": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUser-Agent\u202C"
+    }
+  ],
+  "web.admin.sessions.login.self.currentDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe session you’re using right now.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.self.currentTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis browser\u202C"
+    }
+  ],
+  "web.admin.sessions.login.self.othersDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOther browsers and apps with access to your account.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.self.othersEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo other signed-in sessions.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.self.othersTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOther signed-in sessions\u202C"
+    }
+  ],
+  "web.admin.sessions.login.signOut": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign out\u202C"
+    }
+  ],
+  "web.admin.sessions.login.signOutEverywhere": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESign out everywhere\u202C"
+    }
+  ],
+  "web.admin.sessions.login.subtitle.admin": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBrowsers and apps signed in to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E’s account.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.subtitle.self": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESee where your account is signed in, and sign out any session you don’t recognize.\u202C"
+    }
+  ],
+  "web.admin.sessions.login.toast.signedOut": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESession signed out\u202C"
+    }
+  ],
+  "web.admin.sessions.login.toast.signedOutEverywhere": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is signed out everywhere\u202C"
     }
   ],
   "web.admin.sessions.playback.action.message": [
@@ -66095,8 +64303,9 @@
       "value": "\u200F\u202ENone picked, so \u202C"
     },
     {
-      "type": 1,
-      "value": "server"
+      "type": 8,
+      "value": "server",
+      "children": []
     },
     {
       "type": 0,
@@ -80907,12 +79116,6 @@
       "value": "\u200F\u202EThe server owner can't be viewed as\u202C"
     }
   ],
-  "web.admin.users.detail.overview.access.anyQuality": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAny quality\u202C"
-    }
-  ],
   "web.admin.users.detail.overview.access.autoApprove": [
     {
       "type": 0,
@@ -81711,8 +79914,14 @@
       "value": "\u202E changed on this device is removed, so it uses \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81725,8 +79934,14 @@
       "value": "\u200F\u202EClear \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81765,8 +79980,14 @@
       "value": "\u200F\u202EIt uses \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81813,8 +80034,14 @@
       "value": "\u200F\u202EThe rows on \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81827,8 +80054,14 @@
       "value": "\u200F\u202ECouldn't load \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81859,8 +80092,14 @@
       "value": "\u200F"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81881,8 +80120,14 @@
       "value": "\u200F"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81901,8 +80146,14 @@
       "value": "\u200F\u202EReset \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81971,8 +80222,14 @@
       "value": "\u200F\u202EThese replace \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -81993,8 +80250,14 @@
       "value": "\u200F\u202EThese replace \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -82023,8 +80286,14 @@
       "value": "\u202E. These replace \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -82045,8 +80314,14 @@
       "value": "\u200F\u202EThese replace \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -82081,8 +80356,14 @@
       "value": "\u200F\u202EThese replace \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -82389,8 +80670,14 @@
       "value": "\u200F\u202Eon \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -82449,8 +80736,14 @@
       "value": "\u200F\u202EUse \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -82469,8 +80762,14 @@
       "value": "\u200F\u202EUse \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -82551,8 +80850,14 @@
       "value": "\u202E goes back to \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -82581,8 +80886,14 @@
       "value": "\u202E goes back to \u202C"
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -83182,8 +81493,14 @@
       "value": "\u200F\u202EChange \u202C"
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        }
+      ]
     },
     {
       "type": 0,
@@ -83312,8 +81629,14 @@
       "value": "\u200F\u202ERemove \u202C"
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        }
+      ]
     },
     {
       "type": 0,
@@ -100279,2758 +98602,6 @@
       "value": "\u202E, pinned first\u202C"
     }
   ],
-  "web.common.activity.method.direct.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThe original file is delivered without modification.\u202C"
-    }
-  ],
-  "web.common.activity.method.direct.label": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDirect Play\u202C"
-    }
-  ],
-  "web.common.activity.method.directStream.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EVideo is copied without re-encoding; audio is transcoded.\u202C"
-    }
-  ],
-  "web.common.activity.method.directStream.label": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDirect Stream\u202C"
-    }
-  ],
-  "web.common.activity.method.remux.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAudio and video are copied into a streaming container without re-encoding.\u202C"
-    }
-  ],
-  "web.common.activity.method.remux.label": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERemux\u202C"
-    }
-  ],
-  "web.common.activity.method.transcode.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EVideo is re-encoded; audio may be copied or transcoded.\u202C"
-    }
-  ],
-  "web.common.activity.method.transcode.label": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETranscode\u202C"
-    }
-  ],
-  "web.common.activity.method.unknown.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThe server has not reported a recognized playback method.\u202C"
-    }
-  ],
-  "web.common.activity.method.unknown.label": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnknown\u202C"
-    }
-  ],
-  "web.common.activity.subtitle.movie": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMovie\u202C"
-    }
-  ],
-  "web.common.activity.subtitle.series": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESeries\u202C"
-    }
-  ],
-  "web.common.activity.title.file": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFile #\u202C"
-    },
-    {
-      "type": 1,
-      "value": "id"
-    }
-  ],
-  "web.common.catalog.sections.changedConflict": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThese sections changed. Reload and review your changes before trying again.\u202C"
-    }
-  ],
-  "web.common.catalog.sections.changedWhileLoading": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESections changed while loading. Reload before editing.\u202C"
-    }
-  ],
-  "web.common.catalog.sections.invalidScope": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESelect a valid section scope.\u202C"
-    }
-  ],
-  "web.common.catalog.sections.tooManyLibraries": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESelect at most 100 libraries per request.\u202C"
-    }
-  ],
-  "web.common.catalog.sections.typeAndTitleRequired": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EA section type and title are required.\u202C"
-    }
-  ],
-  "web.common.catalog.sections.versionUnavailable": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReload these sections before editing; their version is unavailable.\u202C"
-    }
-  ],
-  "web.common.collections.chartName.airingTodayTv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAiring Today TV Shows\u202C"
-    }
-  ],
-  "web.common.collections.chartName.nowPlayingMovies": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENow Playing Movies\u202C"
-    }
-  ],
-  "web.common.collections.chartName.onTheAirTv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOn The Air TV Shows\u202C"
-    }
-  ],
-  "web.common.collections.chartName.popularMovies": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPopular Movies\u202C"
-    }
-  ],
-  "web.common.collections.chartName.popularTv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPopular TV Shows\u202C"
-    }
-  ],
-  "web.common.collections.chartName.topRatedMovies": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETop Rated Movies\u202C"
-    }
-  ],
-  "web.common.collections.chartName.topRatedTv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETop Rated TV Shows\u202C"
-    }
-  ],
-  "web.common.collections.chartName.trendingMoviesThisWeek": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETrending Movies This Week\u202C"
-    }
-  ],
-  "web.common.collections.chartName.trendingMoviesToday": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETrending Movies Today\u202C"
-    }
-  ],
-  "web.common.collections.chartName.trendingThisWeek": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETrending This Week\u202C"
-    }
-  ],
-  "web.common.collections.chartName.trendingToday": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETrending Today\u202C"
-    }
-  ],
-  "web.common.collections.chartName.trendingTvThisWeek": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETrending TV Shows This Week\u202C"
-    }
-  ],
-  "web.common.collections.chartName.trendingTvToday": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETrending TV Shows Today\u202C"
-    }
-  ],
-  "web.common.collections.chartName.upcomingMovies": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUpcoming Movies\u202C"
-    }
-  ],
-  "web.common.collections.guidedUnavailable": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThese rules use options the Guided view can't show.\u202C"
-    }
-  ],
-  "web.common.date.daysAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Ed ago\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Ed ago\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.date.hoursAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Eh ago\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Eh ago\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.date.justNow": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Ejust now\u202C"
-    }
-  ],
-  "web.common.date.minutesAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Em ago\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Em ago\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.devicePlatform.kind.desktop": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDesktop\u202C"
-    }
-  ],
-  "web.common.devicePlatform.kind.mobile": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMobile\u202C"
-    }
-  ],
-  "web.common.devicePlatform.kind.tablet": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETablet\u202C"
-    }
-  ],
-  "web.common.devicePlatform.kind.tv": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETV\u202C"
-    }
-  ],
-  "web.common.devicePlatform.kind.unknown": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOther\u202C"
-    }
-  ],
-  "web.common.devicePlatform.unknown": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnknown platform\u202C"
-    }
-  ],
-  "web.common.format.bitrate.kbps": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "rate"
-    },
-    {
-      "type": 0,
-      "value": "\u202E kbps\u202C"
-    }
-  ],
-  "web.common.format.bitrate.mbps": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "rate"
-    },
-    {
-      "type": 0,
-      "value": "\u202E Mbps\u202C"
-    }
-  ],
-  "web.common.format.channels.count": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E ch\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E ch\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.format.channels.stereo": [
-    {
-      "type": 0,
-      "value": "\u200F\u202Estereo\u202C"
-    }
-  ],
-  "web.common.format.manga.chapter": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EChapter \u202C"
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
-  "web.common.format.manga.chapterFallback": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EChapter\u202C"
-    }
-  ],
-  "web.common.format.manga.volume": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EVolume \u202C"
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
-  "web.common.format.manga.volumeChapter": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "volume"
-    },
-    {
-      "type": 0,
-      "value": "\u202E · \u202C"
-    },
-    {
-      "type": 1,
-      "value": "chapter"
-    }
-  ],
-  "web.common.format.runtime.hoursMinutes": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "hours"
-    },
-    {
-      "type": 0,
-      "value": "\u202Eh \u202C"
-    },
-    {
-      "type": 1,
-      "value": "minutes"
-    },
-    {
-      "type": 0,
-      "value": "\u202Em\u202C"
-    }
-  ],
-  "web.common.format.runtime.minutes": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Em\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Em\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.format.sampleRate": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "rate"
-    },
-    {
-      "type": 0,
-      "value": "\u202E Hz\u202C"
-    }
-  ],
-  "web.common.format.size.bytes": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": "\u202E B\u202C"
-    }
-  ],
-  "web.common.format.size.gb": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": "\u202E GB\u202C"
-    }
-  ],
-  "web.common.format.size.gib": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": "\u202E GiB\u202C"
-    }
-  ],
-  "web.common.format.size.kb": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": "\u202E KB\u202C"
-    }
-  ],
-  "web.common.format.size.kib": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": "\u202E KiB\u202C"
-    }
-  ],
-  "web.common.format.size.mb": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": "\u202E MB\u202C"
-    }
-  ],
-  "web.common.format.size.mib": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": "\u202E MiB\u202C"
-    }
-  ],
-  "web.common.genres.action": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAction\u202C"
-    }
-  ],
-  "web.common.genres.actionAdventure": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAction & Adventure\u202C"
-    }
-  ],
-  "web.common.genres.adventure": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdventure\u202C"
-    }
-  ],
-  "web.common.genres.animation": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAnimation\u202C"
-    }
-  ],
-  "web.common.genres.comedy": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EComedy\u202C"
-    }
-  ],
-  "web.common.genres.crime": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECrime\u202C"
-    }
-  ],
-  "web.common.genres.documentary": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDocumentary\u202C"
-    }
-  ],
-  "web.common.genres.drama": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDrama\u202C"
-    }
-  ],
-  "web.common.genres.family": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFamily\u202C"
-    }
-  ],
-  "web.common.genres.fantasy": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFantasy\u202C"
-    }
-  ],
-  "web.common.genres.history": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHistory\u202C"
-    }
-  ],
-  "web.common.genres.horror": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHorror\u202C"
-    }
-  ],
-  "web.common.genres.kids": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EKids\u202C"
-    }
-  ],
-  "web.common.genres.music": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMusic\u202C"
-    }
-  ],
-  "web.common.genres.mystery": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMystery\u202C"
-    }
-  ],
-  "web.common.genres.news": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENews\u202C"
-    }
-  ],
-  "web.common.genres.reality": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReality\u202C"
-    }
-  ],
-  "web.common.genres.romance": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERomance\u202C"
-    }
-  ],
-  "web.common.genres.sciFiFantasy": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESci-Fi & Fantasy\u202C"
-    }
-  ],
-  "web.common.genres.scienceFiction": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EScience Fiction\u202C"
-    }
-  ],
-  "web.common.genres.soap": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESoap\u202C"
-    }
-  ],
-  "web.common.genres.talk": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETalk\u202C"
-    }
-  ],
-  "web.common.genres.thriller": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThriller\u202C"
-    }
-  ],
-  "web.common.genres.tvMovie": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETV Movie\u202C"
-    }
-  ],
-  "web.common.genres.unknown": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGenre \u202C"
-    },
-    {
-      "type": 1,
-      "value": "id"
-    }
-  ],
-  "web.common.genres.war": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWar\u202C"
-    }
-  ],
-  "web.common.genres.warPolitics": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWar & Politics\u202C"
-    }
-  ],
-  "web.common.genres.western": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWestern\u202C"
-    }
-  ],
-  "web.common.markers.sharingDisclosure": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHelp other Silo servers skip intros, credits, recaps and previews. Silo shares the movie, show and episode IDs, each file's hash, size and length, and the marker times it finds or you edit, including sections you mark as missing, with how each was found and how sure it is. It never shares file names, paths or your library list.\u202C"
-    }
-  ],
-  "web.common.overlays.episodesLeft": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E episode left\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E episodes left\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.overlays.previewSample": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPreview sample\u202C"
-    }
-  ],
-  "web.common.overlays.previewVariant.movie": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMovie\u202C"
-    }
-  ],
-  "web.common.overlays.previewVariant.requested": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERequested\u202C"
-    }
-  ],
-  "web.common.overlays.previewVariant.show": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EShow\u202C"
-    }
-  ],
-  "web.common.overlays.watched": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWatched\u202C"
-    }
-  ],
-  "web.common.requests.toast.cancelFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to cancel request\u202C"
-    }
-  ],
-  "web.common.requests.toast.cancelled": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERequest cancelled\u202C"
-    }
-  ],
-  "web.common.requests.toast.following": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWe'll let you know when it's available\u202C"
-    }
-  ],
-  "web.common.requests.toast.removeFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to remove request\u202C"
-    }
-  ],
-  "web.common.requests.toast.removed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERequest removed\u202C"
-    }
-  ],
-  "web.common.requests.toast.submitted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERequest submitted\u202C"
-    }
-  ],
-  "web.common.requests.toast.unfollowed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENotification turned off\u202C"
-    }
-  ],
-  "web.common.scans.cancelFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to cancel scans\u202C"
-    }
-  ],
-  "web.common.scans.cancelRequested": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EScan cancellation requested\u202C"
-    }
-  ],
-  "web.common.scans.fullIngestStarted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFull ingest scan started\u202C"
-    }
-  ],
-  "web.common.scans.scanFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EScan failed\u202C"
-    }
-  ],
-  "web.common.scans.selectAdminProfile": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESelect an administrator profile before scanning.\u202C"
-    }
-  ],
-  "web.common.schemaForm.hideSection": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHide\u202C"
-    }
-  ],
-  "web.common.schemaForm.invalid": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": "\u202E is invalid\u202C"
-    }
-  ],
-  "web.common.schemaForm.max": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": "\u202E must be ≤ \u202C"
-    },
-    {
-      "type": 1,
-      "value": "max"
-    }
-  ],
-  "web.common.schemaForm.maxLength": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": "\u202E must be at most \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E character\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": "\u202E must be at most \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E characters\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.schemaForm.min": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": "\u202E must be ≥ \u202C"
-    },
-    {
-      "type": 1,
-      "value": "min"
-    }
-  ],
-  "web.common.schemaForm.minLength": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": "\u202E must be at least \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E character\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": "\u202E must be at least \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E characters\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.schemaForm.noOptions": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENo options available.\u202C"
-    }
-  ],
-  "web.common.schemaForm.notNumber": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": "\u202E must be a number\u202C"
-    }
-  ],
-  "web.common.schemaForm.required": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": "\u202E is required\u202C"
-    }
-  ],
-  "web.common.schemaForm.selectPlaceholder": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESelect\u202C"
-    }
-  ],
-  "web.common.schemaForm.showSection": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EShow\u202C"
-    }
-  ],
-  "web.common.settingValue.invalidJson": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "key"
-    },
-    {
-      "type": 0,
-      "value": "\u202E: the value must be valid JSON\u202C"
-    }
-  ],
-  "web.common.settingValue.notANumber": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "key"
-    },
-    {
-      "type": 0,
-      "value": "\u202E: \"\u202C"
-    },
-    {
-      "type": 1,
-      "value": "raw"
-    },
-    {
-      "type": 0,
-      "value": "\u202E\" is not a number\u202C"
-    }
-  ],
-  "web.common.shell.endImpersonationFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to end impersonation\u202C"
-    }
-  ],
-  "web.common.shell.loadingApplication": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELoading application\u202C"
-    }
-  ],
-  "web.common.shell.loadingPage": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELoading page\u202C"
-    }
-  ],
-  "web.common.shell.loadingRequestAvailability": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELoading request availability\u202C"
-    }
-  ],
-  "web.common.shell.manageLibraryVisibility": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EManage library visibility in Settings\u202C"
-    }
-  ],
-  "web.common.shell.noLibraries": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENo visible libraries are available right now.\u202C"
-    }
-  ],
-  "web.common.shell.pageLoaded": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPage loaded\u202C"
-    }
-  ],
-  "web.common.shell.pluginOpenFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnable to open the plugin. Please try again.\u202C"
-    }
-  ],
-  "web.common.signingSecret.copied": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESigning secret copied\u202C"
-    }
-  ],
-  "web.common.signingSecret.copy": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECopy signing secret\u202C"
-    }
-  ],
-  "web.common.signingSecret.copyFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to copy to clipboard\u202C"
-    }
-  ],
-  "web.common.signingSecret.description": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESilo signs every delivery with this secret so your receiver can verify it. It is shown only once — store it on the receiving service now. You can rotate it later if it is lost.\u202C"
-    }
-  ],
-  "web.common.signingSecret.saved": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EI've saved it\u202C"
-    }
-  ],
-  "web.common.signingSecret.title": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESave your signing secret\u202C"
-    }
-  ],
-  "web.common.sort.bitrate": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBitrate\u202C"
-    }
-  ],
-  "web.common.sort.contentRating": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EContent Rating\u202C"
-    }
-  ],
-  "web.common.sort.dateRead": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDate Read\u202C"
-    }
-  ],
-  "web.common.sort.dateViewed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDate Viewed\u202C"
-    }
-  ],
-  "web.common.sort.duration": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDuration\u202C"
-    }
-  ],
-  "web.common.sort.latestEpisodeAdded": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELatest Episode Added\u202C"
-    }
-  ],
-  "web.common.sort.latestEpisodeAirDate": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELatest Episode Air Date\u202C"
-    }
-  ],
-  "web.common.sort.plays": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPlays\u202C"
-    }
-  ],
-  "web.common.sort.progress": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProgress\u202C"
-    }
-  ],
-  "web.common.sort.reads": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReads\u202C"
-    }
-  ],
-  "web.common.sort.rtAudienceRating": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERT Audience Rating\u202C"
-    }
-  ],
-  "web.common.sort.rtCriticRating": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERT Critic Rating\u202C"
-    }
-  ],
-  "web.common.sort.tmdbRating": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETMDB Rating\u202C"
-    }
-  ],
-  "web.common.speedTest.retryAfter": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ETry again in \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E second\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ETry again in \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E seconds\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.subtitles.providers.invalidConfiguration": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EInvalid provider configuration. Reload saved configuration.\u202C"
-    }
-  ],
-  "web.common.subtitles.providers.saveUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnable to confirm the save result. Reload saved configuration before retrying.\u202C"
-    }
-  ],
-  "web.common.subtitles.providers.savedApplied": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettings saved and applied on this server. Other servers may still use older settings.\u202C"
-    }
-  ],
-  "web.common.subtitles.providers.savedDifferentRevision": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettings saved. This server applied a different saved revision; reload to review the current configuration.\u202C"
-    }
-  ],
-  "web.common.subtitles.providers.savedNotApplied": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettings saved, but not applied on this server. Other servers may still use older settings.\u202C"
-    }
-  ],
-  "web.common.subtitles.providers.validatorRequired": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EA strong edit validator is required. Reload saved configuration.\u202C"
-    }
-  ],
-  "web.common.subtitles.unsupportedIdentifier": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnsupported subtitle identifier\u202C"
-    }
-  ],
-  "web.common.title.settings.accessibility": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAccessibility Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.account": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAccount Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.connectApps": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EConnect Apps Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.devices": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EYour Devices\u202C"
-    }
-  ],
-  "web.common.title.settings.historyImport": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHistory Import Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.homeScreen": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHome Screen Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.index": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESettings\u202C"
-    }
-  ],
-  "web.common.title.settings.interface": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENavigation & Card Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.libraries": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELibrary Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.notifications": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ENotification Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.personalize": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPersonalize\u202C"
-    }
-  ],
-  "web.common.title.settings.playback": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPlayback Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.profiles": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProfile Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.requests": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERequest Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.sessions": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESigned-in sessions\u202C"
-    }
-  ],
-  "web.common.title.settings.subtitleAppearance": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELanguage & Subtitle Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.titlePages": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETitle Page Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.watchProviders": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWatch Provider Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.webhookSync": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook Sync Settings\u202C"
-    }
-  ],
-  "web.common.title.settings.yourData": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EYour Data\u202C"
-    }
-  ],
-  "web.common.toast.collections.deleteFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to delete\u202C"
-    }
-  ],
-  "web.common.toast.collections.deleted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECollection deleted\u202C"
-    }
-  ],
-  "web.common.toast.collections.syncFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESync failed\u202C"
-    }
-  ],
-  "web.common.toast.collections.synced": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESynced — matched \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E item\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESynced — matched \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E items\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.collections.syncedWithWarnings": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESynced with warnings — matched \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E item\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESynced with warnings — matched \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202E items\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.favorites.added": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdded to favorites\u202C"
-    }
-  ],
-  "web.common.toast.favorites.removed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERemoved from favorites\u202C"
-    }
-  ],
-  "web.common.toast.favorites.updateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to update favorites\u202C"
-    }
-  ],
-  "web.common.toast.historyImport.acceptanceUnconfirmed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EImport acceptance could not be confirmed. Refresh imports before submitting again.\u202C"
-    }
-  ],
-  "web.common.toast.historyImport.embyConnectFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to sign in with Emby Connect\u202C"
-    }
-  ],
-  "web.common.toast.historyImport.plexSignInFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to start Plex sign-in\u202C"
-    }
-  ],
-  "web.common.toast.historyImport.queued": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EImport queued\u202C"
-    }
-  ],
-  "web.common.toast.historyImport.startFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to start import\u202C"
-    }
-  ],
-  "web.common.toast.historyImport.unexpectedLocation": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUnexpected import status location. Refresh imports before trying again.\u202C"
-    }
-  ],
-  "web.common.toast.homeRows.reset": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReset to the server's rows.\u202C"
-    }
-  ],
-  "web.common.toast.homeRows.resetFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECould not reset your rows\u202C"
-    }
-  ],
-  "web.common.toast.markers.saveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to save markers\u202C"
-    }
-  ],
-  "web.common.toast.markers.saved": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EMarkers saved\u202C"
-    }
-  ],
-  "web.common.toast.notInterested.hidden": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWe won't recommend this\u202C"
-    }
-  ],
-  "web.common.toast.notInterested.restored": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EBack in your recommendations\u202C"
-    }
-  ],
-  "web.common.toast.notInterested.undo": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EUndo\u202C"
-    }
-  ],
-  "web.common.toast.notInterested.undoFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to undo Not interested\u202C"
-    }
-  ],
-  "web.common.toast.notInterested.undoOtherProfile": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESwitch back to the profile that marked this to undo it\u202C"
-    }
-  ],
-  "web.common.toast.notInterested.updateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to update Not interested\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.createInProgress": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDestination creation is already in progress.\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.deleteFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to delete webhook\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.deleted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook deleted\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.nameAndUrlRequired": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EA name and webhook URL are required.\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.pushRemoveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to remove push subscription\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.reloadBeforeDeleting": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReload the webhook list before deleting this destination.\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.reloadBeforeEditing": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReload the webhook list before editing this destination.\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.rotateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to rotate signing secret\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.testInProgress": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EA test delivery is already in progress.\u202C"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.updateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to update webhook\u202C"
-    }
-  ],
-  "web.common.toast.profiles.avatarRemoveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to remove avatar\u202C"
-    }
-  ],
-  "web.common.toast.profiles.avatarRemoved": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAvatar removed\u202C"
-    }
-  ],
-  "web.common.toast.profiles.avatarUpdated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAvatar updated\u202C"
-    }
-  ],
-  "web.common.toast.profiles.avatarUploadFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to upload avatar\u202C"
-    }
-  ],
-  "web.common.toast.profiles.created": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProfile created\u202C"
-    }
-  ],
-  "web.common.toast.profiles.deleteFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to delete\u202C"
-    }
-  ],
-  "web.common.toast.profiles.deleted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProfile deleted\u202C"
-    }
-  ],
-  "web.common.toast.profiles.saveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to save profile\u202C"
-    }
-  ],
-  "web.common.toast.profiles.updated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProfile updated\u202C"
-    }
-  ],
-  "web.common.toast.ratings.updateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to update rating\u202C"
-    }
-  ],
-  "web.common.toast.subtitles.downloadFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to download subtitle\u202C"
-    }
-  ],
-  "web.common.toast.subtitles.downloaded": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESubtitle downloaded\u202C"
-    }
-  ],
-  "web.common.toast.subtitles.resetPreferenceFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to reset subtitle preference\u202C"
-    }
-  ],
-  "web.common.toast.subtitles.savePreferenceFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to save subtitle preference\u202C"
-    }
-  ],
-  "web.common.toast.subtitles.uploadFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to upload subtitle\u202C"
-    }
-  ],
-  "web.common.toast.subtitles.uploaded": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESubtitle uploaded\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.connectFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to connect provider\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.connected": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWatch provider connected\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.disconnectFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to disconnect provider\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.disconnected": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWatch provider disconnected\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.finishAuthFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to finish auth\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.reloadBeforeSaving": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EReload provider settings before saving changes.\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.startAuthFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to start auth\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.syncAvailableHours": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESync available in \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Eh\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESync available in \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Eh\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.watchProviders.syncAvailableHoursMinutes": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESync available in \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Eh \u202C"
-            },
-            {
-              "type": 1,
-              "value": "minutes"
-            },
-            {
-              "type": 0,
-              "value": "\u202Em\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESync available in \u202C"
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "\u202Eh \u202C"
-            },
-            {
-              "type": 1,
-              "value": "minutes"
-            },
-            {
-              "type": 0,
-              "value": "\u202Em\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.watchProviders.syncAvailableMinutes": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESync available in \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202Em\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESync available in \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202Em\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.watchProviders.syncAvailableSeconds": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESync available in \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202Es\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESync available in \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202Es\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.watchProviders.syncCoolingDown": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESync is cooling down\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.syncFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to start sync\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.syncStarted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWatch provider sync started\u202C"
-    }
-  ],
-  "web.common.toast.watchProviders.updateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to update provider\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.added": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdded to your watchlist\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.addedAndRequested": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdded to your watchlist and requested\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.availableNotice": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWe'll let you know when \u202C"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "\u202E is available.\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.notRequested": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIt wasn't requested.\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.notRequestedReason": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIt wasn't requested: \u202C"
-    },
-    {
-      "type": 1,
-      "value": "reason"
-    },
-    {
-      "type": 0,
-      "value": "\u202E.\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.notRequestedRequestsOff": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EIt wasn't requested, because watchlist requests are off.\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.removed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERemoved from your watchlist\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.requestedNotice": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWe'll let you know when \u202C"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "\u202E is available. It moves into your watchlist on its own.\u202C"
-    }
-  ],
-  "web.common.toast.watchlist.updateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to update your watchlist\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.createFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to create webhook connection\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.created": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook connection created\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.deleteFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to delete webhook connection\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.deleted": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook connection deleted\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.mappingsSaveFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to save profile mappings\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.mappingsSaved": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EProfile mappings saved\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.rotateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to rotate webhook URL\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.updateFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EFailed to update webhook connection\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.updated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook connection updated\u202C"
-    }
-  ],
-  "web.common.toast.webhookSync.urlRotated": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWebhook URL rotated\u202C"
-    }
-  ],
-  "web.common.ui.calendar.daySelected": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "date"
-    },
-    {
-      "type": 0,
-      "value": "\u202E, selected\u202C"
-    }
-  ],
-  "web.common.ui.calendar.dayToday": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EToday, \u202C"
-    },
-    {
-      "type": 1,
-      "value": "date"
-    }
-  ],
-  "web.common.ui.calendar.dayTodaySelected": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EToday, \u202C"
-    },
-    {
-      "type": 1,
-      "value": "date"
-    },
-    {
-      "type": 0,
-      "value": "\u202E, selected\u202C"
-    }
-  ],
-  "web.common.ui.calendar.monthDropdown": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EChoose the Month\u202C"
-    }
-  ],
-  "web.common.ui.calendar.nextMonth": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGo to the Next Month\u202C"
-    }
-  ],
-  "web.common.ui.calendar.previousMonth": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EGo to the Previous Month\u202C"
-    }
-  ],
-  "web.common.ui.calendar.weekNumber": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWeek \u202C"
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
-  "web.common.ui.calendar.weekNumberHeader": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EWeek Number\u202C"
-    }
-  ],
-  "web.common.ui.calendar.yearDropdown": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EChoose the Year\u202C"
-    }
-  ],
-  "web.common.ui.carousel.label": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": "\u202E carousel\u202C"
-    }
-  ],
-  "web.common.ui.carousel.loadFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECould not load \u202C"
-    },
-    {
-      "type": 1,
-      "value": "title_lower"
-    },
-    {
-      "type": 0,
-      "value": "\u202E.\u202C"
-    }
-  ],
-  "web.common.ui.carousel.scrollLeft": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EScroll left\u202C"
-    }
-  ],
-  "web.common.ui.carousel.scrollRight": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EScroll right\u202C"
-    }
-  ],
-  "web.common.ui.dateTimePicker.anyTime": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAny time\u202C"
-    }
-  ],
-  "web.common.ui.dateTimePicker.clear": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EClear\u202C"
-    }
-  ],
-  "web.common.ui.dateTimePicker.timeOfDay": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ETime of day\u202C"
-    }
-  ],
-  "web.common.ui.imageUpload.delete": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EDelete image\u202C"
-    }
-  ],
-  "web.common.ui.imageUpload.drop": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EClick or drop image\u202C"
-    }
-  ],
-  "web.common.ui.imageUpload.removeSelected": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ERemove selected file\u202C"
-    }
-  ],
-  "web.common.ui.imageUpload.urlHelp": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EPaste an image URL instead of uploading a file. If both are provided, the uploaded file wins.\u202C"
-    }
-  ],
-  "web.common.ui.libraryItemLink.noAccess": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThis title is in a library this profile can't open.\u202C"
-    }
-  ],
-  "web.common.ui.loadError.generic": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESomething went wrong while loading it. Try again in a moment.\u202C"
-    }
-  ],
-  "web.common.ui.loadError.timeout": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EThe server isn't responding. Try again in a moment.\u202C"
-    }
-  ],
-  "web.common.ui.loadMore.button": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELoad more\u202C"
-    }
-  ],
-  "web.common.ui.loadMore.loading": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ELoading more\u202C"
-    }
-  ],
-  "web.common.ui.refreshFailed.timeout": [
-    {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "message"
-    },
-    {
-      "type": 0,
-      "value": "\u202E The server isn't responding.\u202C"
-    }
-  ],
-  "web.common.ui.selectMode.collections.group": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESelected collections\u202C"
-    }
-  ],
-  "web.common.ui.selectMode.collections.limit": [
-    {
-      "type": 6,
-      "value": "limit",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EUp to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E collection at a time\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EUp to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E collections at a time\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.ui.selectMode.collections.tooMany": [
-    {
-      "type": 6,
-      "value": "limit",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESelect up to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E collection at a time.\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESelect up to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E collections at a time.\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.ui.selectMode.rows.group": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESelected rows\u202C"
-    }
-  ],
-  "web.common.ui.selectMode.rows.limit": [
-    {
-      "type": 6,
-      "value": "limit",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EUp to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E row at a time\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EUp to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E rows at a time\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.ui.selectMode.rows.tooMany": [
-    {
-      "type": 6,
-      "value": "limit",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESelect up to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E row at a time.\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202ESelect up to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E rows at a time.\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.ui.tagInput.placeholder": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAdd...\u202C"
-    }
-  ],
   "web.detail.actions.addToCollection": [
     {
       "type": 0,
@@ -103388,11 +98959,7 @@
   "web.detail.actions.startFromFirstEpisode": [
     {
       "type": 0,
-      "value": "\u200F\u202EStart From Episode \u202C"
-    },
-    {
-      "type": 1,
-      "value": "episode"
+      "value": "\u200F\u202EStart From Episode 1\u202C"
     }
   ],
   "web.detail.actions.startWatchParty": [
@@ -107572,20 +103139,6 @@
       "value": "number"
     }
   ],
-  "web.home.addRow.rules.groupMatchLabel": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EHow group \u202C"
-    },
-    {
-      "type": 1,
-      "value": "number"
-    },
-    {
-      "type": 0,
-      "value": "\u202E's rules combine\u202C"
-    }
-  ],
   "web.home.addRow.rules.groupSentence": [
     {
       "type": 0,
@@ -109431,6 +104984,24 @@
     {
       "type": 0,
       "value": "\u200F\u202EThis can't be undone.\u202C"
+    }
+  ],
+  "web.home.rows.collectionKinds.manual": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EManual\u202C"
+    }
+  ],
+  "web.home.rows.collectionKinds.smart": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESmart\u202C"
+    }
+  ],
+  "web.home.rows.collectionKinds.synced": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESynced list\u202C"
     }
   ],
   "web.home.rows.delete.conflict": [
@@ -118546,72 +114117,14 @@
   ],
   "web.player.bitrateLimit.invalid": [
     {
-      "type": 6,
-      "value": "places",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EEnter a value above \u202C"
-            },
-            {
-              "type": 1,
-              "value": "min"
-            },
-            {
-              "type": 0,
-              "value": "\u202E Mbps, such as 8 or 1.5 (up to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E decimal place).\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F\u202EEnter a value above \u202C"
-            },
-            {
-              "type": 1,
-              "value": "min"
-            },
-            {
-              "type": 0,
-              "value": "\u202E Mbps, such as 8 or 1.5 (up to \u202C"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E decimal places).\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "\u200F\u202EEnter a value above 0 Mbps, such as 8 or 1.5 (up to 3 decimal places).\u202C"
     }
   ],
   "web.player.bitrateLimit.lowWarning": [
     {
       "type": 0,
-      "value": "\u200F\u202EBelow \u202C"
-    },
-    {
-      "type": 1,
-      "value": "mbps"
-    },
-    {
-      "type": 0,
-      "value": "\u202E Mbps, streams are transcoded to very low quality.\u202C"
+      "value": "\u200F\u202EBelow 1 Mbps, streams are transcoded to very low quality.\u202C"
     }
   ],
   "web.player.bitrateLimit.unit": [
@@ -120472,6 +115985,46 @@
       "value": "\u202E×\u202C"
     }
   ],
+  "web.player.speedTest.retryAfter": [
+    {
+      "type": 6,
+      "value": "seconds",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ETry again in \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E second\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ETry again in \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E seconds\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.player.subtitles.aiTranslation": [
     {
       "type": 0,
@@ -121844,12 +117397,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EAll libraries\u202C"
-    }
-  ],
-  "web.profiles.helpers.access.anyQuality": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EAny quality\u202C"
     }
   ],
   "web.profiles.helpers.access.libraries": [
@@ -125128,12 +120675,6 @@
       "value": "\u200F\u202EApp language\u202C"
     }
   ],
-  "web.settings.accessibility.appLanguageDeviceClearFailed": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ESaved, but this browser still uses its own language. Try again.\u202C"
-    }
-  ],
   "web.settings.accessibility.appLanguageSaveFailed": [
     {
       "type": 0,
@@ -125908,8 +121449,14 @@
       "value": "\u200F\u202EConfirm your Silo password to connect \u202C"
     },
     {
-      "type": 1,
-      "value": "owner"
+      "type": 8,
+      "value": "name",
+      "children": [
+        {
+          "type": 1,
+          "value": "owner"
+        }
+      ]
     },
     {
       "type": 0,
@@ -126829,11 +122376,11 @@
     },
     {
       "type": 1,
-      "value": "name"
+      "value": "owner"
     },
     {
       "type": 0,
-      "value": "\u202E's style\u202C"
+      "value": "\u202E style\u202C"
     }
   ],
   "web.settings.device.appearance.resetOwn": [
@@ -127023,11 +122570,11 @@
         },
         {
           "type": 1,
-          "value": "name"
+          "value": "owner"
         },
         {
           "type": 0,
-          "value": "\u202E's settings, not your own.\u202C"
+          "value": "\u202E settings, not your own.\u202C"
         }
       ]
     },
@@ -127163,11 +122710,11 @@
             },
             {
               "type": 1,
-              "value": "name"
+              "value": "owner"
             },
             {
               "type": 0,
-              "value": "\u202E's profile settings on \u202C"
+              "value": "\u202E profile settings on \u202C"
             },
             {
               "type": 1,
@@ -127195,11 +122742,11 @@
             },
             {
               "type": 1,
-              "value": "name"
+              "value": "owner"
             },
             {
               "type": 0,
-              "value": "\u202E's profile settings on \u202C"
+              "value": "\u202E profile settings on \u202C"
             },
             {
               "type": 1,
@@ -127255,11 +122802,11 @@
     },
     {
       "type": 1,
-      "value": "name"
+      "value": "owner"
     },
     {
       "type": 0,
-      "value": "\u202E's other devices, and anyone else who uses this one, are unaffected.\u202C"
+      "value": "\u202E other devices, and anyone else who uses this one, are unaffected.\u202C"
     }
   ],
   "web.settings.device.scopeDetailOwn": [
@@ -127289,11 +122836,11 @@
         },
         {
           "type": 1,
-          "value": "name"
+          "value": "owner"
         },
         {
           "type": 0,
-          "value": "\u202E's profile only\u202C"
+          "value": "\u202E profile only\u202C"
         }
       ]
     },
@@ -127909,37 +123456,15 @@
   "web.settings.deviceSettingGroups.fromOwnerProfile": [
     {
       "type": 0,
-      "value": "\u200F"
+      "value": "\u200F\u202EFrom \u202C"
     },
     {
-      "type": 5,
-      "value": "owner",
-      "options": {
-        "self": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u202EFrom your profile\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u202EFrom \u202C"
-            },
-            {
-              "type": 1,
-              "value": "name"
-            },
-            {
-              "type": 0,
-              "value": "\u202E's profile\u202C"
-            }
-          ]
-        }
-      }
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "\u202E profile\u202C"
     }
   ],
   "web.settings.deviceSettingGroups.householdLimit": [
@@ -127977,37 +123502,15 @@
   "web.settings.deviceSettingGroups.useOwnerSetting": [
     {
       "type": 0,
-      "value": "\u200F"
+      "value": "\u200F\u202EUse \u202C"
     },
     {
-      "type": 5,
-      "value": "owner",
-      "options": {
-        "self": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u202EUse your setting\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u202EUse \u202C"
-            },
-            {
-              "type": 1,
-              "value": "name"
-            },
-            {
-              "type": 0,
-              "value": "\u202E's setting\u202C"
-            }
-          ]
-        }
-      }
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": "\u202E setting\u202C"
     }
   ],
   "web.settings.historyImport.chooseProfile": [
@@ -139128,122 +134631,20 @@
   ],
   "web.subtitles.quotaWindow.day": [
     {
-      "type": 6,
-      "value": "hours",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E hour\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E hours\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "\u200F\u202E24 hours\u202C"
     }
   ],
   "web.subtitles.quotaWindow.month": [
     {
-      "type": 6,
-      "value": "days",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E day\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E days\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "\u200F\u202E30 days\u202C"
     }
   ],
   "web.subtitles.quotaWindow.week": [
     {
-      "type": 6,
-      "value": "days",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E day\u202C"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "\u200F"
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "\u202E days\u202C"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "\u200F\u202E7 days\u202C"
     }
   ],
   "web.subtitles.search.downloadFailed": [
@@ -140069,15 +135470,7 @@
   "web.subtitles.upload.help": [
     {
       "type": 0,
-      "value": "\u200F\u202EDrag and drop or browse for SRT, VTT, ASS, SSA, or SUB files up to \u202C"
-    },
-    {
-      "type": 1,
-      "value": "megabytes"
-    },
-    {
-      "type": 0,
-      "value": "\u202E MB. Language is detected automatically when possible.\u202C"
+      "value": "\u200F\u202EDrag and drop or browse for SRT, VTT, ASS, SSA, or SUB files up to 5 MB. Language is detected automatically when possible.\u202C"
     }
   ],
   "web.subtitles.upload.languageLabel": [

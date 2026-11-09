@@ -83,60 +83,6 @@
       "value": "Sunday"
     }
   ],
-  "catalog.sort.added": [
-    {
-      "type": 0,
-      "value": "Date Added"
-    }
-  ],
-  "catalog.sort.author": [
-    {
-      "type": 0,
-      "value": "Author"
-    }
-  ],
-  "catalog.sort.imdbRating": [
-    {
-      "type": 0,
-      "value": "IMDb Rating"
-    }
-  ],
-  "catalog.sort.narrator": [
-    {
-      "type": 0,
-      "value": "Narrator"
-    }
-  ],
-  "catalog.sort.released": [
-    {
-      "type": 0,
-      "value": "Release Date"
-    }
-  ],
-  "catalog.sort.resolution": [
-    {
-      "type": 0,
-      "value": "Resolution"
-    }
-  ],
-  "catalog.sort.series": [
-    {
-      "type": 0,
-      "value": "Series"
-    }
-  ],
-  "catalog.sort.title": [
-    {
-      "type": 0,
-      "value": "Title"
-    }
-  ],
-  "catalog.sort.year": [
-    {
-      "type": 0,
-      "value": "Year"
-    }
-  ],
   "common.back": [
     {
       "type": 0,
@@ -593,16 +539,6 @@
       "value": "Some values aren’t valid. Check them and try again."
     }
   ],
-  "home.section.becauseYouEnjoy": [
-    {
-      "type": 0,
-      "value": "Because you enjoy "
-    },
-    {
-      "type": 1,
-      "value": "genres"
-    }
-  ],
   "home.section.becauseYouWatched": [
     {
       "type": 0,
@@ -637,12 +573,6 @@
       "value": "Continue Watching"
     }
   ],
-  "home.section.forYou": [
-    {
-      "type": 0,
-      "value": "For You"
-    }
-  ],
   "home.section.hiddenGems": [
     {
       "type": 0,
@@ -667,22 +597,10 @@
       "value": "Next Up"
     }
   ],
-  "home.section.pickedFromYourHistory": [
-    {
-      "type": 0,
-      "value": "Picked from your history"
-    }
-  ],
   "home.section.popularOnServer": [
     {
       "type": 0,
       "value": "Popular on This Server"
-    }
-  ],
-  "home.section.profilesLikeYouEnjoyed": [
-    {
-      "type": 0,
-      "value": "Profiles Like You Enjoyed"
     }
   ],
   "home.section.randomPicks": [
@@ -839,12 +757,6 @@
       "value": "Top Rated TV"
     }
   ],
-  "home.section.trendingOnServer": [
-    {
-      "type": 0,
-      "value": "Trending on Server"
-    }
-  ],
   "home.section.trendingThisWeek": [
     {
       "type": 0,
@@ -869,198 +781,6 @@
       "value": "Intro skipped"
     }
   ],
-  "language.ar": [
-    {
-      "type": 0,
-      "value": "Arabic"
-    }
-  ],
-  "language.cs": [
-    {
-      "type": 0,
-      "value": "Czech"
-    }
-  ],
-  "language.da": [
-    {
-      "type": 0,
-      "value": "Danish"
-    }
-  ],
-  "language.de": [
-    {
-      "type": 0,
-      "value": "German"
-    }
-  ],
-  "language.el": [
-    {
-      "type": 0,
-      "value": "Greek"
-    }
-  ],
-  "language.en": [
-    {
-      "type": 0,
-      "value": "English"
-    }
-  ],
-  "language.es": [
-    {
-      "type": 0,
-      "value": "Spanish"
-    }
-  ],
-  "language.fa": [
-    {
-      "type": 0,
-      "value": "Persian"
-    }
-  ],
-  "language.fi": [
-    {
-      "type": 0,
-      "value": "Finnish"
-    }
-  ],
-  "language.fr": [
-    {
-      "type": 0,
-      "value": "French"
-    }
-  ],
-  "language.he": [
-    {
-      "type": 0,
-      "value": "Hebrew"
-    }
-  ],
-  "language.hi": [
-    {
-      "type": 0,
-      "value": "Hindi"
-    }
-  ],
-  "language.hu": [
-    {
-      "type": 0,
-      "value": "Hungarian"
-    }
-  ],
-  "language.id": [
-    {
-      "type": 0,
-      "value": "Indonesian"
-    }
-  ],
-  "language.is": [
-    {
-      "type": 0,
-      "value": "Icelandic"
-    }
-  ],
-  "language.it": [
-    {
-      "type": 0,
-      "value": "Italian"
-    }
-  ],
-  "language.ja": [
-    {
-      "type": 0,
-      "value": "Japanese"
-    }
-  ],
-  "language.ko": [
-    {
-      "type": 0,
-      "value": "Korean"
-    }
-  ],
-  "language.nl": [
-    {
-      "type": 0,
-      "value": "Dutch"
-    }
-  ],
-  "language.no": [
-    {
-      "type": 0,
-      "value": "Norwegian"
-    }
-  ],
-  "language.pl": [
-    {
-      "type": 0,
-      "value": "Polish"
-    }
-  ],
-  "language.pt": [
-    {
-      "type": 0,
-      "value": "Portuguese"
-    }
-  ],
-  "language.ro": [
-    {
-      "type": 0,
-      "value": "Romanian"
-    }
-  ],
-  "language.ru": [
-    {
-      "type": 0,
-      "value": "Russian"
-    }
-  ],
-  "language.sv": [
-    {
-      "type": 0,
-      "value": "Swedish"
-    }
-  ],
-  "language.ta": [
-    {
-      "type": 0,
-      "value": "Tamil"
-    }
-  ],
-  "language.te": [
-    {
-      "type": 0,
-      "value": "Telugu"
-    }
-  ],
-  "language.th": [
-    {
-      "type": 0,
-      "value": "Thai"
-    }
-  ],
-  "language.tr": [
-    {
-      "type": 0,
-      "value": "Turkish"
-    }
-  ],
-  "language.uk": [
-    {
-      "type": 0,
-      "value": "Ukrainian"
-    }
-  ],
-  "language.vi": [
-    {
-      "type": 0,
-      "value": "Vietnamese"
-    }
-  ],
-  "language.zh": [
-    {
-      "type": 0,
-      "value": "Chinese"
-    }
-  ],
   "marker.skipCredits": [
     {
       "type": 0,
@@ -1077,50 +797,6 @@
     {
       "type": 0,
       "value": "Go Back"
-    }
-  ],
-  "player.seekInterval.choice": [
-    {
-      "type": 6,
-      "value": "seconds",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " second"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " seconds"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "requests.error.create": [
-    {
-      "type": 0,
-      "value": "Failed to submit request"
-    }
-  ],
-  "requests.error.follow": [
-    {
-      "type": 0,
-      "value": "Failed to update notification"
     }
   ],
   "settings.appLanguage.matchDevice": [
@@ -2555,30 +2231,6 @@
     {
       "type": 0,
       "value": "Show title art"
-    }
-  ],
-  "settingsManifest.watch_party.guest_control_policy.description": [
-    {
-      "type": 0,
-      "value": "Who can play and pause in Watch Parties you host. Changing it in a party saves it for your next one."
-    }
-  ],
-  "settingsManifest.watch_party.guest_control_policy.label": [
-    {
-      "type": 0,
-      "value": "Watch Party playback controls"
-    }
-  ],
-  "settingsManifest.watch_party.guest_control_policy.option.guest_play_pause": [
-    {
-      "type": 0,
-      "value": "Host and guests"
-    }
-  ],
-  "settingsManifest.watch_party.guest_control_policy.option.host_only": [
-    {
-      "type": 0,
-      "value": "Host only"
     }
   ],
   "subtitleSearch.hearingImpaired": [
@@ -5411,6 +5063,66 @@
       "value": "Lookup"
     }
   ],
+  "web.admin.activity.method.direct.description": [
+    {
+      "type": 0,
+      "value": "The original file is delivered without modification."
+    }
+  ],
+  "web.admin.activity.method.direct.label": [
+    {
+      "type": 0,
+      "value": "Direct Play"
+    }
+  ],
+  "web.admin.activity.method.directStream.description": [
+    {
+      "type": 0,
+      "value": "Video is copied without re-encoding; audio is transcoded."
+    }
+  ],
+  "web.admin.activity.method.directStream.label": [
+    {
+      "type": 0,
+      "value": "Direct Stream"
+    }
+  ],
+  "web.admin.activity.method.remux.description": [
+    {
+      "type": 0,
+      "value": "Audio and video are copied into a streaming container without re-encoding."
+    }
+  ],
+  "web.admin.activity.method.remux.label": [
+    {
+      "type": 0,
+      "value": "Remux"
+    }
+  ],
+  "web.admin.activity.method.transcode.description": [
+    {
+      "type": 0,
+      "value": "Video is re-encoded; audio may be copied or transcoded."
+    }
+  ],
+  "web.admin.activity.method.transcode.label": [
+    {
+      "type": 0,
+      "value": "Transcode"
+    }
+  ],
+  "web.admin.activity.method.unknown.description": [
+    {
+      "type": 0,
+      "value": "The server has not reported a recognized playback method."
+    }
+  ],
+  "web.admin.activity.method.unknown.label": [
+    {
+      "type": 0,
+      "value": "Unknown"
+    }
+  ],
   "web.admin.activity.page.liveCount": [
     {
       "type": 6,
@@ -5777,6 +5489,18 @@
       "value": "Sort"
     }
   ],
+  "web.admin.activity.subtitle.movie": [
+    {
+      "type": 0,
+      "value": "Movie"
+    }
+  ],
+  "web.admin.activity.subtitle.series": [
+    {
+      "type": 0,
+      "value": "Series"
+    }
+  ],
   "web.admin.activity.summary.byNode": [
     {
       "type": 0,
@@ -5843,6 +5567,16 @@
     {
       "type": 0,
       "value": "Unknown source"
+    }
+  ],
+  "web.admin.activity.title.file": [
+    {
+      "type": 0,
+      "value": "File #"
+    },
+    {
+      "type": 1,
+      "value": "id"
     }
   ],
   "web.admin.activity.toneMap.hardware": [
@@ -13227,8 +12961,9 @@
               "value": "Restore from "
             },
             {
-              "type": 1,
-              "value": "name"
+              "type": 8,
+              "value": "name",
+              "children": []
             },
             {
               "type": 0,
@@ -16367,8 +16102,9 @@
       "value": "Hide "
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "name",
+      "children": []
     },
     {
       "type": 0,
@@ -16531,8 +16267,9 @@
       "value": "Show "
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "name",
+      "children": []
     },
     {
       "type": 0,
@@ -16729,8 +16466,9 @@
         "weekday": {
           "value": [
             {
-              "type": 1,
-              "value": "day"
+              "type": 8,
+              "value": "day",
+              "children": []
             },
             {
               "type": 0,
@@ -16827,8 +16565,9 @@
         "weekday": {
           "value": [
             {
-              "type": 1,
-              "value": "day"
+              "type": 8,
+              "value": "day",
+              "children": []
             },
             {
               "type": 0,
@@ -20035,46 +19774,6 @@
       "value": "Couldn't change it"
     }
   ],
-  "web.admin.common.accounts.role": [
-    {
-      "type": 5,
-      "value": "role",
-      "options": {
-        "owner": {
-          "value": [
-            {
-              "type": 0,
-              "value": "owner"
-            }
-          ]
-        },
-        "admin": {
-          "value": [
-            {
-              "type": 0,
-              "value": "admin"
-            }
-          ]
-        },
-        "user": {
-          "value": [
-            {
-              "type": 0,
-              "value": "user"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "role"
-            }
-          ]
-        }
-      }
-    }
-  ],
   "web.admin.common.adminUserSignIn.breakGlass.failed": [
     {
       "type": 0,
@@ -20707,138 +20406,6 @@
       "value": "."
     }
   ],
-  "web.admin.common.autoscan.connectionCreateUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Connection creation could not be confirmed. Refresh connections before submitting again."
-    }
-  ],
-  "web.admin.common.autoscan.connectionCreated": [
-    {
-      "type": 0,
-      "value": "Autoscan connection created"
-    }
-  ],
-  "web.admin.common.autoscan.connectionDeleteUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Connection deletion could not be confirmed. Refresh connections and check source bindings before submitting again."
-    }
-  ],
-  "web.admin.common.autoscan.connectionDeleted": [
-    {
-      "type": 0,
-      "value": "Autoscan connection deleted"
-    }
-  ],
-  "web.admin.common.autoscan.connectionUpdateUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Connection update could not be confirmed. Refresh connections before submitting again."
-    }
-  ],
-  "web.admin.common.autoscan.connectionUpdated": [
-    {
-      "type": 0,
-      "value": "Autoscan connection updated"
-    }
-  ],
-  "web.admin.common.autoscan.pollAlreadyRunning": [
-    {
-      "type": 0,
-      "value": "A poll is already running and may skip recently polled sources. Press Run now again when it finishes to poll every source."
-    }
-  ],
-  "web.admin.common.autoscan.pollStartUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Autoscan start could not be confirmed. Check task and activity state before running again."
-    }
-  ],
-  "web.admin.common.autoscan.pollStarted": [
-    {
-      "type": 0,
-      "value": "Autoscan poll started on this server process. Check activity for source outcomes."
-    }
-  ],
-  "web.admin.common.autoscan.rewriteSuggestionsFailed": [
-    {
-      "type": 0,
-      "value": "Could not read rewrite suggestions"
-    }
-  ],
-  "web.admin.common.autoscan.settingsSaved": [
-    {
-      "type": 0,
-      "value": "Autoscan settings saved"
-    }
-  ],
-  "web.admin.common.autoscan.settingsSavedNoRescheduler": [
-    {
-      "type": 0,
-      "value": "Settings saved; no poll-task rescheduler is configured on this server."
-    }
-  ],
-  "web.admin.common.autoscan.settingsSavedRescheduleFailed": [
-    {
-      "type": 0,
-      "value": "Settings saved, but poll-task rescheduling failed. Runtime may retain its previous schedule until restart."
-    }
-  ],
-  "web.admin.common.autoscan.settingsUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Settings persistence could not be confirmed. Reload settings before submitting again."
-    }
-  ],
-  "web.admin.common.autoscan.sourceCreated": [
-    {
-      "type": 0,
-      "value": "Autoscan source created"
-    }
-  ],
-  "web.admin.common.autoscan.sourceDeleteUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Source deletion could not be confirmed. Refresh sources before submitting again; running work may continue."
-    }
-  ],
-  "web.admin.common.autoscan.sourceDeleted": [
-    {
-      "type": 0,
-      "value": "Autoscan source deleted"
-    }
-  ],
-  "web.admin.common.autoscan.sourceSaved": [
-    {
-      "type": 0,
-      "value": "Autoscan source saved"
-    }
-  ],
-  "web.admin.common.autoscan.sourceWriteUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Source write could not be confirmed. Refresh sources before another explicit submission."
-    }
-  ],
-  "web.admin.common.autoscan.webhookCreated": [
-    {
-      "type": 0,
-      "value": "Webhook endpoint created or already configured"
-    }
-  ],
-  "web.admin.common.autoscan.webhookRotated": [
-    {
-      "type": 0,
-      "value": "Webhook URL rotated. Copy the new URL into Sonarr or Radarr; the old one no longer works."
-    }
-  ],
-  "web.admin.common.autoscan.webhookUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Webhook change could not be confirmed. Refresh source state before another explicit submission."
-    }
-  ],
   "web.admin.common.brandingAssetField.previewAlt": [
     {
       "type": 1,
@@ -21457,6 +21024,36 @@
       "value": "Override is set on this device"
     }
   ],
+  "web.admin.common.deviceOverrides.platformKind.desktop": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "web.admin.common.deviceOverrides.platformKind.mobile": [
+    {
+      "type": 0,
+      "value": "Mobile"
+    }
+  ],
+  "web.admin.common.deviceOverrides.platformKind.tablet": [
+    {
+      "type": 0,
+      "value": "Tablet"
+    }
+  ],
+  "web.admin.common.deviceOverrides.platformKind.tv": [
+    {
+      "type": 0,
+      "value": "TV"
+    }
+  ],
+  "web.admin.common.deviceOverrides.platformKind.unknown": [
+    {
+      "type": 0,
+      "value": "Other"
+    }
+  ],
   "web.admin.common.deviceOverrides.reset": [
     {
       "type": 0,
@@ -21539,8 +21136,9 @@
       "value": "from "
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "name",
+      "children": []
     },
     {
       "type": 0,
@@ -21683,6 +21281,12 @@
     {
       "type": 0,
       "value": "Unnamed"
+    }
+  ],
+  "web.admin.common.deviceOverrides.unknownPlatform": [
+    {
+      "type": 0,
+      "value": "Unknown platform"
     }
   ],
   "web.admin.common.deviceOverrides.value.default": [
@@ -23551,792 +23155,6 @@
       "value": "Series"
     }
   ],
-  "web.admin.common.pagination.polls": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Showing "
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "from"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "–"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "to"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": " of "
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "total"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": " poll"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Showing "
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "from"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "–"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "to"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": " of "
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "total"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": " polls"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.pagination.scans": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Showing "
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "from"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "–"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "to"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": " of "
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "total"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": " scan"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Showing "
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "from"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": "–"
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "to"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": " of "
-            },
-            {
-              "type": 8,
-              "value": "num",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "total"
-                }
-              ]
-            },
-            {
-              "type": 0,
-              "value": " scans"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.policy.changedConflict": [
-    {
-      "type": 0,
-      "value": "The policy changed. Your draft and original revision are kept. Review the current policy before submitting a new change."
-    }
-  ],
-  "web.admin.common.policy.outcomeUnknown": [
-    {
-      "type": 1,
-      "value": "fallback"
-    },
-    {
-      "type": 0,
-      "value": " The outcome may be unknown. Review the saved state before trying again."
-    }
-  ],
-  "web.admin.common.policy.revisionUnavailable": [
-    {
-      "type": 0,
-      "value": "Reload this policy before editing; its revision is unavailable."
-    }
-  ],
-  "web.admin.common.policy.savedLoaded": [
-    {
-      "type": 0,
-      "value": "Policy change saved at generation "
-    },
-    {
-      "type": 1,
-      "value": "generation"
-    },
-    {
-      "type": 0,
-      "value": ". This server loaded generation "
-    },
-    {
-      "type": 1,
-      "value": "loaded"
-    },
-    {
-      "type": 0,
-      "value": ". Other servers apply changes independently."
-    }
-  ],
-  "web.admin.common.policy.savedNotReloaded": [
-    {
-      "type": 0,
-      "value": "Policy change saved at generation "
-    },
-    {
-      "type": 1,
-      "value": "generation"
-    },
-    {
-      "type": 0,
-      "value": ". This server could not reload it. Do not repeat the write; check the policy service before relying on the change."
-    }
-  ],
-  "web.admin.common.policy.savedNotifyFailed": [
-    {
-      "type": 0,
-      "value": "Policy change saved at generation "
-    },
-    {
-      "type": 1,
-      "value": "generation"
-    },
-    {
-      "type": 0,
-      "value": ". This server reloaded generation "
-    },
-    {
-      "type": 1,
-      "value": "loaded"
-    },
-    {
-      "type": 0,
-      "value": ", but notification failed. Other servers may still use an earlier policy."
-    }
-  ],
-  "web.admin.common.policy.unsupportedDomain": [
-    {
-      "type": 0,
-      "value": "Unsupported policy domain"
-    }
-  ],
-  "web.admin.common.rateLimits.changedElsewhere": [
-    {
-      "type": 0,
-      "value": "Rate limit settings changed. Reload and review them before saving again."
-    }
-  ],
-  "web.admin.common.rateLimits.reloadBeforeEditing": [
-    {
-      "type": 0,
-      "value": "Reload rate limit settings before editing."
-    }
-  ],
-  "web.admin.common.rateLimits.saveFailed": [
-    {
-      "type": 0,
-      "value": "Failed to save rate limit settings"
-    }
-  ],
-  "web.admin.common.rateLimits.saved": [
-    {
-      "type": 0,
-      "value": "Rate limit settings saved"
-    }
-  ],
-  "web.admin.common.rateLimits.savedRestartRequired": [
-    {
-      "type": 0,
-      "value": "Rate limit settings saved — restart the server to apply them"
-    }
-  ],
-  "web.admin.common.requestAccess.adminApproves": [
-    {
-      "type": 0,
-      "value": "an admin approves"
-    }
-  ],
-  "web.admin.common.requestAccess.approvedAutomatically": [
-    {
-      "type": 0,
-      "value": "approved automatically"
-    }
-  ],
-  "web.admin.common.requestAccess.blockedAccount": [
-    {
-      "type": 0,
-      "value": "can't request, because Media Requests is off for this account"
-    }
-  ],
-  "web.admin.common.requestAccess.blockedGroup": [
-    {
-      "type": 0,
-      "value": "can't request, because "
-    },
-    {
-      "type": 1,
-      "value": "group"
-    },
-    {
-      "type": 0,
-      "value": " has requests turned off"
-    }
-  ],
-  "web.admin.common.requestAccess.blockedLegacy": [
-    {
-      "type": 0,
-      "value": "can't request, because an old request setting blocks this account"
-    }
-  ],
-  "web.admin.common.requestAccess.blockedServerOff": [
-    {
-      "type": 0,
-      "value": "can't request, because requests are turned off server-wide"
-    }
-  ],
-  "web.admin.common.requestAccess.errorMaxRequests": [
-    {
-      "type": 0,
-      "value": "Enter a whole number of requests, 0 or more."
-    }
-  ],
-  "web.admin.common.requestAccess.errorWindowDays": [
-    {
-      "type": 0,
-      "value": "Use at least 1 day."
-    }
-  ],
-  "web.admin.common.requestAccess.group": [
-    {
-      "type": 1,
-      "value": "name"
-    },
-    {
-      "type": 0,
-      "value": " group"
-    }
-  ],
-  "web.admin.common.requestAccess.inheritedFromGroup": [
-    {
-      "type": 1,
-      "value": "group"
-    },
-    {
-      "type": 0,
-      "value": ": "
-    },
-    {
-      "type": 1,
-      "value": "value"
-    }
-  ],
-  "web.admin.common.requestAccess.inheritedFromServer": [
-    {
-      "type": 0,
-      "value": "Server default: "
-    },
-    {
-      "type": 1,
-      "value": "value"
-    }
-  ],
-  "web.admin.common.requestAccess.inheritedViaGroup": [
-    {
-      "type": 1,
-      "value": "group"
-    },
-    {
-      "type": 0,
-      "value": " uses the server default: "
-    },
-    {
-      "type": 1,
-      "value": "value"
-    }
-  ],
-  "web.admin.common.requestAccess.noLimit": [
-    {
-      "type": 0,
-      "value": "no limit"
-    }
-  ],
-  "web.admin.common.requestAccess.noLimitFrom": [
-    {
-      "type": 0,
-      "value": "no limit ("
-    },
-    {
-      "type": 1,
-      "value": "source"
-    },
-    {
-      "type": 0,
-      "value": ")"
-    }
-  ],
-  "web.admin.common.requestAccess.noNewRequests": [
-    {
-      "type": 0,
-      "value": "no new requests (0 "
-    },
-    {
-      "type": 1,
-      "value": "per_window"
-    },
-    {
-      "type": 0,
-      "value": ")"
-    }
-  ],
-  "web.admin.common.requestAccess.noNewRequestsFrom": [
-    {
-      "type": 0,
-      "value": "no new requests (0 "
-    },
-    {
-      "type": 1,
-      "value": "per_window"
-    },
-    {
-      "type": 0,
-      "value": ", "
-    },
-    {
-      "type": 1,
-      "value": "source"
-    },
-    {
-      "type": 0,
-      "value": ")"
-    }
-  ],
-  "web.admin.common.requestAccess.perWindow": [
-    {
-      "type": 6,
-      "value": "days",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "per day"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "per "
-            },
-            {
-              "type": 1,
-              "value": "days_text"
-            },
-            {
-              "type": 0,
-              "value": " days"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.policy": [
-    {
-      "type": 1,
-      "value": "quota"
-    },
-    {
-      "type": 0,
-      "value": ", "
-    },
-    {
-      "type": 1,
-      "value": "approval"
-    },
-    {
-      "type": 0,
-      "value": " ("
-    },
-    {
-      "type": 1,
-      "value": "source"
-    },
-    {
-      "type": 0,
-      "value": ")"
-    }
-  ],
-  "web.admin.common.requestAccess.quota": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " request "
-            },
-            {
-              "type": 1,
-              "value": "per_window"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " requests "
-            },
-            {
-              "type": 1,
-              "value": "per_window"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.quotaFrom": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " request "
-            },
-            {
-              "type": 1,
-              "value": "per_window"
-            },
-            {
-              "type": 0,
-              "value": " ("
-            },
-            {
-              "type": 1,
-              "value": "source"
-            },
-            {
-              "type": 0,
-              "value": ")"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " requests "
-            },
-            {
-              "type": 1,
-              "value": "per_window"
-            },
-            {
-              "type": 0,
-              "value": " ("
-            },
-            {
-              "type": 1,
-              "value": "source"
-            },
-            {
-              "type": 0,
-              "value": ")"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.sourceAccount": [
-    {
-      "type": 0,
-      "value": "set on this account"
-    }
-  ],
-  "web.admin.common.requestAccess.sourceGroup": [
-    {
-      "type": 0,
-      "value": "from "
-    },
-    {
-      "type": 1,
-      "value": "group"
-    }
-  ],
-  "web.admin.common.requestAccess.sourceServer": [
-    {
-      "type": 0,
-      "value": "server default"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryAdminApproves": [
-    {
-      "type": 0,
-      "value": "Admin approves"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryAutoApproves": [
-    {
-      "type": 0,
-      "value": "Auto-approves"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryCount": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " request"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " requests"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryNoLimit": [
-    {
-      "type": 0,
-      "value": "No request limit"
-    }
-  ],
-  "web.admin.common.requestAccess.summaryPerWindow": [
-    {
-      "type": 6,
-      "value": "days",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "max"
-            },
-            {
-              "type": 0,
-              "value": " per day"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "max"
-            },
-            {
-              "type": 0,
-              "value": " per "
-            },
-            {
-              "type": 1,
-              "value": "days_text"
-            },
-            {
-              "type": 0,
-              "value": " days"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.requestAccess.unknownGroup": [
-    {
-      "type": 0,
-      "value": "its access group"
-    }
-  ],
   "web.admin.common.requestLimits.approval": [
     {
       "type": 0,
@@ -24441,298 +23259,6 @@
       }
     }
   ],
-  "web.admin.common.requests.country.ar": [
-    {
-      "type": 0,
-      "value": "Argentina"
-    }
-  ],
-  "web.admin.common.requests.country.at": [
-    {
-      "type": 0,
-      "value": "Austria"
-    }
-  ],
-  "web.admin.common.requests.country.au": [
-    {
-      "type": 0,
-      "value": "Australia"
-    }
-  ],
-  "web.admin.common.requests.country.be": [
-    {
-      "type": 0,
-      "value": "Belgium"
-    }
-  ],
-  "web.admin.common.requests.country.br": [
-    {
-      "type": 0,
-      "value": "Brazil"
-    }
-  ],
-  "web.admin.common.requests.country.ca": [
-    {
-      "type": 0,
-      "value": "Canada"
-    }
-  ],
-  "web.admin.common.requests.country.ch": [
-    {
-      "type": 0,
-      "value": "Switzerland"
-    }
-  ],
-  "web.admin.common.requests.country.cn": [
-    {
-      "type": 0,
-      "value": "China"
-    }
-  ],
-  "web.admin.common.requests.country.cz": [
-    {
-      "type": 0,
-      "value": "Czechia"
-    }
-  ],
-  "web.admin.common.requests.country.de": [
-    {
-      "type": 0,
-      "value": "Germany"
-    }
-  ],
-  "web.admin.common.requests.country.dk": [
-    {
-      "type": 0,
-      "value": "Denmark"
-    }
-  ],
-  "web.admin.common.requests.country.eg": [
-    {
-      "type": 0,
-      "value": "Egypt"
-    }
-  ],
-  "web.admin.common.requests.country.es": [
-    {
-      "type": 0,
-      "value": "Spain"
-    }
-  ],
-  "web.admin.common.requests.country.fi": [
-    {
-      "type": 0,
-      "value": "Finland"
-    }
-  ],
-  "web.admin.common.requests.country.fr": [
-    {
-      "type": 0,
-      "value": "France"
-    }
-  ],
-  "web.admin.common.requests.country.gb": [
-    {
-      "type": 0,
-      "value": "United Kingdom"
-    }
-  ],
-  "web.admin.common.requests.country.gr": [
-    {
-      "type": 0,
-      "value": "Greece"
-    }
-  ],
-  "web.admin.common.requests.country.hk": [
-    {
-      "type": 0,
-      "value": "Hong Kong"
-    }
-  ],
-  "web.admin.common.requests.country.hu": [
-    {
-      "type": 0,
-      "value": "Hungary"
-    }
-  ],
-  "web.admin.common.requests.country.id": [
-    {
-      "type": 0,
-      "value": "Indonesia"
-    }
-  ],
-  "web.admin.common.requests.country.ie": [
-    {
-      "type": 0,
-      "value": "Ireland"
-    }
-  ],
-  "web.admin.common.requests.country.il": [
-    {
-      "type": 0,
-      "value": "Israel"
-    }
-  ],
-  "web.admin.common.requests.country.in": [
-    {
-      "type": 0,
-      "value": "India"
-    }
-  ],
-  "web.admin.common.requests.country.ir": [
-    {
-      "type": 0,
-      "value": "Iran"
-    }
-  ],
-  "web.admin.common.requests.country.is": [
-    {
-      "type": 0,
-      "value": "Iceland"
-    }
-  ],
-  "web.admin.common.requests.country.it": [
-    {
-      "type": 0,
-      "value": "Italy"
-    }
-  ],
-  "web.admin.common.requests.country.jp": [
-    {
-      "type": 0,
-      "value": "Japan"
-    }
-  ],
-  "web.admin.common.requests.country.kr": [
-    {
-      "type": 0,
-      "value": "South Korea"
-    }
-  ],
-  "web.admin.common.requests.country.mx": [
-    {
-      "type": 0,
-      "value": "Mexico"
-    }
-  ],
-  "web.admin.common.requests.country.ng": [
-    {
-      "type": 0,
-      "value": "Nigeria"
-    }
-  ],
-  "web.admin.common.requests.country.nl": [
-    {
-      "type": 0,
-      "value": "Netherlands"
-    }
-  ],
-  "web.admin.common.requests.country.no": [
-    {
-      "type": 0,
-      "value": "Norway"
-    }
-  ],
-  "web.admin.common.requests.country.nz": [
-    {
-      "type": 0,
-      "value": "New Zealand"
-    }
-  ],
-  "web.admin.common.requests.country.ph": [
-    {
-      "type": 0,
-      "value": "Philippines"
-    }
-  ],
-  "web.admin.common.requests.country.pl": [
-    {
-      "type": 0,
-      "value": "Poland"
-    }
-  ],
-  "web.admin.common.requests.country.pt": [
-    {
-      "type": 0,
-      "value": "Portugal"
-    }
-  ],
-  "web.admin.common.requests.country.ru": [
-    {
-      "type": 0,
-      "value": "Russia"
-    }
-  ],
-  "web.admin.common.requests.country.se": [
-    {
-      "type": 0,
-      "value": "Sweden"
-    }
-  ],
-  "web.admin.common.requests.country.th": [
-    {
-      "type": 0,
-      "value": "Thailand"
-    }
-  ],
-  "web.admin.common.requests.country.tr": [
-    {
-      "type": 0,
-      "value": "Turkey"
-    }
-  ],
-  "web.admin.common.requests.country.tw": [
-    {
-      "type": 0,
-      "value": "Taiwan"
-    }
-  ],
-  "web.admin.common.requests.country.ua": [
-    {
-      "type": 0,
-      "value": "Ukraine"
-    }
-  ],
-  "web.admin.common.requests.country.us": [
-    {
-      "type": 0,
-      "value": "United States"
-    }
-  ],
-  "web.admin.common.requests.country.za": [
-    {
-      "type": 0,
-      "value": "South Africa"
-    }
-  ],
-  "web.admin.common.requests.decade": [
-    {
-      "type": 1,
-      "value": "decade"
-    },
-    {
-      "type": 0,
-      "value": "s"
-    }
-  ],
-  "web.admin.common.requests.language.cn": [
-    {
-      "type": 0,
-      "value": "Cantonese"
-    }
-  ],
-  "web.admin.common.requests.language.ml": [
-    {
-      "type": 0,
-      "value": "Malayalam"
-    }
-  ],
-  "web.admin.common.requests.language.tl": [
-    {
-      "type": 0,
-      "value": "Tagalog"
-    }
-  ],
   "web.admin.common.restartBanner.description": [
     {
       "type": 0,
@@ -24797,382 +23323,6 @@
     {
       "type": 0,
       "value": "Silo is shutting down to restart."
-    }
-  ],
-  "web.admin.common.scans.entireLibrary": [
-    {
-      "type": 0,
-      "value": "Entire library"
-    }
-  ],
-  "web.admin.common.scans.mode.file": [
-    {
-      "type": 0,
-      "value": "Single file scan"
-    }
-  ],
-  "web.admin.common.scans.mode.library": [
-    {
-      "type": 0,
-      "value": "Full library scan"
-    }
-  ],
-  "web.admin.common.scans.mode.subtree": [
-    {
-      "type": 0,
-      "value": "Subtree scan"
-    }
-  ],
-  "web.admin.common.scans.processingFiles": [
-    {
-      "type": 0,
-      "value": "Processing files"
-    }
-  ],
-  "web.admin.common.scans.progress": [
-    {
-      "type": 1,
-      "value": "message"
-    },
-    {
-      "type": 0,
-      "value": " · "
-    },
-    {
-      "type": 1,
-      "value": "processed"
-    },
-    {
-      "type": 0,
-      "value": " / "
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " ("
-    },
-    {
-      "type": 1,
-      "value": "percent"
-    },
-    {
-      "type": 0,
-      "value": "%)"
-    }
-  ],
-  "web.admin.common.scans.started": [
-    {
-      "type": 0,
-      "value": "Started"
-    }
-  ],
-  "web.admin.common.scans.startedDaysAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Started "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "d ago"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Started "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "d ago"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.scans.startedHoursAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Started "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "h ago"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Started "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "h ago"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.scans.startedJustNow": [
-    {
-      "type": 0,
-      "value": "Started just now"
-    }
-  ],
-  "web.admin.common.scans.startedMinutesAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Started "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "m ago"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Started "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "m ago"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.scans.trigger.autoscan": [
-    {
-      "type": 0,
-      "value": "Autoscan"
-    }
-  ],
-  "web.admin.common.scans.trigger.created": [
-    {
-      "type": 0,
-      "value": "Created"
-    }
-  ],
-  "web.admin.common.scans.trigger.fileChange": [
-    {
-      "type": 0,
-      "value": "File change"
-    }
-  ],
-  "web.admin.common.scans.trigger.manual": [
-    {
-      "type": 0,
-      "value": "Manual"
-    }
-  ],
-  "web.admin.common.scans.trigger.scheduled": [
-    {
-      "type": 0,
-      "value": "Scheduled"
-    }
-  ],
-  "web.admin.common.scans.trigger.updated": [
-    {
-      "type": 0,
-      "value": "Updated"
-    }
-  ],
-  "web.admin.common.sections.deleteFailed": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Failed to delete "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " section"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Failed to delete "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " sections"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.sections.deleted": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Deleted "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " section"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Deleted "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " sections"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.sections.partiallyDeleted": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Deleted "
-            },
-            {
-              "type": 1,
-              "value": "deleted"
-            },
-            {
-              "type": 0,
-              "value": " of "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " section"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Deleted "
-            },
-            {
-              "type": 1,
-              "value": "deleted"
-            },
-            {
-              "type": 0,
-              "value": " of "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " sections"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
     }
   ],
   "web.admin.common.serverActivity.connecting": [
@@ -25737,6 +23887,42 @@
       "value": "View all"
     }
   ],
+  "web.admin.common.signingSecret.copied": [
+    {
+      "type": 0,
+      "value": "Signing secret copied"
+    }
+  ],
+  "web.admin.common.signingSecret.copy": [
+    {
+      "type": 0,
+      "value": "Copy signing secret"
+    }
+  ],
+  "web.admin.common.signingSecret.copyFailed": [
+    {
+      "type": 0,
+      "value": "Failed to copy to clipboard"
+    }
+  ],
+  "web.admin.common.signingSecret.description": [
+    {
+      "type": 0,
+      "value": "Silo signs every delivery with this secret so your receiver can verify it. It is shown only once — store it on the receiving service now. You can rotate it later if it is lost."
+    }
+  ],
+  "web.admin.common.signingSecret.saved": [
+    {
+      "type": 0,
+      "value": "I've saved it"
+    }
+  ],
+  "web.admin.common.signingSecret.title": [
+    {
+      "type": 0,
+      "value": "Save your signing secret"
+    }
+  ],
   "web.admin.common.subtitleAppearanceDialog.createsOverride": [
     {
       "type": 0,
@@ -26189,372 +24375,6 @@
       "value": "failed"
     }
   ],
-  "web.admin.common.title.header.accessGroups": [
-    {
-      "type": 0,
-      "value": "Access Groups"
-    }
-  ],
-  "web.admin.common.title.header.activity": [
-    {
-      "type": 0,
-      "value": "Activity"
-    }
-  ],
-  "web.admin.common.title.header.apiKeys": [
-    {
-      "type": 0,
-      "value": "API Keys"
-    }
-  ],
-  "web.admin.common.title.header.autoscan": [
-    {
-      "type": 0,
-      "value": "Autoscan"
-    }
-  ],
-  "web.admin.common.title.header.autoscanActivity": [
-    {
-      "type": 0,
-      "value": "Autoscan Activity"
-    }
-  ],
-  "web.admin.common.title.header.backups": [
-    {
-      "type": 0,
-      "value": "Backups"
-    }
-  ],
-  "web.admin.common.title.header.collections": [
-    {
-      "type": 0,
-      "value": "Collections"
-    }
-  ],
-  "web.admin.common.title.header.devices": [
-    {
-      "type": 0,
-      "value": "Devices"
-    }
-  ],
-  "web.admin.common.title.header.diagnostics": [
-    {
-      "type": 0,
-      "value": "Client Diagnostics"
-    }
-  ],
-  "web.admin.common.title.header.downloads": [
-    {
-      "type": 0,
-      "value": "Downloads"
-    }
-  ],
-  "web.admin.common.title.header.history": [
-    {
-      "type": 0,
-      "value": "Playback History"
-    }
-  ],
-  "web.admin.common.title.header.historyImport": [
-    {
-      "type": 0,
-      "value": "History Import"
-    }
-  ],
-  "web.admin.common.title.header.libraries": [
-    {
-      "type": 0,
-      "value": "Libraries"
-    }
-  ],
-  "web.admin.common.title.header.logs": [
-    {
-      "type": 0,
-      "value": "Logs"
-    }
-  ],
-  "web.admin.common.title.header.maintenance": [
-    {
-      "type": 0,
-      "value": "Maintenance"
-    }
-  ],
-  "web.admin.common.title.header.markerHistory": [
-    {
-      "type": 0,
-      "value": "Marker History"
-    }
-  ],
-  "web.admin.common.title.header.nodes": [
-    {
-      "type": 0,
-      "value": "Nodes"
-    }
-  ],
-  "web.admin.common.title.header.plugin": [
-    {
-      "type": 0,
-      "value": "Plugin"
-    }
-  ],
-  "web.admin.common.title.header.plugins": [
-    {
-      "type": 0,
-      "value": "Plugins"
-    }
-  ],
-  "web.admin.common.title.header.policy": [
-    {
-      "type": 0,
-      "value": "Policy"
-    }
-  ],
-  "web.admin.common.title.header.recommendations": [
-    {
-      "type": 0,
-      "value": "Recommendations"
-    }
-  ],
-  "web.admin.common.title.header.requests": [
-    {
-      "type": 0,
-      "value": "Requests"
-    }
-  ],
-  "web.admin.common.title.header.sections": [
-    {
-      "type": 0,
-      "value": "Sections"
-    }
-  ],
-  "web.admin.common.title.header.settings": [
-    {
-      "type": 0,
-      "value": "Settings"
-    }
-  ],
-  "web.admin.common.title.header.subtitles": [
-    {
-      "type": 0,
-      "value": "Subtitles"
-    }
-  ],
-  "web.admin.common.title.header.task": [
-    {
-      "type": 0,
-      "value": "Task"
-    }
-  ],
-  "web.admin.common.title.header.tasks": [
-    {
-      "type": 0,
-      "value": "Tasks"
-    }
-  ],
-  "web.admin.common.title.header.user": [
-    {
-      "type": 0,
-      "value": "User"
-    }
-  ],
-  "web.admin.common.title.header.users": [
-    {
-      "type": 0,
-      "value": "Users"
-    }
-  ],
-  "web.admin.common.title.tab.accessGroups": [
-    {
-      "type": 0,
-      "value": "Admin Access Groups"
-    }
-  ],
-  "web.admin.common.title.tab.activity": [
-    {
-      "type": 0,
-      "value": "Admin Activity"
-    }
-  ],
-  "web.admin.common.title.tab.admin": [
-    {
-      "type": 0,
-      "value": "Admin"
-    }
-  ],
-  "web.admin.common.title.tab.apiKeys": [
-    {
-      "type": 0,
-      "value": "Admin API Keys"
-    }
-  ],
-  "web.admin.common.title.tab.autoscan": [
-    {
-      "type": 0,
-      "value": "Admin Autoscan"
-    }
-  ],
-  "web.admin.common.title.tab.autoscanActivity": [
-    {
-      "type": 0,
-      "value": "Admin Autoscan Activity"
-    }
-  ],
-  "web.admin.common.title.tab.backups": [
-    {
-      "type": 0,
-      "value": "Admin Backups"
-    }
-  ],
-  "web.admin.common.title.tab.collectionEdit": [
-    {
-      "type": 0,
-      "value": "Edit Admin Collection"
-    }
-  ],
-  "web.admin.common.title.tab.collectionNew": [
-    {
-      "type": 0,
-      "value": "New Admin Collection"
-    }
-  ],
-  "web.admin.common.title.tab.collections": [
-    {
-      "type": 0,
-      "value": "Admin Collections"
-    }
-  ],
-  "web.admin.common.title.tab.devices": [
-    {
-      "type": 0,
-      "value": "Admin Devices"
-    }
-  ],
-  "web.admin.common.title.tab.diagnostics": [
-    {
-      "type": 0,
-      "value": "Admin Client Diagnostics"
-    }
-  ],
-  "web.admin.common.title.tab.downloads": [
-    {
-      "type": 0,
-      "value": "Admin Downloads"
-    }
-  ],
-  "web.admin.common.title.tab.history": [
-    {
-      "type": 0,
-      "value": "Admin Playback History"
-    }
-  ],
-  "web.admin.common.title.tab.historyImport": [
-    {
-      "type": 0,
-      "value": "Admin History Import"
-    }
-  ],
-  "web.admin.common.title.tab.libraries": [
-    {
-      "type": 0,
-      "value": "Admin Libraries"
-    }
-  ],
-  "web.admin.common.title.tab.logs": [
-    {
-      "type": 0,
-      "value": "Admin Logs"
-    }
-  ],
-  "web.admin.common.title.tab.maintenance": [
-    {
-      "type": 0,
-      "value": "Admin Maintenance"
-    }
-  ],
-  "web.admin.common.title.tab.markerHistory": [
-    {
-      "type": 0,
-      "value": "Admin Marker History"
-    }
-  ],
-  "web.admin.common.title.tab.nodes": [
-    {
-      "type": 0,
-      "value": "Admin Nodes"
-    }
-  ],
-  "web.admin.common.title.tab.plugin": [
-    {
-      "type": 0,
-      "value": "Admin Plugin"
-    }
-  ],
-  "web.admin.common.title.tab.plugins": [
-    {
-      "type": 0,
-      "value": "Admin Plugins"
-    }
-  ],
-  "web.admin.common.title.tab.policy": [
-    {
-      "type": 0,
-      "value": "Admin Policy"
-    }
-  ],
-  "web.admin.common.title.tab.recommendations": [
-    {
-      "type": 0,
-      "value": "Admin Recommendations"
-    }
-  ],
-  "web.admin.common.title.tab.requests": [
-    {
-      "type": 0,
-      "value": "Admin Requests"
-    }
-  ],
-  "web.admin.common.title.tab.sections": [
-    {
-      "type": 0,
-      "value": "Admin Sections"
-    }
-  ],
-  "web.admin.common.title.tab.settings": [
-    {
-      "type": 0,
-      "value": "Admin Settings"
-    }
-  ],
-  "web.admin.common.title.tab.subtitles": [
-    {
-      "type": 0,
-      "value": "Admin Subtitles"
-    }
-  ],
-  "web.admin.common.title.tab.task": [
-    {
-      "type": 0,
-      "value": "Admin Task"
-    }
-  ],
-  "web.admin.common.title.tab.tasks": [
-    {
-      "type": 0,
-      "value": "Admin Tasks"
-    }
-  ],
-  "web.admin.common.title.tab.user": [
-    {
-      "type": 0,
-      "value": "Admin User"
-    }
-  ],
-  "web.admin.common.title.tab.users": [
-    {
-      "type": 0,
-      "value": "Admin Users"
-    }
-  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -26921,174 +24741,6 @@
     {
       "type": 0,
       "value": "Failed"
-    }
-  ],
-  "web.admin.common.userProfiles.createFailed": [
-    {
-      "type": 0,
-      "value": "Couldn't create the profile"
-    }
-  ],
-  "web.admin.common.userProfiles.created": [
-    {
-      "type": 0,
-      "value": "Profile created"
-    }
-  ],
-  "web.admin.common.userProfiles.deleteFailed": [
-    {
-      "type": 0,
-      "value": "Couldn't delete the profile"
-    }
-  ],
-  "web.admin.common.userProfiles.deleted": [
-    {
-      "type": 0,
-      "value": "Profile deleted"
-    }
-  ],
-  "web.admin.common.userProfiles.saveFailed": [
-    {
-      "type": 0,
-      "value": "Couldn't save the profile"
-    }
-  ],
-  "web.admin.common.users.clearLearnedLimitFailed": [
-    {
-      "type": 0,
-      "value": "Failed to clear learned limit"
-    }
-  ],
-  "web.admin.common.users.deviceOverrideReset": [
-    {
-      "type": 0,
-      "value": "Device override reset"
-    }
-  ],
-  "web.admin.common.users.deviceOverrideResetFailed": [
-    {
-      "type": 0,
-      "value": "Failed to reset override"
-    }
-  ],
-  "web.admin.common.users.deviceOverrideSaveFailed": [
-    {
-      "type": 0,
-      "value": "Failed to save device override"
-    }
-  ],
-  "web.admin.common.users.deviceOverrideUpdated": [
-    {
-      "type": 0,
-      "value": "Device override updated"
-    }
-  ],
-  "web.admin.common.users.resetAllDone": [
-    {
-      "type": 0,
-      "value": "All device overrides reset"
-    }
-  ],
-  "web.admin.common.users.resetAllFailed": [
-    {
-      "type": 0,
-      "value": "Failed to reset device"
-    }
-  ],
-  "web.admin.common.users.resetAllRemainingFailed": [
-    {
-      "type": 0,
-      "value": "The remaining override could not be reset."
-    }
-  ],
-  "web.admin.common.users.resetAllStopped": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Reset stopped after "
-            },
-            {
-              "type": 1,
-              "value": "completed"
-            },
-            {
-              "type": 0,
-              "value": " of "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " override. Reload the settings before continuing. "
-            },
-            {
-              "type": 1,
-              "value": "reason"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Reset stopped after "
-            },
-            {
-              "type": 1,
-              "value": "completed"
-            },
-            {
-              "type": 0,
-              "value": " of "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " overrides. Reload the settings before continuing. "
-            },
-            {
-              "type": 1,
-              "value": "reason"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.common.users.settingReset": [
-    {
-      "type": 0,
-      "value": "User setting reset"
-    }
-  ],
-  "web.admin.common.users.settingResetFailed": [
-    {
-      "type": 0,
-      "value": "Failed to reset setting"
-    }
-  ],
-  "web.admin.common.users.settingSaveFailed": [
-    {
-      "type": 0,
-      "value": "Failed to save setting"
-    }
-  ],
-  "web.admin.common.users.settingUpdated": [
-    {
-      "type": 0,
-      "value": "User setting updated"
     }
   ],
   "web.admin.dashboard.addSheet.description": [
@@ -33181,8 +30833,14 @@
               "value": "The Silo app on "
             },
             {
-              "type": 1,
-              "value": "profile"
+              "type": 8,
+              "value": "owner",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "profile"
+                }
+              ]
             },
             {
               "type": 0,
@@ -33205,8 +30863,14 @@
               "value": "The Silo app on "
             },
             {
-              "type": 1,
-              "value": "profile"
+              "type": 8,
+              "value": "owner",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "profile"
+                }
+              ]
             },
             {
               "type": 0,
@@ -39386,8 +37050,14 @@
       "value": "Couldn't list "
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "location",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        }
+      ]
     },
     {
       "type": 0,
@@ -48943,6 +46613,188 @@
       "value": "Repository URL"
     }
   ],
+  "web.admin.plugins.schemaForm.hideSection": [
+    {
+      "type": 0,
+      "value": "Hide"
+    }
+  ],
+  "web.admin.plugins.schemaForm.invalid": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " is invalid"
+    }
+  ],
+  "web.admin.plugins.schemaForm.max": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " must be ≤ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    }
+  ],
+  "web.admin.plugins.schemaForm.maxLength": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": " must be at most "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " character"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": " must be at most "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " characters"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.plugins.schemaForm.min": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " must be ≥ "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    }
+  ],
+  "web.admin.plugins.schemaForm.minLength": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": " must be at least "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " character"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": " must be at least "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " characters"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.plugins.schemaForm.noOptions": [
+    {
+      "type": 0,
+      "value": "No options available."
+    }
+  ],
+  "web.admin.plugins.schemaForm.notNumber": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " must be a number"
+    }
+  ],
+  "web.admin.plugins.schemaForm.required": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " is required"
+    }
+  ],
+  "web.admin.plugins.schemaForm.selectPlaceholder": [
+    {
+      "type": 0,
+      "value": "Select"
+    }
+  ],
+  "web.admin.plugins.schemaForm.showSection": [
+    {
+      "type": 0,
+      "value": "Show"
+    }
+  ],
   "web.admin.plugins.settings.defaultSchedule": [
     {
       "type": 0,
@@ -53023,6 +50875,390 @@
     {
       "type": 0,
       "value": "via watchlist"
+    }
+  ],
+  "web.admin.sessions.login.admin.empty": [
+    {
+      "type": 0,
+      "value": "No active sign-ins for this account."
+    }
+  ],
+  "web.admin.sessions.login.admin.groupDescription": [
+    {
+      "type": 0,
+      "value": "Sign out one client, or end all of this account’s sign-ins."
+    }
+  ],
+  "web.admin.sessions.login.admin.groupTitle": [
+    {
+      "type": 0,
+      "value": "Active sign-ins"
+    }
+  ],
+  "web.admin.sessions.login.admin.ownerOnly": [
+    {
+      "type": 0,
+      "value": "Only the server owner can sign out another admin or the owner."
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionClient": [
+    {
+      "type": 0,
+      "value": "This client will lose access on its next authenticated request. Its other sessions and password stay unchanged."
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionClientOfUser": [
+    {
+      "type": 0,
+      "value": "This client on "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account will lose access on its next authenticated request. Its other sessions and password stay unchanged."
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionEverywhere": [
+    {
+      "type": 0,
+      "value": "Every active sign-in to "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account will lose access on its next authenticated request, including sessions beyond this list. The password stays the same and other accounts stay signed in."
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionEverywhereThisBrowser": [
+    {
+      "type": 0,
+      "value": "Every active sign-in to "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account will lose access on its next authenticated request, including sessions beyond this list. The password stays the same and other accounts stay signed in. This includes the browser you’re using."
+    }
+  ],
+  "web.admin.sessions.login.dialog.descriptionThisBrowser": [
+    {
+      "type": 0,
+      "value": "You’ll return to the sign-in screen. You can sign in again with the same password or sign-in provider."
+    }
+  ],
+  "web.admin.sessions.login.dialog.playbackNote": [
+    {
+      "type": 0,
+      "value": "A video already playing may continue until its next request. Saved device settings are kept."
+    }
+  ],
+  "web.admin.sessions.login.dialog.signingOut": [
+    {
+      "type": 0,
+      "value": "Signing out…"
+    }
+  ],
+  "web.admin.sessions.login.dialog.titleDevice": [
+    {
+      "type": 0,
+      "value": "Sign out "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "?"
+    }
+  ],
+  "web.admin.sessions.login.dialog.titleEverywhere": [
+    {
+      "type": 0,
+      "value": "Sign "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " out everywhere?"
+    }
+  ],
+  "web.admin.sessions.login.dialog.titleFallback": [
+    {
+      "type": 0,
+      "value": "Sign out this session?"
+    }
+  ],
+  "web.admin.sessions.login.dialog.titleThisBrowser": [
+    {
+      "type": 0,
+      "value": "Sign out this browser?"
+    }
+  ],
+  "web.admin.sessions.login.error.signOutFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't sign out the session. Try again."
+    }
+  ],
+  "web.admin.sessions.login.footer.admin": [
+    {
+      "type": 0,
+      "value": "Last seen records authenticated activity, updated at most once a minute. Older sessions may have no recorded activity yet. Signing out keeps the password and saved device settings. Other accounts stay signed in."
+    }
+  ],
+  "web.admin.sessions.login.footer.self": [
+    {
+      "type": 0,
+      "value": "Last seen records authenticated activity, updated at most once a minute. Older sessions may have no recorded activity yet. Signing out keeps the password and saved device settings. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Manage your account’s password"
+        }
+      ]
+    }
+  ],
+  "web.admin.sessions.login.heading": [
+    {
+      "type": 0,
+      "value": "Signed-in sessions"
+    }
+  ],
+  "web.admin.sessions.login.loadError": [
+    {
+      "type": 0,
+      "value": "Couldn’t load sessions. Try again."
+    }
+  ],
+  "web.admin.sessions.login.loadMore": [
+    {
+      "type": 0,
+      "value": "Load more sessions"
+    }
+  ],
+  "web.admin.sessions.login.loading": [
+    {
+      "type": 0,
+      "value": "Loading sessions…"
+    }
+  ],
+  "web.admin.sessions.login.loadingMore": [
+    {
+      "type": 0,
+      "value": "Loading…"
+    }
+  ],
+  "web.admin.sessions.login.refresh": [
+    {
+      "type": 0,
+      "value": "Refresh"
+    }
+  ],
+  "web.admin.sessions.login.refreshAriaLabel": [
+    {
+      "type": 0,
+      "value": "Refresh sessions"
+    }
+  ],
+  "web.admin.sessions.login.row.details": [
+    {
+      "type": 0,
+      "value": "Details"
+    }
+  ],
+  "web.admin.sessions.login.row.detailsAriaLabel": [
+    {
+      "type": 0,
+      "value": "Details for "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.admin.sessions.login.row.expires": [
+    {
+      "type": 0,
+      "value": "Expires"
+    }
+  ],
+  "web.admin.sessions.login.row.ipAddress": [
+    {
+      "type": 0,
+      "value": "IP address at sign-in"
+    }
+  ],
+  "web.admin.sessions.login.row.lastSeen": [
+    {
+      "type": 0,
+      "value": "Last seen"
+    }
+  ],
+  "web.admin.sessions.login.row.notRecorded": [
+    {
+      "type": 0,
+      "value": "Not recorded yet"
+    }
+  ],
+  "web.admin.sessions.login.row.notSent": [
+    {
+      "type": 0,
+      "value": "Not sent"
+    }
+  ],
+  "web.admin.sessions.login.row.signOutAriaLabel": [
+    {
+      "type": 0,
+      "value": "Sign out "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    }
+  ],
+  "web.admin.sessions.login.row.signOutThisBrowser": [
+    {
+      "type": 0,
+      "value": "Sign out this browser"
+    }
+  ],
+  "web.admin.sessions.login.row.signedIn": [
+    {
+      "type": 0,
+      "value": "Signed in"
+    }
+  ],
+  "web.admin.sessions.login.row.summary": [
+    {
+      "type": 8,
+      "value": "status",
+      "children": [
+        {
+          "type": 1,
+          "value": "last_seen"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " · Signed in "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "web.admin.sessions.login.row.thisBrowserBadge": [
+    {
+      "type": 0,
+      "value": "This browser"
+    }
+  ],
+  "web.admin.sessions.login.row.unknown": [
+    {
+      "type": 0,
+      "value": "Unknown"
+    }
+  ],
+  "web.admin.sessions.login.row.userAgent": [
+    {
+      "type": 0,
+      "value": "User-Agent"
+    }
+  ],
+  "web.admin.sessions.login.self.currentDescription": [
+    {
+      "type": 0,
+      "value": "The session you’re using right now."
+    }
+  ],
+  "web.admin.sessions.login.self.currentTitle": [
+    {
+      "type": 0,
+      "value": "This browser"
+    }
+  ],
+  "web.admin.sessions.login.self.othersDescription": [
+    {
+      "type": 0,
+      "value": "Other browsers and apps with access to your account."
+    }
+  ],
+  "web.admin.sessions.login.self.othersEmpty": [
+    {
+      "type": 0,
+      "value": "No other signed-in sessions."
+    }
+  ],
+  "web.admin.sessions.login.self.othersTitle": [
+    {
+      "type": 0,
+      "value": "Other signed-in sessions"
+    }
+  ],
+  "web.admin.sessions.login.signOut": [
+    {
+      "type": 0,
+      "value": "Sign out"
+    }
+  ],
+  "web.admin.sessions.login.signOutEverywhere": [
+    {
+      "type": 0,
+      "value": "Sign out everywhere"
+    }
+  ],
+  "web.admin.sessions.login.subtitle.admin": [
+    {
+      "type": 0,
+      "value": "Browsers and apps signed in to "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "’s account."
+    }
+  ],
+  "web.admin.sessions.login.subtitle.self": [
+    {
+      "type": 0,
+      "value": "See where your account is signed in, and sign out any session you don’t recognize."
+    }
+  ],
+  "web.admin.sessions.login.toast.signedOut": [
+    {
+      "type": 0,
+      "value": "Session signed out"
+    }
+  ],
+  "web.admin.sessions.login.toast.signedOutEverywhere": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " is signed out everywhere"
     }
   ],
   "web.admin.sessions.playback.action.message": [
@@ -62791,8 +61027,9 @@
       "value": "None picked, so "
     },
     {
-      "type": 1,
-      "value": "server"
+      "type": 8,
+      "value": "server",
+      "children": []
     },
     {
       "type": 0,
@@ -76983,12 +75220,6 @@
       "value": "The server owner can't be viewed as"
     }
   ],
-  "web.admin.users.detail.overview.access.anyQuality": [
-    {
-      "type": 0,
-      "value": "Any quality"
-    }
-  ],
   "web.admin.users.detail.overview.access.autoApprove": [
     {
       "type": 0,
@@ -77711,8 +75942,14 @@
       "value": " changed on this device is removed, so it uses "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77725,8 +75962,14 @@
       "value": "Clear "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77765,8 +76008,14 @@
       "value": "It uses "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77813,8 +76062,14 @@
       "value": "The rows on "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77827,8 +76082,14 @@
       "value": "Couldn't load "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77855,8 +76116,14 @@
   ],
   "web.admin.users.detail.preferences.home.resetDescription": [
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77873,8 +76140,14 @@
   ],
   "web.admin.users.detail.preferences.home.resetDone": [
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77893,8 +76166,14 @@
       "value": "Reset "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77963,8 +76242,14 @@
       "value": "These replace "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -77985,8 +76270,14 @@
       "value": "These replace "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -78011,8 +76302,14 @@
       "value": ". These replace "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -78033,8 +76330,14 @@
       "value": "These replace "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -78069,8 +76372,14 @@
       "value": "These replace "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -78357,8 +76666,14 @@
       "value": "on "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -78417,8 +76732,14 @@
       "value": "Use "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -78437,8 +76758,14 @@
       "value": "Use "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -78507,8 +76834,14 @@
       "value": " goes back to "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -78533,8 +76866,14 @@
       "value": " goes back to "
     },
     {
-      "type": 1,
-      "value": "profile"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
     },
     {
       "type": 0,
@@ -79118,8 +77457,14 @@
       "value": "Change "
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        }
+      ]
     },
     {
       "type": 0,
@@ -79248,8 +77593,14 @@
       "value": "Remove "
     },
     {
-      "type": 1,
-      "value": "name"
+      "type": 8,
+      "value": "owner",
+      "children": [
+        {
+          "type": 1,
+          "value": "name"
+        }
+      ]
     },
     {
       "type": 0,
@@ -95527,2606 +93878,6 @@
       "value": ", pinned first"
     }
   ],
-  "web.common.activity.method.direct.description": [
-    {
-      "type": 0,
-      "value": "The original file is delivered without modification."
-    }
-  ],
-  "web.common.activity.method.direct.label": [
-    {
-      "type": 0,
-      "value": "Direct Play"
-    }
-  ],
-  "web.common.activity.method.directStream.description": [
-    {
-      "type": 0,
-      "value": "Video is copied without re-encoding; audio is transcoded."
-    }
-  ],
-  "web.common.activity.method.directStream.label": [
-    {
-      "type": 0,
-      "value": "Direct Stream"
-    }
-  ],
-  "web.common.activity.method.remux.description": [
-    {
-      "type": 0,
-      "value": "Audio and video are copied into a streaming container without re-encoding."
-    }
-  ],
-  "web.common.activity.method.remux.label": [
-    {
-      "type": 0,
-      "value": "Remux"
-    }
-  ],
-  "web.common.activity.method.transcode.description": [
-    {
-      "type": 0,
-      "value": "Video is re-encoded; audio may be copied or transcoded."
-    }
-  ],
-  "web.common.activity.method.transcode.label": [
-    {
-      "type": 0,
-      "value": "Transcode"
-    }
-  ],
-  "web.common.activity.method.unknown.description": [
-    {
-      "type": 0,
-      "value": "The server has not reported a recognized playback method."
-    }
-  ],
-  "web.common.activity.method.unknown.label": [
-    {
-      "type": 0,
-      "value": "Unknown"
-    }
-  ],
-  "web.common.activity.subtitle.movie": [
-    {
-      "type": 0,
-      "value": "Movie"
-    }
-  ],
-  "web.common.activity.subtitle.series": [
-    {
-      "type": 0,
-      "value": "Series"
-    }
-  ],
-  "web.common.activity.title.file": [
-    {
-      "type": 0,
-      "value": "File #"
-    },
-    {
-      "type": 1,
-      "value": "id"
-    }
-  ],
-  "web.common.catalog.sections.changedConflict": [
-    {
-      "type": 0,
-      "value": "These sections changed. Reload and review your changes before trying again."
-    }
-  ],
-  "web.common.catalog.sections.changedWhileLoading": [
-    {
-      "type": 0,
-      "value": "Sections changed while loading. Reload before editing."
-    }
-  ],
-  "web.common.catalog.sections.invalidScope": [
-    {
-      "type": 0,
-      "value": "Select a valid section scope."
-    }
-  ],
-  "web.common.catalog.sections.tooManyLibraries": [
-    {
-      "type": 0,
-      "value": "Select at most 100 libraries per request."
-    }
-  ],
-  "web.common.catalog.sections.typeAndTitleRequired": [
-    {
-      "type": 0,
-      "value": "A section type and title are required."
-    }
-  ],
-  "web.common.catalog.sections.versionUnavailable": [
-    {
-      "type": 0,
-      "value": "Reload these sections before editing; their version is unavailable."
-    }
-  ],
-  "web.common.collections.chartName.airingTodayTv": [
-    {
-      "type": 0,
-      "value": "Airing Today TV Shows"
-    }
-  ],
-  "web.common.collections.chartName.nowPlayingMovies": [
-    {
-      "type": 0,
-      "value": "Now Playing Movies"
-    }
-  ],
-  "web.common.collections.chartName.onTheAirTv": [
-    {
-      "type": 0,
-      "value": "On The Air TV Shows"
-    }
-  ],
-  "web.common.collections.chartName.popularMovies": [
-    {
-      "type": 0,
-      "value": "Popular Movies"
-    }
-  ],
-  "web.common.collections.chartName.popularTv": [
-    {
-      "type": 0,
-      "value": "Popular TV Shows"
-    }
-  ],
-  "web.common.collections.chartName.topRatedMovies": [
-    {
-      "type": 0,
-      "value": "Top Rated Movies"
-    }
-  ],
-  "web.common.collections.chartName.topRatedTv": [
-    {
-      "type": 0,
-      "value": "Top Rated TV Shows"
-    }
-  ],
-  "web.common.collections.chartName.trendingMoviesThisWeek": [
-    {
-      "type": 0,
-      "value": "Trending Movies This Week"
-    }
-  ],
-  "web.common.collections.chartName.trendingMoviesToday": [
-    {
-      "type": 0,
-      "value": "Trending Movies Today"
-    }
-  ],
-  "web.common.collections.chartName.trendingThisWeek": [
-    {
-      "type": 0,
-      "value": "Trending This Week"
-    }
-  ],
-  "web.common.collections.chartName.trendingToday": [
-    {
-      "type": 0,
-      "value": "Trending Today"
-    }
-  ],
-  "web.common.collections.chartName.trendingTvThisWeek": [
-    {
-      "type": 0,
-      "value": "Trending TV Shows This Week"
-    }
-  ],
-  "web.common.collections.chartName.trendingTvToday": [
-    {
-      "type": 0,
-      "value": "Trending TV Shows Today"
-    }
-  ],
-  "web.common.collections.chartName.upcomingMovies": [
-    {
-      "type": 0,
-      "value": "Upcoming Movies"
-    }
-  ],
-  "web.common.collections.guidedUnavailable": [
-    {
-      "type": 0,
-      "value": "These rules use options the Guided view can't show."
-    }
-  ],
-  "web.common.date.daysAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "d ago"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "d ago"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.date.hoursAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "h ago"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "h ago"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.date.justNow": [
-    {
-      "type": 0,
-      "value": "just now"
-    }
-  ],
-  "web.common.date.minutesAgo": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "m ago"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "m ago"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.devicePlatform.kind.desktop": [
-    {
-      "type": 0,
-      "value": "Desktop"
-    }
-  ],
-  "web.common.devicePlatform.kind.mobile": [
-    {
-      "type": 0,
-      "value": "Mobile"
-    }
-  ],
-  "web.common.devicePlatform.kind.tablet": [
-    {
-      "type": 0,
-      "value": "Tablet"
-    }
-  ],
-  "web.common.devicePlatform.kind.tv": [
-    {
-      "type": 0,
-      "value": "TV"
-    }
-  ],
-  "web.common.devicePlatform.kind.unknown": [
-    {
-      "type": 0,
-      "value": "Other"
-    }
-  ],
-  "web.common.devicePlatform.unknown": [
-    {
-      "type": 0,
-      "value": "Unknown platform"
-    }
-  ],
-  "web.common.format.bitrate.kbps": [
-    {
-      "type": 1,
-      "value": "rate"
-    },
-    {
-      "type": 0,
-      "value": " kbps"
-    }
-  ],
-  "web.common.format.bitrate.mbps": [
-    {
-      "type": 1,
-      "value": "rate"
-    },
-    {
-      "type": 0,
-      "value": " Mbps"
-    }
-  ],
-  "web.common.format.channels.count": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " ch"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " ch"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.format.channels.stereo": [
-    {
-      "type": 0,
-      "value": "stereo"
-    }
-  ],
-  "web.common.format.manga.chapter": [
-    {
-      "type": 0,
-      "value": "Chapter "
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
-  "web.common.format.manga.chapterFallback": [
-    {
-      "type": 0,
-      "value": "Chapter"
-    }
-  ],
-  "web.common.format.manga.volume": [
-    {
-      "type": 0,
-      "value": "Volume "
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
-  "web.common.format.manga.volumeChapter": [
-    {
-      "type": 1,
-      "value": "volume"
-    },
-    {
-      "type": 0,
-      "value": " · "
-    },
-    {
-      "type": 1,
-      "value": "chapter"
-    }
-  ],
-  "web.common.format.runtime.hoursMinutes": [
-    {
-      "type": 1,
-      "value": "hours"
-    },
-    {
-      "type": 0,
-      "value": "h "
-    },
-    {
-      "type": 1,
-      "value": "minutes"
-    },
-    {
-      "type": 0,
-      "value": "m"
-    }
-  ],
-  "web.common.format.runtime.minutes": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "m"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "m"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.format.sampleRate": [
-    {
-      "type": 1,
-      "value": "rate"
-    },
-    {
-      "type": 0,
-      "value": " Hz"
-    }
-  ],
-  "web.common.format.size.bytes": [
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": " B"
-    }
-  ],
-  "web.common.format.size.gb": [
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": " GB"
-    }
-  ],
-  "web.common.format.size.gib": [
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": " GiB"
-    }
-  ],
-  "web.common.format.size.kb": [
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": " KB"
-    }
-  ],
-  "web.common.format.size.kib": [
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": " KiB"
-    }
-  ],
-  "web.common.format.size.mb": [
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": " MB"
-    }
-  ],
-  "web.common.format.size.mib": [
-    {
-      "type": 1,
-      "value": "size"
-    },
-    {
-      "type": 0,
-      "value": " MiB"
-    }
-  ],
-  "web.common.genres.action": [
-    {
-      "type": 0,
-      "value": "Action"
-    }
-  ],
-  "web.common.genres.actionAdventure": [
-    {
-      "type": 0,
-      "value": "Action & Adventure"
-    }
-  ],
-  "web.common.genres.adventure": [
-    {
-      "type": 0,
-      "value": "Adventure"
-    }
-  ],
-  "web.common.genres.animation": [
-    {
-      "type": 0,
-      "value": "Animation"
-    }
-  ],
-  "web.common.genres.comedy": [
-    {
-      "type": 0,
-      "value": "Comedy"
-    }
-  ],
-  "web.common.genres.crime": [
-    {
-      "type": 0,
-      "value": "Crime"
-    }
-  ],
-  "web.common.genres.documentary": [
-    {
-      "type": 0,
-      "value": "Documentary"
-    }
-  ],
-  "web.common.genres.drama": [
-    {
-      "type": 0,
-      "value": "Drama"
-    }
-  ],
-  "web.common.genres.family": [
-    {
-      "type": 0,
-      "value": "Family"
-    }
-  ],
-  "web.common.genres.fantasy": [
-    {
-      "type": 0,
-      "value": "Fantasy"
-    }
-  ],
-  "web.common.genres.history": [
-    {
-      "type": 0,
-      "value": "History"
-    }
-  ],
-  "web.common.genres.horror": [
-    {
-      "type": 0,
-      "value": "Horror"
-    }
-  ],
-  "web.common.genres.kids": [
-    {
-      "type": 0,
-      "value": "Kids"
-    }
-  ],
-  "web.common.genres.music": [
-    {
-      "type": 0,
-      "value": "Music"
-    }
-  ],
-  "web.common.genres.mystery": [
-    {
-      "type": 0,
-      "value": "Mystery"
-    }
-  ],
-  "web.common.genres.news": [
-    {
-      "type": 0,
-      "value": "News"
-    }
-  ],
-  "web.common.genres.reality": [
-    {
-      "type": 0,
-      "value": "Reality"
-    }
-  ],
-  "web.common.genres.romance": [
-    {
-      "type": 0,
-      "value": "Romance"
-    }
-  ],
-  "web.common.genres.sciFiFantasy": [
-    {
-      "type": 0,
-      "value": "Sci-Fi & Fantasy"
-    }
-  ],
-  "web.common.genres.scienceFiction": [
-    {
-      "type": 0,
-      "value": "Science Fiction"
-    }
-  ],
-  "web.common.genres.soap": [
-    {
-      "type": 0,
-      "value": "Soap"
-    }
-  ],
-  "web.common.genres.talk": [
-    {
-      "type": 0,
-      "value": "Talk"
-    }
-  ],
-  "web.common.genres.thriller": [
-    {
-      "type": 0,
-      "value": "Thriller"
-    }
-  ],
-  "web.common.genres.tvMovie": [
-    {
-      "type": 0,
-      "value": "TV Movie"
-    }
-  ],
-  "web.common.genres.unknown": [
-    {
-      "type": 0,
-      "value": "Genre "
-    },
-    {
-      "type": 1,
-      "value": "id"
-    }
-  ],
-  "web.common.genres.war": [
-    {
-      "type": 0,
-      "value": "War"
-    }
-  ],
-  "web.common.genres.warPolitics": [
-    {
-      "type": 0,
-      "value": "War & Politics"
-    }
-  ],
-  "web.common.genres.western": [
-    {
-      "type": 0,
-      "value": "Western"
-    }
-  ],
-  "web.common.markers.sharingDisclosure": [
-    {
-      "type": 0,
-      "value": "Help other Silo servers skip intros, credits, recaps and previews. Silo shares the movie, show and episode IDs, each file's hash, size and length, and the marker times it finds or you edit, including sections you mark as missing, with how each was found and how sure it is. It never shares file names, paths or your library list."
-    }
-  ],
-  "web.common.overlays.episodesLeft": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " episode left"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " episodes left"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.overlays.previewSample": [
-    {
-      "type": 0,
-      "value": "Preview sample"
-    }
-  ],
-  "web.common.overlays.previewVariant.movie": [
-    {
-      "type": 0,
-      "value": "Movie"
-    }
-  ],
-  "web.common.overlays.previewVariant.requested": [
-    {
-      "type": 0,
-      "value": "Requested"
-    }
-  ],
-  "web.common.overlays.previewVariant.show": [
-    {
-      "type": 0,
-      "value": "Show"
-    }
-  ],
-  "web.common.overlays.watched": [
-    {
-      "type": 0,
-      "value": "Watched"
-    }
-  ],
-  "web.common.requests.toast.cancelFailed": [
-    {
-      "type": 0,
-      "value": "Failed to cancel request"
-    }
-  ],
-  "web.common.requests.toast.cancelled": [
-    {
-      "type": 0,
-      "value": "Request cancelled"
-    }
-  ],
-  "web.common.requests.toast.following": [
-    {
-      "type": 0,
-      "value": "We'll let you know when it's available"
-    }
-  ],
-  "web.common.requests.toast.removeFailed": [
-    {
-      "type": 0,
-      "value": "Failed to remove request"
-    }
-  ],
-  "web.common.requests.toast.removed": [
-    {
-      "type": 0,
-      "value": "Request removed"
-    }
-  ],
-  "web.common.requests.toast.submitted": [
-    {
-      "type": 0,
-      "value": "Request submitted"
-    }
-  ],
-  "web.common.requests.toast.unfollowed": [
-    {
-      "type": 0,
-      "value": "Notification turned off"
-    }
-  ],
-  "web.common.scans.cancelFailed": [
-    {
-      "type": 0,
-      "value": "Failed to cancel scans"
-    }
-  ],
-  "web.common.scans.cancelRequested": [
-    {
-      "type": 0,
-      "value": "Scan cancellation requested"
-    }
-  ],
-  "web.common.scans.fullIngestStarted": [
-    {
-      "type": 0,
-      "value": "Full ingest scan started"
-    }
-  ],
-  "web.common.scans.scanFailed": [
-    {
-      "type": 0,
-      "value": "Scan failed"
-    }
-  ],
-  "web.common.scans.selectAdminProfile": [
-    {
-      "type": 0,
-      "value": "Select an administrator profile before scanning."
-    }
-  ],
-  "web.common.schemaForm.hideSection": [
-    {
-      "type": 0,
-      "value": "Hide"
-    }
-  ],
-  "web.common.schemaForm.invalid": [
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " is invalid"
-    }
-  ],
-  "web.common.schemaForm.max": [
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " must be ≤ "
-    },
-    {
-      "type": 1,
-      "value": "max"
-    }
-  ],
-  "web.common.schemaForm.maxLength": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": " must be at most "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " character"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": " must be at most "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " characters"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.schemaForm.min": [
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " must be ≥ "
-    },
-    {
-      "type": 1,
-      "value": "min"
-    }
-  ],
-  "web.common.schemaForm.minLength": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": " must be at least "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " character"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": " must be at least "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " characters"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.schemaForm.noOptions": [
-    {
-      "type": 0,
-      "value": "No options available."
-    }
-  ],
-  "web.common.schemaForm.notNumber": [
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " must be a number"
-    }
-  ],
-  "web.common.schemaForm.required": [
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " is required"
-    }
-  ],
-  "web.common.schemaForm.selectPlaceholder": [
-    {
-      "type": 0,
-      "value": "Select"
-    }
-  ],
-  "web.common.schemaForm.showSection": [
-    {
-      "type": 0,
-      "value": "Show"
-    }
-  ],
-  "web.common.settingValue.invalidJson": [
-    {
-      "type": 1,
-      "value": "key"
-    },
-    {
-      "type": 0,
-      "value": ": the value must be valid JSON"
-    }
-  ],
-  "web.common.settingValue.notANumber": [
-    {
-      "type": 1,
-      "value": "key"
-    },
-    {
-      "type": 0,
-      "value": ": \""
-    },
-    {
-      "type": 1,
-      "value": "raw"
-    },
-    {
-      "type": 0,
-      "value": "\" is not a number"
-    }
-  ],
-  "web.common.shell.endImpersonationFailed": [
-    {
-      "type": 0,
-      "value": "Failed to end impersonation"
-    }
-  ],
-  "web.common.shell.loadingApplication": [
-    {
-      "type": 0,
-      "value": "Loading application"
-    }
-  ],
-  "web.common.shell.loadingPage": [
-    {
-      "type": 0,
-      "value": "Loading page"
-    }
-  ],
-  "web.common.shell.loadingRequestAvailability": [
-    {
-      "type": 0,
-      "value": "Loading request availability"
-    }
-  ],
-  "web.common.shell.manageLibraryVisibility": [
-    {
-      "type": 0,
-      "value": "Manage library visibility in Settings"
-    }
-  ],
-  "web.common.shell.noLibraries": [
-    {
-      "type": 0,
-      "value": "No visible libraries are available right now."
-    }
-  ],
-  "web.common.shell.pageLoaded": [
-    {
-      "type": 0,
-      "value": "Page loaded"
-    }
-  ],
-  "web.common.shell.pluginOpenFailed": [
-    {
-      "type": 0,
-      "value": "Unable to open the plugin. Please try again."
-    }
-  ],
-  "web.common.signingSecret.copied": [
-    {
-      "type": 0,
-      "value": "Signing secret copied"
-    }
-  ],
-  "web.common.signingSecret.copy": [
-    {
-      "type": 0,
-      "value": "Copy signing secret"
-    }
-  ],
-  "web.common.signingSecret.copyFailed": [
-    {
-      "type": 0,
-      "value": "Failed to copy to clipboard"
-    }
-  ],
-  "web.common.signingSecret.description": [
-    {
-      "type": 0,
-      "value": "Silo signs every delivery with this secret so your receiver can verify it. It is shown only once — store it on the receiving service now. You can rotate it later if it is lost."
-    }
-  ],
-  "web.common.signingSecret.saved": [
-    {
-      "type": 0,
-      "value": "I've saved it"
-    }
-  ],
-  "web.common.signingSecret.title": [
-    {
-      "type": 0,
-      "value": "Save your signing secret"
-    }
-  ],
-  "web.common.sort.bitrate": [
-    {
-      "type": 0,
-      "value": "Bitrate"
-    }
-  ],
-  "web.common.sort.contentRating": [
-    {
-      "type": 0,
-      "value": "Content Rating"
-    }
-  ],
-  "web.common.sort.dateRead": [
-    {
-      "type": 0,
-      "value": "Date Read"
-    }
-  ],
-  "web.common.sort.dateViewed": [
-    {
-      "type": 0,
-      "value": "Date Viewed"
-    }
-  ],
-  "web.common.sort.duration": [
-    {
-      "type": 0,
-      "value": "Duration"
-    }
-  ],
-  "web.common.sort.latestEpisodeAdded": [
-    {
-      "type": 0,
-      "value": "Latest Episode Added"
-    }
-  ],
-  "web.common.sort.latestEpisodeAirDate": [
-    {
-      "type": 0,
-      "value": "Latest Episode Air Date"
-    }
-  ],
-  "web.common.sort.plays": [
-    {
-      "type": 0,
-      "value": "Plays"
-    }
-  ],
-  "web.common.sort.progress": [
-    {
-      "type": 0,
-      "value": "Progress"
-    }
-  ],
-  "web.common.sort.reads": [
-    {
-      "type": 0,
-      "value": "Reads"
-    }
-  ],
-  "web.common.sort.rtAudienceRating": [
-    {
-      "type": 0,
-      "value": "RT Audience Rating"
-    }
-  ],
-  "web.common.sort.rtCriticRating": [
-    {
-      "type": 0,
-      "value": "RT Critic Rating"
-    }
-  ],
-  "web.common.sort.tmdbRating": [
-    {
-      "type": 0,
-      "value": "TMDB Rating"
-    }
-  ],
-  "web.common.speedTest.retryAfter": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Try again in "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " second"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Try again in "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " seconds"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.subtitles.providers.invalidConfiguration": [
-    {
-      "type": 0,
-      "value": "Invalid provider configuration. Reload saved configuration."
-    }
-  ],
-  "web.common.subtitles.providers.saveUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Unable to confirm the save result. Reload saved configuration before retrying."
-    }
-  ],
-  "web.common.subtitles.providers.savedApplied": [
-    {
-      "type": 0,
-      "value": "Settings saved and applied on this server. Other servers may still use older settings."
-    }
-  ],
-  "web.common.subtitles.providers.savedDifferentRevision": [
-    {
-      "type": 0,
-      "value": "Settings saved. This server applied a different saved revision; reload to review the current configuration."
-    }
-  ],
-  "web.common.subtitles.providers.savedNotApplied": [
-    {
-      "type": 0,
-      "value": "Settings saved, but not applied on this server. Other servers may still use older settings."
-    }
-  ],
-  "web.common.subtitles.providers.validatorRequired": [
-    {
-      "type": 0,
-      "value": "A strong edit validator is required. Reload saved configuration."
-    }
-  ],
-  "web.common.subtitles.unsupportedIdentifier": [
-    {
-      "type": 0,
-      "value": "Unsupported subtitle identifier"
-    }
-  ],
-  "web.common.title.settings.accessibility": [
-    {
-      "type": 0,
-      "value": "Accessibility Settings"
-    }
-  ],
-  "web.common.title.settings.account": [
-    {
-      "type": 0,
-      "value": "Account Settings"
-    }
-  ],
-  "web.common.title.settings.connectApps": [
-    {
-      "type": 0,
-      "value": "Connect Apps Settings"
-    }
-  ],
-  "web.common.title.settings.devices": [
-    {
-      "type": 0,
-      "value": "Your Devices"
-    }
-  ],
-  "web.common.title.settings.historyImport": [
-    {
-      "type": 0,
-      "value": "History Import Settings"
-    }
-  ],
-  "web.common.title.settings.homeScreen": [
-    {
-      "type": 0,
-      "value": "Home Screen Settings"
-    }
-  ],
-  "web.common.title.settings.index": [
-    {
-      "type": 0,
-      "value": "Settings"
-    }
-  ],
-  "web.common.title.settings.interface": [
-    {
-      "type": 0,
-      "value": "Navigation & Card Settings"
-    }
-  ],
-  "web.common.title.settings.libraries": [
-    {
-      "type": 0,
-      "value": "Library Settings"
-    }
-  ],
-  "web.common.title.settings.notifications": [
-    {
-      "type": 0,
-      "value": "Notification Settings"
-    }
-  ],
-  "web.common.title.settings.personalize": [
-    {
-      "type": 0,
-      "value": "Personalize"
-    }
-  ],
-  "web.common.title.settings.playback": [
-    {
-      "type": 0,
-      "value": "Playback Settings"
-    }
-  ],
-  "web.common.title.settings.profiles": [
-    {
-      "type": 0,
-      "value": "Profile Settings"
-    }
-  ],
-  "web.common.title.settings.requests": [
-    {
-      "type": 0,
-      "value": "Request Settings"
-    }
-  ],
-  "web.common.title.settings.sessions": [
-    {
-      "type": 0,
-      "value": "Signed-in sessions"
-    }
-  ],
-  "web.common.title.settings.subtitleAppearance": [
-    {
-      "type": 0,
-      "value": "Language & Subtitle Settings"
-    }
-  ],
-  "web.common.title.settings.titlePages": [
-    {
-      "type": 0,
-      "value": "Title Page Settings"
-    }
-  ],
-  "web.common.title.settings.watchProviders": [
-    {
-      "type": 0,
-      "value": "Watch Provider Settings"
-    }
-  ],
-  "web.common.title.settings.webhookSync": [
-    {
-      "type": 0,
-      "value": "Webhook Sync Settings"
-    }
-  ],
-  "web.common.title.settings.yourData": [
-    {
-      "type": 0,
-      "value": "Your Data"
-    }
-  ],
-  "web.common.toast.collections.deleteFailed": [
-    {
-      "type": 0,
-      "value": "Failed to delete"
-    }
-  ],
-  "web.common.toast.collections.deleted": [
-    {
-      "type": 0,
-      "value": "Collection deleted"
-    }
-  ],
-  "web.common.toast.collections.syncFailed": [
-    {
-      "type": 0,
-      "value": "Sync failed"
-    }
-  ],
-  "web.common.toast.collections.synced": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Synced — matched "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " item"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Synced — matched "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " items"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.collections.syncedWithWarnings": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Synced with warnings — matched "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " item"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Synced with warnings — matched "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " items"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.favorites.added": [
-    {
-      "type": 0,
-      "value": "Added to favorites"
-    }
-  ],
-  "web.common.toast.favorites.removed": [
-    {
-      "type": 0,
-      "value": "Removed from favorites"
-    }
-  ],
-  "web.common.toast.favorites.updateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to update favorites"
-    }
-  ],
-  "web.common.toast.historyImport.acceptanceUnconfirmed": [
-    {
-      "type": 0,
-      "value": "Import acceptance could not be confirmed. Refresh imports before submitting again."
-    }
-  ],
-  "web.common.toast.historyImport.embyConnectFailed": [
-    {
-      "type": 0,
-      "value": "Failed to sign in with Emby Connect"
-    }
-  ],
-  "web.common.toast.historyImport.plexSignInFailed": [
-    {
-      "type": 0,
-      "value": "Failed to start Plex sign-in"
-    }
-  ],
-  "web.common.toast.historyImport.queued": [
-    {
-      "type": 0,
-      "value": "Import queued"
-    }
-  ],
-  "web.common.toast.historyImport.startFailed": [
-    {
-      "type": 0,
-      "value": "Failed to start import"
-    }
-  ],
-  "web.common.toast.historyImport.unexpectedLocation": [
-    {
-      "type": 0,
-      "value": "Unexpected import status location. Refresh imports before trying again."
-    }
-  ],
-  "web.common.toast.homeRows.reset": [
-    {
-      "type": 0,
-      "value": "Reset to the server's rows."
-    }
-  ],
-  "web.common.toast.homeRows.resetFailed": [
-    {
-      "type": 0,
-      "value": "Could not reset your rows"
-    }
-  ],
-  "web.common.toast.markers.saveFailed": [
-    {
-      "type": 0,
-      "value": "Failed to save markers"
-    }
-  ],
-  "web.common.toast.markers.saved": [
-    {
-      "type": 0,
-      "value": "Markers saved"
-    }
-  ],
-  "web.common.toast.notInterested.hidden": [
-    {
-      "type": 0,
-      "value": "We won't recommend this"
-    }
-  ],
-  "web.common.toast.notInterested.restored": [
-    {
-      "type": 0,
-      "value": "Back in your recommendations"
-    }
-  ],
-  "web.common.toast.notInterested.undo": [
-    {
-      "type": 0,
-      "value": "Undo"
-    }
-  ],
-  "web.common.toast.notInterested.undoFailed": [
-    {
-      "type": 0,
-      "value": "Failed to undo Not interested"
-    }
-  ],
-  "web.common.toast.notInterested.undoOtherProfile": [
-    {
-      "type": 0,
-      "value": "Switch back to the profile that marked this to undo it"
-    }
-  ],
-  "web.common.toast.notInterested.updateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to update Not interested"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.createInProgress": [
-    {
-      "type": 0,
-      "value": "Destination creation is already in progress."
-    }
-  ],
-  "web.common.toast.notificationWebhooks.deleteFailed": [
-    {
-      "type": 0,
-      "value": "Failed to delete webhook"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.deleted": [
-    {
-      "type": 0,
-      "value": "Webhook deleted"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.nameAndUrlRequired": [
-    {
-      "type": 0,
-      "value": "A name and webhook URL are required."
-    }
-  ],
-  "web.common.toast.notificationWebhooks.pushRemoveFailed": [
-    {
-      "type": 0,
-      "value": "Failed to remove push subscription"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.reloadBeforeDeleting": [
-    {
-      "type": 0,
-      "value": "Reload the webhook list before deleting this destination."
-    }
-  ],
-  "web.common.toast.notificationWebhooks.reloadBeforeEditing": [
-    {
-      "type": 0,
-      "value": "Reload the webhook list before editing this destination."
-    }
-  ],
-  "web.common.toast.notificationWebhooks.rotateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to rotate signing secret"
-    }
-  ],
-  "web.common.toast.notificationWebhooks.testInProgress": [
-    {
-      "type": 0,
-      "value": "A test delivery is already in progress."
-    }
-  ],
-  "web.common.toast.notificationWebhooks.updateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to update webhook"
-    }
-  ],
-  "web.common.toast.profiles.avatarRemoveFailed": [
-    {
-      "type": 0,
-      "value": "Failed to remove avatar"
-    }
-  ],
-  "web.common.toast.profiles.avatarRemoved": [
-    {
-      "type": 0,
-      "value": "Avatar removed"
-    }
-  ],
-  "web.common.toast.profiles.avatarUpdated": [
-    {
-      "type": 0,
-      "value": "Avatar updated"
-    }
-  ],
-  "web.common.toast.profiles.avatarUploadFailed": [
-    {
-      "type": 0,
-      "value": "Failed to upload avatar"
-    }
-  ],
-  "web.common.toast.profiles.created": [
-    {
-      "type": 0,
-      "value": "Profile created"
-    }
-  ],
-  "web.common.toast.profiles.deleteFailed": [
-    {
-      "type": 0,
-      "value": "Failed to delete"
-    }
-  ],
-  "web.common.toast.profiles.deleted": [
-    {
-      "type": 0,
-      "value": "Profile deleted"
-    }
-  ],
-  "web.common.toast.profiles.saveFailed": [
-    {
-      "type": 0,
-      "value": "Failed to save profile"
-    }
-  ],
-  "web.common.toast.profiles.updated": [
-    {
-      "type": 0,
-      "value": "Profile updated"
-    }
-  ],
-  "web.common.toast.ratings.updateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to update rating"
-    }
-  ],
-  "web.common.toast.subtitles.downloadFailed": [
-    {
-      "type": 0,
-      "value": "Failed to download subtitle"
-    }
-  ],
-  "web.common.toast.subtitles.downloaded": [
-    {
-      "type": 0,
-      "value": "Subtitle downloaded"
-    }
-  ],
-  "web.common.toast.subtitles.resetPreferenceFailed": [
-    {
-      "type": 0,
-      "value": "Failed to reset subtitle preference"
-    }
-  ],
-  "web.common.toast.subtitles.savePreferenceFailed": [
-    {
-      "type": 0,
-      "value": "Failed to save subtitle preference"
-    }
-  ],
-  "web.common.toast.subtitles.uploadFailed": [
-    {
-      "type": 0,
-      "value": "Failed to upload subtitle"
-    }
-  ],
-  "web.common.toast.subtitles.uploaded": [
-    {
-      "type": 0,
-      "value": "Subtitle uploaded"
-    }
-  ],
-  "web.common.toast.watchProviders.connectFailed": [
-    {
-      "type": 0,
-      "value": "Failed to connect provider"
-    }
-  ],
-  "web.common.toast.watchProviders.connected": [
-    {
-      "type": 0,
-      "value": "Watch provider connected"
-    }
-  ],
-  "web.common.toast.watchProviders.disconnectFailed": [
-    {
-      "type": 0,
-      "value": "Failed to disconnect provider"
-    }
-  ],
-  "web.common.toast.watchProviders.disconnected": [
-    {
-      "type": 0,
-      "value": "Watch provider disconnected"
-    }
-  ],
-  "web.common.toast.watchProviders.finishAuthFailed": [
-    {
-      "type": 0,
-      "value": "Failed to finish auth"
-    }
-  ],
-  "web.common.toast.watchProviders.reloadBeforeSaving": [
-    {
-      "type": 0,
-      "value": "Reload provider settings before saving changes."
-    }
-  ],
-  "web.common.toast.watchProviders.startAuthFailed": [
-    {
-      "type": 0,
-      "value": "Failed to start auth"
-    }
-  ],
-  "web.common.toast.watchProviders.syncAvailableHours": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Sync available in "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "h"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Sync available in "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "h"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.watchProviders.syncAvailableHoursMinutes": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Sync available in "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "h "
-            },
-            {
-              "type": 1,
-              "value": "minutes"
-            },
-            {
-              "type": 0,
-              "value": "m"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Sync available in "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": "h "
-            },
-            {
-              "type": 1,
-              "value": "minutes"
-            },
-            {
-              "type": 0,
-              "value": "m"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.watchProviders.syncAvailableMinutes": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Sync available in "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "m"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Sync available in "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "m"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.watchProviders.syncAvailableSeconds": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Sync available in "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "s"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Sync available in "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": "s"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.toast.watchProviders.syncCoolingDown": [
-    {
-      "type": 0,
-      "value": "Sync is cooling down"
-    }
-  ],
-  "web.common.toast.watchProviders.syncFailed": [
-    {
-      "type": 0,
-      "value": "Failed to start sync"
-    }
-  ],
-  "web.common.toast.watchProviders.syncStarted": [
-    {
-      "type": 0,
-      "value": "Watch provider sync started"
-    }
-  ],
-  "web.common.toast.watchProviders.updateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to update provider"
-    }
-  ],
-  "web.common.toast.watchlist.added": [
-    {
-      "type": 0,
-      "value": "Added to your watchlist"
-    }
-  ],
-  "web.common.toast.watchlist.addedAndRequested": [
-    {
-      "type": 0,
-      "value": "Added to your watchlist and requested"
-    }
-  ],
-  "web.common.toast.watchlist.availableNotice": [
-    {
-      "type": 0,
-      "value": "We'll let you know when "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " is available."
-    }
-  ],
-  "web.common.toast.watchlist.notRequested": [
-    {
-      "type": 0,
-      "value": "It wasn't requested."
-    }
-  ],
-  "web.common.toast.watchlist.notRequestedReason": [
-    {
-      "type": 0,
-      "value": "It wasn't requested: "
-    },
-    {
-      "type": 1,
-      "value": "reason"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.common.toast.watchlist.notRequestedRequestsOff": [
-    {
-      "type": 0,
-      "value": "It wasn't requested, because watchlist requests are off."
-    }
-  ],
-  "web.common.toast.watchlist.removed": [
-    {
-      "type": 0,
-      "value": "Removed from your watchlist"
-    }
-  ],
-  "web.common.toast.watchlist.requestedNotice": [
-    {
-      "type": 0,
-      "value": "We'll let you know when "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " is available. It moves into your watchlist on its own."
-    }
-  ],
-  "web.common.toast.watchlist.updateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to update your watchlist"
-    }
-  ],
-  "web.common.toast.webhookSync.createFailed": [
-    {
-      "type": 0,
-      "value": "Failed to create webhook connection"
-    }
-  ],
-  "web.common.toast.webhookSync.created": [
-    {
-      "type": 0,
-      "value": "Webhook connection created"
-    }
-  ],
-  "web.common.toast.webhookSync.deleteFailed": [
-    {
-      "type": 0,
-      "value": "Failed to delete webhook connection"
-    }
-  ],
-  "web.common.toast.webhookSync.deleted": [
-    {
-      "type": 0,
-      "value": "Webhook connection deleted"
-    }
-  ],
-  "web.common.toast.webhookSync.mappingsSaveFailed": [
-    {
-      "type": 0,
-      "value": "Failed to save profile mappings"
-    }
-  ],
-  "web.common.toast.webhookSync.mappingsSaved": [
-    {
-      "type": 0,
-      "value": "Profile mappings saved"
-    }
-  ],
-  "web.common.toast.webhookSync.rotateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to rotate webhook URL"
-    }
-  ],
-  "web.common.toast.webhookSync.updateFailed": [
-    {
-      "type": 0,
-      "value": "Failed to update webhook connection"
-    }
-  ],
-  "web.common.toast.webhookSync.updated": [
-    {
-      "type": 0,
-      "value": "Webhook connection updated"
-    }
-  ],
-  "web.common.toast.webhookSync.urlRotated": [
-    {
-      "type": 0,
-      "value": "Webhook URL rotated"
-    }
-  ],
-  "web.common.ui.calendar.daySelected": [
-    {
-      "type": 1,
-      "value": "date"
-    },
-    {
-      "type": 0,
-      "value": ", selected"
-    }
-  ],
-  "web.common.ui.calendar.dayToday": [
-    {
-      "type": 0,
-      "value": "Today, "
-    },
-    {
-      "type": 1,
-      "value": "date"
-    }
-  ],
-  "web.common.ui.calendar.dayTodaySelected": [
-    {
-      "type": 0,
-      "value": "Today, "
-    },
-    {
-      "type": 1,
-      "value": "date"
-    },
-    {
-      "type": 0,
-      "value": ", selected"
-    }
-  ],
-  "web.common.ui.calendar.monthDropdown": [
-    {
-      "type": 0,
-      "value": "Choose the Month"
-    }
-  ],
-  "web.common.ui.calendar.nextMonth": [
-    {
-      "type": 0,
-      "value": "Go to the Next Month"
-    }
-  ],
-  "web.common.ui.calendar.previousMonth": [
-    {
-      "type": 0,
-      "value": "Go to the Previous Month"
-    }
-  ],
-  "web.common.ui.calendar.weekNumber": [
-    {
-      "type": 0,
-      "value": "Week "
-    },
-    {
-      "type": 1,
-      "value": "number"
-    }
-  ],
-  "web.common.ui.calendar.weekNumberHeader": [
-    {
-      "type": 0,
-      "value": "Week Number"
-    }
-  ],
-  "web.common.ui.calendar.yearDropdown": [
-    {
-      "type": 0,
-      "value": "Choose the Year"
-    }
-  ],
-  "web.common.ui.carousel.label": [
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": " carousel"
-    }
-  ],
-  "web.common.ui.carousel.loadFailed": [
-    {
-      "type": 0,
-      "value": "Could not load "
-    },
-    {
-      "type": 1,
-      "value": "title_lower"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.common.ui.carousel.scrollLeft": [
-    {
-      "type": 0,
-      "value": "Scroll left"
-    }
-  ],
-  "web.common.ui.carousel.scrollRight": [
-    {
-      "type": 0,
-      "value": "Scroll right"
-    }
-  ],
-  "web.common.ui.dateTimePicker.anyTime": [
-    {
-      "type": 0,
-      "value": "Any time"
-    }
-  ],
-  "web.common.ui.dateTimePicker.clear": [
-    {
-      "type": 0,
-      "value": "Clear"
-    }
-  ],
-  "web.common.ui.dateTimePicker.timeOfDay": [
-    {
-      "type": 0,
-      "value": "Time of day"
-    }
-  ],
-  "web.common.ui.imageUpload.delete": [
-    {
-      "type": 0,
-      "value": "Delete image"
-    }
-  ],
-  "web.common.ui.imageUpload.drop": [
-    {
-      "type": 0,
-      "value": "Click or drop image"
-    }
-  ],
-  "web.common.ui.imageUpload.removeSelected": [
-    {
-      "type": 0,
-      "value": "Remove selected file"
-    }
-  ],
-  "web.common.ui.imageUpload.urlHelp": [
-    {
-      "type": 0,
-      "value": "Paste an image URL instead of uploading a file. If both are provided, the uploaded file wins."
-    }
-  ],
-  "web.common.ui.libraryItemLink.noAccess": [
-    {
-      "type": 0,
-      "value": "This title is in a library this profile can't open."
-    }
-  ],
-  "web.common.ui.loadError.generic": [
-    {
-      "type": 0,
-      "value": "Something went wrong while loading it. Try again in a moment."
-    }
-  ],
-  "web.common.ui.loadError.timeout": [
-    {
-      "type": 0,
-      "value": "The server isn't responding. Try again in a moment."
-    }
-  ],
-  "web.common.ui.loadMore.button": [
-    {
-      "type": 0,
-      "value": "Load more"
-    }
-  ],
-  "web.common.ui.loadMore.loading": [
-    {
-      "type": 0,
-      "value": "Loading more"
-    }
-  ],
-  "web.common.ui.refreshFailed.timeout": [
-    {
-      "type": 1,
-      "value": "message"
-    },
-    {
-      "type": 0,
-      "value": " The server isn't responding."
-    }
-  ],
-  "web.common.ui.selectMode.collections.group": [
-    {
-      "type": 0,
-      "value": "Selected collections"
-    }
-  ],
-  "web.common.ui.selectMode.collections.limit": [
-    {
-      "type": 6,
-      "value": "limit",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " collection at a time"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " collections at a time"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.ui.selectMode.collections.tooMany": [
-    {
-      "type": 6,
-      "value": "limit",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Select up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " collection at a time."
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Select up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " collections at a time."
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.ui.selectMode.rows.group": [
-    {
-      "type": 0,
-      "value": "Selected rows"
-    }
-  ],
-  "web.common.ui.selectMode.rows.limit": [
-    {
-      "type": 6,
-      "value": "limit",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " row at a time"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " rows at a time"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.ui.selectMode.rows.tooMany": [
-    {
-      "type": 6,
-      "value": "limit",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Select up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " row at a time."
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Select up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " rows at a time."
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.common.ui.tagInput.placeholder": [
-    {
-      "type": 0,
-      "value": "Add..."
-    }
-  ],
   "web.detail.actions.addToCollection": [
     {
       "type": 0,
@@ -98484,11 +94235,7 @@
   "web.detail.actions.startFromFirstEpisode": [
     {
       "type": 0,
-      "value": "Start From Episode "
-    },
-    {
-      "type": 1,
-      "value": "episode"
+      "value": "Start From Episode 1"
     }
   ],
   "web.detail.actions.startWatchParty": [
@@ -102388,20 +98135,6 @@
       "value": "number"
     }
   ],
-  "web.home.addRow.rules.groupMatchLabel": [
-    {
-      "type": 0,
-      "value": "How group "
-    },
-    {
-      "type": 1,
-      "value": "number"
-    },
-    {
-      "type": 0,
-      "value": "'s rules combine"
-    }
-  ],
   "web.home.addRow.rules.groupSentence": [
     {
       "type": 8,
@@ -104171,6 +99904,24 @@
     {
       "type": 0,
       "value": "This can't be undone."
+    }
+  ],
+  "web.home.rows.collectionKinds.manual": [
+    {
+      "type": 0,
+      "value": "Manual"
+    }
+  ],
+  "web.home.rows.collectionKinds.smart": [
+    {
+      "type": 0,
+      "value": "Smart"
+    }
+  ],
+  "web.home.rows.collectionKinds.synced": [
+    {
+      "type": 0,
+      "value": "Synced list"
     }
   ],
   "web.home.rows.delete.conflict": [
@@ -112958,72 +108709,14 @@
   ],
   "web.player.bitrateLimit.invalid": [
     {
-      "type": 6,
-      "value": "places",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Enter a value above "
-            },
-            {
-              "type": 1,
-              "value": "min"
-            },
-            {
-              "type": 0,
-              "value": " Mbps, such as 8 or 1.5 (up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " decimal place)."
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Enter a value above "
-            },
-            {
-              "type": 1,
-              "value": "min"
-            },
-            {
-              "type": 0,
-              "value": " Mbps, such as 8 or 1.5 (up to "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " decimal places)."
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "Enter a value above 0 Mbps, such as 8 or 1.5 (up to 3 decimal places)."
     }
   ],
   "web.player.bitrateLimit.lowWarning": [
     {
       "type": 0,
-      "value": "Below "
-    },
-    {
-      "type": 1,
-      "value": "mbps"
-    },
-    {
-      "type": 0,
-      "value": " Mbps, streams are transcoded to very low quality."
+      "value": "Below 1 Mbps, streams are transcoded to very low quality."
     }
   ],
   "web.player.bitrateLimit.unit": [
@@ -114804,6 +110497,46 @@
       "value": "×"
     }
   ],
+  "web.player.speedTest.retryAfter": [
+    {
+      "type": 6,
+      "value": "seconds",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Try again in "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " second"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Try again in "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " seconds"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.player.subtitles.aiTranslation": [
     {
       "type": 0,
@@ -116096,12 +111829,6 @@
     {
       "type": 0,
       "value": "All libraries"
-    }
-  ],
-  "web.profiles.helpers.access.anyQuality": [
-    {
-      "type": 0,
-      "value": "Any quality"
     }
   ],
   "web.profiles.helpers.access.libraries": [
@@ -119248,12 +114975,6 @@
       "value": "App language"
     }
   ],
-  "web.settings.accessibility.appLanguageDeviceClearFailed": [
-    {
-      "type": 0,
-      "value": "Saved, but this browser still uses its own language. Try again."
-    }
-  ],
   "web.settings.accessibility.appLanguageSaveFailed": [
     {
       "type": 0,
@@ -120016,8 +115737,14 @@
       "value": "Confirm your Silo password to connect "
     },
     {
-      "type": 1,
-      "value": "owner"
+      "type": 8,
+      "value": "name",
+      "children": [
+        {
+          "type": 1,
+          "value": "owner"
+        }
+      ]
     },
     {
       "type": 0,
@@ -120913,11 +116640,11 @@
     },
     {
       "type": 1,
-      "value": "name"
+      "value": "owner"
     },
     {
       "type": 0,
-      "value": "'s style"
+      "value": " style"
     }
   ],
   "web.settings.device.appearance.resetOwn": [
@@ -121095,11 +116822,11 @@
         },
         {
           "type": 1,
-          "value": "name"
+          "value": "owner"
         },
         {
           "type": 0,
-          "value": "'s settings, not your own."
+          "value": " settings, not your own."
         }
       ]
     },
@@ -121231,11 +116958,11 @@
             },
             {
               "type": 1,
-              "value": "name"
+              "value": "owner"
             },
             {
               "type": 0,
-              "value": "'s profile settings on "
+              "value": " profile settings on "
             },
             {
               "type": 1,
@@ -121263,11 +116990,11 @@
             },
             {
               "type": 1,
-              "value": "name"
+              "value": "owner"
             },
             {
               "type": 0,
-              "value": "'s profile settings on "
+              "value": " profile settings on "
             },
             {
               "type": 1,
@@ -121319,11 +117046,11 @@
   "web.settings.device.scopeDetailOther": [
     {
       "type": 1,
-      "value": "name"
+      "value": "owner"
     },
     {
       "type": 0,
-      "value": "'s other devices, and anyone else who uses this one, are unaffected."
+      "value": " other devices, and anyone else who uses this one, are unaffected."
     }
   ],
   "web.settings.device.scopeDetailOwn": [
@@ -121353,11 +117080,11 @@
         },
         {
           "type": 1,
-          "value": "name"
+          "value": "owner"
         },
         {
           "type": 0,
-          "value": "'s profile only"
+          "value": " profile only"
         }
       ]
     },
@@ -121928,34 +117655,16 @@
   ],
   "web.settings.deviceSettingGroups.fromOwnerProfile": [
     {
-      "type": 5,
-      "value": "owner",
-      "options": {
-        "self": {
-          "value": [
-            {
-              "type": 0,
-              "value": "From your profile"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "From "
-            },
-            {
-              "type": 1,
-              "value": "name"
-            },
-            {
-              "type": 0,
-              "value": "'s profile"
-            }
-          ]
-        }
-      }
+      "type": 0,
+      "value": "From "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " profile"
     }
   ],
   "web.settings.deviceSettingGroups.householdLimit": [
@@ -121992,34 +117701,16 @@
   ],
   "web.settings.deviceSettingGroups.useOwnerSetting": [
     {
-      "type": 5,
-      "value": "owner",
-      "options": {
-        "self": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Use your setting"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Use "
-            },
-            {
-              "type": 1,
-              "value": "name"
-            },
-            {
-              "type": 0,
-              "value": "'s setting"
-            }
-          ]
-        }
-      }
+      "type": 0,
+      "value": "Use "
+    },
+    {
+      "type": 1,
+      "value": "owner"
+    },
+    {
+      "type": 0,
+      "value": " setting"
     }
   ],
   "web.settings.historyImport.chooseProfile": [
@@ -132800,98 +128491,20 @@
   ],
   "web.subtitles.quotaWindow.day": [
     {
-      "type": 6,
-      "value": "hours",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " hour"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " hours"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "24 hours"
     }
   ],
   "web.subtitles.quotaWindow.month": [
     {
-      "type": 6,
-      "value": "days",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " day"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " days"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "30 days"
     }
   ],
   "web.subtitles.quotaWindow.week": [
     {
-      "type": 6,
-      "value": "days",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " day"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " days"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "type": 0,
+      "value": "7 days"
     }
   ],
   "web.subtitles.search.downloadFailed": [
@@ -133677,15 +129290,7 @@
   "web.subtitles.upload.help": [
     {
       "type": 0,
-      "value": "Drag and drop or browse for SRT, VTT, ASS, SSA, or SUB files up to "
-    },
-    {
-      "type": 1,
-      "value": "megabytes"
-    },
-    {
-      "type": 0,
-      "value": " MB. Language is detected automatically when possible."
+      "value": "Drag and drop or browse for SRT, VTT, ASS, SSA, or SUB files up to 5 MB. Language is detected automatically when possible."
     }
   ],
   "web.subtitles.upload.languageLabel": [

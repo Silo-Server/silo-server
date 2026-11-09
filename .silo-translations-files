@@ -1,11 +1,4 @@
 web/src/locales/ar-XB.json
-web/src/locales/ar.json
-web/src/locales/de.json
 web/src/locales/en-XA.json
 web/src/locales/en.json
-web/src/locales/es.json
-web/src/locales/fr.json
-web/src/locales/ja.json
 web/src/locales/keys.ts
-web/src/locales/pt-BR.json
-web/src/locales/zh-Hans.json
