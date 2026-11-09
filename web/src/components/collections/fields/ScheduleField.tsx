@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { appIntl, useT, type MessageKey, type Translate } from "@/i18n";
 import { serverTimeLabel } from "@/lib/collections/copy";
 
 /** Radix Select can't hold "", so "no scheduled sync" is this in the menu. */
@@ -43,7 +43,8 @@ function clock(t: Translate, minute: string, hour: string): string | null {
   if (h > 23 || m > 59) return null;
   return t("web.collections.fields.clockTime", {
     hour: h % 12 === 0 ? 12 : h % 12,
-    minute: String(m).padStart(2, "0"),
+    // Two digits, in the screen's digits like the hour.
+    minute: appIntl().formatNumber(m, { minimumIntegerDigits: 2, useGrouping: false }),
     period: h < 12 ? "am" : "pm",
   });
 }
