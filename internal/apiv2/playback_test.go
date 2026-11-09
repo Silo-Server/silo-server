@@ -210,6 +210,8 @@ func TestPlaybackV2ProbeURLOrigin(t *testing.T) {
 			map[string]string{"X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "https://public.example.test/silo"},
 		{"proxy rewrote host, ambiguous forwarded host", "203.0.113.5:8090", "https://public.example.test",
 			map[string]string{"X-Forwarded-Host": "media.example.test, edge.example.test", "X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "https://public.example.test"},
+		{"proxy named the IP host it kept", "192.168.1.20:8090", "https://public.example.test",
+			map[string]string{"X-Forwarded-Host": "192.168.1.20:8090", "X-Forwarded-For": "192.168.1.30"}, netaccess.Path{}, "http://192.168.1.20:8090"},
 		{"proxy rewrote host, no public URL", "203.0.113.5:8090", "",
 			map[string]string{"X-Forwarded-For": "198.51.100.7"}, netaccess.Path{}, "http://203.0.113.5:8090"},
 		{"proxy kept a named host", "media.example.test", "https://public.example.test",

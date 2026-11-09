@@ -597,13 +597,13 @@ func playbackBandwidthLimit(limit *playback.BandwidthLimitV3) *PlaybackBandwidth
 // the server's own network keeps the LAN address it used. A proxy that
 // rewrites Host to a bare IP address leaves only the address it dialed, which
 // a client elsewhere may not reach, unless it is a trusted proxy that names
-// the client's host in a single X-Forwarded-Host (clientip.RequestHost); then
+// the client's host in a single X-Forwarded-Host (clientip.ForwardedHost); then
 // the URL is on the configured public URL, when there is one. A network access
 // provider's path keeps Host, which can be an overlay IP, so it always keeps
 // the origin it reached.
 func (reg *Registry) bandwidthProbeBaseURL(r *http.Request) string {
 	_, err := netip.ParseAddr((&url.URL{Host: r.Host}).Hostname())
-	hostRewritten := err == nil && clientip.RequestHost(r) == r.Host && clientip.HasForwardingHeaders(r.Header) &&
+	hostRewritten := err == nil && clientip.ForwardedHost(r) == "" && clientip.HasForwardingHeaders(r.Header) &&
 		netaccess.PathFromContext(r.Context()).IsDefault()
 	if base := reg.publicBaseURL(); hostRewritten && base != "" {
 		return base
