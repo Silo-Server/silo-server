@@ -37,7 +37,7 @@ const (
 	// sections or series.
 	maxRunBytes int64 = 64 << 30
 	// maxRunRetainedBytes caps what one run holds across pages, which is only
-	// the in-progress lists: roughly 100,000 items with their ids. Watched
+	// the in-progress lists and the Plex watchlist: roughly 100,000 items with their ids. Watched
 	// history is never held, however long it is.
 	maxRunRetainedBytes int64 = 64 << 20
 	// upstreamErrorBodyBytes caps how much of a non-2xx body is kept for

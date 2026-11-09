@@ -227,3 +227,49 @@ func TestProviderPeakHeapIsIndependentOfHistorySize(t *testing.T) {
 		})
 	}
 }
+
+// Lookups are dropped after their page, so they cannot use up the run's budget
+// for what it holds.
+func TestPlexMetadataLookupsAreNotChargedToTheRun(t *testing.T) {
+	t.Parallel()
+	server := serveBody(t, []byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"1","type":"show"}]}}`))
+	runCtx := withRunBudget(trustLoopback(context.Background()))
+	if _, err := newUnthrottledPlexClient().FetchMetadataBatch(runCtx, server.URL, "t", []string{"1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := runBudgetFrom(runCtx).retained; got != 0 {
+		t.Fatalf("retained = %d, want 0", got)
+	}
+}
+
+// A resumed admin import reads earlier pages again to learn which items it has
+// imported, so an older play past the checkpoint stays out of history.
+func TestPlexAdminResumeKeepsOlderPlaysOut(t *testing.T) {
+	t.Parallel()
+	rows := []string{
+		`{"ratingKey":"1","type":"movie","viewedAt":300,"Guid":[{"id":"tmdb://1"}]}`,
+		`{"ratingKey":"1","type":"movie","viewedAt":200,"Guid":[{"id":"tmdb://1"}]}`,
+		`{"ratingKey":"2","type":"movie","viewedAt":100,"Guid":[{"id":"tmdb://2"}]}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, _ := strconv.Atoi(r.URL.Query().Get("X-Plex-Container-Start"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"MediaContainer":{"totalSize":%d,"Metadata":[%s]}}`, len(rows), rows[start])
+	}))
+	t.Cleanup(server.Close)
+
+	var got []string
+	provider := NewPlexAdminProvider(newUnthrottledPlexClient(), server.URL, "t", "1")
+	err := provider.Stream(trustLoopback(context.Background()), &StreamPosition{Stage: plexStageHistory, Offset: 1}, func(batch RecordBatch) error {
+		for _, record := range batch.Records {
+			got = append(got, record.ExternalID)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "2" {
+		t.Fatalf("records = %v, want only the item first seen past the checkpoint", got)
+	}
+}

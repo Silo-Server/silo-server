@@ -554,11 +554,7 @@ func (c *PlexClient) FetchMetadataBatch(ctx context.Context, baseURL, token stri
 	if err := c.doJSON(req, &container); err != nil {
 		return nil, fmt.Errorf("fetching Plex metadata for %s: %w", strings.Join(ratingKeys, ","), err)
 	}
-	items := keepRequested(container.items(), ratingKeys, func(item PlexItem) string { return item.RatingKey })
-	if err := retainItems(ctx, items); err != nil {
-		return nil, fmt.Errorf("fetching Plex metadata for %s: %w", strings.Join(ratingKeys, ","), err)
-	}
-	return items, nil
+	return keepRequested(container.items(), ratingKeys, func(item PlexItem) string { return item.RatingKey }), nil
 }
 
 // Authenticate exchanges Plex account credentials for an auth token via plex.tv.

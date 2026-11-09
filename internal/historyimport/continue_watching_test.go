@@ -483,9 +483,8 @@ func TestPrivateNetworkProviderPassesTheRowThrough(t *testing.T) {
 	t.Parallel()
 
 	want := ContinueWatchingRow{SourceSeriesIDs: map[string]bool{"lasso": true}}
-	var wrapped Provider = privateNetworkProvider{rowProvider{row: want, ok: true}}
-	reporter, ok := wrapped.(ContinueWatchingRowReporter)
-	if !ok {
+	reporter := continueWatchingReporter(privateNetworkProvider{rowProvider{row: want, ok: true}})
+	if reporter == nil {
 		t.Fatal("wrapped provider does not report a row")
 	}
 	if row, ok := reporter.ContinueWatchingRow(); !ok || !row.SourceSeriesIDs["lasso"] {
@@ -493,12 +492,12 @@ func TestPrivateNetworkProviderPassesTheRowThrough(t *testing.T) {
 	}
 
 	// The wrapped Emby provider, as queued runs build it.
-	if _, ok := Provider(privateNetworkProvider{NewEmbyProvider(nil, embyLocalAuth{})}).(ContinueWatchingRowReporter); !ok {
+	if continueWatchingReporter(privateNetworkProvider{NewEmbyProvider(nil, embyLocalAuth{})}) == nil {
 		t.Fatal("wrapped Emby provider does not report a row")
 	}
 
 	// A provider without a row reports none through the wrapper.
-	if _, ok := (privateNetworkProvider{staticWatchlistProvider{}}).ContinueWatchingRow(); ok {
-		t.Fatal("wrapped provider without a row reported one")
+	if continueWatchingReporter(privateNetworkProvider{staticWatchlistProvider{}}) != nil {
+		t.Fatal("wrapped provider without a row has a reporter")
 	}
 }

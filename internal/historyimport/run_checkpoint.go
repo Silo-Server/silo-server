@@ -26,6 +26,10 @@ const (
 	largeImportPollInterval = 15 * time.Second
 )
 
+// errRunInterrupted marks a failure of this server rather than of the import,
+// so the run goes back to the queue. The resume limit stops it repeating.
+var errRunInterrupted = errors.New("history import interrupted")
+
 // runCheckpoint is where a run continues after a restart, and the totals it
 // continues from.
 type runCheckpoint struct {

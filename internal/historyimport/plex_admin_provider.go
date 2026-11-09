@@ -40,7 +40,14 @@ func (p *PlexAdminProvider) Stream(ctx context.Context, from *StreamPosition, si
 	series := newPlexSeriesLookup(p.client, p.baseURL, p.token)
 	var ids plexItemIDLookup
 	seen := make(map[uint64]int64)
-	err := p.client.forEachUserHistoryPage(ctx, p.baseURL, p.token, p.accountID, stageOffset(from, plexStageHistory), func(page []PlexHistoryItem, start int) error {
+	// A resume reads the pages before its checkpoint again, without applying
+	// them, because they say which items already imported their newest play.
+	resumeAt := stageOffset(from, plexStageHistory)
+	err := p.client.forEachUserHistoryPage(ctx, p.baseURL, p.token, p.accountID, 0, func(page []PlexHistoryItem, start int) error {
+		if start < resumeAt {
+			markSeenHistory(page, seen)
+			return nil
+		}
 		records, err := p.normalizePage(ctx, page, series, &ids, seen)
 		if err != nil {
 			return err
@@ -71,6 +78,28 @@ func historySeenKey(ratingKey string) uint64 {
 	return hash.Sum64()
 }
 
+// keepNewestPlay records item as seen and reports whether it is newer than any
+// play of the same item seen so far.
+func keepNewestPlay(item PlexHistoryItem, seen map[uint64]int64) bool {
+	key := historySeenKey(item.RatingKey)
+	newest, ok := seen[key]
+	if ok && item.ViewedAt <= newest {
+		return false
+	}
+	if ok || len(seen) < maxSeenHistoryItems {
+		seen[key] = item.ViewedAt
+	}
+	return true
+}
+
+func markSeenHistory(page []PlexHistoryItem, seen map[uint64]int64) {
+	for _, item := range page {
+		if item.RatingKey != "" {
+			keepNewestPlay(item, seen)
+		}
+	}
+}
+
 func (p *PlexAdminProvider) normalizePage(ctx context.Context, rows []PlexHistoryItem, series *plexSeriesLookup, ids *plexItemIDLookup, seen map[uint64]int64) ([]Record, error) {
 	// Plex is inconsistent about including Guid on history rows for one item,
 	// so a row borrows ids from another row of the item on the page.
@@ -82,16 +111,8 @@ func (p *PlexAdminProvider) normalizePage(ctx context.Context, rows []PlexHistor
 	}
 	page := make([]PlexHistoryItem, 0, len(rows))
 	for _, item := range rows {
-		if item.RatingKey == "" {
+		if item.RatingKey == "" || !keepNewestPlay(item, seen) {
 			continue
-		}
-		key := historySeenKey(item.RatingKey)
-		newest, ok := seen[key]
-		if ok && item.ViewedAt <= newest {
-			continue
-		}
-		if ok || len(seen) < maxSeenHistoryItems {
-			seen[key] = item.ViewedAt
 		}
 		if borrowed, found := guids[item.RatingKey]; found && !hasMatchablePlexGuid(item.Guid) {
 			item.Guid = borrowed

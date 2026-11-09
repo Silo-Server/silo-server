@@ -126,12 +126,13 @@ func (p privateNetworkProvider) Stream(ctx context.Context, from *StreamPosition
 	return p.Provider.Stream(netguard.WithPrivateAccess(ctx), from, sink)
 }
 
-// ContinueWatchingRow passes through the wrapped provider's row. The embedded
-// interface only carries Stream, so without it the run would never see the
-// row of a wrapped provider.
-func (p privateNetworkProvider) ContinueWatchingRow() (ContinueWatchingRow, bool) {
-	if reporter, ok := p.Provider.(ContinueWatchingRowReporter); ok {
-		return reporter.ContinueWatchingRow()
+// continueWatchingReporter returns the provider's reporter of the source's
+// Continue Watching row, or nil when it has none. The network wrapper embeds
+// only the Provider interface, so it is looked through.
+func continueWatchingReporter(provider Provider) ContinueWatchingRowReporter {
+	if wrapped, ok := provider.(privateNetworkProvider); ok {
+		provider = wrapped.Provider
 	}
-	return ContinueWatchingRow{}, false
+	reporter, _ := provider.(ContinueWatchingRowReporter)
+	return reporter
 }

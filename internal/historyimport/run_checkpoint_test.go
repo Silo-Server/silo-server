@@ -16,12 +16,18 @@ type pagedProvider struct {
 	from    *StreamPosition
 	stopAt  int
 	stop    context.CancelFunc
+	// breakAt runs before delivering that page, to fail what the page needs.
+	breakAt int
+	broken  func()
 }
 
 func (p *pagedProvider) Stream(ctx context.Context, from *StreamPosition, sink RecordSink) error {
 	p.from = from
 	start := stageOffset(from, "listing")
 	for i := start; i < len(p.records); i++ {
+		if i == p.breakAt && p.broken != nil {
+			p.broken()
+		}
 		if i == p.stopAt && p.stop != nil {
 			p.stop()
 			<-ctx.Done()
@@ -118,6 +124,30 @@ func TestInterruptedRunResumesWithoutDuplicates(t *testing.T) {
 	}
 	if history := limitsHistory(t, repo); len(history) != 2 {
 		t.Fatalf("history after re-run = %v", history)
+	}
+}
+
+// A database failure while matching is transient: the run goes back to the
+// queue from its checkpoint instead of ending.
+func TestMatchFailureRequeuesTheRun(t *testing.T) {
+	repo := limitsRepository(t)
+	ctx := t.Context()
+	queued, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, claim, err := repo.claimAdminRun(ctx)
+	if err != nil || claimed == nil {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
+	provider := &pagedProvider{records: checkpointRecords(time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)), stopAt: -1, breakAt: 1, broken: func() {
+		if _, err := repo.pool.Exec(ctx, `ALTER TABLE media_items RENAME COLUMN tmdb_id TO tmdb_id_gone`); err != nil {
+			t.Error(err)
+		}
+	}}
+	checkpointService(ctx, repo).executeRunWithClaim(claimed, provider, claim, true)
+	if got := runRow(t, repo, queued.ID); got.Status != RunStatusQueued {
+		t.Fatalf("status = %s (%q), want queued", got.Status, got.ErrorMessage)
 	}
 }
 

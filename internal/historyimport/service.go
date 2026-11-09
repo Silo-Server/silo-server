@@ -419,7 +419,7 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		"resumed", from != nil,
 	)
 
-	reporter, _ := provider.(ContinueWatchingRowReporter)
+	reporter := continueWatchingReporter(provider)
 	apply := runApplier{service: s, run: run, claim: claim, summary: &summary, hiddenWarningAt: -1}
 	if summary.HiddenSuppressed > 0 {
 		apply.hiddenWarningAt = 0 // restored by the checkpoint; the warning stays first
@@ -435,9 +435,9 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 		if cause := context.Cause(ctx); cause != nil {
 			err = cause
 		}
-		// A deploy or shutdown is not the run's failure: it continues from
-		// its checkpoint on the next start.
-		if s.bgContext.Err() != nil && s.repo.requeueInterruptedRun(context.WithoutCancel(ctx), claim) {
+		// A deploy, shutdown or database failure is not the run's failure: it
+		// continues from its checkpoint.
+		if (s.bgContext.Err() != nil || errors.Is(err, errRunInterrupted)) && s.repo.requeueInterruptedRun(context.WithoutCancel(ctx), claim) {
 			return
 		}
 		s.failClaim(ctx, claim, summary, err)
@@ -540,7 +540,7 @@ func (a *runApplier) apply(ctx context.Context, batch RecordBatch) error {
 	}
 	matches, reasons, err := matchAllWithReasons(ctx, s.repo.pool, batch.Records)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", errRunInterrupted, err)
 	}
 	// The checkpoint keeps the totals from before this batch, because a
 	// resume reads the batch again and would otherwise count it twice.

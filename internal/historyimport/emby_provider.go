@@ -12,7 +12,7 @@ import (
 type EmbyProvider struct {
 	client *EmbyClient
 	auth   embyLocalAuth
-	// row is the Continue Watching row the last Fetch read, or nil when it
+	// row is the Continue Watching row the last Stream read, or nil when it
 	// could not be read reliably.
 	row *ContinueWatchingRow
 }
@@ -27,7 +27,7 @@ const (
 var embyStages = []string{embyStagePlayed, embyStageRemainder, embyStageFavorites}
 
 // ContinueWatchingRow reports the shows in Emby's Continue Watching row as
-// of the last Fetch. ok is false when the row could not be read reliably,
+// of the last Stream. ok is false when the row could not be read reliably,
 // and then nothing may be hidden on its account.
 func (p *EmbyProvider) ContinueWatchingRow() (ContinueWatchingRow, bool) {
 	if p.row == nil {
