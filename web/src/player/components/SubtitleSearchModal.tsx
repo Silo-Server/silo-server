@@ -8,6 +8,12 @@ import { languageOptions } from "../utils/languageNames";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 import type { StoredSubtitle } from "../utils/subtitleSync";
 import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
+
+/** Glyph on the close button, which carries a translated label. */
+const CLOSE_GLYPH = "✕";
+/** Spinning glyph while a result downloads; the span carries a translated label. */
+const SPINNER_GLYPH = "⟳";
 
 interface SubtitleSearchModalProps {
   mediaFileId: number;
@@ -55,6 +61,7 @@ export function SubtitleSearchModal({
   onDownloadStarted,
   onlineSearchEnabled = true,
 }: SubtitleSearchModalProps) {
+  const t = useT();
   const [selectedLang, setSelectedLang] = useState("en");
   const [results, setResults] = useState<SubtitleResult[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -159,11 +166,11 @@ export function SubtitleSearchModal({
       setResults(response.results ?? []);
       setWarnings(response.warnings ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Search failed");
+      setError(err instanceof Error ? err.message : t("web.subtitles.search.searchFailed"));
     } finally {
       setSearching(false);
     }
-  }, [playerConfig, mediaFileId, selectedLang]);
+  }, [playerConfig, mediaFileId, selectedLang, t]);
 
   const handleUpload = useCallback(
     async (input: {
@@ -257,12 +264,13 @@ export function SubtitleSearchModal({
         onSubtitleDownloaded(response?.subtitle, "download");
         handleClose();
       } catch (err) {
-        if (current()) setError(err instanceof Error ? err.message : "Download failed");
+        if (current())
+          setError(err instanceof Error ? err.message : t("web.subtitles.search.downloadFailed"));
       } finally {
         if (current()) setDownloading(null);
       }
     },
-    [playerConfig, mediaFileId, onSubtitleDownloaded, onDownloadStarted, handleClose],
+    [playerConfig, mediaFileId, onSubtitleDownloaded, onDownloadStarted, handleClose, t],
   );
 
   if (!isOpen) return null;
@@ -273,7 +281,7 @@ export function SubtitleSearchModal({
       onClick={handleClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Add Subtitles"
+      aria-label={t("web.subtitles.search.title")}
       onKeyDown={handleFocusTrap}
     >
       <div
@@ -283,14 +291,14 @@ export function SubtitleSearchModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-          <h2 className="text-sm font-semibold">Add Subtitles</h2>
+          <h2 className="text-sm font-semibold">{t("web.subtitles.search.title")}</h2>
           <button
             type="button"
             className="rounded text-white/60 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
             onClick={handleClose}
-            aria-label="Close"
+            aria-label={t("web.subtitles.closeDialog")}
           >
-            ✕
+            {CLOSE_GLYPH}
           </button>
         </div>
 
@@ -305,7 +313,9 @@ export function SubtitleSearchModal({
 
         {onlineSearchEnabled && (
           <div className="border-b border-white/10 px-4 py-2">
-            <p className="text-xs font-medium text-white/60">Search online</p>
+            <p className="text-xs font-medium text-white/60">
+              {t("web.subtitles.search.searchOnline")}
+            </p>
           </div>
         )}
 
@@ -314,7 +324,7 @@ export function SubtitleSearchModal({
           <div className="flex gap-2 px-4 py-3">
             <select
               ref={searchInputRef}
-              aria-label="Language"
+              aria-label={t("web.subtitles.search.language")}
               className="flex-1 rounded bg-neutral-800 px-2 py-1.5 text-sm text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
               value={selectedLang}
               onChange={(e) => setSelectedLang(e.target.value)}
@@ -331,7 +341,7 @@ export function SubtitleSearchModal({
               onClick={handleSearch}
               disabled={searching}
             >
-              {searching ? "Searching\u2026" : "Search"}
+              {searching ? t("web.subtitles.search.searching") : t("web.subtitles.search.search")}
             </button>
           </div>
         )}
@@ -362,7 +372,7 @@ export function SubtitleSearchModal({
           <div className="max-h-[60vh] overflow-y-auto px-4 pb-4">
             {results.length === 0 && !searching && !error && (
               <p className="py-6 text-center text-xs text-white/40">
-                Select a language and press Search.
+                {t("web.subtitles.search.prompt")}
               </p>
             )}
 
@@ -397,13 +407,15 @@ export function SubtitleSearchModal({
                   {/* HI badge */}
                   {result.hearing_impaired && (
                     <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[10px] text-white/60">
-                      HI
+                      {t("subtitleSearch.hearingImpaired")}
                     </span>
                   )}
 
                   {/* Download count */}
                   <span className="shrink-0 text-[10px] text-white/40">
-                    ↓{result.downloads.toLocaleString(formatLocale())}
+                    {t("web.subtitles.search.downloads", {
+                      downloads: result.downloads.toLocaleString(formatLocale()),
+                    })}
                   </span>
 
                   {/* Provider badge */}
@@ -420,8 +432,11 @@ export function SubtitleSearchModal({
 
                   {/* Download spinner */}
                   {isDownloading && (
-                    <span className="shrink-0 text-xs text-white/60" aria-label="Downloading">
-                      ⟳
+                    <span
+                      className="shrink-0 text-xs text-white/60"
+                      aria-label={t("web.subtitles.search.downloading")}
+                    >
+                      {SPINNER_GLYPH}
                     </span>
                   )}
                 </button>

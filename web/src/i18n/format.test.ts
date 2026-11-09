@@ -78,6 +78,7 @@ describe("serverTextWith", () => {
   });
 
   it("isolates printed arguments in a right-to-left language", () => {
+    // The right-to-left pseudo-locale is always generated; `ar` is listed only once it ships.
     const arabic = createAppIntl("ar-XB", translated);
     expect(serverTextWith(arabic, "home.section.recentlyAddedIn", { library: "Movies" }, "x")).toBe(
       `Añadido en ${FSI}Movies${PDI}`,

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { useT } from "@/i18n";
 import { markerProvenanceLabel } from "@/lib/markerProvenance";
 import type { PlayerMarkerProvenance } from "../types";
 
@@ -34,7 +35,7 @@ interface IntroSkipButtonProps {
  */
 export function IntroSkipButton({
   onSkip,
-  label = "Skip Intro",
+  label,
   caption,
   timer,
   introPrompt = false,
@@ -44,6 +45,7 @@ export function IntroSkipButton({
   showConfidence = false,
   showSource = false,
 }: IntroSkipButtonProps) {
+  const t = useT();
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -102,7 +104,7 @@ export function IntroSkipButton({
           style={{ width: `${Math.min(1, Math.max(0, progress)) * 100}%` }}
         />
       ) : null}
-      <span className="relative">{label}</span>
+      <span className="relative">{label ?? t("introSkip.pill.skip")}</span>
     </button>
   );
 

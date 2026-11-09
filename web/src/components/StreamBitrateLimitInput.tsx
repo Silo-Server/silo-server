@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { Input } from "@/components/ui/input";
+import { useT } from "@/i18n";
 import {
   Select,
   SelectContent,
@@ -19,7 +20,6 @@ import {
 
 const UNLIMITED = "0";
 const CUSTOM = "custom";
-const INVALID_MBPS = "Enter a value above 0 Mbps, such as 8 or 1.5 (up to 3 decimal places).";
 
 function choiceFor(kbps: number | null): string {
   if (kbps === null) return "";
@@ -53,6 +53,8 @@ export function StreamBitrateLimitInput({
   onInvalidDraftChange?: (draft: string | undefined) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
+  const invalidMbps = t("web.player.bitrateLimit.invalid");
   const [choice, setChoice] = useState(() =>
     invalidDraft !== undefined && (invalidDraft !== "" || value !== null)
       ? CUSTOM
@@ -71,8 +73,8 @@ export function StreamBitrateLimitInput({
   // parser can't disagree about what is saveable, including for a draft
   // restored on mount.
   useLayoutEffect(() => {
-    draftRef.current?.setCustomValidity(draftValue === null ? INVALID_MBPS : "");
-  }, [custom, draftValue]);
+    draftRef.current?.setCustomValidity(draftValue === null ? invalidMbps : "");
+  }, [custom, draftValue, invalidMbps]);
 
   function handleChoiceChange(next: string) {
     if (next === "") return;
@@ -99,45 +101,43 @@ export function StreamBitrateLimitInput({
       <div className="flex gap-2">
         <Select value={choice} onValueChange={handleChoiceChange} required disabled={disabled}>
           <SelectTrigger id={id} className={custom ? "w-32 shrink-0" : "w-full"}>
-            <SelectValue placeholder="Choose a limit" />
+            <SelectValue placeholder={t("web.player.bitrateLimit.choosePlaceholder")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={UNLIMITED}>Unlimited</SelectItem>
+            <SelectItem value={UNLIMITED}>{t("web.player.bitrateLimit.unlimited")}</SelectItem>
             {STREAM_BITRATE_LIMIT_PRESETS_KBPS.map((kbps) => (
               <SelectItem key={kbps} value={String(kbps)}>
                 {formatStreamBitrateLimit(kbps)}
               </SelectItem>
             ))}
-            <SelectItem value={CUSTOM}>Custom</SelectItem>
+            <SelectItem value={CUSTOM}>{t("web.player.bitrateLimit.custom")}</SelectItem>
           </SelectContent>
         </Select>
         {custom && (
           <div className="relative min-w-0 flex-1">
             <Input
               ref={draftRef}
-              aria-label={`${label} in Mbps`}
+              aria-label={t("web.player.bitrateLimit.customAria", { label })}
               inputMode="decimal"
               autoComplete="off"
               required
               aria-invalid={draft !== "" && draftValue === null}
-              placeholder="e.g. 1.5"
+              placeholder={t("web.player.bitrateLimit.customPlaceholder")}
               value={draft}
               onChange={(event) => handleDraftChange(event.target.value)}
               className="pr-14"
             />
             <span className="text-muted-foreground pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm">
-              Mbps
+              {t("web.player.bitrateLimit.unit")}
             </span>
           </div>
         )}
       </div>
       {custom && draftValue === null && (
-        <p className="text-muted-foreground text-xs">{INVALID_MBPS}</p>
+        <p className="text-muted-foreground text-xs">{invalidMbps}</p>
       )}
       {custom && draftValue !== null && isLowStreamBitrateLimit(draftValue) && (
-        <p className="text-warning text-xs">
-          Below 1 Mbps, streams are transcoded to very low quality.
-        </p>
+        <p className="text-warning text-xs">{t("web.player.bitrateLimit.lowWarning")}</p>
       )}
     </div>
   );

@@ -1,10 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
-import {
-  BUFFERING_PILL_MS,
-  BUFFERING_QUALITY_COPY as COPY,
-  type BufferingAnswer,
-  type BufferingPill,
-} from "../buffering-quality";
+import { useT } from "@/i18n";
+import { BUFFERING_PILL_MS, type BufferingAnswer, type BufferingPill } from "../buffering-quality";
 
 interface BufferingQualityPillProps {
   kind: BufferingPill;
@@ -34,6 +30,7 @@ export function BufferingQualityPill({
   focusOnMount,
   onAnswer,
 }: BufferingQualityPillProps) {
+  const t = useT();
   const titleId = useId();
   const primaryRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => performance.now());
@@ -63,7 +60,7 @@ export function BufferingQualityPill({
       className="animate-in fade-in pointer-events-auto max-w-xl rounded-2xl border border-sky-400/50 bg-sky-500/15 px-5 py-4 text-white shadow-2xl backdrop-blur duration-150"
     >
       <div id={titleId} role="status" className="text-sm font-semibold tracking-wide text-white">
-        {prompt ? COPY.prompt_title : COPY.undo_caption}
+        {prompt ? t("bufferingQuality.prompt.title") : t("web.player.buffering.undoCaption")}
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <button
@@ -77,7 +74,9 @@ export function BufferingQualityPill({
             className="absolute inset-y-0 left-0 bg-white/15"
             style={{ width: `${progress * 100}%` }}
           />
-          <span className="relative">{prompt ? COPY.prompt_lower : COPY.undo_action}</span>
+          <span className="relative">
+            {prompt ? t("bufferingQuality.prompt.lower") : t("bufferingQuality.restore")}
+          </span>
         </button>
         {prompt ? (
           <button
@@ -86,7 +85,7 @@ export function BufferingQualityPill({
             className={ACTION_CLASS}
             onClick={() => onAnswer("select_keep")}
           >
-            {COPY.prompt_keep}
+            {t("bufferingQuality.prompt.keep")}
           </button>
         ) : null}
       </div>

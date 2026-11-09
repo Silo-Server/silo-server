@@ -1,5 +1,6 @@
 import { useEffect, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
+import { useT } from "@/i18n";
 
 interface PlayerMenuSurfaceProps {
   children: ReactNode;
@@ -21,6 +22,7 @@ export function PlayerMenuSurface({
   onKeyDown,
   anchorRef,
 }: PlayerMenuSurfaceProps) {
+  const t = useT();
   const isCoarsePointer = useCoarsePointer();
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export function PlayerMenuSurface({
       <button
         type="button"
         className="fixed inset-0 z-40 bg-black/50"
-        aria-label="Close menu"
+        aria-label={t("web.player.menu.close")}
         onClick={(event) => {
           event.stopPropagation();
           onClose();

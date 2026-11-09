@@ -55,6 +55,12 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Apostrophes:** the catalog validator rejects an ASCII `'` next to a brace or `#`
   (`{name}'s`, `'{title}'`). Extraction can't change English, so such a string stays
   literal, with an `eslint-disable` comment saying why, until a wording change replaces it.
+- **Data stays English:** text that is stored, sent to the server, matched or
+  compared (a saved track signature's label, a default note written to the
+  server, a value another client reads) is data, not interface text. Keep it
+  English and translate only the label that is shown; split the two when one
+  helper builds both. Code that found an element by its English label finds
+  it by a data attribute instead.
 - **Right to left:** in an RTL language every printed string placeholder is
   wrapped in Unicode isolates, so a left-to-right title keeps its punctuation in
   place. `select` and `plural` arguments are not. English bytes never change.

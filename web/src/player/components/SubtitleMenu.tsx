@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Captions, CaptionsOff, Languages, Minus, Plus, SlidersHorizontal } from "lucide-react";
+import { useT, type MessageKey } from "@/i18n";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { SubtitleSearchModal } from "./SubtitleSearchModal";
@@ -24,6 +25,9 @@ import {
   syncStatusLabel,
 } from "../utils/subtitleSync";
 
+/** Mark on the selected row; the row is announced as checked, so not translated. */
+const CHECK_MARK = "✓";
+
 interface SubtitleMenuProps {
   tracks: PlayerSubtitleInfo[];
   activeIndex: number | null;
@@ -45,16 +49,17 @@ interface SubtitleMenuProps {
 const DELAY_STEP_MS = 100;
 const DELAY_MAX_MS = 10_000;
 
-const SOURCE_LABELS: Record<string, string> = {
-  external: "External",
-  embedded: "Embedded",
-  downloaded: "Downloaded",
+const SOURCE_LABELS: Record<string, MessageKey> = {
+  external: "web.subtitles.menu.source.external",
+  embedded: "web.subtitles.menu.source.embedded",
+  downloaded: "web.subtitles.menu.source.downloaded",
 };
 
+/** The signed delay number the "{delay} ms" message shows. */
 function formatDelay(ms: number): string {
-  if (ms === 0) return "0 ms";
+  if (ms === 0) return "0";
   const sign = ms > 0 ? "+" : "−";
-  return `${sign}${Math.abs(ms)} ms`;
+  return `${sign}${Math.abs(ms)}`;
 }
 
 export function SubtitleMenu({
@@ -73,6 +78,7 @@ export function SubtitleMenu({
   audioTracks,
   subtitleSync,
 }: SubtitleMenuProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [translateOpen, setTranslateOpen] = useState(false);
@@ -251,7 +257,11 @@ export function SubtitleMenu({
           if (!open) subtitleSync?.reload();
           setOpen((v) => !v);
         }}
-        aria-label={activeIndex !== null ? "Disable captions" : "Enable captions"}
+        aria-label={
+          activeIndex !== null
+            ? t("web.subtitles.menu.disableCaptions")
+            : t("web.subtitles.menu.enableCaptions")
+        }
         aria-expanded={open}
         aria-haspopup="menu"
       >
@@ -282,16 +292,18 @@ export function SubtitleMenu({
               onClick={() => handleSelect(null)}
             >
               <span className="w-4 shrink-0 text-center text-xs">
-                {activeIndex === null ? "✓" : ""}
+                {activeIndex === null ? CHECK_MARK : ""}
               </span>
-              Off
+              {t("web.subtitles.menu.off")}
             </button>
           </div>
           <div className="max-h-[60vh] overflow-y-auto py-1">
             {sortedTracks.map((track) => {
               const isActive = track.index === activeIndex;
               const languageName = getLanguageName(track.language);
-              const sourceLabel = SOURCE_LABELS[track.source ?? "embedded"] ?? "Embedded";
+              const sourceLabel = t(
+                SOURCE_LABELS[track.source ?? "embedded"] ?? "web.subtitles.menu.source.embedded",
+              );
               const formatLabel = getSubtitleFormatLabel(track.codec);
               const hasDetail =
                 track.label &&
@@ -316,7 +328,7 @@ export function SubtitleMenu({
                   onClick={() => handleSelect(track.index)}
                 >
                   <span className="mt-0.5 w-4 shrink-0 text-center text-xs">
-                    {isActive ? "✓" : ""}
+                    {isActive ? CHECK_MARK : ""}
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="flex w-full items-center justify-between gap-3">
@@ -355,26 +367,28 @@ export function SubtitleMenu({
           </div>
           <div className="shrink-0 border-t border-white/10 px-3 py-2">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs tracking-wide text-white/50 uppercase">Delay</span>
+              <span className="text-xs tracking-wide text-white/50 uppercase">
+                {t("web.subtitles.menu.delay")}
+              </span>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
                   className="flex h-7 w-7 items-center justify-center rounded text-white/80 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={() => nudgeDelay(-DELAY_STEP_MS)}
                   disabled={delayDisabled || delayMs <= -DELAY_MAX_MS}
-                  aria-label={`Subtitle delay ${DELAY_STEP_MS}ms earlier`}
+                  aria-label={t("web.subtitles.menu.delayEarlier", { step: String(DELAY_STEP_MS) })}
                 >
                   <Minus className="h-3.5 w-3.5" />
                 </button>
                 <span className="min-w-[4.5rem] text-center font-mono text-xs text-white/80 tabular-nums">
-                  {formatDelay(delayMs)}
+                  {t("web.subtitles.menu.delayValue", { delay: formatDelay(delayMs) })}
                 </span>
                 <button
                   type="button"
                   className="flex h-7 w-7 items-center justify-center rounded text-white/80 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={() => nudgeDelay(DELAY_STEP_MS)}
                   disabled={delayDisabled || delayMs >= DELAY_MAX_MS}
-                  aria-label={`Subtitle delay ${DELAY_STEP_MS}ms later`}
+                  aria-label={t("web.subtitles.menu.delayLater", { step: String(DELAY_STEP_MS) })}
                 >
                   <Plus className="h-3.5 w-3.5" />
                 </button>
@@ -383,9 +397,9 @@ export function SubtitleMenu({
                   className="ml-1 rounded px-2 py-1 text-xs text-white/60 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={resetDelay}
                   disabled={delayDisabled || delayMs === 0}
-                  aria-label="Reset subtitle delay"
+                  aria-label={t("web.subtitles.menu.resetDelayLabel")}
                 >
-                  Reset
+                  {t("web.subtitles.menu.resetDelay")}
                 </button>
               </div>
             </div>
@@ -407,7 +421,7 @@ export function SubtitleMenu({
                   setOpen(false);
                 }}
               >
-                Add Subtitles…
+                {t("web.subtitles.menu.addSubtitles")}
               </button>
             )}
             {mediaFileId &&
@@ -427,7 +441,7 @@ export function SubtitleMenu({
                   }}
                 >
                   <Languages className="h-3.5 w-3.5 text-white/50" />
-                  Translate with AI…
+                  {t("web.subtitles.menu.translateWithAi")}
                 </button>
               )}
             <button
@@ -443,7 +457,7 @@ export function SubtitleMenu({
               }}
             >
               <SlidersHorizontal className="h-3.5 w-3.5 text-white/50" />
-              Appearance…
+              {t("web.subtitles.menu.appearance")}
             </button>
           </div>
         </PlayerMenuSurface>
@@ -515,6 +529,7 @@ const TIMING_BUTTON_CLASS =
  * the actions with a short explanation.
  */
 function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSyncEntry }) {
+  const t = useT();
   const key = entry.state.key;
   const job = entry.state.sync;
   const inProgress = isSyncInProgress(job?.status);
@@ -528,15 +543,19 @@ function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSy
     switch (job?.status) {
       case "synced":
         if (!isIdentityTiming(entry.state.timing)) {
-          result = { text: `Synced to the audio: ${describeTiming(entry.state.timing)}` };
+          result = {
+            text: t("web.subtitles.menu.syncedResult", {
+              timing: describeTiming(entry.state.timing),
+            }),
+          };
         }
         break;
       case "already_synced":
-        result = { text: "Already matches the audio." };
+        result = { text: t("web.subtitles.menu.alreadyMatches") };
         break;
       case "no_match":
         result = {
-          text: "Doesn't match this video's audio; probably for another release.",
+          text: t("web.subtitles.menu.noMatch"),
           warning: true,
         };
         break;
@@ -549,7 +568,9 @@ function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSy
   return (
     <div className="shrink-0 border-t border-white/10 px-3 py-2" data-testid="subtitle-timing">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs tracking-wide text-white/50 uppercase">Timing</span>
+        <span className="text-xs tracking-wide text-white/50 uppercase">
+          {t("web.subtitles.menu.timing")}
+        </span>
         {!entry.forbidden && (
           <div className="flex items-center gap-1">
             {canSync && (
@@ -559,7 +580,7 @@ function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSy
                 disabled={entry.busy || inProgress}
                 onClick={() => void sync.requestSync(key)}
               >
-                {inProgress ? "Syncing…" : "Sync to audio"}
+                {inProgress ? t("web.subtitles.menu.syncing") : t("web.subtitles.menu.syncToAudio")}
               </button>
             )}
             {canReset && (
@@ -569,7 +590,7 @@ function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSy
                 disabled={entry.busy || inProgress}
                 onClick={() => void sync.resetTiming(key)}
               >
-                Reset timing
+                {t("web.subtitles.menu.resetTiming")}
               </button>
             )}
           </div>
@@ -579,7 +600,7 @@ function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSy
         <div className="mt-2 flex flex-col gap-1">
           <span
             role="progressbar"
-            aria-label="Subtitle sync progress"
+            aria-label={t("web.subtitles.sync.progressLabel")}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={percent ?? 0}
@@ -592,7 +613,9 @@ function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSy
           </span>
           <span className="flex justify-between text-xs text-white/50">
             <span>{syncPhaseLabel(job)}</span>
-            <span className="tabular-nums">{percent ?? 0}%</span>
+            <span className="tabular-nums">
+              {t("web.subtitles.sync.percent", { percent: String(percent ?? 0) })}
+            </span>
           </span>
         </div>
       )}
@@ -604,14 +627,12 @@ function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSy
       {!entry.forbidden && canSync && !inProgress && !result && (
         <p className="mt-1 text-xs text-white/40">
           {entry.state.source === "external"
-            ? "Matches the timing to the audio for everyone. The file itself isn't changed."
-            : "Matches the timing to the audio for everyone watching."}
+            ? t("web.subtitles.menu.syncHintExternal")
+            : t("web.subtitles.menu.syncHint")}
         </p>
       )}
       {entry.forbidden && (
-        <p className="mt-1 text-xs text-white/50">
-          This server doesn&apos;t allow changing subtitle timing.
-        </p>
+        <p className="mt-1 text-xs text-white/50">{t("web.subtitles.menu.timingForbidden")}</p>
       )}
       {entry.error && (
         <p role="alert" className="mt-1 text-xs text-red-300">

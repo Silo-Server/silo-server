@@ -46,6 +46,7 @@ import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { hasEarlierEntry } from "@/lib/navigationHistory";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { TOCItem } from "@/reader/readest/libs/document";
 import FoliateBookReader, {
@@ -84,18 +85,25 @@ type TocEntry = TOCItem & {
   depth: number;
 };
 
-const READER_FONT_OPTIONS = [
-  { label: "Book default", value: READER_FONT_STACKS.inherit },
-  { label: "System serif", value: READER_FONT_STACKS.serif },
-  { label: "System sans", value: READER_FONT_STACKS.sans },
-  { label: "Monospace", value: READER_FONT_STACKS.mono },
-] as const;
+/**
+ * The note saved with a toolbar bookmark when the book has no title. It is
+ * stored data, read back by every client, so it stays the same in every
+ * interface language.
+ */
+const DEFAULT_BOOKMARK_NOTE = "Bookmark";
+
+const READER_FONT_OPTIONS: readonly { labelKey: MessageKey; value: string }[] = [
+  { labelKey: "web.reader.font.bookDefault", value: READER_FONT_STACKS.inherit },
+  { labelKey: "web.reader.font.systemSerif", value: READER_FONT_STACKS.serif },
+  { labelKey: "web.reader.font.systemSans", value: READER_FONT_STACKS.sans },
+  { labelKey: "web.reader.font.monospace", value: READER_FONT_STACKS.mono },
+];
 
 const READER_PROFILES = [
   {
     id: "comfortable",
-    label: "Comfortable",
-    description: "Serif, roomier lines",
+    labelKey: "web.reader.profile.comfortable",
+    descriptionKey: "web.reader.profile.comfortableDescription",
     settings: {
       fontFamily: READER_FONT_STACKS.serif,
       fontSize: 112,
@@ -105,8 +113,8 @@ const READER_PROFILES = [
   },
   {
     id: "accessible",
-    label: "Accessible",
-    description: "Larger sans text",
+    labelKey: "web.reader.profile.accessible",
+    descriptionKey: "web.reader.profile.accessibleDescription",
     settings: {
       fontFamily: READER_FONT_STACKS.sans,
       fontSize: 126,
@@ -116,8 +124,8 @@ const READER_PROFILES = [
   },
   {
     id: "compact",
-    label: "Compact",
-    description: "More words per page",
+    labelKey: "web.reader.profile.compact",
+    descriptionKey: "web.reader.profile.compactDescription",
     settings: {
       fontFamily: READER_FONT_STACKS.inherit,
       fontSize: 96,
@@ -158,9 +166,12 @@ function chooseReaderFile(
   );
 }
 
-function readerFileLabel(file: FileVersion): string {
+function readerFileLabel(file: FileVersion, t: Translate): string {
   const format = readerFileFormat(file).toUpperCase();
-  const name = file.file_name || file.file_path?.split(/[\\/]/).pop() || `File ${file.file_id}`;
+  const name =
+    file.file_name ||
+    file.file_path?.split(/[\\/]/).pop() ||
+    t("web.reader.fileOption.unnamed", { id: String(file.file_id) });
   return format ? `${format} · ${name}` : name;
 }
 
@@ -200,6 +211,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export default function EbookReader() {
+  const t = useT();
   const { contentId = "" } = useParams<{ contentId: string }>();
   // Swapping the open file re-renders the reader in place, so it stays on the
   // plain navigate; only leaving the reader is a page transition.
@@ -407,7 +419,7 @@ export default function EbookReader() {
         {
           kind: "bookmark",
           location,
-          note: item?.title || "Bookmark",
+          note: item?.title || DEFAULT_BOOKMARK_NOTE,
         },
         session,
       );
@@ -613,7 +625,7 @@ export default function EbookReader() {
     return (
       <div className="page-shell py-10">
         <PageBack />
-        <div className="text-muted-foreground mt-10 text-sm">Ebook not found.</div>
+        <div className="text-muted-foreground mt-10 text-sm">{t("web.reader.page.notFound")}</div>
       </div>
     );
   }
@@ -657,7 +669,7 @@ export default function EbookReader() {
     return (
       <div className="page-shell py-10">
         <PageBack />
-        <div className="text-muted-foreground mt-10 text-sm">No ebook files found.</div>
+        <div className="text-muted-foreground mt-10 text-sm">{t("web.reader.page.noFiles")}</div>
       </div>
     );
   }
@@ -666,7 +678,7 @@ export default function EbookReader() {
     <div className="bg-background min-h-screen">
       <header className="border-border/70 bg-background/95 sticky top-0 z-20 border-b backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
-          <Button asChild variant="ghost" size="icon" aria-label="Back">
+          <Button asChild variant="ghost" size="icon" aria-label={t("web.reader.toolbar.back")}>
             <Link
               to={backHref}
               onClick={(event) => {
@@ -707,7 +719,7 @@ export default function EbookReader() {
               variant="ghost"
               size="sm"
               className="hidden gap-1 sm:inline-flex"
-              title={`Next: ${nextChapter.label}`}
+              title={t("web.reader.toolbar.nextChapterTitle", { chapter: nextChapter.label })}
             >
               <Link to={nextChapterHref} replace>
                 <span className="text-muted-foreground max-w-36 truncate text-xs">
@@ -724,14 +736,14 @@ export default function EbookReader() {
           )}
           {isReaderSupportedFile(selectedFile) && readerFiles.length > 1 && (
             <select
-              aria-label="Reader file"
+              aria-label={t("web.reader.toolbar.fileSelect")}
               value={selectedFile.file_id}
               onChange={(event) => handleFileChange(event.target.value)}
               className="border-border bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 hidden h-8 max-w-44 rounded-md border px-2 text-xs outline-none focus-visible:ring-[3px] sm:block"
             >
               {readerFiles.map((file) => (
                 <option key={file.file_id} value={file.file_id}>
-                  {readerFileLabel(file)}
+                  {readerFileLabel(file, t)}
                 </option>
               ))}
             </select>
@@ -741,19 +753,19 @@ export default function EbookReader() {
               <Button
                 variant="secondary"
                 size="sm"
-                aria-label="Highlight selection"
-                title="Highlight selection"
+                aria-label={t("web.reader.toolbar.highlightSelection")}
+                title={t("web.reader.toolbar.highlightSelection")}
                 onClick={() => void handleCreateHighlight()}
               >
                 <Highlighter className="size-4" />
-                Highlight
+                {t("web.reader.toolbar.highlight")}
               </Button>
             )}
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Add bookmark"
-              title="Add bookmark"
+              aria-label={t("web.reader.toolbar.addBookmark")}
+              title={t("web.reader.toolbar.addBookmark")}
               onClick={() => void handleCreateBookmark()}
             >
               <Bookmark className="size-4" />
@@ -762,8 +774,8 @@ export default function EbookReader() {
               <Button
                 variant={readerSettings.readingRuler ? "secondary" : "ghost"}
                 size="icon-sm"
-                aria-label="Toggle reading ruler"
-                title="Reading ruler"
+                aria-label={t("web.reader.toolbar.toggleRuler")}
+                title={t("web.reader.toolbar.rulerTitle")}
                 onClick={() => updateReaderSettings({ readingRuler: !readerSettings.readingRuler })}
               >
                 <Ruler className="size-4" />
@@ -772,8 +784,12 @@ export default function EbookReader() {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={panelOpen ? "Close reader panel" : "Open reader panel"}
-              title={panelOpen ? "Close reader panel" : "Open reader panel"}
+              aria-label={t(
+                panelOpen ? "web.reader.toolbar.closePanel" : "web.reader.toolbar.openPanel",
+              )}
+              title={t(
+                panelOpen ? "web.reader.toolbar.closePanel" : "web.reader.toolbar.openPanel",
+              )}
               onClick={() => setPanelOpen((open) => !open)}
             >
               {panelOpen ? (
@@ -785,8 +801,8 @@ export default function EbookReader() {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Previous page"
-              title="Previous page"
+              aria-label={t("web.reader.toolbar.previousPage")}
+              title={t("web.reader.toolbar.previousPage")}
               onClick={() => readerRef.current?.prev()}
             >
               <ChevronLeft className="size-5" />
@@ -794,8 +810,8 @@ export default function EbookReader() {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Next page"
-              title="Next page"
+              aria-label={t("web.reader.toolbar.nextPage")}
+              title={t("web.reader.toolbar.nextPage")}
               onClick={() => readerRef.current?.next()}
             >
               <ChevronRight className="size-5" />
@@ -805,7 +821,7 @@ export default function EbookReader() {
             <Button asChild variant="outline" size="sm">
               <a href={loadedFile.objectUrl} download={loadedFile.filename}>
                 <Download className="size-4" />
-                File
+                {t("web.reader.toolbar.downloadFile")}
               </a>
             </Button>
           )}
@@ -813,7 +829,7 @@ export default function EbookReader() {
         <div className="border-border/60 flex h-10 items-center gap-3 border-t px-4">
           <BookOpen className="text-muted-foreground size-4 shrink-0" />
           <input
-            aria-label="Reading progress"
+            aria-label={t("web.reader.toolbar.progress")}
             type="range"
             min="0"
             max="100"
@@ -823,7 +839,7 @@ export default function EbookReader() {
             className="accent-primary h-2 min-w-0 flex-1"
           />
           <div className="text-muted-foreground w-11 text-right text-xs tabular-nums">
-            {progressLabel ?? "0%"}
+            {progressLabel ?? formatReaderProgress(0)}
           </div>
         </div>
       </header>
@@ -861,13 +877,15 @@ export default function EbookReader() {
                 <button
                   type="button"
                   role="slider"
-                  aria-label="Reading ruler position"
+                  aria-label={t("web.reader.ruler.position")}
                   aria-orientation="vertical"
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={Math.round(effectiveRulerTop)}
-                  aria-valuetext={`${Math.round(effectiveRulerTop)}%`}
-                  title="Drag to reposition the reading ruler"
+                  aria-valuetext={t("web.reader.ruler.valueText", {
+                    percent: String(Math.round(effectiveRulerTop)),
+                  })}
+                  title={t("web.reader.ruler.dragHint")}
                   className="focus-visible:ring-ring/50 pointer-events-auto absolute top-1/2 right-2 flex h-11 w-6 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-center rounded-md border border-yellow-500/60 bg-yellow-400/90 text-yellow-950 shadow-sm transition-colors select-none hover:bg-yellow-300 focus-visible:ring-[3px] focus-visible:outline-none"
                   onPointerDown={handleRulerPointerDown}
                   onPointerMove={handleRulerPointerMove}
@@ -885,20 +903,20 @@ export default function EbookReader() {
             <div className="max-w-md text-center">
               <Library className="text-muted-foreground mx-auto mb-4 size-10" />
               <h1 className="text-lg font-semibold">{item.title}</h1>
-              <p className="text-muted-foreground mt-2 text-sm">Unsupported ebook format.</p>
+              <p className="text-muted-foreground mt-2 text-sm">
+                {t("web.reader.page.unsupportedFormat")}
+              </p>
             </div>
           </div>
         )}
         {annotationError && (
           <p role="alert" className="px-4 py-2 text-sm text-amber-300">
-            Annotations could not sync. Your selection and saved notes are retained. Retry a new
-            note, or reload before changing an existing note.
+            {t("web.reader.sync.annotationsFailed")}
           </p>
         )}
         {configSaveError && (
           <p role="status" className="text-muted-foreground px-4 py-2 text-sm">
-            Reader settings are saved on this device, but could not sync. Reopen the book to reload
-            server settings.
+            {t("web.reader.sync.settingsFailed")}
           </p>
         )}
         {panelOpen && isReaderSupportedFile(selectedFile) && (
@@ -907,22 +925,27 @@ export default function EbookReader() {
               {[
                 {
                   id: "toc" as const,
-                  label: "Contents",
+                  label: t("web.reader.tabs.contents"),
                   icon: ListTree,
-                  aria: "Table of contents",
+                  aria: t("web.reader.tabs.contentsAria"),
                 },
-                { id: "search" as const, label: "Search", icon: Search, aria: "Search book" },
+                {
+                  id: "search" as const,
+                  label: t("web.reader.tabs.search"),
+                  icon: Search,
+                  aria: t("web.reader.tabs.searchAria"),
+                },
                 {
                   id: "notes" as const,
-                  label: "Notes",
+                  label: t("web.reader.tabs.notes"),
                   icon: StickyNote,
-                  aria: "Annotations and bookmarks",
+                  aria: t("web.reader.tabs.notesAria"),
                 },
                 {
                   id: "settings" as const,
-                  label: "Settings",
+                  label: t("web.reader.tabs.settings"),
                   icon: Settings,
-                  aria: "Reader settings",
+                  aria: t("web.reader.tabs.settingsAria"),
                 },
               ].map((tab) => {
                 const Icon = tab.icon;
@@ -953,7 +976,7 @@ export default function EbookReader() {
                 <div className="space-y-1">
                   {tocEntries.length === 0 ? (
                     <div className="text-muted-foreground px-2 py-8 text-center text-sm">
-                      No contents found.
+                      {t("web.reader.toc.empty")}
                     </div>
                   ) : (
                     tocEntries.map((entry) => (
@@ -982,14 +1005,14 @@ export default function EbookReader() {
                     }}
                   >
                     <input
-                      aria-label="Search text"
+                      aria-label={t("web.reader.search.input")}
                       value={searchText}
                       onChange={(event) => setSearchText(event.target.value)}
                       className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 min-w-0 flex-1 rounded-md border px-3 text-sm outline-none focus-visible:ring-[3px]"
                     />
                     <Button
-                      aria-label="Run search"
-                      title="Run search"
+                      aria-label={t("web.reader.search.run")}
+                      title={t("web.reader.search.run")}
                       size="icon"
                       disabled={searching}
                     >
@@ -1027,7 +1050,7 @@ export default function EbookReader() {
                 <div className="space-y-2">
                   {annotations.length === 0 ? (
                     <div className="text-muted-foreground px-2 py-8 text-center text-sm">
-                      No annotations yet.
+                      {t("web.reader.notes.empty")}
                     </div>
                   ) : (
                     annotations.map((annotation) => (
@@ -1044,7 +1067,7 @@ export default function EbookReader() {
                           >
                             <span className="min-w-0">
                               <span className="text-muted-foreground block text-xs capitalize">
-                                {annotation.kind}
+                                {t("web.reader.notes.kind", { kind: annotation.kind })}
                               </span>
                               <span className="block">
                                 {annotation.selected_text || annotation.note || annotation.location}
@@ -1054,8 +1077,8 @@ export default function EbookReader() {
                           <Button
                             variant="ghost"
                             size="icon-xs"
-                            aria-label="Delete annotation"
-                            title="Delete annotation"
+                            aria-label={t("web.reader.notes.delete")}
+                            title={t("web.reader.notes.delete")}
                             onClick={() => void handleDeleteAnnotation(annotation)}
                           >
                             <Trash2 className="size-3" />
@@ -1072,18 +1095,18 @@ export default function EbookReader() {
                   <Button
                     variant="outline"
                     size="sm"
-                    aria-label="Reset reader settings"
+                    aria-label={t("web.reader.settings.resetAria")}
                     onClick={resetReaderSettings}
                     className="w-full justify-center"
                   >
                     <RotateCcw className="size-4" />
-                    Reset
+                    {t("web.reader.settings.reset")}
                   </Button>
                   <div className="space-y-3">
                     {!isComicFormat && (
                       <div className="border-border space-y-2 border-b pb-3">
                         <div className="text-muted-foreground text-xs font-medium">
-                          Reading profile
+                          {t("web.reader.settings.profile")}
                         </div>
                         <div className="grid gap-2">
                           {READER_PROFILES.map((profile) => {
@@ -1099,9 +1122,11 @@ export default function EbookReader() {
                                 className="h-auto min-h-11 w-full justify-between px-3 py-2 text-left"
                               >
                                 <span className="min-w-0">
-                                  <span className="block text-sm font-medium">{profile.label}</span>
+                                  <span className="block text-sm font-medium">
+                                    {t(profile.labelKey)}
+                                  </span>
                                   <span className="text-muted-foreground block text-xs">
-                                    {profile.description}
+                                    {t(profile.descriptionKey)}
                                   </span>
                                 </span>
                                 {active && <Check className="size-4 shrink-0" />}
@@ -1115,22 +1140,26 @@ export default function EbookReader() {
                       <>
                         <div className="flex items-center gap-2 text-sm font-medium">
                           <Volume2 className="size-4" />
-                          Read aloud
+                          {t("web.reader.settings.readAloud")}
                         </div>
                         <div className="flex gap-2">
                           <Button
                             variant="secondary"
                             size="sm"
-                            aria-label="Speak text"
+                            aria-label={t("web.reader.settings.speakAria")}
                             onClick={handleSpeak}
                           >
                             <Play className="size-4" />
-                            Speak
+                            {t("web.reader.settings.speak")}
                           </Button>
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            aria-label={tts.state === "paused" ? "Resume speech" : "Pause speech"}
+                            aria-label={t(
+                              tts.state === "paused"
+                                ? "web.reader.settings.resumeSpeech"
+                                : "web.reader.settings.pauseSpeech",
+                            )}
                             onClick={tts.state === "paused" ? tts.resume : tts.pause}
                           >
                             <Pause className="size-4" />
@@ -1138,14 +1167,14 @@ export default function EbookReader() {
                           <Button
                             variant="ghost"
                             size="icon-sm"
-                            aria-label="Stop speech"
+                            aria-label={t("web.reader.settings.stopSpeech")}
                             onClick={tts.stop}
                           >
                             <Square className="size-4" />
                           </Button>
                         </div>
                         <ReaderRange
-                          label="Speech rate"
+                          label={t("web.reader.settings.speechRate")}
                           value={ttsRate}
                           min={0.5}
                           max={2}
@@ -1153,14 +1182,16 @@ export default function EbookReader() {
                           onChange={setTtsRate}
                         />
                         <label className="block space-y-1 text-sm">
-                          <span className="text-muted-foreground text-xs font-medium">Voice</span>
+                          <span className="text-muted-foreground text-xs font-medium">
+                            {t("web.reader.settings.voice")}
+                          </span>
                           <select
-                            aria-label="Voice"
+                            aria-label={t("web.reader.settings.voice")}
                             value={ttsVoiceURI}
                             onChange={(event) => setTtsVoiceURI(event.target.value)}
                             className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                           >
-                            <option value="">Default</option>
+                            <option value="">{t("web.reader.settings.voiceDefault")}</option>
                             {tts.voices.map((voice) => (
                               <option key={voice.voiceURI} value={voice.voiceURI}>
                                 {voice.name}
@@ -1173,9 +1204,9 @@ export default function EbookReader() {
                   </div>
                   <div className="border-border space-y-2 border-t pt-3">
                     <label className="flex items-center justify-between gap-3 text-sm">
-                      <span>Keep screen awake</span>
+                      <span>{t("web.reader.settings.keepAwake")}</span>
                       <input
-                        aria-label="Keep screen awake"
+                        aria-label={t("web.reader.settings.keepAwake")}
                         type="checkbox"
                         checked={wakeLockEnabled}
                         onChange={(event) => setWakeLockEnabled(event.target.checked)}
@@ -1184,12 +1215,14 @@ export default function EbookReader() {
                   </div>
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <Type className="size-4" />
-                    Typography
+                    {t("web.reader.settings.typography")}
                   </div>
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Theme</span>
+                    <span className="text-muted-foreground text-xs font-medium">
+                      {t("web.reader.settings.theme")}
+                    </span>
                     <select
-                      aria-label="Theme"
+                      aria-label={t("web.reader.settings.theme")}
                       value={readerSettings.theme}
                       onChange={(event) =>
                         updateReaderSettings({
@@ -1198,16 +1231,18 @@ export default function EbookReader() {
                       }
                       className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                     >
-                      <option value="light">Light</option>
-                      <option value="sepia">Sepia</option>
-                      <option value="dark">Dark</option>
+                      <option value="light">{t("web.reader.theme.light")}</option>
+                      <option value="sepia">{t("web.reader.theme.sepia")}</option>
+                      <option value="dark">{t("web.reader.theme.dark")}</option>
                     </select>
                   </label>
                   {!isComicFormat && (
                     <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground text-xs font-medium">Font</span>
+                      <span className="text-muted-foreground text-xs font-medium">
+                        {t("web.reader.settings.font")}
+                      </span>
                       <select
-                        aria-label="Font family"
+                        aria-label={t("web.reader.settings.fontFamily")}
                         value={readerSettings.fontFamily}
                         onChange={(event) =>
                           updateReaderSettings({ fontFamily: event.target.value })
@@ -1216,18 +1251,22 @@ export default function EbookReader() {
                       >
                         {READER_FONT_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
-                            {option.label}
+                            {t(option.labelKey)}
                           </option>
                         ))}
                         {!READER_FONT_OPTIONS.some(
                           (option) => option.value === readerSettings.fontFamily,
-                        ) && <option value={readerSettings.fontFamily}>Custom</option>}
+                        ) && (
+                          <option value={readerSettings.fontFamily}>
+                            {t("web.reader.font.custom")}
+                          </option>
+                        )}
                       </select>
                     </label>
                   )}
                   {!isComicFormat && (
                     <ReaderRange
-                      label="Font size"
+                      label={t("web.reader.settings.fontSize")}
                       value={readerSettings.fontSize}
                       min={80}
                       max={180}
@@ -1237,7 +1276,7 @@ export default function EbookReader() {
                     />
                   )}
                   <ReaderRange
-                    label="Brightness"
+                    label={t("web.reader.settings.brightness")}
                     value={readerSettings.fontBrightness}
                     min={70}
                     max={125}
@@ -1247,7 +1286,7 @@ export default function EbookReader() {
                   />
                   {!isComicFormat && (
                     <ReaderRange
-                      label="Line height"
+                      label={t("web.reader.settings.lineHeight")}
                       value={readerSettings.lineHeight}
                       min={1.1}
                       max={2.4}
@@ -1256,7 +1295,7 @@ export default function EbookReader() {
                     />
                   )}
                   <ReaderRange
-                    label="Margin"
+                    label={t("web.reader.settings.margin")}
                     value={readerSettings.margin}
                     min={0}
                     max={64}
@@ -1266,7 +1305,7 @@ export default function EbookReader() {
                   />
                   {!isComicFormat && readerSettings.flow !== "scrolled" && (
                     <ReaderRange
-                      label="Width"
+                      label={t("web.reader.settings.width")}
                       value={readerSettings.maxWidth}
                       min={42}
                       max={96}
@@ -1278,9 +1317,9 @@ export default function EbookReader() {
                   <div className="border-border space-y-2 border-t pt-3">
                     {!isComicFormat && (
                       <label className="flex items-center justify-between gap-3 text-sm">
-                        <span>Hyphenation</span>
+                        <span>{t("web.reader.settings.hyphenation")}</span>
                         <input
-                          aria-label="Hyphenation"
+                          aria-label={t("web.reader.settings.hyphenation")}
                           type="checkbox"
                           checked={readerSettings.hyphenation}
                           onChange={(event) =>
@@ -1290,9 +1329,9 @@ export default function EbookReader() {
                       </label>
                     )}
                     <label className="flex items-center justify-between gap-3 text-sm">
-                      <span>Right to left</span>
+                      <span>{t("web.reader.settings.rightToLeft")}</span>
                       <input
-                        aria-label="Right to left"
+                        aria-label={t("web.reader.settings.rightToLeft")}
                         type="checkbox"
                         checked={readerSettings.rtl}
                         onChange={(event) => updateReaderSettings({ rtl: event.target.checked })}
@@ -1300,9 +1339,9 @@ export default function EbookReader() {
                     </label>
                     {!isComicFormat && (
                       <label className="flex items-center justify-between gap-3 text-sm">
-                        <span>Reading ruler</span>
+                        <span>{t("web.reader.settings.readingRuler")}</span>
                         <input
-                          aria-label="Reading ruler"
+                          aria-label={t("web.reader.settings.readingRuler")}
                           type="checkbox"
                           checked={readerSettings.readingRuler}
                           onChange={(event) =>
@@ -1313,7 +1352,7 @@ export default function EbookReader() {
                     )}
                     {readerSettings.readingRuler && (
                       <ReaderRange
-                        label="Ruler position"
+                        label={t("web.reader.settings.rulerPosition")}
                         value={readerSettings.readingRulerTop}
                         min={0}
                         max={100}
@@ -1326,10 +1365,10 @@ export default function EbookReader() {
                   {!isComicFormat && (
                     <label className="block space-y-1 text-sm">
                       <span className="text-muted-foreground text-xs font-medium">
-                        Writing mode
+                        {t("web.reader.settings.writingMode")}
                       </span>
                       <select
-                        aria-label="Writing mode"
+                        aria-label={t("web.reader.settings.writingMode")}
                         value={readerSettings.writingMode}
                         onChange={(event) =>
                           updateReaderSettings({
@@ -1338,17 +1377,21 @@ export default function EbookReader() {
                         }
                         className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                       >
-                        <option value="auto">Auto</option>
-                        <option value="horizontal-tb">Horizontal</option>
-                        <option value="vertical-rl">Vertical</option>
+                        <option value="auto">{t("web.reader.writingMode.auto")}</option>
+                        <option value="horizontal-tb">
+                          {t("web.reader.writingMode.horizontal")}
+                        </option>
+                        <option value="vertical-rl">{t("web.reader.writingMode.vertical")}</option>
                       </select>
                     </label>
                   )}
                   {readerSettings.flow !== "scrolled" && (
                     <label className="block space-y-1 text-sm">
-                      <span className="text-muted-foreground text-xs font-medium">Spread</span>
+                      <span className="text-muted-foreground text-xs font-medium">
+                        {t("web.reader.settings.spread")}
+                      </span>
                       <select
-                        aria-label="Spread"
+                        aria-label={t("web.reader.settings.spread")}
                         value={readerSettings.spread}
                         onChange={(event) =>
                           updateReaderSettings({
@@ -1357,23 +1400,25 @@ export default function EbookReader() {
                         }
                         className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                       >
-                        <option value="auto">Auto</option>
-                        <option value="none">Single page</option>
+                        <option value="auto">{t("web.reader.spread.auto")}</option>
+                        <option value="none">{t("web.reader.spread.single")}</option>
                       </select>
                     </label>
                   )}
                   <label className="block space-y-1 text-sm">
-                    <span className="text-muted-foreground text-xs font-medium">Flow</span>
+                    <span className="text-muted-foreground text-xs font-medium">
+                      {t("web.reader.settings.flow")}
+                    </span>
                     <select
-                      aria-label="Flow"
+                      aria-label={t("web.reader.settings.flow")}
                       value={readerSettings.flow}
                       onChange={(event) =>
                         updateReaderSettings({ flow: event.target.value as ReaderSettings["flow"] })
                       }
                       className="border-border bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-2 text-sm outline-none focus-visible:ring-[3px]"
                     >
-                      <option value="paginated">Paginated</option>
-                      <option value="scrolled">Scrolled</option>
+                      <option value="paginated">{t("web.reader.flow.paginated")}</option>
+                      <option value="scrolled">{t("web.reader.flow.scrolled")}</option>
                     </select>
                   </label>
                 </div>
@@ -1390,7 +1435,7 @@ export default function EbookReader() {
             className="h-11 gap-2 rounded-full px-6 text-[15px] font-bold shadow-lg"
           >
             <Link to={nextChapterHref} replace>
-              Next: {nextChapter.label}
+              {t("web.reader.endOfBook.nextChapter", { chapter: nextChapter.label })}
               <ChevronRight className="size-[18px]" />
             </Link>
           </Button>

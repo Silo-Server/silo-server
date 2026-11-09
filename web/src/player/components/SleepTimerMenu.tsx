@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Moon } from "lucide-react";
+import { useT } from "@/i18n";
 
 export type SleepSetting =
   | { kind: "off" }
@@ -12,13 +13,7 @@ interface SleepTimerMenuProps {
   onChange: (next: SleepSetting) => void;
 }
 
-const PRESETS: { label: string; seconds: number }[] = [
-  { label: "5 min", seconds: 300 },
-  { label: "15 min", seconds: 900 },
-  { label: "30 min", seconds: 1800 },
-  { label: "45 min", seconds: 2700 },
-  { label: "60 min", seconds: 3600 },
-];
+const PRESET_SECONDS = [300, 900, 1800, 2700, 3600];
 
 function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
@@ -28,6 +23,7 @@ function formatCountdown(ms: number): string {
 }
 
 export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMenuProps) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<(HTMLButtonElement | null)[]>([]);
@@ -44,7 +40,10 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const label = armed && remainingMs != null ? `Sleep ${formatCountdown(remainingMs)}` : "Sleep";
+  const label =
+    armed && remainingMs != null
+      ? t("web.player.sleepTimer.countdown", { time: formatCountdown(remainingMs) })
+      : t("web.player.sleepTimer.short");
 
   return (
     <div ref={menuRef} className="relative" onBlur={handleBlur}>
@@ -52,7 +51,7 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
         type="button"
         className="player-utility-btn flex items-center gap-1.5 px-2 text-xs"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Sleep timer"
+        aria-label={t("web.player.sleepTimer.trigger")}
         aria-expanded={open}
         aria-haspopup="menu"
       >
@@ -78,12 +77,12 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
                 setOpen(false);
               }}
             >
-              Turn off
+              {t("web.player.sleepTimer.turnOff")}
             </button>
           )}
-          {PRESETS.map((p, i) => (
+          {PRESET_SECONDS.map((seconds, i) => (
             <button
-              key={p.seconds}
+              key={seconds}
               ref={(el) => {
                 itemsRef.current[(armed ? 1 : 0) + i] = el;
               }}
@@ -91,11 +90,11 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
               type="button"
               className="w-full px-4 py-2 text-left text-sm text-white/85 hover:bg-white/10"
               onClick={() => {
-                onChange({ kind: "duration", seconds: p.seconds });
+                onChange({ kind: "duration", seconds });
                 setOpen(false);
               }}
             >
-              {p.label}
+              {t("web.player.sleepTimer.minutes", { minutes: String(seconds / 60) })}
             </button>
           ))}
           <button
@@ -107,7 +106,7 @@ export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMen
               setOpen(false);
             }}
           >
-            End of chapter
+            {t("web.player.sleepTimer.endOfChapter")}
           </button>
         </div>
       )}
