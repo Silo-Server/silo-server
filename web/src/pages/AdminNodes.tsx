@@ -69,6 +69,9 @@ import {
   filterNodesByGroup,
   nodeHWDevicePaths,
   nodeHasHWDeviceInventory,
+  NODE_STATE_LABEL,
+  nodeState,
+  type NodeState,
   nodeReportsAcceleration,
   hwDeviceSyntaxChanges,
   nodeUsesCUDADevices,
@@ -77,35 +80,6 @@ import {
 import { NodeRoutingSettings } from "@/pages/admin-settings/NodeRoutingSettings";
 
 type NodeType = "proxy" | "transcode";
-
-/**
- * Whether a node is in the rotation, and why not when it is out of it.
- *
- * Enabled and healthy are two separate facts, but an operator reading the rack
- * asks one question — can this node take work — so they resolve to one state.
- * Disabled wins over unhealthy: a node somebody switched off is not a node
- * that is failing, however its last health check went. A healthy node that is
- * draining is out of the rotation for new work while it finishes what it has.
- */
-type NodeState = "healthy" | "draining" | "drained" | "unhealthy" | "disabled";
-
-function nodeState(node: StreamNode): NodeState {
-  if (!node.enabled) {
-    return "disabled";
-  }
-  if (!node.healthy) {
-    return "unhealthy";
-  }
-  return describeNodeDrain(node)?.phase ?? "healthy";
-}
-
-const NODE_STATE_LABEL: Record<NodeState, string> = {
-  healthy: "Healthy",
-  draining: "Draining",
-  drained: "Drained",
-  unhealthy: "Unhealthy",
-  disabled: "Disabled",
-};
 
 /**
  * Status-rail tint. The rail runs down the left edge of every unit, so a rack
@@ -171,7 +145,7 @@ function NodeLoadBlock({ node }: { node: StreamNode }) {
       <UnitLabel>Load</UnitLabel>
       {system.kind === "unreported" ? (
         <p className="text-muted-foreground text-xs" title={system.title}>
-          {system.label === "Stale" ? "Stale resource sample" : "No resource sample"}
+          {system.stale ? "Stale resource sample" : "No resource sample"}
         </p>
       ) : (
         <div className={METRIC_GRID}>
