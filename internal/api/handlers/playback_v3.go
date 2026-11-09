@@ -269,11 +269,16 @@ func headerAuthenticatedMediaV3(clientFeatures []string) mediaAuthModeV3 {
 // TransportFeatureRemuxRangeRefusalV1, because an older one streams the range
 // from the origin. A remux relayed from a transcode node is refused at the
 // proxy, so the node's version does not matter.
+//
+// It reads the snapshot planning just used to pick the proxy, stale or not: the
+// parameter only decorates the URL, so it is not worth a synchronous probe
+// under the session's lifecycle lock, and a proxy whose snapshot is missing or
+// failed keeps the plain stream.
 func (h *PlaybackHandler) egressRefusesRemuxRangeV3(ctx context.Context, servedByProxy bool, proxyNode *nodepool.Node) bool {
 	if !servedByProxy || proxyNode == nil {
 		return true
 	}
-	capabilities, err := h.lookupRemoteCapabilitiesV3(ctx, proxyNode.URL, false)
+	capabilities, err := h.lookupRemoteCapabilitiesV3(ctx, proxyNode.URL, true)
 	return err == nil && slices.Contains(capabilities.transportFeatures, playback.TransportFeatureRemuxRangeRefusalV1)
 }
 
