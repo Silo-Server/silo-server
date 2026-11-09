@@ -103,6 +103,7 @@ import type {
 import type { PlayerTrickplay } from "../trickplay";
 import type { FailureV3, PlanV3, SubtitleInventoryItemV3 } from "../protocol-v3";
 import {
+  bufferedAheadSeconds,
   mediaDurationSeconds,
   subtitleStartPositionSeconds,
   toMediaTime,
@@ -366,6 +367,19 @@ interface VideoPlayerProps {
 const EXIT_PROGRESS_FLUSH_TIMEOUT_MS = 1_000;
 // MediaError.MEDIA_ERR_NETWORK: the media was usable, then fetching it failed.
 const MEDIA_ERR_NETWORK = 2;
+// hls.js gives up on a stream the moment a request is refused, but keeps what
+// it buffered. While the element has at least this much media at its playhead
+// it plays on, and the reconnect waits for the buffer to run out.
+const MIN_DRAIN_AHEAD_SECONDS = 1;
+// `waiting` on a draining stream is checked again after this long: a seek
+// inside the buffer or a decoder hiccup has recovered by then, an empty buffer
+// has not.
+const DRAIN_CHECK_DELAY_MS = 1_000;
+
+/** Whether a draining stream still has media to play at `position` (player time). */
+function hasMediaAhead(video: HTMLVideoElement, position = video.currentTime): boolean {
+  return bufferedAheadSeconds(video.buffered, position) >= MIN_DRAIN_AHEAD_SECONDS;
+}
 const FIREFOX_COMPATIBILITY_FALLBACK_DELAY_MS = 8_000;
 /**
  * Firefox's copy-remux stall is media that arrived and still made no frame.
@@ -957,6 +971,13 @@ export function VideoPlayer({
     transportFailedForPlanRevisionRef.current = null;
   }, [planRevision]);
 
+  // Whether the viewer is watching, from the player's play state rather than
+  // the element: Chromium reports a failed element paused by the time the
+  // element's own `error` listener runs. The play and pause handlers also set
+  // it directly, so it never trails those events by a render.
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
+
   /**
    * Hands a network failure to the session's reconnect when the stream has
    * already played. Returns false before the first frame, where the failure
@@ -970,7 +991,7 @@ export function VideoPlayer({
       // A seek still in flight is where the viewer wants to be.
       const positionSeconds =
         pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
-      onConnectionLost(positionSeconds, !video.paused);
+      onConnectionLost(positionSeconds, playingRef.current);
     }
     return true;
   }, [onConnectionLost]);
@@ -982,6 +1003,67 @@ export function VideoPlayer({
   // controller, which lowers when Auto lowers on its own and otherwise calls
   // back to fail the plan. Set once the controller's hook has run below.
   const startDeadlinePassedRef = useRef<(fail: () => void) => void>((fail) => fail());
+
+  // -- Draining a dead HLS transport --
+  // After hls.js gives up on the network, the element plays on from what it
+  // buffered, so a server that is away for less than the buffer interrupts
+  // nothing yet. The reconnect starts when the buffer runs out: `waiting`
+  // with nothing buffered at the playhead, a seek that needs the server, or
+  // any further fatal error. One stream at a time, reset with the transport.
+  const hlsDrainingRef = useRef(false);
+  const drainCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopDraining = useCallback(() => {
+    hlsDrainingRef.current = false;
+    if (drainCheckTimerRef.current !== null) {
+      clearTimeout(drainCheckTimerRef.current);
+      drainCheckTimerRef.current = null;
+    }
+  }, []);
+  const reconnectFromDrainedStream = useCallback(() => {
+    stopDraining();
+    reportConnectionLostRef.current();
+  }, [stopDraining]);
+
+  // `waiting` alone doesn't mean the buffer is empty: it also fires on a seek
+  // inside the buffer and on a brief decoder stall. A playhead that stays put
+  // with media buffered gets one more look; a stream stuck there needs
+  // replacing as much as an empty one. A viewer who paused meanwhile isn't
+  // waiting for anything: playing again fires `waiting` if the element still
+  // can't play. Ending the drain clears the check.
+  const scheduleDrainCheck = useCallback(() => {
+    if (!hlsDrainingRef.current || drainCheckTimerRef.current !== null) return;
+    let stalledAt: number | null = null;
+    const check = () => {
+      drainCheckTimerRef.current = null;
+      const video = videoRef.current;
+      if (!video || video.paused || video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) return;
+      if (hasMediaAhead(video) && video.currentTime !== stalledAt) {
+        stalledAt = video.currentTime;
+        drainCheckTimerRef.current = setTimeout(check, DRAIN_CHECK_DELAY_MS);
+        return;
+      }
+      reconnectFromDrainedStream();
+    };
+    drainCheckTimerRef.current = setTimeout(check, DRAIN_CHECK_DELAY_MS);
+  }, [reconnectFromDrainedStream]);
+
+  /**
+   * reportConnectionLost for a fatal hls.js network error: while the element
+   * still has media ahead of its playhead, the stream drains instead.
+   */
+  const reportHlsConnectionLost = useCallback((): boolean => {
+    const video = videoRef.current;
+    if (!onConnectionLost || !video || !streamPlayedRef.current) return false;
+    if (connectionStatusRef.current === "connected" && hasMediaAhead(video)) {
+      hlsDrainingRef.current = true;
+      // The element may already be stalled, with its `waiting` long gone.
+      if (video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) scheduleDrainCheck();
+      return true;
+    }
+    return reportConnectionLost();
+  }, [onConnectionLost, reportConnectionLost, scheduleDrainCheck]);
+  const reportHlsConnectionLostRef = useRef(reportHlsConnectionLost);
+  reportHlsConnectionLostRef.current = reportHlsConnectionLost;
 
   // While the session reconnects, nothing plays: the element is paused (so
   // progress reports say so), and hls.js stops hammering the server. The
@@ -1590,7 +1672,20 @@ export function VideoPlayer({
       }
 
       const nativeSeconds = toPlayerTime(seconds, timelineOffsetRef.current);
+      // A draining stream can only play what it buffered. The reconnect
+      // resumes at a target that needs the server.
+      const draining = hlsDrainingRef.current && connectionStatusRef.current === "connected";
+      const reconnectAtTarget = () => {
+        if (!hlsDrainingRef.current) return;
+        rememberPendingSeek(seconds);
+        setCurrentTime(seconds);
+        reconnectFromDrainedStream();
+      };
       if (canSeekAnywhere || isNativePositionInRanges(video.seekable, nativeSeconds)) {
+        if (draining && !hasMediaAhead(video, nativeSeconds)) {
+          reconnectAtTarget();
+          return true;
+        }
         rememberPendingSeek(seconds);
         setCurrentTime(seconds);
         if (isHlsStream) video.currentTime = nativeSeconds;
@@ -1600,13 +1695,32 @@ export function VideoPlayer({
 
       // Outside the server-anchored window: this is a timeline operation, not
       // a failure, so it asks for a reanchor rather than reporting a failure.
-      return reanchorAt(seconds);
+      // Only the reanchor moves the window; the reconnect's replan may keep
+      // it. A draining stream reconnects once the reanchor can't reach the
+      // server either.
+      const accepted = reanchorAt(seconds);
+      if (!draining || accepted === true) return accepted;
+      if (accepted === false) {
+        reconnectAtTarget();
+        return true;
+      }
+      return accepted.then(
+        (ok) => {
+          if (!ok) reconnectAtTarget();
+          return true;
+        },
+        () => {
+          reconnectAtTarget();
+          return true;
+        },
+      );
     },
     [
       canSeekAnywhere,
       handleSeek,
       isHlsStream,
       reanchorAt,
+      reconnectFromDrainedStream,
       rememberPendingSeek,
       resetRoomCatchupRate,
     ],
@@ -2536,6 +2650,7 @@ export function VideoPlayer({
     // frame yet may be a route this browser cannot reach, so its network
     // failures go through startup recovery rather than the reconnect.
     streamPlayedRef.current = false;
+    stopDraining();
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
     if (!video || !isPlayerReady || startupGuardRef.current?.hasFailed()) return;
@@ -2808,9 +2923,20 @@ export function VideoPlayer({
                 error: data.error?.message,
               });
 
+              // A draining stream is already dead: whatever failed now, only
+              // the reconnect can replace it.
+              if (hlsDrainingRef.current) {
+                reconnectFromDrainedStream();
+                return;
+              }
+
               // hls.js has already retried the request; a fatal network error
-              // on a stream that played means the server went away.
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR && reportConnectionLostRef.current()) {
+              // on a stream that played means the server went away. The
+              // element plays out what it buffered before the reconnect.
+              if (
+                data.type === Hls.ErrorTypes.NETWORK_ERROR &&
+                reportHlsConnectionLostRef.current()
+              ) {
                 return;
               }
 
@@ -3078,6 +3204,7 @@ export function VideoPlayer({
       cleanupStartupListeners();
       video.removeEventListener("suspend", endHoldOnceLoaded);
       video.removeEventListener("canplay", endHoldOnceLoaded);
+      stopDraining();
       if (engineSession) {
         // Restores the element's own media pipeline before it is reset below.
         engineSession.destroy();
@@ -3111,8 +3238,10 @@ export function VideoPlayer({
     playsOriginalFile,
     plannedBitrateKbps,
     plannedDynamicRange,
+    reconnectFromDrainedStream,
     reportCurrentPlanFailure,
     shouldAutoPlay,
+    stopDraining,
   ]);
 
   // -- Video event listeners --
@@ -3126,6 +3255,7 @@ export function VideoPlayer({
         video.pause();
         return;
       }
+      playingRef.current = true;
       setPlaying(true);
       const idleSince = transportIdleSinceRef.current;
       transportIdleSinceRef.current = null;
@@ -3135,6 +3265,7 @@ export function VideoPlayer({
     };
     const onPause = () => {
       resetRoomCatchupRate();
+      playingRef.current = false;
       setPlaying(false);
       // Only a stream that played or has opened. The pause a teardown queues
       // arrives after the next transport has started over, before it has
@@ -3246,6 +3377,7 @@ export function VideoPlayer({
       persistVolume(video.volume, viewerMuted);
     };
     const onWaiting = () => {
+      scheduleDrainCheck();
       // Delay showing the spinner so brief buffering between segments
       // or during initial HLS startup doesn't flash a spinner.
       if (!bufferingTimerRef.current) {
@@ -3369,6 +3501,7 @@ export function VideoPlayer({
     reportCurrentPlanFailure,
     resetRoomCatchupRate,
     roomReadinessPending,
+    scheduleDrainCheck,
     sessionId,
     watchTogetherRoomActive,
     watchTogetherSync,
@@ -4367,6 +4500,10 @@ export function VideoPlayer({
           video.paused &&
           transportStartupPendingRef.current &&
           video.readyState < HTMLMediaElement.HAVE_FUTURE_DATA;
+        // The command sets the play state. A position this stream can't reach
+        // starts the reconnect inside applyRoomPosition, before the element
+        // pauses or plays below, and the reconnect resumes by this state.
+        playingRef.current = command.action === "play";
         const playAllowed = !awaitingMedia && applyRoomPosition(video);
 
         if (command.action === "seek") {
