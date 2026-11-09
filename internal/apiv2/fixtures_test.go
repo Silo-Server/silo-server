@@ -1769,7 +1769,8 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, sectionItemLimitFixtureCases()...)
 	cases = append(cases, adminCatalogItemsFixtureCases()...)
 	cases = append(cases, adminCatalogMatchHintsFixtureCases()...)
-	return append(cases, deviceLoginBindingFixtureCases()...)
+	cases = append(cases, deviceLoginBindingFixtureCases()...)
+	return append(cases, adminDashboardLayoutFixtureCases()...)
 }
 
 // deviceLoginBindingFixtureCases pin the session binding a device-login
@@ -2102,6 +2103,7 @@ func fixtureDeps() Dependencies {
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.NetworkAccess = newFakeNetworkAccess()
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
+	deps.AdminDashboardLayout = new(fakeDashboardLayout)
 	deps.OrderedApplePush = new(fakeOrderedApple)
 	deps.OrderedAndroidPush = new(fakeOrderedPush)
 	fixtureProviders := netaccess.NewStatusCache()

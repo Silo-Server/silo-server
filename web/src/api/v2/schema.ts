@@ -16309,14 +16309,15 @@ export interface components {
       node_id?: string;
     };
     AdminDashboardLayout: {
+      /** @description Stored layout; null when this account has none saved, and the client keeps its local or default arrangement */
       layout: {
         [key: string]: unknown;
-      };
+      } | null;
       /**
        * Format: date-time
-       * @description RFC 3339 instant in UTC with millisecond precision
+       * @description When the stored layout was last saved; null when none is saved
        */
-      updated_at: string;
+      updated_at: string | null;
     };
     AdminDashboardLayoutSaveBody: {
       layout: {
