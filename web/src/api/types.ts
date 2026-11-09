@@ -4064,6 +4064,13 @@ export interface PluginRuntime {
   next_restart_at?: string;
 }
 
+/** The last automatic update Silo refused to install, and why. */
+export interface PluginUpdateFailure {
+  version: string;
+  reason: string;
+  failed_at: string;
+}
+
 export interface PluginInstallation {
   id: number;
   repository_id?: number | null;
@@ -4088,6 +4095,8 @@ export interface PluginInstallation {
   repo_url?: string;
   presentation?: PluginPresentation;
   updates_paused: boolean;
+  /** The last automatic update that failed; absent when the last check did not fail. */
+  update_failure?: PluginUpdateFailure | null;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;

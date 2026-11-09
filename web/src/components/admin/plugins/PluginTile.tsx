@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { ReactNode, Ref } from "react";
-import { Check, Download } from "lucide-react";
+import { AlertTriangle, Check, Download } from "lucide-react";
 import { useLocation } from "react-router";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
@@ -141,7 +141,15 @@ export function InstalledPluginTile({
       <TileSummary>{pluginSummary(presentation, capabilities)}</TileSummary>
       <TileFooter>
         <PluginStatusLabel {...status} />
-        {updateVersion ? (
+        {installation.update_failure ? (
+          <span
+            className="text-warning inline-flex min-w-0 items-center gap-1 text-[12.5px]"
+            title={installation.update_failure.reason}
+          >
+            <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">Update to {installation.update_failure.version} failed</span>
+          </span>
+        ) : updateVersion ? (
           <span className="bg-surface-raised text-foreground/85 inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[12.5px]">
             <Download aria-hidden="true" className="size-3.5" />
             {updateVersion} available
