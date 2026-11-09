@@ -110,10 +110,13 @@ func (r *SmartCountRefresher) refreshOne(ctx context.Context, id string, defJSON
 	if err != nil {
 		return fmt.Errorf("preview: %w", err)
 	}
+	// Any write to the row advances the collection's revision, which ends open
+	// catalog cursors and fails editor saves, so an unchanged count is left
+	// alone. Scans recount often, mostly finding the same number.
 	if _, err := r.Pool.Exec(ctx, `
 		UPDATE library_collections
 		SET item_count_cached = $1, item_count_cached_at = NOW()
-		WHERE id = $2
+		WHERE id = $2 AND item_count_cached IS DISTINCT FROM $1
 	`, total, id); err != nil {
 		return fmt.Errorf("update cache: %w", err)
 	}

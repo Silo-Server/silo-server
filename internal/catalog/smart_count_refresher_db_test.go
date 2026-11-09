@@ -78,22 +78,37 @@ func TestSmartCountRefreshFollowsScannedLibraryDB(t *testing.T) {
 		return got
 	}
 
+	// The refresh also recounts other tests' smart collections that draw from
+	// every library, and one of them may hold a rule that cannot be counted, so
+	// the error total is not this test's to check: the counts below are.
 	refresher := &SmartCountRefresher{Pool: pool, Executor: &QueryExecutor{Pool: pool}}
 	added := prefix + "-added"
 	exec(`INSERT INTO media_items(content_id,type,title,status,genres) VALUES($1,'movie',$1,'released','{}')`, added)
 	exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, added, scanned)
-	if _, errs := refresher.RefreshLibraries(ctx, []int{scanned}); errs != 0 {
-		t.Fatalf("refresh after the title was added had %d errors", errs)
-	}
+	refresher.RefreshLibraries(ctx, []int{scanned})
 	if got := counts(); got["scanned"] != 1 || got["every"] < 1 || got["other"] != -1 {
 		t.Fatalf("after adding a title, counts are %v; want scanned 1, every at least 1, other untouched (-1)", got)
 	}
 
 	exec(`DELETE FROM media_item_libraries WHERE content_id=$1`, added)
-	if _, errs := refresher.RefreshLibraries(ctx, []int{scanned}); errs != 0 {
-		t.Fatalf("refresh after the title was removed had %d errors", errs)
-	}
+	refresher.RefreshLibraries(ctx, []int{scanned})
 	if got := counts(); got["scanned"] != 0 || got["other"] != -1 {
 		t.Fatalf("after removing the title, counts are %v; want scanned 0, other untouched (-1)", got)
+	}
+
+	// A recount that finds the same number leaves the revision, and so open
+	// cursors and editor saves, alone.
+	revision := func() int64 {
+		t.Helper()
+		var v int64
+		if err := pool.QueryRow(ctx, `SELECT revision FROM library_collection_revisions WHERE collection_id=$1`, ids["scanned"]).Scan(&v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	before := revision()
+	refresher.RefreshLibraries(ctx, []int{scanned})
+	if after := revision(); after != before {
+		t.Fatalf("a recount with no change moved the collection revision from %d to %d", before, after)
 	}
 }
