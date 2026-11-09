@@ -164,6 +164,7 @@ func NewMeilisearchSearchProvider(
 		stateStore = stateRepo
 	}
 	return &MeilisearchSearchProvider{
+		sessions:    &searchSessionStore{},
 		itemRepo:    itemRepo,
 		stateRepo:   stateStore,
 		fallback:    fallback,

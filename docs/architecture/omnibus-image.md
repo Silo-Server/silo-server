@@ -218,11 +218,12 @@ PostgreSQL image, whose file trusts every local connection.
 
 ## Search settings
 
-Meilisearch search keeps its paging sessions in Redis, and without Redis the
-v2 search capabilities and paged searches answer 503
-`search_continuation_unavailable`. So `ENABLE_MEILISEARCH=true`, or a
-deployment's own `SILO_SEARCH_PROVIDER=meilisearch`, also starts the bundled
-Redis unless `REDIS_URL` points elsewhere.
+Meilisearch search keeps its paging sessions in process for a single-node
+deployment without Redis. Redis provides shared paging sessions for multi-node
+deployments and keeps them available across Silo restarts. The omnibus image
+therefore still starts bundled Redis when `ENABLE_MEILISEARCH=true`, or when a
+deployment sets `SILO_SEARCH_PROVIDER=meilisearch`, unless `REDIS_URL` points
+elsewhere.
 
 With `ENABLE_MEILISEARCH=true`, `init-config` exports `SILO_SEARCH_PROVIDER`,
 `SILO_MEILISEARCH_URL`, and `SILO_MEILISEARCH_API_KEY` for the bundled instance,
@@ -377,10 +378,6 @@ here. It refuses, before anything is moved into place, when:
   its largest collation-dependent index twice over (the index and its WAL) plus
   1 GiB, or for copying a Silo directory that cannot be hard-linked while
   keeping that room for the database's first start.
-- The copy's search uses a Meilisearch chosen in the admin UI, `.env` sets no
-  `SILO_SEARCH_PROVIDER`, and nothing turns Redis on (`ENABLE_REDIS`,
-  `ENABLE_MEILISEARCH`, node access, or a `REDIS_URL`): its paging sessions need
-  the Redis the earlier stack always ran.
 - The copy has enabled proxy or transcode nodes and node access is off: they
   reached the old services on published ports.
 

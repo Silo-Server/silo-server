@@ -827,7 +827,9 @@ server whose PostgreSQL ranking differed. PostgreSQL search retains its
 three-second deadline inside the overall browse deadline.
 
 Meilisearch captures the configured ranked result window in one provider response,
-then stores its filtered, ordered candidate IDs in shared Redis for 15 minutes.
+then stores its filtered, ordered candidate IDs for 15 minutes. Redis shares
+sessions across replicas. Without Redis, sessions stay in process, so a cursor
+returns `invalid_cursor` after a restart or when another replica handles it.
 The configured window must be between 1 and 1,000 candidates; a larger runtime
 index setting returns `capability_unsupported` before serving a partial ranking.
 This is the provider's reachable window, not an exact global match count.
@@ -839,8 +841,9 @@ and access scope. Pages reauthorize each candidate and advance past deleted or
 inaccessible IDs. Explicit window seeks count visible rows within this bounded
 ranking. Metadata and access remain live; the retained IDs and their order are
 immutable. Fallback may select PostgreSQL before the first page, but a continuation
-never switches providers. Expiry or Redis eviction returns `invalid_cursor`;
-Redis failure returns `dependency_unavailable`. Restarting performs a new search.
+never switches providers. Expiry or eviction returns `invalid_cursor`; a
+configured Redis failure returns `dependency_unavailable`. Restarting performs a
+new search.
 
 ### Letter index
 
