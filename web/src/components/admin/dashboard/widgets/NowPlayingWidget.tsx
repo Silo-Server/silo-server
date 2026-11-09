@@ -327,8 +327,21 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
         </div>
 
         <div className="mt-auto">
-          {/* Position: the bar needs a duration; the time shows either way. */}
+          {/* Position: the bar needs a duration; the state and time show either way. */}
           <div className="mb-1.5 flex items-center gap-2">
+            {session.is_paused ? (
+              <Pause
+                role="img"
+                aria-label="Paused"
+                className="text-muted-foreground h-3 w-3 shrink-0"
+              />
+            ) : (
+              <Play
+                role="img"
+                aria-label="Playing"
+                className="text-muted-foreground h-3 w-3 shrink-0"
+              />
+            )}
             {duration > 0 ? (
               <Progress
                 value={(session.position_seconds / duration) * 100}
