@@ -1028,6 +1028,27 @@ titles through the existing viewer access filter; admin pages require acting
 administrator access. Membership identity, ordering and cursor revision checks
 are unchanged. Frozen v1 membership responses do not expose this field.
 
+## Server smart collection libraries
+
+A server smart collection keeps two library lists. Its `library_ids` are where it shows: the
+library Collections tabs that list it, and the libraries through which a viewer can open it. Its
+`query_definition.library_ids` are where its titles come from, and an empty list means every
+library. The two are independent, so a collection can draw from every library and show only on the
+Movies tab. Every read of its titles (`/api/v2` and `/api/v1` collection items, home and library
+rows, the catalog `library_collection` source, Jellyfin BoxSet children and `item_count`) runs the
+rules over their own libraries and then applies the viewer's access: allowed libraries, hidden
+libraries and rating limits. A viewer who can reach none of the collection's own `library_ids` gets
+none of its titles from any of these reads, as its page refuses them. A row on one library's page
+still lists only that library's titles.
+`previewAdminCollection` previews the same rules with no viewer limits.
+
+Before this, reads narrowed the rules to the collection's `library_ids`, and rules naming no library
+took them. A migration wrote that effective list into each existing collection's rules, so none of
+them changed titles, and restoring a backup made before this change (restore set version 4 or older)
+does the same for the collections it creates. Rules naming only libraries outside the collection's
+own libraries matched nothing before; they now draw from the libraries they name, which is what the
+admin preview already showed.
+
 ## Admin template list
 
 `listAdminCollectionTemplates` (`GET /api/v2/admin/collections/templates`) lists only the

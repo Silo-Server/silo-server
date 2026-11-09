@@ -25,12 +25,17 @@ import (
 // newer one with ErrRestoreSetTooNew. Version 2 added the users section;
 // version 3 the home_sections section, template-bundle collections in
 // collections.json, and an omitted item's cause and error; version 4 a home
-// section's web_only. A reader refuses an unknown section and an unknown
-// field, so any of those is a new version, and an older set never holds
-// them.
+// section's web_only; version 5 changed no field: a server smart
+// collection's rules draw from their own library_ids (none: every library)
+// rather than only from the collection's libraries. A reader refuses an
+// unknown section and an unknown field, so any of those is a new version,
+// and an older set never holds them.
 const (
 	restoreSetFormat  = "silo-restore-set"
-	restoreSetVersion = 4
+	restoreSetVersion = 5
+	// restoreSetSmartRulesOwnLibraries is the first version whose smart
+	// collection rules keep their own libraries.
+	restoreSetSmartRulesOwnLibraries = 5
 
 	restoreSetIndexName = "restore-set.json"
 	restoreSetBlobDir   = "blobs/"

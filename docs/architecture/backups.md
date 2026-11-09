@@ -697,10 +697,13 @@ users/<account id>.json           version 2 and later
 blobs/<object key>
 ```
 
-`restore-set.json` has `format: "silo-restore-set"`, `version` (4: version 2
+`restore-set.json` has `format: "silo-restore-set"`, `version` (5: version 2
 added the users section; version 3 the home sections section, template
 collections in `collections.json`, and an omitted item's `cause` and
-`error`; version 4 a home section's `web_only`), the source
+`error`; version 4 a home section's `web_only`; version 5 no new field, but a
+server smart collection's rules now draw from their own `library_ids`, so a
+restore pins an older set's smart collection rules to the collection's
+libraries), the source
 server id and name, Silo version, creation time, `SECRET_KEY` check value, and
 a section index: for each section its item count, each of its files with
 size and SHA-256, and the blob keys its documents reference. Plugin archive

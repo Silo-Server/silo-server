@@ -2621,20 +2621,9 @@ func (h *LibraryCollectionHandler) loadLiveCollectionItems(ctx context.Context, 
 	if err := def.ValidateWithOptions(false, false); err != nil {
 		return nil, false, smartCollectionQueryError{fmt.Errorf("validating smart collection query definition: %w", err)}
 	}
+	// The rules' own libraries pick the titles (every library when they name
+	// none); access narrows them to what the viewer may see.
 	def = catalog.ApplySmartCollectionItemLimit(def)
-
-	switch {
-	case len(collection.LibraryIDs) > 0:
-		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, collection.LibraryIDs)
-		if len(def.LibraryIDs) == 0 {
-			return []itemListResponse{}, false, nil
-		}
-	case collection.LibraryID > 0:
-		def.LibraryIDs = catalog.IntersectCollectionLibraryIDs(def.LibraryIDs, []int{collection.LibraryID})
-		if len(def.LibraryIDs) == 0 {
-			return []itemListResponse{}, false, nil
-		}
-	}
 
 	var (
 		items   []*models.MediaItem
@@ -2681,9 +2670,6 @@ func (e smartCollectionQueryError) Error() string {
 func (e smartCollectionQueryError) Unwrap() error {
 	return e.err
 }
-
-// intersectCollectionLibraryIDs moved to catalog.IntersectCollectionLibraryIDs
-// so the web API and the Jellyfin-compat resolver share one implementation.
 
 func (h *LibraryCollectionHandler) toItemListResponse(r *http.Request, item *models.MediaItem) itemListResponse {
 	return h.itemListResponseOf(r.Context(), item)

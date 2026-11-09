@@ -108,7 +108,11 @@ export interface CollectionDraft {
   kind: CollectionKind;
   name: string;
   description: string;
-  /** Server: the libraries the collection belongs to. Personal smart: the libraries it matches; [] = all. */
+  /**
+   * Server: the libraries whose Collections tabs show it (a Smart collection's
+   * rules name the libraries it draws from). Personal smart: the libraries it
+   * matches; [] = all.
+   */
   libraryIds: number[];
   /** Smart only. A "no limit" limit is already cleared. */
   rules?: QueryDefinition;
@@ -279,7 +283,7 @@ function rulesFor(kind: CollectionKind, query: QueryDefinitionInput) {
     : undefined;
 }
 
-/** Smart rules match the draft's libraries; the draft's list is the one the editor shows. */
+/** A Smart draft's rules, with the libraries they draw from. */
 function smartRules(draft: ManualOrSmartDraft): QueryDefinition | undefined {
   return draft.kind === "smart" ? draftRules(draft) : undefined;
 }
@@ -745,7 +749,8 @@ export const SERVER_SCOPE: CollectionScope<LibraryCollection> = {
       name: view?.name ?? "",
       description: view?.description ?? "",
       libraryIds,
-      rules: rulesFor(draftKind, { ...view?.raw.query_definition, library_ids: libraryIds }),
+      // The rules name their own libraries. Opened from a library, a new one starts there.
+      rules: rulesFor(draftKind, view ? view.raw.query_definition : { library_ids: libraryIds }),
       rawSortConfig: view?.raw.sort_config ?? {},
       artwork: {},
       server: { visibility: view?.server?.visibility ?? "visible" },

@@ -95,6 +95,9 @@ export const SHOW_TO_OTHER_PROFILES_SHORT_HELP = "Every profile on this account 
 
 /** The Libraries row while a server collection has none ticked. */
 export const LIBRARIES_NOT_PICKED = "Not picked yet";
+/** A server Smart collection's Libraries row: where it shows, not where its titles come from. */
+export const SMART_LIBRARIES_HELP =
+  "Their Collections tabs list it. Its rules pick where titles come from.";
 /** The Shelf row of a collection that isn't created yet, after "No heading". */
 export const SHELF_AFTER_CREATE = "Move it in Arrange once it's created";
 
@@ -404,8 +407,6 @@ export const SMART_UPDATES_ITSELF = "Updates itself as titles are added";
 export const PREVIEW_SHOWS_UNSAVED = "The preview already shows them.";
 
 export const PREVIEW_LIVE = "Live preview";
-/** Beside the preview count while a server collection has no library picked yet. */
-export const PREVIEW_EVERY_LIBRARY = "From every library until you pick some";
 export const PREVIEW_EMPTY = "No titles match yet";
 export const PREVIEW_EMPTY_HELP = "You can still save. Titles that match later join on their own.";
 export const PREVIEW_FAILED = "The preview didn't load. You can still save.";
@@ -675,6 +676,8 @@ export const SAVE_FAILED = "Couldn't save";
 
 /** Why Create waits on a server collection with no library yet. */
 export const PICK_LIBRARIES_FIRST = "Pick its libraries, then create it.";
+/** Why Create waits on a server Smart collection that shows in no library yet. */
+export const PICK_WHERE_IT_SHOWS_FIRST = "Pick the libraries it shows in, then create it.";
 
 /** Why Save waits on a saved server collection with every library unticked. */
 export const PICK_A_LIBRARY = "Pick at least one library.";

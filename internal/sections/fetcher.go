@@ -1431,7 +1431,7 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 	// sort applies here — a viewer's personal override is honored on the
 	// collection's own browse page.
 	queryAccess := collectionRailQueryAccess(filter, libraryID, libraryIDs)
-	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess.AllowedLibraryIDs)
+	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess)
 	if err != nil {
 		// The stored query no longer parses or validates, e.g. a legacy
 		// per-profile rule. Like jellycompat, list nothing rather than fail
