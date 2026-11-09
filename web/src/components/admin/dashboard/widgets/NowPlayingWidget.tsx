@@ -235,6 +235,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
   const username = session.username || `User #${session.user_id}`;
   const startedAgo = formatRelativeTime(session.started_at, { rounding: "floor" });
   const position = formatPlaybackPosition(session);
+  const delivery = deliveryTitle(session);
   const duration = session.file_duration ?? 0;
   const clientLabel = getSessionClientLabel(session);
   const method = classifyActivityMethod(session);
@@ -347,9 +348,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
               <Progress
                 value={(session.position_seconds / duration) * 100}
                 segments={deliverySegments(session, duration)}
-                title={deliveryTitle(session)}
+                title={delivery}
                 aria-label="Playback position"
-                aria-valuetext={position}
+                aria-valuetext={delivery ? `${position}. ${delivery}` : position}
                 className={cn(
                   "bg-foreground/10 h-1 flex-1 rounded-full",
                   session.is_paused && "opacity-45",
