@@ -70,7 +70,9 @@ export default function BrandCarousel({
             className="embla__viewport overflow-hidden pr-4 sm:pr-6 lg:pr-10 xl:pr-12"
             tabIndex={0}
             aria-label={`${title} carousel`}
+            data-nav-group
             onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
               if (e.key === "ArrowLeft") {
                 scrollPrev();
               } else if (e.key === "ArrowRight") {

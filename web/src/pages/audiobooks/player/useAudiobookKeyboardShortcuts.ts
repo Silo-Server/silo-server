@@ -133,6 +133,8 @@ export function useAudiobookKeyboardShortcuts({
           // Open popovers close themselves on Escape; only collapse the
           // full-screen view when nothing else is consuming the key.
           if (expanded && !document.querySelector("[role='menu'], [role='dialog']")) {
+            // Claimed, so the page-level Back key doesn't also leave the page.
+            e.preventDefault();
             onCollapse();
           }
           break;
