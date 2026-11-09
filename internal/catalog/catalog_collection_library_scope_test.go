@@ -124,7 +124,7 @@ func TestLibraryCollectionDrawsFromItsRulesLibrariesDB(t *testing.T) {
 			for _, item := range result.Items {
 				got = append(got, item.ContentID)
 			}
-			if !slices.Equal(got, tc.want) && !(len(got) == 0 && len(tc.want) == 0) {
+			if !slices.Equal(got, tc.want) {
 				t.Fatalf("cursor=%v allowed=%v: got %v, want %v", cursor, allowed, got, tc.want)
 			}
 		}
@@ -132,7 +132,7 @@ func TestLibraryCollectionDrawsFromItsRulesLibrariesDB(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !slices.Equal(ids, tc.want) && !(len(ids) == 0 && len(tc.want) == 0) {
+		if !slices.Equal(ids, tc.want) {
 			t.Fatalf("allowed=%v: source IDs = %v, want %v", allowed, ids, tc.want)
 		}
 	}

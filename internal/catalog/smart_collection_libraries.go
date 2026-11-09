@@ -60,10 +60,7 @@ func PinSmartRulesToCollectionLibraries(raw json.RawMessage, collectionLibraries
 		return raw
 	}
 
-	encoded, err := json.Marshal(pinned)
-	if err != nil {
-		return raw
-	}
+	encoded, _ := json.Marshal(pinned)
 	doc["library_ids"] = encoded
 	if legacy {
 		doc["filter_library_ids"] = encoded
