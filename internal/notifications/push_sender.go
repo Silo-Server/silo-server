@@ -729,15 +729,15 @@ type ApplePushTestResult struct {
 	FailureMessage string
 }
 
-func (s *System) SendApplePushTest(ctx context.Context, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
-	return s.sendPushTest(ctx, PushPlatformApple, profileID, serverDeviceID)
+func (s *System) SendApplePushTest(ctx context.Context, userID int, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+	return s.sendPushTest(ctx, PushPlatformApple, userID, profileID, serverDeviceID)
 }
 
-func (s *System) SendAndroidPushTest(ctx context.Context, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
-	return s.sendPushTest(ctx, PushPlatformAndroid, profileID, serverDeviceID)
+func (s *System) SendAndroidPushTest(ctx context.Context, userID int, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+	return s.sendPushTest(ctx, PushPlatformAndroid, userID, profileID, serverDeviceID)
 }
 
-func (s *System) sendPushTest(ctx context.Context, platform, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
+func (s *System) sendPushTest(ctx context.Context, platform string, userID int, profileID, serverDeviceID string) (*ApplePushTestResult, error) {
 	if s == nil || s.pushDeviceRepo == nil || s.pushSender == nil {
 		return nil, ErrPushDeliveryUnavailable
 	}
@@ -750,7 +750,7 @@ func (s *System) sendPushTest(ctx context.Context, platform, profileID, serverDe
 	}
 	// No relay-credential gate here: a test push on a fresh install goes
 	// through the same first-use registration as an ordinary delivery.
-	attempt, device, err := s.pushDeviceRepo.EnqueueTestAttempt(ctx, platform, profileID, serverDeviceID)
+	attempt, device, err := s.pushDeviceRepo.EnqueueTestAttempt(ctx, platform, userID, profileID, serverDeviceID)
 	if err != nil {
 		return nil, err
 	}

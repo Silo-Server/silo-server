@@ -9,7 +9,10 @@ export interface PluginStatus {
   /** Text color for the label; empty for the neutral states. */
   textClass: string;
   title?: string;
-  /** The plugin needs an admin: it is failing, restarting, or missing required settings. */
+  /**
+   * The plugin needs an admin: it is failing, restarting, missing required
+   * settings, or its last automatic update was refused.
+   */
   attention: boolean;
   /** Sort rank: problems first (most severe first), healthy plugins next, off plugins last. */
   rank: number;
@@ -41,6 +44,9 @@ export function pluginStatus(installation: PluginInstallation): PluginStatus {
       attention: true,
       rank: 2,
     };
+  }
+  if (installation.update_failure) {
+    return { ...indicator, textClass: "", attention: true, rank: 2 };
   }
   return { ...indicator, textClass: "", attention: false, rank: 3 };
 }

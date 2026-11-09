@@ -1166,39 +1166,71 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
 
   /* Hovering a star previews that value instead: clear the stored fill first,
-     then fill up to the hovered position. */
-  .star-rating:has(.star-rating-star:hover) .star-rating-star {
+     then fill up to the hovered position. The preview is gated on a fine
+     pointer, so a tap's emulated :hover cannot hold it on touch screens, and
+     it is held back after a click until the pointer leaves the clicked star
+     (StarRating sets data-suppress-preview), so the click's result shows
+     straight away instead of the preview of the value it just replaced. */
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:hover)
+    .star-rating-star {
     color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
   }
 
-  .star-rating:has(.star-rating-star:hover) .star-rating-star svg {
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:hover)
+    .star-rating-star
+    svg {
     fill: none;
   }
 
-  .star-rating:has(.star-rating-star:nth-of-type(1):hover) .star-rating-star:nth-of-type(-n + 1),
-  .star-rating:has(.star-rating-star:nth-of-type(2):hover) .star-rating-star:nth-of-type(-n + 2),
-  .star-rating:has(.star-rating-star:nth-of-type(3):hover) .star-rating-star:nth-of-type(-n + 3),
-  .star-rating:has(.star-rating-star:nth-of-type(4):hover) .star-rating-star:nth-of-type(-n + 4),
-  .star-rating:has(.star-rating-star:nth-of-type(5):hover) .star-rating-star:nth-of-type(-n + 5) {
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(1):hover)
+    .star-rating-star:nth-of-type(-n + 1),
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(2):hover)
+    .star-rating-star:nth-of-type(-n + 2),
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(3):hover)
+    .star-rating-star:nth-of-type(-n + 3),
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(4):hover)
+    .star-rating-star:nth-of-type(-n + 4),
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(5):hover)
+    .star-rating-star:nth-of-type(-n + 5) {
     color: rgb(250 204 21);
   }
 
-  .star-rating:has(.star-rating-star:nth-of-type(1):hover)
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(1):hover)
     .star-rating-star:nth-of-type(-n + 1)
     svg,
-  .star-rating:has(.star-rating-star:nth-of-type(2):hover)
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(2):hover)
     .star-rating-star:nth-of-type(-n + 2)
     svg,
-  .star-rating:has(.star-rating-star:nth-of-type(3):hover)
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(3):hover)
     .star-rating-star:nth-of-type(-n + 3)
     svg,
-  .star-rating:has(.star-rating-star:nth-of-type(4):hover)
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(4):hover)
     .star-rating-star:nth-of-type(-n + 4)
     svg,
-  .star-rating:has(.star-rating-star:nth-of-type(5):hover)
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star:nth-of-type(5):hover)
     .star-rating-star:nth-of-type(-n + 5)
     svg {
     fill: currentcolor;
+  }
+
+  /* Hovering the star that is already set previews removal: clicking it
+     clears the rating, so dim the stars rather than show the same fill. */
+  :where(:root[data-fine-pointer="true"])
+    .star-rating:not([data-suppress-preview]):has(.star-rating-star[aria-checked="true"]:hover)
+    .star-rating-star {
+    opacity: 0.45;
   }
 
   /* Less-transparent glass for small chips that sit over busy cover art

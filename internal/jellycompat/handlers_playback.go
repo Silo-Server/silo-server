@@ -376,6 +376,7 @@ type PlaybackHandler struct {
 	WatchScrobbler         PlaybackWatchScrobbler
 	StableIdentityResolver watchsync.ScrobbleIdentityResolver
 	terminalFallbackDelay  time.Duration
+	terminalRequestWait    time.Duration
 	// RecipeNodeStore hands a remote transcode's reconstruction recipe to the
 	// control-plane recipe store (Redis) so a dedicated transcode node that
 	// restarts can rebuild ffmpeg from it. The node-hop token is server-minted and
@@ -3121,7 +3122,8 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 	}
 
 	for index, track := range version.VideoTracks {
-		bitrate := track.Bitrate
+		// Silo stores bitrates in kbps; Jellyfin's BitRate is bits per second.
+		bitrate := track.Bitrate * 1000
 		if bitrate == 0 && version.Bitrate > 0 {
 			bitrate = version.Bitrate * 1000
 		}
@@ -3189,8 +3191,9 @@ func buildMediaStreamsWithSelection(routeItemID, mediaSourceID string, version c
 			SupportsExternalStream: false,
 			Profile:                track.Profile,
 			AudioSpatialFormat:     compatAudioSpatialFormat(track.Profile),
+			ChannelLayout:          compatChannelLayout(track.Layout),
 			Channels:               track.Channels,
-			BitRate:                track.Bitrate,
+			BitRate:                track.Bitrate * 1000,
 		})
 	}
 
@@ -3687,6 +3690,14 @@ func audioCodecDisplayName(codec string) string {
 	default:
 		return strings.ToUpper(strings.TrimSpace(codec))
 	}
+}
+
+// compatChannelLayout trims ffprobe's layout variant the way Jellyfin's
+// ParseChannelLayout does ("5.1(side)" becomes "5.1"); clients match their
+// channel badges against that form.
+func compatChannelLayout(layout string) string {
+	base, _, _ := strings.Cut(layout, "(")
+	return base
 }
 
 func audioChannelsDisplayName(channels int) string {

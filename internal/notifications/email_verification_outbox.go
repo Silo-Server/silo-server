@@ -73,7 +73,7 @@ func (r *EmailPrefsRepository) QueueVerification(ctx context.Context, in EmailVe
 	var currentHash string
 	var lastSent *time.Time
 	var sendsToday int
-	err = tx.QueryRow(ctx, `SELECT user_id,pending_token_hash,pending_last_sent_at,verify_sends_today FROM notification_email_prefs WHERE profile_id=$1`, in.ProfileID).Scan(&owner, &currentHash, &lastSent, &sendsToday)
+	err = tx.QueryRow(ctx, `SELECT user_id,pending_token_hash,pending_last_sent_at,verify_sends_today FROM notification_email_prefs WHERE user_id=$1 AND profile_id=$2`, in.UserID, in.ProfileID).Scan(&owner, &currentHash, &lastSent, &sendsToday)
 	if err != nil {
 		return empty, err
 	}
@@ -138,7 +138,7 @@ func (r *EmailPrefsRepository) QueueVerification(ctx context.Context, in EmailVe
 	if err != nil {
 		return empty, err
 	}
-	_, err = tx.Exec(ctx, `UPDATE notification_email_prefs SET pending_email=$2,pending_token_hash=$3,pending_expires_at=$4,pending_last_sent_at=$5,verify_sends_today=$6,updated_at=$5 WHERE profile_id=$1`, in.ProfileID, address, hash, result.ExpiresAt, now, sendsToday+1)
+	_, err = tx.Exec(ctx, `UPDATE notification_email_prefs SET pending_email=$2,pending_token_hash=$3,pending_expires_at=$4,pending_last_sent_at=$5,verify_sends_today=$6,updated_at=$5 WHERE user_id=$7 AND profile_id=$1`, in.ProfileID, address, hash, result.ExpiresAt, now, sendsToday+1, in.UserID)
 	if err != nil {
 		return empty, err
 	}
@@ -152,7 +152,7 @@ func lockEmailVerificationProfile(ctx context.Context, tx pgx.Tx, user int, prof
 		return err
 	}
 	var owner int
-	if err := tx.QueryRow(ctx, `SELECT user_id FROM notification_email_prefs WHERE profile_id=$1 FOR UPDATE`, profile).Scan(&owner); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT user_id FROM notification_email_prefs WHERE user_id=$1 AND profile_id=$2 FOR UPDATE`, user, profile).Scan(&owner); err != nil {
 		return fmt.Errorf("lock email verification profile: %w", err)
 	}
 	return nil

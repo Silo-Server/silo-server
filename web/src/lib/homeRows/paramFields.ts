@@ -17,6 +17,7 @@ const FIELD_KEYS: Record<string, { primary?: string[]; more?: string[] }> = {
   short_watches: { more: ["max_minutes"] },
   anniversaries: { more: ["milestone_years"] },
   taste_match: { more: ["genre"] },
+  trending_discover: { primary: ["filter_type"] },
   editorial_spotlight: { more: ["auto_rotate", "rotation_cadence", "subject"] },
   seasonal_themed: {
     primary: [
