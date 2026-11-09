@@ -81,7 +81,7 @@ func (s syntheticSource) plexHandler(w http.ResponseWriter, r *http.Request) {
 		for _, key := range parts {
 			items = append(items, fmt.Sprintf(`{"ratingKey":%q,"type":"show","title":"Show","year":2001,"Guid":[{"id":"tvdb://%s"}]}`, key, key))
 		}
-		fmt.Fprintf(w, `{"MediaContainer":{"Metadata":[%s]}}`, strings.Join(items, ","))
+		_, _ = fmt.Fprintf(w, `{"MediaContainer":{"Metadata":[%s]}}`, strings.Join(items, ","))
 	case q.Get("inProgress") == "1":
 		_, _ = io.WriteString(w, `{"MediaContainer":{"totalSize":0,"Metadata":[]}}`)
 	default:
@@ -93,12 +93,12 @@ func (s syntheticSource) plexHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s syntheticSource) plexPage(w http.ResponseWriter, _ *http.Request, offset, size int) {
 	start, end := s.slice(offset, size)
-	fmt.Fprintf(w, `{"MediaContainer":{"totalSize":%d,"Metadata":[`, s.total)
+	_, _ = fmt.Fprintf(w, `{"MediaContainer":{"totalSize":%d,"Metadata":[`, s.total)
 	for i := start; i < end; i++ {
 		if i > start {
 			_, _ = io.WriteString(w, ",")
 		}
-		fmt.Fprintf(w, `{"ratingKey":"%d","type":"episode","title":"Episode","grandparentTitle":"Show","grandparentRatingKey":"%d","parentIndex":1,"index":%d,"duration":1000,"viewCount":1,"lastViewedAt":1700000000,"viewedAt":1700000000,"Guid":[{"id":"tvdb://%d"}]}`, i+1, i%2000+1000000, i+1, i+1)
+		_, _ = fmt.Fprintf(w, `{"ratingKey":"%d","type":"episode","title":"Episode","grandparentTitle":"Show","grandparentRatingKey":"%d","parentIndex":1,"index":%d,"duration":1000,"viewCount":1,"lastViewedAt":1700000000,"viewedAt":1700000000,"Guid":[{"id":"tvdb://%d"}]}`, i+1, i%2000+1000000, i+1, i+1)
 	}
 	_, _ = io.WriteString(w, `]}}`)
 }
@@ -123,7 +123,7 @@ func (s syntheticSource) mediaBrowserItems(w http.ResponseWriter, r *http.Reques
 		for _, id := range strings.Split(ids, ",") {
 			items = append(items, fmt.Sprintf(`{"Id":%q,"Type":"Series","Name":"Show","ProviderIds":{"Tvdb":"1"}}`, id))
 		}
-		fmt.Fprintf(w, `{"Items":[%s]}`, strings.Join(items, ","))
+		_, _ = fmt.Fprintf(w, `{"Items":[%s]}`, strings.Join(items, ","))
 		return
 	}
 	if q.Get("Filters") != "IsPlayed" {
@@ -133,12 +133,12 @@ func (s syntheticSource) mediaBrowserItems(w http.ResponseWriter, r *http.Reques
 	offset, _ := strconv.Atoi(q.Get("StartIndex"))
 	limit, _ := strconv.Atoi(q.Get("Limit"))
 	start, end := s.slice(offset, limit)
-	fmt.Fprintf(w, `{"TotalRecordCount":%d,"Items":[`, s.total)
+	_, _ = fmt.Fprintf(w, `{"TotalRecordCount":%d,"Items":[`, s.total)
 	for i := start; i < end; i++ {
 		if i > start {
 			_, _ = io.WriteString(w, ",")
 		}
-		fmt.Fprintf(w, `{"Id":"item-%d","Name":"Episode","Type":"Episode","SeriesId":"series-%d","SeriesName":"Show","ParentIndexNumber":1,"IndexNumber":%d,"RunTimeTicks":1000000000,"UserData":{"Played":true,"PlayCount":1,"LastPlayedDate":"2026-09-02T00:00:00Z"},"ProviderIds":{"Tvdb":"%d"}}`, i, i%2000, i+1, i)
+		_, _ = fmt.Fprintf(w, `{"Id":"item-%d","Name":"Episode","Type":"Episode","SeriesId":"series-%d","SeriesName":"Show","ParentIndexNumber":1,"IndexNumber":%d,"RunTimeTicks":1000000000,"UserData":{"Played":true,"PlayCount":1,"LastPlayedDate":"2026-09-02T00:00:00Z"},"ProviderIds":{"Tvdb":"%d"}}`, i, i%2000, i+1, i)
 	}
 	_, _ = io.WriteString(w, `]}`)
 }

@@ -114,23 +114,8 @@ func (p *PlexServerProvider) Stream(ctx context.Context, from *StreamPosition, s
 	}
 	series := newPlexSeriesLookup(p.client, p.baseURL, p.token)
 	if from == nil || from.Stage != plexStageWatchlist {
-		first := 0
-		if from != nil {
-			// A section that is gone restarts the listing; re-applying is safe.
-			first = max(0, slices.IndexFunc(sections, func(s struct{ Key, Type, Title string }) bool { return s.Key == from.Section }))
-		}
-		for i, section := range sections[first:] {
-			kind, ok := plexSectionMediaTypes[section.Type]
-			if !ok {
-				continue
-			}
-			var resume *StreamPosition
-			if i == 0 && from != nil && from.Section == section.Key {
-				resume = from
-			}
-			if err := p.streamSection(ctx, section.Key, section.Title, kind.mediaType, kind.noun, series, resume, sink); err != nil {
-				return err
-			}
+		if err := p.streamSections(ctx, sections, series, from, sink); err != nil {
+			return err
 		}
 	}
 	if warning := series.warning(); warning != "" {
@@ -139,6 +124,28 @@ func (p *PlexServerProvider) Stream(ctx context.Context, from *StreamPosition, s
 		}
 	}
 	return p.streamWatchlist(ctx, sink)
+}
+
+func (p *PlexServerProvider) streamSections(ctx context.Context, sections []struct{ Key, Type, Title string }, series *plexSeriesLookup, from *StreamPosition, sink RecordSink) error {
+	first := 0
+	if from != nil {
+		// A section that is gone restarts the listing; re-applying is safe.
+		first = max(0, slices.IndexFunc(sections, func(s struct{ Key, Type, Title string }) bool { return s.Key == from.Section }))
+	}
+	for i, section := range sections[first:] {
+		kind, ok := plexSectionMediaTypes[section.Type]
+		if !ok {
+			continue
+		}
+		var resume *StreamPosition
+		if i == 0 && from != nil && from.Section == section.Key {
+			resume = from
+		}
+		if err := p.streamSection(ctx, section.Key, section.Title, kind.mediaType, kind.noun, series, resume, sink); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *PlexServerProvider) streamSection(ctx context.Context, key, title string, mediaType int, noun string, series *plexSeriesLookup, from *StreamPosition, sink RecordSink) error {
@@ -168,18 +175,12 @@ func (p *PlexServerProvider) streamSection(ctx context.Context, key, title strin
 	defer held.release(ctx)
 
 	if from == nil || from.Stage == plexStageWatched {
-		offset := stageOffset(from, plexStageWatched)
-		err := p.client.forEachSectionPage(ctx, p.baseURL, p.token, key, mediaType, plexFilterWatched, offset, func(page []PlexItem, start int) error {
-			records, err := p.normalizePage(ctx, page, held, series)
-			if err != nil {
-				return err
-			}
-			return sink(RecordBatch{Records: records, Resume: StreamPosition{Stage: plexStageWatched, Section: key, Offset: start}})
-		})
-		if err != nil && (ctx.Err() != nil || isSinkError(err)) {
+		err := p.streamWatchedPages(ctx, key, mediaType, stageOffset(from, plexStageWatched), held, series, sink)
+		switch {
+		case err == nil:
+		case ctx.Err() != nil || isSinkError(err):
 			return err
-		}
-		if err != nil {
+		default:
 			if err := unavailable("watched", err); err != nil {
 				return err
 			}
@@ -196,6 +197,16 @@ func (p *PlexServerProvider) streamSection(ctx context.Context, key, title strin
 		}
 	}
 	return nil
+}
+
+func (p *PlexServerProvider) streamWatchedPages(ctx context.Context, key string, mediaType, offset int, held *heldItems[PlexItem], series *plexSeriesLookup, sink RecordSink) error {
+	return p.client.forEachSectionPage(ctx, p.baseURL, p.token, key, mediaType, plexFilterWatched, offset, func(page []PlexItem, start int) error {
+		records, err := p.normalizePage(ctx, page, held, series)
+		if err != nil {
+			return err
+		}
+		return sink(RecordBatch{Records: records, Resume: StreamPosition{Stage: plexStageWatched, Section: key, Offset: start}})
+	})
 }
 
 // normalizePage turns one page into records, merging held in-progress state.

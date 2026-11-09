@@ -160,6 +160,8 @@ type importedShow struct {
 // A show counts as listed when any of its copies at the source is in the
 // row: by the source series of the episodes the run imported, or by the
 // listed series' provider IDs, which mark every Silo series that has them.
+//
+//nolint:funlen,gocyclo // one ordered decision pass, unchanged apart from taking aggregated shows
 func (s *Service) reconcileContinueWatching(ctx context.Context, userID int, profileID string, row ContinueWatchingRow, imported *importedShows) (int, error) {
 	if s.seriesDrops == nil || s.nextUp == nil {
 		slog.InfoContext(ctx, "history import: continue watching pass skipped: stores not configured", "component", "historyimport")

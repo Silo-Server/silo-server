@@ -45,11 +45,8 @@ func (s ExecutionSummary) snapshot() ExecutionSummary {
 // saveRunCheckpoint records where the run stands. Getting past a page clears
 // the run's count of restarts without progress.
 func (r *Repository) saveRunCheckpoint(ctx context.Context, claim RunClaim, checkpoint runCheckpoint) error {
-	payload, err := json.Marshal(checkpoint)
-	if err != nil {
-		return fmt.Errorf("marshaling run checkpoint: %w", err)
-	}
-	_, err = r.pool.Exec(ctx, `UPDATE history_import_runs SET
+	payload, _ := json.Marshal(checkpoint)
+	_, err := r.pool.Exec(ctx, `UPDATE history_import_runs SET
 		resume_attempts = CASE WHEN checkpoint->'position' IS DISTINCT FROM $3::jsonb->'position' THEN 0 ELSE resume_attempts END,
 		checkpoint = $3::jsonb
 		WHERE id=$1 AND status='running' AND claim_generation=$2`, claim.RunID, claim.Generation, payload)
@@ -93,8 +90,8 @@ func (r *Repository) requeueStaleRuns(ctx context.Context, staleBefore time.Time
 }
 
 // requeueInterruptedRun hands a run this process is abandoning at shutdown
-// back to the queue, and reports whether it did. A cancelled run stays
-// cancelled and a run with no checkpoint is left for the normal failure path.
+// back to the queue, and reports whether it did. A canceled run stays
+// canceled and a run with no checkpoint is left for the normal failure path.
 func (r *Repository) requeueInterruptedRun(ctx context.Context, claim RunClaim) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

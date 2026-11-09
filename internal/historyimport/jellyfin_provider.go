@@ -74,21 +74,8 @@ func (p *JellyfinProvider) Stream(ctx context.Context, from *StreamPosition, sin
 	series := newLookupCache[jellyfinItem](seriesLookupCacheEntries)
 	readFull := true
 	if p.playedSince != nil && (from == nil || from.Stage == jellyfinStageLookback) {
-		sorted, err := p.client.streamPlayedSince(ctx, p.auth, *p.playedSince, func(page []jellyfinItem) error {
-			return p.emitWatched(ctx, page, held, series, StreamPosition{Stage: jellyfinStageLookback}, sink)
-		})
-		if err != nil {
+		if readFull, err = p.streamLookback(ctx, held, series, sink); err != nil {
 			return err
-		}
-		readFull = !sorted
-		if !sorted {
-			// The server ignored the newest-first sort, or the list kept
-			// moving during the read, so the early stop could miss recent
-			// plays. Read the whole played history instead.
-			slog.WarnContext(ctx, "jellyfin history import: played items not newest first or kept moving; reading the full played history", "component", "historyimport")
-			if err := sink(RecordBatch{Warnings: []string{warnJellyfinLookbackUnsorted}}); err != nil {
-				return err
-			}
 		}
 	}
 	if readFull && stageReached(from, jellyfinStages, jellyfinStagePlayed) {
@@ -107,6 +94,22 @@ func (p *JellyfinProvider) Stream(ctx context.Context, from *StreamPosition, sin
 		}
 	}
 	return p.streamFavorites(ctx, from, series, sink)
+}
+
+// streamLookback reads the played-since window and reports whether the full
+// played listing is still needed.
+func (p *JellyfinProvider) streamLookback(ctx context.Context, held *heldItems[jellyfinItem], series *lookupCache[jellyfinItem], sink RecordSink) (bool, error) {
+	sorted, err := p.client.streamPlayedSince(ctx, p.auth, *p.playedSince, func(page []jellyfinItem) error {
+		return p.emitWatched(ctx, page, held, series, StreamPosition{Stage: jellyfinStageLookback}, sink)
+	})
+	if err != nil || sorted {
+		return false, err
+	}
+	// The server ignored the newest-first sort, or the list kept moving during
+	// the read, so the early stop could miss recent plays. Read the whole
+	// played history instead.
+	slog.WarnContext(ctx, "jellyfin history import: played items not newest first or kept moving; reading the full played history", "component", "historyimport")
+	return true, sink(RecordBatch{Warnings: []string{warnJellyfinLookbackUnsorted}})
 }
 
 func (p *JellyfinProvider) emitWatched(ctx context.Context, page []jellyfinItem, held *heldItems[jellyfinItem], series *lookupCache[jellyfinItem], resume StreamPosition, sink RecordSink) error {

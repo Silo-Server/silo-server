@@ -567,6 +567,31 @@ func (a *runApplier) apply(ctx context.Context, batch RecordBatch) error {
 	return nil
 }
 
+func (a *runApplier) recordUnmatched(record Record, reason string) {
+	summary := a.summary
+	summary.Unmatched++
+	if reason != "" {
+		if summary.UnmatchedReasonCounts == nil {
+			summary.UnmatchedReasonCounts = make(map[string]int)
+		}
+		// Reasons name the item's IDs; count by cause so one warning covers
+		// every item that failed the same way. Samples and logs keep the full
+		// reason.
+		summary.UnmatchedReasonCounts[PublicUnmatchedReason(reason)]++
+	}
+	if len(summary.UnmatchedSamples) < maxUnmatchedSamples {
+		summary.UnmatchedSamples = append(summary.UnmatchedSamples, UnmatchedSample{
+			Kind:   record.Kind,
+			Title:  recordTitle(record),
+			Year:   record.Year,
+			Reason: reason,
+		})
+	}
+	if summary.Unmatched <= maxUnmatchedLogSamples {
+		a.service.logUnmatched(a.run.ID, summary.Fetched, record, reason)
+	}
+}
+
 // applyRecord writes one matched record. Its failures become warnings, so one
 // bad item does not end the run.
 func (a *runApplier) applyRecord(ctx context.Context, record Record, match *Match, reason string, episodes *[]importedEpisode) {
@@ -575,29 +600,8 @@ func (a *runApplier) applyRecord(ctx context.Context, record Record, match *Matc
 		summary.Fetched++
 	}
 	if match == nil {
-		if record.RepeatOfWatch {
-			return
-		}
-		summary.Unmatched++
-		if reason != "" {
-			if summary.UnmatchedReasonCounts == nil {
-				summary.UnmatchedReasonCounts = make(map[string]int)
-			}
-			// Reasons name the item's IDs; count by cause so one warning
-			// covers every item that failed the same way. Samples and logs
-			// keep the full reason.
-			summary.UnmatchedReasonCounts[PublicUnmatchedReason(reason)]++
-		}
-		if len(summary.UnmatchedSamples) < maxUnmatchedSamples {
-			summary.UnmatchedSamples = append(summary.UnmatchedSamples, UnmatchedSample{
-				Kind:   record.Kind,
-				Title:  recordTitle(record),
-				Year:   record.Year,
-				Reason: reason,
-			})
-		}
-		if summary.Unmatched <= maxUnmatchedLogSamples {
-			s.logUnmatched(run.ID, summary.Fetched, record, reason)
+		if !record.RepeatOfWatch {
+			a.recordUnmatched(record, reason)
 		}
 		return
 	}
