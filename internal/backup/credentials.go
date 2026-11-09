@@ -712,8 +712,8 @@ func tableColumns(ctx context.Context, tx pgx.Tx, table string) ([]string, error
 // the columns the restored schema has are written, so a backup taken
 // before a column was added still restores. A backup taken before a table's
 // key widened (notification_email_prefs gained user_id) is upserted on the
-// key it has, and live rows that would share one of its keys are dropped:
-// it cannot hold them all, and keeping one would hand it the others'.
+// key it has, and carried live rows that would share one of its keys are
+// dropped: it cannot hold them all, and keeping one would hand it the others'.
 func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, result *CarriedCredentials) error {
 	c := t.carry
 	rows := fmt.Sprintf(`json_populate_recordset(NULL::%s, $1::json) r`, t.name)
@@ -728,9 +728,9 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 		return err
 	}
 	if len(restoredKey) > 0 && !sameColumns(restoredKey, keyColumns) {
-		owned = fmt.Sprintf(`(%s) AND NOT EXISTS (SELECT 1 FROM json_populate_recordset(NULL::%s, $1::json) o
+		owned = fmt.Sprintf(`(%s) AND NOT EXISTS (SELECT 1 FROM (SELECT r.* FROM %s WHERE %s) o
 			WHERE ROW(%s) = ROW(%s) AND ROW(%s) IS DISTINCT FROM ROW(%s))`,
-			c.owned, t.name, prefixed("o.", restoredKey), prefixed("r.", restoredKey),
+			c.owned, rows, c.owned, prefixed("o.", restoredKey), prefixed("r.", restoredKey),
 			prefixed("o.", keyColumns), prefixed("r.", keyColumns))
 		keyColumns = restoredKey
 	}

@@ -1888,4 +1888,23 @@ func TestCarryOntoAnOlderKeyDropsSharedRowsDB(t *testing.T) {
 	if !slices.Equal(got, []string{"kids 1 kids@example.test"}) || len(result.Dropped) != 2 || result.Kept["notification_email_prefs"] != 1 {
 		t.Fatalf("carried %v, dropped %v, kept %v", got, result.Dropped, result.Kept)
 	}
+
+	// A live row the backup would not carry anyway (its account is not in
+	// the backup) does not cost the other account its row.
+	if _, err = tx.Exec(ctx, `DELETE FROM carried_owners WHERE id = 2`); err != nil {
+		t.Fatal(err)
+	}
+	result = CarriedCredentials{Kept: map[string]int{}}
+	if err = secretTables[i].carryInto(ctx, tx, live, &result); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err = tx.Query(ctx, `SELECT profile_id || ' ' || user_id || ' ' || custom_email FROM notification_email_prefs ORDER BY 1`); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []string{"default 1 a@example.test", "kids 1 kids@example.test"}) || len(result.Dropped) != 1 {
+		t.Fatalf("with account 2 not in the backup: carried %v, dropped %v", got, result.Dropped)
+	}
 }
