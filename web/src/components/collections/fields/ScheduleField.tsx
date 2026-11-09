@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { appIntl, useT, type MessageKey, type Translate } from "@/i18n";
+import { appIntl, numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import { serverTimeLabel } from "@/lib/collections/copy";
 
 /** Radix Select can't hold "", so "no scheduled sync" is this in the menu. */
@@ -64,10 +64,11 @@ function describeCron(t: Translate, cron: string): string | null {
     if (hour === "*") return t("web.collections.fields.everyHour");
     const step = /^\*\/(\d+)$/.exec(hour);
     if (step) {
-      // The step as written ("02" stays "02"); the number only picks the plural form.
+      // The step as written ("02" stays "02") in the screen's digits; the number
+      // only picks the plural form.
       return t("web.collections.fields.everyHours", {
         count: Number(step[1]),
-        count_text: step[1],
+        count_text: numberText(step[1]!),
       });
     }
   }
