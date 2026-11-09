@@ -448,7 +448,10 @@ export function usePlaybackSession(
     [probe, browserEngine.capabilities],
   );
   const clientPlaybackContext = useMemo(
-    () => buildClientPlaybackContextV3(probe, browserEngine.capabilities),
+    () =>
+      buildClientPlaybackContextV3(probe, browserEngine.capabilities, {
+        reopensProgressiveAtPosition: true,
+      }),
     [probe, browserEngine.capabilities],
   );
   const nativeOriginalSupport = useMemo<NativeOriginalSupport>(

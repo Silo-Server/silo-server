@@ -112,7 +112,7 @@ describe("structured HDR capabilities", () => {
     expect(deliveries.original_http?.hdr_details?.dolby_vision_profiles).toEqual([]);
   });
 
-  it("opts only Chromium's media loader into progressive range refusal", () => {
+  it("opts only Chromium's media loader in a reopening player into progressive range refusal", () => {
     const uas = {
       chrome: chromeUA,
       edge: `${chromeUA} Edg/151.0.0.0`,
@@ -124,9 +124,9 @@ describe("structured HDR capabilities", () => {
     const optedIn = Object.fromEntries(
       Object.entries(uas).map(([name, ua]) => [
         name,
-        buildDeliveriesV3(probe, ua).progressive?.features.includes(
-          FEATURE_PROGRESSIVE_RANGE_REFUSAL_V3,
-        ),
+        buildDeliveriesV3(probe, ua, null, {
+          reopensProgressiveAtPosition: true,
+        }).progressive?.features.includes(FEATURE_PROGRESSIVE_RANGE_REFUSAL_V3),
       ]),
     );
 
@@ -137,6 +137,9 @@ describe("structured HDR capabilities", () => {
       chromeOnIOS: false,
       firefox: false,
     });
+    // A player without the reopen (audiobooks) would take the refusal as a
+    // failed route.
+    expect(buildDeliveriesV3(probe, chromeUA).progressive?.features).toEqual([]);
   });
 
   it("keeps Chromium native-HLS evidence scoped to its hls.js engine", () => {
