@@ -579,7 +579,7 @@ func TestJSONSubtitleTimingEmptyWindow(t *testing.T) {
 
 func TestProgressiveRemuxChecksMP4OutputContainer(t *testing.T) {
 	version := catalog.FileVersion{FileID: 42, Container: "mkv", CodecVideo: "h264", CodecAudio: "aac", Bitrate: 8000,
-		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500000}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
+		VideoTracks: []models.VideoTrack{{Codec: "h264", Width: 1920, Height: 1080, Bitrate: 7500}}, AudioTracks: []models.AudioTrack{{Codec: "aac", Channels: 6}}}
 	handler := &PlaybackHandler{codec: NewResourceIDCodec()}
 	for _, tc := range []struct{ property, value string }{
 		{"Width", "1280"}, {"AudioChannels", "2"},
