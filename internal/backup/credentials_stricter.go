@@ -36,6 +36,13 @@ type stricterFlag struct {
 	absentOff      bool
 	describeAbsent string
 	rollsBack      string
+	// addMissing is the column's definition, for a restriction added after
+	// backups were taken. A backup without the column gets it added when a
+	// live row holds the stricter value, so the live restriction is kept
+	// rather than lifted by the column's default. Only a column whose
+	// migration adds it with ADD COLUMN IF NOT EXISTS may set it: that
+	// migration then runs over the restored database without failing.
+	addMissing string
 }
 
 // whyAccountsRollBack is why account switches roll back with the account:
@@ -126,7 +133,8 @@ var stricterFlags = func() []stricterFlag {
 		{table: tableUserProfiles, column: "require_advisory_age", stricter: true, key: profileKey, scope: everyRow,
 			describe: `format('profile %s kept its advisory-age requirement', t.name)`},
 		{table: tableUserProfiles, column: "requests_blocked", stricter: true, key: profileKey, scope: everyRow,
-			describe: `format('profile %s kept its block from requests', t.name)`},
+			describe:   `format('profile %s kept its block from requests', t.name)`,
+			addMissing: "boolean NOT NULL DEFAULT false"},
 		// A collection its owner stopped sharing stays private, and one
 		// deleted since comes back unshared.
 		{table: tablePersonalCollections, column: "is_shared", stricter: false, key: noKey, scope: everyRow,
@@ -300,13 +308,19 @@ func keepStricterFlags(ctx context.Context, tx pgx.Tx, live []liveFlags) ([]stri
 	var kept []string
 	for i, f := range stricterFlags {
 		// A backup taken before the column existed has nothing to keep;
-		// the restored server adds it with its default when it migrates.
+		// the restored server adds it with its default when it migrates,
+		// unless the flag adds it here to keep a live restriction.
 		has, err := columnExists(ctx, tx, f.table, f.column)
 		if err != nil {
 			return nil, err
 		}
 		if !has {
-			continue
+			if f.addMissing == "" || live[i].stricter == "[]" {
+				continue
+			}
+			if _, err := tx.Exec(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s %s`, f.table, f.column, f.addMissing)); err != nil {
+				return nil, fmt.Errorf("%s.%s: %w", f.table, f.column, err)
+			}
 		}
 		sql := fmt.Sprintf(`UPDATE %[1]s t SET %[2]s = $2 FROM json_to_recordset($1::json) AS l(id text, key text)
 			WHERE %[5]s = l.id AND %[3]s = l.key AND t.%[2]s IS DISTINCT FROM $2 RETURNING %[4]s`, f.table, f.column, f.key, f.describe, f.idOf())

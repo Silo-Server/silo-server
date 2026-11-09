@@ -2089,7 +2089,12 @@ neither list.
   plugin task binding, an access group's permissions, a profile's
   notifications. Only account switches roll back as they were
   (`rollsBack`), since accounts roll back whole. Nothing
-  a full restore does turns a plugin on; the admin does. These switches are
+  a full restore does turns a plugin on; the admin does. A backup taken
+  before a switch's column existed keeps nothing for it, and the restored
+  server adds the column with its default when it migrates, except for a
+  restriction that sets `addMissing` (a profile's block from requests): the
+  restore adds that column itself when a live row is restricted, so the
+  restriction is kept. These switches are
   set before the credential carry compares authority, so it compares the
   restored server as it will start; the carry also counts an account with
   every library as seeing each enabled library of its server, and drops a
