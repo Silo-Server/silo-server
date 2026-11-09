@@ -8,6 +8,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/requests/discoverrows"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -90,6 +91,14 @@ func TestBlockedProfileIsKeptOutOfRequestsAndDiscovery(t *testing.T) {
 		},
 		"discover all": func(s *Service, v Viewer) error {
 			_, err := s.DiscoverAll(ctx, v)
+			return err
+		},
+		"discover rows": func(s *Service, v Viewer) error {
+			_, err := s.DiscoverRows(ctx, v)
+			return err
+		},
+		"discover row": func(s *Service, v Viewer) error {
+			_, err := s.DiscoverRow(ctx, v, discoverrows.LegacyIDs()[0], 1)
 			return err
 		},
 		"detail": func(s *Service, v Viewer) error {

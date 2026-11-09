@@ -76,7 +76,7 @@ func (s *Service) DiscoverRows(ctx context.Context, viewer Viewer) (*DiscoverLay
 		return nil, errRequestServiceNotConfigured
 	}
 	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
@@ -165,7 +165,7 @@ func (s *Service) DiscoverRow(ctx context.Context, viewer Viewer, rowID string, 
 		return nil, errRequestServiceNotConfigured
 	}
 	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	rows, err := s.layoutRows(ctx)
@@ -207,6 +207,9 @@ func (s *Service) Discover(ctx context.Context, viewer Viewer, section string, p
 		return nil, errRequestServiceNotConfigured
 	}
 	ctx = withPolicyCache(ctx)
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
+		return nil, err
+	}
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
 	if err != nil {
 		return nil, err
@@ -221,7 +224,7 @@ func (s *Service) DiscoverAll(ctx context.Context, viewer Viewer) ([]DiscoverySe
 		return nil, errRequestServiceNotConfigured
 	}
 	ctx = withPolicyCache(ctx)
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	ceiling, err := s.viewerContentCeiling(ctx, viewer)
