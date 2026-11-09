@@ -122,6 +122,22 @@ else
 fi
 
 unsafe "$tmp/new-list" && die "$list of the new tree has unsafe paths"
+# Only this platform's generated outputs may be written, and only the listed ones: a release
+# asset that carried anything else (a hook, a build file) is refused before anything is copied.
+allowed() {
+  case $platform in
+    web) case $1 in web/src/locales/*.json | web/src/locales/keys.ts) return 0 ;; esac ;;
+    apple) case $1 in iosApp/iosApp/Localizable.xcstrings | iosApp/InfoPlist/*/InfoPlist.xcstrings) return 0 ;; esac ;;
+    android) case $1 in android-shared/silo-locales.properties | android-shared/src/androidMain/res/values*/strings_catalog.xml) return 0 ;; esac ;;
+    roku) case $1 in locale/languages.json | locale/*/strings.json | i18n-charsets/*.txt | source/util/pluralRules.bs) return 0 ;; esac ;;
+  esac
+  return 1
+}
+while IFS= read -r path; do
+  allowed "$path" || die "$path is not a generated $platform output; refusing to install it"
+done < "$tmp/new-list"
+( cd "$tmp/tree" && find . -type f | sed 's#^\./##' | sort ) > "$tmp/tree-files"
+sort "$tmp/new-list" | cmp -s - "$tmp/tree-files" || die "the generated tree holds files its $list doesn't list"
 while IFS= read -r path; do
   contained "$path" || die "$path goes through a symlink in the client; refusing to write there"
 done < "$tmp/new-list"
