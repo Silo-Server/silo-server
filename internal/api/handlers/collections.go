@@ -539,6 +539,51 @@ func normalizeSmartCollectionQueryDefinitionJSON(raw []byte, allowPersonalizedSo
 	return catalog.NormalizeSmartCollectionQueryJSON(raw, allowPersonalizedSorts, allowPersonalizedFields, v1Rules)
 }
 
+// smartCollectionNeedsRule is why a smart collection with no complete rule is
+// refused: its empty rules would match every title.
+const smartCollectionNeedsRule = "A smart collection needs at least one rule with a field, an operator and a value"
+
+// requireSmartCollectionRule refuses a smart collection's normalized
+// query_definition when it holds no rule complete enough to filter, as a
+// validation error at query_definition.groups. Only /api/v2 applies it: /api/v1
+// is frozen, and restores keep collections saved before the check.
+func requireSmartCollectionRule(queryDefinition json.RawMessage) error {
+	var definition catalog.QueryDefinition
+	if len(queryDefinition) > 0 {
+		if err := json.Unmarshal(queryDefinition, &definition); err != nil {
+			return fieldError("query_definition", "Invalid query_definition")
+		}
+	}
+	if definition.HasCompleteRule() {
+		return nil
+	}
+	return fieldError("query_definition.groups", smartCollectionNeedsRule)
+}
+
+// adminSmartRuleCheck applies requireSmartCollectionRule to an admin update
+// that would leave the collection Smart: to the rules it sends, or, when it
+// switches a collection to Smart without sending any, to the stored rules that
+// switch activates. An update that leaves the rules alone, such as a rename or
+// a visibility change, keeps a collection saved before the check working.
+func adminSmartRuleCheck(existingType string, existingRules json.RawMessage, req AdminCollectionUpdate, rules json.RawMessage) error {
+	if req.V1Rules {
+		return nil
+	}
+	collectionType := existingType
+	if req.CollectionType != nil {
+		collectionType = *req.CollectionType
+	}
+	switch {
+	case collectionType != collectionTypeSmart:
+		return nil
+	case len(req.QueryDefinition) > 0:
+		return requireSmartCollectionRule(rules)
+	case existingType != collectionTypeSmart:
+		return requireSmartCollectionRule(existingRules)
+	}
+	return nil
+}
+
 func firstNonEmptyCollection(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
