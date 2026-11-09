@@ -1,5 +1,6 @@
 import { memo, useCallback, useState } from "react";
 import { Star } from "lucide-react";
+import { readFinePointer } from "@/lib/pointerCapability";
 
 interface StarRatingProps {
   value: number | null;
@@ -29,9 +30,11 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
    * pointer that has not moved. A pointer click therefore suppresses the
    * preview until the pointer leaves that star. Keyboard activation fires a
    * click with detail 0 and has no pointer to leave, so it never sets the flag.
+   * Neither does a touch tap: its pointerleave fires before the click, and the
+   * preview is already off once a touch press clears data-fine-pointer.
    */
   function handleClick(event: React.MouseEvent, star: number) {
-    if (event.detail !== 0) setSuppressPreview(true);
+    if (event.detail !== 0 && readFinePointer() !== false) setSuppressPreview(true);
     if (star === value) {
       onChange(null);
     } else {

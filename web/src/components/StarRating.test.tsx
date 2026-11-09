@@ -37,5 +37,15 @@ describe("StarRating", () => {
 
     fireEvent.pointerLeave(fourthStar);
     expect(group).not.toHaveAttribute("data-suppress-preview");
+
+    // A touch press clears data-fine-pointer before the click, and the tap's
+    // pointerleave has already fired, so a flag set now would never clear.
+    document.documentElement.setAttribute("data-fine-pointer", "false");
+    try {
+      fireEvent.click(fourthStar, { detail: 1 });
+      expect(group).not.toHaveAttribute("data-suppress-preview");
+    } finally {
+      document.documentElement.removeAttribute("data-fine-pointer");
+    }
   });
 });
