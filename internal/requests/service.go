@@ -2601,6 +2601,7 @@ func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, 
 	validStatus := map[Status]bool{StatusQueued: true, StatusDownloading: true, StatusCompleted: true, StatusFailed: true}
 	returned := map[Quality]bool{}
 	var record []Target
+	completion := newCompletionCheck(req, nil)
 	for _, rt := range targets {
 		if !validQuality[rt.Quality] {
 			slog.WarnContext(ctx, "requests: plugin returned unknown quality; skipping", "component", "requests", "request_id", req.ID, "quality", string(rt.Quality))
@@ -2621,19 +2622,10 @@ func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, 
 		if status == "" || !validStatus[status] {
 			status = StatusQueued // coerce unknown/empty status to the DB-valid default
 		}
-		if status == StatusCompleted {
-			// The plugin has already acted, so a failed check must not drop
-			// its targets: hold the target and let reconcile check again.
-			stands, err := s.pluginCompletionStands(ctx, req)
-			if err != nil {
-				slog.WarnContext(ctx, "requests: could not check the requested seasons; holding the target", "component", "requests",
-					"request_id", req.ID, "quality", string(rt.Quality), "err", err)
-			}
-			if !stands {
-				// Reconcile completes the target once the seasons are in.
-				status = StatusQueued
-			}
-		}
+		// The plugin has already acted, so a completion that does not stand,
+		// or that could not be checked, is recorded as queued rather than
+		// dropped; reconcile completes it once the seasons are in.
+		status = completion.reported(ctx, s, StatusQueued, status)
 		message := rt.Message
 		if status == StatusFailed {
 			message = explainSubmissionFailure(req, message)
@@ -2644,6 +2636,10 @@ func (s *Service) recordTargets(ctx context.Context, req Request, actor Viewer, 
 			ExternalID: rt.ExternalID, ExternalStatus: rt.ExternalStatus, LastError: message,
 			RouteID: decision.RouteID, RouteName: decision.RouteName,
 		})
+	}
+	if completion.err != nil {
+		slog.WarnContext(ctx, "requests: could not check the requested seasons; holding the target", "component", "requests",
+			"request_id", req.ID, "err", completion.err)
 	}
 	for _, q := range plan.want {
 		if returned[q] {
@@ -2923,7 +2919,7 @@ func (s *Service) reconcileRequest(ctx context.Context, req Request, fc *fulfill
 	statuses, checkErr := s.checkTargetStatuses(ctx, req, targets, fc)
 	change, err := s.applyTargetStatuses(ctx, newCompletionCheck(req, &present), targets, statuses)
 	if err != nil {
-		return reconcileUnchanged, err
+		return reconcileUnchanged, errors.Join(err, checkErr)
 	}
 	return change, checkErr
 }

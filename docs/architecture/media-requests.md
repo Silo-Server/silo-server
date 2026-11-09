@@ -338,10 +338,13 @@ library does not have, or a library that cannot report seasons, keeps it open.
 Once a request is completed, a season also counts when any episode of it is
 present: an episode the server cannot find would otherwise hold its
 notification open for good. A season with no episode in the library never
-counts, since it may not have aired yet. A library whose metadata provider numbers seasons differently
-from TMDB (absolute or TVDB order) can therefore leave a season request
-waiting; the fulfilled-notification pass stamps each request it checks without
-notifying, so such requests rotate behind newer ones rather than starve them.
+counts, since it may not have aired yet. A library whose metadata provider
+numbers seasons differently from TMDB (absolute or TVDB order), or an aired
+episode the download server never finds, therefore keeps a season request in
+progress, and no other request for the title can be made while it is open. A
+completed request can still wait on its seasons for its notification; the
+fulfilled-notification pass stamps each request it checks without notifying,
+so such requests rotate behind newer ones rather than starve them.
 
 The series detail lists each regular season with its availability (`missing`,
 `partial`, `available`) and whether the active request covers it. A title still

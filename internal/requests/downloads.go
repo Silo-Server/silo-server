@@ -140,7 +140,7 @@ func (s *Service) refreshRequestDownloads(ctx, checkCtx context.Context, fc *ful
 	statuses, checkErr := s.checkTargetStatuses(checkCtx, req, polled, fc)
 	change, err = s.applyTargetStatuses(ctx, newCompletionCheck(req, nil), polled, statuses)
 	if err != nil {
-		return reconcileUnchanged, true, errors.Join(featureErr, err)
+		return reconcileUnchanged, true, errors.Join(featureErr, err, checkErr)
 	}
 	return change, true, errors.Join(featureErr, checkErr)
 }

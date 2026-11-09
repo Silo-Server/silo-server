@@ -277,12 +277,12 @@ func TestUncheckableCompletionHoldsOnlyThatTarget(t *testing.T) {
 	}
 }
 
-func TestSeasonDeliveredRelaxesOnceTheServerIsDone(t *testing.T) {
+func TestSeasonDeliveredRelaxesOnceTheRequestIsCompleted(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		c          SeasonCounts
-		serverDone bool
-		want       bool
+		name      string
+		c         SeasonCounts
+		completed bool
+		want      bool
 	}{
 		{"complete", SeasonCounts{Aired: 9, Have: 9}, false, true},
 		{"partial while downloading", SeasonCounts{Aired: 9, Have: 4}, false, false},
@@ -290,8 +290,8 @@ func TestSeasonDeliveredRelaxesOnceTheServerIsDone(t *testing.T) {
 		{"missing once done", SeasonCounts{Aired: 9}, true, false},
 		{"nothing in the library once done", SeasonCounts{}, true, false},
 	} {
-		if got := seasonDelivered(tc.c, tc.serverDone); got != tc.want {
-			t.Errorf("%s: seasonDelivered(%+v, %v) = %v, want %v", tc.name, tc.c, tc.serverDone, got, tc.want)
+		if got := seasonDelivered(tc.c, tc.completed); got != tc.want {
+			t.Errorf("%s: seasonDelivered(%+v, %v) = %v, want %v", tc.name, tc.c, tc.completed, got, tc.want)
 		}
 	}
 }

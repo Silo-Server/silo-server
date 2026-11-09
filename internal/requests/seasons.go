@@ -98,18 +98,17 @@ func seasonProgress(seasons []int, counts map[int]SeasonCounts) []SeasonProgress
 }
 
 // seasonDelivered reports whether a requested season counts as in the
-// library. A complete season always does; once the download server reports
-// the request done, so does a season with any episode present. A season with
-// no episode in the library never does: it may not have aired yet, and the
-// server's word alone does not make it watchable.
-func seasonDelivered(c SeasonCounts, serverDone bool) bool {
-	return c.Complete() || (serverDone && c.Have > 0)
+// library. A complete season always does; once the request is completed, so
+// does a season with any episode present. A season with no episode in the
+// library never does: it may not have aired yet.
+func seasonDelivered(c SeasonCounts, completed bool) bool {
+	return c.Complete() || (completed && c.Have > 0)
 }
 
 // seasonsDelivered reports whether every season in progress is delivered.
-func seasonsDelivered(progress []SeasonProgress, serverDone bool) bool {
+func seasonsDelivered(progress []SeasonProgress, completed bool) bool {
 	for _, p := range progress {
-		if !seasonDelivered(p.SeasonCounts, serverDone) {
+		if !seasonDelivered(p.SeasonCounts, completed) {
 			return false
 		}
 	}
