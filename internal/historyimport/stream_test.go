@@ -17,11 +17,22 @@ import (
 func TestRunWarningsStopAtTheStoredLimit(t *testing.T) {
 	t.Parallel()
 	var summary ExecutionSummary
-	for range maxStoredWarnings * 100 {
-		addRunWarning(&summary, "the same failure")
+	for i := range maxStoredWarnings * 100 {
+		addRunWarning(&summary, "failure "+strconv.Itoa(i))
 	}
 	if len(summary.Warnings) != maxStoredWarnings {
 		t.Fatalf("warnings = %d, want %d", len(summary.Warnings), maxStoredWarnings)
+	}
+}
+
+// A resume sends its startup warnings again; the run keeps one copy.
+func TestRunWarningsAreNotRepeated(t *testing.T) {
+	t.Parallel()
+	var summary ExecutionSummary
+	addRunWarning(&summary, "resume list unavailable")
+	addRunWarning(&summary, "resume list unavailable", "other")
+	if len(summary.Warnings) != 2 {
+		t.Fatalf("warnings = %v, want one of each", summary.Warnings)
 	}
 }
 

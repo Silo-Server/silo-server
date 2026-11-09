@@ -3,6 +3,7 @@ package historyimport
 import (
 	"context"
 	"errors"
+	"slices"
 )
 
 // StreamPosition says where a provider's listing stands. It is stored with
@@ -70,13 +71,16 @@ func markSinkErrors(sink RecordSink) RecordSink {
 }
 
 // addRunWarning keeps the first warnings a run can store. A systematic failure
-// produces one per record, which would otherwise grow with history size.
+// produces one per record, which would otherwise grow with history size. A
+// repeat is dropped, because a resume sends its startup warnings again.
 func addRunWarning(summary *ExecutionSummary, warnings ...string) {
 	for _, warning := range warnings {
 		if len(summary.Warnings) >= maxStoredWarnings {
 			return
 		}
-		summary.Warnings = append(summary.Warnings, warning)
+		if !slices.Contains(summary.Warnings, warning) {
+			summary.Warnings = append(summary.Warnings, warning)
+		}
 	}
 }
 
