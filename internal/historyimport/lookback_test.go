@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 )
@@ -223,20 +224,26 @@ func TestJellyfinFetchPlayedSince_RestartsWhenAPlayMovesTheList(t *testing.T) {
 	for i := range list {
 		list[i] = jellyfinItem{ID: "item-" + strconv.Itoa(i), Type: "Movie", UserData: playedAt(since.Add(time.Duration(300-i)*time.Minute - time.Second))}
 	}
+	var mu sync.Mutex
 	firstPages := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start, _ := strconv.Atoi(r.URL.Query().Get("StartIndex"))
+		mu.Lock()
 		end := min(start+jellyfinPageSize, len(list))
-		writeJellyfinItems(t, w, len(list), list[start:end])
+		page, total := list[start:end], len(list)
 		if start == 0 {
 			firstPages++
 			if firstPages == 1 {
-				// item-250, not read yet, is watched again.
+				// item-250, not read yet, is watched again. The list moves
+				// before this page is written: the client can decode the
+				// page and ask for the next one before this handler returns.
 				moved := list[250]
 				moved.UserData = playedAt(since.Add(time.Hour + time.Minute))
 				list = append([]jellyfinItem{moved}, append(list[:250:250], list[251:]...)...)
 			}
 		}
+		mu.Unlock()
+		writeJellyfinItems(t, w, total, page)
 	}))
 	defer server.Close()
 
@@ -249,8 +256,11 @@ func TestJellyfinFetchPlayedSince_RestartsWhenAPlayMovesTheList(t *testing.T) {
 	for _, item := range items {
 		ids[item.ID]++
 	}
-	if len(items) != 300 || len(ids) != 300 || ids["item-250"] != 1 || firstPages != 2 {
-		t.Fatalf("items = %d (%d distinct), item-250 = %d, first-page reads = %d; want all 300 plays once after one restart", len(items), len(ids), ids["item-250"], firstPages)
+	mu.Lock()
+	reads := firstPages
+	mu.Unlock()
+	if len(items) != 300 || len(ids) != 300 || ids["item-250"] != 1 || reads != 2 {
+		t.Fatalf("items = %d (%d distinct), item-250 = %d, first-page reads = %d; want all 300 plays once after one restart", len(items), len(ids), ids["item-250"], reads)
 	}
 }
 
