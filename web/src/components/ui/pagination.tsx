@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useT, type MessageKey } from "@/i18n";
+import { numberText, useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_PAGE_SIZE_OPTIONS = [25, 50, 100];
@@ -140,7 +140,7 @@ export function TablePagination({
                   aria-label={t("web.ui.pagination.page", { page: entry + 1 })}
                   aria-current={entry === safePage ? "page" : undefined}
                 >
-                  {entry + 1}
+                  {numberText(entry + 1)}
                 </Button>
               ),
             )}
