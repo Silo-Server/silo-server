@@ -2652,6 +2652,7 @@ func catalogSearchAccess(req CatalogRequest, access AccessFilter) (AccessFilter,
 		AllowedLibraryIDs:  allowedLibraryIDs,
 		DisabledLibraryIDs: slices.Clone(access.DisabledLibraryIDs),
 		MaturityLimits:     access.MaturityLimits,
+		UserID:             access.UserID,
 	}
 
 	scope := req.Query.MediaScope
