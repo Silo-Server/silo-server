@@ -19,7 +19,7 @@ func TestResolveLibraryCollectionMembershipReadsStoredItemsForNonSmartTypes(t *t
 				QueryDefinition: json.RawMessage(`{"media_scope":"movie","sort":{"field":"year","order":"desc"}}`),
 				SortConfig:      json.RawMessage(`{"field":"title","order":"asc"}`),
 			}
-			m, err := ResolveLibraryCollectionMembership(c, nil)
+			m, err := ResolveLibraryCollectionMembership(c, AccessFilter{})
 			if err != nil {
 				t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 			}
@@ -34,7 +34,7 @@ func TestResolveLibraryCollectionMembershipReadsStoredItemsForNonSmartTypes(t *t
 }
 
 func TestResolveLibraryCollectionMembershipKeepsCuratedOrderWithoutDefaultSort(t *testing.T) {
-	m, err := ResolveLibraryCollectionMembership(&models.LibraryCollection{CollectionType: "manual", SortConfig: json.RawMessage(`{}`)}, nil)
+	m, err := ResolveLibraryCollectionMembership(&models.LibraryCollection{CollectionType: "manual", SortConfig: json.RawMessage(`{}`)}, AccessFilter{})
 	if err != nil {
 		t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestResolveLibraryCollectionMembershipPreparesSmartQuery(t *testing.T) {
 		LibraryIDs:      []int{1, 2},
 		QueryDefinition: json.RawMessage(`{"media_scope":"movie","library_ids":[2,3],"sort":{"field":"year","order":"desc"}}`),
 	}
-	m, err := ResolveLibraryCollectionMembership(c, nil)
+	m, err := ResolveLibraryCollectionMembership(c, AccessFilter{})
 	if err != nil {
 		t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestResolveLibraryCollectionMembershipListsSmartMembersInDefaultSort(t *tes
 		QueryDefinition: json.RawMessage(`{"sort":{"field":"year","order":"desc"},"limit":25}`),
 		SortConfig:      json.RawMessage(`{"field":"title","order":"asc"}`),
 	}
-	m, err := ResolveLibraryCollectionMembership(c, nil)
+	m, err := ResolveLibraryCollectionMembership(c, AccessFilter{})
 	if err != nil {
 		t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 	}
@@ -117,6 +117,7 @@ func TestResolveLibraryCollectionMembershipNarrowsToScope(t *testing.T) {
 		name       string
 		collection *models.LibraryCollection
 		scope      []int
+		disabled   []int
 		want       []int
 		outOfScope bool
 	}{
@@ -133,9 +134,13 @@ func TestResolveLibraryCollectionMembershipNarrowsToScope(t *testing.T) {
 		{name: "every library, shown only outside the scope", collection: every, scope: []int{2}, outOfScope: true},
 		{name: "legacy single library in scope", collection: legacy, scope: []int{2, 7}, want: []int{2, 7}},
 		{name: "legacy single library outside the scope", collection: legacy, scope: []int{2}, outOfScope: true},
+		// A reader who hid every library it shows in can't reach it either.
+		{name: "every library it shows in hidden", collection: every, disabled: []int{5, 9}, outOfScope: true},
+		{name: "one library it shows in hidden", collection: every, disabled: []int{9}},
+		{name: "scoped reader hid the library it shares", collection: named, scope: []int{1, 2, 5}, disabled: []int{5}, outOfScope: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := ResolveLibraryCollectionMembership(tc.collection, tc.scope)
+			m, err := ResolveLibraryCollectionMembership(tc.collection, AccessFilter{AllowedLibraryIDs: tc.scope, DisabledLibraryIDs: tc.disabled})
 			if err != nil {
 				t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 			}
@@ -158,7 +163,7 @@ func TestResolveLibraryCollectionMembershipHasNoMembersOutsideScope(t *testing.T
 		LibraryIDs:      []int{1},
 		QueryDefinition: json.RawMessage(`{"library_ids":[2]}`),
 	}
-	m, err := ResolveLibraryCollectionMembership(c, []int{1})
+	m, err := ResolveLibraryCollectionMembership(c, AccessFilter{AllowedLibraryIDs: []int{1}})
 	if err != nil {
 		t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 	}
@@ -175,7 +180,7 @@ func TestResolveLibraryCollectionMembershipHasNoMembersOutsideScope(t *testing.T
 func TestResolveLibraryCollectionMembershipRunsUnboundSmartQueryEverywhere(t *testing.T) {
 	// The repository reads a collection without library bindings as an empty
 	// list, which binds it to nothing rather than to no library.
-	m, err := ResolveLibraryCollectionMembership(&models.LibraryCollection{CollectionType: "smart", LibraryIDs: []int{}}, nil)
+	m, err := ResolveLibraryCollectionMembership(&models.LibraryCollection{CollectionType: "smart", LibraryIDs: []int{}}, AccessFilter{})
 	if err != nil {
 		t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 	}
@@ -194,7 +199,7 @@ func TestResolveLibraryCollectionMembershipRejectsUnusableQueries(t *testing.T) 
 			// Library collections are shared across profiles, so their query
 			// must not depend on who is watching.
 			c := &models.LibraryCollection{CollectionType: "smart", QueryDefinition: json.RawMessage(raw)}
-			if m, err := ResolveLibraryCollectionMembership(c, nil); err == nil {
+			if m, err := ResolveLibraryCollectionMembership(c, AccessFilter{}); err == nil {
 				t.Fatalf("membership = %+v, want an error", m)
 			}
 		})

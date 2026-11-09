@@ -118,7 +118,7 @@ func (r *LibraryCollectionRepository) countSmartCollections(ctx context.Context,
 	var queries []collectionCountStatement
 	var failures []error
 	for _, c := range collections {
-		membership, err := ResolveLibraryCollectionMembership(c, access.AllowedLibraryIDs)
+		membership, err := ResolveLibraryCollectionMembership(c, access)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("collection %s: %w", c.ID, err))
 			continue

@@ -43,10 +43,11 @@ type LibraryCollectionMembership struct {
 // the admin API accepts one on any type, and a PATCH without collection_type
 // normalizes it as smart, but neither makes the collection live.
 //
-// scope lists the libraries the reader may list, nil for no limit. Library
-// collections are shared across profiles, so a query with per-profile rules or
-// sorts is an error.
-func ResolveLibraryCollectionMembership(c *models.LibraryCollection, scope []int) (LibraryCollectionMembership, error) {
+// access is the reader's: its AllowedLibraryIDs list the libraries the reader
+// may list, nil for no limit, and its disabled libraries can't make the
+// collection reachable. Library collections are shared across profiles, so a
+// query with per-profile rules or sorts is an error.
+func ResolveLibraryCollectionMembership(c *models.LibraryCollection, access AccessFilter) (LibraryCollectionMembership, error) {
 	defaultSort, hasDefaultSort := ParseCollectionDefaultSort(c.SortConfig, false)
 	if !IsLiveQueryType(c.CollectionType) {
 		return LibraryCollectionMembership{Sort: defaultSort}, nil
@@ -69,18 +70,22 @@ func ResolveLibraryCollectionMembership(c *models.LibraryCollection, scope []int
 	// Collections tabs show it, so they never narrow the rules. A reader who
 	// can't reach any of those libraries lists none of it, as the collection's
 	// own page refuses them (CanAccessLibraryCollection).
-	if scope != nil {
-		placement := c.LibraryIDs
-		if len(placement) == 0 && c.LibraryID > 0 {
-			placement = []int{c.LibraryID}
+	placement := c.LibraryIDs
+	if len(placement) == 0 && c.LibraryID > 0 {
+		placement = []int{c.LibraryID}
+	}
+	if len(placement) > 0 {
+		if _, none := access.LibraryScope(placement); none {
+			m.OutOfScope = true
 		}
+	}
+	if scope := access.AllowedLibraryIDs; scope != nil {
 		if len(def.LibraryIDs) == 0 {
 			def.LibraryIDs = slices.Clone(scope)
 		} else {
 			def.LibraryIDs = intersectInts(def.LibraryIDs, scope)
 		}
-		reachable := len(placement) == 0 || len(intersectInts(placement, scope)) > 0
-		m.OutOfScope = !reachable || len(def.LibraryIDs) == 0
+		m.OutOfScope = m.OutOfScope || len(def.LibraryIDs) == 0
 	}
 	m.Query = ApplySmartCollectionItemLimit(def)
 	return m, nil

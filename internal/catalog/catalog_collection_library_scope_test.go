@@ -37,7 +37,7 @@ func TestResolveLibraryCollectionMembershipDrawsFromItsRules(t *testing.T) {
 			}
 			tc.collection.CollectionType = "smart"
 			tc.collection.QueryDefinition = definition
-			got, err := ResolveLibraryCollectionMembership(&tc.collection, nil)
+			got, err := ResolveLibraryCollectionMembership(&tc.collection, AccessFilter{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -135,5 +135,16 @@ func TestLibraryCollectionDrawsFromItsRulesLibrariesDB(t *testing.T) {
 		if !slices.Equal(ids, tc.want) {
 			t.Fatalf("allowed=%v: source IDs = %v, want %v", allowed, ids, tc.want)
 		}
+	}
+
+	// A viewer who hid the only library that shows it can't open it, so its
+	// facets list none of its titles, though they may see the rules' library.
+	hidden := AccessFilter{DisabledLibraryIDs: []int{libraries[1]}}
+	ids, err := resolver.loadCollectionSourceIDs(ctx, CatalogRequest{Source: CatalogSourceLibraryCollection, CollectionID: c.ID}, hidden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("placement hidden: source IDs = %v, want none", ids)
 	}
 }
