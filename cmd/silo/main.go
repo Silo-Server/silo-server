@@ -2865,10 +2865,12 @@ func main() {
 		fetchNodeDelivery := func(ctx context.Context, nodeURL string) (map[string]playback.HLSDeliveryProgress, error) {
 			return transcodenode.FetchDeliveryProgress(ctx, transcodeproxy.NodeClient(), nodeURL, cfg.Auth.JWTSecret)
 		}
+		// Syncs on client request paths must not wait on a node, so only the
+		// periodic tick reads the nodes (in PreSync) and syncs use that read.
+		nodeDelivery := &remoteDeliveryCache{}
 		sessionProvider := func() []worker.SessionSync {
-			sessions := sessionMgr.AllSessions()
-			delivery := sessionDelivery{local: localTranscodes, remote: fetchRemoteDelivery(appCtx, sessions, fetchNodeDelivery)}
-			return buildLiveSessionSyncs(sessions, nodeIdentity, delivery)
+			delivery := sessionDelivery{local: localTranscodes, remote: nodeDelivery.snapshot()}
+			return buildLiveSessionSyncs(sessionMgr.AllSessions(), nodeIdentity, delivery)
 		}
 		reconciler = worker.NewReconciler(deps.DB, nodeIdentity, sessionProvider)
 		reconciler.EventBus = deps.EventBus
@@ -2880,6 +2882,7 @@ func main() {
 			if expired := sessionMgr.CleanStale(); len(expired) > 0 {
 				slog.Info("expired idle sessions", "count", len(expired))
 			}
+			nodeDelivery.refresh(appCtx, sessionMgr.AllSessions(), fetchNodeDelivery)
 		}
 		deps.SessionSyncer = reconciler
 		deps.LiveSessionRowJSON = func(s *playback.Session) (json.RawMessage, error) {

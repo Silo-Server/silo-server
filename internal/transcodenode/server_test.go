@@ -3451,7 +3451,11 @@ func TestDeliveryProgressRead(t *testing.T) {
 		t.Fatalf("unsigned status = %d, want 401", unsigned.StatusCode)
 	}
 
-	older := httptest.NewServer(http.NotFoundHandler())
+	// A node built before the read has only DELETE /transcode/{session_id}
+	// there, so its router answers 405.
+	olderRouter := chi.NewRouter()
+	olderRouter.Delete("/transcode/{session_id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	older := httptest.NewServer(olderRouter)
 	defer older.Close()
 	if listing, err := FetchDeliveryProgress(t.Context(), older.Client(), older.URL, testSecret); err != nil || listing != nil {
 		t.Fatalf("older node = (%v, %v), want (nil, nil)", listing, err)

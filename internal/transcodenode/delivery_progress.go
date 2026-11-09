@@ -96,8 +96,9 @@ func (p SessionDeliveryProgress) HLS() playback.HLSDeliveryProgress {
 }
 
 // FetchDeliveryProgress reads the delivery progress of every HLS session on
-// the node at nodeURL. A node that predates the read answers 404, which
-// reports no sessions and no error.
+// the node at nodeURL. A node that predates the read reports no sessions and
+// no error: its router matches the path to DELETE /transcode/{session_id} and
+// answers 405 before authentication, or 404 where nothing matches.
 func FetchDeliveryProgress(ctx context.Context, client *http.Client, nodeURL, jwtSecret string) (map[string]playback.HLSDeliveryProgress, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(nodeURL, "/")+deliveryProgressPath, nil)
 	if err != nil {
@@ -114,7 +115,7 @@ func FetchDeliveryProgress(ctx context.Context, client *http.Client, nodeURL, jw
 		return nil, logredact.SanitizeURLError(err)
 	}
 	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode == http.StatusNotFound {
+	if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 		return nil, nil
 	}

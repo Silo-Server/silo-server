@@ -296,8 +296,9 @@ downloading, omitted while that run does not contain the playback position.
 `produced_through_seconds` is the end of the
 last segment the current transcode process wrote. For an HLS session on a
 remote transcode node, the API server that owns the session reads both from the
-node during its session sync; a node that does not answer within 2 seconds, or
-runs a build without the read, leaves them out for that sync. Proxy-served
+node before each periodic session sync, and syncs in between reuse that read; a
+node that does not answer within 2 seconds, or runs a build without the read,
+leaves them out until the next read. Proxy-served
 Direct Play and progressive remux omit them for now. The
 frozen `/api/v1` bridge does not carry these fields.
 

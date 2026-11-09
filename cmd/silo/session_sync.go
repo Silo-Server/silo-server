@@ -19,16 +19,21 @@ type hlsDeliverySource interface {
 
 // sessionDelivery is where one sync pass reads HLS delivery progress: local
 // for transcodes this process runs, remote (by API session id) for sessions
-// on a transcode node, read from the node at the start of the pass.
+// on a transcode node, as last read from the node by remoteDeliveryCache.
 type sessionDelivery struct {
 	local  hlsDeliverySource
-	remote map[string]playback.HLSDeliveryProgress
+	remote map[string]remoteDelivery
 }
 
 func (d sessionDelivery) hls(s *playback.Session, now time.Time) (playback.HLSDeliveryProgress, bool) {
 	if s.TranscodeNodeURL != "" {
-		p, ok := d.remote[s.ID]
-		return p, ok
+		r, ok := d.remote[s.ID]
+		// A session moved to another node or transport since the read must not
+		// show the values of the one it left.
+		if !ok || r.nodeURL != s.TranscodeNodeURL || r.transportID != transportSessionID(s) {
+			return playback.HLSDeliveryProgress{}, false
+		}
+		return r.progress, true
 	}
 	if d.local == nil {
 		return playback.HLSDeliveryProgress{}, false
@@ -36,19 +41,59 @@ func (d sessionDelivery) hls(s *playback.Session, now time.Time) (playback.HLSDe
 	return d.local.DeliveryProgress(s.ID, now)
 }
 
+// remoteDelivery is one session's progress as read from its transcode node,
+// with the node and transport id it was read for.
+type remoteDelivery struct {
+	nodeURL     string
+	transportID string
+	progress    playback.HLSDeliveryProgress
+}
+
+// transportSessionID is the id the session's transcode node knows it by.
+func transportSessionID(s *playback.Session) string {
+	if s.TranscodeTransportID != "" {
+		return s.TranscodeTransportID
+	}
+	return s.ID
+}
+
+// remoteDeliveryCache holds the latest node read. Several session syncs run
+// on client request paths, so only the periodic reconciler tick reads the
+// nodes (before its own sync) and every sync takes the values from here.
+type remoteDeliveryCache struct {
+	mu      sync.Mutex
+	entries map[string]remoteDelivery
+}
+
+// refresh replaces the cached progress with a fresh read of the nodes.
+func (c *remoteDeliveryCache) refresh(ctx context.Context, sessions []*playback.Session, fetch nodeDeliveryFetcher) {
+	entries := fetchRemoteDelivery(ctx, sessions, fetch)
+	c.mu.Lock()
+	c.entries = entries
+	c.mu.Unlock()
+}
+
+// snapshot returns the latest read. refresh replaces the map rather than
+// changing it, so callers may read it without the lock.
+func (c *remoteDeliveryCache) snapshot() map[string]remoteDelivery {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.entries
+}
+
 // nodeDeliveryFetcher reads the HLS delivery progress of every session on the
 // transcode node at nodeURL, keyed by transport session id.
 type nodeDeliveryFetcher func(ctx context.Context, nodeURL string) (map[string]playback.HLSDeliveryProgress, error)
 
-// remoteDeliveryTimeout bounds the node reads of one sync pass. Delivery
-// progress is display data: a slow or hung node costs its sessions the values
-// for that pass, never the pass itself.
+// remoteDeliveryTimeout bounds one read of the nodes. Delivery progress is
+// display data: a slow or hung node costs its sessions the values until the
+// next read, never the sync.
 const remoteDeliveryTimeout = 2 * time.Second
 
 // fetchRemoteDelivery reads, one call per node and all nodes at once, the
 // delivery progress of the HLS sessions this process hands to transcode
 // nodes, keyed by API session id.
-func fetchRemoteDelivery(ctx context.Context, sessions []*playback.Session, fetch nodeDeliveryFetcher) map[string]playback.HLSDeliveryProgress {
+func fetchRemoteDelivery(ctx context.Context, sessions []*playback.Session, fetch nodeDeliveryFetcher) map[string]remoteDelivery {
 	byNode := make(map[string][]*playback.Session)
 	for _, s := range sessions {
 		if s == nil || s.StopReported || s.TranscodeNodeURL == "" || s.PlayMethod == playback.PlayDirect {
@@ -65,7 +110,7 @@ func fetchRemoteDelivery(ctx context.Context, sessions []*playback.Session, fetc
 	var (
 		mu  sync.Mutex
 		wg  sync.WaitGroup
-		out = make(map[string]playback.HLSDeliveryProgress)
+		out = make(map[string]remoteDelivery)
 	)
 	for nodeURL, onNode := range byNode {
 		wg.Go(func() {
@@ -77,12 +122,9 @@ func fetchRemoteDelivery(ctx context.Context, sessions []*playback.Session, fetc
 			mu.Lock()
 			defer mu.Unlock()
 			for _, s := range onNode {
-				transportID := s.TranscodeTransportID
-				if transportID == "" {
-					transportID = s.ID
-				}
+				transportID := transportSessionID(s)
 				if p, ok := listing[transportID]; ok {
-					out[s.ID] = p
+					out[s.ID] = remoteDelivery{nodeURL: nodeURL, transportID: transportID, progress: p}
 				}
 			}
 		})

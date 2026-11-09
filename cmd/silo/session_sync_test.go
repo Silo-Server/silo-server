@@ -26,13 +26,14 @@ func TestBuildLiveSessionSyncsSkipsStopReportedSessions(t *testing.T) {
 
 // HLS sessions on a transcode node take the node's progress for their
 // transport id, one read per node; a node that fails costs only its own
-// sessions the values, and Direct Play never asks a node.
+// sessions the values, Direct Play never asks a node, and a session that moved
+// node or transport since the read does not show the old values.
 func TestLiveDeliveryProgressFromTranscodeNodes(t *testing.T) {
 	run := func(start, end, produced float64) playback.HLSDeliveryProgress {
 		return playback.HLSDeliveryProgress{Fetched: playback.MediaSpan{Start: start, End: end}, FetchedOK: true, ProducedThrough: produced, ProducedOK: true}
 	}
 	nodes := map[string]map[string]playback.HLSDeliveryProgress{
-		"http://node-a": {"transport-1": run(100, 160.4, 300), "plain": run(0, 30, 60), "elsewhere": run(500, 520, 600)},
+		"http://node-a": {"transport-1": run(100, 160.4, 300), "plain": run(0, 30, 60), "elsewhere": run(500, 520, 600), "moved": run(0, 40, 80), "replanned": run(0, 40, 80)},
 	}
 	var mu sync.Mutex
 	reads := map[string]int{}
@@ -52,8 +53,13 @@ func TestLiveDeliveryProgressFromTranscodeNodes(t *testing.T) {
 		{ID: "node-down", PlayMethod: playback.PlayTranscode, TranscodeNodeURL: "http://node-b", Position: 10},
 		{ID: "direct", PlayMethod: playback.PlayDirect, TranscodeNodeURL: "http://node-c"},
 		{ID: "local", PlayMethod: playback.PlayTranscode, Position: 10},
+		{ID: "moved", PlayMethod: playback.PlayTranscode, TranscodeNodeURL: "http://node-a", Position: 10},
+		{ID: "replanned", PlayMethod: playback.PlayTranscode, TranscodeNodeURL: "http://node-a", Position: 10},
 	}
-	remote := fetchRemoteDelivery(t.Context(), sessions, fetch)
+	var cache remoteDeliveryCache
+	cache.refresh(t.Context(), sessions, fetch)
+	sessions[6].TranscodeNodeURL = "http://node-d"
+	sessions[7].TranscodeTransportID = "replanned-2"
 	if reads["http://node-a"] != 1 || reads["http://node-b"] != 1 || reads["http://node-c"] != 0 {
 		t.Fatalf("node reads = %v, want node-a and node-b once, node-c never", reads)
 	}
@@ -64,8 +70,10 @@ func TestLiveDeliveryProgressFromTranscodeNodes(t *testing.T) {
 		"sought-away": {nil, 600.0},
 		"node-down":   {nil, nil},
 		"local":       {nil, nil},
+		"moved":       {nil, nil},
+		"replanned":   {nil, nil},
 	}
-	syncs := buildLiveSessionSyncs(sessions, "api-1", sessionDelivery{remote: remote})
+	syncs := buildLiveSessionSyncs(sessions, "api-1", sessionDelivery{remote: cache.snapshot()})
 	for _, row := range syncs {
 		w, ok := want[row.SessionID]
 		if !ok {

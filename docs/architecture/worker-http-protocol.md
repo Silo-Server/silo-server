@@ -183,9 +183,12 @@ end client. Runtime acknowledgement and pruning behavior remain unchanged.
 The transcode `GET /transcode/delivery-progress` lists, under node bearer
 authentication, each HLS session's fetched segment run and produced head in
 media seconds, keyed by transport session id. It is observation for the admin
-dashboard and feeds no playback decision. Each API server reads it once per
-session sync from the nodes running its HLS sessions, with a 2 second bound; a
-node that predates the read answers 404 and its sessions report no progress.
+dashboard and feeds no playback decision. Each API server reads it from the
+nodes running its HLS sessions before each periodic session sync, with a 2
+second bound, and caches it per session along with the node and transport it was
+read for; syncs on request paths reuse that cache and never call a node. A node
+that predates the read answers 405 (its router matches
+`DELETE /transcode/{session_id}`) and its sessions report no progress.
 
 The retained transcode `POST /downloads/prepare` synchronously prepares or reuses
 an MP4 on that node. It requires node bearer authorization and an approved input
