@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Bookmark, BookmarkCheck, Library, Loader2, Plus } from "lucide-react";
+import { Bookmark, BookmarkCheck, Loader2, Plus } from "lucide-react";
 import type { MediaRequest, RequestMediaResult, RequestMediaType } from "@/api/types";
 import { cn } from "@/lib/utils";
 import {
@@ -27,8 +27,7 @@ import {
   mediaItemMenuTriggerClassName,
 } from "@/components/mediaItemMenuTrigger";
 
-// The badge takes the top-right corner and truncates before it reaches the
-// Library chip on the left.
+// The badge takes the top-right corner and truncates when the card is narrow.
 const BADGE_CLASS = "ml-auto max-w-full shrink-0";
 const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[0.75rem] font-medium";
 
@@ -105,7 +104,6 @@ function DiscoverCard({
       year={item.year}
       posterPath={item.poster_path}
       href={requestDetailHref(item.media_type, item.tmdb_id)}
-      libraryContentId={item.library_content_id}
       fluid={fluid}
       dim={!requestable}
       badge={
@@ -151,7 +149,6 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
       year={request.year}
       posterPath={request.poster_path}
       href={requestDetailHref(request.media_type, request.tmdb_id)}
-      libraryContentId={request.library_content_id}
       fluid={fluid}
       dim={isClosed}
       badge={state ? <RequestStatusBadge state={state} overlay className={BADGE_CLASS} /> : null}
@@ -205,7 +202,6 @@ function ExternalTitleCard({
   year,
   posterPath,
   href,
-  libraryContentId,
   fluid,
   dim,
   badge,
@@ -217,8 +213,6 @@ function ExternalTitleCard({
   year?: number;
   posterPath?: string;
   href: string;
-  /** Adds a Library chip linking to the title's library item. */
-  libraryContentId?: string;
   fluid?: boolean;
   dim?: boolean;
   badge?: ReactNode;
@@ -252,9 +246,8 @@ function ExternalTitleCard({
             dim={dim}
           />
         </ViewTransitionLink>
-        {libraryContentId || badge ? (
-          <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex flex-wrap items-center gap-1.5">
-            {libraryContentId ? <LibraryChip contentID={libraryContentId} title={title} /> : null}
+        {badge ? (
+          <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex items-center">
             {badge}
           </div>
         ) : null}
@@ -358,18 +351,5 @@ export function WatchlistAction({
         aria-hidden
       />
     </button>
-  );
-}
-
-function LibraryChip({ contentID, title }: { contentID: string; title: string }) {
-  return (
-    <ViewTransitionLink
-      to={`/item/${encodeURIComponent(contentID)}`}
-      aria-label={`Open ${title} in library`}
-      className="glass-chip text-foreground focus-visible:ring-ring pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.14em] uppercase transition-colors hover:border-white/40 focus-visible:ring-2 focus-visible:outline-none"
-    >
-      <Library className="size-3 shrink-0" strokeWidth={2.4} aria-hidden />
-      Library
-    </ViewTransitionLink>
   );
 }

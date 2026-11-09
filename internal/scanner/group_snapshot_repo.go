@@ -72,6 +72,38 @@ func (r *ScannedGroupRepository) Get(
 	return group, nil
 }
 
+// GetForItem returns the scanned group of contentID's files in folderID, as
+// the scanner read it from the folder and file names. When the item's files
+// there span several groups it returns the one holding most of them, then the
+// most recently seen. It returns nil when the item has no grouped file there.
+// It reads the files rather than media_item_groups, which the scanner does not
+// record for every item (an ID-anchored movie has none).
+func (r *ScannedGroupRepository) GetForItem(ctx context.Context, folderID int, contentID string) (*models.ScannedMediaGroup, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT `+scannedGroupColumns+`
+		FROM (
+			SELECT group_key_version AS file_key_version, content_group_key AS file_group_key, COUNT(*) AS files
+			FROM media_files
+			WHERE media_folder_id = $1 AND content_id = $2 AND missing_since IS NULL
+			GROUP BY group_key_version, content_group_key
+		) f
+		JOIN scanned_media_groups g
+		  ON g.media_folder_id = $1
+		 AND g.group_key_version = f.file_key_version
+		 AND g.content_group_key = f.file_group_key
+		ORDER BY f.files DESC, g.last_seen_at DESC, g.content_group_key ASC
+		LIMIT 1
+	`, folderID, contentID)
+	group, err := scanScannedGroup(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return group, nil
+}
+
 // ListByFolder pages one folder's scanned groups, newest first. An empty
 // state lists every state; a non-empty search keeps only groups whose
 // observed root path, base title or sample file path contains it,

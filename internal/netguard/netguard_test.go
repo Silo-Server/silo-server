@@ -160,6 +160,24 @@ func TestClientChecksEveryRedirectHop(t *testing.T) {
 	}
 }
 
+// DialTimeout wraps the guarded dialer, so the address check still applies.
+func TestDialTimeoutKeepsAddressCheck(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	client := &http.Client{Timeout: 5 * time.Second, Transport: NewTransport(DialTimeout(time.Second))}
+
+	if err := get(WithPrivateAccess(context.Background()), client, server.URL); err != nil {
+		t.Fatalf("trusted request: %v", err)
+	}
+	if err := get(context.Background(), client, server.URL); !errors.Is(err, ErrPrivateDestination) {
+		t.Fatalf("untrusted request error = %v, want ErrPrivateDestination", err)
+	}
+	err := get(WithPrivateAccess(context.Background()), client, "http://169.254.169.254/latest/meta-data/")
+	if !errors.Is(err, ErrBlockedDestination) {
+		t.Fatalf("metadata request error = %v, want ErrBlockedDestination", err)
+	}
+}
+
 // A trusted request leaves an idle keep-alive connection behind; an untrusted
 // request to the same address must dial again, and so be refused.
 func TestUntrustedRequestDoesNotReuseTrustedConnection(t *testing.T) {

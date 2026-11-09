@@ -39,6 +39,16 @@ func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (us
 	if err != nil {
 		return dto, err
 	}
+	// The image route finds the profile through stored sessions, so a session
+	// synthesized for an sa_ API key (no login session, never stored) gets no
+	// tag rather than one whose image would 404.
+	if h.avatars != nil && session.LoginSessionID != "" {
+		profile, err := store.GetProfile(ctx, session.ProfileID)
+		if err != nil {
+			return dto, err
+		}
+		dto.PrimaryImageTag = h.avatars.primaryImageTag(profile)
+	}
 	raw, err := store.GetSetting(ctx, configurationKey(session.ProfileID))
 	if err != nil {
 		return dto, err

@@ -1767,7 +1767,24 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, seasonalThemeFixtureCases()...)
 	cases = append(cases, personalListMembershipFixtureCases()...)
 	cases = append(cases, sectionItemLimitFixtureCases()...)
-	return append(cases, adminCatalogItemsFixtureCases()...)
+	cases = append(cases, adminCatalogItemsFixtureCases()...)
+	cases = append(cases, adminCatalogMatchHintsFixtureCases()...)
+	return append(cases, deviceLoginBindingFixtureCases()...)
+}
+
+// deviceLoginBindingFixtureCases pin the session binding a device-login
+// lookup reports and the poll refusal of a bound request without its secret.
+func deviceLoginBindingFixtureCases() []fixtureCase {
+	return []fixtureCase{
+		{name: "get_device_login_bound", operationID: "getDeviceLogin",
+			scenario: "The lookup of a request started with a session binding carries the binding, which a sender compares with the binding of the request whose code the person compared.",
+			method:   http.MethodGet, path: "/api/v2/auth/device?code=1357-2468",
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DeviceLogin"},
+		{name: "poll_device_login_binding_mismatch", operationID: "pollDeviceLogin",
+			scenario: "A poll of a bound request without the secret its binding was made from: 403 under the domain's own type, and the request is left as it was.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/poll", body: `{"device_code":"dev-bound"}`,
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/Problem"},
+	}
 }
 
 // sectionItemLimitFixtureCases pin the item_limit bound of the aggregate

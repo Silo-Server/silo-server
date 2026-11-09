@@ -113,6 +113,14 @@ capabilities. A different value is `409 installation_changed`: refresh
 capabilities and start a new attempt. There is no admission step and no
 per-account enrollment.
 
+## Watch library context
+
+On `GET /api/v2/watch/{id}`, `library_id` accepts an episode when either the
+episode or its series belongs to that library. The series must still pass the
+viewer's access checks. The response includes every file the viewer may access,
+even if the selected library has none of that episode's files;
+`catalog.scope_versions_to_library` does not narrow watch responses.
+
 ## Watch artwork
 
 `GET /api/v2/watch/{id}` includes optional `poster_url`, `poster_thumbhash`,

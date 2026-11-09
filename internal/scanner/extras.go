@@ -326,15 +326,15 @@ func (c *extrasClassifier) probeOwner(owner string) bool {
 // names dir or a folder above it so its caller can abandon that folder too.
 func (c *extrasClassifier) walkMedia(dir string, depth int, inherited []ignoreRules, visit func(file string) (stop bool, skip string)) (bool, string) {
 	mode := walkModeFor(c.folderType)
-	if isIgnoredDirectoryPath(dir) || (mode == walkModeMovie && shouldSkipMovieSupplementalDir(dir)) {
+	if mode == walkModeMovie && shouldSkipMovieSupplementalDir(dir) {
 		return false, ""
 	}
 	entries, err := fspath.ReadDir(dir)
 	if err != nil {
 		return false, ""
 	}
-	rules, ignored := dirIgnoreRules(inherited, dir, dir, entries)
-	if ignored {
+	rules, ignored, err := dirIgnoreRules(inherited, dir, dir, entries)
+	if err != nil || ignored {
 		return false, ""
 	}
 	for _, entry := range entries {
@@ -356,7 +356,7 @@ func (c *extrasClassifier) walkMedia(dir string, depth int, inherited []ignoreRu
 			}
 		}
 		if isDir {
-			if depth > 1 {
+			if depth > 1 && !SkippedDirName(entry.Name()) {
 				if stop, skip := c.walkMedia(child, depth-1, rules, visit); stop {
 					return true, ""
 				} else if skip != "" && skip != child {

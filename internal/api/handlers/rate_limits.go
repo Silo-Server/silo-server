@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"math"
 	"net/http"
 	"strings"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -269,13 +272,22 @@ func (h *RateLimitHandler) UpdateAdminRateLimitConfig(ctx context.Context, req A
 	if !changed {
 		return AdminRateLimitUpdateResult{Status: "ok"}, nil
 	}
+	restartRequired, err := h.rateLimitsChanged(ctx)
+	if err != nil {
+		return AdminRateLimitUpdateResult{}, err
+	}
+	return AdminRateLimitUpdateResult{Status: "ok", RestartRequired: restartRequired}, nil
+}
 
+// rateLimitsChanged applies a committed rate-limit change: it reloads the
+// limiter, flags a restart the change needs, and tells other servers.
+func (h *RateLimitHandler) rateLimitsChanged(ctx context.Context) (bool, error) {
 	// Another process may have committed a newer settings mutation after this
 	// request released the mutation lock. Base post-commit behavior on a fresh
 	// snapshot so reordered requests converge on the latest durable state.
 	latest, err := h.store.GetAll(ctx)
 	if err != nil {
-		return AdminRateLimitUpdateResult{}, apiError(http.StatusInternalServerError, "internal_error", "Config saved but latest settings could not be loaded")
+		return false, apiError(http.StatusInternalServerError, "internal_error", "Config saved but latest settings could not be loaded")
 	}
 	latestConfig := ratelimit.ConfigFromSettings(latest)
 	latestBackend := strings.TrimSpace(strings.ToLower(latest["ratelimit.backend"]))
@@ -296,7 +308,7 @@ func (h *RateLimitHandler) UpdateAdminRateLimitConfig(ctx context.Context, req A
 		// Reload reads the store again rather than applying the request-local
 		// merge, ensuring the middleware receives the latest committed config.
 		if err := h.mw.Reload(ctx); err != nil {
-			return AdminRateLimitUpdateResult{}, apiError(http.StatusInternalServerError, "internal_error", "Config saved but reload failed")
+			return false, apiError(http.StatusInternalServerError, "internal_error", "Config saved but reload failed")
 		}
 	}
 	if restartRequired {
@@ -310,7 +322,59 @@ func (h *RateLimitHandler) UpdateAdminRateLimitConfig(ctx context.Context, req A
 		})
 	}
 
-	return AdminRateLimitUpdateResult{Status: "ok", RestartRequired: restartRequired}, nil
+	return restartRequired, nil
+}
+
+// serverSettingsTxUpdater writes settings in the caller's transaction.
+type serverSettingsTxUpdater interface {
+	UpdateAtomicWithTx(ctx context.Context, tx pgx.Tx, update func(current map[string]string, tx pgx.Tx) (map[string]string, error)) error
+}
+
+// ApplyRateLimitSettingsInTx writes restored rate-limit settings (ratelimit.*)
+// in the caller's transaction with the checks UpdateAdminRateLimitConfig
+// applies: the limits as a whole must validate, the backend must be memory
+// or redis, and redis needs a configured Redis. check sees the settings as
+// stored under the lock first. The returned func runs once the transaction
+// commits.
+func (h *RateLimitHandler) ApplyRateLimitSettingsInTx(ctx context.Context, tx pgx.Tx, values map[string]string, check func(map[string]string) error) (func(context.Context), error) {
+	updater, ok := h.store.(serverSettingsTxUpdater)
+	if !ok || tx == nil {
+		return nil, apiError(http.StatusInternalServerError, "internal_error", "Settings store does not support caller transactions")
+	}
+	err := updater.UpdateAtomicWithTx(ctx, tx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		if check != nil {
+			if err := check(current); err != nil {
+				return nil, err
+			}
+		}
+		next := maps.Clone(current)
+		maps.Copy(next, values)
+		cfg := ratelimit.ConfigFromSettings(next)
+		if err := validateRateLimitConfig(cfg); err != nil {
+			return nil, apiError(http.StatusBadRequest, "invalid_rate_limit_config", err.Error())
+		}
+		backend := strings.TrimSpace(strings.ToLower(next["ratelimit.backend"]))
+		if backend == "" {
+			backend = "memory"
+		}
+		if backend != "memory" && backend != "redis" {
+			return nil, apiError(http.StatusBadRequest, "invalid_rate_limit_config", "backend must be memory or redis")
+		}
+		if backend == "redis" && !redisConfiguredSettings(current, h.redisBootstrapAvailable) {
+			return nil, apiError(http.StatusBadRequest, "redis_not_configured", "configure a Redis URL before selecting the Redis rate-limit backend")
+		}
+		out := ratelimit.ConfigSettings(cfg)
+		out["ratelimit.backend"] = backend
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return func(ctx context.Context) {
+		if _, err := h.rateLimitsChanged(ctx); err != nil {
+			slog.WarnContext(ctx, "applying restored rate limits failed", "component", "ratelimit", "error", err)
+		}
+	}, nil
 }
 
 func mergeRateLimitConfig(existing ratelimit.Config, req rateLimitConfigRequest) (ratelimit.Config, error) {

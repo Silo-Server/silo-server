@@ -462,7 +462,6 @@ export default function LibraryPage() {
             <LibraryBrowse
               libraryId={id}
               libraryType={libraryType || "mixed"}
-              boxSetsEnabled={library?.box_sets_enabled === true}
               browseType={browseType}
               queryDefinition={queryDefinition}
               onBrowseTypeChange={handleBrowseTypeChange}

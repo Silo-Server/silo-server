@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -47,6 +48,12 @@ type batchEpisodeFileProvider interface {
 type overlayFileProvider interface {
 	ListOverlayFilesByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaFile, error)
 	ListOverlayFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
+}
+
+// episodeListFileProvider loads only the file fields a season's episode list
+// renders: access, version rows, the unreadable flag, and overlay badges.
+type episodeListFileProvider interface {
+	ListEpisodeListFilesByEpisodeIDs(ctx context.Context, episodeIDs []string) (map[string][]*models.MediaFile, error)
 }
 
 type MetadataRefreshRequester interface {
@@ -259,12 +266,8 @@ func (h *ItemsHandler) maybeRequestStaleDetailMetadataRefresh(ctx context.Contex
 			h.maybeRequestStaleSeasonMetadataRefresh(ctx, detail.ContentID, episodes)
 		}
 	case "series":
-		if h.itemRepo == nil {
-			return
-		}
-		item, err := h.itemRepo.GetByID(ctx, detail.ContentID)
-		if err == nil && item != nil && item.EpisodeMetadataIncomplete {
-			h.requestStaleMetadataRefresh(ctx, "item", item.ContentID)
+		if detail.EpisodeMetadataIncomplete {
+			h.requestStaleMetadataRefresh(ctx, "item", detail.ContentID)
 		}
 	}
 }
@@ -322,12 +325,15 @@ type itemListResponse struct {
 	Studios       []string `json:"studios,omitempty"`
 	Networks      []string `json:"networks,omitempty"`
 	ContentRating string   `json:"content_rating,omitempty"`
-	// AdvisoryAge, AdvisorySource, and LogoURL carry the item's advisory and
-	// logo to the v2 card renderer. json:"-" because /api/v1 is frozen: the
-	// fields exist on the Go struct only, and apiv2 emits them under its own
-	// names.
+	// AdvisoryAge, AdvisorySource, the external IDs, and LogoURL carry the
+	// item's advisory, identity, and logo to the v2 card renderer. json:"-"
+	// because /api/v1 is frozen: the fields exist on the Go struct only, and
+	// apiv2 emits them under its own names.
 	AdvisoryAge            *int     `json:"-"`
 	AdvisorySource         string   `json:"-"`
+	ImdbID                 string   `json:"-"`
+	TmdbID                 string   `json:"-"`
+	TvdbID                 string   `json:"-"`
 	Status                 string   `json:"status"`
 	ShowStatus             string   `json:"show_status,omitempty"`
 	RatingIMDB             *float64 `json:"rating_imdb,omitempty"`
@@ -359,8 +365,6 @@ type itemListResponse struct {
 
 	// ParentArtwork reaches the v2 card only; v1 is frozen.
 	ParentArtwork EpisodeParentArtworkView `json:"-"`
-	// BoxSet describes a box set card (type box_set). Served by v2 only.
-	BoxSet *BoxSetView `json:"-"`
 }
 
 type sortMetricsResponse struct {
@@ -1025,6 +1029,9 @@ func itemListResponseShell(item *models.MediaItem, overlaySummary *models.Overla
 		RatingTMDB:        item.RatingTMDB,
 		RatingRTCritic:    item.RatingRTCritic,
 		RatingRTAudience:  item.RatingRTAudience,
+		ImdbID:            item.ImdbID,
+		TmdbID:            item.TmdbID,
+		TvdbID:            item.TvdbID,
 		OriginalLanguage:  item.OriginalLanguage,
 		Overview:          item.Overview,
 		PosterThumbhash:   item.PosterThumbhash,
@@ -1273,17 +1280,11 @@ func episodeResponseShell(ep *models.Episode, fallback episodeImageFallback, siz
 // buildEpisodeResponses converts episodes to API responses using batched
 // lookups — localization, media files, watch progress, and image presigning
 // each resolve in one round-trip for the whole list instead of per episode.
+// Localization rewrites only text fields, so the lookups keyed by episode and
+// series ID run alongside it.
 func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, episodes []*models.Episode) []episodeResponse {
 	filter := v.Access
 	size := filter.ImageSizeFor(imagesize.SlotStill)
-
-	if h.detailSvc != nil {
-		if localized, err := h.detailSvc.LocalizeEpisodeModels(ctx, episodes, filter); err == nil && len(localized) == len(episodes) {
-			episodes = localized
-		}
-	}
-
-	fallbacks := h.episodeImageFallbacks(ctx, episodes)
 
 	episodeIDs := make([]string, 0, len(episodes))
 	for _, ep := range episodes {
@@ -1291,8 +1292,29 @@ func (h *ItemsHandler) buildEpisodeResponses(ctx context.Context, v ItemViewer, 
 			episodeIDs = append(episodeIDs, ep.ContentID)
 		}
 	}
-	filesByEpisode := h.listEpisodeFiles(ctx, episodeIDs)
-	userData := h.listLeafUserData(ctx, v, episodeIDs)
+
+	var (
+		localized      []*models.Episode
+		localizedOK    bool
+		fallbacks      map[string]episodeImageFallback
+		filesByEpisode map[string][]*models.MediaFile
+		userData       map[string]*catalog.SeasonUserData
+		wg             sync.WaitGroup
+	)
+	if h.detailSvc != nil {
+		wg.Go(func() {
+			var err error
+			localized, err = h.detailSvc.LocalizeEpisodeModels(ctx, episodes, filter)
+			localizedOK = err == nil && len(localized) == len(episodes)
+		})
+	}
+	wg.Go(func() { fallbacks = h.episodeImageFallbacks(ctx, episodes) })
+	wg.Go(func() { filesByEpisode = h.listEpisodeListFiles(ctx, episodeIDs) })
+	wg.Go(func() { userData = h.listLeafUserData(ctx, v, episodeIDs) })
+	wg.Wait()
+	if localizedOK {
+		episodes = localized
+	}
 
 	resp := make([]episodeResponse, 0, len(episodes))
 	stillPaths := make([]string, 0, len(episodes))
@@ -1341,6 +1363,20 @@ func (h *ItemsHandler) listEpisodeFiles(ctx context.Context, episodeIDs []string
 	return files
 }
 
+// listEpisodeListFiles fetches the file fields the episode list renders,
+// falling back to full rows when the repository lacks that projection.
+func (h *ItemsHandler) listEpisodeListFiles(ctx context.Context, episodeIDs []string) map[string][]*models.MediaFile {
+	provider, ok := h.fileRepo.(episodeListFileProvider)
+	if !ok || len(episodeIDs) == 0 {
+		return h.listEpisodeFiles(ctx, episodeIDs)
+	}
+	files, err := provider.ListEpisodeListFilesByEpisodeIDs(ctx, episodeIDs)
+	if err != nil {
+		return nil
+	}
+	return files
+}
+
 func episodeFileResponses(files []*models.MediaFile, filter catalog.AccessFilter) []episodeFileResponse {
 	var resp []episodeFileResponse
 	for _, f := range files {
@@ -1361,6 +1397,9 @@ func episodeFileResponses(files []*models.MediaFile, filter catalog.AccessFilter
 	return resp
 }
 
+// episodeImageFallbacks loads the series artwork that stands in for a missing
+// episode still. episodeResponseShell reads it only for episodes without a
+// still of their own, so only their series are loaded.
 func (h *ItemsHandler) episodeImageFallbacks(ctx context.Context, episodes []*models.Episode) map[string]episodeImageFallback {
 	if h.itemRepo == nil || len(episodes) == 0 {
 		return map[string]episodeImageFallback{}
@@ -1368,7 +1407,7 @@ func (h *ItemsHandler) episodeImageFallbacks(ctx context.Context, episodes []*mo
 	seriesIDs := make([]string, 0, 1)
 	seen := make(map[string]struct{})
 	for _, ep := range episodes {
-		if ep == nil || strings.TrimSpace(ep.SeriesID) == "" {
+		if ep == nil || strings.TrimSpace(ep.SeriesID) == "" || strings.TrimSpace(ep.StillPath) != "" {
 			continue
 		}
 		if _, ok := seen[ep.SeriesID]; ok {
@@ -2345,6 +2384,9 @@ type AccessFilterOptions struct {
 	// ScopeFilesToLibrary also limits file versions to PresentationLibraryID;
 	// see catalog.AccessFilter.ScopeFilesToLibrary.
 	ScopeFilesToLibrary bool
+	// SeriesLibraryCoversEpisodes opens an episode under a library that holds
+	// its series; see catalog.AccessFilter.SeriesLibraryCoversEpisodes.
+	SeriesLibraryCoversEpisodes bool
 	// ImageSize is the artwork variant to presign; Unset picks defaults.
 	ImageSize imagesize.Size
 	// ImageWidths are per-slot target widths overriding ImageSize.
@@ -2360,20 +2402,21 @@ type AccessFilterOptions struct {
 func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilterOptions) (catalog.AccessFilter, error) {
 	if scope, ok := access.GetScope(ctx); ok {
 		return catalog.AccessFilter{
-			AllowedLibraryIDs:         scope.AllowedLibraryIDs,
-			DisabledLibraryIDs:        scope.DisabledLibraryIDs,
-			MaturityLimits:            scope.MaturityLimits,
-			MaxPlaybackQuality:        scope.MaxPlaybackQuality,
-			PresentationLibraryID:     opts.PresentationLibraryID,
-			ScopeFilesToLibrary:       opts.ScopeFilesToLibrary,
-			ProfilePreferredLanguage:  scope.PreferredMetadataLanguage,
-			MetadataLanguageOverrides: scope.MetadataLanguageOverrides,
-			SelectedFileID:            opts.SelectedFileID,
-			ImageSize:                 opts.ImageSize,
-			ImageWidths:               opts.ImageWidths,
-			UserID:                    apimw.GetUserID(ctx),
-			ProfileID:                 apimw.GetProfileID(ctx),
-			DeviceID:                  opts.DeviceID,
+			AllowedLibraryIDs:           scope.AllowedLibraryIDs,
+			DisabledLibraryIDs:          scope.DisabledLibraryIDs,
+			MaturityLimits:              scope.MaturityLimits,
+			MaxPlaybackQuality:          scope.MaxPlaybackQuality,
+			PresentationLibraryID:       opts.PresentationLibraryID,
+			ScopeFilesToLibrary:         opts.ScopeFilesToLibrary,
+			SeriesLibraryCoversEpisodes: opts.SeriesLibraryCoversEpisodes,
+			ProfilePreferredLanguage:    scope.PreferredMetadataLanguage,
+			MetadataLanguageOverrides:   scope.MetadataLanguageOverrides,
+			SelectedFileID:              opts.SelectedFileID,
+			ImageSize:                   opts.ImageSize,
+			ImageWidths:                 opts.ImageWidths,
+			UserID:                      apimw.GetUserID(ctx),
+			ProfileID:                   apimw.GetProfileID(ctx),
+			DeviceID:                    opts.DeviceID,
 		}, nil
 	}
 
@@ -2400,16 +2443,17 @@ func (h *ItemsHandler) ContextAccessFilter(ctx context.Context, opts AccessFilte
 	}
 
 	return catalog.AccessFilter{
-		AllowedLibraryIDs:     libraryIDs,
-		MaxPlaybackQuality:    maxPlaybackQuality,
-		PresentationLibraryID: opts.PresentationLibraryID,
-		ScopeFilesToLibrary:   opts.ScopeFilesToLibrary,
-		SelectedFileID:        opts.SelectedFileID,
-		ImageSize:             opts.ImageSize,
-		ImageWidths:           opts.ImageWidths,
-		UserID:                apimw.GetUserID(ctx),
-		ProfileID:             apimw.GetProfileID(ctx),
-		DeviceID:              opts.DeviceID,
+		AllowedLibraryIDs:           libraryIDs,
+		MaxPlaybackQuality:          maxPlaybackQuality,
+		PresentationLibraryID:       opts.PresentationLibraryID,
+		ScopeFilesToLibrary:         opts.ScopeFilesToLibrary,
+		SeriesLibraryCoversEpisodes: opts.SeriesLibraryCoversEpisodes,
+		SelectedFileID:              opts.SelectedFileID,
+		ImageSize:                   opts.ImageSize,
+		ImageWidths:                 opts.ImageWidths,
+		UserID:                      apimw.GetUserID(ctx),
+		ProfileID:                   apimw.GetProfileID(ctx),
+		DeviceID:                    opts.DeviceID,
 	}, nil
 }
 

@@ -809,12 +809,12 @@ const DASH = "—";
  */
 export const DISK_FILL_WARNING_PCT = 85;
 
-/** One derived reading, ready to render in a table cell or a stat tile. */
+/** One derived reading, ready to render in a table cell or a meter row. */
 export interface ResourceMetric {
   label: string;
   /** Rendered value, or a dash when `muted`. */
   value: string;
-  /** Short secondary line for the dashboard tiles; empty when there is none. */
+  /** Short secondary line for the dashboard card; empty when there is none. */
   detail: string;
   /** Hover text explaining the value, or why there is none. */
   title: string;
@@ -998,8 +998,7 @@ function describeMemory(system: HostSystemStats): ResourceMetric {
 
 /**
  * The fullest sampled mount, which for a transcode node is its scratch dir —
- * the only mount it samples. Reporting the worst rather than the first keeps
- * the same rule working on the API host, which also samples the media roots.
+ * the only mount it samples.
  */
 export function describeWorstDisk(disks: readonly HostDiskStats[]): ResourceMetric {
   const measured = disks
@@ -1056,9 +1055,8 @@ export type ResourceSamplePresentation =
   | {
       kind: "sampled";
       cpu: ResourceMetric;
+      /** Leads with the percentage so it reads on the same scale as CPU and GPU. */
       memory: ResourceMetric;
-      disk: ResourceMetric;
-      network: ResourceMetric;
       /** Busiest GPU's video engine; null when this host reports no GPU. */
       gpu: ResourceMetric | null;
       /** When the sample was taken, for a freshness label; null when unstamped. */
@@ -1087,9 +1085,12 @@ export function describeResourceSample(
     };
   }
 
+  const { cpu, memory } = describeSystemStats(system, resources.attribution);
   return {
-    ...describeSystemStats(system, resources.attribution),
     kind: "sampled",
+    cpu,
+    memory:
+      memory.fill === null ? memory : { ...memory, value: `${memory.fill}%`, detail: memory.value },
     stale: resources.stale === true || resourceSampleIsOld(resources, now),
     instanceID: resources.attribution?.instance_id?.trim() || null,
     processMemory: resources.attribution
@@ -1130,7 +1131,7 @@ function describeProcessMemory(attribution: ResourceAttribution, heap: boolean):
 /**
  * The busiest GPU's video engine, which is the one an operator asks about when
  * transcodes queue. Averaging would hide a saturated card behind an idle one.
- * Null when the host reports no GPU at all, so the tile is omitted rather than
+ * Null when the host reports no GPU at all, so the row is omitted rather than
  * showing a zero.
  */
 export function describeGPUBusy(gpu: readonly HostGPUStats[]): ResourceMetric | null {

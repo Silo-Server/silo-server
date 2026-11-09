@@ -21,11 +21,27 @@ expiration closes owned transports; process shutdown drains local FFmpeg
 sessions, cancels and waits for active progressive remux requests, and refuses
 new HLS or progressive-remux admission after the drain begins.
 
-Copy-video playlists retain actual FFmpeg fragment durations. A complete
-playlist inferred from source keyframes is not safe: restarting the HLS muxer
-can change its cut schedule, giving an existing segment URL different content.
-Clients seeking outside the produced window must negotiate a new playback
-transport at the requested source position.
+By default, copy-video playlists retain actual FFmpeg fragment durations. A
+complete playlist inferred from source keyframes is not safe in that mode:
+restarting the HLS muxer can change its cut schedule, giving an existing segment
+URL different content. Clients seeking outside the produced window must
+negotiate a new playback transport at the requested source position.
+
+The experimental `playback.copy_keyframe_playlist` server setting, off by
+default, adds a keyframe-planned mode. With it on, a fresh copy-video
+`POST /transcode/start` carries `keyframe_playlist: true` and the node echoes
+`keyframe_playlist: true` in the start response; the API rejects a missing echo
+and stops the transport. The echo confirms the node understood the request, not
+that it planned. A copy serves one complete playlist planned from the source's
+keyframes only when it starts at the beginning of the source, the duration is
+known, the keyframe index exists and records where the video ends, the plan
+fits within the synthetic playlist's 50,000-segment limit, and the node can
+record the plan in the session's output directory. Any other copy keeps
+FFmpeg's playlist. A keyframe-planned copy never seek-restarts. While FFmpeg is
+running, a request for a segment past the last one it produced waits up to 30
+seconds for the copy to get there. When FFmpeg has stopped, or the segment is
+behind the produced head and gone, the copy restarts from the beginning, so
+FFmpeg cuts the same segments.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.

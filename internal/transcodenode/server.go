@@ -420,7 +420,7 @@ type Server struct {
 	// against work admission. See healthStatus.
 	drainFence      sync.Mutex
 	drainedReported atomic.Bool
-	// trickplay admits one trickplay run at a time.
+	// trickplay admits up to playback.trickplay_node_capacity runs at once.
 	trickplay trickplayWork
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
 	// session may register after the shutdown drain has taken its snapshot.

@@ -28,13 +28,14 @@ func (s *Service) CreateRoomWithIdentity(ctx context.Context, id string, input C
 		return Snapshot{}, ErrInvalidSelection
 	}
 	now := s.now()
+	policy := s.initialGuestControlPolicy(ctx, input.HostUserID, input.HostProfileID)
 	var row *Room
 	var err error
 	for range 3 {
 		row, _, err = store.CreateRoomOnce(ctx, Room{
 			ID: id, Code: randomToken(8), JoinToken: randomToken(24), HostUserID: input.HostUserID, HostProfileID: input.HostProfileID,
 			Phase: RoomPhaseLobby, PlaybackState: RoomPlaybackStateIdle, SelectionMode: input.SelectionMode,
-			GuestControlPolicy: GuestControlPolicyHostOnly, IsPaused: true, AnchorUpdatedAt: now, Generation: 1, CreatedAt: now,
+			GuestControlPolicy: policy, IsPaused: true, AnchorUpdatedAt: now, Generation: 1, CreatedAt: now,
 		})
 		if err == nil {
 			break

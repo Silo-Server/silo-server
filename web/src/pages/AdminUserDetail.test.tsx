@@ -99,6 +99,7 @@ vi.mock("@/hooks/queries/admin/userActivity", () => ({
   useAdminUserLiveSessions: () => ({ data: mocks.live, isError: false }),
   useAdminUserDownloadSummary: () => ({ data: undefined }),
   useAdminUserRequestUsage: () => ({ data: undefined }),
+  useAdminUserProfileActivity: () => ({ data: undefined }),
 }));
 vi.mock("@/hooks/queries/admin/accessGroups", () => ({
   useAccessGroups: () => ({

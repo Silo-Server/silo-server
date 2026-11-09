@@ -168,7 +168,10 @@ foreign-key deletion may detach a mapping while the retained dispatch locator pr
 source-filtered audit history. Terminal execution state cannot be overwritten.
 
 The admin enqueue lock order is source, then mapping. Personal enqueue locks its
-optional source, account/profile pair, and login session in that order. Claims and ordinary progress or
+optional source, account/profile pair, a per-account advisory lock, and login session in
+that order. Under the advisory lock it refuses a new personal run while the account already
+has one queued or running: a personal run can name any server, and the worker slots are
+shared by every account, so one account holds at most one of them. Claims and ordinary progress or
 terminal transitions lock the run without acquiring a mapping admission lock. Mapping
 configuration edits use the same source-before-mapping order. The admission trigger
 performs its active-run lookup after the mapping lock wait; a PostgreSQL regression test

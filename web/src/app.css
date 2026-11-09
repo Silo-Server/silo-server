@@ -208,26 +208,31 @@
     opacity: 0;
   }
 }
+/* Hero backdrop drift: a slow pan over a fixed overscan. The scale stays
+   constant on purpose. Firefox redraws an element whose scale is animating at
+   each new size and lands it on whole pixels, so a slow zoom stutters there.
+   Each pan stays inside its overscan (3% a side at 1.06, 2% at 1.04), so the
+   frame never shows an edge. */
 @keyframes ken-burns-a {
-  0% {
-    transform: scale(1) translate(0, 0);
+  0%,
+  100% {
+    scale: 1.06;
+    translate: 0 0;
   }
   50% {
-    transform: scale(1.06) translate(-0.5%, -0.3%);
-  }
-  100% {
-    transform: scale(1) translate(0, 0);
+    scale: 1.06;
+    translate: -1.5% -1%;
   }
 }
 @keyframes ken-burns-b {
-  0% {
-    transform: scale(1.04) translate(0.3%, 0);
+  0%,
+  100% {
+    scale: 1.04;
+    translate: 1% 0;
   }
   50% {
-    transform: scale(1) translate(-0.3%, 0.2%);
-  }
-  100% {
-    transform: scale(1.04) translate(0.3%, 0);
+    scale: 1.04;
+    translate: -1% 0.6%;
   }
 }
 
@@ -435,7 +440,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .sidebar-surface,
   .sidebar-inner,
   .sidebar-fade,
-  .sidebar-row-shift,
   .sidebar-main-stage,
   .impersonation-banner {
     transition: none;
@@ -1018,14 +1022,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      used to animate `max-width` now just fade; the frame does the hiding. */
   .sidebar-fade {
     transition: opacity var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
-  }
-  .sidebar-row-shift {
-    transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
-  }
-  .sidebar-surface[data-collapsed="true"] .sidebar-row-shift {
-    /* Slides the library rows left by their reserved chevron slot so their
-       icons line up with the rest of the rail's icon column. */
-    transform: translateX(var(--sidebar-row-shift, 0px));
   }
 
   /* ── Sidebar Scrollbar ────────────────────────────────────── */

@@ -280,7 +280,7 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 		}
 		collected := make(chan pollResult, 1)
 		go func() {
-			poll, err := devices.Poll(waitCtx, approvals[0].DeviceCode)
+			poll, err := devices.Poll(waitCtx, approvals[0].DeviceCode, "")
 			collected <- pollResult{poll, err}
 		}()
 		impersonated := make(chan error, 1)
@@ -335,15 +335,15 @@ func TestLoginSessionActivityAndAdminRevocationDB(t *testing.T) {
 			t.Fatalf("impersonation refresh after account-wide revoke = %v", err)
 		}
 		for _, request := range approvals {
-			poll, err := devices.Poll(ctx, request.DeviceCode)
+			poll, err := devices.Poll(ctx, request.DeviceCode, "")
 			if err != nil || poll.Status != DeviceLoginStatusDenied || poll.TokenPair != nil {
 				t.Fatalf("account-wide revoke allowed %s collection: %+v, %v", request.ClientPurpose, poll, err)
 			}
 		}
-		if poll, err := devices.Poll(ctx, pending.DeviceCode); err != nil || poll.Status != DeviceLoginStatusPending {
+		if poll, err := devices.Poll(ctx, pending.DeviceCode, ""); err != nil || poll.Status != DeviceLoginStatusPending {
 			t.Fatalf("unapproved request changed: %+v, %v", poll, err)
 		}
-		if poll, err := devices.Poll(ctx, unrelated.DeviceCode); err != nil || poll.Status != DeviceLoginStatusApproved || poll.TokenPair == nil {
+		if poll, err := devices.Poll(ctx, unrelated.DeviceCode, ""); err != nil || poll.Status != DeviceLoginStatusApproved || poll.TokenPair == nil {
 			t.Fatalf("other account's device approval lost: %+v, %v", poll, err)
 		}
 		if _, active, err := repo.ActiveSession(ctx, untouched, other); err != nil || !active {

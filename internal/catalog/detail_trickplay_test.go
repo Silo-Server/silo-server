@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -156,6 +157,42 @@ func TestTrickplayAvailabilityBatchesEpisodeDetails(t *testing.T) {
 	for _, detail := range details {
 		if len(detail.Versions) != 2 || detail.Versions[0].Trickplay == nil || detail.Versions[1].Trickplay == nil {
 			t.Fatalf("episode lost availability: %+v", detail.Versions)
+		}
+	}
+}
+
+// One item's detail keeps seek-bar and marker previews for the Jellyfin and
+// watch views, and leaves both out, without looking them up, when asked.
+func TestItemDetailSkipsPlaybackPreviewsOnlyWhenAsked(t *testing.T) {
+	f := newVersionsFixture(t)
+	kinds := []string{"movie", "episode", "extra"}
+	for _, kind := range kinds {
+		file := f.files.files[f.ids[kind]][0]
+		segment := models.EffectiveMarkerSegments(file)[0]
+		file.MarkerThumbnails = []models.MarkerThumbnail{{Identity: models.MarkerThumbnailIdentity(file, segment), MediaChapter: models.MediaChapter{ThumbnailPath: "markers/" + kind + ".jpg"}}}
+	}
+	counter := &trickplayLookupCounter{}
+	f.svc.SetTrickplayAvailability(counter)
+	for _, kind := range kinds {
+		for _, skip := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/skip=%t", kind, skip), func(t *testing.T) {
+				counter.calls = 0
+				detail, err := f.svc.GetItemDetailWithOptions(t.Context(), f.ids[kind], AccessFilter{}, ItemDetailOptions{SkipPlaybackPreviews: skip})
+				if err != nil {
+					t.Fatal(err)
+				}
+				i := slices.IndexFunc(detail.Versions, func(v FileVersion) bool { return v.FileID == 1 })
+				if i < 0 {
+					t.Fatalf("versions=%+v", detail.Versions)
+				}
+				version := detail.Versions[i]
+				if skip && (counter.calls != 0 || version.Trickplay != nil || version.MarkerPreviews != nil) {
+					t.Fatalf("skipped previews: lookups=%d trickplay=%v markers=%v", counter.calls, version.Trickplay, version.MarkerPreviews)
+				}
+				if !skip && (counter.calls != 1 || version.Trickplay == nil || len(version.MarkerPreviews) != 1) {
+					t.Fatalf("default previews: lookups=%d trickplay=%v markers=%v", counter.calls, version.Trickplay, version.MarkerPreviews)
+				}
+			})
 		}
 	}
 }

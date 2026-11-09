@@ -5615,7 +5615,8 @@
                     "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
-                    "opened_signal"
+                    "opened_signal",
+                    "session_binding"
                   ]
                 },
                 {
@@ -5698,7 +5699,8 @@
                     "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
-                    "opened_signal"
+                    "opened_signal",
+                    "session_binding"
                   ]
                 },
                 {
@@ -5802,7 +5804,8 @@
                     "jellyfin_quick_connect",
                     "protocol_versions",
                     "cancel",
-                    "opened_signal"
+                    "opened_signal",
+                    "session_binding"
                   ]
                 },
                 {

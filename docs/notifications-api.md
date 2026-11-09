@@ -1,9 +1,14 @@
 # Notification inbox API
 
-The v2 inbox uses the existing durable delivery rows and preference store. All
-routes below `/api/v2/notifications` require an authenticated, verified profile
-and retain the demo write guard. Websocket transport, email links, and
-push-registration protocol retain their existing shapes.
+The v2 inbox uses the existing durable delivery rows and preference store. The
+inbox routes in the table below require an authenticated, verified profile and
+retain the demo write guard. Other routes below `/api/v2/notifications` set their
+own authority: the tokenized email links, the Discord link callback and Android
+retirement are public, the Discord routes take an optional profile, and the Apple
+display fetch accepts its display token in place of `X-Profile-Id`. The sections
+below give the rules; push registration and retirement are in the
+[push guide](notifications-push-api.md). Websocket transport retains its existing
+shape.
 
 | Method and suffix | Result |
 | --- | --- |
@@ -171,8 +176,9 @@ token binds its own profile, ignores a supplied profile header, and requires a
 valid login session and a still-owned profile. It is rejected by other API v2
 operations. Query-string display credentials are not accepted. Existing
 pre-auth and post-auth rate limits apply. This read neither marks a notification
-read nor sends a push. Apple registration and display-token issuance retain
-the bridge contract until their separate migration is accepted.
+read nor sends a push. Apple registration and display-token issuance use
+`registerApplePushDevice`; see
+[Apple registration and display renewal](#apple-registration-and-display-renewal).
 
 The Apple notification extension is the consumer; Android does not call this
 Apple display endpoint. Jellyfin compatibility has no equivalent display-token
@@ -291,9 +297,10 @@ credentials and need no consumer change.
 `GET` and `PUT /api/v2/notifications/email-preferences` read and set the acting
 profile's email mode. The response retains `mode`, `custom_email`,
 `pending_email`, and `can_edit_address`. Each profile uses its own verified
-address; there is no login-account email fallback. Address verification and
-removal remain separate bridge operations pending their durable dispatch and
-callback migration.
+address; there is no login-account email fallback. Address verification requests
+and removal are separate v2 operations; see
+[Queued email verification caller](#queued-email-verification-caller) and
+[Clear the custom email address](#clear-the-custom-email-address).
 
 `GET` and `PUT /api/v2/notifications/discord-preferences` read and set the login
 account's Discord mode. Reads keep their optional-profile behavior; a supplied
@@ -349,8 +356,8 @@ Existing web lists drain bounded pages under captured authority and use scoped
 cache keys. Missing/repeated continuations and authority changes fail explicitly
 without returning a partial list. The current web display limit is 100 pages of
 100 records; exceeding it is an explicit error. Destination creation, updates,
-deletes, tests, and secret rotation remain separate bridge operations until their
-own guarded mutation migration. No native destination-management caller exists;
+deletes, tests, and secret rotation are separate v2 operations, described below.
+No native destination-management caller exists;
 Jellyfin compatibility has no equivalent list surface.
 
 ### API v2 administrator Discord credential test
@@ -368,8 +375,9 @@ The operation is `non_retryable`. The existing administrator test button capture
 authority, prevents overlapping tests, disables authentication replay, and refuses
 stale results after an account/profile switch. Apple and Android have no caller;
 Jellyfin compatibility has no corresponding operation. Discord link initiation,
-OAuth callbacks, and unlinking retain their bridge routes pending their separate
-migration.
+the OAuth callback and unlinking are separate v2 operations; see
+[API v2 Discord account-link consent and callback](#api-v2-discord-account-link-consent-and-callback)
+and [Unlink Discord](#unlink-discord).
 
 ### API v2 webhook and server-channel test delivery
 
@@ -390,7 +398,7 @@ services return 503. Responses are no-store. Both operations are `non_retryable`
 
 Existing web cards capture authority, prevent overlapping test calls, disable
 authentication replay, and suppress stale results. Configuration changes and
-secret rotation retain their bridge routes pending guarded mutation migration.
+secret rotation are separate v2 operations, described below.
 Apple and Android have no destination-test callers. Jellyfin compatibility has
 no corresponding operation.
 
@@ -415,8 +423,8 @@ no-referrer headers; pages never reflect the proof or internal error text.
 
 The one-click POST is `non_retryable`: the existing capability token can turn
 email off again after the profile later re-enables it. This migration adds no
-generation guard or delivery retry. Address request/clear transports remain on
-the bridge until their separate migration. Previously sent bridge links keep
+generation guard or delivery retry. Address requests and clearing are separate
+v2 operations. Previously sent bridge links keep
 working through the bridge release. Mail clients follow the emitted URLs;
 Apple and Android have no in-app callback consumer, and Jellyfin compatibility
 has no corresponding operation.
@@ -446,9 +454,9 @@ Register the exact v2 redirect URI in the Discord application's OAuth settings
 before using v2 linking. Keep the bridge redirect registered while bridge flows
 remain supported; their consent and exchange still use the v1 URI. This port
 preserves the existing link-state and account-link write semantics. It adds no
-generation guard for overlapping consent flows or unlinking; unlink migration
-remains separate. Apple and Android have no notification Discord-link callers,
-and Jellyfin compatibility has no equivalent operation.
+generation guard for overlapping consent flows or unlinking; see
+[Unlink Discord](#unlink-discord). Apple and Android have no notification
+Discord-link callers, and Jellyfin compatibility has no equivalent operation.
 
 ### API v2 destination creation
 
@@ -573,7 +581,7 @@ does not introduce an Apple v2 endpoint, native adoption or rollout authorizatio
 
 ## Apple registration and display renewal
 
-`GET /api/v2/devices/push/apple/capabilities` reports `ordered_apple_v1` and local
+`GET /api/v2/devices/push/apple/capabilities` reports local
 `registration_available`. Availability does not assert provider delivery or that
 all serving nodes have completed the guarded-writer rollout.
 
@@ -619,9 +627,9 @@ not enable it. The browser has no Apple-registration caller.
 
 ## Durable email verification storage prerequisite
 
-The retained address-request route still uses the bridge flow. Its v2 port
-requires durable dispatch: replacing a pending token and sending inline would
-invalidate an earlier link and send again after a lost HTTP response.
+The v2 address request (`requestNotificationEmailVerification`) uses durable
+dispatch, because replacing a pending token and sending inline would invalidate an
+earlier link and send again after a lost HTTP response.
 
 The email repository now supports a client-created verification intent UUID,
 bound to its original account, profile and normalized address. Admission locks
@@ -649,15 +657,16 @@ requests from recreating pending state.
 The migration must precede guarded writers on every serving node. After a profile
 has admitted a durable intent, the bridge's inline request path returns
 `email_verification_upgrade_required` rather than overwriting its pending token.
-Unadopted profiles retain the bridge behavior. This prerequisite does not wire a
-v2 route, web caller or sender, and must not be activated without the dispatch and
-caller work. The table's Down operation is not an online rollback protocol.
+Unadopted profiles retain the bridge behavior. The storage step alone wires no v2
+route, web caller or sender; the dispatch and caller sections below add them. The
+table's Down operation is not an online rollback protocol.
 
-Future dispatch must check current pending hash, expiry, account/profile authority
+Dispatch checks the current pending hash, expiry, account/profile authority
 and message ownership under its claim before sending. Queued work cannot authorize
 a send after clear, replacement or profile deletion. Retained receipts must survive
-payload cleanup; no retention or worker lease policy is introduced here. The outbox
-currently has no dispatch state, automatic retries or recovery worker.
+payload cleanup; no retention or worker lease policy is introduced here. Dispatch
+state, retries and recovery are described under
+[Email verification dispatch](#email-verification-dispatch).
 
 SMTP has no provider idempotency key and a failed connection cannot always establish
 whether the server accepted the message. Durable admission therefore does not imply
