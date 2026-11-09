@@ -16,13 +16,13 @@ const (
 // AdminNotificationPushService is the existing outbox-backed test dispatch.
 // Each call creates a new test attempt; an HTTP retry is a new send request.
 type AdminNotificationPushService interface {
-	SendApplePushTest(context.Context, string, string) (*notifications.ApplePushTestResult, error)
-	SendAndroidPushTest(context.Context, string, string) (*notifications.ApplePushTestResult, error)
+	SendApplePushTest(ctx context.Context, userID int, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error)
+	SendAndroidPushTest(ctx context.Context, userID int, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error)
 }
 
 type AdminNotificationPushTestInput struct {
 	Body struct {
-		ProfileID      ID `json:"profile_id" minLength:"1"`
+		ProfileID      ID `json:"profile_id" minLength:"1" doc:"A profile on the authenticated account. A profile or device on another account answers 404, as a device that does not exist does."`
 		ServerDeviceID ID `json:"server_device_id,omitempty"`
 	}
 }
@@ -60,7 +60,7 @@ func registerAdminNotificationPush(reg *Registry) {
 			if platform.apple {
 				send = svc.SendApplePushTest
 			}
-			view, err := send(ctx, string(in.Body.ProfileID), string(in.Body.ServerDeviceID))
+			view, err := send(ctx, claimsFrom(ctx).UserID, string(in.Body.ProfileID), string(in.Body.ServerDeviceID))
 			if err != nil {
 				switch {
 				case errors.Is(err, notifications.ErrPushDeliveryInvalid):

@@ -194,6 +194,11 @@ The body requires `profile_id` and optionally selects `server_device_id`; both
 identifiers are strings. An omitted device selector retains the existing
 platform-specific device selection behavior.
 
+The target is always on the caller's own account, any profile on it. Profile IDs
+such as the legacy `default` repeat across accounts, so a profile ID alone could
+otherwise select another person's phone. Another account's profile or device
+answers the same 404 as a device that does not exist, and no push is sent.
+
 Each request calls the existing test dispatcher once. It creates and claims a
 new outbox attempt, invokes the configured sender, and returns HTTP 200 with
 `attempt_id`, `push_device_id`, `server_device_id`, `outcome`, and any existing

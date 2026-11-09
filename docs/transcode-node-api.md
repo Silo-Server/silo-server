@@ -75,6 +75,23 @@ so a node that predates the echo never serves fMP4 under a plan that promises
 MPEG-TS. Recipe cards and signed reconstruction claims (`cvts`) carry the flag,
 so reconstruction, seek restarts, and rehoming keep it.
 
+## Copied audio codec
+
+`copy_audio_codec` on `POST /transcode/start` names the source codec of the
+audio track that `target_codec_audio: "copy"` keeps. When that track is AAC and
+the segments are fMP4, the node adds `aac_adtstoasc`, because fMP4 can't hold
+the ADTS framing that AAC from MPEG-TS uses. The node echoes the codec in the
+start response. For copied AAC into fMP4, protocol-v3 and jellycompat starts
+and protocol-v3 rehoming reject a missing or different echo and stop the
+transport, so they never start that stream on a node that predates the field.
+The receipt is checked only on `POST /transcode/start`: a jellycompat move and
+a node rebuilding a lost session from its token or stored recipe don't check
+it, so an older node reached that way still fails after the first segment. The
+check applies to every copied AAC track, including MKV and MP4 sources whose
+AAC an older node copies correctly without the filter, so update transcode
+nodes before the API server. MPEG-TS segments and other copied codecs don't need the echo. Recipe
+cards and signed reconstruction claims (`cac`) carry the codec.
+
 ## Subtitle renditions
 
 A node that advertises the `hls_subtitle_rendition_v1` transport feature

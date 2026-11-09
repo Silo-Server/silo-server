@@ -2989,8 +2989,8 @@ func TestServiceConfirmedStopSerializesConcurrentConfirmation(t *testing.T) {
 }
 
 func TestConfirmedStopLeaseExceedsDispatchTimeout(t *testing.T) {
-	if confirmedStopLease <= confirmedStopDispatchTimeout {
-		t.Fatalf("confirmed stop lease %s must exceed dispatch timeout %s", confirmedStopLease, confirmedStopDispatchTimeout)
+	if confirmedStopLease <= ConfirmedStopDispatchTimeout {
+		t.Fatalf("confirmed stop lease %s must exceed dispatch timeout %s", confirmedStopLease, ConfirmedStopDispatchTimeout)
 	}
 }
 

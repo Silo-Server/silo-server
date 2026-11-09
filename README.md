@@ -164,18 +164,31 @@ an issue useful.
 
 ## Supporting Silo
 
-Silo is developed in spare time and funded out of pocket, and will stay free and
-open source. [GitHub Sponsors](https://github.com/sponsors/quick104) covers AI
-development tooling (Claude, Codex), push-notification relay infrastructure, and
-future project costs. Bug reports, code, and documentation help just as much.
+Silo is free and open source, and it will stay that way. It's built in spare
+time and paid for out of pocket.
 
-Code review is supported by [Macroscope](https://macroscope.com) through its
-open source program.
+<p align="center">
+  <a href="https://github.com/sponsors/quick104"><img alt="Sponsor Silo on GitHub" src="https://img.shields.io/badge/sponsor-GitHub%20Sponsors-EA4AAA?style=for-the-badge&amp;logo=githubsponsors&amp;logoColor=white"></a>
+</p>
 
-<p>
+Sponsorship pays for AI development tooling (Claude, Codex), the
+push-notification relay, and future project costs. You can help just as much
+without spending anything:
+
+- **Report bugs** with steps to reproduce on
+  [GitHub Issues](https://github.com/Silo-Server/silo-server/issues).
+- **Help other users** on [Discord](https://discord.gg/siloserver).
+- **Improve the docs** at [siloserver.org](https://siloserver.org/docs).
+- **Contribute code** by following [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Sponsors
+
+<p align="center">
   <a href="https://macroscope.com">
     <img alt="Sponsored by Macroscope" src="assets/macroscope-banner.png" width="400">
   </a>
+  <br>
+  <sub>Code review is supported by <a href="https://macroscope.com">Macroscope</a> through its open source program.</sub>
 </p>
 
 ## License and trademarks

@@ -3,6 +3,7 @@ package jellycompat
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -53,14 +54,14 @@ func StartTerminalScrobbleRecovery(
 }
 
 func recoverPendingTerminalScrobbles(ctx context.Context, handler *PlaybackHandler) error {
-	_, _, err := recoverPendingTerminalScrobbleBatch(ctx, handler, nil)
+	_, _, err := recoverPendingTerminalScrobbleBatch(ctx, handler, nil, false)
 	return err
 }
 
 func recoverInitialPendingTerminalScrobbles(ctx context.Context, handler *PlaybackHandler) error {
 	seen := make(map[string]struct{})
 	for {
-		processed, batchSize, err := recoverPendingTerminalScrobbleBatch(ctx, handler, seen)
+		processed, batchSize, err := recoverPendingTerminalScrobbleBatch(ctx, handler, seen, true)
 		if err != nil {
 			return err
 		}
@@ -77,11 +78,14 @@ func recoverPendingTerminalScrobbleBatch(
 	ctx context.Context,
 	handler *PlaybackHandler,
 	seen map[string]struct{},
+	waitForDelivery bool,
 ) (int, int, error) {
 	pending, err := handler.playbackStore.ListPendingTerminals(ctx, compatTerminalRecoveryBatchSize)
 	if err != nil {
 		return 0, 0, err
 	}
+	var delivering sync.WaitGroup
+	defer delivering.Wait()
 	processed := 0
 	for _, session := range pending {
 		if err := ctx.Err(); err != nil {
@@ -108,13 +112,25 @@ func recoverPendingTerminalScrobbleBatch(
 				continue
 			}
 		}
-		handler.deliverCompatTerminal(
+		if waitForDelivery {
+			// The startup sweep of open scrobbles waits for the initial scan.
+			// Finishing while a recovered stop is still in flight would let the
+			// sweep send a second stop with stale progress, so the initial scan
+			// delivers its batch in parallel and waits for all of it.
+			delivering.Go(func() {
+				handler.deliverCompatTerminal(
+					ctx, session.ID, session.CompatToken, session.TerminalAuthoritative, session.ExpiresAt, 0, false,
+				)
+			})
+			continue
+		}
+		// A stalled provider holds its own stop, not the rest of the batch.
+		handler.deliverCompatTerminalDetached(
 			ctx,
 			session.ID,
 			session.CompatToken,
 			session.TerminalAuthoritative,
 			session.ExpiresAt,
-			0,
 			false,
 		)
 	}

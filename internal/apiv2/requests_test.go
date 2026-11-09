@@ -405,6 +405,49 @@ func requireTargets(t *testing.T, label string, rec *httptest.ResponseRecorder) 
 	return req
 }
 
+// Progress with no report time is left out rather than failing the response:
+// a zero timestamp cannot be marshaled, and one bad row would take down every
+// request on the page.
+func TestRequestDownloadWithoutReportTimeIsOmitted(t *testing.T) {
+	svc := fixtureRequests()
+	svc.requests[0].Status = mediarequests.StatusDownloading
+	svc.requests[0].Targets = []mediarequests.Target{
+		{ID: 1, Quality: "1080p", Status: mediarequests.StatusDownloading, CreatedAt: fixedTime(), UpdatedAt: fixedTime(),
+			Download: &mediarequests.DownloadProgress{Phase: mediarequests.DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 500}},
+		{ID: 2, Quality: "4k", Status: mediarequests.StatusDownloading, CreatedAt: fixedTime(), UpdatedAt: fixedTime(),
+			Download: &mediarequests.DownloadProgress{Phase: mediarequests.DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 250, UpdatedAt: fixedTime()}},
+	}
+	h := newTestHandler(t, requestDeps(svc))
+
+	rec := do(t, h, http.MethodGet, "/api/v2/requests/mine", "", requestOwner)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("listMyRequests: %d %s", rec.Code, rec.Body.String())
+	}
+	var mine struct {
+		Items []map[string]any `json:"items"`
+	}
+	decodeBody(t, rec.Body, &mine)
+	var item map[string]any
+	for _, candidate := range mine.Items {
+		if candidate["id"] == svc.requests[0].ID {
+			item = candidate
+		}
+	}
+	if item == nil {
+		t.Fatalf("request %s missing from %v", svc.requests[0].ID, mine.Items)
+	}
+	if _, present := item["download"]; present {
+		t.Fatalf("request download = %v, want it omitted", item["download"])
+	}
+	targets := item["targets"].([]any)
+	if _, present := targets[0].(map[string]any)["download"]; present {
+		t.Fatalf("target without report time: download = %v, want it omitted", targets[0])
+	}
+	if targets[1].(map[string]any)["download"] == nil {
+		t.Fatalf("target with report time lost its download: %v", targets[1])
+	}
+}
+
 // The profile-scoped request operations leave the download server details
 // out for a requester and keep them for an admin.
 func TestRequestDownloadServerDetailsAreForAdmins(t *testing.T) {

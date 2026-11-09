@@ -12620,7 +12620,8 @@
             "enum": [
               "pending",
               "matched",
-              "unmatched"
+              "unmatched",
+              null
             ],
             "type": [
               "string",
@@ -14856,7 +14857,7 @@
         "additionalProperties": false,
         "properties": {
           "profile_id": {
-            "description": "Opaque identifier",
+            "description": "A profile on the authenticated account. A profile or device on another account answers 404, as a device that does not exist does.",
             "examples": [
               "1"
             ],
@@ -47449,7 +47450,8 @@
             "description": "Playback ceiling; null removes it",
             "enum": [
               "1080p",
-              "2160p"
+              "2160p",
+              null
             ],
             "examples": [
               "1080p"
@@ -238630,7 +238632,7 @@
           },
           "required": true
         },
-        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, one run at a time, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
+        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on an approved input path, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -238696,7 +238698,7 @@
                 }
               }
             },
-            "description": "Node busy with another trickplay run, re-probing, or unconfigured"
+            "description": "Node at its trickplay run capacity, re-probing, or unconfigured"
           }
         }
       },
@@ -246124,6 +246126,9 @@
           "auto_fallback_ready": {
             "type": "boolean"
           },
+          "copy_audio_codec": {
+            "type": "string"
+          },
           "copy_fmp4_recipe_version": {
             "type": "string"
           },
@@ -246285,6 +246290,9 @@
         "additionalProperties": false,
         "properties": {
           "audio_recipe_version": {
+            "type": "string"
+          },
+          "copy_audio_codec": {
             "type": "string"
           },
           "copy_fmp4_recipe_version": {
