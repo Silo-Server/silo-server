@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ArrowUpDown, ChevronDown, Play } from "lucide-react";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import type { AudiobookChapter, AudiobookFile } from "@/lib/audiobooks/types";
 
 interface ChaptersSectionProps {
@@ -46,7 +46,7 @@ function formatChapterDuration(t: Translate, s: number): string {
   const sec = Math.floor(s % 60);
   return t("web.audiobooks.chapters.duration", {
     minutes: m,
-    seconds: String(sec).padStart(2, "0"),
+    seconds: numberText(String(sec).padStart(2, "0")),
   });
 }
 

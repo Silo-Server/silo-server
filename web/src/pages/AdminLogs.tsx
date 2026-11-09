@@ -729,7 +729,7 @@ const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry 
         {entry.impersonator_user_id
           ? t("web.admin.logs.audit.impersonatedActor", {
               impersonator: entry.impersonator_user_id,
-              user: String(entry.user_id),
+              user: entry.user_id ?? NO_VALUE,
             })
           : entry.user_id
             ? t("web.admin.logs.audit.actor", { user: entry.user_id })

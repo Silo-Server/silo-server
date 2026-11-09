@@ -18,7 +18,7 @@ import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiob
 import { coldResumePosition } from "@/pages/audiobooks/player/smartRewind";
 import { getAudiobookSmartRewind } from "@/pages/audiobooks/player/useAudiobookPrefs";
 import { hasMachineTranslation } from "./components/machineTranslation";
-import { useAppLanguage, useT, type Translate } from "@/i18n";
+import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 
 function formatSeconds(t: Translate, totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "";
@@ -28,13 +28,13 @@ function formatSeconds(t: Translate, totalSeconds: number): string {
   if (h > 0) {
     return t("web.detail.duration.hoursMinutes", {
       hours: h,
-      minutes: String(m).padStart(2, "0"),
+      minutes: numberText(String(m).padStart(2, "0")),
     });
   }
   if (m > 0) {
     return t("web.detail.mediaInfo.durationMs", {
       minutes: m,
-      seconds: String(s).padStart(2, "0"),
+      seconds: numberText(String(s).padStart(2, "0")),
     });
   }
   return t("web.detail.mediaInfo.durationS", { seconds: s });
