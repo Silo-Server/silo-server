@@ -12,9 +12,10 @@
 -- catalog reads instead of library_ids, so they get the list in both keys.
 --
 -- Rules whose libraries miss every library the collection shows in matched
--- nothing before. They are left as they are and now draw from the libraries
--- they name, which is what the editor and its preview already showed. An empty
--- list can't stand for "nothing" any more, since it means every library.
+-- nothing before. They now draw from the libraries they name, which is what
+-- the editor and its preview already showed. An empty list can't stand for
+-- "nothing" any more, since it means every library. Rules with library_ids are
+-- left as they are; legacy rules get the libraries they name in library_ids.
 WITH smart AS (
     SELECT
         lc.id,
@@ -69,12 +70,22 @@ effective AS (
         id,
         rules,
         legacy,
-        to_jsonb(ARRAY(
-            SELECT DISTINCT library_id
-            FROM unnest(placement) AS library_id
-            WHERE cardinality(ids) = 0 OR library_id = ANY (ids)
-            ORDER BY library_id
-        )) AS library_ids
+        to_jsonb(CASE
+            -- Legacy rules naming none of the collection's libraries keep the
+            -- libraries they name, written to library_ids as well: some readers
+            -- see only that key, and without it they would read every library.
+            WHEN legacy AND cardinality(ids) > 0 AND NOT (placement && ids) THEN ARRAY(
+                SELECT DISTINCT library_id
+                FROM unnest(ids) AS library_id
+                ORDER BY library_id
+            )
+            ELSE ARRAY(
+                SELECT DISTINCT library_id
+                FROM unnest(placement) AS library_id
+                WHERE cardinality(ids) = 0 OR library_id = ANY (ids)
+                ORDER BY library_id
+            )
+        END) AS library_ids
     FROM named
 ),
 pinned AS (

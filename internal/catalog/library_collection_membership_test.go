@@ -96,14 +96,21 @@ func TestResolveLibraryCollectionMembershipListsSmartMembersInDefaultSort(t *tes
 }
 
 func TestResolveLibraryCollectionMembershipNarrowsToScope(t *testing.T) {
+	// Shown in 5, 9 and the legacy single library 7, so every reader below
+	// with a scope can reach it unless a case says otherwise.
 	named := &models.LibraryCollection{
 		CollectionType:  "smart",
-		LibraryIDs:      []int{9},
+		LibraryIDs:      []int{5, 9},
 		QueryDefinition: json.RawMessage(`{"library_ids":[1,2]}`),
 	}
 	every := &models.LibraryCollection{
 		CollectionType:  "smart",
-		LibraryIDs:      []int{9},
+		LibraryIDs:      []int{5, 9},
+		QueryDefinition: json.RawMessage(`{}`),
+	}
+	legacy := &models.LibraryCollection{
+		CollectionType:  "smart",
+		LibraryID:       7,
 		QueryDefinition: json.RawMessage(`{}`),
 	}
 	for _, tc := range []struct {
@@ -120,6 +127,12 @@ func TestResolveLibraryCollectionMembershipNarrowsToScope(t *testing.T) {
 		{name: "every library, no scope", collection: every, scope: nil},
 		{name: "every library, scoped reader", collection: every, scope: []int{2, 5}, want: []int{2, 5}},
 		{name: "every library, empty scope", collection: every, scope: []int{}, outOfScope: true},
+		// A reader who can't reach a library it shows in lists none of it, as
+		// its page refuses them, though the rules match titles they may see.
+		{name: "shown only outside the scope", collection: named, scope: []int{1, 2}, outOfScope: true},
+		{name: "every library, shown only outside the scope", collection: every, scope: []int{2}, outOfScope: true},
+		{name: "legacy single library in scope", collection: legacy, scope: []int{2, 7}, want: []int{2, 7}},
+		{name: "legacy single library outside the scope", collection: legacy, scope: []int{2}, outOfScope: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, err := ResolveLibraryCollectionMembership(tc.collection, tc.scope)

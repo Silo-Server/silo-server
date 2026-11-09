@@ -1027,7 +1027,9 @@ library. The two are independent, so a collection can draw from every library an
 Movies tab. Every read of its titles (`/api/v2` and `/api/v1` collection items, home and library
 rows, the catalog `library_collection` source, Jellyfin BoxSet children and `item_count`) runs the
 rules over their own libraries and then applies the viewer's access: allowed libraries, hidden
-libraries and rating limits. A row on one library's page still lists only that library's titles.
+libraries and rating limits. A viewer who can reach none of the collection's own `library_ids` gets
+none of its titles from any of these reads, as its page refuses them. A row on one library's page
+still lists only that library's titles.
 `previewAdminCollection` previews the same rules with no viewer limits.
 
 Before this, reads narrowed the rules to the collection's `library_ids`, and rules naming no library
