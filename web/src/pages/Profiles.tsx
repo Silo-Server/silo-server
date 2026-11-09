@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { listUserLibraries, useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { sanitizeAuthRedirect } from "@/lib/authRedirect";
+import { canAddProfile } from "@/lib/profile-management";
 
 type ManagePurpose = "add" | "manage";
 /** What a PIN prompt on the picker unlocks. */
@@ -44,6 +45,7 @@ export default function Profiles() {
     maxAdvisoryAgeSupported,
     requireAdvisoryAgeSupported,
     requestsAllowedSupported,
+    maxProfiles,
   } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -249,17 +251,19 @@ export default function Profiles() {
             </button>
           </div>
         ))}
-        <button
-          type="button"
-          onClick={() => startManaging("add")}
-          disabled={preparingAdd}
-          className="group border-border hover:border-primary text-muted-foreground hover:text-foreground flex w-[148px] flex-col items-center gap-3 rounded-[1.75rem] border-2 border-dashed p-5 transition-all duration-150 hover:-translate-y-1 disabled:pointer-events-none disabled:opacity-60"
-        >
-          <span className="border-border group-hover:border-primary/40 flex h-20 w-20 items-center justify-center rounded-full border-2 transition-colors">
-            <Plus className="h-8 w-8" aria-hidden="true" />
-          </span>
-          <span className="text-sm font-medium">Add profile</span>
-        </button>
+        {canAddProfile(profiles.length, maxProfiles) ? (
+          <button
+            type="button"
+            onClick={() => startManaging("add")}
+            disabled={preparingAdd}
+            className="group border-border hover:border-primary text-muted-foreground hover:text-foreground flex w-[148px] flex-col items-center gap-3 rounded-[1.75rem] border-2 border-dashed p-5 transition-all duration-150 hover:-translate-y-1 disabled:pointer-events-none disabled:opacity-60"
+          >
+            <span className="border-border group-hover:border-primary/40 flex h-20 w-20 items-center justify-center rounded-full border-2 transition-colors">
+              <Plus className="h-8 w-8" aria-hidden="true" />
+            </span>
+            <span className="text-sm font-medium">Add profile</span>
+          </button>
+        ) : null}
       </div>
 
       <div className="relative z-10 mt-2 flex flex-wrap justify-center gap-3">

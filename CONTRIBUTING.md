@@ -2,9 +2,12 @@
 
 > [!IMPORTANT]
 > The most helpful way to contribute to Silo right now is a clear, accurate
-> issue. Pull requests are welcome from contributors who've had one merged in a
-> Silo repository, or when a maintainer asks for one. We close other pull
-> requests without review.
+> issue. Feature ideas go in
+> [Discussions → Ideas](https://github.com/Silo-Server/silo-server/discussions/categories/ideas),
+> not issues. Pull requests are welcome from contributors who've had one merged
+> in a Silo repository, or when a maintainer asks for one; a feature pull request
+> also needs an issue a maintainer has labeled `accepted`. Other pull requests
+> are closed automatically without review.
 
 ## Why we're asking for issues
 
@@ -31,15 +34,13 @@ Using Claude Code or Codex? The
 helps you collect these details and drafts the issue, then has independent
 reviewers check it against your evidence before you post it.
 
-- One problem or proposal per issue.
+- One problem per issue.
 - Describe what you observed before any theory about the cause.
 - Give exact steps to reproduce, expected and actual behavior, the Silo version
   or commit, your deployment, and the clients involved.
 - Paste raw logs rather than a summary. Redact credentials, tokens, personal
   data, and private media details, mark each redaction, and leave the rest
   untouched.
-- For a feature, describe the problem it solves and who it affects, and read
-  [Project non-goals](docs/non-goals.md) first.
 - If you found the cause or have a fix in mind, put it under Technical notes,
   apart from what you observed. Point to the files involved; a short code
   excerpt is fine. We may implement it differently.
@@ -49,28 +50,46 @@ reviewers check it against your evidence before you post it.
 Report security vulnerabilities privately with **Report a vulnerability** on
 the repository's Security tab, not in a public issue.
 
+## Suggest a feature
+
+Post feature ideas in
+[Discussions → Ideas](https://github.com/Silo-Server/silo-server/discussions/categories/ideas),
+not as issues. Search first and upvote an existing idea rather than repeating
+it. Describe the problem the feature solves and who it affects, and read
+[Project non-goals](docs/non-goals.md) first. Maintainers open an issue for an
+idea when they plan to build it or want help building it.
+
 ## Pull requests
 
 Pull requests are welcome from contributors who've had a pull request merged in
 a Silo repository, and from anyone a maintainer has asked for one, usually in
-an issue comment. The rest of this guide applies to those pull requests.
+an issue comment. A feature pull request (a `feat` title) from someone without
+triage or write access must also link, in its description, an issue in this
+repository that a maintainer has labeled `accepted`.
+The rest of this guide applies to those pull requests.
 
-We close other pull requests without review. That isn't a judgment of the
-work. If the problem still matters, open an issue for it and link the closed
-pull request; we may use the code as a reference.
+A workflow closes other pull requests without review when they open. That isn't
+a judgment of the work. If the problem still matters, open an issue for it, or
+post a feature idea in Ideas, and link the closed pull request; we may use the
+code as a reference. Once a feature's issue is labeled `accepted`, link it in
+a new pull request, or ask a maintainer to reopen the closed one. If a
+maintainer asked you for a pull request and you haven't had one merged yet, the
+workflow still closes it when it opens; the maintainer reopens it, and the
+check leaves it alone from then on.
 
 ## Before you start
 
 > [!IMPORTANT]
-> An open issue is not required before a pull request. State the problem in the
-> pull request itself: what breaks or is missing, who it affects, and why this
-> change is the right answer. Link an issue when one already covers the work.
+> Apart from feature pull requests, an open issue is not required before a pull
+> request. State the problem in the pull request itself: what breaks or is
+> missing, who it affects, and why this change is the right answer. Link an
+> issue when one already covers the work.
 
-Silo is pre-1.0 and moves quickly. For features, API or behavior changes, schema
+Silo is pre-1.0 and moves quickly. For API or behavior changes, schema
 migrations, large refactors, or anything else that changes product scope, opening
-an issue or discussion first is still the cheapest way to learn that the work is
-already in flight or outside scope. That is a judgment call, not a gate; the risk
-of a rejected pull request is yours. Read [Project non-goals](docs/non-goals.md)
+an issue first is still the cheapest way to learn that the work is already in
+flight or outside scope. That is a judgment call, not a gate; the risk of a
+rejected pull request is yours. Read [Project non-goals](docs/non-goals.md)
 and the relevant `docs/architecture/` material before proposing a capability.
 
 An open issue is not an unclaimed one. Before implementing someone else's issue,

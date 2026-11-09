@@ -33,9 +33,11 @@ server instance UUID that diagnostics also report. `protocol_versions` is
 `fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`,
 `bandwidth_probe_v1` and `connection_speed_v1`. With `connection_speed_v1` the
 response adds `bandwidth_probe_url`, the media-path probe below, on the origin
-the request arrived on. A reverse proxy that rewrites `Host` to a bare IP
-address and sends no `X-Forwarded-Host` leaves only the address it dialed;
-then the URL is on `server.public_url` when one is configured. When the origin
+the request arrived on, with `X-Forwarded-Proto` and `X-Forwarded-Host`
+counted only from a trusted proxy. A reverse proxy that rewrites `Host` to a
+bare IP address and names no single client host in `X-Forwarded-Host` as a
+trusted proxy leaves only the address it dialed; then the URL is on
+`server.public_url` when one is configured. When the origin
 is the server's local-network origin (a local route), clients send the probe with the saved server's credentials and trust,
 as they do for any request to that server. The response also adds the speed
 test schedule:

@@ -2385,7 +2385,9 @@ type fakePresence struct {
 	byTVDB    map[MediaType]map[int]int
 	got       []PresenceCandidate
 	// seasons holds per-season counts by series content ID.
-	seasons       map[string]map[int]SeasonCounts
+	seasons map[string]map[int]SeasonCounts
+	// seasonErr fails SeasonAvailability.
+	seasonErr     error
 	seasonLookups int
 }
 
@@ -2393,6 +2395,9 @@ func (f *fakePresence) SeasonAvailability(_ context.Context, seriesContentIDs []
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.seasonLookups++
+	if f.seasonErr != nil {
+		return nil, f.seasonErr
+	}
 	out := map[string]map[int]SeasonCounts{}
 	for _, id := range seriesContentIDs {
 		if counts, ok := f.seasons[id]; ok {

@@ -17,7 +17,12 @@ interface SubtitleSearchModalProps {
    * Called with the stored subtitle a download or upload created, so the
    * player can show its automatic sync while it runs.
    */
-  onSubtitleDownloaded: (subtitle?: StoredSubtitle) => void;
+  onSubtitleDownloaded: (
+    subtitle: StoredSubtitle | undefined,
+    source: "download" | "upload",
+  ) => void;
+  /** Let the player snapshot its current subtitle choice before the request. */
+  onDownloadStarted?: () => void;
   /** False hides the online-search section; manual upload stays available. */
   onlineSearchEnabled?: boolean;
 }
@@ -46,6 +51,7 @@ export function SubtitleSearchModal({
   isOpen,
   onClose,
   onSubtitleDownloaded,
+  onDownloadStarted,
   onlineSearchEnabled = true,
 }: SubtitleSearchModalProps) {
   const [selectedLang, setSelectedLang] = useState("en");
@@ -214,12 +220,13 @@ export function SubtitleSearchModal({
   );
 
   const handleUploadSuccess = useCallback(() => {
-    onSubtitleDownloaded(uploadedSubtitle.current);
+    onSubtitleDownloaded(uploadedSubtitle.current, "upload");
     handleClose();
   }, [onSubtitleDownloaded, handleClose]);
 
   const handleDownload = useCallback(
     async (result: SubtitleResult) => {
+      onDownloadStarted?.();
       const generation = downloadGeneration.current;
       const token = playerConfig.getAccessToken();
       const profile = playerConfig.getProfileId();
@@ -246,7 +253,7 @@ export function SubtitleSearchModal({
           },
         });
         if (!current()) return;
-        onSubtitleDownloaded(response?.subtitle);
+        onSubtitleDownloaded(response?.subtitle, "download");
         handleClose();
       } catch (err) {
         if (current()) setError(err instanceof Error ? err.message : "Download failed");
@@ -254,7 +261,7 @@ export function SubtitleSearchModal({
         if (current()) setDownloading(null);
       }
     },
-    [playerConfig, mediaFileId, onSubtitleDownloaded, handleClose],
+    [playerConfig, mediaFileId, onSubtitleDownloaded, onDownloadStarted, handleClose],
   );
 
   if (!isOpen) return null;

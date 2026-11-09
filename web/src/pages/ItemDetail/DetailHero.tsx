@@ -3,6 +3,7 @@ import { decodeThumbhash } from "@/lib/thumbhash";
 import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
+import { HeroBackdropArtwork } from "@/components/HeroBackdropArtwork";
 
 import "./detailLayout.css";
 import DetailOverview from "./components/DetailOverview";
@@ -87,11 +88,6 @@ export default function DetailHero({
   topNav,
 }: DetailHeroProps) {
   const {
-    loaded: backdropLoaded,
-    onLoad: onBackdropLoad,
-    onError: onBackdropError,
-  } = useImageLoaded(backdropUrl);
-  const {
     loaded: posterLoaded,
     onLoad: onPosterLoad,
     onError: onPosterError,
@@ -104,7 +100,6 @@ export default function DetailHero({
   // A plain-text context is the title's type; it shares one eyebrow line with
   // the studio or network. Richer context (an episode breadcrumb) keeps its own row.
   const eyebrowType = typeof context === "string" ? context : undefined;
-  const backdropPlaceholder = backdropThumbhash ? decodeThumbhash(backdropThumbhash) : "";
   const posterPlaceholder = posterThumbhash ? decodeThumbhash(posterThumbhash) : "";
   const isCompact = variant === "compact";
   const isViewportBounded = variant === "episode" || variant === "series" || variant === "season";
@@ -150,32 +145,11 @@ export default function DetailHero({
       {/* The artwork stops 1px short of the bottom edge, which the fade below
           covers solidly anyway. At a fractional hero height the edge pixel is
           only partly covered by the fade, and the artwork bled through as a line. */}
-      {(backdropUrl || backdropPlaceholder) && (
-        <div
-          className="hero-backdrop-artwork absolute inset-x-0 top-0 bottom-px"
-          style={{
-            ...(backdropPlaceholder
-              ? {
-                  backgroundImage: `url(${backdropPlaceholder})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center 20%",
-                }
-              : undefined),
-          }}
-        >
-          {backdropUrl && (
-            <img
-              key={imageIdentity(backdropUrl)}
-              src={backdropUrl}
-              alt=""
-              decoding="async"
-              className={`h-full w-full object-cover object-[center_20%] transition-opacity duration-300 ${backdropLoaded ? "opacity-100" : "opacity-0"}`}
-              onLoad={onBackdropLoad}
-              onError={onBackdropError}
-            />
-          )}
-        </div>
-      )}
+      <HeroBackdropArtwork
+        backdropUrl={backdropUrl}
+        backdropThumbhash={backdropThumbhash}
+        className="absolute inset-x-0 top-0 bottom-px"
+      />
 
       {/* Keep the detail treatment on three contained paint surfaces while
           preserving its original stacking: tint/left fade, ambient artwork

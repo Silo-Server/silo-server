@@ -1774,8 +1774,11 @@ worker acknowledges cancellation at its next boundary. Pending cancellation retu
 202, an already cancelled run returns 200, and completed or failed runs return
 409 `job_not_cancelable`. Already committed external
 history effects are not undone. Editing a source or mapping invalidates previously
-captured execution configuration rather than retargeting its run. Stale executions
-fail without automatic replay. See [History import execution](architecture/history-import-execution.md)
+captured execution configuration rather than retargeting its run. A stale or interrupted
+execution with a checkpoint returns to `queued` and resumes near where it stopped, with its
+counts so far; one without a checkpoint, or past five restarts without progress, fails.
+While a run is active, `fetched` counts the source items read so far, not the listing's
+total. See [History import execution](architecture/history-import-execution.md)
 for the persistence and cancellation boundaries. Run monitor errors and warnings use safe summaries; stored source
 credentials are never returned. The explicit Plex login exchange returns its newly
 issued token so the administrator can assign it to a source.
@@ -3368,6 +3371,14 @@ capabilities (installations, catalog entries, and the install, upload and update
 `base_url_optional` say which request server fields its plugin can do without; both are false
 when the plugin declares neither. For an installation they come from the capability stored at
 install or update, which is what routing reads.
+
+An installation whose last automatic update failed carries `update_failure`: the `version`
+Silo tried, the `reason` (the same administrator-facing text a manual update would show, or a
+generic line pointing at the server log; never a URL or checksum) and `failed_at`. The update
+check records it on the installation row, so every node returns it. It disappears when the
+installed version changes or a later check handles the plugin without failing; a check that
+cannot reach the plugin's repository leaves it in place. The frozen `/api/v1` view does not
+carry it.
 
 Both reads require an acting administrator and answer 503 when the
 plugin service or stores are not wired. The web plugins page and admin sidebar read these

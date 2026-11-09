@@ -117,3 +117,28 @@ func TestRangeTypeWithHDR10PlusKeepsDolbyVision(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamBitrateKbps(t *testing.T) {
+	tests := []struct {
+		name   string
+		stream Stream
+		want   int
+	}{
+		{name: "bit_rate", stream: Stream{BitRate: "640000"}, want: 640},
+		{name: "bit_rate wins over tag", stream: Stream{BitRate: "640000", Tags: map[string]string{matroskaBPSTag: "1"}}, want: 640},
+		// Matroska reports bit_rate N/A and keeps the rate in mkvmerge's tags.
+		{name: "matroska BPS tag", stream: Stream{BitRate: "N/A", Tags: map[string]string{matroskaBPSTag: "1509000"}}, want: 1509},
+		{name: "older BPS-eng tag", stream: Stream{Tags: map[string]string{matroskaBPSEngTag: "448000"}}, want: 448},
+		{name: "BPS-eng wins over BPS", stream: Stream{Tags: map[string]string{matroskaBPSEngTag: "448000", matroskaBPSTag: "640000"}}, want: 448},
+		{name: "unparseable tag", stream: Stream{Tags: map[string]string{matroskaBPSTag: "fast"}}, want: 0},
+		// A corrupt tag must stay unknown, not become a huge bitrate.
+		{name: "overflowing tag falls through", stream: Stream{Tags: map[string]string{matroskaBPSEngTag: "99999999999999999999", matroskaBPSTag: "640000"}}, want: 640},
+		{name: "implausible tag", stream: Stream{Tags: map[string]string{matroskaBPSTag: "3000000000000"}}, want: 0},
+		{name: "unknown", stream: Stream{}, want: 0},
+	}
+	for _, tt := range tests {
+		if got := StreamBitrateKbps(tt.stream); got != tt.want {
+			t.Errorf("%s: StreamBitrateKbps() = %d, want %d", tt.name, got, tt.want)
+		}
+	}
+}

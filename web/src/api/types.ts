@@ -847,6 +847,9 @@ export interface BrowseItem {
   play_content_id?: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
   title: string;
+  /** On a Continue Watching or Next Up row's card: in_progress or next_up. */
+  item_source?: string;
+  progress_updated_at?: string;
   series_id?: string;
   series_title?: string;
   season_number?: number | null;
@@ -4066,6 +4069,13 @@ export interface PluginRuntime {
   next_restart_at?: string;
 }
 
+/** The last automatic update Silo refused to install, and why. */
+export interface PluginUpdateFailure {
+  version: string;
+  reason: string;
+  failed_at: string;
+}
+
 export interface PluginInstallation {
   id: number;
   repository_id?: number | null;
@@ -4090,6 +4100,8 @@ export interface PluginInstallation {
   repo_url?: string;
   presentation?: PluginPresentation;
   updates_paused: boolean;
+  /** The last automatic update that failed; absent when the last check did not fail. */
+  update_failure?: PluginUpdateFailure | null;
   legacy_metadata_import_types?: string[];
   created_at?: string;
   updated_at?: string;

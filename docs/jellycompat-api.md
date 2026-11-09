@@ -377,6 +377,11 @@ request gets a video copy with the audio encoded when the profile accepts it
 and the encode changes the audio. When the audio is already AAC within the
 channel target, or the source has no audio, the video is encoded instead.
 
+Profile `VideoBitrate` and `AudioBitrate` conditions are in bits per second, as
+in Jellyfin; Silo stores track bitrates in kbps and converts them before
+comparing. When ffprobe reports no bitrate for a Matroska audio track (AAC,
+FLAC, Opus and TrueHD, for example), the scanner reads its `BPS` statistics tag
+(`BPS-eng` first).
 Unknown or excessive source bitrate prevents copying under a client ceiling.
 An automatic VideoToolbox bitrate must not override an explicit client cap.
 The server also applies the account's effective per-stream bitrate limit for

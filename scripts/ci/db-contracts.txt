@@ -49,6 +49,12 @@
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB
 
+# Locked season and episode fields survive refreshes, seed imports and a change of show.
+./internal/catalog TestSeasonEpisodeLockedFieldsSurviveUpsertsDB
+./internal/catalogseed TestSeedCarriesSeasonEpisodeLocksDB
+./internal/metadata TestIdentify_SeasonEpisodeLocksFollowTheShow
+./internal/metadata TestIdentify_SeasonEpisodeLocksClearOnEveryCorrectionPath
+
 # Movie box sets: grouping by viewer access and the minimum, grouped browse
 # and letters, search, sync bookkeeping, and collection artwork.
 ./internal/catalog TestBoxSetGroupsDB
@@ -56,6 +62,9 @@
 ./internal/catalog TestBoxSetCollectionsOfDisabledLibraryDB
 ./internal/catalog TestMovieBoxSetDB
 ./internal/catalog TestBoxSetCollectionArtworkDB
+
+# A corrected match empties an item's localized text, keeping locks and manual translations.
+./internal/catalog TestClearMatchTextDB
 
 # A watched special does not anchor Next Up for a series with regular seasons.
 ./internal/catalog TestNextUpSkipsSpecialAnchorsPostgres
@@ -94,6 +103,9 @@
 # Web-only hero rows: the web_only column keeps a page's hero banner off every
 # caller but the web on Home and library pages, and clears with the hero.
 ./internal/api/handlers TestWebOnlyHeroRowsDB
+
+# The v2 aggregate Home and library section reads leave out rows the viewer has nothing in.
+./internal/api/handlers TestAggregateSectionsOmitRowsWithNoAccessibleItemsDB
 
 # Scan membership reconciliation retries a transaction Postgres aborts as a deadlock victim.
 ./internal/catalog TestFolderMembershipReconciliationRetriesDeadlockDB
@@ -223,6 +235,11 @@
 # Verification delivery survives a lost persistence receipt with bounded retries.
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
+
+# Two accounts' profiles with the same id keep separate email settings and
+# addresses, and the upgrade resets a row they shared instead of guessing.
+./internal/notifications TestEmailPrefsStayOnTheAccountDB
+./internal/notifications TestEmailPrefsAccountKeyMigrationResetsSharedRowsDB
 
 # Legacy mobile registration protects account ownership under the installation lock.
 ./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
@@ -359,6 +376,7 @@
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
+./internal/notifications TestSendPushTestStaysOnTheCallersAccount
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
@@ -571,6 +589,10 @@
 # returns its row.
 ./internal/api/handlers TestPluginListsKeepWorkingWithAnUnreadableArchiveDB
 
+# A refused automatic plugin update stays on its installation until it is
+# cleared or the installed version changes.
+./internal/plugins TestInstallationStoreUpdateFailureDB
+
 # Autoscan poll markers restart from now, and poll at once, only when the upstream changes.
 ./internal/autoscan TestUpdateSourceMarkerReset
 ./internal/autoscan TestUpdateConnectionMarkerReset
@@ -726,6 +748,11 @@
 # values fails the run without allocating it.
 ./internal/historyimport TestImportRunReadsLargeSourcesWithinLimits
 ./internal/historyimport TestImportRunFailsOnExpandingSourceListing
+./internal/historyimport TestInterruptedRunResumesWithoutDuplicates
+./internal/historyimport TestMatchFailureRequeuesTheRun
+./internal/historyimport TestRejectedMatchValueStaysOnItsRecord
+./internal/historyimport TestStaleSweepRequeuesOnlyRunsThatCanContinue
+./internal/historyimport TestOnlyOneLargeImportSlot
 
 # Buffering quality: a learned limit expires after seven days, a reset keeps the
 # probe and plan summary, rows go with the device's last registration (in either
@@ -887,6 +914,7 @@
 # a restored library whose setup partly failed, or whose provider placement
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
 ./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestFullRestoresAreSerializedDB
 ./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB

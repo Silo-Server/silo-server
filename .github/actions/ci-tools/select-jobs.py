@@ -36,7 +36,7 @@ def classify(paths):
                 or any(ord(char) < 32 for char in path)):
             return all_jobs("unrecognized path")
         if (path == ".github/evidence.yml"
-                or (path.startswith(".github/ISSUE_TEMPLATE/") and path.endswith((".yml", ".yaml", ".md")))
+                or (path.startswith((".github/ISSUE_TEMPLATE/", ".github/DISCUSSION_TEMPLATE/")) and path.endswith((".yml", ".yaml", ".md")))
                 or (path.endswith(".md") and path.startswith((".github/", "scripts/", "cmd/")))):
             continue
         if (path in GO_ONLY_CONTRACTS

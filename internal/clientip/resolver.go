@@ -239,21 +239,21 @@ func (r *Resolver) requestScheme(req *http.Request) string {
 	return ""
 }
 
-// requestHost is the single X-Forwarded-Host value a trusted proxy sent, or
-// the Host header. A list, several headers or a value that is not a bare
-// host[:port] is ambiguous and falls back to Host. Like requestScheme it must
-// run before Middleware replaces the transport peer address.
-func (r *Resolver) requestHost(req *http.Request) string {
+// forwardedHost is the single X-Forwarded-Host value a trusted proxy sent, or
+// "" when there is none to accept. A list, several headers or a value that is
+// not a bare host[:port] is ambiguous and counts as none. Like requestScheme
+// it must run before Middleware replaces the transport peer address.
+func (r *Resolver) forwardedHost(req *http.Request) string {
 	if !r.peerTrusted(req) {
-		return req.Host
+		return ""
 	}
 	values := req.Header.Values("X-Forwarded-Host")
 	if len(values) != 1 {
-		return req.Host
+		return ""
 	}
 	host := strings.TrimSpace(values[0])
-	if host == "" || strings.ContainsAny(host, ",/?#@ \t") {
-		return req.Host
+	if strings.ContainsAny(host, ",/?#@ \t") {
+		return ""
 	}
 	return host
 }

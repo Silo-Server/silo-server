@@ -304,3 +304,26 @@ export function clearKidsPreset(draft: ProfileDraft): ProfileDraft {
     requestsAllowed: true,
   };
 }
+
+/**
+ * Whether the household has room for another profile. With no reported limit
+ * (null) the answer is yes, so an older server keeps today's behaviour and
+ * createProfile stays the authority.
+ */
+export function canAddProfile(profileCount: number, maxProfiles: number | null): boolean {
+  return maxProfiles === null || profileCount < maxProfiles;
+}
+
+/**
+ * Whether Switch Profile leads anywhere: to another profile, or to room for a
+ * new one. A household with several profiles keeps it even at its limit.
+ */
+export function canSwitchProfile(profileCount: number, maxProfiles: number | null): boolean {
+  return profileCount > 1 || canAddProfile(profileCount, maxProfiles);
+}
+
+/** The sentence shown in place of New profile once the household is full. */
+export function profileLimitMessage(maxProfiles: number): string {
+  const noun = maxProfiles === 1 ? "profile" : "profiles";
+  return `This account can have ${maxProfiles} ${noun}. An administrator can raise the limit.`;
+}
