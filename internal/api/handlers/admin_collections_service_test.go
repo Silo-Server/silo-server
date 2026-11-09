@@ -168,6 +168,7 @@ func TestSmartCollectionNeedsACompleteRule(t *testing.T) {
 		"smart, only a blank rule":          {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(blank)}, refused: true},
 		"smart, a rule":                     {existingType: smart, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(comedy)}},
 		"saved empty, renamed only":         {existingType: smart, existingRules: `{}`, req: AdminCollectionUpdate{Title: new("Renamed")}},
+		"saved empty, list toggle":          {existingType: smart, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart, Featured: new(true)}},
 		"switched to smart, no stored rule": {existingType: manual, existingRules: `{}`, req: AdminCollectionUpdate{CollectionType: &smart}, refused: true},
 		"switched to smart, stored rule":    {existingType: manual, existingRules: comedy, req: AdminCollectionUpdate{CollectionType: &smart}},
 		"manual sending empty rules":        {existingType: manual, req: AdminCollectionUpdate{QueryDefinition: json.RawMessage(`{"groups":[]}`)}},

@@ -716,10 +716,10 @@ or an RFC 3339 time.
 A Smart collection also needs at least one complete rule, since empty rule groups
 match every title. A rule is complete when it has a field, an operator and a value
 that is not missing, blank, or a range with an empty end (`QueryDefinition.HasCompleteRule`).
-`createAdminCollection`, `createCollection`, and an `updateAdminCollection` or
-`updateCollection` that sends a Smart collection's `query_definition` (or switches a
-collection to Smart) answer `422 validation_failed` at `body.query_definition.groups`
-when there is none. An update that leaves the rules alone still works on a Smart
+`createAdminCollection`, `createCollection`, an `updateAdminCollection` or
+`updateCollection` that sends a Smart collection's `query_definition`, and an
+`updateAdminCollection` that switches a collection to Smart answer
+`422 validation_failed` at `body.query_definition.groups` when there is none. An update that leaves the rules alone still works on a Smart
 collection saved before this check, and the frozen `/api/v1` routes and backup
 restore don't apply it.
 

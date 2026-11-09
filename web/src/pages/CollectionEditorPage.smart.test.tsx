@@ -318,12 +318,14 @@ describe("a Smart collection needs a rule", () => {
     await addGenreRule();
     expect(await within(pane).findByText("Avatar")).toBeInTheDocument();
     expect(create).toBeEnabled();
-    // No preview went out for the empty rules, which would match every title.
+    // Previews went out only for the complete rule, never for empty or blank rules.
     const sent = previews("personal").map(
       (call) => (call.body as { query_definition: { groups: unknown[] } }).query_definition.groups,
     );
     expect(sent.length).toBeGreaterThan(0);
-    expect(sent.every((groups) => groups.length > 0)).toBe(true);
+    for (const groups of sent) {
+      expect(groups).toEqual([{ match: "all", rules: [COMEDY] }]);
+    }
   });
 
   it("server: won't save once its last rule is removed", async () => {
