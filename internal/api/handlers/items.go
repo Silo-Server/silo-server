@@ -358,6 +358,8 @@ type itemListResponse struct {
 	MangaVolumeCount       *int                        `json:"manga_volume_count,omitempty"`
 	OverlaySummary         *models.OverlaySummary      `json:"overlay_summary,omitempty"`
 	SortMetrics            *sortMetricsResponse        `json:"sort_metrics,omitempty"`
+	ProgressUpdatedAt      *string                     `json:"-"`
+	ItemSource             string                      `json:"-"`
 	UserState              *itemUserStateResponse      `json:"user_state,omitempty"`
 	WorkID                 string                      `json:"work_id,omitempty"`
 	WorkTitle              string                      `json:"work_title,omitempty"`

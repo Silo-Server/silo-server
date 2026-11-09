@@ -17,6 +17,34 @@ export interface DismissHomeItemVariables {
   progressUpdatedAt?: string;
 }
 
+/** A card's removal, when its row lets it be removed from Home. */
+export function homeDismissalForCard(card: {
+  content_id: string;
+  type: string;
+  series_id?: string;
+  item_source?: string;
+  progress_updated_at?: string;
+}): DismissHomeItemVariables | undefined {
+  if (card.item_source === "next_up") {
+    return card.series_id
+      ? {
+          itemId: card.content_id,
+          surface: "next_up",
+          mediaType: card.type,
+          seriesId: card.series_id,
+        }
+      : undefined;
+  }
+  return card.progress_updated_at
+    ? {
+        itemId: card.content_id,
+        surface: "continue_watching",
+        mediaType: card.type,
+        progressUpdatedAt: card.progress_updated_at,
+      }
+    : undefined;
+}
+
 function dismissalPath({ itemId, surface }: DismissHomeItemVariables) {
   return { surface, item_id: itemId };
 }

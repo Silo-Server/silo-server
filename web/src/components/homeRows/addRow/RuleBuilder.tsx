@@ -239,7 +239,7 @@ export function RuleBuilder({
         {groups.length === 0 ? (
           <p className="text-muted-foreground text-sm">
             {context === "collection"
-              ? "No rules yet, so the collection holds every title from these libraries."
+              ? "No rules yet. Add one to choose which titles it holds."
               : "No rules yet, so the row shows every title from these libraries."}
           </p>
         ) : null}

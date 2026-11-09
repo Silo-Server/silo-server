@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 
 import { PosterTile } from "@/components/calm/PosterTile";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,6 +8,8 @@ import {
   PREVIEW_EMPTY_HELP,
   PREVIEW_FAILED,
   PREVIEW_LIVE,
+  PREVIEW_NEEDS_RULE,
+  PREVIEW_NEEDS_RULE_HELP,
   previewMatches,
 } from "@/lib/collections/copy";
 import { cn } from "@/lib/utils";
@@ -18,12 +20,21 @@ const GHOSTS = 8;
 /**
  * "● Live preview · 40 titles match · showing 24": the first titles the
  * Smart rules match, from the libraries they name, as posters. With nothing to
- * match it shows ghost posters and says saving still works.
+ * match it shows ghost posters and says saving still works. With no complete
+ * rule it previews nothing, since no rule would match every title, and asks
+ * for one.
  */
-export function CollectionPreviewPane({ preview }: { preview: ScopePreview }) {
+export function CollectionPreviewPane({
+  preview,
+  needsRules = false,
+}: {
+  preview: ScopePreview;
+  /** No rule is complete yet: show the prompt to add one, not the last result. */
+  needsRules?: boolean;
+}) {
   const id = useId();
-  const ready = preview.status === "ready" ? preview : null;
-  const busy = preview.status === "loading" || Boolean(ready?.refreshing);
+  const ready = !needsRules && preview.status === "ready" ? preview : null;
+  const busy = !needsRules && (preview.status === "loading" || Boolean(ready?.refreshing));
 
   return (
     <section
@@ -63,13 +74,21 @@ export function CollectionPreviewPane({ preview }: { preview: ScopePreview }) {
         </p>
       </div>
 
-      <PreviewBody preview={preview} />
+      <PreviewBody preview={preview} needsRules={needsRules} />
     </section>
   );
 }
 
 /** Posters, loading skeletons, or ghost posters with the reason there are none. */
-function PreviewBody({ preview }: { preview: ScopePreview }) {
+function PreviewBody({ preview, needsRules }: { preview: ScopePreview; needsRules: boolean }) {
+  if (needsRules) {
+    return (
+      <PreviewGhosts announce>
+        <p className="text-[14.5px] font-semibold">{PREVIEW_NEEDS_RULE}</p>
+        <p className="text-muted-foreground mt-1 text-[13px]">{PREVIEW_NEEDS_RULE_HELP}</p>
+      </PreviewGhosts>
+    );
+  }
   if (preview.status === "loading") {
     return (
       <div className={GRID}>
@@ -103,6 +122,11 @@ function PreviewBody({ preview }: { preview: ScopePreview }) {
     );
   }
   // The count above already reads out "0 titles match"; announce only the other reasons.
+  return <PreviewGhosts announce={preview.status !== "ready"}>{message}</PreviewGhosts>;
+}
+
+/** Ghost posters over the reason the preview shows no titles, read out when `announce`. */
+function PreviewGhosts({ announce, children }: { announce: boolean; children: ReactNode }) {
   return (
     <div className="grid gap-4">
       <div aria-hidden className={GRID}>
@@ -113,8 +137,8 @@ function PreviewBody({ preview }: { preview: ScopePreview }) {
           />
         ))}
       </div>
-      <div className="text-center" role={preview.status === "ready" ? undefined : "status"}>
-        {message}
+      <div className="text-center" role={announce ? "status" : undefined}>
+        {children}
       </div>
     </div>
   );

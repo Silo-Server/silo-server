@@ -410,6 +410,10 @@ export const PREVIEW_LIVE = "Live preview";
 export const PREVIEW_EMPTY = "No titles match yet";
 export const PREVIEW_EMPTY_HELP = "You can still save. Titles that match later join on their own.";
 export const PREVIEW_FAILED = "The preview didn't load. You can still save.";
+/** The preview of a Smart collection with no complete rule, which would match every title. */
+export const PREVIEW_NEEDS_RULE = "Add a rule to see what it matches";
+export const PREVIEW_NEEDS_RULE_HELP =
+  "A smart collection needs at least one rule. Without one it would hold every title.";
 
 export function previewMatches(total: number): string {
   return total === 1 ? "1 title matches" : `${total.toLocaleString()} titles match`;
@@ -679,6 +683,12 @@ export const PICK_WHERE_IT_SHOWS_FIRST = "Pick the libraries it shows in, then c
 export const PICK_A_LIBRARY = "Pick at least one library.";
 
 export const NAME_IT_THEN_CREATE = "Name it, then create it.";
+
+/** Why Create waits on a Smart collection with no complete rule. */
+export const ADD_A_RULE_THEN_CREATE = "Add a rule, then create it.";
+
+/** Why Save waits on a saved Smart collection whose last rule was removed. */
+export const ADD_A_RULE = "Add at least one rule.";
 
 export function titlesReadyToAdd(count: number): string {
   return `${plural(count, "title")} ready to add`;
