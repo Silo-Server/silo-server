@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { CheckSquare, RefreshCw, Search, Shuffle, Trash2, X } from "lucide-react";
+import { CheckSquare, RefreshCw, Search, Trash2, X } from "lucide-react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import type { BrowseItem } from "@/api/types";
@@ -40,18 +40,13 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { requestSearchTypeForScope } from "@/lib/mediaRequests";
 import SearchBar from "@/components/SearchBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import {
-  CollectionByline,
-  CollectionPageActions,
-  ReadOnlyCollectionCallout,
-} from "@/components/collections/CollectionPageActions";
+import { ReadOnlyCollectionCallout } from "@/components/collections/CollectionPageActions";
 import {
   useCollectionPageAccess,
   type CollectionPageTarget,
 } from "@/hooks/useCollectionPageAccess";
 import { useCollectionPageHeader } from "@/hooks/useCollectionPageHeader";
-import { HeroBackdropArtwork } from "@/components/HeroBackdropArtwork";
-import DetailOverview from "@/pages/ItemDetail/components/DetailOverview";
+import { CollectionPageHero } from "@/components/collections/CollectionPageHero";
 import {
   buildHistoryRemovalTarget,
   historyRemovalDialogDescription,
@@ -378,11 +373,6 @@ function CatalogResults({
       : null;
   const collectionAccess = useCollectionPageAccess(collectionTarget);
   const collectionHeader = useCollectionPageHeader(collectionUnavailable ? null : collectionTarget);
-  const collectionBackdrop =
-    collectionHeader.status === "ready" &&
-    (collectionHeader.backdropUrl || collectionHeader.backdropThumbhash)
-      ? collectionHeader
-      : null;
   const title = collectionUnavailable
     ? "Not found"
     : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q));
@@ -409,7 +399,14 @@ function CatalogResults({
 
   const totalItems = catalogQuery.data?.totalItems ?? 0;
   const shuffleCollectionId = isCollectionSource ? state.collection_id?.trim() : undefined;
-  const canShuffleCollection = Boolean(shuffleCollectionId) && totalItems > 0;
+  const shuffleKind = state.source === "user_collection" ? "user_collection" : "library_collection";
+  const collectionShuffle =
+    shuffleCollectionId && totalItems > 0
+      ? {
+          starting: isStartingShuffle,
+          onShuffle: () => startShuffle({ kind: shuffleKind, id: shuffleCollectionId }),
+        }
+      : undefined;
   // For an in-app search the count reflects local library hits only; requestable
   // matches live in a separate section, so scope the label to avoid a "0 results"
   // reading while an outside-library result is visible.
@@ -437,108 +434,42 @@ function CatalogResults({
       {searchParams.get("notice") === "read-only" ? (
         <ReadOnlyCollectionCallout access={collectionAccess} collectionName={title} />
       ) : null}
-      <header
-        className={cn(
-          "page-header",
-          collectionBackdrop &&
-            "relative isolate min-h-[clamp(16rem,42vh,26rem)] content-end overflow-hidden rounded-2xl px-4 pt-24 pb-5 sm:flex-nowrap sm:px-6 sm:pb-6",
-        )}
-      >
-        {collectionBackdrop ? (
-          <>
-            <HeroBackdropArtwork
-              backdropUrl={collectionBackdrop.backdropUrl}
-              backdropThumbhash={collectionBackdrop.backdropThumbhash}
-              className="absolute inset-0"
-            />
-            {/* Fade the artwork into the page below and behind the text. */}
-            <div
-              aria-hidden="true"
-              className="from-background via-background/70 absolute inset-0 bg-gradient-to-t to-transparent"
-            />
-            <div
-              aria-hidden="true"
-              className="from-background/80 absolute inset-0 bg-gradient-to-r via-transparent to-transparent"
-            />
-          </>
-        ) : null}
-        {/* Over the artwork the actions stay beside the title, not under it. */}
-        <div className={cn("space-y-3", collectionBackdrop && "relative sm:min-w-0 sm:flex-1")}>
-          <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
-          <CollectionByline access={collectionAccess} />
-          {collectionHeader.status === "pending" ? null : collectionHeader.description ? (
-            // A description keeps the line breaks it was written with.
-            <div className="whitespace-pre-line">
-              <DetailOverview overview={collectionHeader.description} clamp />
-            </div>
-          ) : (
+      {isCollectionSource ? (
+        <CollectionPageHero
+          title={title}
+          access={collectionAccess}
+          header={collectionHeader}
+          libraryId={state.library_id}
+          shuffle={collectionShuffle}
+        />
+      ) : (
+        <header className="page-header">
+          <div className="space-y-3">
+            <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
             <p className="page-subtitle text-sm sm:text-base">
               {defaultCatalogSubtitle(state.source)}
             </p>
-          )}
-        </div>
-        {/* A collection's actions, Shuffle and count share one centred row. */}
-        <div
-          className={cn(
-            isCollectionSource
-              ? "flex flex-wrap items-center gap-3 sm:justify-end"
-              : "flex flex-col items-start gap-3 sm:items-end",
-            collectionBackdrop && "relative shrink-0",
-          )}
-        >
-          <CollectionPageActions access={collectionAccess} libraryId={state.library_id} />
-          <div
-            className={cn(
-              "items-baseline gap-3 sm:flex",
-              canShuffleCollection && "flex items-center",
-            )}
-          >
-            {canShuffleCollection && shuffleCollectionId ? (
-              <Button
-                variant="outline"
-                className="self-center rounded-full"
-                disabled={isStartingShuffle}
-                onClick={() =>
-                  startShuffle({
-                    kind:
-                      state.source === "user_collection" ? "user_collection" : "library_collection",
-                    id: shuffleCollectionId,
-                  })
-                }
-              >
-                <Shuffle aria-hidden="true" />
-                Shuffle
-              </Button>
-            ) : null}
-            <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
-            {showExactResultCount ? (
-              <div
-                className={cn(
-                  "text-right tabular-nums",
-                  canShuffleCollection && "flex items-center",
-                )}
-                role="status"
-                aria-live="polite"
-              >
-                <span
-                  className={cn(
-                    "hidden text-3xl font-extralight tracking-tight sm:inline",
-                    canShuffleCollection && "leading-none",
-                  )}
-                >
-                  {totalItems}
-                </span>
-                <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
-                  {resultNoun}
-                </span>
-                <span className="text-muted-foreground text-xs sm:hidden">
-                  {totalItems} {resultNoun}
-                </span>
-              </div>
-            ) : null}
           </div>
-        </div>
-      </header>
+          <div className="flex flex-col items-start gap-3 sm:items-end">
+            <div className="items-baseline gap-3 sm:flex">
+              <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
+              {showExactResultCount ? (
+                <div className="text-right tabular-nums" role="status" aria-live="polite">
+                  <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
+                    {totalItems}
+                  </span>
+                  <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
+                    {resultNoun}
+                  </span>
+                  <span className="text-muted-foreground text-xs sm:hidden">
+                    {totalItems} {resultNoun}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </header>
+      )}
 
       {showWatchlistTabs ? (
         <WatchlistTabs
@@ -579,6 +510,15 @@ function CatalogResults({
 
           <CatalogFiltersPanel
             state={sortedState}
+            // A collection's hero has no count of its own; the filter bar shows it.
+            resultCountLabel={
+              isCollectionSource && showExactResultCount
+                ? `${totalItems} title${totalItems === 1 ? "" : "s"}`
+                : undefined
+            }
+            resultCountLoading={
+              isCollectionSource && (catalogQuery.isLoading || catalogQuery.isPlaceholderData)
+            }
             onStateChange={(nextState) => {
               const sortChanged =
                 nextState.uses_source_order !== sortedState.uses_source_order ||

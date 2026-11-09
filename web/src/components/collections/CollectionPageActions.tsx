@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router";
 import { House, Library as LibraryIcon, Lock, MoreHorizontal, Pencil } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,7 +28,13 @@ import {
 import { addToMyHomePath, matchedLibraries, rowPages } from "@/lib/collections/rows";
 import { PERSONAL_SCOPE, type CollectionScope, type EditorSnapshot } from "@/lib/collections/scope";
 import type { RowLinkCollection } from "@/lib/homeRows/rowLinks";
+import { cn } from "@/lib/utils";
 import { buildLibraryCollectionCatalogHref } from "@/pages/catalogSearchParams";
+
+/** The collection hero's glass pills, the homepage hero's secondary button. */
+const HERO_PILL =
+  "pill pill-glass outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 [&_svg]:size-4";
+const HERO_ICON_PILL = cn(HERO_PILL, "size-11 p-0");
 
 /** "by *Name* · Read-only" under the title of another profile's shared collection. */
 export function CollectionByline({ access }: { access: CollectionPageAccess }) {
@@ -67,7 +72,7 @@ export function ReadOnlyCollectionCallout({
 }
 
 /**
- * Top-right on a collection page: Edit + ⋯ for viewers who may change the
+ * Beside Shuffle in a collection page's hero: Edit + ⋯ for viewers who may change the
  * collection, Add to my Home + ⋯ for everyone else.
  */
 export function CollectionPageActions({
@@ -135,18 +140,16 @@ function ManageActions({
     : personalDeleteDescription(view?.personal?.shared ?? false);
 
   return (
-    <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm">
-        <Link to={scope.paths.edit(id, { libraryId })}>
-          <Pencil aria-hidden />
-          Edit
-        </Link>
-      </Button>
+    <div className="flex items-center gap-3">
+      <Link to={scope.paths.edit(id, { libraryId })} className={HERO_PILL}>
+        <Pencil aria-hidden />
+        Edit
+      </Link>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="outline" size="icon-sm" aria-label="More actions">
+          <button type="button" className={HERO_ICON_PILL} aria-label="More actions">
             <MoreHorizontal />
-          </Button>
+          </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-48">
           {openIn.length > 0 ? (
@@ -220,19 +223,17 @@ function AddToMyHomeActions({
     addToMyHomePath(collection, { kind: "library", libraryId: library.id });
 
   return (
-    <div className="flex items-center gap-2">
-      <Button asChild variant="outline" size="sm">
-        <Link to={addToMyHomePath(collection, { kind: "home" })}>
-          <House aria-hidden />
-          {ADD_TO_MY_HOME}
-        </Link>
-      </Button>
+    <div className="flex items-center gap-3">
+      <Link to={addToMyHomePath(collection, { kind: "home" })} className={HERO_PILL}>
+        <House aria-hidden />
+        {ADD_TO_MY_HOME}
+      </Link>
       {pages.length > 0 ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button type="button" variant="outline" size="icon-sm" aria-label="More actions">
+            <button type="button" className={HERO_ICON_PILL} aria-label="More actions">
               <MoreHorizontal />
-            </Button>
+            </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-48">
             {pages.length === 1 ? (
