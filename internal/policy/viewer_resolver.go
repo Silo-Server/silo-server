@@ -273,8 +273,9 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		policyInput.ProfileMaxRating = profile.MaxContentRating
 		policyInput.ProfileMaxAdvisoryAge = profile.MaxAdvisoryAge
 		policyInput.ProfileMaxQuality = profile.MaxPlaybackQuality
-		policyInput.ProfileLibraryLimited = profile.LibraryRestrictionsEnabled
-		policyInput.ProfileLibraryIDs = slices.Clone(profile.AllowedLibraryIDs)
+		profileLibraryIDs, profileLibraryLimited := access.ProfileLibraryLimit(profile)
+		policyInput.ProfileLibraryLimited = profileLibraryLimited
+		policyInput.ProfileLibraryIDs = slices.Clone(profileLibraryIDs)
 		policyInput.ProfileHasPIN = profile.PINHash != ""
 		// Resolved canonically (profile scope -> contract default), not read off
 		// the legacy profile column it migrated from. scope.rego relays this

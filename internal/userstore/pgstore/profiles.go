@@ -657,22 +657,28 @@ func LockProfilesInTx(ctx context.Context, tx pgx.Tx, userID int) (int, error) {
 // limit. Its preferences take the column
 // defaults; a restore that carries them writes them separately. A primary
 // profile becomes primary only when the account has none, so the account's
-// household parent never changes.
-func CreateRestoredProfileInTx(ctx context.Context, tx pgx.Tx, userID int, p RestoredProfile) error {
+// household parent never changes. It reports whether the profile became the
+// primary, which drops any library limit it carried: the primary inherits
+// its account's libraries (access.ProfileLibraryLimit).
+func CreateRestoredProfileInTx(ctx context.Context, tx pgx.Tx, userID int, p RestoredProfile) (bool, error) {
 	if p.ID == "" {
-		return errors.New("a restored profile needs an id")
+		return false, errors.New("a restored profile needs an id")
 	}
 	var hasPrimary bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = $1 AND is_primary)`, userID).Scan(&hasPrimary); err != nil {
-		return fmt.Errorf("checking the primary profile of user %d: %w", userID, err)
+		return false, fmt.Errorf("checking the primary profile of user %d: %w", userID, err)
+	}
+	primary := p.IsPrimary && !hasPrimary
+	if primary {
+		p.LibraryRestrictionsEnabled, p.AllowedLibraryIDs = false, nil
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_profiles (id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
 			require_advisory_age, library_restrictions_enabled, max_playback_quality)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12)`,
-		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary && !hasPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
+		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, primary, p.MaxContentRating, p.MaxAdvisoryAge,
 		p.RequireAdvisoryAge, p.LibraryRestrictionsEnabled, p.MaxPlaybackQuality); err != nil {
-		return fmt.Errorf("inserting restored profile: %w", err)
+		return false, fmt.Errorf("inserting restored profile: %w", err)
 	}
-	return replaceProfileAllowedLibraries(ctx, tx, userID, p.ID, p.AllowedLibraryIDs)
+	return primary, replaceProfileAllowedLibraries(ctx, tx, userID, p.ID, p.AllowedLibraryIDs)
 }

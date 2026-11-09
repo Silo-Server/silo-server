@@ -46,7 +46,7 @@ type Profile struct {
 	AutoSkipRecap              bool    `json:"auto_skip_recap" example:"false"`
 	AutoPlayNextPreview        bool    `json:"auto_play_next_preview" example:"false"`
 	ShowForcedSubtitles        bool    `json:"show_forced_subtitles" example:"false"`
-	LibraryRestrictionsEnabled bool    `json:"library_restrictions_enabled" example:"false"`
+	LibraryRestrictionsEnabled bool    `json:"library_restrictions_enabled" doc:"Whether the profile is limited to allowed_library_ids within its account's libraries. The primary profile is never limited: it sees every library its account can access and hides libraries through its settings instead" example:"false"`
 	AllowedLibraryIDs          []ID    `json:"allowed_library_ids" doc:"Libraries the profile may see when restrictions are enabled" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         string  `json:"max_playback_quality" doc:"Playback ceiling. Canonical values: 1080p, 2160p; empty means none. Older profiles may carry other stored values" example:"1080p"`
 	CreatedAt                  Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
@@ -73,7 +73,7 @@ type ProfileUpdate struct {
 	AutoSkipRecap              *bool         `json:"auto_skip_recap,omitempty" nullable:"false" example:"false"`
 	AutoPlayNextPreview        *bool         `json:"auto_play_next_preview,omitempty" nullable:"false" example:"false"`
 	ShowForcedSubtitles        *bool         `json:"show_forced_subtitles,omitempty" nullable:"false" example:"false"`
-	LibraryRestrictionsEnabled *bool         `json:"library_restrictions_enabled,omitempty" nullable:"false" example:"false"`
+	LibraryRestrictionsEnabled *bool         `json:"library_restrictions_enabled,omitempty" nullable:"false" doc:"Limits the profile to allowed_library_ids. The primary profile can't be limited: true, or a non-empty allowed_library_ids, fails validation on it" example:"false"`
 	AllowedLibraryIDs          *[]ID         `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Replaces the allowlist with these unique library identifiers; an empty array allows none" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         Patch[string] `json:"max_playback_quality,omitzero" enum:"1080p,2160p" doc:"Playback ceiling; null removes it" example:"1080p"`
 }
@@ -169,7 +169,7 @@ type ProfileCreate struct {
 	AutoSkipRecap              *bool   `json:"auto_skip_recap,omitempty" nullable:"false" example:"false"`
 	AutoPlayNextPreview        *bool   `json:"auto_play_next_preview,omitempty" nullable:"false" example:"false"`
 	ShowForcedSubtitles        *bool   `json:"show_forced_subtitles,omitempty" nullable:"false" doc:"Defaults to true when omitted" example:"true"`
-	LibraryRestrictionsEnabled *bool   `json:"library_restrictions_enabled,omitempty" nullable:"false" example:"false"`
+	LibraryRestrictionsEnabled *bool   `json:"library_restrictions_enabled,omitempty" nullable:"false" doc:"Limits the profile to allowed_library_ids. Not allowed on an account's first profile, which becomes its primary profile" example:"false"`
 	AllowedLibraryIDs          *[]ID   `json:"allowed_library_ids,omitempty" nullable:"false" doc:"Unique library identifiers the profile may see when restrictions are enabled" example:"[\"1\",\"2\"]"`
 	MaxPlaybackQuality         *string `json:"max_playback_quality,omitempty" nullable:"false" enum:"1080p,2160p" doc:"Playback ceiling" example:"1080p"`
 }

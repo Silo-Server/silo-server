@@ -71,6 +71,11 @@ export interface ProfileEditorSave {
 interface ProfileEditorDialogProps {
   open: boolean;
   profile?: Profile | null;
+  /**
+   * Creating this profile makes it the account's primary profile (the account
+   * has none yet), so it gets no library limit, as an edited primary doesn't.
+   */
+  createsPrimary?: boolean;
   libraries: UserLibrary[];
   avatarUploadEnabled?: boolean;
   /** The server accepts `max_advisory_age`; hides the control when false. */
@@ -113,6 +118,7 @@ function sortLibraryIDs(ids: number[]) {
 export function ProfileEditorDialog({
   open,
   profile = null,
+  createsPrimary = false,
   libraries,
   avatarUploadEnabled = false,
   advisoryAgeSupported = false,
@@ -142,6 +148,7 @@ export function ProfileEditorDialog({
             key={profile?.id ?? "new-profile"}
             mode={mode}
             profile={profile}
+            isPrimary={profile ? profile.is_primary : createsPrimary}
             libraries={sortedLibraries}
             avatarUploadEnabled={avatarUploadEnabled}
             advisoryAgeSupported={advisoryAgeSupported}
@@ -160,6 +167,7 @@ export function ProfileEditorDialog({
 function ProfileEditorForm({
   mode,
   profile,
+  isPrimary,
   libraries,
   avatarUploadEnabled,
   advisoryAgeSupported,
@@ -171,6 +179,7 @@ function ProfileEditorForm({
 }: {
   mode: "create" | "edit";
   profile: Profile | null;
+  isPrimary: boolean;
   libraries: UserLibrary[];
   avatarUploadEnabled: boolean;
   advisoryAgeSupported: boolean;
@@ -197,7 +206,15 @@ function ProfileEditorForm({
     uploadAvatarMutation.isPending ||
     deleteAvatarMutation.isPending;
 
-  const [draft, setDraft] = useState<ProfileDraft>(() => createProfileDraft(profile));
+  // The primary profile inherits the account's libraries and hides the ones it
+  // doesn't want in Settings → Libraries, so it has no library limit. A limit
+  // an older server stored on it is cleared by the next save.
+  const [draft, setDraft] = useState<ProfileDraft>(() => {
+    const initial = createProfileDraft(profile);
+    return isPrimary
+      ? { ...initial, libraryRestrictionsEnabled: false, allowedLibraryIDs: [] }
+      : initial;
+  });
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [removeUploadedAvatar, setRemoveUploadedAvatar] = useState(false);
   const [activePresetStyle, setActivePresetStyle] = useState(
@@ -292,7 +309,7 @@ function ProfileEditorForm({
     setDraft((current) =>
       applyKidsPreset(current, {
         contentRatingTouched,
-        libraryAccessTouched,
+        libraryAccessTouched: libraryAccessTouched || isPrimary,
       }),
     );
   }
@@ -725,61 +742,73 @@ function ProfileEditorForm({
           </div>
         </div>
 
-        <div className="border-border space-y-3 rounded-md border p-3">
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor={restrictLibrariesId}>Restrict libraries</Label>
-              <p className="text-muted-foreground text-xs">
-                Limit this profile to a specific set of libraries.
-              </p>
-            </div>
-            <Switch
-              id={restrictLibrariesId}
-              checked={draft.libraryRestrictionsEnabled}
-              onCheckedChange={(checked) => {
-                setLibraryAccessTouched(true);
-                updateDraft("libraryRestrictionsEnabled", checked);
-                setErrors((current) => ({ ...current, libraries: undefined }));
-              }}
-            />
+        {isPrimary ? (
+          <div className="border-border space-y-0.5 rounded-md border p-3">
+            <p className="text-sm font-medium">Libraries</p>
+            <p className="text-muted-foreground text-xs">
+              The primary profile sees every library the account can access. It can hide libraries
+              in Settings → Libraries.
+            </p>
           </div>
-
-          {draft.libraryRestrictionsEnabled ? (
-            <div className="space-y-2">
-              <div className="grid gap-2">
-                {libraries.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No libraries available.</p>
-                ) : (
-                  libraries.map((library) => {
-                    const checked = draft.allowedLibraryIDs.includes(library.id);
-
-                    return (
-                      <div
-                        key={library.id}
-                        className="border-border flex items-center justify-between rounded-md border px-3 py-2"
-                      >
-                        <div className="space-y-0.5">
-                          <div className="text-sm font-medium">{library.name}</div>
-                          <div className="text-muted-foreground text-xs capitalize">
-                            {library.type}
-                          </div>
-                        </div>
-                        <Switch
-                          checked={checked}
-                          onCheckedChange={(nextChecked) => toggleLibrary(library.id, nextChecked)}
-                        />
-                      </div>
-                    );
-                  })
-                )}
+        ) : (
+          <div className="border-border space-y-3 rounded-md border p-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <Label htmlFor={restrictLibrariesId}>Restrict libraries</Label>
+                <p className="text-muted-foreground text-xs">
+                  Limit this profile to a specific set of libraries.
+                </p>
               </div>
-
-              {errors.libraries ? (
-                <p className="text-destructive text-sm">{errors.libraries}</p>
-              ) : null}
+              <Switch
+                id={restrictLibrariesId}
+                checked={draft.libraryRestrictionsEnabled}
+                onCheckedChange={(checked) => {
+                  setLibraryAccessTouched(true);
+                  updateDraft("libraryRestrictionsEnabled", checked);
+                  setErrors((current) => ({ ...current, libraries: undefined }));
+                }}
+              />
             </div>
-          ) : null}
-        </div>
+
+            {draft.libraryRestrictionsEnabled ? (
+              <div className="space-y-2">
+                <div className="grid gap-2">
+                  {libraries.length === 0 ? (
+                    <p className="text-muted-foreground text-sm">No libraries available.</p>
+                  ) : (
+                    libraries.map((library) => {
+                      const checked = draft.allowedLibraryIDs.includes(library.id);
+
+                      return (
+                        <div
+                          key={library.id}
+                          className="border-border flex items-center justify-between rounded-md border px-3 py-2"
+                        >
+                          <div className="space-y-0.5">
+                            <div className="text-sm font-medium">{library.name}</div>
+                            <div className="text-muted-foreground text-xs capitalize">
+                              {library.type}
+                            </div>
+                          </div>
+                          <Switch
+                            checked={checked}
+                            onCheckedChange={(nextChecked) =>
+                              toggleLibrary(library.id, nextChecked)
+                            }
+                          />
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {errors.libraries ? (
+                  <p className="text-destructive text-sm">{errors.libraries}</p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        )}
       </section>
 
       {showAllowedTitles && profile ? <AllowedTitlesSection profileId={profile.id} /> : null}

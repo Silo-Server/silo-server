@@ -477,15 +477,29 @@ func (u *userPlanner) checkPrimaryRoom(ctx context.Context, plan *accountPlan) e
 func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error {
 	acct := plan.item.Account
 	claimed := map[string][]int{}
+	// A backup's primary profile becomes the primary here only when the
+	// account has none (pgstore.CreateRestoredProfileInTx), and then it
+	// inherits the account's libraries instead of its stored library limit.
+	hasPrimary := false
+	if plan.localID > 0 {
+		if err := u.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = $1 AND is_primary)`, plan.localID).Scan(&hasPrimary); err != nil {
+			return fmt.Errorf("checking the account's primary profile: %w", err)
+		}
+	}
 	for i := range plan.doc.Profiles {
 		e := &plan.doc.Profiles[i]
-		pp := profilePlan{entry: e, preview: PreviewProfile{ID: e.ID, Name: e.Name, IsPrimary: e.IsPrimary, Restricted: e.LibraryRestrictionsEnabled,
+		becomesPrimary := e.IsPrimary && !hasPrimary
+		limited := e.LibraryRestrictionsEnabled && !becomesPrimary
+		pp := profilePlan{entry: e, preview: PreviewProfile{ID: e.ID, Name: e.Name, IsPrimary: e.IsPrimary, Restricted: limited,
 			HasPIN: e.PINHash != "", DataTypes: []PreviewDataType{}}}
 		pp.allowed, pp.preview.LibrariesLeftOut = mapLibraries(e.AllowedLibraryIDs, u.libMap)
 		if pp.allowed == nil {
 			pp.allowed = []int{}
 		}
-		pp.preview.NoLibraryAccess = e.LibraryRestrictionsEnabled && len(pp.allowed) == 0
+		if !limited {
+			pp.preview.LibrariesLeftOut = 0
+		}
+		pp.preview.NoLibraryAccess = limited && len(pp.allowed) == 0
 		for _, t := range userDataTypes {
 			raw, ok := e.Data[t.ID()]
 			if !ok {

@@ -31,7 +31,7 @@ export default function HouseholdSetup() {
     requireAdvisoryAgeSupported,
     maxProfiles,
   } = useProfiles();
-  const { data: libraries = [] } = useAvailableUserLibraries();
+  const { data: libraries = [] } = useAvailableUserLibraries({ includeHidden: true });
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Profile | null>(null);
   const navigate = useNavigate();
@@ -148,6 +148,7 @@ export default function HouseholdSetup() {
       <ProfileEditorDialog
         open={editorOpen}
         profile={editing}
+        createsPrimary={profiles.length === 0}
         libraries={libraries}
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}

@@ -146,7 +146,12 @@ export function ProfilesTab({ user, manageable }: { user: AdminUser; manageable:
 
       {manage ? (
         <>
-          <ProfileEditor user={user} editing={editing} onClose={() => setEditing(null)} />
+          <ProfileEditor
+            user={user}
+            editing={editing}
+            createsPrimary={profiles.data?.length === 0}
+            onClose={() => setEditing(null)}
+          />
           <SetPinDialog userId={user.id} profile={pinTarget} onClose={() => setPinTarget(null)} />
           <RemovePinDialog
             userId={user.id}
@@ -252,10 +257,13 @@ function useAccountLibraries(user: AdminUser): UserLibrary[] {
 function ProfileEditor({
   user,
   editing,
+  createsPrimary,
   onClose,
 }: {
   user: AdminUser;
   editing: Editing | null;
+  /** The account has no profiles, so a created one becomes its primary. */
+  createsPrimary: boolean;
   onClose: () => void;
 }) {
   const libraries = useAccountLibraries(user);
@@ -301,6 +309,7 @@ function ProfileEditor({
       <ProfileEditorDialog
         open={open}
         profile={editId !== null ? full.data : null}
+        createsPrimary={createsPrimary}
         libraries={libraries}
         advisoryAgeSupported={server.maxAdvisoryAgeSupported}
         requireAdvisoryAgeSupported={server.requireAdvisoryAgeSupported}

@@ -52,7 +52,9 @@ export default function ProfilesSettings() {
     requireAdvisoryAgeSupported,
     maxProfiles,
   } = useProfiles();
-  const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
+  const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries({
+    includeHidden: true,
+  });
   const { profile: activeProfile, selectProfile, verifyProfilePin } = useAuth();
   const deleteMutation = useDeleteProfile();
 
