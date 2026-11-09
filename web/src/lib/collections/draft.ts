@@ -50,7 +50,11 @@ const FIELDS: Record<DraftField, FieldAccess> = {
   // Libraries. A server collection's rules carry their own libraries: `libraryIds` is only
   // where it shows.
   rules: {
-    get: (d) => d.rules && (d.server ? d.rules : { ...d.rules, library_ids: undefined }),
+    get: (d) =>
+      d.rules && {
+        ...d.rules,
+        library_ids: d.server ? [...d.rules.library_ids].sort((a, b) => a - b) : undefined,
+      },
     set: (d, v) => ({
       ...d,
       rules: v

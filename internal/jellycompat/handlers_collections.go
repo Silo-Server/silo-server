@@ -1225,12 +1225,11 @@ func (h *ItemsHandler) writeListItemsPage(w http.ResponseWriter, r *http.Request
 }
 
 // prepareSmartCollectionQuery resolves a smart (live-query) collection's stored
-// query definition into an executable form: normalized, validated, item-limited,
-// and intersected with the collection's own bound library scope, plus the
-// session access filter. ok is false when the collection has no executable
-// query — no executor wired, a malformed or invalid definition, or an empty
-// library intersection — so callers degrade to no children rather than error
-// and a single bad collection never 500s a browse.
+// query definition into an executable form: normalized, validated and
+// item-limited, over the rules' own libraries, plus the session access filter.
+// ok is false when the collection has no executable query (no executor wired,
+// or a malformed or invalid definition), so callers degrade to no children
+// rather than error and a single bad collection never 500s a browse.
 func (h *ItemsHandler) prepareSmartCollectionQuery(ctx context.Context, session *Session, c *models.LibraryCollection) (catalog.QueryDefinition, catalog.AccessFilter, bool) {
 	if h.queryExecutor == nil {
 		return catalog.QueryDefinition{}, catalog.AccessFilter{}, false

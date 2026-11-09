@@ -110,8 +110,8 @@ func (r *LibraryCollectionRepository) ViewerCollectionCounts(ctx context.Context
 }
 
 // countSmartCollections counts the members each smart collection lists under
-// access, as its catalog page resolves them: its rules narrowed to its
-// libraries and access's, with its item limit. A collection whose count could
+// access, as its catalog page resolves them: its rules over their own
+// libraries narrowed to access's, with its item limit. A collection whose count could
 // not be read is absent from the result.
 func (r *LibraryCollectionRepository) countSmartCollections(ctx context.Context, collections []*models.LibraryCollection, access AccessFilter) (map[string]int, error) {
 	counts := make(map[string]int, len(collections))

@@ -4,64 +4,96 @@
 -- to the libraries the collection shows in (library_collection_libraries,
 -- else the legacy library_id), and rules naming no library took those
 -- libraries. Write that effective list into the rules so every existing
--- collection keeps the titles it had.
+-- collection keeps the titles it had. catalog.PinSmartRulesToCollectionLibraries
+-- does the same for collections a restore of an older backup creates.
+--
+-- Legacy section-filter rules (filter_type, filter_library_id,
+-- filter_library_ids) name their libraries in filter_library_ids, which the
+-- catalog reads instead of library_ids, so they get the list in both keys.
 --
 -- Rules whose libraries miss every library the collection shows in matched
 -- nothing before. They are left as they are and now draw from the libraries
 -- they name, which is what the editor and its preview already showed. An empty
 -- list can't stand for "nothing" any more, since it means every library.
-WITH placement AS (
+WITH smart AS (
     SELECT
         lc.id,
+        CASE WHEN jsonb_typeof(lc.query_definition) = 'object' THEN lc.query_definition ELSE '{}'::jsonb END AS rules,
         COALESCE(
             (SELECT array_agg(DISTINCT lcl.library_id)
              FROM library_collection_libraries lcl
              WHERE lcl.collection_id = lc.id),
             ARRAY[lc.library_id]
-        ) AS library_ids
+        ) AS placement
     FROM library_collections lc
     WHERE lower(btrim(lc.collection_type)) = 'smart'
       AND jsonb_typeof(lc.query_definition) IN ('object', 'null')
 ),
-rules AS (
+classified AS (
     SELECT
-        p.id,
-        p.library_ids AS placement,
-        CASE
-            WHEN jsonb_typeof(lc.query_definition -> 'library_ids') = 'array'
-                THEN ARRAY(
-                    SELECT (value #>> '{}')::integer
-                    FROM jsonb_array_elements(lc.query_definition -> 'library_ids')
-                    WHERE jsonb_typeof(value) = 'number'
-                )
+        id,
+        rules,
+        placement,
+        (rules ? 'filter_type' OR rules ? 'filter_library_id' OR rules ? 'filter_library_ids') AS legacy
+    FROM smart
+),
+named AS (
+    SELECT
+        c.id,
+        c.rules,
+        c.placement,
+        c.legacy,
+        ARRAY(
+            SELECT (entry #>> '{}')::integer
+            FROM jsonb_array_elements(
+                CASE
+                    WHEN c.legacy AND jsonb_typeof(c.rules -> 'filter_library_ids') = 'array'
+                        THEN c.rules -> 'filter_library_ids'
+                    WHEN NOT c.legacy AND jsonb_typeof(c.rules -> 'library_ids') = 'array'
+                        THEN c.rules -> 'library_ids'
+                    ELSE '[]'::jsonb
+                END
+            ) AS entry
+            WHERE jsonb_typeof(entry) = 'number' AND (entry #>> '{}') ~ '^[1-9][0-9]{0,8}$'
+        ) || CASE
+            WHEN c.legacy
+             AND jsonb_typeof(c.rules -> 'filter_library_id') = 'number'
+             AND (c.rules ->> 'filter_library_id') ~ '^[1-9][0-9]{0,8}$'
+                THEN ARRAY[(c.rules ->> 'filter_library_id')::integer]
             ELSE ARRAY[]::integer[]
-        END AS named
-    FROM placement p
-    JOIN library_collections lc ON lc.id = p.id
+        END AS ids
+    FROM classified c
 ),
 effective AS (
     SELECT
         id,
+        rules,
+        legacy,
         to_jsonb(ARRAY(
             SELECT DISTINCT library_id
-            FROM unnest(CASE WHEN cardinality(named) = 0 THEN placement ELSE named END) AS library_id
-            WHERE cardinality(named) = 0 OR library_id = ANY (placement)
+            FROM unnest(placement) AS library_id
+            WHERE cardinality(ids) = 0 OR library_id = ANY (ids)
             ORDER BY library_id
         )) AS library_ids
-    FROM rules
+    FROM named
+),
+pinned AS (
+    SELECT
+        id,
+        CASE
+            WHEN legacy THEN jsonb_set(jsonb_set(rules, '{library_ids}', library_ids), '{filter_library_ids}', library_ids) - 'filter_library_id'
+            ELSE jsonb_set(rules, '{library_ids}', library_ids)
+        END AS rules
+    FROM effective
+    WHERE jsonb_array_length(library_ids) > 0
 )
--- Only rows whose list changes, so the revision trigger leaves the others'
+-- Only rows whose rules change, so the revision trigger leaves the others'
 -- open pages alone.
 UPDATE library_collections lc
-SET query_definition = jsonb_set(
-    CASE WHEN jsonb_typeof(lc.query_definition) = 'object' THEN lc.query_definition ELSE '{}'::jsonb END,
-    '{library_ids}',
-    e.library_ids
-)
-FROM effective e
-WHERE lc.id = e.id
-  AND jsonb_array_length(e.library_ids) > 0
-  AND (lc.query_definition -> 'library_ids') IS DISTINCT FROM e.library_ids;
+SET query_definition = p.rules
+FROM pinned p
+WHERE lc.id = p.id
+  AND lc.query_definition IS DISTINCT FROM p.rules;
 
 -- +goose Down
 -- Nothing to undo: the lists written above are what the older read paths

@@ -147,6 +147,9 @@ describe("smart rules and their libraries", () => {
       ["rules"],
     );
     expect(changedFields(smart, { ...smart, libraryIds: [3] })).toEqual(["libraryIds"]);
+    expect(
+      changedFields(smart, { ...smart, rules: { ...smart.rules!, library_ids: [2, 1] } }),
+    ).toEqual([]);
   });
 
   it("still sees a rule change", () => {
