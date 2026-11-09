@@ -98,7 +98,9 @@ export function CollectionPageHero({
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-3">
+      {/* Wraps on a narrow phone, where Shuffle, Add to my Home and More actions
+          don't fit on one row. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-3">
         {shuffle ? (
           <button
             type="button"
