@@ -5,7 +5,7 @@ import {
 } from "./admin/autoscanSourceObservation";
 import { readAdminAutoscanEvents, type AutoscanEventQuery } from "@/api/v2/adminAutoscanEvents";
 import { readAdminAutoscanScans, type AutoscanScanQuery } from "@/api/v2/adminAutoscanScans";
-import { V2ProblemError, v2 } from "@/api/v2/request";
+import { problemFieldDetail, V2ProblemError, v2 } from "@/api/v2/request";
 import { readAdminAutoscanRewrites } from "@/api/v2/adminAutoscanRewrites";
 import { readAdminAutoscanAvailableSources } from "@/api/v2/adminAutoscanAvailableSources";
 import { readAdminAutoscanConnections } from "@/api/v2/adminAutoscanConnections";
@@ -527,8 +527,10 @@ function useAutoscanSourceWrite(create: boolean) {
 function sourceWriteRejection(error: unknown): string | null {
   if (!(error instanceof V2ProblemError) || error.status !== 422) return null;
   const detail = error.problem.detail;
-  if (detail && !/see errors/i.test(detail)) return detail;
-  return error.problem.errors?.find((e) => e.detail)?.detail || detail || null;
+  // `message` is `detail` in English and the catalog text in a translated interface.
+  if (detail && !/see errors/i.test(detail)) return error.message;
+  const field = error.problem.errors?.find((e) => e.detail);
+  return (field && problemFieldDetail(field)) || detail || null;
 }
 
 function sourceWriteCallbacks(

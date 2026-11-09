@@ -62,8 +62,10 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Server text** (problem details, section titles): `useServerText()(key, args, text)`
   shows the translation only when the interface language's catalog has `key` and
   `args` fill it; otherwise, and always in English, the server's text as sent.
-  `V2ProblemError.message` and `problemFieldDetail()` already do this for
-  `error.<type>` and `error.field.<code>`; `useSectionTitle()` for section titles.
+  `V2ProblemError.message` does this with the first field error's
+  `error.field.<code>`, then `error.<type>`, in the language current when the error
+  arrived; `problemFieldDetail()` for one field error; `useSectionTitle()` for section
+  titles.
 
 ## Languages and pseudo-locales
 

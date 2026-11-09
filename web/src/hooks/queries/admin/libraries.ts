@@ -35,7 +35,13 @@ import {
   staleMediaIDFromV2,
   unmatchedItemFromV2,
 } from "@/api/v2/libraries";
-import { v2, V2ProblemError, type V2Body, type V2Result } from "@/api/v2/request";
+import {
+  v2,
+  problemFieldDetail,
+  V2ProblemError,
+  type V2Body,
+  type V2Result,
+} from "@/api/v2/request";
 import { adminKeys, libraryKeys } from "../keys";
 import { toast } from "sonner";
 import type { LibraryReorderEntry } from "@/pages/adminLibraryOrder";
@@ -962,7 +968,7 @@ export function useImportCatalogSeed() {
         err instanceof V2ProblemError &&
         err.problem.errors?.some((error) => error.code === "path_rewrite_required")
       ) {
-        toast.error([err.message, ...err.problem.errors.map((error) => error.detail)].join(" "));
+        toast.error([err.message, ...err.problem.errors.map(problemFieldDetail)].join(" "));
         return;
       }
       toast.error(err instanceof Error ? err.message : "Failed to import catalog seed");

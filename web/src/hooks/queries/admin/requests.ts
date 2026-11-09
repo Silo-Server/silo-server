@@ -6,7 +6,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { V2ProblemError } from "@/api/v2/request";
+import { problemFieldDetail, V2ProblemError } from "@/api/v2/request";
 import { captureProfileRequestContext } from "@/api/client";
 import { adminAuthorityScope, type AdminAuthority } from "@/api/v2/adminAuthority";
 import {
@@ -573,7 +573,7 @@ function storeRequestRoute(queryClient: ReturnType<typeof useQueryClient>, saved
 function problemMessage(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) return fallback;
   if (!(err instanceof V2ProblemError)) return err.message;
-  const details = [err.message, ...(err.problem.errors ?? []).map((e) => e.detail)];
+  const details = [err.message, ...(err.problem.errors ?? []).map(problemFieldDetail)];
   return [...new Set(details.filter(Boolean))].join(" ");
 }
 

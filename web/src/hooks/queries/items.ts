@@ -14,7 +14,13 @@ import type {
   ItemSplitRequest,
   WatchDetail,
 } from "@/api/types";
-import { V2ProblemError, V2TransportError, v2, type V2Result } from "@/api/v2/request";
+import {
+  problemFieldDetail,
+  V2ProblemError,
+  V2TransportError,
+  v2,
+  type V2Result,
+} from "@/api/v2/request";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
@@ -635,7 +641,10 @@ type ApplyImageItem = Pick<ItemDetail, "content_id" | "type" | "series_id" | "se
 // A validation problem's first field detail says why an image was refused;
 // its summary only says that it was.
 function imageErrorMessage(err: unknown, fallback: string) {
-  if (err instanceof V2ProblemError) return err.problem.errors?.[0]?.detail ?? err.message;
+  if (err instanceof V2ProblemError) {
+    const field = err.problem.errors?.[0];
+    return field ? problemFieldDetail(field) : err.message;
+  }
   return err instanceof Error ? err.message : fallback;
 }
 
