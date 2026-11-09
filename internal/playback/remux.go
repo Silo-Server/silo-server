@@ -317,16 +317,7 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 		args = appendAACEncodeFilterArgs(args, sourceAudioChannels, "aac", targetAudioChannels, channels)
 	} else {
 		args = append(args, "-c", "copy")
-		if strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac") {
-			// AAC in MPEG-TS (and raw .aac) is ADTS-framed; MP4 needs the
-			// ADTS headers stripped into a config record. FFmpeg normally
-			// inserts this filter on its own, but not under delay_moov: the
-			// muxer rejects the first ADTS packet ("Malformed AAC bitstream")
-			// and the response ends after the header. The filter passes
-			// already-raw AAC from MKV/MP4 through unchanged, but it refuses
-			// any other codec, so it is only added for a copied AAC track.
-			args = append(args, "-bsf:a", "aac_adtstoasc")
-		}
+		args = appendCopiedAACToMP4Args(args, copyAudioCodec)
 	}
 
 	args = append(args,
@@ -495,6 +486,27 @@ func containerMIME(format string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// appendCopiedAACToMP4Args adds aac_adtstoasc when a copied audio track of
+// codec copyAudioCodec is muxed into MP4 (the progressive fMP4 remux and fMP4
+// HLS segments). AAC in MPEG-TS (and raw .aac) is ADTS-framed; MP4 needs the
+// ADTS headers stripped into a config record. FFmpeg normally inserts this
+// filter on its own, but neither under delay_moov nor inside the HLS muxer's
+// fMP4 segments: the muxer rejects the first ADTS packet ("Malformed AAC
+// bitstream") and the output ends there. The filter passes already-raw AAC
+// from MKV/MP4 through unchanged, but it refuses any other codec, so it is only
+// added for a copied AAC track. An empty codec (older tokens and recipes)
+// keeps the plain copy.
+func appendCopiedAACToMP4Args(args []string, copyAudioCodec string) []string {
+	if !copiedAudioIsAAC(copyAudioCodec) {
+		return args
+	}
+	return append(args, "-bsf:a", "aac_adtstoasc")
+}
+
+func copiedAudioIsAAC(copyAudioCodec string) bool {
+	return strings.EqualFold(strings.TrimSpace(copyAudioCodec), "aac")
 }
 
 // RemuxServeOptions carries the optional serving concerns that not every

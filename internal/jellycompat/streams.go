@@ -3068,6 +3068,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	}
 	if !compatHLSTranscodesAudio(source) {
 		opts.TargetCodecAudio = compatCopyCodec
+		opts.CopyAudioCodec = compatSourceAudioCodec(source)
 	}
 	var toneMapCapabilities tonemap.Capabilities
 	autoVideoToolboxBitrate := 0
