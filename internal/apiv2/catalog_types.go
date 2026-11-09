@@ -263,6 +263,7 @@ func catalogItemOfListing(v handlers.CollectionItemView, sel ratingsources.Selec
 		MangaChapterCount: v.MangaChapterCount, MangaVolumeCount: v.MangaVolumeCount,
 		OverlaySummary: catalogOverlayOf(v.OverlaySummary), UserState: catalogUserStateOf(v.UserState),
 		WorkID: v.WorkID, WorkTitle: v.WorkTitle,
+		ProgressUpdatedAt: instantOfRFC3339(v.ProgressUpdatedAt), ItemSource: v.ItemSource,
 	}
 	if m := v.SortMetrics; m != nil {
 		metrics := CatalogItemSortMetrics{ReleaseDate: calendarDatePtr(m.ReleaseDate), RuntimeMinutes: m.RuntimeMinutes, Resolution: m.Resolution, BitrateKbps: m.BitrateKbps,

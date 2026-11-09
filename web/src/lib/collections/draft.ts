@@ -106,6 +106,24 @@ export function draftRules(draft: CollectionDraft): QueryDefinition {
   return { ...normalizeQueryDefinition(draft.rules), library_ids: draft.libraryIds };
 }
 
+/** A rule's value is filled in: a blank text value or an open range end filters nothing yet. */
+function filled(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0 && value.every(filled);
+  if (typeof value === "string") return value.trim() !== "";
+  return value !== null && value !== undefined;
+}
+
+/**
+ * The rules hold at least one rule complete enough to filter: a field, an
+ * operator and a value. With none, a Smart collection would match every title,
+ * so the editor neither previews nor saves it, and the server refuses it.
+ */
+export function hasCompleteRule(rules: QueryDefinition): boolean {
+  return rules.groups.some((group) =>
+    group.rules.some((rule) => rule.field !== "" && rule.op !== "" && filled(rule.value)),
+  );
+}
+
 /**
  * A smart collection's `sort_config` once its stored default sort is cleared:
  * `field` and `order` go, any other setting stays. A stored default sort wins

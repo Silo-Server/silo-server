@@ -151,6 +151,11 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	if err := normalizeAdminCollectionInput(&input, req.V1Rules); err != nil {
 		return none, err
 	}
+	if !req.V1Rules && input.CollectionType == collectionTypeSmart {
+		if err := requireSmartCollectionRule(input.QueryDefinition); err != nil {
+			return none, err
+		}
+	}
 
 	collection, err := h.repo.Create(ctx, input)
 	if err != nil {
@@ -210,6 +215,9 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 		if err := catalog.ValidateV1Rules(existing.QueryDefinition); err != nil {
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
+	}
+	if err := adminSmartRuleCheck(existing.CollectionType, existing.QueryDefinition, req, queryDefinition); err != nil {
+		return none, err
 	}
 
 	sortConfig := req.SortConfig

@@ -140,6 +140,11 @@ func (h *CollectionHandler) CreatePersonalCollection(ctx context.Context, cmd Pe
 		if err != nil {
 			return none, fieldError("query_definition", "Invalid query_definition")
 		}
+		if !cmd.V1Rules {
+			if err := requireSmartCollectionRule(queryDefinitionJSON); err != nil {
+				return none, err
+			}
+		}
 	} else if len(req.QueryDefinition) > 0 {
 		queryDefinitionJSON, err = normalizeQueryDefinitionJSON(queryDefinitionJSON, true, true, cmd.V1Rules)
 		if err != nil {

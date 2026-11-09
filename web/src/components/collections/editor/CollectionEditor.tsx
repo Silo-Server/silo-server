@@ -30,6 +30,8 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useHasUnsavedChanges, useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
 import {
+  ADD_A_RULE,
+  ADD_A_RULE_THEN_CREATE,
   CHANGED_BEFORE_DELETE,
   CHECK_BEFORE_DELETE_FAILED,
   COLLECTION_CREATED,
@@ -62,7 +64,12 @@ import {
   smartCreateHint,
   titlesReadyToAdd,
 } from "@/lib/collections/copy";
-import { changedFields, draftRules, type DraftField } from "@/lib/collections/draft";
+import {
+  changedFields,
+  draftRules,
+  hasCompleteRule,
+  type DraftField,
+} from "@/lib/collections/draft";
 import { listReturnState, useListReturnPath } from "@/lib/collections/listReturn";
 import {
   addRowPath,
@@ -197,6 +204,7 @@ function SmartContents<Raw extends WireCollection>({
       />
       <CollectionPreviewPane
         preview={preview}
+        needsRules={!hasCompleteRule(draftRules(draft))}
         note={needsLibraries ? PREVIEW_EVERY_LIBRARY : undefined}
       />
     </>
@@ -285,8 +293,10 @@ export function CollectionEditor<Raw extends WireCollection>({
   const newList = synced && !snapshot;
   const editor = useCollectionDraft(scope, { snapshot, kind, libraryId });
   const { draft, view } = editor;
+  // Smart: no rule would match every title, so the collection waits for one.
+  const needsRules = smart && !hasCompleteRule(draftRules(draft));
   // Smart: the live preview under the rules, whose count the save bar repeats before Create.
-  const preview = useScopePreview(scope, draftRules(draft), { enabled: smart });
+  const preview = useScopePreview(scope, draftRules(draft), { enabled: smart && !needsRules });
   const created = Boolean(editor.id) && !newList;
   const isServer = scope.kind === "server";
   useDocumentTitle(created ? `Edit ${view?.name ?? draft.name}` : "New collection");
@@ -607,7 +617,8 @@ export function CollectionEditor<Raw extends WireCollection>({
   const listProblem =
     draft.list && editor.changed.includes("list") ? savedListProblem(draft.list) : null;
   // A created Synced list keeps this bar until it leaves for the list; one Create is enough.
-  const canCreate = !editor.id && draft.name.trim() !== "" && !needsLibraries && !needsList;
+  const canCreate =
+    !editor.id && draft.name.trim() !== "" && !needsLibraries && !needsList && !needsRules;
   const pending = editor.pendingLabels;
   // What the save bar adds after the pending fields.
   let afterPending: string | null = kind === "manual" ? TITLES_ALREADY_SAVED : listProblem;
@@ -617,18 +628,20 @@ export function CollectionEditor<Raw extends WireCollection>({
       : null;
   }
   if (needsLibraries && !needsList) afterPending = PICK_A_LIBRARY;
+  else if (needsRules) afterPending = ADD_A_RULE;
   // Before Create: what's still missing, in the order the page asks for it.
   let createHint: string | null = null;
   if (needsList) createHint = PICK_A_LIST_FIRST;
   else if (draft.name.trim() === "") createHint = NAME_IT_THEN_CREATE;
   else if (needsLibraries) createHint = PICK_LIBRARIES_FIRST;
+  else if (needsRules) createHint = ADD_A_RULE_THEN_CREATE;
   else if (newList) createHint = SYNCS_ON_CREATE;
   else if (smart && preview.status === "ready") createHint = smartCreateHint(preview.total);
   else if (staged.length > 0) createHint = titlesReadyToAdd(staged.length);
   // Save and Save and continue wait for the same things.
   let saveBlockedReason: string | null = null;
   if (editor.conflicts.length > 0) saveBlockedReason = SAVE_AFTER_CONFLICTS;
-  else if (draft.name.trim() === "" || needsLibraries || listProblem)
+  else if (draft.name.trim() === "" || needsLibraries || listProblem || needsRules)
     saveBlockedReason = SAVE_NOT_READY;
   const saveBar = created ? (
     <SaveBar

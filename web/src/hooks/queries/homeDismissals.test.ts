@@ -55,7 +55,11 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { type DismissHomeItemVariables, useDismissHomeItem } from "./homeDismissals";
+import {
+  type DismissHomeItemVariables,
+  homeDismissalForCard,
+  useDismissHomeItem,
+} from "./homeDismissals";
 
 type MutationOptions = {
   mutationFn: (variables: DismissHomeItemVariables) => Promise<unknown>;
@@ -135,5 +139,35 @@ describe("home dismissal query hooks", () => {
         }),
       }),
     );
+  });
+});
+
+describe("homeDismissalForCard", () => {
+  const stamp = "2026-01-02T03:04:05Z";
+  const movie = { content_id: "m1", type: "movie" };
+  const episode = { content_id: "e1", type: "episode", series_id: "s1" };
+
+  it.each([
+    [
+      "in-progress movie",
+      { ...movie, item_source: "in_progress", progress_updated_at: stamp },
+      {
+        itemId: "m1",
+        surface: "continue_watching",
+        mediaType: "movie",
+        progressUpdatedAt: stamp,
+      },
+    ],
+    [
+      "next-up episode",
+      { ...episode, item_source: "next_up" },
+      { itemId: "e1", surface: "next_up", mediaType: "episode", seriesId: "s1" },
+    ],
+    ["next-up card without a series", { ...movie, item_source: "next_up" }, undefined],
+    ["in-progress card without a timestamp", { ...movie, item_source: "in_progress" }, undefined],
+    ["audiobook next in series", { ...movie, item_source: "next_in_series" }, undefined],
+    ["ordinary catalog card", movie, undefined],
+  ])("%s", (_name, card, expected) => {
+    expect(homeDismissalForCard(card)).toEqual(expected);
   });
 });

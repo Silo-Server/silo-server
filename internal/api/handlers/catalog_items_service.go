@@ -157,6 +157,11 @@ func catalogResolveError(ctx context.Context, err error, groupedByWork bool) err
 }
 
 func catalogBrowseView(result *catalog.CatalogResult, items []itemListResponse) CatalogBrowseView {
+	for i := range items {
+		if progress, ok := result.SectionCardProgress[items[i].ContentID]; ok {
+			items[i].ProgressUpdatedAt, items[i].ItemSource = progress.ProgressUpdatedAt, progress.ItemSource
+		}
+	}
 	var snapshot string
 	if !result.SnapshotAt.IsZero() {
 		snapshot = result.SnapshotAt.Format(time.RFC3339Nano)

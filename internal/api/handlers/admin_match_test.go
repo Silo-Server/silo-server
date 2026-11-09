@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -141,18 +141,27 @@ func TestSearchAdminItemMatches_SearchesWithoutYearWhenNoneGiven(t *testing.T) {
 	}
 }
 
-// A failed folder lookup is the server's fault, not the caller's library
-// choice, so it must not come back as an invalid library_id.
-func TestAdminItemMatchHints_FolderLookupFailureIsInternal(t *testing.T) {
-	items := &fakeMatchItemLookup{
-		items: map[string]*models.MediaItem{"item-2": {ContentID: "item-2", Title: "Parasite", Type: "movie"}},
-	}
-	h := NewAdminMatchHandler(items, &fakeMatchFolderLookup{}, &fakeMatchMetadataService{})
+// The frozen /api/v1 routes keep answering a failed folder lookup as an invalid
+// library_id. /api/v2 answers it as a 500; its tests cover the other library
+// failures, which both versions share.
+func TestAdminMatchV1_FolderLookupFailureIsInvalidLibrary(t *testing.T) {
+	for _, library := range []string{"", `,"library_id":7`} {
+		for _, action := range []string{"search", "apply"} {
+			t.Run(action+library, func(t *testing.T) {
+				items := &fakeMatchItemLookup{items: map[string]*models.MediaItem{"item-2": {ContentID: "item-2", Title: "Parasite", Type: "movie"}}}
+				h := NewAdminMatchHandler(items, &fakeMatchFolderLookup{}, &fakeMatchMetadataService{})
+				body := `{"provider_ids":{"tmdb":"496243"}` + library + `}`
+				req := httptest.NewRequest(http.MethodPost, "/admin/items/item-2/match/"+action, strings.NewReader(body))
+				rec := httptest.NewRecorder()
 
-	_, err := h.AdminItemMatchHints(context.Background(), "item-2", nil)
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusInternalServerError {
-		t.Fatalf("AdminItemMatchHints error = %v, want a 500", err)
+				buildMatchRouter(h).ServeHTTP(rec, req)
+
+				const want = `{"error":"bad_request","message":"Invalid library_id"}`
+				if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != want {
+					t.Fatalf("got %d %s, want 400 %s", rec.Code, rec.Body, want)
+				}
+			})
+		}
 	}
 }
 
