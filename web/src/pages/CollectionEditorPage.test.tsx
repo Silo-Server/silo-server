@@ -186,6 +186,30 @@ describe("titles save as you change them", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/collections"));
   });
 
+  it("waits for a title still being added before Save leaves, and stays when it fails", async () => {
+    let refuse: ((error: Error) => void) | undefined;
+    v2Recorder.answer(
+      "PUT /api/v2/collections/{id}/items/{item_id}",
+      () =>
+        new Promise((_, reject) => {
+          refuse = reject;
+        }),
+    );
+    const router = showEditorPage("/collections/c1/edit");
+    fireEvent.change(await nameField(), { target: { value: "Renamed" } });
+    await addTitle("alien", "Alien");
+    await waitFor(() => expect(refuse).toBeDefined());
+    await save();
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Unsaved changes" })).toBeNull(),
+    );
+    expect(router.state.location.pathname).toBe("/collections/c1/edit");
+    act(() => refuse!(new Error("Not available")));
+    expect(await screen.findByText(/Couldn't add Alien/)).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/collections/c1/edit");
+  });
+
   it("puts a removed title back at its position with Undo", async () => {
     members = [HEAT.content_id, ALIEN.content_id];
     showEditorPage("/collections/c1/edit");

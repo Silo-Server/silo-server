@@ -459,6 +459,13 @@ export interface ManualContentsPanelProps {
   itemCount?: number;
   /** After every title write, so the editor refreshes its save token. */
   onItemsChanged: () => void;
+  /** Whether a title write is running, and whether the last one failed. */
+  onWritesChange?: (writes: TitleWrites) => void;
+}
+
+export interface TitleWrites {
+  writing: boolean;
+  failed: boolean;
 }
 
 /**
@@ -476,6 +483,7 @@ export function ManualContentsPanel({
   onRetryStaged,
   itemCount = 0,
   onItemsChanged,
+  onWritesChange,
 }: ManualContentsPanelProps) {
   const queryClient = useQueryClient();
   const headingId = useId();
@@ -500,6 +508,9 @@ export function ManualContentsPanel({
   const [expanded, setExpanded] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [undo, setUndo] = useState<{ id: string; title: string; position: number } | null>(null);
+  const writing = saved === "saving";
+  const failed = problem !== null;
+  useEffect(() => onWritesChange?.({ writing, failed }), [onWritesChange, writing, failed]);
   const dragOrder = useRef<typeof orderSnapshot>(undefined);
 
   // Posters and years for titles saved before the editor opened.

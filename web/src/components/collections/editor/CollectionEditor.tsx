@@ -98,7 +98,7 @@ import { DetailsPanel } from "./DetailsPanel";
 import { EditorHeader, type OpenTarget } from "./EditorHeader";
 import { CollectionPreviewPane } from "./CollectionPreviewPane";
 import { LookPanel } from "./LookPanel";
-import { ManualContentsPanel } from "./ManualContentsPanel";
+import { ManualContentsPanel, type TitleWrites } from "./ManualContentsPanel";
 import { PersonalRowsThatShowIt } from "./PersonalRowsThatShowIt";
 import { RowsOnceCreated, RowsThatShowIt } from "./RowsThatShowIt";
 import { SaveFirstDialog } from "./SaveFirstDialog";
@@ -243,9 +243,13 @@ function syncedTouched(synced: SyncedDraft | undefined) {
 /**
  * Where a save that worked goes once it settles: Save and Create back to the
  * list (`created`: the new collection's edit page instead, when Create left
- * something unsaved), Save and continue on to its detour.
+ * something unsaved), Save and continue on to its detour. `titlesFailed`: a
+ * title write had already failed, with its message on screen, when Save was
+ * pressed.
  */
-type AfterSave = { to: "list"; created?: string } | { to: "detour"; path: string };
+type AfterSave =
+  | { to: "list"; created?: string; titlesFailed?: boolean }
+  | { to: "detour"; path: string };
 
 /**
  * The editor page for every collection type, both scopes, create and edit.
@@ -300,6 +304,9 @@ export function CollectionEditor<Raw extends WireCollection>({
   const [detour, setDetour] = useState<string | null>(null);
   // A save or Create that worked: where to go once it has settled.
   const [afterSave, setAfterSave] = useState<AfterSave | null>(null);
+  // The Titles panel's own writes: Save waits for one still running, and stays
+  // when it fails, so its message isn't lost with the page.
+  const [titleWrites, setTitleWrites] = useState<TitleWrites>({ writing: false, failed: false });
   const [openEdit, setOpenEdit] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const location = useLocation();
@@ -406,11 +413,15 @@ export function CollectionEditor<Raw extends WireCollection>({
   // Something the save couldn't keep (artwork that failed to upload, a title
   // that failed to add, an edit made while saving) stays here with its message
   // rather than being dropped. Otherwise Save and Create return to the list.
-  if (afterSave && !editor.isSaving) {
+  if (afterSave && !editor.isSaving && !titleWrites.writing) {
     setAfterSave(null);
     if (afterSave.to === "detour") {
       if (!editor.isDirty) setDetour(afterSave.path);
-    } else if (!editor.isDirty && staged.length === 0) {
+    } else if (
+      !editor.isDirty &&
+      staged.length === 0 &&
+      (!titleWrites.failed || afterSave.titlesFailed)
+    ) {
       setLeftSaved(afterSave.created ? COLLECTION_CREATED : COLLECTION_SAVED);
       setLeaving(listPath);
     } else if (afterSave.created) {
@@ -497,7 +508,8 @@ export function CollectionEditor<Raw extends WireCollection>({
     if (saved) setAfterSave({ to: "detour", path: savingFirst.path });
   }
   async function save() {
-    if (await editor.save()) setAfterSave({ to: "list" });
+    const titlesFailed = titleWrites.failed;
+    if (await editor.save()) setAfterSave({ to: "list", titlesFailed });
   }
   // Only a hidden server collection waits to be shown: a personal row's See all
   // opens however its Collections tab switch is set.
@@ -796,6 +808,7 @@ export function CollectionEditor<Raw extends WireCollection>({
         onRetryStaged={(position) => void editor.retryStagedItems(position)}
         itemCount={view?.itemCount}
         onItemsChanged={reread}
+        onWritesChange={setTitleWrites}
       />
     );
   }
