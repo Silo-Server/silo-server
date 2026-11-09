@@ -876,9 +876,12 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 }
 
 // requestDownloadOf maps download progress. The byte counts and percent are
-// left out while the size is unknown (a total of 0).
+// left out while the size is unknown (a total of 0). Progress with no report
+// time, which only an out-of-band database edit can leave behind, is left out
+// whole: a zero Instant cannot be marshaled and would fail the entire response.
+// It stays on the domain value so the download refresh pass can still clear it.
 func requestDownloadOf(d *mediarequests.DownloadProgress) *RequestDownload {
-	if d == nil {
+	if d == nil || d.UpdatedAt.IsZero() {
 		return nil
 	}
 	out := &RequestDownload{
