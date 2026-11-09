@@ -64,16 +64,18 @@ idea when they plan to build it or want help building it.
 Pull requests are welcome from contributors who've had a pull request merged in
 a Silo repository, and from anyone a maintainer has asked for one, usually in
 an issue comment. A feature pull request (a `feat` title) from someone without
-triage or write access must also link an issue that a maintainer has labeled
-`accepted`.
+triage or write access must also link, in its description, an issue in this
+repository that a maintainer has labeled `accepted`.
 The rest of this guide applies to those pull requests.
 
 A workflow closes other pull requests without review when they open. That isn't
 a judgment of the work. If the problem still matters, open an issue for it, or
 post a feature idea in Ideas, and link the closed pull request; we may use the
 code as a reference. Once a feature's issue is labeled `accepted`, link it in
-a new pull request, or ask a maintainer to reopen the closed one. When a
-maintainer reopens a pull request, the check leaves it alone from then on.
+a new pull request, or ask a maintainer to reopen the closed one. If a
+maintainer asked you for a pull request and you haven't had one merged yet, the
+workflow still closes it when it opens; the maintainer reopens it, and the
+check leaves it alone from then on.
 
 ## Before you start
 

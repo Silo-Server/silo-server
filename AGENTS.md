@@ -354,9 +354,9 @@ never attach or embed its media.
   request's scope changes.
 - An open issue is not a precondition for a pull request, except a feature
   (`feat`) pull request from someone without triage or write access, which must
-  link an issue labeled `accepted`. Either way, the Problem section must state the
-  problem on its own: what breaks or is missing, who it affects, and why this
-  change is the right answer.
+  link an issue in the same repository labeled `accepted`. Either way, the
+  Problem section must state the problem on its own: what breaks or is missing,
+  who it affects, and why this change is the right answer.
 - Do not open a pull request against an issue someone else is working on. Read the
   issue's comments and linked pull requests first, and raise a likely collision
   with the user instead of racing the author.

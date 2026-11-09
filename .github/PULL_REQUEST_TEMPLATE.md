@@ -12,7 +12,7 @@ Related issue: #NNN
 <!-- An epic, sub-issue, or partly addressed issue this work serves and that should
 stay open, or "N/A". An open issue is not required — the Problem section below must
 stand on its own — except for a feat PR from someone without triage or write access,
-which must link an issue labeled `accepted`. -->
+which must link an issue in this repository labeled `accepted`. -->
 Validation tasks: #NNN C1
 <!-- Until 1.0 ships: v1.0 board tasks and cases this change unblocks or changes,
 e.g. "unblocks #1144 C3; changes #1200 C1". Write "none" when no validation task is

@@ -163,9 +163,10 @@ not issues.
 
 Pull requests are still welcome from contributors who've had one merged in a
 Silo repository, or when a maintainer asks for one; a feature pull request also
-needs an issue a maintainer has labeled `accepted`. Other pull requests are
-closed automatically without review. [CONTRIBUTING.md](CONTRIBUTING.md) explains
-what makes an issue useful.
+needs an issue in this repository that a maintainer has labeled `accepted`.
+Other pull requests are closed automatically without review; when a maintainer
+asked for one, they reopen it. [CONTRIBUTING.md](CONTRIBUTING.md) explains what
+makes an issue useful.
 
 ## Supporting Silo
 

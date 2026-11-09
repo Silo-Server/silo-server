@@ -50,8 +50,7 @@ jobs:
             const contributing = process.env.CONTRIBUTING_URL || `https://github.com/${owner}/${repo}/blob/HEAD/CONTRIBUTING.md`;
             const ideas = `https://github.com/${owner}/${repo}/discussions/categories/ideas`;
 
-            // Triage counts: org members can be granted it without write access, and
-            // private org membership does not show in author_association.
+            // Triage counts, so org members can be exempted without write access.
             async function isMaintainer(username) {
               try {
                 const { data } = await github.rest.repos.getCollaboratorPermissionLevel({ owner, repo, username });
@@ -81,30 +80,29 @@ jobs:
               }
             }
 
-            if (["OWNER", "MEMBER", "COLLABORATOR"].includes(pr.author_association) || (await isMaintainer(author))) {
+            // Decide by repository role, not author_association: MEMBER and
+            // COLLABORATOR include read-only access, and CONTRIBUTOR only means a
+            // commit on the default branch, not a merged pull request.
+            if (await isMaintainer(author)) {
               core.info(`${author} is a maintainer; skipping.`);
               return;
             }
 
-            // CONTRIBUTOR means the author already has a commit on this repository's
-            // default branch. Anyone else needs a merged pull request elsewhere in the org.
-            if (pr.author_association !== "CONTRIBUTOR") {
-              const { data } = await github.rest.search.issuesAndPullRequests({
-                q: `org:${owner} is:pr is:merged author:${author}`,
-                per_page: 1,
-              });
-              if (data.incomplete_results) {
-                throw new Error(`Search for ${author}'s merged pull requests timed out; leaving #${pr.number} open.`);
-              }
-              if (data.total_count === 0) {
-                core.info(`${author} has no merged pull request in ${owner}; closing #${pr.number}.`);
-                await close([
-                  "Thanks for the pull request. Silo takes pull requests from people who have had one merged in a Silo repository, or whom a maintainer has asked for one, so this one is closed without review. That isn't a judgment of the work.",
-                  "",
-                  `If the problem still matters, open an issue for it and link this pull request; a maintainer may reopen it or use the code as a reference. Feature ideas go in [Discussions → Ideas](${ideas}). [The contributing guide](${contributing}) explains why.`,
-                ].join("\n"));
-                return;
-              }
+            const { data: merged } = await github.rest.search.issuesAndPullRequests({
+              q: `org:${owner} is:pr is:merged author:${author}`,
+              per_page: 1,
+            });
+            if (merged.incomplete_results) {
+              throw new Error(`Search for ${author}'s merged pull requests timed out; leaving #${pr.number} open.`);
+            }
+            if (merged.total_count === 0) {
+              core.info(`${author} has no merged pull request in ${owner}; closing #${pr.number}.`);
+              await close([
+                "Thanks for the pull request. Silo takes pull requests from people who have had one merged in a Silo repository, or whom a maintainer has asked for one, so this one is closed without review. That isn't a judgment of the work. If a maintainer asked you for it, they will reopen it.",
+                "",
+                `If the problem still matters, open an issue for it and link this pull request; a maintainer may reopen it or use the code as a reference. Feature ideas go in [Discussions → Ideas](${ideas}). [The contributing guide](${contributing}) explains why.`,
+              ].join("\n"));
+              return;
             }
 
             if (!/^feat(\([^)]*\))?!?:/i.test(pr.title)) {
@@ -134,7 +132,7 @@ jobs:
 
             core.info(`#${pr.number} is a feature pull request without an accepted issue; closing.`);
             await close([
-              `Thanks for the pull request. A feature pull request needs a linked issue that a maintainer has labeled \`${ACCEPTED}\`, and this one doesn't link one, so it is closed without review.`,
+              `Thanks for the pull request. A feature pull request needs a linked issue in this repository that a maintainer has labeled \`${ACCEPTED}\`, and this one doesn't link one, so it is closed without review.`,
               "",
-              `Propose the feature in [Discussions → Ideas](${ideas}), or ask on an existing issue. Once an issue carries the \`${ACCEPTED}\` label, link it in the description (for example \`Closes #123\`) of a new pull request, or ask a maintainer to reopen this one. [The contributing guide](${contributing}) has the details.`,
+              `Propose the feature in [Discussions → Ideas](${ideas}), or ask on an existing issue. Once an issue in this repository carries the \`${ACCEPTED}\` label, link it in the description (for example \`Closes #123\`) of a new pull request, or ask a maintainer to reopen this one. [The contributing guide](${contributing}) has the details.`,
             ].join("\n"));
