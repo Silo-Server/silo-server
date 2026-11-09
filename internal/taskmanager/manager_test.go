@@ -413,41 +413,59 @@ func (cleanStopTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter
 }
 
 func TestScheduledRunStopsAtTriggerMaxRuntime(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		const taskKey = "long_task"
-		triggerRepo := &fakeTriggerRepository{
-			triggers: map[string][]taskmanager.TriggerConfig{
-				taskKey: {{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "03:00", MaxRuntimeMs: int64(4 * time.Hour / time.Millisecond)}},
-			},
-		}
-		historyRepo := &recordingExecutionRepository{}
-		var trigger *fakeTrigger
-		factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
-			trigger = &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
-			return trigger
-		}
-		manager := taskmanager.New(triggerRepo, historyRepo, factory, slog.New(slog.DiscardHandler))
-		manager.Register(cleanStopTask{stubTask{key: taskKey}})
+	for _, tc := range []struct {
+		name        string
+		limitMs     int64
+		wantStopped bool
+	}{
+		{name: "stops at the limit", limitMs: int64(4 * time.Hour / time.Millisecond), wantStopped: true},
+		// The v1 route accepts any int64; this one would wrap to a 448µs limit.
+		{name: "too large to represent means no limit", limitMs: 18446744073710},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const taskKey = "long_task"
+				triggerRepo := &fakeTriggerRepository{
+					triggers: map[string][]taskmanager.TriggerConfig{
+						taskKey: {{Type: taskmanager.TriggerTypeDaily, TimeOfDay: "03:00", MaxRuntimeMs: tc.limitMs}},
+					},
+				}
+				historyRepo := &recordingExecutionRepository{}
+				var trigger *fakeTrigger
+				factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+					trigger = &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
+					return trigger
+				}
+				manager := taskmanager.New(triggerRepo, historyRepo, factory, slog.New(slog.DiscardHandler))
+				manager.Register(cleanStopTask{stubTask{key: taskKey}})
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer manager.Stop()
-		defer cancel()
-		manager.Start(ctx)
-		trigger.ch <- struct{}{}
+				ctx, cancel := context.WithCancel(context.Background())
+				defer manager.Stop()
+				defer cancel()
+				manager.Start(ctx)
+				trigger.ch <- struct{}{}
 
-		time.Sleep(4*time.Hour + time.Second) //nolint:forbidigo // synctest: virtual time past the trigger's max runtime
-		synctest.Wait()
-		if got := historyRepo.insertCount(); got != 1 {
-			t.Fatalf("history inserts = %d, want 1", got)
-		}
-		result := historyRepo.inserts[0]
-		if result.Status != "cancelled" { //nolint:misspell // Existing task state vocabulary.
-			t.Fatalf("status = %q, want cancelled", result.Status) //nolint:misspell // Existing task state vocabulary.
-		}
-		if result.ErrorMessage != "Stopped after reaching the max runtime of 4h0m0s" {
-			t.Fatalf("error message = %q, want it to name the max runtime", result.ErrorMessage)
-		}
-	})
+				time.Sleep(4*time.Hour + time.Second) //nolint:forbidigo // synctest: virtual time past the trigger's max runtime
+				synctest.Wait()
+				if !tc.wantStopped {
+					if got := historyRepo.insertCount(); got != 0 {
+						t.Fatalf("history inserts = %d, want the run still going: %+v", got, historyRepo.inserts[0])
+					}
+					return
+				}
+				if got := historyRepo.insertCount(); got != 1 {
+					t.Fatalf("history inserts = %d, want 1", got)
+				}
+				result := historyRepo.inserts[0]
+				if result.Status != "cancelled" { //nolint:misspell // Existing task state vocabulary.
+					t.Fatalf("status = %q, want cancelled", result.Status) //nolint:misspell // Existing task state vocabulary.
+				}
+				if result.ErrorMessage != "Stopped after reaching the max runtime of 4h0m0s" {
+					t.Fatalf("error message = %q, want it to name the max runtime", result.ErrorMessage)
+				}
+			})
+		})
+	}
 }
 
 type reservedTask struct {

@@ -194,6 +194,11 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	var err error
 	workmetrics.Do(execCtx, func(ctx context.Context) { err = w.task.Execute(ctx, reporter) })
 	completedAt := time.Now()
+	// Stop the max runtime timer now, so it can't relabel a run that already
+	// returned while this goroutine waits for the worker lock.
+	cancel()
+	var limitErr maxRuntimeError
+	limitReached := errors.As(context.Cause(execCtx), &limitErr)
 
 	result := &ExecutionResult{
 		TaskKey:     w.task.Key(),
@@ -204,15 +209,20 @@ func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.Can
 	}
 
 	metricOutcome := telemetry.Outcome(err)
-	var limitErr maxRuntimeError
+	if limitReached && err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		// The run is recorded as stopped at its limit; keep the task's own error.
+		slog.WarnContext(execCtx, "task returned an error after reaching its max runtime", "task", w.task.Key(), "error", err)
+	}
 	w.mu.Lock()
 	switch {
-	case w.state == TaskStateCancelling:
-		result.Status = "cancelled"
-		metricOutcome = "canceled"
-	case errors.As(context.Cause(execCtx), &limitErr):
+	case limitReached:
+		// Checked before TaskStateCancelling: an admin who cancels a run already past
+		// its limit still sees why it stopped.
 		result.Status = "cancelled" //nolint:misspell // Existing task state vocabulary.
 		result.ErrorMessage = limitErr.Error()
+		metricOutcome = "canceled"
+	case w.state == TaskStateCancelling:
+		result.Status = "cancelled"
 		metricOutcome = "canceled"
 	case err != nil:
 		result.Status = "failed"

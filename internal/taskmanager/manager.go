@@ -123,8 +123,9 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			}
 		}
 
-		// merged carries the firing trigger's config so the run gets its max runtime.
-		merged := make(chan TriggerConfig, 1)
+		// merged carries the firing trigger's config so the run gets its max
+		// runtime, or nil when the schedule changed.
+		merged := make(chan *TriggerConfig, 1)
 		done := make(chan struct{})
 
 		for _, tr := range trigs {
@@ -135,8 +136,9 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 					return
 				case _, ok := <-tr.C():
 					if ok {
+						cfg := tr.Config()
 						select {
-						case merged <- tr.Config():
+						case merged <- &cfg:
 						default:
 						}
 					}
@@ -150,13 +152,13 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 				return
 			case <-w.triggerUpdate:
 				select {
-				case merged <- TriggerConfig{}:
+				case merged <- nil:
 				default:
 				}
 			}
 		}()
 
-		var fired TriggerConfig
+		var fired *TriggerConfig
 		select {
 		case <-ctx.Done():
 			close(done)
@@ -165,7 +167,10 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			close(done)
 		}
 
-		if w.triggerChanged.CompareAndSwap(true, false) {
+		// A schedule change only rebuilds the triggers. Checking fired too keeps
+		// a stale update signal, whose flag an earlier wake already cleared,
+		// from starting a run that no trigger asked for.
+		if changed := w.triggerChanged.CompareAndSwap(true, false); changed || fired == nil {
 			continue
 		}
 
@@ -186,7 +191,7 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			continue
 		}
 
-		result, err := w.run(ctx, time.Duration(fired.MaxRuntimeMs)*time.Millisecond)
+		result, err := w.run(ctx, fired.MaxRuntime())
 		if err != nil {
 			// If the task is already running (e.g. via manual RunTask), don't
 			// rearm — the concurrent runner will rearm when it finishes.

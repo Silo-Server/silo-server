@@ -80,10 +80,13 @@ requires explicit review and revision adoption before another submission. It
 disables both mutation retries and authentication-refresh replay.
 
 A trigger's `max_runtime_ms` bounds each run that trigger starts. When it
-elapses, the task runner cancels the run's context exactly as a cancel request
-does, so a task stops wherever it stops on cancel and keeps the progress it
-saved. The run is recorded as `cancelled` with an `error_message` naming the
-limit. Runs that no trigger started, such as manual runs, are not bounded.
+elapses, the task runner cancels the run's context, the same signal a cancel
+request sends, so a task stops wherever it stops on cancel and keeps the
+progress it saved. Unlike a cancel request, the task stays `running` until it
+returns. The run is then recorded as `cancelled` with an `error_message` naming
+the limit, including when an administrator cancelled it after the limit passed.
+Runs that no trigger started, such as manual runs, are not bounded, and a value
+too large to represent as a duration counts as no limit.
 
 A task can spread its scheduled starts so servers sharing a remote service do
 not start together. Each daily or weekly run of such a task starts at a random

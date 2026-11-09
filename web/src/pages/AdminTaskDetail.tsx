@@ -323,14 +323,16 @@ function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
           <Input
             type="number"
             min={0}
+            step="any"
             className="w-full sm:w-[100px]"
             placeholder="None"
             value={trigger.max_runtime_ms ? trigger.max_runtime_ms / 60_000 : ""}
             onChange={(e) => {
-              const val = parseInt(e.target.value, 10);
+              // Fractional minutes keep sub-minute limits saved through the API.
+              const ms = Math.round(Number(e.target.value) * 60_000);
               onChange({
                 ...trigger,
-                max_runtime_ms: val > 0 ? val * 60_000 : undefined,
+                max_runtime_ms: ms > 0 ? ms : undefined,
               });
             }}
           />
