@@ -2291,6 +2291,23 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if appCtx == nil {
 			appCtx = context.Background()
 		}
+		// A scan that adds or removes titles publishes scan_complete with the
+		// library ID. Observing the publish, rather than subscribing, counts
+		// each scan once on the node that ran it, with or without Redis.
+		if observed, ok := deps.EventBus.(interface {
+			ObservePublishes(cache.PublishObserver)
+		}); ok {
+			scheduler := catalog.NewSmartCountScheduler(refresher, 10*time.Second)
+			observed.ObservePublishes(func(channel string, event cache.Event) {
+				if channel != cache.ChannelCatalog || event.Type != cache.EventScanComplete {
+					return
+				}
+				if libraryID, err := strconv.Atoi(event.Payload); err == nil {
+					scheduler.LibraryChanged(libraryID)
+				}
+			})
+			go scheduler.Run(appCtx)
+		}
 		go func() {
 			select {
 			case <-time.After(15 * time.Second):
