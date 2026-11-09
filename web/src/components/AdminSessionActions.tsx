@@ -10,7 +10,7 @@ import {
   terminateAdminPlaybackSession,
   type AdminPlaybackCommandAction,
 } from "@/api/v2/adminPlaybackCommands";
-import { V2ProblemError } from "@/api/v2/request";
+import { problemDisplayText, V2ProblemError } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +28,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import { getPrimaryPlaybackAction, isSessionPaused } from "./adminSessionActionModel";
 
 type SessionActionKind = "pause" | "resume" | "stop" | "terminate" | "message";
@@ -41,62 +42,67 @@ interface AdminSessionActionsProps {
   showInlineTerminate?: boolean;
 }
 
-const successMessages: Record<Exclude<SessionActionKind, "message">, string> = {
-  pause: "Pause command sent",
-  resume: "Resume command sent",
-  stop: "Stop command sent",
-  terminate: "Terminate command sent",
+const successMessages: Record<Exclude<SessionActionKind, "message">, MessageKey> = {
+  pause: "web.admin.sessions.playback.toast.pauseSent",
+  resume: "web.admin.sessions.playback.toast.resumeSent",
+  stop: "web.admin.sessions.playback.toast.stopSent",
+  terminate: "web.admin.sessions.playback.toast.terminateSent",
 };
 
-const fallbackMessages: Record<Exclude<SessionActionKind, "message">, string> = {
-  pause: "Pause could not reach the player directly. Silo will end the session shortly instead.",
-  resume: "Resume could not reach the player directly. Silo will end the session shortly instead.",
-  stop: "Stop could not reach the player directly. Silo will end the session shortly instead.",
-  terminate:
-    "Terminate could not reach the player directly. Silo will end the session shortly instead.",
+const fallbackMessages: Record<Exclude<SessionActionKind, "message">, MessageKey> = {
+  pause: "web.admin.sessions.playback.toast.pauseFallback",
+  resume: "web.admin.sessions.playback.toast.resumeFallback",
+  stop: "web.admin.sessions.playback.toast.stopFallback",
+  terminate: "web.admin.sessions.playback.toast.terminateFallback",
 };
-
-const unsupportedPlaybackControlCopy =
-  "This session does not support live pause, resume, or messages. Stop and Terminate can still end playback.";
-
-const staleAuthorityCopy = "Your session changed. Reload and try again.";
 
 // Pause, resume, stop and message travel on the sequenced v2 commands: each
 // click is a new command unless the last answer for the same command left its
 // outcome unknown, which repeats it with the same identity so the server
 // applies it once. A stale refusal means a newer command already won.
-function describeTerminateReceipt(receipt: {
-  authority_revoked: boolean;
-  already_revoked: boolean;
-  client_notified: boolean;
-  durable_state: string;
-}): string {
-  const revoked = receipt.already_revoked
-    ? "Playback authority was already revoked"
-    : receipt.authority_revoked
-      ? "Playback authority revoked"
-      : "Playback authority was not revoked";
-  const notified = receipt.client_notified
-    ? "the player was told to stop"
-    : "the player could not be reached and will stop when it next contacts the server";
-  return `${revoked}; ${notified}.`;
+function describeTerminateReceipt(
+  t: Translate,
+  receipt: {
+    authority_revoked: boolean;
+    already_revoked: boolean;
+    client_notified: boolean;
+    durable_state: string;
+  },
+): string {
+  return t("web.admin.sessions.playback.toast.terminateReceipt", {
+    revoked: receipt.already_revoked ? "already" : receipt.authority_revoked ? "revoked" : "other",
+    notified: receipt.client_notified ? "yes" : "other",
+  });
 }
 
+// Problem text follows the problem-details rule: English shows the server's
+// detail as before; another language shows the catalog's text for the field
+// code or problem type when it has one.
 function describeCommandFailure(
+  t: Translate,
   action: AdminPlaybackCommandAction | "terminate",
   error: unknown,
 ): string {
-  if (error instanceof StaleApiRequestContextError) return staleAuthorityCopy;
-  if (error instanceof V2ProblemError) {
-    if (error.problemType === "conflict" && error.status === 409) {
-      return `The ${action} command was not applied: ${error.problem.detail ?? "the session state changed"}`;
-    }
-    if (error.problemType === "not_found") return "This playback session has already ended.";
-    if (error.problemType === "dependency_unavailable")
-      return error.problem.detail || "Playback control is unavailable on this server.";
-    return error.problem.detail ?? error.message;
+  if (error instanceof StaleApiRequestContextError) {
+    return t("web.admin.sessions.playback.failure.staleAuthority");
   }
-  return error instanceof Error ? error.message : "Failed to send session command";
+  if (error instanceof V2ProblemError) {
+    const { problem } = error;
+    if (error.problemType === "conflict" && error.status === 409) {
+      const reason = problem.detail ?? t("web.admin.sessions.playback.failure.conflictReason");
+      return t("web.admin.sessions.playback.failure.notApplied", {
+        action,
+        reason: problemDisplayText(problem, reason),
+      });
+    }
+    if (error.problemType === "not_found") return t("web.admin.sessions.playback.failure.ended");
+    if (error.problemType === "dependency_unavailable") {
+      const english = problem.detail || t("web.admin.sessions.playback.failure.unavailable");
+      return problemDisplayText(problem, english);
+    }
+    return problemDisplayText(problem, problem.detail ?? error.message);
+  }
+  return error instanceof Error ? error.message : t("web.admin.sessions.playback.failure.generic");
 }
 
 export function AdminSessionActions({
@@ -107,6 +113,7 @@ export function AdminSessionActions({
   inlinePrefixActions,
   showInlineTerminate = false,
 }: AdminSessionActionsProps) {
+  const t = useT();
   const [pendingAction, setPendingAction] = useState<SessionActionKind | null>(null);
   const [messageOpen, setMessageOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -125,7 +132,7 @@ export function AdminSessionActions({
 
   const paused = optimisticPaused ?? isSessionPaused(session);
   const primaryAction = paused
-    ? { action: "resume" as const, label: "Resume" }
+    ? { action: "resume" as const, label: t("web.admin.sessions.playback.action.resume") }
     : getPrimaryPlaybackAction(session);
 
   async function runAction(action: Exclude<SessionActionKind, "message">) {
@@ -140,7 +147,7 @@ export function AdminSessionActions({
           undefined,
           profileContext,
         );
-        toast.success(describeTerminateReceipt(receipt));
+        toast.success(describeTerminateReceipt(t, receipt));
         return;
       }
       const receipt = await sendAdminPlaybackCommand(
@@ -148,12 +155,13 @@ export function AdminSessionActions({
         profileContext,
       );
       if (receipt.outcome === "replayed") {
-        const fallback =
-          receipt.delivery === "fallback_scheduled"
-            ? " Silo could not reach the player and scheduled the session to end."
-            : "";
         toast.success(
-          `Your earlier ${action} request was already accepted.${fallback} Choose ${action} again to send a new command.`,
+          t(
+            receipt.delivery === "fallback_scheduled"
+              ? "web.admin.sessions.playback.toast.replayedFallback"
+              : "web.admin.sessions.playback.toast.replayed",
+            { action },
+          ),
         );
         return;
       }
@@ -164,11 +172,11 @@ export function AdminSessionActions({
       }
       toast.success(
         receipt.delivery === "fallback_scheduled"
-          ? fallbackMessages[action]
-          : successMessages[action],
+          ? t(fallbackMessages[action])
+          : t(successMessages[action]),
       );
     } catch (error) {
-      toast.error(describeCommandFailure(action, error));
+      toast.error(describeCommandFailure(t, action, error));
     } finally {
       setPendingAction(null);
     }
@@ -177,7 +185,7 @@ export function AdminSessionActions({
   async function sendMessage() {
     const trimmed = message.trim();
     if (!trimmed) {
-      toast.error("Message is required");
+      toast.error(t("web.admin.sessions.playback.toast.messageRequired"));
       return;
     }
 
@@ -189,16 +197,14 @@ export function AdminSessionActions({
         profileContext,
       );
       if (receipt.outcome === "replayed") {
-        toast.success(
-          "Your earlier message request was already accepted. Send again to send a new message.",
-        );
+        toast.success(t("web.admin.sessions.playback.toast.messageReplayed"));
         return;
       }
-      toast.success("Message sent");
+      toast.success(t("web.admin.sessions.playback.toast.messageSent"));
       setMessage("");
       setMessageOpen(false);
     } catch (error) {
-      toast.error(describeCommandFailure("message", error));
+      toast.error(describeCommandFailure(t, "message", error));
     } finally {
       setPendingAction(null);
     }
@@ -217,7 +223,7 @@ export function AdminSessionActions({
       disabled={pendingAction !== null}
     >
       <OctagonAlert className="h-3.5 w-3.5" />
-      Terminate
+      {t("web.admin.sessions.playback.action.terminate")}
     </Button>
   ) : null;
 
@@ -228,7 +234,7 @@ export function AdminSessionActions({
           variant="ghost"
           size="icon"
           className={compact ? "h-7 w-7" : "h-8 w-8"}
-          aria-label="Session actions"
+          aria-label={t("web.admin.sessions.playback.menu.ariaLabel")}
           disabled={pendingAction !== null}
         >
           <MoreHorizontal className="h-4 w-4" />
@@ -237,10 +243,10 @@ export function AdminSessionActions({
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>
           {layout === "inline"
-            ? "Session Actions"
+            ? t("web.admin.sessions.playback.menu.titleSession")
             : supportsPlaybackControl
-              ? "Playback Actions"
-              : "Limited Playback Actions"}
+              ? t("web.admin.sessions.playback.menu.titlePlayback")
+              : t("web.admin.sessions.playback.menu.titleLimited")}
         </DropdownMenuLabel>
         {supportsPlaybackControl ? (
           <DropdownMenuItem onSelect={() => void runAction(primaryAction.action)}>
@@ -254,14 +260,14 @@ export function AdminSessionActions({
         ) : (
           <>
             <div className="text-muted-foreground px-2 py-1.5 text-xs leading-5">
-              {unsupportedPlaybackControlCopy}
+              {t("web.admin.sessions.playback.unsupportedControl")}
             </div>
             <DropdownMenuSeparator />
           </>
         )}
         <DropdownMenuItem onSelect={() => void runAction("stop")}>
           <Square className="h-4 w-4" />
-          Stop
+          {t("web.admin.sessions.playback.action.stop")}
         </DropdownMenuItem>
         {extraMenuItems ? (
           <>
@@ -272,7 +278,7 @@ export function AdminSessionActions({
         {supportsPlaybackControl ? (
           <DropdownMenuItem onSelect={() => setMessageOpen(true)}>
             <MessageSquare className="h-4 w-4" />
-            Message…
+            {t("web.admin.sessions.playback.action.message")}
           </DropdownMenuItem>
         ) : null}
         {showInlineTerminate ? null : (
@@ -280,7 +286,7 @@ export function AdminSessionActions({
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={() => void runAction("terminate")}>
               <OctagonAlert className="h-4 w-4" />
-              Terminate
+              {t("web.admin.sessions.playback.action.terminate")}
             </DropdownMenuItem>
           </>
         )}
@@ -306,17 +312,22 @@ export function AdminSessionActions({
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Send Message</DialogTitle>
+            <DialogTitle>{t("web.admin.sessions.playback.messageDialog.title")}</DialogTitle>
             <DialogDescription>
-              Send a custom message to {session.username || `User #${session.user_id}`} during
-              playback.
+              {t("web.admin.sessions.playback.messageDialog.description", {
+                name:
+                  session.username ||
+                  t("web.admin.sessions.playback.messageDialog.userFallback", {
+                    id: String(session.user_id),
+                  }),
+              })}
             </DialogDescription>
           </DialogHeader>
           <textarea
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             rows={4}
-            placeholder="Server restart in 5 minutes. Please finish this episode soon."
+            placeholder={t("web.admin.sessions.playback.messageDialog.placeholder")}
             className="border-border bg-background text-foreground min-h-24 w-full resize-y rounded-md border px-3 py-2 text-sm outline-none focus:border-[var(--primary)]"
           />
           <DialogFooter>
@@ -325,10 +336,10 @@ export function AdminSessionActions({
               onClick={() => setMessageOpen(false)}
               disabled={pendingAction === "message"}
             >
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button onClick={() => void sendMessage()} disabled={pendingAction === "message"}>
-              Send Message
+              {t("web.admin.sessions.playback.messageDialog.send")}
             </Button>
           </DialogFooter>
         </DialogContent>

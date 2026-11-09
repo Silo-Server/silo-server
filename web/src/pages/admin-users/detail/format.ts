@@ -1,6 +1,19 @@
+import type { ReactNode } from "react";
+
+import { t, type MessageKey, type TextValues, type Translate } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate, formatTime, preferredDateLocale } from "@/lib/datetime";
 import { activityMethodMeta, formatDecisionLabel } from "@/pages/adminActivityPresentation";
+
+/**
+ * A message as plain text whose `<owner>` tag only marks a name that an ASCII
+ * apostrophe follows (`<owner>{profile}</owner>'s`): the catalog rejects an
+ * apostrophe right after a placeholder.
+ */
+export function possessiveText(translate: Translate, id: MessageKey, values: TextValues): string {
+  const node = translate(id, { ...values, owner: (chunks: ReactNode[]) => chunks.join("") });
+  return Array.isArray(node) ? node.join("") : String(node);
+}
 
 function validDate(iso: string | null | undefined): Date | null {
   if (!iso) return null;
@@ -13,7 +26,12 @@ export function formatWatchTime(seconds: number): string {
   const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  return hours > 0
+    ? t("web.admin.users.detail.common.watchTime.hoursMinutes", {
+        hours: String(hours),
+        minutes: String(minutes),
+      })
+    : t("web.admin.users.detail.common.watchTime.minutes", { minutes: String(minutes) });
 }
 
 /** A month and day, "Sep 26"; "" when there is no date. */
@@ -38,12 +56,12 @@ export function formatDayTime(iso: string): string {
   const now = new Date();
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  const day = sameDay(date, now)
-    ? "Today"
-    : sameDay(date, yesterday)
-      ? "Yesterday"
-      : formatShortDate(iso);
-  return `${day}, ${formatTime(date)}`;
+  const time = formatTime(date);
+  if (sameDay(date, now)) return t("web.admin.users.detail.common.dayTime.today", { time });
+  if (sameDay(date, yesterday)) {
+    return t("web.admin.users.detail.common.dayTime.yesterday", { time });
+  }
+  return t("web.admin.users.detail.common.dayTime.date", { date: formatShortDate(iso), time });
 }
 
 /**
@@ -77,16 +95,19 @@ export function episodeCode(
 ): string {
   if (season == null || episode == null) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `S${pad(season)}E${pad(episode)}`;
+  return t("web.admin.users.detail.common.episodeCode", {
+    season: pad(season),
+    episode: pad(episode),
+  });
 }
 
-const BYTE_UNITS = [
-  { unit: "B", size: 1, digits: 0 },
-  { unit: "KB", size: 1e3, digits: 0 },
-  { unit: "MB", size: 1e6, digits: 0 },
-  { unit: "GB", size: 1e9, digits: 1 },
-  { unit: "TB", size: 1e12, digits: 1 },
-] as const;
+const BYTE_UNITS: readonly { unit: MessageKey; size: number; digits: number }[] = [
+  { unit: "web.admin.users.detail.common.bytes.b", size: 1, digits: 0 },
+  { unit: "web.admin.users.detail.common.bytes.kb", size: 1e3, digits: 0 },
+  { unit: "web.admin.users.detail.common.bytes.mb", size: 1e6, digits: 0 },
+  { unit: "web.admin.users.detail.common.bytes.gb", size: 1e9, digits: 1 },
+  { unit: "web.admin.users.detail.common.bytes.tb", size: 1e12, digits: 1 },
+];
 
 /** A size in decimal units: "14.2 GB", "900 MB", "512 B". */
 export function formatBytes(bytes: number): string {
@@ -98,7 +119,7 @@ export function formatBytes(bytes: number): string {
   if (Number((value / size).toFixed(digits)) >= 1000 && index < BYTE_UNITS.length - 1) {
     ({ unit, size, digits } = BYTE_UNITS[index + 1]!);
   }
-  return `${(value / size).toFixed(digits)} ${unit}`;
+  return t(unit, { value: (value / size).toFixed(digits) });
 }
 
 /**
@@ -109,9 +130,23 @@ export function formatBytes(bytes: number): string {
 export function formatStorageLimit(bytes: number): string {
   const value = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
   const gb = value / 1024 ** 3;
-  if (gb >= 1) return `${Number(gb.toFixed(1))} GB`;
-  return `${Math.round(value / 1024 ** 2)} MB`;
+  if (gb >= 1) {
+    return t("web.admin.users.detail.common.bytes.gb", { value: String(Number(gb.toFixed(1))) });
+  }
+  return t("web.admin.users.detail.common.bytes.mb", {
+    value: String(Math.round(value / 1024 ** 2)),
+  });
 }
+
+// The values adminActivityPresentation labels; anything else reads as itself.
+// Checked by value, not by comparing a label, so a translated "Unknown" still works.
+const ACTIVITY_METHODS: ReadonlySet<string> = new Set([
+  "direct",
+  "remux",
+  "direct_stream",
+  "transcode",
+]);
+const DECISIONS: ReadonlySet<string> = new Set(["direct", "copy", "remux", "hls", "transcode"]);
 
 /**
  * "Direct Play", "Direct Stream", "Transcode"… for a play method or activity
@@ -120,10 +155,8 @@ export function formatStorageLimit(bytes: number): string {
  */
 export function formatPlayMethod(method: string | null | undefined): string {
   const raw = (method ?? "").trim();
-  const meta = activityMethodMeta(raw);
-  if (meta.label !== "Unknown") return meta.label;
-  const decision = formatDecisionLabel(raw);
-  if (decision !== "Unknown" || raw === "") return decision;
+  if (ACTIVITY_METHODS.has(raw)) return activityMethodMeta(raw).label;
+  if (DECISIONS.has(raw) || raw === "") return formatDecisionLabel(raw);
   return raw
     .split(/[\s_-]+/)
     .filter(Boolean)

@@ -3,6 +3,7 @@ import { Info } from "lucide-react";
 import { getAdminUser, type AdminUserEditor } from "@/api/v2/adminUsers";
 import { V2ProblemError } from "@/api/v2/request";
 import { useDeleteUser, useUpdateUser } from "@/hooks/queries/admin/users";
+import { useT } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,6 +34,7 @@ export function AdminUserDeleteDialog({
   /** Offers "Disable instead"; called after the account is disabled. */
   onDisabled?: () => void;
 }) {
+  const t = useT();
   const [editor, setEditor] = useState(initialEditor);
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
@@ -66,13 +68,13 @@ export function AdminUserDeleteDialog({
     void run(async () => {
       await deleteUser.mutateAsync(editor);
       onDeleted();
-    }, "Could not delete user.");
+    }, t("web.admin.users.deleteDialog.deleteFailed"));
   }
   function disable() {
     void run(async () => {
       await updateUser.mutateAsync({ editor, body: { enabled: false } });
       onDisabled?.();
-    }, "Could not disable user.");
+    }, t("web.admin.users.deleteDialog.disableFailed"));
   }
   async function reload() {
     if (busy.current) return;
@@ -83,7 +85,7 @@ export function AdminUserDeleteDialog({
       setConflict(false);
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reload user.");
+      setError(err instanceof Error ? err.message : t("web.admin.users.deleteDialog.reloadFailed"));
     } finally {
       busy.current = false;
       setPending(false);
@@ -98,27 +100,34 @@ export function AdminUserDeleteDialog({
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete {username}?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {t("web.admin.users.deleteDialog.title", { username })}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            This removes the account,{" "}
             {profileCount === undefined
-              ? "its profiles"
-              : `its ${profileCount} ${profileCount === 1 ? "profile" : "profiles"}`}
-            , watch history, and saved preferences. It can't be undone.
+              ? t("web.admin.users.deleteDialog.description")
+              : t("web.admin.users.deleteDialog.descriptionCounted", {
+                  count: profileCount,
+                  count_text: String(profileCount),
+                })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {offerDisable && (
           <div className="border-info/25 bg-info/5 text-muted-foreground flex items-start gap-2 rounded-xl border px-3 py-2.5 text-sm">
             <Info aria-hidden="true" className="text-info mt-0.5 size-4 shrink-0" />
             <span>
-              Want to keep the history? <strong className="text-foreground">Disable</strong> the
-              account instead. It stops sign-in and keeps everything.
+              {t("web.admin.users.deleteDialog.disableHint", {
+                b: (chunks) => <strong className="text-foreground">{chunks}</strong>,
+              })}
             </span>
           </div>
         )}
         <div className="space-y-2">
           <label htmlFor={confirmId} className="text-sm font-medium">
-            Type <span className="font-mono">{username}</span> to confirm
+            {t("web.admin.users.deleteDialog.confirmLabel", {
+              username,
+              code: (chunks) => <span className="font-mono">{chunks}</span>,
+            })}
           </label>
           <Input
             id={confirmId}
@@ -131,19 +140,19 @@ export function AdminUserDeleteDialog({
         {error && <p role="alert">{error}</p>}
         {conflict && (
           <>
-            <p>The user changed. Reload before trying again.</p>
+            <p>{t("web.admin.users.deleteDialog.conflict")}</p>
             <Button disabled={pending} onClick={() => void reload()}>
-              Reload current user
+              {t("web.admin.users.deleteDialog.reload")}
             </Button>
           </>
         )}
         <AlertDialogFooter>
           <Button variant="ghost" disabled={pending} onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           {offerDisable && (
             <Button variant="outline" disabled={pending || conflict} onClick={disable}>
-              Disable instead
+              {t("web.admin.users.deleteDialog.disableInstead")}
             </Button>
           )}
           <Button
@@ -151,7 +160,7 @@ export function AdminUserDeleteDialog({
             disabled={pending || conflict || !confirmed}
             onClick={remove}
           >
-            Delete account
+            {t("web.admin.users.deleteDialog.confirm")}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

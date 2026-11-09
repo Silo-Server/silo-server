@@ -9,6 +9,7 @@ import {
   useAdminUserProfileActivity,
 } from "@/hooks/queries/admin/userActivity";
 import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import { countCustomPolicyRows, countCustomRequestTerms } from "./access/policySources";
@@ -26,6 +27,7 @@ function Count({ children }: { children: ReactNode }) {
  * it, and keeps the active tab in view. Render it inside the page's `Tabs`.
  */
 export function UserDetailTabBar({ user, active }: { user: AdminUser; active: UserDetailTab }) {
+  const t = useT();
   const {
     ref: scroller,
     edges,
@@ -46,33 +48,40 @@ export function UserDetailTabBar({ user, active }: { user: AdminUser; active: Us
   const preferences = settingCounts.account + settingCounts.device;
 
   const tabs: Array<{ value: UserDetailTab; label: string; extra?: ReactNode }> = [
-    { value: "overview", label: "Overview" },
+    { value: "overview", label: t("web.admin.users.detail.tabs.overview") },
     {
       value: "profiles",
-      label: "Profiles",
+      label: t("web.admin.users.detail.tabs.profiles"),
       extra: profiles.data ? <Count>{profiles.data.length}</Count> : null,
     },
     {
       value: "access",
-      label: "Access & limits",
-      extra: custom > 0 ? <Count>{custom} custom</Count> : null,
+      label: t("web.admin.users.detail.tabs.access"),
+      extra:
+        custom > 0 ? (
+          <Count>{t("web.admin.users.detail.tabs.customCount", { count: custom })}</Count>
+        ) : null,
     },
-    { value: "sign-in", label: "Sign-in" },
+    { value: "sign-in", label: t("web.admin.users.detail.tabs.signIn") },
     {
       value: "activity",
-      label: "Activity",
+      label: t("web.admin.users.detail.tabs.activity"),
       extra: watching ? (
-        <span role="img" aria-label="Watching now" className="bg-success size-2 rounded-full" />
+        <span
+          role="img"
+          aria-label={t("web.admin.users.detail.common.watchingNow")}
+          className="bg-success size-2 rounded-full"
+        />
       ) : null,
     },
     {
       value: "downloads",
-      label: "Downloads",
+      label: t("web.admin.users.detail.tabs.downloads"),
       extra: accountDownloads && downloads.data ? <Count>{downloads.data.total}</Count> : null,
     },
     {
       value: "preferences",
-      label: "Preferences",
+      label: t("web.admin.users.detail.tabs.preferences"),
       extra: preferencesLoaded ? <Count>{preferences}</Count> : null,
     },
   ];
