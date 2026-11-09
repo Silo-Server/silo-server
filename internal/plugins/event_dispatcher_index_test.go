@@ -97,7 +97,7 @@ type delivery struct {
 }
 
 // deliveryRecorder resolves every installation to a client that records the
-// call. dispatchBusEvent and dispatchEnvelope wait for their deliveries, so
+// call. dispatchEnvelope waits for its deliveries, so
 // they have finished recording by the time they return.
 type deliveryRecorder struct {
 	mu   sync.Mutex
@@ -148,12 +148,12 @@ func eventConsumer(installationID int, id string, subscriptions ...string) *Capa
 
 // newIndexFixture returns a store with one builtin and three plugin
 // installations, of which only installation 1 subscribes to
-// library.media_added and installation 3 subscribes to a plugin event.
+// catalog.library.changed and installation 3 subscribes to a plugin event.
 func newIndexFixture() *countingDispatchStore {
 	store := &countingDispatchStore{}
 	store.install(&Installation{ID: 1, PluginID: "silo.alpha", Enabled: true},
-		eventConsumer(1, "first", "library.media_added"),
-		eventConsumer(1, "second", "library.media_added", cache.EventScanComplete),
+		eventConsumer(1, "first", "catalog.library.changed"),
+		eventConsumer(1, "second", "catalog.library.changed", "scan.completed"),
 	)
 	store.install(&Installation{ID: 2, PluginID: "silo.metadata", Enabled: true},
 		&Capability{InstallationID: 2, Type: "metadata_provider.v1", ID: "tmdb"},
@@ -165,9 +165,8 @@ func newIndexFixture() *countingDispatchStore {
 	return store
 }
 
-func mediaAdded() cache.Event {
-	body, _ := json.Marshal(map[string]any{"libraryId": "lib-1"})
-	return cache.Event{Type: "library.media_added", Payload: string(body)}
+func mediaAdded() events.Envelope {
+	return catalogEnvelope("catalog.library.changed", `{"library_id":1,"reason":"scan","new":2}`)
 }
 
 // TestDispatcherStoreReadsPerEvent measures how many plugin store reads one
@@ -181,7 +180,7 @@ func TestDispatcherStoreReadsPerEvent(t *testing.T) {
 	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, newMemoryDeliveryStore(), 4)
 
 	// Warm up: the first event may build whatever the dispatcher caches.
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	recorder.take()
 
 	const eventCount = 100
@@ -196,11 +195,11 @@ func TestDispatcherStoreReadsPerEvent(t *testing.T) {
 		return reads
 	}
 
-	unsubscribedBus := measure("bus event, 0 subscribers", func() {
-		d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventPlaybackSessionsChanged, Payload: "42"})
+	unsubscribedCatalog := measure("catalog event, 0 subscribers", func() {
+		d.dispatchEnvelope(ctx, catalogEnvelope("session.started", `{"session_id":"s1"}`))
 	})
 	// The envelope a progress sync publishes for each updated item.
-	unsubscribedHub := measure("hub event, 0 subscribers", func() {
+	unsubscribedHub := measure("internal event, 0 subscribers", func() {
 		d.dispatchEnvelope(ctx, events.Envelope{
 			Channel:   events.ChannelUserState,
 			Event:     "user_state.changed",
@@ -213,21 +212,21 @@ func TestDispatcherStoreReadsPerEvent(t *testing.T) {
 		t.Fatalf("unsubscribed events were delivered: %+v", got)
 	}
 
-	subscribed := measure("bus event, 1 subscriber", func() { d.dispatchBusEvent(ctx, mediaAdded()) })
+	subscribed := measure("catalog event, 1 subscriber", func() { d.dispatchEnvelope(ctx, mediaAdded()) })
 	got := recorder.take()
 	if len(got) != eventCount {
 		t.Fatalf("subscribed deliveries = %d, want %d", len(got), eventCount)
 	}
 	for _, delivered := range got {
-		want := delivery{installationID: 1, capabilityID: "first", eventName: "library.media_added"}
+		want := delivery{installationID: 1, capabilityID: "first", eventName: "catalog.library.changed"}
 		if delivered != want {
 			t.Fatalf("delivery = %+v, want %+v", delivered, want)
 		}
 	}
 
-	if unsubscribedBus != 0 || unsubscribedHub != 0 || subscribed != 0 {
-		t.Fatalf("store reads per %d events: bus unsubscribed=%d hub unsubscribed=%d subscribed=%d, want 0 each",
-			eventCount, unsubscribedBus, unsubscribedHub, subscribed)
+	if unsubscribedCatalog != 0 || unsubscribedHub != 0 || subscribed != 0 {
+		t.Fatalf("store reads per %d events: catalog unsubscribed=%d internal unsubscribed=%d subscribed=%d, want 0 each",
+			eventCount, unsubscribedCatalog, unsubscribedHub, subscribed)
 	}
 }
 
@@ -250,7 +249,7 @@ func TestDispatcherFollowsPluginsChangedFromAnotherReplica(t *testing.T) {
 
 	publish := func() []int {
 		t.Helper()
-		d.dispatchBusEvent(ctx, mediaAdded())
+		d.dispatchEnvelope(ctx, mediaAdded())
 		var ids []int
 		for _, delivered := range recorder.take() {
 			ids = append(ids, delivered.installationID)
@@ -281,7 +280,7 @@ func TestDispatcherFollowsPluginsChangedFromAnotherReplica(t *testing.T) {
 	// The other replica commits the new installation. Until its notification
 	// arrives this replica keeps dispatching from its index.
 	store.install(&Installation{ID: 5, PluginID: "silo.delta", Enabled: true},
-		eventConsumer(5, "watcher", "library.media_added"),
+		eventConsumer(5, "watcher", "catalog.library.changed"),
 	)
 	if got := publish(); !reflect.DeepEqual(got, []int{1}) {
 		t.Fatalf("deliveries before plugins_changed = %v, want [1]", got)
@@ -349,20 +348,20 @@ func TestServiceLifecycleChangeRebuildsDispatcherIndex(t *testing.T) {
 			t.Cleanup(d.Stop)
 			svc.SetEventDispatcher(d)
 
-			d.dispatchBusEvent(ctx, mediaAdded())
+			d.dispatchEnvelope(ctx, mediaAdded())
 			if got := recorder.take(); len(got) != 1 {
 				t.Fatalf("initial deliveries = %+v, want one", got)
 			}
 
 			store.install(&Installation{ID: 5, PluginID: "silo.delta", Enabled: true},
-				eventConsumer(5, "watcher", "library.media_added"),
+				eventConsumer(5, "watcher", "catalog.library.changed"),
 			)
 			store.resetReads()
 			svc.OnLifecycleChange(ctx)
 			changeReads := store.reads()
 			store.resetReads()
 
-			d.dispatchBusEvent(ctx, mediaAdded())
+			d.dispatchEnvelope(ctx, mediaAdded())
 			eventReads := store.reads()
 			t.Logf("store reads: %d during OnLifecycleChange, %d for the next event", changeReads, eventReads)
 			var ids []int
@@ -388,11 +387,11 @@ func TestDispatcherDeliversOncePerInstallation(t *testing.T) {
 	recorder := &deliveryRecorder{}
 	d := NewEventDispatcher(newFakeBus(), nil, newIndexFixture(), recorder, newMemoryDeliveryStore(), 4)
 
-	d.dispatchBusEvent(ctx, mediaAdded())
-	d.dispatchBusEvent(ctx, cache.Event{Type: cache.EventScanComplete, Payload: "7"})
+	d.dispatchEnvelope(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, scanCompleted())
 	want := []delivery{
-		{installationID: 1, capabilityID: "first", eventName: "library.media_added"},
-		{installationID: 1, capabilityID: "second", eventName: cache.EventScanComplete},
+		{installationID: 1, capabilityID: "first", eventName: "catalog.library.changed"},
+		{installationID: 1, capabilityID: "second", eventName: "scan.completed"},
 	}
 	if got := recorder.take(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("deliveries = %+v, want %+v", got, want)
@@ -409,7 +408,7 @@ func TestDispatcherIndexNotKeptAfterRacingInvalidation(t *testing.T) {
 	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, newMemoryDeliveryStore(), 4)
 
 	store.onListEnabled = d.invalidateIndex
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := recorder.take(); len(got) != 1 {
 		t.Fatalf("racing rebuild deliveries = %+v, want one", got)
 	}
@@ -419,12 +418,12 @@ func TestDispatcherIndexNotKeptAfterRacingInvalidation(t *testing.T) {
 
 	store.onListEnabled = nil
 	store.resetReads()
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := store.reads(); got != 4 {
 		t.Fatalf("store reads after racing rebuild = %d, want 4 (index was not kept)", got)
 	}
 	store.resetReads()
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := store.reads(); got != 0 {
 		t.Fatalf("store reads once rebuilt = %d, want 0", got)
 	}
@@ -439,17 +438,17 @@ func TestDispatcherIndexExpires(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	d.now = func() time.Time { return now }
 
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	store.resetReads()
 
 	now = now.Add(DefaultLifecyclePollInterval - time.Second)
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := store.reads(); got != 0 {
 		t.Fatalf("store reads before expiry = %d, want 0", got)
 	}
 
 	now = now.Add(time.Second)
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := store.reads(); got != 4 {
 		t.Fatalf("store reads at expiry = %d, want 4", got)
 	}
@@ -500,13 +499,13 @@ func TestDispatcherIndexWithUnreadableInstallationIsNotKept(t *testing.T) {
 	ctx := context.Background()
 	store := newIndexFixture()
 	store.install(&Installation{ID: 5, PluginID: "silo.delta", Enabled: true},
-		eventConsumer(5, "watcher", "library.media_added"),
+		eventConsumer(5, "watcher", "catalog.library.changed"),
 	)
 	store.capabilitiesErr = map[int]error{5: errors.New("connection reset")}
 	recorder := &deliveryRecorder{}
 	d := NewEventDispatcher(newFakeBus(), nil, store, recorder, newMemoryDeliveryStore(), 4)
 
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	if got := recorder.take(); len(got) != 1 || got[0].installationID != 1 {
 		t.Fatalf("deliveries with installation 5 unreadable = %+v, want installation 1 only", got)
 	}
@@ -514,7 +513,7 @@ func TestDispatcherIndexWithUnreadableInstallationIsNotKept(t *testing.T) {
 	store.mu.Lock()
 	store.capabilitiesErr = nil
 	store.mu.Unlock()
-	d.dispatchBusEvent(ctx, mediaAdded())
+	d.dispatchEnvelope(ctx, mediaAdded())
 	var ids []int
 	for _, delivered := range recorder.take() {
 		ids = append(ids, delivered.installationID)
