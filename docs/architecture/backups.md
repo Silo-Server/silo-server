@@ -1305,7 +1305,7 @@ backup. `is_owner` and `break_glass` are never carried.
 **Profile fields:** name, avatar, `is_primary`, PIN hash, and every field the
 access resolver (`internal/access/resolver.go`) reads to decide access:
 `is_child`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`,
-`library_restrictions_enabled`, the allowed libraries
+`requests_blocked`, `library_restrictions_enabled`, the allowed libraries
 (`user_profile_allowed_libraries`), and `max_playback_quality`. The PIN
 revision is not carried; a restored profile starts its own.
 
@@ -2029,8 +2029,9 @@ neither list.
   since, which the credential's holder could select), or, for a profile
   both sides have, a
   protection or restriction lifted or loosened (its PIN, becoming the
-  primary profile, child profile, rating or advisory-age ceiling, library
-  restriction, playback-quality ceiling), or a looser request policy
+  primary profile, child profile, rating or advisory-age ceiling, block
+  from requests, library restriction, playback-quality ceiling), or a
+  looser request policy
   (requests at all, without limit, more titles or over a shorter window,
   or with automatic approval, as `requests.LayeredPolicy` resolves it from
   the server's, the access group's, and the account's limits). The PIN
@@ -2073,7 +2074,8 @@ neither list.
   settings (requests, auto-approval, watchlist requests); subtitle
   providers; marker sharing; per-account and per-group download,
   transcode, and request permissions; a profile's child flag, library
-  restriction, and advisory-age requirement (on wins); a personal
+  restriction, advisory-age requirement, and block from requests (on
+  wins); a personal
   collection's sharing; a profile's notification preferences; a
   watch-provider connection's sync switches; an account's `enabled`,
   `break_glass`, and `local_password_login_enabled` (off wins) and
@@ -2090,7 +2092,12 @@ neither list.
   plugin task binding, an access group's permissions, a profile's
   notifications. Only account switches roll back as they were
   (`rollsBack`), since accounts roll back whole. Nothing
-  a full restore does turns a plugin on; the admin does. These switches are
+  a full restore does turns a plugin on; the admin does. A backup taken
+  before a switch's column existed keeps nothing for it, and the restored
+  server adds the column with its default when it migrates, except for a
+  restriction that sets `addMissing` (a profile's block from requests): the
+  restore adds that column itself when a live row is restricted, so the
+  restriction is kept. These switches are
   set before the credential carry compares authority, so it compares the
   restored server as it will start; the carry also counts an account with
   every library as seeing each enabled library of its server, and drops a

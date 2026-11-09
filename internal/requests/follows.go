@@ -40,7 +40,7 @@ func (s *Service) Follow(ctx context.Context, viewer Viewer, mediaType MediaType
 	if err := s.ensureRequestsEnabled(ctx); err != nil {
 		return RequestState{}, err
 	}
-	if err := s.ensureViewerRequestsAllowed(ctx, viewer.UserID); err != nil {
+	if err := s.ensureViewerRequestsAllowed(ctx, viewer); err != nil {
 		return RequestState{}, err
 	}
 	if blocked, err := s.userLimitBlocked(ctx, viewer.UserID); err != nil {

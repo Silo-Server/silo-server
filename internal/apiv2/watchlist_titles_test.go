@@ -307,6 +307,21 @@ func TestWatchlistTitlesRequestsDisabled(t *testing.T) {
 	}
 }
 
+// A profile blocked from requests gets 403 from the watchlist title
+// operations, so the status must not advertise them to it.
+func TestRequestStatusForBlockedProfile(t *testing.T) {
+	deps := watchlistTitlesDeps(&fakeWatchlistTitles{}, &fakeWatchlistRequests{})
+	deps.RequestLifecycle = &fakeLifecycle{profileBlocked: true}
+	rec := do(t, newTestHandler(t, deps), http.MethodGet, Prefix+"/requests/status", "", viewerHeaders())
+	var got struct {
+		Supported *bool `json:"watchlist_titles_supported"`
+	}
+	decodeBody(t, rec.Body, &got)
+	if rec.Code != http.StatusOK || got.Supported == nil || *got.Supported {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // Search results carry in_watchlist from the viewer's watchlist titles.
 func TestSearchRequestMediaMarksWatchlist(t *testing.T) {
 	deps := requestDeps(fixtureRequests())

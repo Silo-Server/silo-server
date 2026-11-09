@@ -27,10 +27,23 @@ export function useMissingSeasonsRequestable(enabled: boolean): boolean {
   );
 }
 
+/**
+ * False when the household manager has blocked the active profile from
+ * requests. The server then refuses request discovery and submission for the
+ * profile, so its request pages and entry points are hidden.
+ */
+export function useProfileRequestsAllowed(): boolean {
+  const { profile } = useCurrentProfile();
+  return profile?.requests_allowed !== false;
+}
+
 export function useCanRequest(): CanRequestState {
   const status = useRequestFeatureStatus();
   const { profile } = useCurrentProfile();
-  const discoveryEnabled = Boolean(status.data?.requests_enabled) && Boolean(profile?.id);
+  const discoveryEnabled =
+    Boolean(status.data?.requests_enabled) &&
+    Boolean(profile?.id) &&
+    profile?.requests_allowed !== false;
   const isResolving = status.isLoading;
 
   return {

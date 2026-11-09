@@ -94,7 +94,7 @@ func TestAuthorityComparisonCoversEveryField(t *testing.T) {
 func TestProfileComparisonCoversEveryField(t *testing.T) {
 	profileColumns := map[string]string{
 		"PINHash": "pin", "IsPrimary": "primary", "IsChild": "child", "MaxContentRating": "ceiling", "MaxAdvisoryAge": "advisoryAge",
-		"RequireAdvisoryAge": "requireAdvisoryAge", "LibraryRestrictionsEnabled": "restricted", "AllowedLibraryIDs": "libraries",
+		"RequireAdvisoryAge": "requireAdvisoryAge", "RequestsBlocked": "requestsBlocked", "LibraryRestrictionsEnabled": "restricted", "AllowedLibraryIDs": "libraries",
 		"MaxPlaybackQuality": "quality", "AllowedTitleIDs": "allowedTitles",
 	}
 	notAuthority := map[string]string{
@@ -125,8 +125,8 @@ func TestProfileComparisonCoversEveryField(t *testing.T) {
 	}
 	// Each protection, lifted, widens the account.
 	quality, age := "1080p", 12
-	strict := profileLimits{pin: true, child: true, ceiling: "PG", advisoryAge: &age, requireAdvisoryAge: true, restricted: true,
-		libraries: []int{1}, quality: quality}
+	strict := profileLimits{pin: true, child: true, ceiling: "PG", advisoryAge: &age, requireAdvisoryAge: true, requestsBlocked: true,
+		restricted: true, libraries: []int{1}, quality: quality}
 	profileWidenings := map[string]func(*profileLimits){
 		"pin":                func(p *profileLimits) { p.pin = false },
 		"primary":            func(p *profileLimits) { p.primary = true },
@@ -134,6 +134,7 @@ func TestProfileComparisonCoversEveryField(t *testing.T) {
 		"ceiling":            func(p *profileLimits) { p.ceiling = "" },
 		"advisoryAge":        func(p *profileLimits) { p.advisoryAge = nil },
 		"requireAdvisoryAge": func(p *profileLimits) { p.requireAdvisoryAge = false },
+		"requestsBlocked":    func(p *profileLimits) { p.requestsBlocked = false },
 		"restricted":         func(p *profileLimits) { p.restricted = false },
 		"libraries":          func(p *profileLimits) { p.libraries = []int{1, 2} },
 		"quality":            func(p *profileLimits) { p.quality = "" },

@@ -143,6 +143,7 @@ func RunProfilePINRevision(t *testing.T, newStore func(*testing.T) userstore.Use
 		MaxContentRating:           str("PG"),
 		MaxAdvisoryAge:             &age,
 		RequireAdvisoryAge:         &yes,
+		RequestsBlocked:            &yes,
 		LibraryRestrictionsEnabled: &yes,
 		AllowedLibraryIDs:          &libs,
 		MaxPlaybackQuality:         str("720p"),

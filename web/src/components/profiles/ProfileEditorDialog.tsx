@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { Profile, UserLibrary } from "@/api/types";
 import { ImageUploadField } from "@/components/ImageUploadField";
+import { LibraryRestrictionField } from "@/components/profiles/LibraryRestrictionField";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,6 +78,8 @@ interface ProfileEditorDialogProps {
   advisoryAgeSupported?: boolean;
   /** The server accepts `require_advisory_age`; hides the switch when false. */
   requireAdvisoryAgeSupported?: boolean;
+  /** The server accepts `requests_allowed`; hides the switch when false. */
+  requestsAllowedSupported?: boolean;
   /**
    * Creates the profile and uploads its avatar as this profile instead of the
    * active one, as Who's watching does for the verified primary profile.
@@ -117,6 +120,7 @@ export function ProfileEditorDialog({
   avatarUploadEnabled = false,
   advisoryAgeSupported = false,
   requireAdvisoryAgeSupported = false,
+  requestsAllowedSupported = false,
   profileContext,
   save,
   onOpenChange,
@@ -146,6 +150,7 @@ export function ProfileEditorDialog({
             avatarUploadEnabled={avatarUploadEnabled}
             advisoryAgeSupported={advisoryAgeSupported}
             requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+            requestsAllowedSupported={requestsAllowedSupported}
             profileContext={profileContext}
             save={save}
             onOpenChange={onOpenChange}
@@ -164,6 +169,7 @@ function ProfileEditorForm({
   avatarUploadEnabled,
   advisoryAgeSupported,
   requireAdvisoryAgeSupported,
+  requestsAllowedSupported,
   profileContext,
   save,
   onOpenChange,
@@ -175,6 +181,7 @@ function ProfileEditorForm({
   avatarUploadEnabled: boolean;
   advisoryAgeSupported: boolean;
   requireAdvisoryAgeSupported: boolean;
+  requestsAllowedSupported: boolean;
   profileContext?: ProfileRequestContextSnapshot;
   save?: ProfileEditorSave;
   onOpenChange: (open: boolean) => void;
@@ -210,6 +217,7 @@ function ProfileEditorForm({
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [contentRatingTouched, setContentRatingTouched] = useState(false);
   const [libraryAccessTouched, setLibraryAccessTouched] = useState(false);
+  const [requestsTouched, setRequestsTouched] = useState(false);
   // Allowances belong to the signed-in household, so not when saving another
   // account's profiles (save), and only for another profile with a limit.
   const canManageAllowances = useCanManageTitleAllowances();
@@ -230,7 +238,8 @@ function ProfileEditorForm({
   const requireAdvisoryAgeId = useId();
   const requireAdvisoryAgeHelpId = useId();
   const playbackQualityId = useId();
-  const restrictLibrariesId = useId();
+  const requestsAllowedId = useId();
+  const requestsAllowedHelpId = useId();
   const selectedContentRatingValue =
     draft.maxContentRating === "" ? ANY_CONTENT_RATING_VALUE : draft.maxContentRating;
 
@@ -284,6 +293,7 @@ function ProfileEditorForm({
     if (!checked) {
       setContentRatingTouched(false);
       setLibraryAccessTouched(false);
+      setRequestsTouched(false);
       setErrors((current) => ({ ...current, libraries: undefined }));
       setDraft((current) => clearKidsPreset(current));
       return;
@@ -293,6 +303,7 @@ function ProfileEditorForm({
       applyKidsPreset(current, {
         contentRatingTouched,
         libraryAccessTouched,
+        requestsTouched,
       }),
     );
   }
@@ -347,6 +358,7 @@ function ProfileEditorForm({
         const body = buildProfileUpdateFromDraft(draft, {
           advisoryAgeSupported,
           requireAdvisoryAgeSupported,
+          requestsAllowedSupported,
         });
         if (preserveExistingUpload || deleteExistingUpload) {
           delete body.avatar;
@@ -358,6 +370,7 @@ function ProfileEditorForm({
         const body = buildProfileRequestFromDraft(draft, {
           advisoryAgeSupported,
           requireAdvisoryAgeSupported,
+          requestsAllowedSupported,
         });
         savedProfile = save ? await save.create(body) : await createMutation.mutateAsync(body);
       }
@@ -594,7 +607,7 @@ function ProfileEditorForm({
         <div className="space-y-1">
           <h3 className="text-sm font-semibold">Access</h3>
           <p className="text-muted-foreground text-sm">
-            Content limits and library visibility for this profile.
+            Content limits, library visibility, and requests for this profile.
           </p>
         </div>
 
@@ -725,61 +738,40 @@ function ProfileEditorForm({
           </div>
         </div>
 
-        <div className="border-border space-y-3 rounded-md border p-3">
-          <div className="flex items-center justify-between gap-4">
+        <LibraryRestrictionField
+          libraries={libraries}
+          enabled={draft.libraryRestrictionsEnabled}
+          allowedLibraryIDs={draft.allowedLibraryIDs}
+          error={errors.libraries}
+          onEnabledChange={(checked) => {
+            setLibraryAccessTouched(true);
+            updateDraft("libraryRestrictionsEnabled", checked);
+            setErrors((current) => ({ ...current, libraries: undefined }));
+          }}
+          onLibraryChange={toggleLibrary}
+        />
+
+        {requestsAllowedSupported ? (
+          <div className="border-border flex items-center justify-between gap-4 rounded-md border px-3 py-2">
             <div className="space-y-0.5">
-              <Label htmlFor={restrictLibrariesId}>Restrict libraries</Label>
-              <p className="text-muted-foreground text-xs">
-                Limit this profile to a specific set of libraries.
+              <Label htmlFor={requestsAllowedId}>Allow requests</Label>
+              <p id={requestsAllowedHelpId} className="text-muted-foreground text-xs">
+                Lets this profile browse titles that are not in the library and request them. The
+                content rating limits those titles by their US rating only, and the advisory-age
+                limit does not apply to them.
               </p>
             </div>
             <Switch
-              id={restrictLibrariesId}
-              checked={draft.libraryRestrictionsEnabled}
+              id={requestsAllowedId}
+              aria-describedby={requestsAllowedHelpId}
+              checked={draft.requestsAllowed}
               onCheckedChange={(checked) => {
-                setLibraryAccessTouched(true);
-                updateDraft("libraryRestrictionsEnabled", checked);
-                setErrors((current) => ({ ...current, libraries: undefined }));
+                setRequestsTouched(true);
+                updateDraft("requestsAllowed", checked);
               }}
             />
           </div>
-
-          {draft.libraryRestrictionsEnabled ? (
-            <div className="space-y-2">
-              <div className="grid gap-2">
-                {libraries.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No libraries available.</p>
-                ) : (
-                  libraries.map((library) => {
-                    const checked = draft.allowedLibraryIDs.includes(library.id);
-
-                    return (
-                      <div
-                        key={library.id}
-                        className="border-border flex items-center justify-between rounded-md border px-3 py-2"
-                      >
-                        <div className="space-y-0.5">
-                          <div className="text-sm font-medium">{library.name}</div>
-                          <div className="text-muted-foreground text-xs capitalize">
-                            {library.type}
-                          </div>
-                        </div>
-                        <Switch
-                          checked={checked}
-                          onCheckedChange={(nextChecked) => toggleLibrary(library.id, nextChecked)}
-                        />
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {errors.libraries ? (
-                <p className="text-destructive text-sm">{errors.libraries}</p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        ) : null}
       </section>
 
       {showAllowedTitles && profile ? <AllowedTitlesSection profileId={profile.id} /> : null}

@@ -25,7 +25,7 @@ func scanProfile(scanner interface {
 	var createdAt, updatedAt time.Time
 	err := scanner.Scan(append([]any{
 		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
-		&p.RequireAdvisoryAge,
+		&p.RequireAdvisoryAge, &p.RequestsBlocked,
 		&p.QualityPreference, &p.Language, &p.PreferredMetadataLanguage, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview,
 		&p.LibraryRestrictionsEnabled,
@@ -81,14 +81,14 @@ func createProfile(
 	_, err := exec.Exec(ctx, `
 		INSERT INTO user_profiles (
 			id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
-			require_advisory_age,
+			require_advisory_age, requests_blocked,
 			quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 			auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview,
 			library_restrictions_enabled,
 			show_forced_subtitles, max_playback_quality, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
 		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
-		p.RequireAdvisoryAge,
+		p.RequireAdvisoryAge, p.RequestsBlocked,
 		p.QualityPreference, p.Language, p.PreferredMetadataLanguage, p.SubtitleLanguage, p.SubtitleMode,
 		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
 		p.LibraryRestrictionsEnabled,
@@ -130,7 +130,7 @@ func QueueProfile(batch *pgx.Batch, userID int, id string) func(pgx.BatchResults
 // ascending id order, so a profile costs one statement.
 var profileByIDQuery = `
 	SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
-	       require_advisory_age,
+	       require_advisory_age, requests_blocked,
 	       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 	       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
 	       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at,
@@ -214,7 +214,7 @@ func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profile, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
-		       require_advisory_age,
+		       require_advisory_age, requests_blocked,
 		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
 		       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at
@@ -260,6 +260,7 @@ func updateProfile(
 		u.MaxContentRating != nil ||
 		u.MaxAdvisoryAge != nil ||
 		u.RequireAdvisoryAge != nil ||
+		u.RequestsBlocked != nil ||
 		u.LibraryRestrictionsEnabled != nil ||
 		u.AllowedLibraryIDs != nil ||
 		u.MaxPlaybackQuality != nil
@@ -300,6 +301,9 @@ func updateProfile(
 	}
 	if u.RequireAdvisoryAge != nil {
 		addArg("require_advisory_age", *u.RequireAdvisoryAge)
+	}
+	if u.RequestsBlocked != nil {
+		addArg("requests_blocked", *u.RequestsBlocked)
 	}
 	if u.QualityPreference != nil {
 		addArg("quality_preference", *u.QualityPreference)
@@ -632,6 +636,7 @@ type RestoredProfile struct {
 	MaxContentRating           string
 	MaxAdvisoryAge             int
 	RequireAdvisoryAge         bool
+	RequestsBlocked            bool
 	LibraryRestrictionsEnabled bool
 	AllowedLibraryIDs          []int
 	MaxPlaybackQuality         string
@@ -668,10 +673,10 @@ func CreateRestoredProfileInTx(ctx context.Context, tx pgx.Tx, userID int, p Res
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_profiles (id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
-			require_advisory_age, library_restrictions_enabled, max_playback_quality)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12)`,
+			require_advisory_age, requests_blocked, library_restrictions_enabled, max_playback_quality)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12, $13)`,
 		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary && !hasPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
-		p.RequireAdvisoryAge, p.LibraryRestrictionsEnabled, p.MaxPlaybackQuality); err != nil {
+		p.RequireAdvisoryAge, p.RequestsBlocked, p.LibraryRestrictionsEnabled, p.MaxPlaybackQuality); err != nil {
 		return fmt.Errorf("inserting restored profile: %w", err)
 	}
 	return replaceProfileAllowedLibraries(ctx, tx, userID, p.ID, p.AllowedLibraryIDs)

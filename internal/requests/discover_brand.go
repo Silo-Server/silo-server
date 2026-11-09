@@ -23,11 +23,11 @@ type DiscoverBrandCard struct {
 }
 
 // ListStudios returns the bundled studios with their curated logo URLs.
-func (s *Service) ListStudios(ctx context.Context, _ Viewer) ([]DiscoverBrandCard, error) {
+func (s *Service) ListStudios(ctx context.Context, viewer Viewer) ([]DiscoverBrandCard, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	out := make([]DiscoverBrandCard, 0, len(BundledStudios))
@@ -43,11 +43,11 @@ func (s *Service) ListStudios(ctx context.Context, _ Viewer) ([]DiscoverBrandCar
 }
 
 // ListNetworks returns the bundled TV networks with their curated logo URLs.
-func (s *Service) ListNetworks(ctx context.Context, _ Viewer) ([]DiscoverBrandCard, error) {
+func (s *Service) ListNetworks(ctx context.Context, viewer Viewer) ([]DiscoverBrandCard, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	out := make([]DiscoverBrandCard, 0, len(BundledNetworks))
@@ -65,11 +65,11 @@ func (s *Service) ListNetworks(ctx context.Context, _ Viewer) ([]DiscoverBrandCa
 // ListGenres returns the bundled genres. Each card carries gradient hints
 // (no logo URL) and a SeriesSupported flag for the browse page to decide
 // whether to show the Series tab.
-func (s *Service) ListGenres(ctx context.Context, _ Viewer) ([]DiscoverBrandCard, error) {
+func (s *Service) ListGenres(ctx context.Context, viewer Viewer) ([]DiscoverBrandCard, error) {
 	if s == nil || s.store == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	out := make([]DiscoverBrandCard, 0, len(BundledGenres))
@@ -126,7 +126,7 @@ func (s *Service) BrowseStudio(ctx context.Context, viewer Viewer, slug, sort st
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	studio, ok := FindStudioBySlug(strings.TrimSpace(slug))
@@ -171,7 +171,7 @@ func (s *Service) BrowseNetwork(ctx context.Context, viewer Viewer, slug, sort s
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	network, ok := FindNetworkBySlug(strings.TrimSpace(slug))
@@ -216,7 +216,7 @@ func (s *Service) BrowseGenre(ctx context.Context, viewer Viewer, slug string, r
 	if s == nil || s.store == nil || s.tmdb == nil {
 		return nil, fmt.Errorf("request service is not configured")
 	}
-	if err := s.ensureRequestsEnabled(ctx); err != nil {
+	if err := s.ensureDiscoveryAllowed(ctx, viewer); err != nil {
 		return nil, err
 	}
 	genre, ok := FindGenreBySlug(strings.TrimSpace(slug))

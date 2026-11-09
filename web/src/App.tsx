@@ -41,6 +41,7 @@ import { useSettingValuesRealtime } from "@/hooks/queries/settingValues";
 import Layout from "@/components/Layout";
 import Home from "@/pages/Home";
 import { useRequestFeatureStatus } from "@/hooks/queries/useRequests";
+import { useProfileRequestsAllowed } from "@/hooks/useCanRequest";
 import { OnboardingGate } from "@/components/onboarding/OnboardingGate";
 import TasteSeedGate from "@/components/TasteSeedGate";
 import {
@@ -288,8 +289,21 @@ function RequirePrimaryOrAdmin({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function RequireRequestsEnabled({ children }: { children: ReactNode }) {
+/**
+ * Guards a request page on the server's requests switch, and on the active
+ * profile not being blocked from requests. `allowBlockedProfile` keeps the
+ * hub open to a blocked profile, which may still list and cancel the
+ * requests it made before the block.
+ */
+function RequireRequestsEnabled({
+  children,
+  allowBlockedProfile = false,
+}: {
+  children: ReactNode;
+  allowBlockedProfile?: boolean;
+}) {
   const status = useRequestFeatureStatus();
+  const profileRequestsAllowed = useProfileRequestsAllowed() || allowBlockedProfile;
   if (status.isLoading) {
     return (
       <div className="p-8" role="status" aria-live="polite">
@@ -298,7 +312,9 @@ function RequireRequestsEnabled({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (status.data?.requests_enabled !== true) return <Navigate to="/" replace />;
+  if (status.data?.requests_enabled !== true || !profileRequestsAllowed) {
+    return <Navigate to="/" replace />;
+  }
   return <>{children}</>;
 }
 
@@ -701,7 +717,7 @@ function AppRoutes() {
                           <Route
                             path="/requests"
                             element={
-                              <RequireRequestsEnabled>
+                              <RequireRequestsEnabled allowBlockedProfile>
                                 <Requests />
                               </RequireRequestsEnabled>
                             }

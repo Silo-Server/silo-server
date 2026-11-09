@@ -50,6 +50,7 @@ export default function ProfilesSettings() {
     avatarUploadEnabled,
     maxAdvisoryAgeSupported,
     requireAdvisoryAgeSupported,
+    requestsAllowedSupported,
     maxProfiles,
   } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
@@ -215,6 +216,7 @@ export default function ProfilesSettings() {
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}
         requireAdvisoryAgeSupported={requireAdvisoryAgeSupported}
+        requestsAllowedSupported={requestsAllowedSupported}
         onOpenChange={(open) => {
           setEditorOpen(open);
           if (!open) {

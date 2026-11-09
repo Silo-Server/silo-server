@@ -7,6 +7,7 @@ import {
   downloadKeys,
   libraryKeys,
   mediaSurfaceKeys,
+  profileKeys,
   requestKeys,
   sectionKeys,
 } from "@/hooks/queries/keys";
@@ -242,6 +243,7 @@ describe("invalidateAccessDependentState", () => {
       calendarKeys.week("2026-09-28", "all"),
       requestKeys.status(),
       downloadKeys.capability(),
+      profileKeys.list(),
     ];
     for (const key of keys) queryClient.setQueryData(key, {});
 
