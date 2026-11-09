@@ -497,15 +497,19 @@ function NodeRow({
         {noCountsTitle ? <NoReading /> : <EgressValue node={node} />}
       </td>
       <td className={cn(CELL, CPU_COLUMN)}>
-        <LoadReading name={`${node.name} CPU`} metric={readings.cpu} />
+        <LoadReading name={`${node.name} CPU`} metric={readings.cpu} missing={readings.missing} />
       </td>
       <td className={cn(CELL, RAM_COLUMN)}>
-        <LoadReading name={`${node.name} RAM`} metric={readings.ram} />
+        <LoadReading name={`${node.name} RAM`} metric={readings.ram} missing={readings.missing} />
       </td>
       {showsGPU ? (
         <td className={cn(CELL, GPU_COLUMN)}>
           {nodeReportsAcceleration(node) ? (
-            <LoadReading name={`${node.name} GPU`} metric={readings.gpu} />
+            <LoadReading
+              name={`${node.name} GPU`}
+              metric={readings.gpu}
+              missing={readings.missing}
+            />
           ) : null}
         </td>
       ) : null}
@@ -590,26 +594,37 @@ function EgressValue({ node }: { node: StreamNode }) {
 
 /**
  * CPU, RAM and GPU from the node's last sample. A reading that is unmeasured or
- * no longer current is null, because a remembered percentage reads as a live one.
+ * no longer current is null, because a remembered percentage reads as a live one;
+ * `missing` then says why, so a stalled sampler doesn't look like one that never ran.
  */
 function nodeReadings(node: StreamNode): {
   cpu: ResourceMetric | null;
   ram: ResourceMetric | null;
   gpu: ResourceMetric | null;
+  missing: string | undefined;
 } {
   const system = describeNodeSystem(node);
   return {
     cpu: system.kind === "reported" ? system.cpu : null,
     ram: system.kind === "reported" ? system.memory : null,
     gpu: describeNodeGPUBusy(node),
+    missing: system.kind === "unreported" ? system.title : undefined,
   };
 }
 
 /** The number sits under its column heading, with the meter running to its right. */
-function LoadReading({ name, metric }: { name: string; metric: ResourceMetric | null }) {
+function LoadReading({
+  name,
+  metric,
+  missing,
+}: {
+  name: string;
+  metric: ResourceMetric | null;
+  missing?: string;
+}) {
   if (!metric || metric.fill === null) {
     return (
-      <span className="text-muted-foreground block w-8 text-right" title={metric?.title}>
+      <span className="text-muted-foreground block w-8 text-right" title={metric?.title ?? missing}>
         –
       </span>
     );
