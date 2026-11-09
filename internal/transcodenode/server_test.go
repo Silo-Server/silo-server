@@ -3442,6 +3442,20 @@ func TestDeliveryProgressRead(t *testing.T) {
 		t.Fatalf("listing = %+v, want live-1 with nothing fetched or produced", listing)
 	}
 
+	// A populated reading crosses the wire unchanged.
+	want := playback.HLSDeliveryProgress{Fetched: playback.MediaSpan{Start: 100, End: 160.5}, FetchedOK: true, ProducedThrough: 300, ProducedOK: true}
+	wire, err := json.Marshal(sessionDeliveryProgress(want))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded SessionDeliveryProgress
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if got := decoded.HLS(); got != want {
+		t.Fatalf("wire round trip = %+v, want %+v (%s)", got, want, wire)
+	}
+
 	unsigned, err := http.Get(node.URL + "/transcode/delivery-progress")
 	if err != nil {
 		t.Fatal(err)
