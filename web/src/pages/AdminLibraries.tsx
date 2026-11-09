@@ -496,9 +496,11 @@ function LibrariesPage() {
                       <Fragment key={lib.id}>
                         <SortableLibraryRow id={lib.id}>
                           <TableCell className="font-medium">{lib.name}</TableCell>
-                          <TableCell className="font-mono text-xs">
+                          <TableCell className="text-xs">
                             {lib.paths.length === 1 ? (
-                              <span className="text-muted-foreground">{lib.paths[0]}</span>
+                              <span className="text-muted-foreground font-mono">
+                                {lib.paths[0]}
+                              </span>
                             ) : (
                               <button
                                 type="button"
@@ -830,12 +832,14 @@ function LibrariesPage() {
                       <GripVertical className="text-muted-foreground h-4 w-4" />
                     </TableCell>
                     <TableCell className="font-medium">{activeLibrary.name}</TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-xs">
-                      {activeLibrary.paths.length === 1
-                        ? activeLibrary.paths[0]
-                        : t("web.admin.libraries.list.folderCount", {
-                            count: activeLibrary.paths.length,
-                          })}
+                    <TableCell className="text-muted-foreground text-xs">
+                      {activeLibrary.paths.length === 1 ? (
+                        <span className="font-mono">{activeLibrary.paths[0]}</span>
+                      ) : (
+                        t("web.admin.libraries.list.folderCount", {
+                          count: activeLibrary.paths.length,
+                        })
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{libraryTypeLabel(activeLibrary.type)}</Badge>
