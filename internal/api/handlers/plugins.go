@@ -261,6 +261,10 @@ type PluginCapabilityView struct {
 	// fields the plugin can do without from it; the frozen v1 projection does
 	// not carry it.
 	RequestRouter *pluginv1.RequestRouterDescriptor `json:"-"`
+	// ScheduledTask is a scheduled_task.v1 capability's descriptor, nil when
+	// the manifest declares none. The v2 admin view reports its default
+	// schedule; the frozen v1 projection does not carry it.
+	ScheduledTask *pluginv1.ScheduledTaskDescriptor `json:"-"`
 }
 
 type PluginRouteView struct {
@@ -1633,6 +1637,7 @@ func capabilitiesToJSON(descriptors []*pluginv1.CapabilityDescriptor) []PluginCa
 			Metadata:      structToMap(descriptor.GetMetadata()),
 			AuthModes:     append([]string(nil), descriptor.GetAuthModes()...),
 			RequestRouter: descriptor.GetRequestRouter(),
+			ScheduledTask: descriptor.GetScheduledTask(),
 		})
 	}
 	return response

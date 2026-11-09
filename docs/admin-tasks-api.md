@@ -76,7 +76,14 @@ and a strong caller-bound ETag. `PUT` on that resource requires `If-Match` and a
 compares the original revision under the schedule parent lock. Legacy writers
 use that same lock and advance the revision. A mismatch returns 412 with the
 observed validator, without rereading or retrying the write. An empty schedule
-remains configured across restarts rather than restoring task defaults.
+remains configured across restarts rather than restoring task defaults. A plugin
+task without a persisted schedule reports the default it runs (binding trigger,
+else manifest default, else startup) at revision zero, under a validator that
+also changes when that default changes; the first `PUT` saves a schedule that
+then outranks the default. Only an administrator's edit saves one now, but a
+plugin task can still hold a schedule an earlier release saved from a binding
+trigger, which `GET` reports with its nonzero revision
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)).
 
 Successful edits apply to the responding process. Other running processes load
 the persisted configuration when they restart. Runtime state and persisted

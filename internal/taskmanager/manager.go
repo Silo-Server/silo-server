@@ -82,10 +82,14 @@ func (m *TaskManager) Start(ctx context.Context) {
 
 		configs, err := m.triggerRepo.GetTriggers(ctx, key)
 		if err == nil && configs == nil {
-			// Default providers may read settings. Resolve them only for new
-			// schedules, outside the repository transaction. Initialization
-			// rechecks saved state so a concurrent edit still takes precedence.
-			configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
+			if followsDefaultTriggers(w.task) {
+				configs = w.task.DefaultTriggers()
+			} else {
+				// Default providers may read settings. Resolve them only for new
+				// schedules, outside the repository transaction. Initialization
+				// rechecks saved state so a concurrent edit still takes precedence.
+				configs, err = m.triggerRepo.GetOrCreateTriggers(ctx, key, w.task.DefaultTriggers())
+			}
 		}
 		if err != nil {
 			m.logger.ErrorContext(ctx, "failed to load triggers", "task", key, "error", err)
@@ -378,6 +382,11 @@ func isManualOnly(task Task) bool {
 	return ok && manual.ManualOnly()
 }
 
+func followsDefaultTriggers(task Task) bool {
+	follower, ok := task.(DefaultFollowingTask)
+	return ok && follower.FollowsDefaultTriggers()
+}
+
 func startSpread(task Task) time.Duration {
 	spreader, ok := task.(StartSpreader)
 	if !ok {
@@ -421,15 +430,22 @@ func (m *TaskManager) UpdateTriggers(key string, triggerConfigs []TriggerConfig)
 }
 
 // GetSchedule reads the durable editor state rather than a live trigger snapshot.
+// A DefaultFollowingTask with no saved schedule reports its DefaultTriggers at
+// revision zero, the schedule it runs until one is saved.
 func (m *TaskManager) GetSchedule(ctx context.Context, key string) (Schedule, error) {
-	if _, err := m.getWorker(key); err != nil {
+	w, err := m.getWorker(key)
+	if err != nil {
 		return Schedule{}, err
 	}
 	repo, ok := m.triggerRepo.(GuardedTriggerRepository)
 	if !ok {
 		return Schedule{}, fmt.Errorf("guarded task schedules unavailable")
 	}
-	return repo.GetSchedule(ctx, key)
+	schedule, err := repo.GetSchedule(ctx, key)
+	if err == nil && schedule.Revision == 0 && followsDefaultTriggers(w.task) {
+		schedule.Triggers = w.task.DefaultTriggers()
+	}
+	return schedule, err
 }
 
 // UpdateSchedule persists under the original revision and installs that schedule

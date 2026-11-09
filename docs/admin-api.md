@@ -3518,7 +3518,10 @@ restart. An omitted `auto_provision` is true, and enabling an auth binding while
 is enabled is 409 `provider_already_enabled`
 ([external-sign-in.md](architecture/external-sign-in.md)). The task binding marks a server
 restart required and answers 200 with `restart_required` true, matching the legacy shape.
-An omitted task trigger stores an empty object. Both are naturally idempotent upserts.
+An omitted task trigger stores an empty object. A runnable binding trigger outranks the
+manifest's `scheduled_task.default_trigger`; a schedule saved on the task page outranks both
+([plugin-scheduled-tasks.md](architecture/plugin-scheduled-tasks.md)). Both are naturally
+idempotent upserts.
 
 All four require an acting administrator, restrict demo access, answer 404 for an unknown
 installation, 409 for the reserved built-in host row, 422 for a blank key or capability, and
