@@ -142,14 +142,14 @@ function nodeGroups(nodes: StreamNode[], serverRevision: string | null): NodeGro
       byName.set(name, [node]);
     }
   }
-  const prefix = sharedPrefix([...byName.keys()].filter(Boolean));
+  const labels = groupLabels([...byName.keys()].filter(Boolean));
 
   return [...byName.entries()]
     .map(([name, members]) => {
       const worst = members.reduce((a, b) => (rankOf(b) < rankOf(a) ? b : a));
       return {
         name,
-        label: name ? groupLabel(name, prefix) : UNGROUPED_LABEL,
+        label: labels.get(name) ?? UNGROUPED_LABEL,
         state: nodeState(worst),
         rank: rankOf(worst),
         nodes: members.sort(
@@ -185,6 +185,25 @@ function sharedPrefix(names: string[]): string {
     }
   }
   return prefix.slice(0, prefix.lastIndexOf("-") + 1);
+}
+
+/**
+ * Each group's shortened label. Two names can shorten to the same words, as
+ * "prod-api-east" and "prod-api-api-east" both do, and those keep their full names.
+ */
+function groupLabels(names: string[]): Map<string, string> {
+  const prefix = sharedPrefix(names);
+  const labels = new Map(names.map((name) => [name, groupLabel(name, prefix)]));
+  const counts = new Map<string, number>();
+  for (const label of labels.values()) {
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  for (const [name, label] of labels) {
+    if ((counts.get(label) ?? 0) > 1) {
+      labels.set(name, name);
+    }
+  }
+  return labels;
 }
 
 /** Below this, a label is a bare "3" or "set-3" that says little on its own. */

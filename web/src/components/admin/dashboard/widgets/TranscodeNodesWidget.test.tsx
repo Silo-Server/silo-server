@@ -161,6 +161,11 @@ describe("TranscodeNodesWidget", () => {
         labels: ["eu-west", "us-east"],
       },
       {
+        scenario: "keeps full names when two would shorten to the same words",
+        groups: ["prod-api-east", "prod-api-api-east"],
+        labels: ["prod-api-api-east", "prod-api-east"],
+      },
+      {
         scenario: "keeps the full name of a lone group",
         groups: ["kronos-silo-3-worker-set-1"],
         labels: ["kronos-silo-3-worker-set-1"],
