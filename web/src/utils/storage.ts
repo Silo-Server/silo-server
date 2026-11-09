@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   VOLUME: "player-volume",
   MUTED: "player-muted",
   BROWSER_DECODING: "silo-player-browser-decoding",
+  STILL_WATCHING_THRESHOLD: "silo-player-still-watching-threshold",
   AUDIOBOOK_SKIP_BACK: "audiobook-skip-back",
   AUDIOBOOK_SKIP_FORWARD: "audiobook-skip-forward",
   AUDIOBOOK_SMART_REWIND: "audiobook-smart-rewind",

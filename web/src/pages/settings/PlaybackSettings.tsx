@@ -24,6 +24,12 @@ import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import type { SeekDirection } from "@/lib/seekIntervals";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
 import { isBrowserDecodingEnabled, setBrowserDecodingEnabled } from "@/player/engine/settings";
+import {
+  getStillWatchingThreshold,
+  setStillWatchingThreshold,
+  STILL_WATCHING_LABEL,
+  STILL_WATCHING_MAX,
+} from "@/player/stillWatching";
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { toast } from "sonner";
 import { LearnedLimitRow, PlaybackConnection } from "./PlaybackConnection";
@@ -188,6 +194,39 @@ function AutoPlayNextSetting() {
             setEnabled(checked).catch(() => toast.error("Failed to save playback setting"));
           }}
         />
+      )}
+    />
+  );
+}
+
+/** Stored in this browser: the contract classes the limit as client-local. */
+function StillWatchingSetting() {
+  const [threshold, setThreshold] = useState(getStillWatchingThreshold);
+
+  return (
+    <SettingRow
+      label={STILL_WATCHING_LABEL}
+      description="How many episodes auto-play in a row before Silo waits for you. Saved in this browser."
+      control={(id) => (
+        <Select
+          value={String(threshold)}
+          onValueChange={(value) => {
+            const next = Number(value);
+            setStillWatchingThreshold(next);
+            setThreshold(next);
+          }}
+        >
+          <SelectTrigger id={id} className="w-full sm:w-[220px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Array.from({ length: STILL_WATCHING_MAX + 1 }, (_, count) => (
+              <SelectItem key={count} value={String(count)}>
+                {count === 0 ? "Never ask" : `${count} episode${count === 1 ? "" : "s"}`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       )}
     />
   );
@@ -669,6 +708,8 @@ export default function PlaybackSettings() {
         />
 
         <AutoPlayNextSetting />
+
+        <StillWatchingSetting />
       </SettingsGroup>
 
       <SeekControls />

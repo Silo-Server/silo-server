@@ -1,4 +1,5 @@
 import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
+import { recordAutoAdvance, resetStillWatchingStreak } from "@/player/stillWatching";
 import { useSeekPreferences } from "@/hooks/queries/seekPreferences";
 import {
   lazy,
@@ -338,6 +339,7 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   const startPlayback = useCallback(
     (input: WatchPlaybackStartInput | WatchRouteRequest, trigger: PlaybackStartTrigger) => {
       const request = normalizeWatchPlaybackRequest(input);
+      if (trigger === "viewer") resetStillWatchingStreak();
       // Press-play-to-first-frame starts here, before any navigation or
       // Picture-in-Picture exit the viewer also waits for. The route rebuilds
       // the same request key, so the player's session can claim the mark.
@@ -881,6 +883,7 @@ function WatchPlaybackHostContent() {
         return;
       }
 
+      if (trigger === "automatic") recordAutoAdvance();
       controller.startPlayback(
         {
           contentId: nextContentId,
