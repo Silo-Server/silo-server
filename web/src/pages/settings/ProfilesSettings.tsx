@@ -98,7 +98,7 @@ export default function ProfilesSettings() {
         subtitle="Manage profile names, PINs, and access rules."
         actions={
           householdFull ? undefined : (
-            <Button onClick={openCreateDialog}>
+            <Button onClick={openCreateDialog} disabled={profilesLoading}>
               <Plus className="h-4 w-4" />
               New profile
             </Button>
