@@ -235,6 +235,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
     rounding: "floor",
     justNowLabel: "Just now",
   });
+  const position = formatPlaybackPosition(session);
   const clientLabel = getSessionClientLabel(session);
   const method = classifyActivityMethod(session);
   const methodMeta = activityMethodMeta(method);
@@ -340,7 +341,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             <span className="min-w-0 truncate text-xs font-medium">{username}</span>
           </div>
           <span className="text-muted-foreground ml-auto flex max-w-full min-w-0 flex-wrap justify-end gap-x-1.5 text-[10px]">
-            <span className="min-w-0 truncate tabular-nums">{formatPlaybackPosition(session)}</span>
+            <span className="min-w-0 truncate tabular-nums" title={position}>
+              {position}
+            </span>
             <span className="shrink-0">· {elapsed}</span>
           </span>
         </div>
