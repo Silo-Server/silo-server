@@ -301,9 +301,8 @@ func keepStricterFlags(ctx context.Context, tx pgx.Tx, live []liveFlags) ([]stri
 	for i, f := range stricterFlags {
 		// A backup taken before the column existed has nothing to keep;
 		// the restored server adds it with its default when it migrates.
-		var has bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_attribute
-			WHERE attrelid = to_regclass($1) AND attname = $2 AND attnum > 0 AND NOT attisdropped)`, f.table, f.column).Scan(&has); err != nil {
+		has, err := columnExists(ctx, tx, f.table, f.column)
+		if err != nil {
 			return nil, err
 		}
 		if !has {

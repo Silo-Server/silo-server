@@ -125,9 +125,17 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 	if err != nil {
 		return nil, err
 	}
+	// A backup taken before profiles could be blocked from requests has no
+	// block, so its profiles read as unblocked.
+	requestsBlocked := "FALSE"
+	if has, err := columnExists(ctx, tx, tableUserProfiles, "requests_blocked"); err != nil {
+		return nil, err
+	} else if has {
+		requestsBlocked = "p.requests_blocked"
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT p.id, coalesce(p.pin_hash, '') <> '', p.is_primary, p.is_child, coalesce(p.max_content_rating, ''), p.max_advisory_age::int,
-			p.require_advisory_age, p.requests_blocked, p.library_restrictions_enabled,
+			p.require_advisory_age, `+requestsBlocked+`, p.library_restrictions_enabled,
 			coalesce((SELECT array_agg(a.library_id ORDER BY a.library_id) FROM user_profile_allowed_libraries a WHERE a.user_id = p.user_id AND a.profile_id = p.id), '{}'),
 			coalesce(p.max_playback_quality, ''),
 			`+allowedTitles+`, `+directTitles+`, `+allowedCollections+`, `+collectionTitles+`
