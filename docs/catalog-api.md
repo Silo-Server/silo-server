@@ -66,8 +66,11 @@ require it to use a key.
 
 The fields are absent when an administrator or the profile typed the title, and when the
 server replaced the stored title with one of an item or season (a seasonal row's in-season
-title, an editorial subject). The server records the key with the row it writes, and any
-change to a row's title clears it, so a rename never depends on comparing text. A profile
+title, an editorial subject). The server records the key with the row it writes, and an update that changes a row's title without changing its key clears it,
+so a rename never depends on comparing text. A library rename re-keys the generated rows that still carry their own
+key, with the new name in `title_args`. Upgrading keyed the existing rows whose title is
+exactly a built-in name, because stored rows don't record who wrote them, so a typed title
+identical to a built-in name shows that name's translation. A profile
 title override equal to the administrator's title keeps the key. `getHomeCapabilities`
 reports `section_title_keys: true` on a server that sends them. The frozen `/api/v1` reads
 and the Jellyfin surface do not carry them.

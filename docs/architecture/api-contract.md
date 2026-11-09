@@ -1681,7 +1681,7 @@ different cards when read again.
 `title_args` (an object of strings) while the row's `title` is server text, so a client can show
 the title in its own language; `getHomeCapabilities` reports `section_title_keys: true` when the
 server sends them. `page_sections.title_key` stores the key beside the title, and a trigger
-clears it on any update that changes the title without setting a key, so an older binary's
+clears it on any update that changes the title without changing the key, so an older binary's
 rename cannot leave a stale key. See [the catalog API](../catalog-api.md#section-titles).
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`

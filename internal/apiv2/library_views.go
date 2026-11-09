@@ -74,7 +74,7 @@ type LibrarySectionItemsInput struct {
 // is the English of. Both fields are absent when the title is text an
 // administrator or the profile typed.
 type SectionTitleKey struct {
-	TitleKey  string            `json:"title_key,omitempty" doc:"Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title. Sent when getHomeCapabilities reports section_title_keys" example:"home.section.recentlyAddedIn"`
+	TitleKey  string            `json:"title_key,omitempty" doc:"Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section name. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name. Sent when getHomeCapabilities reports section_title_keys" example:"home.section.recentlyAddedIn"`
 	TitleArgs map[string]string `json:"title_args,omitempty" doc:"Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none" example:"{\"library\":\"Movies\"}"`
 }
 
