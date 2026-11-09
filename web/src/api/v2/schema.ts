@@ -27738,7 +27738,7 @@ export interface components {
        */
       section_item_limit_max?: number;
       /**
-       * @description Sections and profile section settings carry title_key and title_args while their title is the server's own text, so a client can translate it. Absent when the home sections service is not configured, and on a server that predates the fields
+       * @description Sections and profile section settings carry title_key, with title_args when its message has placeholders, while their title is the server's own text, so a client can translate it. Absent when the home sections service is not configured, and on a server that predates the fields
        * @example true
        */
       section_title_keys?: boolean;
