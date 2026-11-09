@@ -1,0 +1,63 @@
+{
+  "Name": "1. MPV",
+  "MaxStaticBitrate": 999999999,
+  "MaxStreamingBitrate": 999999999,
+  "CodecProfiles": [
+    {
+      "Type": "Video",
+      "Codec": "h264,mpeg4,divx,xvid,wmv,vc1,vp8,vp9"
+    },
+    {
+      "Type": "Video",
+      "Codec": "hevc,h265",
+      "Conditions": [
+        { "Condition": "LessThanEqual", "Property": "VideoLevel", "Value": "153", "IsRequired": false },
+        { "Condition": "NotEquals", "Property": "VideoRangeType", "Value": "DOVI", "IsRequired": true }
+      ]
+    },
+    {
+      "Type": "Audio",
+      "Codec": "aac,ac3,eac3,mp3,flac,vorbis,opus,pcm"
+    }
+  ],
+  "DirectPlayProfiles": [
+    {
+      "Type": "Video",
+      "Container": "mp4,mkv,avi,mov,flv,ts,m2ts,webm,ogv,3gp,hls",
+      "VideoCodec": "h264,hevc,mpeg4,divx,xvid,wmv,vc1,vp8,vp9,avi,mpeg,mpeg2video",
+      "AudioCodec": "aac,mp3,flac,opus,vorbis,ac3,eac3,dts,truehd,wma"
+    },
+    {
+      "Type": "Audio",
+      "Container": "mp3,m4a,aac,ogg,flac,wav,webm,mka",
+      "AudioCodec": "mp3,aac,flac,vorbis,opus,pcm"
+    }
+  ],
+  "TranscodingProfiles": [
+    {
+      "Type": "Video",
+      "Context": "Streaming",
+      "Protocol": "hls",
+      "Container": "ts",
+      "VideoCodec": "h264,hevc",
+      "AudioCodec": "aac,mp3,ac3,dts",
+      "MaxAudioChannels": "6"
+    },
+    {
+      "Type": "Audio",
+      "Context": "Streaming",
+      "Protocol": "http",
+      "Container": "mp3",
+      "AudioCodec": "mp3",
+      "MaxAudioChannels": "2"
+    }
+  ],
+  "SubtitleProfiles": [
+    { "Format": "srt", "Method": "External" },
+    { "Format": "subrip", "Method": "External" },
+    { "Format": "ass", "Method": "External" },
+    { "Format": "srt", "Method": "Embed" },
+    { "Format": "subrip", "Method": "Embed" },
+    { "Format": "pgssub", "Method": "Encode" }
+  ]
+}

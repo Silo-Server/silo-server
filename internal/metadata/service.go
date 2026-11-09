@@ -213,6 +213,7 @@ type metadataSeasonRepo interface {
 type metadataItemLocalizationRepo interface {
 	Get(ctx context.Context, contentID, language string) (*models.MediaItemLocalization, error)
 	Upsert(ctx context.Context, loc *models.MediaItemLocalization) error
+	ClearMatchText(ctx context.Context, contentID string, keepTitle, keepText bool) error
 }
 
 type metadataSeasonLocalizationRepo interface {
@@ -2885,6 +2886,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
+	// A correction that merged onto an item already holding the new identity
+	// keeps that item's own values.
+	corrected := existingItem != nil && req.identityCorrection && identityChoiceCorrects(
+		canonicalIdentityProviderIDs(accumulator.ProviderIDs), writtenIdentity)
+
 	// Adoption restamps default_metadata_language to req.Language while the
 	// merge below rewrites the language-bearing text (title, overview). Field
 	// locks win over adoption: if BOTH are locked, nothing would actually be
@@ -2901,6 +2907,9 @@ func (s *MetadataService) mergeAndPersist(
 		// Fallback text belongs to the provider IDs it was fetched with, so it
 		// applies after persistence moved the item to another content ID too.
 		keepStoredTitle := req.Mode != ModeInitialMatch || existingItem == nil || !isSkeletonLikeStatus(existingItem.Status)
+		if corrected {
+			req.fallback.ignoreStoredText()
+		}
 		req.fallback.applyToItem(accumulator, req.Language, existingItem, keepStoredTitle)
 		req.fallback.applyToChildren(seasons, episodes, req.Language, contentID)
 	case fallbackLanguage != "":
@@ -2932,6 +2941,7 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
+	mergeLocked := locked
 	if existingItem != nil {
 		existingResult := itemToMetadataResult(existingItem)
 		suppressProviderIDValues(existingResult.ProviderIDs, accumulator.recordedStaleProviderIDs)
@@ -2955,9 +2965,22 @@ func (s *MetadataService) mergeAndPersist(
 			accumulator.localLists.keepStoredLists(accumulator, existingResult)
 			s.keepStoredLocalCredits(ctx, contentID, accumulator)
 		}
-		mergeLocked := locked
 		if !req.enrichmentOnly {
-			mergeLocked = s.peopleLocksForMerge(ctx, contentID, locked, existingResult, accumulator)
+			var creditsErr error
+			mergeLocked, creditsErr = s.peopleLocksForMerge(ctx, contentID, locked, existingResult, accumulator)
+			if creditsErr != nil {
+				// A correction must drop the previous match's unlocked group
+				// before the new identity is stored; afterwards a retry is no
+				// correction and keeps it.
+				if corrected {
+					return nil, creditsErr
+				}
+				slog.WarnContext(ctx, "metadata: leaving credits unchanged", "component", "metadata",
+					"content_id", contentID, "error", creditsErr)
+			}
+		}
+		if corrected {
+			clearPreviousMatch(existingResult, mergeLocked)
 		}
 		if isCanonicalWrite {
 			MergeMetadata(accumulator, existingResult, mergeLocked, mergeMode)
@@ -2966,12 +2989,8 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		if !req.enrichmentOnly {
 			// One enrichment provider's dates only fill empty ones (above);
-			// the provider chain's current dates are a refresh's to apply. A
-			// correction that merged onto an item already holding the new
-			// identity keeps that item's own dates.
-			corrected := req.identityCorrection && identityChoiceCorrects(
-				canonicalIdentityProviderIDs(accumulator.ProviderIDs), writtenIdentity)
-			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked, corrected)
+			// the provider chain's current dates are a refresh's to apply.
+			refreshHomeReleaseDates(existingResult, accumulator, mergeLocked)
 		}
 		for key := range accumulator.quarantinedProviderIDKeys {
 			delete(existingResult.ProviderIDs, key)
@@ -3085,6 +3104,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 	item.ContentID = contentID
+	if corrected {
+		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
+			return nil, err
+		}
+	}
 	persistedContentID, err := s.persistItemAndProviderIDs(
 		ctx,
 		item,
@@ -3210,17 +3234,17 @@ func (s *MetadataService) mergeAndPersist(
 	// refresh reported: scores and vote counts keep moving after release, and
 	// discovery rows rank by the TMDB count. The enrichment-only bulk pass
 	// carries one provider's answer, so it only fills sources the item lacks
-	// and never overwrites the chain's choice. Identify replaces the whole set,
-	// even with an empty one, because it keeps the content_id while changing
-	// the title: a source only the previous match reported would otherwise
-	// stay on the item for good. Like the rating columns, they are
+	// and never overwrites the chain's choice. Identify and a corrected NFO replace
+	// the whole set, even with an empty one, because they keep the content_id
+	// while changing the title: a source only the previous match reported would
+	// otherwise stay on the item for good. Like the rating columns, they are
 	// provider-invariant and written for every language.
 	if s.ratingSourceRepo != nil && !isFieldLocked(locked, FieldRating) {
 		sources := itemRatingSourcesFromResult(contentID, accumulator.RatingSources)
 		replace := mergeMode == MergeReplaceUnlocked || (req.Mode == ModeScheduledRefresh && !req.enrichmentOnly)
 		var err error
 		switch {
-		case req.Mode == ModeIdentify:
+		case req.Mode == ModeIdentify || corrected:
 			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
 		case len(sources) > 0:
 			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, replace)
@@ -3265,6 +3289,25 @@ func (s *MetadataService) mergeAndPersist(
 		IsNew:     isNew,
 		Updated:   true,
 	}, nil
+}
+
+// clearPreviousMatchRows empties what a correction keeps outside the item row:
+// localized text and, when the new match lists none, credits. It runs before the
+// new identity is stored: afterwards a retry is no correction, and nothing would
+// clear them. Credits the new match does list replace the stored ones later on.
+func (s *MetadataService) clearPreviousMatchRows(ctx context.Context, contentID string, item *models.MediaItem, locked, creditLocks []MetadataField) error {
+	if s.itemLocalizationRepo != nil {
+		if err := s.itemLocalizationRepo.ClearMatchText(ctx, contentID, isFieldLocked(locked, FieldName), isFieldLocked(locked, FieldOverview)); err != nil {
+			return err
+		}
+	}
+	if len(item.People) > 0 || (isFieldLocked(creditLocks, FieldCast) && isFieldLocked(creditLocks, FieldCrew)) {
+		return nil
+	}
+	if err := s.itemRepo.ReplacePeople(ctx, contentID, nil); err != nil {
+		return fmt.Errorf("clearing the previous match's people: %w", err)
+	}
+	return nil
 }
 
 func (s *MetadataService) persistItemAndProviderIDs(

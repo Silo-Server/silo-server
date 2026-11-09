@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,7 +128,7 @@ func QueueProfile(batch *pgx.Batch, userID int, id string) func(pgx.BatchResults
 
 // profileByIDQuery reads one profile together with its allowed libraries in
 // ascending id order, so a profile costs one statement.
-const profileByIDQuery = `
+var profileByIDQuery = `
 	SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
 	       require_advisory_age,
 	       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
@@ -137,12 +138,59 @@ const profileByIDQuery = `
 	           SELECT library_id FROM user_profile_allowed_libraries l
 	           WHERE l.user_id = user_profiles.user_id AND l.profile_id = user_profiles.id
 	           ORDER BY library_id ASC
-	       )
+	       ),
+	       ARRAY(` + ProfileAllowedTitleIDsSQL("user_profiles.user_id", "user_profiles.id") + `)
 	FROM user_profiles WHERE user_id = $1 AND id = $2`
+
+// ProfileAllowedTitleIDsSQL renders the content IDs a profile is allowed
+// above its maturity limits: its own title allowances plus the titles of each
+// live-allowed collection. A collection allows its titles only while it is a
+// manual collection created by the account's current primary profile, so the
+// household manager alone decides what it holds, and only its movies and
+// series, as a title allowance may name (userstore.AllowanceTitleTypes).
+//
+// Every request the profile makes reads this, so both its result and its
+// work are bounded. It returns at most userstore.MaxAllowedTitles distinct
+// IDs: UNION ALL with no ORDER BY lets PostgreSQL stop once it has them. It
+// reads at most liveEntryScanLimit whole-title entries (an empty sub_item_id) of
+// the live collections, and deduplicates within them, leaving out titles
+// the profile is allowed directly. Past that many entries the rest stay
+// hidden, so heavily overlapping or very large live collections fail closed
+// rather than costing every request more. userIDExpr and profileIDExpr are
+// SQL expressions for the profile's key.
+func ProfileAllowedTitleIDsSQL(userIDExpr, profileIDExpr string) string {
+	return `
+	           WITH live AS (
+	               SELECT c.id FROM profile_collection_allowances ca
+	               JOIN user_personal_collections c ON c.user_id = ca.user_id AND c.id = ca.collection_id
+	               JOIN user_profiles creator ON creator.user_id = c.user_id AND creator.id = c.creator_profile_id
+	               WHERE ca.user_id = ` + userIDExpr + ` AND ca.profile_id = ` + profileIDExpr + `
+	                 AND c.collection_type = 'manual' AND creator.is_primary
+	           )
+	           SELECT content_id FROM profile_title_allowances ta
+	           WHERE ta.user_id = ` + userIDExpr + ` AND ta.profile_id = ` + profileIDExpr + `
+	           UNION ALL
+	           SELECT DISTINCT entry.media_item_id FROM (
+	               SELECT ci.media_item_id FROM live
+	               JOIN user_personal_collection_items ci ON ci.user_id = ` + userIDExpr + ` AND ci.collection_id = live.id AND ci.sub_item_id = ''
+	               LIMIT ` + strconv.Itoa(liveEntryScanLimit) + `
+	           ) entry
+	           JOIN media_items mi ON mi.content_id = entry.media_item_id
+	           WHERE mi.type IN ('movie', 'series')
+	             AND NOT EXISTS (SELECT 1 FROM profile_title_allowances dup
+	                 WHERE dup.user_id = ` + userIDExpr + ` AND dup.profile_id = ` + profileIDExpr + ` AND dup.content_id = entry.media_item_id)
+	           LIMIT ` + strconv.Itoa(userstore.MaxAllowedTitles)
+}
+
+// liveEntryScanLimit bounds the live-collection entries one profile read
+// takes: five times the titles it keeps, so collections that overlap up to
+// five times over still yield every distinct title.
+const liveEntryScanLimit = 5 * userstore.MaxAllowedTitles
 
 func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	var libraryIDs []int
-	p, err := scanProfile(row, &libraryIDs)
+	var allowedTitleIDs []string
+	p, err := scanProfile(row, &libraryIDs, &allowedTitleIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -153,6 +201,12 @@ func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 	// reports it.
 	if len(libraryIDs) > 0 {
 		p.AllowedLibraryIDs = libraryIDs
+	}
+	// The read returns distinct IDs in no set order; sorting keeps scope
+	// fingerprints stable.
+	if len(allowedTitleIDs) > 0 {
+		slices.Sort(allowedTitleIDs)
+		p.AllowedTitleIDs = allowedTitleIDs
 	}
 	return p, nil
 }
@@ -510,13 +564,27 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 // scope and library in one JSON value (see SaveSectionOverrides). A value left
 // with no entries is deleted, as ResetSectionOverrides does.
 func deleteProfileSectionOverrides(ctx context.Context, tx pgx.Tx, userID int, profileID string) error {
+	err := rewriteSectionOverrides(ctx, tx, userID, func(overrides []userstore.SectionOverride) ([]userstore.SectionOverride, bool) {
+		kept := slices.DeleteFunc(overrides, func(o userstore.SectionOverride) bool { return o.ProfileID == profileID })
+		return kept, len(kept) != len(overrides)
+	})
+	if err != nil {
+		return fmt.Errorf("profile %s: %w", profileID, err)
+	}
+	return nil
+}
+
+// rewriteSectionOverrides passes each of the account's section-override
+// settings through rewrite under lockSectionOverrides, and writes back the
+// ones it reports changed. A value left with no entries is deleted.
+func rewriteSectionOverrides(ctx context.Context, tx pgx.Tx, userID int, rewrite func([]userstore.SectionOverride) ([]userstore.SectionOverride, bool)) error {
 	if err := lockSectionOverrides(ctx, tx, userID); err != nil {
 		return err
 	}
 	rows, err := tx.Query(ctx,
 		`SELECT key, value FROM user_settings WHERE user_id = $1 AND key LIKE 'section\_overrides:%' FOR UPDATE`, userID)
 	if err != nil {
-		return fmt.Errorf("reading section overrides for profile %s: %w", profileID, err)
+		return fmt.Errorf("reading section overrides: %w", err)
 	}
 	type setting struct{ key, value string }
 	settings, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (setting, error) {
@@ -525,24 +593,21 @@ func deleteProfileSectionOverrides(ctx context.Context, tx pgx.Tx, userID int, p
 		return s, err
 	})
 	if err != nil {
-		return fmt.Errorf("reading section overrides for profile %s: %w", profileID, err)
+		return fmt.Errorf("reading section overrides: %w", err)
 	}
 	for _, st := range settings {
 		var overrides []userstore.SectionOverride
 		if err := json.Unmarshal([]byte(st.value), &overrides); err != nil {
 			return fmt.Errorf("decoding section overrides %s: %w", st.key, err)
 		}
-		kept := slices.DeleteFunc(overrides, func(o userstore.SectionOverride) bool { return o.ProfileID == profileID })
-		if len(kept) == len(overrides) {
+		next, changed := rewrite(overrides)
+		if !changed {
 			continue
 		}
-		if len(kept) == 0 {
+		if len(next) == 0 {
 			_, err = tx.Exec(ctx, `DELETE FROM user_settings WHERE user_id = $1 AND key = $2`, userID, st.key)
 		} else {
-			var data []byte
-			if data, err = json.Marshal(kept); err != nil {
-				return fmt.Errorf("encoding section overrides %s: %w", st.key, err)
-			}
+			data, _ := json.Marshal(next)
 			_, err = tx.Exec(ctx, `UPDATE user_settings SET value = $3 WHERE user_id = $1 AND key = $2`, userID, st.key, string(data))
 		}
 		if err != nil {

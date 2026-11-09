@@ -248,7 +248,9 @@ var secretTables = []secretTable{
 	}},
 
 	// Destinations that receive notifications without a session: one removed
-	// since the backup would receive them again.
+	// since the backup would receive them again. A browser subscription bound to
+	// a login session names one the restore does not have, so it stops until the
+	// web app registers it at the next sign-in.
 	{name: "web_push_subscriptions", handling: secretCarried, why: "browser push subscriptions", carry: &carrySpec{
 		key: "id", same: []string{"id", columnUserID, "endpoint"}, credential: everyRow,
 		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + profileExists,

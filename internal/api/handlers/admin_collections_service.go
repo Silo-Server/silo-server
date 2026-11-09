@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/collections/templates"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -149,6 +151,11 @@ func (h *LibraryCollectionHandler) createAdminCollection(ctx context.Context, re
 	if err := normalizeAdminCollectionInput(&input, req.V1Rules); err != nil {
 		return none, err
 	}
+	if !req.V1Rules && input.CollectionType == collectionTypeSmart {
+		if err := requireSmartCollectionRule(input.QueryDefinition); err != nil {
+			return none, err
+		}
+	}
 
 	collection, err := h.repo.Create(ctx, input)
 	if err != nil {
@@ -209,6 +216,9 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 			return none, apiError(http.StatusBadRequest, "bad_request", "Invalid query_definition")
 		}
 	}
+	if err := adminSmartRuleCheck(existing.CollectionType, existing.QueryDefinition, req, queryDefinition); err != nil {
+		return none, err
+	}
 
 	sortConfig := req.SortConfig
 	if len(req.SortConfig) > 0 {
@@ -268,6 +278,9 @@ func (h *LibraryCollectionHandler) updateAdminCollection(ctx context.Context, co
 			return none, apiError(http.StatusNotFound, "not_found", "Collection group not found")
 		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to update collection")
+	}
+	if req.Title != nil {
+		h.renameCollectionRows(ctx, collectionID, existing.Title, *req.Title)
 	}
 
 	if err := artwork(collectionID, pointerStringValue(req.PosterSourceURL), pointerStringValue(req.BackdropSourceURL)); err != nil {
@@ -751,4 +764,41 @@ func (h *LibraryCollectionHandler) DeleteAdminCollection(ctx context.Context, id
 	}
 	h.cleanupDeletedCollection(ctx, id)
 	return nil
+}
+
+// renameCollectionRows carries a rename into the rows that still show the
+// collection under its old name, following the collection's current title so
+// overlapping renames end on the last one (userstore.FollowCollectionTitle).
+// Admin rows are retitled before the response re-reads the collection,
+// because retitling one advances the collection's revision and the caller's
+// next If-Match needs the new one. The rows profiles built, in every account,
+// are retitled after the response, detached from the request: that sweep
+// leaves the revision alone and grows with the number of accounts. The rename
+// has committed, so a dropped request must not cut either short; each has its
+// own deadline instead. A failure is logged and leaves those rows on the old
+// name.
+func (h *LibraryCollectionHandler) renameCollectionRows(ctx context.Context, collectionID, oldTitle, newTitle string) {
+	if strings.TrimSpace(oldTitle) == strings.TrimSpace(newTitle) {
+		return
+	}
+	detached := context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(detached, userstore.RetitleTimeout)
+	defer cancel()
+	currentTitle := func(ctx context.Context) (string, error) { return h.repo.Title(ctx, collectionID) }
+	if h.SectionRepo != nil {
+		err := userstore.FollowCollectionTitle(ctx, oldTitle, currentTitle, func(ctx context.Context, from, to string) error {
+			return h.SectionRepo.RenameLibraryCollectionRows(ctx, collectionID, from, to)
+		})
+		if err != nil {
+			slog.WarnContext(ctx, "collection rename: retitling admin rows failed", "component", "api",
+				"collection_id", collectionID, "error", err)
+		}
+	}
+	if h.CollectionRowRenamer != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(detached, userstore.RetitleSweepTimeout)
+			defer cancel()
+			h.CollectionRowRenamer.RenameForCollection(ctx, collectionID, oldTitle, currentTitle)
+		}()
+	}
 }

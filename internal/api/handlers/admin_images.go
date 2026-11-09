@@ -115,6 +115,9 @@ type itemImageEntry struct {
 	Width       int     `json:"width"`
 	Height      int     `json:"height"`
 	Rating      float64 `json:"rating"`
+	// Fallback marks show artwork a season list offers after the season's own
+	// images. It is set only on season lists and is left out of JSON.
+	Fallback bool `json:"-"`
 }
 
 type getItemImagesResponse struct {
@@ -233,6 +236,10 @@ func (h *AdminImageHandler) GetAdminItemImages(ctx context.Context, contentID st
 	return h.listItemImages(ctx, contentID, true)
 }
 
+// listItemImages fetches the image choices for a movie, series, season or
+// episode, with display URLs resolved. A season list marks show artwork as a
+// fallback. includeLocal adds sidecar artwork for a movie or series and the
+// uploaded images the item shows.
 func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string, includeLocal bool) (AdminItemImagesView, error) {
 	resolved, err := h.resolveContentID(ctx, contentID)
 	if err != nil {
@@ -343,6 +350,7 @@ func (h *AdminImageHandler) listItemImages(ctx context.Context, contentID string
 			Width:       img.Width,
 			Height:      img.Height,
 			Rating:      img.Rating,
+			Fallback:    resolved.season != nil && img.SeasonNumber == nil,
 		})
 	}
 

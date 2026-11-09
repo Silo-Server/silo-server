@@ -365,6 +365,18 @@ func (r *LibraryCollectionRepository) GetByID(ctx context.Context, id string) (*
 	return scanLibraryCollection(r.pool.QueryRow(ctx, query, id))
 }
 
+// Title returns a collection's title alone, without the joins GetByID makes.
+func (r *LibraryCollectionRepository) Title(ctx context.Context, id string) (string, error) {
+	var title string
+	if err := r.pool.QueryRow(ctx, `SELECT title FROM library_collections WHERE id = $1`, id).Scan(&title); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrLibraryCollectionNotFound
+		}
+		return "", err
+	}
+	return title, nil
+}
+
 // GetByManagementKey returns the collection that owns the given management
 // key within the supplied mode/source pair. Scoping by mode and source guards
 // against future mode collisions on the unique-key index returning a

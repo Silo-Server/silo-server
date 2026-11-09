@@ -67,6 +67,11 @@ type TranscodeOpts struct {
 	// CopyVideoMPEGTS packages copied video in MPEG-TS instead of fMP4. It is
 	// durable because the segment extension and bytes must survive restarts.
 	CopyVideoMPEGTS bool
+	// CopyAudioCodec is the codec of the source audio track a "copy"
+	// TargetCodecAudio keeps. fMP4 segments add aac_adtstoasc for a copied AAC
+	// track; empty (older recipes and tokens) keeps the plain copy. It is
+	// durable because reconstruction must write the same segment bytes.
+	CopyAudioCodec string
 	// KeyframePlaylist serves a copy-video stream that starts at the
 	// beginning as one complete VOD playlist planned from the source's
 	// keyframe index, instead of FFmpeg's growing playlist (#1466). It is
@@ -958,6 +963,9 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 
 	// Audio codec.
 	args = appendAudioArgs(args, opts)
+	if HLSCopiesAACIntoFMP4(opts) {
+		args = appendCopiedAACToMP4Args(args, opts.CopyAudioCodec)
+	}
 
 	// Subtitle burn-in and resolution scaling — only when encoding video.
 	if !isVideoCopy {
@@ -1110,6 +1118,16 @@ func HLSOutputContainer(opts TranscodeOpts) string {
 		return OutputContainerFMP4
 	}
 	return OutputContainerMPEGTS
+}
+
+// HLSCopiesAACIntoFMP4 reports whether an HLS run copies an AAC track into
+// fMP4 segments, the one case that adds aac_adtstoasc. MPEG-TS segments carry
+// ADTS as it is. Remote executors must confirm the copied codec for such a run
+// because an older one ignores it and fails after the first segment.
+func HLSCopiesAACIntoFMP4(opts TranscodeOpts) bool {
+	return !TranscodesAudio(opts.TargetCodecAudio) &&
+		HLSOutputContainer(opts) == OutputContainerFMP4 &&
+		copiedAudioIsAAC(opts.CopyAudioCodec)
 }
 
 // copyVideoUsesFMP4 reports whether copied video is packaged as fragmented MP4

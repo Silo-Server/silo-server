@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
 // An administrator test push carries the device profile's newest
@@ -109,7 +112,7 @@ func TestSendPushTestCarriesTheProfilesNewestNotification(t *testing.T) {
 	})}
 	system := &System{Settings: settings, pushDeviceRepo: repo, pushSender: sender}
 
-	pending, _, err := repo.EnqueueTestAttempt(ctx, PushPlatformApple, profile, phone.ServerDeviceID)
+	pending, _, err := repo.EnqueueTestAttempt(ctx, PushPlatformApple, account, profile, phone.ServerDeviceID)
 	if err != nil {
 		t.Fatalf("enqueue test: %v", err)
 	}
@@ -121,7 +124,7 @@ func TestSendPushTestCarriesTheProfilesNewestNotification(t *testing.T) {
 	}
 
 	for range 2 {
-		result, err := system.SendApplePushTest(ctx, profile, phone.ServerDeviceID)
+		result, err := system.SendApplePushTest(ctx, account, profile, phone.ServerDeviceID)
 		if err != nil {
 			t.Fatalf("send test: %v", err)
 		}
@@ -131,7 +134,7 @@ func TestSendPushTestCarriesTheProfilesNewestNotification(t *testing.T) {
 		}
 	}
 
-	result, err := system.SendApplePushTest(ctx, quietProfile, quietPhone.ServerDeviceID)
+	result, err := system.SendApplePushTest(ctx, account, quietProfile, quietPhone.ServerDeviceID)
 	if err != nil {
 		t.Fatalf("send bare test: %v", err)
 	}
@@ -146,4 +149,148 @@ func TestSendPushTestCarriesTheProfilesNewestNotification(t *testing.T) {
 	if rows != 4 || read != 0 {
 		t.Fatalf("inbox rows = %d with %d read; test pushes must not touch the inbox", rows, read)
 	}
+}
+
+// A test push reaches only the caller's own account. Profile IDs such as the
+// legacy `default` repeat across accounts, so a profile match alone would pick
+// whichever account's phone was seen last and push that person a real
+// notification. Another account's device must look exactly like no device.
+func TestSendPushTestStaysOnTheCallersAccount(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect test database: %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	prefix := fmt.Sprintf("testpush-scope-%d", time.Now().UnixNano())
+	admin, stranger := seedPushScopeAccounts(t, pool, prefix)
+
+	const sharedProfile = "default"
+	sibling := prefix + "-sibling"
+	strangersOnlyProfile := prefix + "-strangers"
+
+	cipher := testPushCipher(t)
+	repo := NewPushDeviceRepository(pool)
+	var relayed []string
+	system := newTokenRecordingPushSystem(t, pool, repo, cipher, &relayed)
+
+	for _, platform := range []struct {
+		name     string
+		register func(account int, profile, device, token string) (*PushDevice, error)
+		send     func(ctx context.Context, userID int, profileID, serverDeviceID string) (*ApplePushTestResult, error)
+	}{
+		{
+			name: "apple",
+			register: func(account int, profile, device, token string) (*PushDevice, error) {
+				return repo.UpsertApple(ctx, ApplePushDeviceRegistration{
+					UserID: account, ProfileID: profile, DeviceID: device, APNsToken: token,
+					APNsEnvironment: APNsEnvironmentSandbox, APNsTopic: ApplePushTopicSilo, PushMode: PushModePrivatePush,
+				}, cipher)
+			},
+			send: system.SendApplePushTest,
+		},
+		{
+			name: "android",
+			register: func(account int, profile, device, token string) (*PushDevice, error) {
+				return repo.UpsertFCM(ctx, FCMPushDeviceRegistration{
+					UserID: account, ProfileID: profile, DeviceID: device, FCMToken: token, PushMode: PushModePrivatePush,
+				}, cipher)
+			},
+			send: system.SendAndroidPushTest,
+		},
+	} {
+		t.Run(platform.name, func(t *testing.T) {
+			adminToken := strings.Repeat("a", 64)
+			siblingToken := strings.Repeat("c", 64)
+			register := func(account int, profile, device, token string) *PushDevice {
+				t.Helper()
+				registered, err := platform.register(account, profile, prefix+"-"+platform.name+"-"+device, token)
+				if err != nil {
+					t.Fatalf("register %s: %v", device, err)
+				}
+				return registered
+			}
+			register(admin, sharedProfile, "admin-phone", adminToken)
+			register(admin, sibling, "sibling-phone", siblingToken)
+			// Registered last, so it is the newest device for the shared profile.
+			strangerPhone := register(stranger, sharedProfile, "stranger-phone", strings.Repeat("b", 64))
+			strangerOther := register(stranger, strangersOnlyProfile, "stranger-other", strings.Repeat("d", 64))
+
+			relayed = nil
+			if _, err := platform.send(ctx, admin, sharedProfile, ""); err != nil {
+				t.Fatalf("send to own shared profile: %v", err)
+			}
+			if _, err := platform.send(ctx, admin, sibling, ""); err != nil {
+				t.Fatalf("send to own sibling profile: %v", err)
+			}
+			if len(relayed) != 2 || relayed[0] != adminToken || relayed[1] != siblingToken {
+				t.Fatalf("relayed tokens = %q; want the admin's own phone, then the sibling profile's", relayed)
+			}
+
+			relayed = nil
+			_, missing := platform.send(ctx, admin, prefix+"-no-such-profile", "")
+			if !errors.Is(missing, ErrPushDeliveryNotFound) {
+				t.Fatalf("missing profile err = %v, want not found", missing)
+			}
+			for name, target := range map[string]struct{ profile, device string }{
+				"device selector": {sharedProfile, strangerPhone.ServerDeviceID},
+				"no selector":     {strangersOnlyProfile, ""},
+			} {
+				if _, err := platform.send(ctx, admin, target.profile, target.device); err == nil || err.Error() != missing.Error() {
+					t.Errorf("%s: err = %v, want the same error as no device (%v)", name, err, missing)
+				}
+			}
+			var attempts int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM push_delivery_attempts WHERE push_device_id = ANY($1)`,
+				[]string{strangerPhone.ID, strangerOther.ID}).Scan(&attempts); err != nil {
+				t.Fatal(err)
+			}
+			if attempts != 0 || len(relayed) != 0 {
+				t.Fatalf("stranger attempts = %d, relayed = %q; want neither", attempts, relayed)
+			}
+		})
+	}
+}
+
+func newTokenRecordingPushSystem(t *testing.T, pool *pgxpool.Pool, repo *PushDeviceRepository, cipher *secret.Cipher, relayed *[]string) *System {
+	t.Helper()
+	settings := NewSettings(mapSettingReader{SettingPushRelayURL: DefaultPushRelayURL, SettingPushRelayAPIKey: "relay-key"})
+	sender := newPushSender(repo, NewDeliveryRepository(pool), cipher, settings)
+	sender.client = &http.Client{Transport: relayRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		var body struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode relay body: %v", err)
+		}
+		*relayed = append(*relayed, body.Token)
+		return relayResponse(http.StatusOK, `{"request_id":"relay-request","status":"accepted"}`), nil
+	})}
+	return &System{Settings: settings, pushDeviceRepo: repo, pushSender: sender}
+}
+
+func seedPushScopeAccounts(t *testing.T, pool *pgxpool.Pool, prefix string) (admin, stranger int) {
+	t.Helper()
+	ctx := context.Background()
+	var accounts []int
+	t.Cleanup(func() {
+		cleanup := context.Background()
+		_, _ = pool.Exec(cleanup, `DELETE FROM push_devices WHERE user_id = ANY($1)`, accounts)
+		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE id = ANY($1)`, accounts)
+	})
+	for _, name := range []string{"admin", "stranger"} {
+		var id int
+		username := prefix + "-" + name
+		if err := pool.QueryRow(ctx, `INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, '', 'user') RETURNING id`,
+			username, username+"@example.test").Scan(&id); err != nil {
+			t.Fatalf("seed account: %v", err)
+		}
+		accounts = append(accounts, id)
+	}
+	return accounts[0], accounts[1]
 }

@@ -1,7 +1,7 @@
 import { captureRoomCreationDraft } from "@/api/v2/watchTogetherCreate";
 import { updateRoomPolicy } from "@/api/v2/watchTogetherPolicy";
 import { stageRoomItem } from "@/api/v2/watchTogetherStage";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { isCapturedProfileAuthorityActive, StaleApiRequestContextError } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -14,11 +14,13 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { useOptionalAuth } from "@/hooks/useAuth";
+import { useSettingValue } from "@/hooks/queries/settingValues";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useSeasonEpisodes, useSeasons } from "@/hooks/queries/episodes";
 import { createWatchTogetherRoom, type WatchTogetherSelectionMode } from "@/lib/watchTogether";
 import { copyWatchTogetherInvite } from "@/lib/watchTogetherActions";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import type { EpisodeListItem, ItemDetail } from "@/api/types";
 import { rememberRecentRoom } from "./hooks/useRecentRooms";
 
@@ -149,17 +151,40 @@ export function StartPartySheet({
   const navigate = useViewTransitionNavigate();
   const auth = useOptionalAuth();
   const [mode, setMode] = useState<WatchTogetherSelectionMode>("host_pick");
-  const [guestsCanPause, setGuestsCanPause] = useState(false);
+  const savedPolicy = useSettingValue<string>(SETTING_KEYS.WATCH_PARTY_GUEST_CONTROL_POLICY, {
+    enabled: open,
+  });
+  // null follows the profile's saved choice, which the server applies to the
+  // new room itself; the switch overrides it once the host flips it.
+  const [guestsCanPauseChoice, setGuestsCanPause] = useState<boolean | null>(null);
+  const guestsCanPause = guestsCanPauseChoice ?? savedPolicy.value === "guest_play_pause";
+  const refetchSavedPolicy = savedPolicy.refetch;
   const [target, setTarget] = useState<StartPartyTarget | null>(initialTarget);
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Detail pages pass a new initialTarget object on every render, so reset on
+  // open or when the page's item changes, never on identity alone: a page
+  // render must not undo the episode or switch choice the host made here.
+  const initialTargetRef = useRef(initialTarget);
+  useEffect(() => {
+    initialTargetRef.current = initialTarget;
+  });
+  const initialTargetId = initialTarget?.content_id;
   useEffect(() => {
     if (open) {
-      setTarget(initialTarget);
+      setTarget(initialTargetRef.current);
       setChoosing(false);
       setBusy(false);
     }
-  }, [open, initialTarget]);
+  }, [open, initialTargetId]);
+  useEffect(() => {
+    if (open) {
+      setGuestsCanPause(null);
+      // Re-read on every open: the cached value can be minutes old, and the
+      // sheet writes what it shows back to the room and the profile.
+      void refetchSavedPolicy({ cancelRefetch: false });
+    }
+  }, [open, refetchSavedPolicy]);
 
   const thumbhash = target?.poster_thumbhash
     ? decodeThumbhash(target.poster_thumbhash)
@@ -179,11 +204,35 @@ export function StartPartySheet({
       const created = await createWatchTogetherRoom(draft);
       if (!active() || !created.room_access_token) return;
       const roomId = created.room.room_id;
-      if (guestsCanPause) {
-        await updateRoomPolicy(roomId, "guest_play_pause", authority!).catch((error: unknown) => {
-          if (error instanceof StaleApiRequestContextError) throw error;
-          toast.error("Room created, but guests can't pause yet. Change it from the room.");
-        });
+      // Make the room match the switch the host saw. An explicit choice is
+      // also saved for the next party unless it already is. An untouched
+      // switch whose saved value could not be read leaves the server's choice
+      // and says what it was.
+      const policy = guestsCanPause ? "guest_play_pause" : "host_only";
+      const explicit = guestsCanPauseChoice !== null;
+      const alreadySaved = savedPolicy.isSuccess && savedPolicy.value === policy;
+      if (!explicit && !savedPolicy.isSuccess) {
+        if (created.room.guest_control_policy !== policy)
+          toast.info(
+            created.room.guest_control_policy === "guest_play_pause"
+              ? "Guests can pause in this party. Change it from the room."
+              : "Only you control playback in this party. Change it from the room.",
+          );
+      } else if (created.room.guest_control_policy !== policy || (explicit && !alreadySaved)) {
+        const notApplied = () =>
+          toast.error(
+            guestsCanPause
+              ? "Room created, but guests can't pause yet. Change it from the room."
+              : "Room created, but guests can still pause. Change it from the room.",
+          );
+        const updated = await updateRoomPolicy(roomId, policy, authority!).catch(
+          (error: unknown) => {
+            if (error instanceof StaleApiRequestContextError) throw error;
+            notApplied();
+            return null;
+          },
+        );
+        if (updated && updated.room.guest_control_policy !== policy) notApplied();
         if (!active()) return;
       }
       if (target && mode === "host_pick") {
@@ -234,7 +283,18 @@ export function StartPartySheet({
     } finally {
       setBusy(false);
     }
-  }, [auth?.profile, auth?.user, guestsCanPause, mode, navigate, onOpenChange, target]);
+  }, [
+    auth?.profile,
+    auth?.user,
+    guestsCanPause,
+    guestsCanPauseChoice,
+    mode,
+    navigate,
+    onOpenChange,
+    savedPolicy.isSuccess,
+    savedPolicy.value,
+    target,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -351,7 +411,7 @@ export function StartPartySheet({
         <Button
           type="button"
           onClick={() => void create()}
-          disabled={busy || choosing}
+          disabled={busy || choosing || savedPolicy.isFetching}
           className="h-11"
         >
           {busy ? "Creating…" : "Create party & copy invite"}

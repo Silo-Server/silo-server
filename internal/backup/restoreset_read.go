@@ -50,7 +50,11 @@ const (
 	// maxRestoreSetMetadata bounds the index and documents one read holds
 	// in memory together, as the preview cache bounds what it keeps
 	// (maxCachedRestoreSetBytes). The index lists every document's size, so
-	// a set over it is refused before any document is read.
+	// a set over it is refused before any document is read. Account
+	// documents are not held: they grow with a server's households and
+	// watch history, so the read writes them to its directory and each is
+	// loaded on its own (RestoreSet.loadUser), bounded by
+	// maxRestoreSetDocument and the disk.
 	maxRestoreSetMetadata  = 256 << 20
 	maxRestoreSetArchive   = 256 << 20 // the admin plugin upload cap
 	maxRestoreSetBlob      = 256 << 20
@@ -72,6 +76,13 @@ const (
 	// blobIndexCost is about what one blob costs the set's maps and
 	// lookups: its key in blobs, blobSizes, and the index's directories.
 	blobIndexCost = 256
+	// userRefCost is about what one account costs the set in memory beside
+	// its spilled document: its identity, two strings of at most
+	// maxAccountField bytes, and its file name (UserRef).
+	userRefCost = 4 << 10
+	// blobRefCost is what one blob key an account references costs beside
+	// its bytes: its string header in accountBlobs.
+	blobRefCost = 16
 	// maxRestoreSetTrailer bounds the bytes after the tar end marker.
 	maxRestoreSetTrailer = 1 << 20
 )
@@ -80,11 +91,13 @@ const (
 type RestoreSet struct {
 	Index RestoreSetIndex
 	// Digest is the SHA-256 of the archive's bytes as read.
-	Digest      string
-	Settings    SettingsDocument
-	Libraries   LibrariesDocument
-	Plugins     []PluginDocument
-	Users       []UserDocument
+	Digest    string
+	Settings  SettingsDocument
+	Libraries LibrariesDocument
+	Plugins   []PluginDocument
+	// Users are the users section's accounts. Their documents stay on disk
+	// in the set's directory; loadUser reads one.
+	Users       []UserRef
 	Collections CollectionsDocument
 	// HomeSections is the home_sections section (version 3 and later).
 	HomeSections HomeSectionsDocument
@@ -108,7 +121,13 @@ type RestoreSet struct {
 	// accountBlobs are the blobs each account's document references
 	// (avatars, collection images), by account id.
 	accountBlobs map[string][]string
-	dir          string
+	// dir holds what the read wrote: extracted blobs and plugin archives,
+	// and every account document. Cleanup removes it.
+	dir string
+	// owner holds dir's lock (makeDir) until Cleanup.
+	owner *os.File
+	// userBytes is what the account documents take in dir.
+	userBytes int64
 	// metadataBytes estimates what the set holds in memory: its documents
 	// and blob keys, for the preview cache's bound.
 	metadataBytes int64
@@ -117,6 +136,8 @@ type RestoreSet struct {
 	// fromUnverified marks a cached set of a backup this server cannot
 	// verify; the cache keeps one at a time.
 	fromUnverified bool
+	// cache counts the set's holders while restoreSetCache has it.
+	cache cacheRefs
 }
 
 // HasBlob reports whether the archive carries key.
@@ -125,10 +146,14 @@ func (rs *RestoreSet) HasBlob(key string) bool {
 	return ok
 }
 
-// Cleanup removes extracted files.
+// Cleanup removes the set's directory: extracted files and account
+// documents.
 func (rs *RestoreSet) Cleanup() {
 	if rs != nil && rs.dir != "" {
 		_ = os.RemoveAll(rs.dir)
+		if rs.owner != nil {
+			_ = rs.owner.Close()
+		}
 	}
 }
 
@@ -136,7 +161,9 @@ func (rs *RestoreSet) Cleanup() {
 type ReadOptions struct {
 	// ExtractDir, when set, is a directory the read creates its own
 	// subdirectory in for plugin archives and blobs. A preview leaves it
-	// empty: their bytes are checked and discarded.
+	// empty: their bytes are checked and discarded. Account documents are
+	// written to that subdirectory either way, under os.TempDir() when
+	// ExtractDir is empty; the caller removes it with Cleanup.
 	ExtractDir string
 	// Extract, when set, picks the blobs an extracting read writes to
 	// ExtractDir; the rest are checked and discarded like a preview's.
@@ -169,15 +196,15 @@ func ReadRestoreSet(ctx context.Context, r io.Reader, opts ReadOptions) (_ *Rest
 	guard := newTarGuard(counted)
 	tr := tar.NewReader(guard)
 	rs := &RestoreSet{blobs: map[string]string{}, blobSizes: map[string]int64{}}
+	defer func() {
+		if err != nil {
+			rs.Cleanup()
+		}
+	}()
 	if opts.ExtractDir != "" {
-		if rs.dir, err = os.MkdirTemp(opts.ExtractDir, "restore-set-"); err != nil {
+		if err = rs.makeDir(opts.ExtractDir); err != nil {
 			return nil, err
 		}
-		defer func() {
-			if err != nil {
-				rs.Cleanup()
-			}
-		}()
 	}
 
 	p := &restoreSetParser{rs: rs, opts: opts, seen: map[string]bool{}, documents: map[string][]byte{}}
@@ -257,6 +284,9 @@ type restoreSetParser struct {
 	opts            ReadOptions
 	seen            map[string]bool
 	documents       map[string][]byte
+	// userFiles are the account documents written to the set's directory,
+	// by archive path.
+	userFiles map[string]string
 	// decoded is what the documents decoded so far take (jsonsize).
 	decoded int64
 	// unusableCount counts each section's entries left out (unusable).
@@ -309,6 +339,9 @@ func (p *restoreSetParser) entry(h *tar.Header, tr io.Reader, first bool) error 
 	}
 	if path.Base(h.Name) == pluginArchiveName {
 		return p.archive(h, tr, want)
+	}
+	if isUserDocument(h.Name) {
+		return p.userDocument(h, tr, want)
 	}
 	data, err := readLimited(tr, h, documentLimit(h.Name))
 	if err != nil {
@@ -405,8 +438,9 @@ func (p *restoreSetParser) readIndex(data []byte) error {
 	p.legacyOriginals = map[string][]string{}
 	p.variants = map[string]int{}
 	sectionsSeen := map[string]bool{}
-	// documents sums the listed documents' sizes.
-	var documents int64
+	// documents sums the listed documents' sizes but the accounts', which
+	// users sums: those go to disk.
+	var documents, users int64
 	for _, si := range index.Sections {
 		spec, ok := sectionByID(si.ID)
 		if !ok {
@@ -439,8 +473,13 @@ func (p *restoreSetParser) readIndex(data []byte) error {
 				if f.Size > documentLimit(f.Path) {
 					return fmt.Errorf("%s: %q is larger than %d bytes", restoreSetIndexName, f.Path, documentLimit(f.Path))
 				}
+				if isUserDocument(f.Path) {
+					users += f.Size
+					p.files[f.Path] = f
+					continue
+				}
 				if documents += f.Size; documents+int64(len(data)) > maxRestoreSetMetadata {
-					return fmt.Errorf("%s: its documents hold more than the %d bytes a restore set may", restoreSetIndexName, int64(maxRestoreSetMetadata))
+					return fmt.Errorf("%s: its documents hold more than the %d bytes a restore set may hold", restoreSetIndexName, int64(maxRestoreSetMetadata))
 				}
 			}
 			p.files[f.Path] = f
@@ -454,6 +493,15 @@ func (p *restoreSetParser) readIndex(data []byte) error {
 			}
 			p.blobs[key] = spec
 			p.noteOriginal(key)
+		}
+	}
+	if users > 0 {
+		dir, err := p.dir()
+		if err != nil {
+			return err
+		}
+		if err := checkSpillSpace(dir, users); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -532,9 +580,11 @@ func (p *restoreSetParser) blob(key string, h *tar.Header, tr io.Reader) error {
 	if h.Size > maxRestoreSetBlob {
 		return fmt.Errorf("blob %q is larger than %d bytes", key, maxRestoreSetBlob)
 	}
-	dir := p.rs.dir
-	if p.opts.Extract != nil && !p.opts.Extract(key) {
-		dir = ""
+	// Only an extracting read writes blobs; the set's directory also exists
+	// for account documents when nothing is extracted.
+	dir := ""
+	if p.opts.ExtractDir != "" && (p.opts.Extract == nil || p.opts.Extract(key)) {
+		dir = p.rs.dir
 	}
 	target, err := p.copyEntry(dir, "blob", h, tr, "")
 	if err != nil {
@@ -575,10 +625,10 @@ func (p *restoreSetParser) copyEntry(dir, kind string, h *tar.Header, tr io.Read
 	if dir != "" {
 		var err error
 		if file, err = os.CreateTemp(dir, kind+"-"); err != nil {
-			return "", err
+			return "", &tempStorageError{err}
 		}
 		defer func() { _ = file.Close() }()
-		w = io.MultiWriter(file, sum)
+		w = io.MultiWriter(storageWriter{file}, sum)
 	}
 	n, err := io.Copy(w, io.LimitReader(tr, h.Size))
 	if err != nil {
@@ -594,7 +644,7 @@ func (p *restoreSetParser) copyEntry(dir, kind string, h *tar.Header, tr io.Read
 		return "", nil
 	}
 	if err := file.Close(); err != nil {
-		return "", err
+		return "", &tempStorageError{err}
 	}
 	return file.Name(), nil
 }

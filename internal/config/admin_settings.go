@@ -448,6 +448,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.preview_image_width":                   "300",
 	"playback.trickplay_interval_seconds":            "10",
 	"playback.trickplay_workers":                     "1",
+	"playback.trickplay_node_capacity":               "1",
 	"playback.trickplay_execution":                   "local",
 	ChapterThumbnailSoftwareToneMapSettingKey:        "true",
 	PlaybackTranscodeHardwareToneMapSettingKey:       "true",
@@ -823,7 +824,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		// Rows are retained 30 days after their last update, so a longer
 		// lifetime would outlive the reading it describes.
 		return normalizeAdminInt(key, value, 1, maxBandwidthProbeMaxAgeDays)
-	case "playback.trickplay_workers":
+	// A node takes no more runs than API servers send it, so its capacity
+	// shares the per-server worker range.
+	case "playback.trickplay_workers", "playback.trickplay_node_capacity":
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)

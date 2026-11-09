@@ -2521,6 +2521,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/admin/items/{id}/match/hints": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the title, year, and provider IDs the scanner parsed from an authorized catalog item's folder and file names. */
+    get: operations["getAdminItemMatchHints"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/admin/items/{id}/match/search": {
     parameters: {
       query?: never;
@@ -7094,6 +7111,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/capabilities/title-allowances": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Whether the household's primary profile can allow limited profiles specific titles above their rating limits. */
+    get: operations["getTitleAllowanceCapability"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/capabilities/trailers": {
     parameters: {
       query?: never;
@@ -7308,6 +7342,23 @@ export interface paths {
     put?: never;
     /** Authorize theme audio for this account and profile, routed like video playback and converted to AAC when the client cannot decode the original. */
     post: operations["createThemeSongPlayback"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/catalog/items/{id}/title-allowances": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** For a movie or series, the standing of every other profile on the account: within its limits, allowed, or above its limits and allowable. Household managers only. */
+    get: operations["listTitleAllowanceProfiles"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -8938,7 +8989,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The home page's sections with their cards, as the acting profile sees them. */
+    /** The home page's sections that have cards for the acting profile, with those cards. */
     get: operations["listHomeSections"];
     put?: never;
     post?: never;
@@ -9540,7 +9591,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The library's sections with their cards, as the acting profile sees them. */
+    /** The library's sections that have cards for the acting profile, with those cards. */
     get: operations["listLibrarySections"];
     put?: never;
     post?: never;
@@ -10806,6 +10857,93 @@ export interface paths {
     head?: never;
     /** Update a household profile; omitted members are unchanged. */
     patch: operations["updateProfile"];
+    trace?: never;
+  };
+  "/api/v2/profiles/{id}/allowed-collections": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the personal collections allowed for a profile, newest first. Household managers only. */
+    get: operations["listAllowedCollections"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profiles/{id}/allowed-collections/{collection_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Allow a profile every title in a personal collection, including titles added later. Only a manual collection the acting primary profile created can be allowed (422 collection_not_live); copy other collections' titles with allowCollectionTitles. A profile sees at most 10,000 of its allowed titles, from its own allowances and its live collections together, and at most 50,000 entries of its live collections together are read; the rest stay hidden. Household managers only. */
+    put: operations["allowCollection"];
+    post?: never;
+    /** Stop allowing a profile a personal collection. An absent allowance succeeds and changes nothing. Household managers only. */
+    delete: operations["disallowCollection"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profiles/{id}/allowed-titles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the movies and series allowed for a profile above its limits, as catalog cards, newest first, paged by cursor. Titles allowed only through a collection are not listed, and titles the acting profile may not see are omitted, so a page can hold fewer cards than its limit. Household managers only. */
+    get: operations["listAllowedTitles"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profiles/{id}/allowed-titles/{item_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /** Allow a profile a movie or series above its rating or advisory-age limit. A series allowance covers its seasons and episodes. The profile must have a limit (422 no_maturity_limits) and reach the title's library (422 no_library_access); episodes and seasons are refused with 422. A profile sees at most 10,000 of its allowed titles; the rest stay hidden. Allowing an allowed title succeeds and changes nothing. Household managers only. */
+    put: operations["allowTitle"];
+    post?: never;
+    /** Remove a profile's allowance for a title. An absent allowance succeeds and changes nothing. A title an allowed collection holds stays allowed. Household managers only. */
+    delete: operations["disallowTitle"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/profiles/{id}/allowed-titles/copy-collection": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Allow a profile every movie and series a personal collection holds now, as individual title allowances, up to 10,000 titles per copy; a stored collection's copy reads at most its first 100,000 entries not yet allowed. Only titles the acting profile can see, in libraries the target profile can reach, are copied; for a smart collection, what its query matches for the acting profile. Titles added to the collection later are not allowed. Not retryable: a repeated copy of a stored collection with more titles than one copy takes continues with the next ones, so after an uncertain response read listAllowedTitles before copying again. Household managers only. */
+    post: operations["allowCollectionTitles"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v2/profiles/{id}/avatar": {
@@ -15392,6 +15530,8 @@ export interface components {
        * @description Most content_ids one listAdminCatalogItems request accepts
        */
       item_listing_max_content_ids: number;
+      /** @description getAdminItemMatchHints is served: the title, year and provider IDs the scanner parsed from an item's folder and file names */
+      item_match_hints: boolean;
       /** @description listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people */
       item_metadata: boolean;
       /** @description Opaque revision of this document */
@@ -18626,6 +18766,19 @@ export interface components {
       /** @description More candidates were returned by providers; refine the search to narrow results. */
       truncated: boolean;
     };
+    AdminMatchHints: {
+      /** @description Provider IDs tagged in the folder or file name, keyed by provider (tmdb, imdb, tvdb); empty, never null. */
+      provider_ids: {
+        [key: string]: string;
+      };
+      /** @description Title the scanner parsed from the folder or file name; empty when it found none. */
+      title: string;
+      /**
+       * Format: int64
+       * @description Year the scanner parsed from the folder or file name; 0 when it found none.
+       */
+      year: number;
+    };
     AdminMatchSearchBody: {
       imdb_id?: string;
       /**
@@ -18986,7 +19139,7 @@ export interface components {
     };
     AdminNotificationPushTestInputBody: {
       /**
-       * @description Opaque identifier
+       * @description A profile on the authenticated account. A profile or device on another account answers 404, as a device that does not exist does.
        * @example 1
        */
       profile_id: string;
@@ -22756,6 +22909,58 @@ export interface components {
       /** @description The content ID of the item that finished. The shuffle advances only while this item is still current, so a retry after a lost response changes nothing */
       from_content_id: string;
     };
+    AllowCollectionTitlesInputBody: {
+      /**
+       * @description A personal collection the acting profile can see
+       * @example 0b9b5c1e-5d0e-4c55-8f5c-2a1d2f3e4b5c
+       */
+      collection_id: string;
+    };
+    AllowCollectionTitlesResult: {
+      /**
+       * Format: int64
+       * @description Movies and series newly allowed; titles already allowed are not counted
+       * @example 12
+       */
+      added: number;
+    };
+    AllowedCollection: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       * @example 2026-01-02T03:04:05.000Z
+       */
+      allowed_at: string;
+      /**
+       * @description Opaque identifier
+       * @example 0b9b5c1e-5d0e-4c55-8f5c-2a1d2f3e4b5c
+       */
+      collection_id: string;
+      /**
+       * Format: int64
+       * @example 24
+       */
+      item_count: number;
+      /**
+       * @description Whether the collection allows its titles now: true while it is a manual collection the primary profile created. A collection that stops meeting that allows nothing until it does again
+       * @example true
+       */
+      live: boolean;
+      /** @example Family movie night */
+      name: string;
+    };
+    AllowedCollectionCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["AllowedCollection"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
+    AllowedTitleCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["CatalogItem"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
     AndroidPushRegistrationBody: {
       device_id: string;
       /** @enum {string} */
@@ -22767,6 +22972,8 @@ export interface components {
     AndroidPushRegistrationCapability: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description A registration applied at a new generation records the calling login session, and push to it stops when that session ends. A replay of the current generation records nothing, so an older registration binds only at a newer generation. */
+      binds_login_session: boolean;
       platforms: string[];
       /** @description Local ordered registration storage is configured; does not assert provider delivery availability. */
       registration_available: boolean;
@@ -23579,6 +23786,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
+      imdb_id?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -23694,6 +23906,16 @@ export interface components {
       studios?: string[];
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
+      tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
+      tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
@@ -23819,6 +24041,10 @@ export interface components {
       folder_paths?: string[];
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
       imdb_id?: string;
       intro?: components["schemas"]["Marker"];
       is_specials?: boolean;
@@ -23966,7 +24192,15 @@ export interface components {
       thumb_url?: string;
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
       tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
       tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
@@ -26995,6 +27229,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
+      imdb_id?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -27110,6 +27349,16 @@ export interface components {
       studios?: string[];
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
+      tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
+      tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
@@ -34765,6 +35014,54 @@ export interface components {
       provider?: string;
       title: string;
     };
+    TitleAllowanceCapability: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+    };
+    TitleAllowanceProfile: {
+      /**
+       * Format: int64
+       * @description The profile's advisory-age limit; null means none
+       * @example 10
+       */
+      max_advisory_age: number | null;
+      /**
+       * @description The profile's content-rating ceiling; empty means none
+       * @example PG
+       */
+      max_content_rating: string;
+      /** @example Emma */
+      name: string;
+      /**
+       * @description Opaque identifier
+       * @example 2
+       */
+      profile_id: string;
+      /**
+       * @description within_limits: the profile sees the title without an allowance. allowed: the profile has its own allowance for it. allowed_by_collection: an allowed collection holds it. above_limit: the title is above the profile's limits and can be allowed. no_library_access: the profile cannot see the title's library, so an allowance would not help
+       * @example above_limit
+       * @enum {string}
+       */
+      state:
+        | "within_limits"
+        | "allowed"
+        | "allowed_by_collection"
+        | "above_limit"
+        | "no_library_access";
+    };
+    TitleAllowanceProfileCollection: {
+      /** @description The page's items; empty, never null */
+      items: components["schemas"]["TitleAllowanceProfile"][];
+      /** @description Cursor state; absent for bounded unpaginated collections */
+      page?: components["schemas"]["PageInfo"];
+    };
     TMDBCollectionImport: {
       /** @example  */
       description?: string;
@@ -36181,6 +36478,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
+      imdb_id?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -36296,6 +36598,16 @@ export interface components {
       studios?: string[];
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
+      tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
+      tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
@@ -36392,6 +36704,11 @@ export interface components {
       episode_number?: number;
       /** @description Empty, never null */
       genres: string[];
+      /**
+       * @description The item's IMDb ID, the one item detail shows. On movie and series cards in catalog browse, collection, favorites, and history listings, and on item detail, when the item has one; Home and library section cards and episode cards leave it absent
+       * @example tt0113277
+       */
+      imdb_id?: string;
       /** @description On a continue-watching card: in_progress or next_up */
       item_source?: string;
       /** @description Empty, never null */
@@ -36507,6 +36824,16 @@ export interface components {
       studios?: string[];
       /** @example Heat */
       title: string;
+      /**
+       * @description The item's TMDB ID, the one item detail shows. Present where imdb_id is
+       * @example 949
+       */
+      tmdb_id?: string;
+      /**
+       * @description The item's TVDB ID, the one item detail shows. Present where imdb_id is
+       * @example 81189
+       */
+      tvdb_id?: string;
       /**
        * @description movie, series, season, episode, audiobook, ebook, podcast, podcast_episode
        * @example movie
@@ -60189,6 +60516,117 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminItemMatchHints: {
+    parameters: {
+      query?: {
+        /** @description Library to read; required for an item in several libraries. */
+        library_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name a profile of the authenticated account. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminMatchHints"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };
@@ -98964,6 +99402,138 @@ export interface operations {
       };
     };
   };
+  getTitleAllowanceCapability: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TitleAllowanceCapability"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   getTrailersCapability: {
     parameters: {
       query?: never;
@@ -100788,6 +101358,115 @@ export interface operations {
       };
       /** @description Unsupported Media Type */
       415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listTitleAllowanceProfiles: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Catalog item identifier of a movie or series */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TitleAllowanceProfileCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
         headers: {
           [name: string]: unknown;
         };
@@ -132342,6 +133021,817 @@ export interface operations {
       };
       /** @description Conflict */
       409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAllowedCollections: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Profile identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AllowedCollectionCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  allowCollection: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Personal collection identifier */
+        collection_id: string;
+        /** @description Profile identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  disallowCollection: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Personal collection identifier */
+        collection_id: string;
+        /** @description Profile identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  listAllowedTitles: {
+    parameters: {
+      query?: {
+        /** @description Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops */
+        backdrop_width?: number;
+        /** @description Opaque cursor from page.next_cursor */
+        cursor?: string;
+        /** @description Artwork size for every image in the response; absent picks each surface's default */
+        image_size?: "small" | "medium" | "large" | "original";
+        /** @description Page size; default 50, maximum 200 */
+        limit?: number;
+        /** @description Width in device pixels the client draws logo_url at. Overrides image_size for logos */
+        logo_width?: number;
+        /** @description Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots */
+        photo_width?: number;
+        /** @description Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original */
+        poster_width?: number;
+        /** @description Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills */
+        still_width?: number;
+      };
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Profile identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AllowedTitleCollection"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  allowTitle: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Profile identifier */
+        id: string;
+        /** @description Catalog item identifier of a movie or series */
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  disallowTitle: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Profile identifier */
+        id: string;
+        /** @description Catalog item identifier of a movie or series */
+        item_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No Content */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  allowCollectionTitles: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The household profile acting for this request; it must belong to the authenticated account. */
+        "X-Profile-Id": string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Profile identifier */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AllowCollectionTitlesInputBody"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AllowCollectionTitlesResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
         headers: {
           [name: string]: unknown;
         };

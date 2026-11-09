@@ -442,6 +442,23 @@ same rules as a title page, so a stored 0 (unrated) or a value off the 0-10
 scale is left out, and an episode with no rating omits the field. `/api/v1`
 episode listings do not carry ratings.
 
+## External IDs on cards
+
+Movie and series cards carry `imdb_id`, `tmdb_id`, and `tvdb_id`, the same IDs
+the item's detail document shows, in these listings:
+
+- catalog browse and search (`listCatalogItems`)
+- library and personal collection items
+- favorites and the watchlist
+- watch history
+
+Each member is omitted when the item has no ID from that provider, so a movie
+usually has no `tvdb_id`. Home and library section cards, and episode cards in
+any listing, leave all three out even when the item has them. A client that
+matches titles across servers can read the IDs from a page of cards instead of
+fetching each item's detail, but must fall back to the detail document for a
+card that omits them. `/api/v1` listings do not carry the fields.
+
 ## Section quality badges
 
 Home and library section cards derive `overlay_summary` from the best accessible,
@@ -534,6 +551,54 @@ and the watchlist alone. A change publishes `user_state.changed` with
 `change: "not_interested"` and a `not_interested` boolean, so the profile's other
 clients can update. The frozen v1 surface has no mark and does not show it. See
 [recommendations.md](architecture/recommendations.md#rows).
+
+## Allowed titles
+
+The household's primary profile can let a limited profile watch specific movies
+and series above its rating or advisory-age limit. Detect support with
+`GET /api/v2/capabilities/title-allowances`; it reports `unsupported` on a
+server whose user store is not PostgreSQL. Every operation below needs the
+acting profile to manage the household (the verified primary profile) and
+answers `403` otherwise.
+
+- `GET /api/v2/catalog/items/{id}/title-allowances` lists every other profile
+  on the account with its `state` for the movie or series: `within_limits`,
+  `allowed`, `allowed_by_collection`, `above_limit` (can be allowed), or
+  `no_library_access`.
+- `PUT` and `DELETE /api/v2/profiles/{id}/allowed-titles/{item_id}` add and
+  remove one allowance; both answer `204` and repeat safely. `PUT` answers `422`
+  for an episode or season (allow the series), for a profile with no limit
+  (`no_maturity_limits`), and for a title in a library the profile cannot see
+  (`no_library_access`). `GET /api/v2/profiles/{id}/allowed-titles` lists the
+  profile's own allowances as catalog cards, newest first, paged with `limit`
+  and `cursor`. Cards for titles the acting profile cannot see are left out, so
+  a page can hold fewer cards than its limit while `page.has_more` is true.
+- `PUT` and `DELETE /api/v2/profiles/{id}/allowed-collections/{collection_id}`
+  allow a personal collection as it changes: titles added to it later are
+  allowed too. Only a manual collection the acting primary profile created can
+  be allowed this way; any other answers `422` (`collection_not_live`).
+  `GET /api/v2/profiles/{id}/allowed-collections` lists them, with `live: false`
+  for a collection that no longer qualifies and so allows nothing.
+- `POST /api/v2/profiles/{id}/allowed-titles/copy-collection` with
+  `{"collection_id": ...}` allows the movies and series a personal collection
+  holds now, in libraries the profile can reach (for a smart collection, what its query matches for the acting
+  profile), as individual allowances, and answers how many were new. One copy
+  allows at most 10,000 titles; copying a stored collection again continues
+  with titles the profile is not yet allowed. A stored collection's copy
+  also reads at most 100,000 entries, so titles the acting profile cannot see
+  count toward that bound on every copy. Because a repeated copy continues,
+  the operation is not retryable: after an uncertain response, read the
+  allowed titles before copying again.
+
+A profile sees at most 10,000 of its allowed titles, from its own allowances
+and its live collections together. Past that, which ones it sees is
+unspecified and the rest stay hidden.
+
+An allowed title is visible and playable for the profile everywhere content is
+reached, Jellyfin clients included. A series allowance covers its seasons and
+episodes. Allowances never lift library restrictions, a custom scope policy's
+rating override, or a stricter `MaxOfficialRating` a Jellyfin client sends. See
+[title-allowances.md](architecture/title-allowances.md).
 
 ## Episodes left on a series card
 
@@ -647,6 +712,16 @@ a decade that is not a year from 10 on (decade 0 would catch every title with no
 year), a `title` or `show_title` value that is empty or not a string, or a
 `latest_episode_added` or `last_air_date` bound that is not a date (`2024-01-31`)
 or an RFC 3339 time.
+
+A Smart collection also needs at least one complete rule, since empty rule groups
+match every title. A rule is complete when it has a field, an operator and a value
+that is not missing, blank, or a range with an empty end (`QueryDefinition.HasCompleteRule`).
+`createAdminCollection`, `createCollection`, an `updateAdminCollection` or
+`updateCollection` that sends a Smart collection's `query_definition`, and an
+`updateAdminCollection` that switches a collection to Smart answer
+`422 validation_failed` at `body.query_definition.groups` when there is none. An update that leaves the rules alone still works on a Smart
+collection saved before this check, and the frozen `/api/v1` routes and backup
+restore don't apply it.
 
 | Operators | Fields | Value |
 | --- | --- | --- |

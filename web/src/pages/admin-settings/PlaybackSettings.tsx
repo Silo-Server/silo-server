@@ -27,6 +27,7 @@ import { SettingField, SettingFieldRow, SettingFieldStatus } from "./SettingFiel
 import { SaveBar } from "@/components/SaveBar";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
+import { TrickplayNodeCapacityField } from "./TrickplayNodeCapacityField";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
   IMAGE_EXECUTION_DEFAULT,
@@ -34,11 +35,13 @@ import {
   buildHWDeviceRows,
   imageExecutionOptions,
   describeDetection,
+  hardwareVerified,
   hasUsableTranscodeNode,
   hasUsableTrickplayNode,
   nodeInventoriesDiverge,
   parseHWDeviceList,
   toggleHWDevice,
+  showsPreviewKey,
 } from "./playbackSettings.utils";
 
 // Shown without a disclosure: the controls a household admin actually
@@ -83,6 +86,7 @@ const PREVIEW_PLACEMENT_KEYS = [
 
 const PREVIEW_ADVANCED_KEYS = [
   "playback.trickplay_workers",
+  "playback.trickplay_node_capacity",
   "playback.chapter_thumbnail_hdr_policy",
   "playback.chapter_thumbnail_software_tone_map_enabled",
 ];
@@ -212,7 +216,7 @@ export default function PlaybackSettings() {
   const previewAdvancedKeys = [
     ...PREVIEW_ADVANCED_KEYS,
     ...(showPreviewPlacement ? [] : PREVIEW_PLACEMENT_KEYS),
-  ].filter((key) => keys.includes(key));
+  ].filter((key) => keys.includes(key) && showsPreviewKey(key, trickplayExecution, form.isDirty));
 
   const isDirty = form.isDirty;
   const anyDirty = (keys: readonly string[]) => keys.some((key) => isDirty(key));
@@ -246,10 +250,7 @@ export default function PlaybackSettings() {
       ? []
       : [
           detectedLabel ? (
-            <SettingFieldStatus
-              key="detected"
-              tone={detection?.resolved && detection.resolved !== "none" ? "ok" : "warn"}
-            >
+            <SettingFieldStatus key="detected" tone={hardwareVerified(detection) ? "ok" : "warn"}>
               {detectedLabel}
             </SettingFieldStatus>
           ) : hwDetection.isLoading ? (
@@ -614,6 +615,9 @@ export default function PlaybackSettings() {
                 onChange={(v) => form.setValue("playback.trickplay_workers", v)}
                 restartRequired={restartKeys.has("playback.trickplay_workers")}
               />
+            )}
+            {supportsTrickplay && (
+              <TrickplayNodeCapacityField form={form} execution={trickplayExecution} />
             )}
             {!showPreviewPlacement && trickplayExecutionField}
             {/* internal/trickplay tone-maps every HDR seek preview, in

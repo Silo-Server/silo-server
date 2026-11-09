@@ -107,6 +107,12 @@ preview route (`POST …/collections/preview`, 24 titles), 300 ms after the last
 unsaved rules, so the save bar says the preview already shows them. A rule set that matches nothing
 still saves.
 
+A Smart collection needs at least one complete rule: a field, an operator and a filled-in value
+(`hasCompleteRule` in `web/src/lib/collections/draft.ts`). With none its rules would match every
+title, so until it has one the editor sends no preview, the preview asks for a rule, and Create
+and Save stay off with the save bar saying a rule is needed. The `/api/v2` create and update
+operations refuse the same thing (see [catalog-api.md](../catalog-api.md#rule-fields-and-operators)).
+
 A Smart collection may carry a stored default sort in `sort_config` (`field` and `order`), which
 wins over the rules' sort when viewers open it. The Order block names it with Clear. Changing the
 sort or direction clears it too, so the new Order takes effect; clearing drops only `field` and
