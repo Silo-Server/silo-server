@@ -535,3 +535,37 @@ func (w *deadlineResponseWriter) WriteHeader(status int) {
 func (w *deadlineResponseWriter) Write([]byte) (int, error) {
 	return 0, os.ErrDeadlineExceeded
 }
+
+// OnDelivered reports the absolute file range a response delivered, so a
+// ranged request after a seek is not mistaken for the file's head.
+func TestServeDirectPlayReportsDeliveredFileRange(t *testing.T) {
+	const content = "0123456789abcdefghijklmnopqrstuvwxyz"
+	filePath := writeDirectPlayFixture(t, "fixture.mp4", content)
+	size := int64(len(content))
+
+	for _, tc := range []struct {
+		name        string
+		rangeHeader string
+		want        [3]int64 // start, end, size; zero means no report
+	}{
+		{name: "whole file", want: [3]int64{0, size, size}},
+		{name: "open range", rangeHeader: "bytes=10-", want: [3]int64{10, size, size}},
+		{name: "bounded range", rangeHeader: "bytes=4-7", want: [3]int64{4, 8, size}},
+		{name: "multipart range", rangeHeader: "bytes=0-1,5-6"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/stream", nil)
+		if tc.rangeHeader != "" {
+			req.Header.Set("Range", tc.rangeHeader)
+		}
+		var got [3]int64
+		err := ServeDirectPlayWithOptions(httptest.NewRecorder(), req, filePath, DirectPlayServeOptions{
+			OnDelivered: func(start, end, size int64) { got = [3]int64{start, end, size} },
+		})
+		if err != nil {
+			t.Fatalf("%s: ServeDirectPlayWithOptions: %v", tc.name, err)
+		}
+		if got != tc.want {
+			t.Errorf("%s: last delivered report = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

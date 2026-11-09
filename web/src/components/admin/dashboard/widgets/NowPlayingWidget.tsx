@@ -3,13 +3,14 @@ import { Link } from "react-router";
 import { Pause, Play } from "lucide-react";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
-import { Progress } from "@/components/ui/progress";
+import { Progress, type ProgressSegment } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   activityMethodMeta,
   classifyActivityMethod,
+  formatClockTime,
   formatPlaybackPosition,
   getSessionClientLabel,
 } from "@/pages/adminActivityPresentation";
@@ -345,6 +346,8 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {duration > 0 ? (
               <Progress
                 value={(session.position_seconds / duration) * 100}
+                segments={deliverySegments(session, duration)}
+                title={deliveryTitle(session)}
                 aria-label="Playback position"
                 aria-valuetext={position}
                 className={cn(
@@ -377,4 +380,39 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
       </div>
     </div>
   );
+}
+
+/**
+ * The delivery ranges ahead of the position, as track percentages: what the
+ * server has sent, then what a transcode has produced beyond that. Both start
+ * at the position, so neither draws behind the position fill.
+ */
+function deliverySegments(session: AdminSession, duration: number): ProgressSegment[] {
+  const percent = (seconds: number) => (Math.min(seconds, duration) / duration) * 100;
+  let from = percent(session.position_seconds);
+  const segments: ProgressSegment[] = [];
+  if (session.delivered_through_seconds != null) {
+    const to = percent(session.delivered_through_seconds);
+    segments.push({ from, to, className: "bg-primary/40" });
+    from = Math.max(from, to);
+  }
+  if (session.produced_through_seconds != null) {
+    segments.push({
+      from,
+      to: percent(session.produced_through_seconds),
+      className: "bg-primary/20",
+    });
+  }
+  return segments;
+}
+
+function deliveryTitle(session: AdminSession): string | undefined {
+  const parts: string[] = [];
+  if (session.delivered_through_seconds != null) {
+    parts.push(`Delivered to ${formatClockTime(session.delivered_through_seconds)}`);
+  }
+  if (session.produced_through_seconds != null) {
+    parts.push(`Transcoded to ${formatClockTime(session.produced_through_seconds)}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }

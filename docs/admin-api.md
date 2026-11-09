@@ -280,6 +280,19 @@ session rows: the pixel height of the source's primary video track.
 tell a full-resolution transcode from a downscale. The frozen `/api/v1` bridge
 does not carry the field.
 
+`delivery_progress: true` advertises two optional fields on v2 session rows, both
+in whole media seconds. `delivered_through_seconds` is the end of the contiguous
+range sent to the client that contains the playback position. For Direct Play it
+is a linear estimate from the file bytes the server delivered (offset ÷ file size
+× duration), so it describes what was sent, not what the client has buffered;
+ranges a player reads elsewhere, such as an index at the end of the file or the
+media before a seek, do not count. For HLS it is the end of the run of segments
+the client finished downloading. `produced_through_seconds` is the end of the
+last segment the current transcode process wrote. The API server reports both
+only for streams it serves or transcodes itself: sessions on remote transcode
+nodes, proxy-served Direct Play, and progressive remux omit them for now. The
+frozen `/api/v1` bridge does not carry these fields.
+
 `silo_playback_routing_decisions_total` counts routing outcomes with bounded
 `workload`, `execution`, `egress`, `outcome`, and `reason` labels. It never
 labels observations with playback-session or node identity.

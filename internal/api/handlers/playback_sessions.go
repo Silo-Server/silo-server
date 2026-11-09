@@ -108,6 +108,11 @@ type playbackSessionRow struct {
 	RoutingEgressNodeID      *int    `json:"routing_egress_node_id,omitempty"`
 	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
 	CompatOrigin             bool    `json:"-"`
+	// DeliveredThroughSeconds and ProducedThroughSeconds are how far the
+	// stream has been sent ahead of the viewer and produced by its transcode.
+	// They are native-only: the frozen bridge payload omits them.
+	DeliveredThroughSeconds *float64 `json:"-"`
+	ProducedThroughSeconds  *float64 `json:"-"`
 }
 
 // playbackSessionsCapabilitiesResponse advertises the additive fields of the
@@ -216,14 +221,17 @@ func lifecycleIDParam(sessionID string) any {
 // lifecycleOnlySessions lists native sessions whose lifecycle row is live
 // and whose attempt is live, but that no server has a live row for: one a
 // node still serves while no API server holds it in memory. The row is the
-// one recorded when the session started, at the attempt's latest position.
+// one recorded when the session started, at the attempt's latest position;
+// the delivery progress it recorded then is stale, so it is dropped.
 const lifecycleOnlySessions = `
 	SELECT (jsonb_populate_record(NULL::playback_sessions_sync, lc.start_facts || jsonb_build_object(
 		'reporting_node', '',
 		'updated_at', a.updated_at,
 		'last_sync_at', a.updated_at,
 		'is_paused', lc.state = 'paused',
-		'position_seconds', COALESCE((a.last_sample->>'position')::double precision, (lc.start_facts->>'position_seconds')::double precision, 0)))).*
+		'position_seconds', COALESCE((a.last_sample->>'position')::double precision, (lc.start_facts->>'position_seconds')::double precision, 0),
+		'delivered_through_seconds', NULL::double precision,
+		'produced_through_seconds', NULL::double precision))).*
 	FROM playback_session_lifecycle lc
 	JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.stopped_at IS NULL AND a.expires_at > NOW()
 	WHERE lc.state <> 'stopped' AND lc.start_facts <> '{}'::jsonb
@@ -396,6 +404,8 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(s.stream_location, ''),
 			COALESCE(s.device_id, ''),
 			COALESCE(s.device_platform, ''),
+			s.delivered_through_seconds,
+			s.produced_through_seconds,
 			` + lifecycleColumns + `
 		 FROM ` + source + ` s
 		 LEFT JOIN users u ON u.id = s.user_id
@@ -474,7 +484,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
-			&s.DeviceID, &s.DevicePlatform, &s.LifecycleSeq,
+			&s.DeviceID, &s.DevicePlatform, &s.DeliveredThroughSeconds, &s.ProducedThroughSeconds, &s.LifecycleSeq,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}

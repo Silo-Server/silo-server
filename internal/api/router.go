@@ -189,6 +189,10 @@ type Dependencies struct {
 	NodeCapabilityInvalidator func(nodeURL string)
 	ResourceSampler           *nodemetrics.Sampler           // this host's own resource sampler (may be nil)
 	SessionSyncer             handlers.PlaybackSessionSyncer // optional; immediate playback session sync trigger
+	// LocalTranscodes receives the native playback handler's transcode
+	// manager so session sync can report how far its transcodes are
+	// delivered. Optional.
+	LocalTranscodes *playback.LocalTranscodes
 	// LiveSessionRowJSON renders a session as the live row a sync would
 	// store for it, so a session.started event can carry it before a sync.
 	LiveSessionRowJSON      func(*playback.Session) (json.RawMessage, error)
@@ -1434,6 +1438,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr)
 		}
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
+		deps.LocalTranscodes.Add(playbackHandler.TranscodeManager())
 		if deps.DB != nil {
 			playbackHandler.PlanStoreV3 = planstore.NewPostgres(deps.DB)
 			playbackHandler.Connections = &connectionstore.Store{Pool: deps.DB}

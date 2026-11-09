@@ -2818,6 +2818,11 @@ export interface AdminSession {
   source_video_codec?: string;
   source_video_resolution?: string;
   source_video_height?: number;
+  /** Media seconds the stream has been sent through, from the range holding the
+   * position. Absent when the serving node does not observe it. */
+  delivered_through_seconds?: number | null;
+  /** Media seconds the transcode has produced through. Absent when unknown. */
+  produced_through_seconds?: number | null;
   source_audio_codec?: string;
   source_audio_channels: number | null;
   source_audio_language?: string;

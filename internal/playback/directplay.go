@@ -83,11 +83,32 @@ func MediaMIMETypes() []string {
 	return slices.Compact(types)
 }
 
+// DirectPlayServeOptions carries ServeDirectPlayWithOptions' optional
+// behavior; the zero value is plain ServeDirectPlay.
+type DirectPlayServeOptions struct {
+	// OnDelivered, when set, observes the absolute byte range [start, end) of
+	// the file this response has delivered so far, and the file's size. It is
+	// called at most about once per directPlayDeliveryReportInterval while the
+	// body is sent and once when the response ends, so a browser's single
+	// long "bytes=0-" response is reported while it plays. A response with no
+	// body or a multipart range reports nothing.
+	OnDelivered func(start, end, size int64)
+}
+
+// directPlayDeliveryReportInterval rate-limits OnDelivered while a body is
+// being sent.
+const directPlayDeliveryReportInterval = time.Second
+
 // ServeDirectPlay serves a media file with HTTP byte-range support.
 // Uses http.ServeContent for proper range handling, which supports
 // Range requests, conditional requests (including If-Match, If-Range, and
 // If-None-Match), and Content-Type detection.
 func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) error {
+	return ServeDirectPlayWithOptions(w, r, filePath, DirectPlayServeOptions{})
+}
+
+// ServeDirectPlayWithOptions is ServeDirectPlay with its optional behavior.
+func ServeDirectPlayWithOptions(w http.ResponseWriter, r *http.Request, filePath string, opts DirectPlayServeOptions) error {
 	// Media bodies routinely take longer than the server's absolute
 	// WriteTimeout; roll the write deadline with progress instead.
 	streamWriter := httpstream.NewRollingDeadlineWriter(w)
@@ -126,8 +147,16 @@ func ServeDirectPlay(w http.ResponseWriter, r *http.Request, filePath string) er
 	hadIfMatch := len(r.Header.Values("If-Match")) > 0
 	hadIfRange := len(r.Header.Values("If-Range")) > 0
 	ifRangeResult := directStreamIfRangeResult(r, etag, stat.ModTime())
+	var delivery *directPlayDeliveryReporter
+	if opts.OnDelivered != nil {
+		delivery = &directPlayDeliveryReporter{writer: streamWriter, size: stat.Size(), report: opts.OnDelivered}
+		streamWriter.OnProgress(delivery.progress)
+	}
 	directStreamActive.Inc()
 	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
+	if delivery != nil {
+		delivery.flush()
+	}
 	outcome := streamWriter.Outcome(r.Context())
 	status := streamWriter.StatusCode()
 	bytesSent := streamWriter.BytesWritten()
@@ -167,6 +196,53 @@ func (w *directPlayResponseWriter) WriteHeader(status int) {
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", w.size))
 	}
 	w.RollingDeadlineWriter.WriteHeader(status)
+}
+
+// directPlayDeliveryReporter turns a direct-play response's running body byte
+// count into the absolute file range it has delivered.
+type directPlayDeliveryReporter struct {
+	writer     *httpstream.RollingDeadlineWriter
+	size       int64
+	report     func(start, end, size int64)
+	lastReport time.Time
+}
+
+func (d *directPlayDeliveryReporter) progress(int64) {
+	if now := time.Now(); now.Sub(d.lastReport) >= directPlayDeliveryReportInterval {
+		d.lastReport = now
+		d.send()
+	}
+}
+
+func (d *directPlayDeliveryReporter) flush() {
+	d.send()
+}
+
+func (d *directPlayDeliveryReporter) send() {
+	written := d.writer.BytesWritten()
+	if written <= 0 {
+		return
+	}
+	start, ok := directPlayBodyStart(d.writer.StatusCode(), d.writer.Header().Get("Content-Range"))
+	if !ok {
+		return
+	}
+	d.report(start, start+written, d.size)
+}
+
+// directPlayBodyStart returns the file offset at which a response body starts:
+// zero for a whole-file 200, the Content-Range start for a single-range 206.
+// A multipart 206 carries no top-level Content-Range, so it reports false.
+func directPlayBodyStart(status int, contentRange string) (int64, bool) {
+	switch status {
+	case http.StatusOK:
+		return 0, true
+	case http.StatusPartialContent:
+		start := directStreamRangeStart(status, contentRange)
+		return start, start >= 0
+	default:
+		return 0, false
+	}
 }
 
 func directStreamRangeStart(status int, contentRange string) int64 {

@@ -600,7 +600,7 @@ export function formatPlaybackPosition(session: AdminSession): string {
   return `${position} / ${formatClockTime(session.file_duration)}`;
 }
 
-function formatClockTime(seconds: number): string {
+export function formatClockTime(seconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
   const h = Math.floor(safeSeconds / 3600);
   const m = Math.floor((safeSeconds % 3600) / 60);

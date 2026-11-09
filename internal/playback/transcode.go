@@ -328,6 +328,10 @@ type TranscodeSession struct {
 	// copyPlan is the planned segment list served instead of FFmpeg's
 	// playlist, or nil. It is fixed when the session starts.
 	copyPlan *copySegmentPlan
+	// completedRun is the contiguous run of segments the client most recently
+	// finished downloading in this generation; see DeliveryProgress. Guarded
+	// by mu.
+	completedRun segmentRun
 	// subtitleSpans lists each generation's subtitle rendition cue file,
 	// oldest first, including those an earlier session recorded in the same
 	// output directory. Guarded by mu.
@@ -3612,6 +3616,7 @@ func (s *TranscodeSession) restart(
 	preStartRangePrunable := opts.SegmentRetentionSeconds > 0 && s.lastPruneFloor < startSegment
 	s.lastRequestedSegment = startSegment
 	s.lastCompletedSegment = startSegment - 1
+	s.completedRun = segmentRun{}
 	if preStartRangePrunable {
 		// Every restart preserves files below startSegment. Keep an older prune
 		// cursor reachable until replacement downloads age out that range, even
@@ -3717,6 +3722,7 @@ func (s *TranscodeSession) restart(
 	s.stdinPipe = stdinPipe
 	s.lastRequestedSegment = requestedSegment
 	s.lastCompletedSegment = startSegment - 1
+	s.completedRun = segmentRun{}
 	s.generationStartedAt = startedAt
 	s.inheritedManifest = inheritedManifest
 	s.startSubtitleSpanLocked(opts)
@@ -4277,6 +4283,7 @@ func (s *TranscodeSession) reportSegmentDownloadedLocked(segNum int) {
 	if segNum > s.lastCompletedSegment {
 		s.lastCompletedSegment = segNum
 	}
+	s.completedRun = s.completedRun.add(segNum)
 	s.scheduleSegmentPruneLocked()
 }
 

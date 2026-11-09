@@ -504,3 +504,75 @@ func assertPrunerFileMissing(t *testing.T, path string) {
 		t.Fatalf("expected %s to be removed, stat error = %v", filepath.Base(path), err)
 	}
 }
+
+// The fetched span is the run of segments the client most recently finished,
+// on the timeline the session serves.
+func TestDeliveryProgressFetchedRun(t *testing.T) {
+	encoded := TranscodeOpts{TargetCodecVideo: "h264", SegmentDuration: 4, TotalDuration: 98}
+	for _, tc := range []struct {
+		name      string
+		opts      TranscodeOpts
+		plan      []float64
+		completed []int
+		want      MediaSpan
+		wantOK    bool
+	}{
+		{name: "nothing downloaded", opts: encoded},
+		{name: "contiguous run", opts: encoded, completed: []int{5, 6, 7}, want: MediaSpan{Start: 20, End: 32}, wantOK: true},
+		{name: "out-of-order pair keeps the run", opts: encoded, completed: []int{5, 7, 6}, want: MediaSpan{Start: 20, End: 32}, wantOK: true},
+		{name: "forward seek starts a new run", opts: encoded, completed: []int{5, 6, 20, 21}, want: MediaSpan{Start: 80, End: 88}, wantOK: true},
+		{name: "backward seek starts a new run", opts: encoded, completed: []int{10, 11, 3}, want: MediaSpan{Start: 12, End: 16}, wantOK: true},
+		{name: "last segment ends with the media", opts: encoded, completed: []int{24}, want: MediaSpan{Start: 96, End: 98}, wantOK: true},
+		{name: "keyframe plan durations", opts: TranscodeOpts{TargetCodecVideo: "copy"}, plan: []float64{2.5, 3, 1.5}, completed: []int{1, 2}, want: MediaSpan{Start: 2.5, End: 7}, wantOK: true},
+	} {
+		session := &TranscodeSession{outputDir: t.TempDir(), opts: tc.opts}
+		if tc.plan != nil {
+			session.copyPlan = &copySegmentPlan{durations: tc.plan}
+		}
+		for _, segment := range tc.completed {
+			session.ReportSegmentDownloaded(segment)
+		}
+		got := session.DeliveryProgress(time.Now())
+		if got.FetchedOK != tc.wantOK || got.Fetched != tc.want {
+			t.Errorf("%s: fetched = (%+v, %t), want (%+v, %t)", tc.name, got.Fetched, got.FetchedOK, tc.want, tc.wantOK)
+		}
+	}
+}
+
+// A copy stream without a plan maps segments through FFmpeg's real playlist,
+// and its produced head counts only when the current process wrote it.
+func TestDeliveryProgressReadsRealPlaylist(t *testing.T) {
+	dir := t.TempDir()
+	opts := TranscodeOpts{TargetCodecVideo: "copy", SeekSeconds: 18, StartSegmentNumber: 9, SegmentDuration: 2}
+	lines := []string{"#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-TARGETDURATION:3", "#EXT-X-MEDIA-SEQUENCE:9"}
+	for i, duration := range []string{"2.5", "1.5", "2.0"} {
+		name := segmentFilename(9+i, opts)
+		lines = append(lines, "#EXTINF:"+duration+",", name)
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("segment"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifestPath := filepath.Join(dir, "stream.m3u8")
+	if err := os.WriteFile(manifestPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	session := &TranscodeSession{outputDir: dir, opts: opts}
+	session.ReportSegmentDownloaded(9)
+	session.ReportSegmentDownloaded(10)
+
+	got := session.DeliveryProgress(time.Now())
+	if !got.FetchedOK || got.Fetched != (MediaSpan{Start: 18, End: 22}) || !got.ProducedOK || got.ProducedThrough != 24 {
+		t.Fatalf("progress = %+v, want fetched 18-22 and produced through 24", got)
+	}
+
+	stale := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(manifestPath, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	session.mu.Lock()
+	session.generationStartedAt = time.Now()
+	session.mu.Unlock()
+	if got := session.DeliveryProgress(time.Now()); got.ProducedOK {
+		t.Fatalf("produced through %v read from an earlier generation's playlist", got.ProducedThrough)
+	}
+}

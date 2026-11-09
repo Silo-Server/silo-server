@@ -739,7 +739,10 @@ func (h *PlaybackHandler) HandleVideoStream(w http.ResponseWriter, r *http.Reque
 			CopyAudioCodec:      copyAudioCodec,
 		})
 	default:
-		_ = playback.ServeDirectPlay(w, r, file.FilePath)
+		noter, _ := h.sessionMgr.(playback.DeliveryNoter)
+		_ = playback.ServeDirectPlayWithOptions(w, r, file.FilePath, playback.DirectPlayServeOptions{
+			OnDelivered: playback.DirectPlayDeliveryRecorder(noter, playSession.UpstreamSessionID, file.ID, float64(file.Duration)),
+		})
 	}
 }
 

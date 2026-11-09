@@ -245,3 +245,25 @@ func TestRestartWaiterReceivesInFlightOutcome(t *testing.T) {
 		t.Errorf("restartCount = %d, want 0 (waiter must not perform a restart)", restartCount)
 	}
 }
+
+// A restart starts a new timeline, so the run the client fetched from the old
+// process no longer describes what is ahead of the viewer.
+func TestRestartClearsFetchedRun(t *testing.T) {
+	session, _ := restartRetentionSession(t, nil, time.Time{}, 70, -1)
+	session.ReportSegmentDownloaded(70)
+	session.ReportSegmentDownloaded(71)
+	if !session.DeliveryProgress(time.Now()).FetchedOK {
+		t.Fatal("fetched run missing before restart")
+	}
+
+	if err := session.Restart(context.Background(), 400, 100); err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	if got := session.DeliveryProgress(time.Now()); got.FetchedOK {
+		t.Fatalf("fetched run %+v survived the restart", got.Fetched)
+	}
+	session.ReportSegmentDownloaded(100)
+	if got := session.DeliveryProgress(time.Now()); !got.FetchedOK || got.Fetched != (MediaSpan{Start: 400, End: 404}) {
+		t.Fatalf("fetched after restart = (%+v, %t), want 400-404", got.Fetched, got.FetchedOK)
+	}
+}

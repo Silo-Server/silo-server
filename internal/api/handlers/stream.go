@@ -248,7 +248,10 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				_ = h.sessionMgr.EndTransport(sessionID)
 			}()
 		}
-		if err := playback.ServeDirectPlay(w, r, file.FilePath); err != nil {
+		noter, _ := h.sessionMgr.(playback.DeliveryNoter)
+		if err := playback.ServeDirectPlayWithOptions(w, r, file.FilePath, playback.DirectPlayServeOptions{
+			OnDelivered: playback.DirectPlayDeliveryRecorder(noter, sessionID, file.ID, float64(file.Duration)),
+		}); err != nil {
 			h.handleTransportStartFailure(r.Context(), session, file, err)
 		}
 

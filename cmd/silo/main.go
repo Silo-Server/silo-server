@@ -2853,12 +2853,16 @@ func main() {
 	// Build the reconciler early enough that playback handlers can trigger
 	// immediate session syncs after start/stop events.
 	nodeIdentity := resolveNodeIdentity()
+	// The API and compat routers register their transcode managers here when
+	// they are built, after the reconciler below starts reading it.
+	localTranscodes := &playback.LocalTranscodes{}
+	deps.LocalTranscodes = localTranscodes
 
 	var reconciler *worker.Reconciler
 	var heartbeatWriter *worker.HeartbeatWriter
 	if needsWorkers && deps.DB != nil {
 		sessionProvider := func() []worker.SessionSync {
-			return buildLiveSessionSyncs(sessionMgr.AllSessions(), nodeIdentity)
+			return buildLiveSessionSyncs(sessionMgr.AllSessions(), nodeIdentity, localTranscodes)
 		}
 		reconciler = worker.NewReconciler(deps.DB, nodeIdentity, sessionProvider)
 		reconciler.EventBus = deps.EventBus
@@ -2873,7 +2877,7 @@ func main() {
 		}
 		deps.SessionSyncer = reconciler
 		deps.LiveSessionRowJSON = func(s *playback.Session) (json.RawMessage, error) {
-			return worker.SessionSyncRowJSON(buildLiveSessionSync(s, nodeIdentity), nodeIdentity)
+			return worker.SessionSyncRowJSON(buildLiveSessionSync(s, nodeIdentity, localTranscodes), nodeIdentity)
 		}
 
 		nodeURL := fmt.Sprintf("http://%s%s", nodeIdentity, cfg.Server.Listen)
@@ -4046,6 +4050,7 @@ func main() {
 			compatDeps.DetailSvc = detailSvc
 			compatDeps.FolderRepo = folderRepo
 			compatDeps.SessionMgr = sessionMgr
+			compatDeps.LocalTranscodes = localTranscodes
 			if deps.MarkerPopulation != nil {
 				compatDeps.MarkerPopulation = deps.MarkerPopulation
 			}

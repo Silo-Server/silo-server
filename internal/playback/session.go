@@ -130,6 +130,9 @@ type Session struct {
 	// node, so this server never sees the transport request that would
 	// otherwise keep it alive. See SetRemoteTransport.
 	remoteTransport bool
+	// delivered is the media time a direct-play transport on this server has
+	// sent of the session's file. See NoteDelivered.
+	delivered deliveredSpans
 }
 
 // SessionStreamState stores the mutable stream-specific details that can

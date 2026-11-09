@@ -19500,6 +19500,11 @@ export interface components {
       client_user_agent?: string;
       client_version?: string;
       content_id?: string;
+      /**
+       * Format: double
+       * @description End, in whole media seconds, of the contiguous range sent to the client that contains the playback position. For Direct Play it is a linear byte-to-time estimate of the file bytes delivered, not what the client has buffered; for HLS it is the end of the run of segments the client finished downloading. Absent when unknown, and for now always for sessions on remote transcode nodes, proxy-served Direct Play, and progressive remux.
+       */
+      delivered_through_seconds?: number;
       /** @description Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared. */
       device_id?: string;
       /** @description Platform the client declared in X-Silo-Device-Platform when playback started; never derived from the user agent. Absent when none was declared, and always for a Jellyfin play. */
@@ -19536,6 +19541,11 @@ export interface components {
       position_seconds: number;
       /** Format: uri-reference */
       poster_url?: string;
+      /**
+       * Format: double
+       * @description End, in whole media seconds, of the last segment the current transcode process has produced. Absent when unknown, for sessions that do not transcode, and for now always for sessions on remote transcode nodes.
+       */
+      produced_through_seconds?: number;
       profile_id: string;
       profile_name?: string;
       reporting_node: string;
@@ -19625,6 +19635,8 @@ export interface components {
       available: boolean;
       client_build: boolean;
       client_channel: boolean;
+      /** @description Rows may carry delivered_through_seconds and produced_through_seconds */
+      delivery_progress: boolean;
       /** @description Rows may carry device_id and device_platform */
       device_identity: boolean;
       effective_play_method: boolean;

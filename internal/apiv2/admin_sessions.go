@@ -88,6 +88,10 @@ type AdminPlaybackSession struct {
 	RoutingEgressNodeID      *ID     `json:"routing_egress_node_id,omitempty"`
 	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
 	LifecycleSeq             *int64  `json:"lifecycle_seq,omitempty" doc:"Sequence number of the session's last lifecycle transition (start, pause, resume) on the sessions channel. A row and a session.* event with the same number carry the same is_paused; the higher number is the newer. Absent for a session that started before the server recorded lifecycle transitions."`
+
+	// Delivery progress is observed only for streams the API server serves itself.
+	DeliveredThroughSeconds *float64 `json:"delivered_through_seconds,omitempty" doc:"End, in whole media seconds, of the contiguous range sent to the client that contains the playback position. For Direct Play it is a linear byte-to-time estimate of the file bytes delivered, not what the client has buffered; for HLS it is the end of the run of segments the client finished downloading. Absent when unknown, and for now always for sessions on remote transcode nodes, proxy-served Direct Play, and progressive remux."`
+	ProducedThroughSeconds  *float64 `json:"produced_through_seconds,omitempty" doc:"End, in whole media seconds, of the last segment the current transcode process has produced. Absent when unknown, for sessions that do not transcode, and for now always for sessions on remote transcode nodes."`
 }
 
 // directStreamPlayMethod is the native bucket for copied video with converted
@@ -188,6 +192,8 @@ func adminPlaybackSessionOf(v handlers.AdminPlaybackSessionView) AdminPlaybackSe
 		RoutingEgress:            v.RoutingEgress,
 		RoutingEgressNodeID:      adminSessionNodeID(v.RoutingEgressNodeID),
 		RoutingEgressNodeName:    v.RoutingEgressNodeName,
+		DeliveredThroughSeconds:  v.DeliveredThroughSeconds,
+		ProducedThroughSeconds:   v.ProducedThroughSeconds,
 		LifecycleSeq:             v.LifecycleSeq,
 	}
 }
@@ -228,6 +234,7 @@ type AdminPlaybackSessionCapabilitiesOutputBody struct {
 	OutputFormat              bool     `json:"output_format" doc:"Rows may carry output_container and output_protocol"`
 	SourceVideoHeight         bool     `json:"source_video_height" doc:"Rows may carry source_video_height"`
 	DeviceIdentity            bool     `json:"device_identity" doc:"Rows may carry device_id and device_platform"`
+	DeliveryProgress          bool     `json:"delivery_progress" doc:"Rows may carry delivered_through_seconds and produced_through_seconds"`
 	LifecycleEvents           bool     `json:"lifecycle_events" doc:"The admin sessions channel carries session.started, session.paused, session.resumed and session.stopped, and rows may carry lifecycle_seq"`
 }
 
@@ -263,6 +270,7 @@ func registerAdminPlaybackSessions(reg *Registry) {
 		out.Body.OutputFormat = true
 		out.Body.SourceVideoHeight = true
 		out.Body.DeviceIdentity = true
+		out.Body.DeliveryProgress = true
 		out.Body.LifecycleEvents = out.Body.Available && reg.deps.PlaybackLifecycleEvents
 		return out, nil
 	})

@@ -153,6 +153,7 @@ func NewRouter(deps Dependencies) chi.Router {
 		}
 	}
 	playbackHandler := NewPlaybackHandler(deps.Config, deps.ContentService, deps.IDCodec, deps.DeviceProfiles, deps.PlaybackStore, deps.SessionMgr, deps.FileResolver, deps.UserStoreProvider)
+	deps.LocalTranscodes.Add(playbackHandler.tm)
 	playbackHandler.ScopeResolver = deps.PlaybackScopeResolver
 	playbackHandler.downloads = deps.Downloads
 	playbackHandler.accessFilter = deps.AccessFilterFn

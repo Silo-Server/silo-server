@@ -20,6 +20,29 @@ func TestSessionSnapshotsEqualDetectsOutputFormatChanges(t *testing.T) {
 	}
 }
 
+// Delivery progress is compared by value: a fresh snapshot always carries new
+// pointers, and comparing them would publish sessions.replaced every tick.
+func TestSessionSnapshotsEqualComparesDeliveryProgressByValue(t *testing.T) {
+	base := SessionSync{SessionID: "session", DeliveredThroughSeconds: new(60.0), ProducedThroughSeconds: new(120.0)}
+	for _, tc := range []struct {
+		name      string
+		delivered *float64
+		produced  *float64
+		equal     bool
+	}{
+		{name: "same values", delivered: new(60.0), produced: new(120.0), equal: true},
+		{name: "delivered advanced", delivered: new(61.0), produced: new(120.0)},
+		{name: "delivered unknown", produced: new(120.0)},
+		{name: "produced advanced", delivered: new(60.0), produced: new(121.0)},
+		{name: "produced unknown", delivered: new(60.0)},
+	} {
+		next := SessionSync{SessionID: "session", DeliveredThroughSeconds: tc.delivered, ProducedThroughSeconds: tc.produced}
+		if got := sessionSnapshotsEqual([]SessionSync{base}, []SessionSync{next}); got != tc.equal {
+			t.Errorf("%s: equal = %t, want %t", tc.name, got, tc.equal)
+		}
+	}
+}
+
 // TestSyncNowSerializesSnapshotCapture guards the SyncNow ordering contract:
 // snapshot capture and reconciliation run under one lock, so a request-path
 // sync (playback start/stop) can never interleave with the periodic tick and

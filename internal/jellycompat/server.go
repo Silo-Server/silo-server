@@ -148,7 +148,11 @@ type Dependencies struct {
 	// admin live-session table right after compat playback starts/stops, so
 	// the activity dashboard doesn't wait for the periodic reconciler tick.
 	// Optional.
-	SessionSyncer     PlaybackSessionSyncer
+	SessionSyncer PlaybackSessionSyncer
+	// LocalTranscodes receives the compat playback handler's transcode
+	// manager so session sync can report how far its transcodes are
+	// delivered. Optional.
+	LocalTranscodes   *playback.LocalTranscodes
 	MarkerPopulation  MarkerPopulationService
 	FileResolver      FilePathResolver
 	MediaSourceOwners MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids

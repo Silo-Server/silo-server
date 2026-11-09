@@ -14,7 +14,7 @@ func TestBuildLiveSessionSyncsSkipsStopReportedSessions(t *testing.T) {
 		{ID: "playing", UserID: 1},
 		{ID: "stopped", UserID: 1, IsPaused: true, StopReported: true},
 		nil,
-	}, "node-a")
+	}, "node-a", nil)
 
 	if len(syncs) != 1 || syncs[0].SessionID != "playing" || syncs[0].ReportingNode != "node-a" {
 		t.Fatalf("syncs = %+v, want only the playing session on node-a", syncs)

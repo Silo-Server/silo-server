@@ -47,7 +47,7 @@ func TestSessionSyncRowJSONMatchesTheSyncedRowDB(t *testing.T) {
 		RoutingExecutionNodeID: 3, RoutingExecutionNodeURL: "http://node", RoutingEgress: "proxy",
 		RoutingEgressNodeID: 4, RoutingEgressNodeURL: "http://proxy", PositionSeconds: 812.5, IsPaused: true,
 		HasWebSocket: true, IsJellyfinCompat: true, OutputContainer: "fmp4", OutputProtocol: "hls",
-		DeviceID: "tv-1", DevicePlatform: "tvOS",
+		DeviceID: "tv-1", DevicePlatform: "tvOS", DeliveredThroughSeconds: new(840.0), ProducedThroughSeconds: new(900.0),
 	}
 	reconciler := NewReconciler(pool, node, nil)
 	if err := reconciler.ReconcileNodeSessions(ctx, node, []SessionSync{session}); err != nil {

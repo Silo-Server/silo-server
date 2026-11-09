@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -66,6 +67,12 @@ type SessionSync struct {
 	IsPaused                bool
 	HasWebSocket            bool
 	IsJellyfinCompat        bool
+	// DeliveredThroughSeconds is how far the stream has been sent ahead of
+	// the position, and ProducedThroughSeconds how far its transcode has
+	// produced, in whole media seconds; nil when the serving node did not
+	// observe it.
+	DeliveredThroughSeconds *float64
+	ProducedThroughSeconds  *float64
 }
 
 // AggregateData represents the aggregate counts for a single user that are
@@ -207,8 +214,9 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				 routing_workload, routing_execution, routing_execution_node_id, routing_execution_node_url,
 				 routing_egress, routing_egress_node_id, routing_egress_node_url,
 				 position_seconds, is_paused, has_websocket, compat_origin, routing_network_provider,
-				 output_container, output_protocol, stream_location, device_id, device_platform)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43)
+				 output_container, output_protocol, stream_location, device_id, device_platform,
+				 delivered_through_seconds, produced_through_seconds)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -252,6 +260,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				stream_location     = EXCLUDED.stream_location,
 				device_id           = EXCLUDED.device_id,
 				device_platform     = EXCLUDED.device_platform,
+				delivered_through_seconds = EXCLUDED.delivered_through_seconds,
+				produced_through_seconds  = EXCLUDED.produced_through_seconds,
 				last_sync_at        = NOW()
 		`, sessionSyncValues(s, sessionNode)...)
 		if err != nil {
@@ -354,7 +364,9 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			COALESCE(output_protocol, ''),
 			COALESCE(stream_location, ''),
 			COALESCE(device_id, ''),
-			COALESCE(device_platform, '')
+			COALESCE(device_platform, ''),
+			delivered_through_seconds,
+			produced_through_seconds
 		FROM playback_sessions_sync
 		WHERE COALESCE(reporting_node, '') = $1
 		ORDER BY session_id
@@ -411,6 +423,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.StreamLocation,
 			&s.DeviceID,
 			&s.DevicePlatform,
+			&s.DeliveredThroughSeconds,
+			&s.ProducedThroughSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -439,57 +453,26 @@ func normalizeSessionSyncs(reportingNode string, sessions []SessionSync) []Sessi
 
 // sessionSnapshotsEqual reports whether two normalized live-session views match.
 func sessionSnapshotsEqual(left, right []SessionSync) bool {
-	if len(left) != len(right) {
+	return slices.EqualFunc(left, right, sessionSyncsEqual)
+}
+
+// sessionSyncsEqual reports whether two normalized live sessions match. The
+// fields == cannot compare by value are compared first and then cleared, so
+// == covers every other column, including any added later.
+func sessionSyncsEqual(a, b SessionSync) bool {
+	if !equalOptional(a.RoutingNetworkProvider, b.RoutingNetworkProvider) ||
+		!equalOptional(a.DeliveredThroughSeconds, b.DeliveredThroughSeconds) ||
+		!equalOptional(a.ProducedThroughSeconds, b.ProducedThroughSeconds) ||
+		!a.StartedAt.Equal(b.StartedAt) ||
+		!a.UpdatedAt.Equal(b.UpdatedAt) ||
+		normalizePositionSeconds(a.PositionSeconds) != normalizePositionSeconds(b.PositionSeconds) {
 		return false
 	}
-	for i := range left {
-		if left[i].SessionID != right[i].SessionID ||
-			left[i].UserID != right[i].UserID ||
-			left[i].ProfileID != right[i].ProfileID ||
-			left[i].MediaFileID != right[i].MediaFileID ||
-			left[i].RequestedMediaFileID != right[i].RequestedMediaFileID ||
-			left[i].PlayMethod != right[i].PlayMethod ||
-			left[i].ReportingNode != right[i].ReportingNode ||
-			left[i].ClientIP != right[i].ClientIP ||
-			left[i].StreamLocation != right[i].StreamLocation ||
-			left[i].ClientName != right[i].ClientName ||
-			left[i].ClientVersion != right[i].ClientVersion ||
-			left[i].ClientBuild != right[i].ClientBuild ||
-			left[i].ClientChannel != right[i].ClientChannel ||
-			left[i].ClientUserAgent != right[i].ClientUserAgent ||
-			left[i].DeviceID != right[i].DeviceID ||
-			left[i].DevicePlatform != right[i].DevicePlatform ||
-			left[i].AudioTrackIndex != right[i].AudioTrackIndex ||
-			left[i].TranscodeAudio != right[i].TranscodeAudio ||
-			left[i].StreamBitrateKbps != right[i].StreamBitrateKbps ||
-			left[i].TranscodeNodeURL != right[i].TranscodeNodeURL ||
-			left[i].TargetResolution != right[i].TargetResolution ||
-			left[i].TargetVideoCodec != right[i].TargetVideoCodec ||
-			left[i].OutputContainer != right[i].OutputContainer ||
-			left[i].OutputProtocol != right[i].OutputProtocol ||
-			left[i].TargetAudioCodec != right[i].TargetAudioCodec ||
-			left[i].TargetAudioChannels != right[i].TargetAudioChannels ||
-			left[i].TargetBitrateKbps != right[i].TargetBitrateKbps ||
-			left[i].TranscodeHWAccel != right[i].TranscodeHWAccel ||
-			left[i].ToneMapMode != right[i].ToneMapMode ||
-			!equalOptionalString(left[i].RoutingNetworkProvider, right[i].RoutingNetworkProvider) ||
-			left[i].RoutingWorkload != right[i].RoutingWorkload ||
-			left[i].RoutingExecution != right[i].RoutingExecution ||
-			left[i].RoutingExecutionNodeID != right[i].RoutingExecutionNodeID ||
-			left[i].RoutingExecutionNodeURL != right[i].RoutingExecutionNodeURL ||
-			left[i].RoutingEgress != right[i].RoutingEgress ||
-			left[i].RoutingEgressNodeID != right[i].RoutingEgressNodeID ||
-			left[i].RoutingEgressNodeURL != right[i].RoutingEgressNodeURL ||
-			!left[i].StartedAt.Equal(right[i].StartedAt) ||
-			!left[i].UpdatedAt.Equal(right[i].UpdatedAt) ||
-			normalizePositionSeconds(left[i].PositionSeconds) != normalizePositionSeconds(right[i].PositionSeconds) ||
-			left[i].IsPaused != right[i].IsPaused ||
-			left[i].HasWebSocket != right[i].HasWebSocket ||
-			left[i].IsJellyfinCompat != right[i].IsJellyfinCompat {
-			return false
-		}
+	for _, s := range []*SessionSync{&a, &b} {
+		s.RoutingNetworkProvider, s.DeliveredThroughSeconds, s.ProducedThroughSeconds = nil, nil, nil
+		s.StartedAt, s.UpdatedAt, s.PositionSeconds = time.Time{}, time.Time{}, 0
 	}
-	return true
+	return a == b
 }
 
 // sessionSyncColumns names the playback_sessions_sync columns a sync binds,
@@ -507,6 +490,7 @@ var sessionSyncColumns = []string{
 	"routing_egress", "routing_egress_node_id", "routing_egress_node_url",
 	"position_seconds", "is_paused", "has_websocket", "compat_origin", "routing_network_provider",
 	"output_container", "output_protocol", "stream_location", "device_id", "device_platform",
+	"delivered_through_seconds", "produced_through_seconds",
 }
 
 // sessionSyncValues is one session as a sync stores it, in
@@ -525,7 +509,8 @@ func sessionSyncValues(s SessionSync, sessionNode string) []any {
 		nullableString(s.RoutingEgress), nullableInt(s.RoutingEgressNodeID), nullableString(s.RoutingEgressNodeURL), normalizePositionSeconds(s.PositionSeconds),
 		s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, s.RoutingNetworkProvider,
 		nullableString(s.OutputContainer), nullableString(s.OutputProtocol), s.StreamLocation,
-		nullableString(s.DeviceID), nullableString(s.DevicePlatform)}
+		nullableString(s.DeviceID), nullableString(s.DevicePlatform),
+		s.DeliveredThroughSeconds, s.ProducedThroughSeconds}
 }
 
 // SessionSyncRowJSON renders a session as the playback_sessions_sync row a
@@ -696,7 +681,7 @@ func (r *Reconciler) Stop() {
 	close(r.stop)
 }
 
-func equalOptionalString(a, b *string) bool {
+func equalOptional[T comparable](a, b *T) bool {
 	if a == nil || b == nil {
 		return a == b
 	}

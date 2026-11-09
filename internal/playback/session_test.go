@@ -1,9 +1,11 @@
 package playback_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -1093,4 +1095,58 @@ func mustGetSession(t *testing.T, sm *playback.SessionManager, sessionID string)
 		t.Fatalf("GetSession(%s): %v", sessionID, err)
 	}
 	return session
+}
+
+// Direct play reports how far the file is delivered past the viewer: the end
+// of the delivered range that holds the position, never the furthest byte
+// read, since players read an index at the file's tail and keep ranges from
+// before a seek.
+func TestSessionDeliveredThroughSeconds(t *testing.T) {
+	// A 1000-byte, 100-second file: 10 bytes are one second.
+	const fileID, size, duration = 42, 1000, 100.0
+	type delivery struct {
+		fileID     int // zero means the session's file
+		start, end int64
+	}
+	spread := make([]delivery, 0, 9)
+	for i := range int64(9) {
+		spread = append(spread, delivery{start: i * 100, end: i*100 + 10})
+	}
+	for _, tc := range []struct {
+		name       string
+		position   float64
+		deliveries []delivery
+		want       float64
+		wantOK     bool
+	}{
+		{name: "head read", position: 10, deliveries: []delivery{{start: 0, end: 300}}, want: 30, wantOK: true},
+		{name: "tail index read is ignored", position: 10, deliveries: []delivery{{start: 0, end: 300}, {start: 950, end: 1000}}, want: 30, wantOK: true},
+		{name: "seek past the delivered range", position: 50, deliveries: []delivery{{start: 0, end: 300}}},
+		{name: "range after a seek", position: 55, deliveries: []delivery{{start: 0, end: 300}, {start: 500, end: 700}}, want: 70, wantOK: true},
+		{name: "adjacent responses merge", position: 10, deliveries: []delivery{{start: 0, end: 300}, {start: 300, end: 450}}, want: 45, wantOK: true},
+		{name: "position just past the end", position: 31, deliveries: []delivery{{start: 0, end: 300}}, want: 30, wantOK: true},
+		{name: "full set keeps the range at the position", position: 0.5, deliveries: spread, want: 1, wantOK: true},
+		{name: "another file's ranges are discarded", position: 10, deliveries: []delivery{{start: 0, end: 300}, {fileID: 43, start: 0, end: 500}}},
+	} {
+		sm := playback.NewSessionManager(0, 0)
+		session, err := sm.StartSession(1, "profile", fileID, playback.PlayDirect, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sm.UpdateProgress(session.ID, tc.position, false); err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range tc.deliveries {
+			id := cmp.Or(d.fileID, fileID)
+			playback.DirectPlayDeliveryRecorder(sm, session.ID, id, duration)(d.start, d.end, size)
+		}
+		got, err := sm.GetSession(session.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		through, ok := got.DeliveredThroughSeconds()
+		if ok != tc.wantOK || (ok && math.Abs(through-tc.want) > 1e-9) {
+			t.Errorf("%s: delivered through = (%v, %t), want (%v, %t)", tc.name, through, ok, tc.want, tc.wantOK)
+		}
+	}
 }

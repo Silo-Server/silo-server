@@ -83,6 +83,9 @@ type RollingDeadlineWriter struct {
 	statusCode    int
 	bytesWritten  int64
 	firstWriteErr error
+	// onProgress, when set, observes the body byte count after every write
+	// that accepted bytes, including each ReadFrom slice.
+	onProgress func(bytesWritten int64)
 }
 
 // NewRollingDeadlineWriter wraps w with the configured stall window.
@@ -246,6 +249,14 @@ func ClassifyOutcome(firstWriteErr, ctxErr error) StreamOutcome {
 	return OutcomeCompleted
 }
 
+// OnProgress registers fn to observe the running body byte count after every
+// write that accepted bytes, including each bounded ReadFrom slice, so a caller
+// can follow a long response while it is still being sent. It runs on the
+// writing goroutine and must be cheap; set it before the first write.
+func (s *RollingDeadlineWriter) OnProgress(fn func(bytesWritten int64)) {
+	s.onProgress = fn
+}
+
 // Unwrap lets http.ResponseController traverse to the underlying writer.
 func (s *RollingDeadlineWriter) Unwrap() http.ResponseWriter { return s.w }
 
@@ -253,6 +264,9 @@ func (s *RollingDeadlineWriter) recordWrite(n int64, err error) {
 	s.bytesWritten += n
 	if err != nil && s.firstWriteErr == nil {
 		s.firstWriteErr = err
+	}
+	if n > 0 && s.onProgress != nil {
+		s.onProgress(s.bytesWritten)
 	}
 }
 
