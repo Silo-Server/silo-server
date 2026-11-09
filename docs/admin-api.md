@@ -302,6 +302,15 @@ leaves them out until the next read. Proxy-served
 Direct Play and progressive remux omit them for now. The
 frozen `/api/v1` bridge does not carry these fields.
 
+`client_buffer: true` advertises `client_buffered_through_seconds`, the media
+time in whole seconds that the player reported holding buffered through with its
+latest progress sample (`buffered_through`, see `progress_buffer_v1` in
+`docs/playback-api.md`). Unlike the two fields above it is reported, not
+observed, so it covers every delivery method the player supports. It is absent
+when the player did not report one, and while progress lands on an API server
+that does not hold the session in memory. The frozen `/api/v1` bridge does not
+carry it.
+
 `silo_playback_routing_decisions_total` counts routing outcomes with bounded
 `workload`, `execution`, `egress`, `outcome`, and `reason` labels. It never
 labels observations with playback-session or node identity.

@@ -188,7 +188,7 @@ async function requestPlaybackStartV2(
         );
         const sessionId = decision.playback_plan?.session_id ?? decision.session_id;
         if (decision.playback_plan && sessionId) {
-          registerSessionMutations(sessionId, installationId);
+          registerSessionMutations(sessionId, installationId, decision.server_features);
         }
         return decision;
       } finally {

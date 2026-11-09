@@ -385,30 +385,32 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
 
 /**
  * The delivery ranges ahead of the position, as track percentages: what the
- * server has sent, then what a transcode has produced beyond that. Both start
- * at the position, so neither draws behind the position fill.
+ * player reported buffered, what the server has sent beyond that, then what a
+ * transcode has produced beyond that. Each starts where the previous one ends,
+ * and the first at the position, so none draws behind the position fill.
  */
 function deliverySegments(session: AdminSession, duration: number): ProgressSegment[] {
   const percent = (seconds: number) => (Math.min(seconds, duration) / duration) * 100;
   let from = percent(session.position_seconds);
   const segments: ProgressSegment[] = [];
-  if (session.delivered_through_seconds != null) {
-    const to = percent(session.delivered_through_seconds);
-    segments.push({ from, to, className: "bg-primary/40" });
+  for (const [through, className] of [
+    [session.client_buffered_through_seconds, "bg-primary/60"],
+    [session.delivered_through_seconds, "bg-primary/40"],
+    [session.produced_through_seconds, "bg-primary/20"],
+  ] as const) {
+    if (through == null) continue;
+    const to = percent(through);
+    segments.push({ from, to, className });
     from = Math.max(from, to);
-  }
-  if (session.produced_through_seconds != null) {
-    segments.push({
-      from,
-      to: percent(session.produced_through_seconds),
-      className: "bg-primary/20",
-    });
   }
   return segments;
 }
 
 function deliveryTitle(session: AdminSession): string | undefined {
   const parts: string[] = [];
+  if (session.client_buffered_through_seconds != null) {
+    parts.push(`Buffered to ${formatClockTime(session.client_buffered_through_seconds)}`);
+  }
   if (session.delivered_through_seconds != null) {
     parts.push(`Delivered to ${formatClockTime(session.delivered_through_seconds)}`);
   }

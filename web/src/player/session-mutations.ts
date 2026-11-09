@@ -22,10 +22,18 @@ import {
 import { playerV2Origin } from "./player-v2";
 import { randomUUID } from "@/lib/uuid";
 
-export type ProgressSample = { position: number; is_paused: boolean };
+/**
+ * One progress sample. `buffered_through` is the media time the player holds
+ * buffered through; it is sent only to a server that advertises
+ * `progress_buffer_v1`, since others refuse unknown fields.
+ */
+export type ProgressSample = { position: number; is_paused: boolean; buffered_through?: number };
+
+const FEATURE_PROGRESS_BUFFER_V1 = "progress_buffer_v1";
 
 type Mutations = {
   installationId: string;
+  acceptsBuffer: boolean;
   readSample?: () => ProgressSample | null;
   latestSample?: ProgressSample;
   sequence: number;
@@ -36,11 +44,29 @@ type Mutations = {
 };
 const sessions = new Map<string, Mutations>();
 
-/** Registers a v2 session so its progress and stop are sequenced. */
-export function registerSessionMutations(sessionId: string, installationId: string) {
+/**
+ * Registers a v2 session so its progress and stop are sequenced.
+ * `serverFeatures` are the features its start decision advertised.
+ */
+export function registerSessionMutations(
+  sessionId: string,
+  installationId: string,
+  serverFeatures: readonly string[] = [],
+) {
   if (!sessions.has(sessionId)) {
-    sessions.set(sessionId, { installationId, sequence: 0, tail: Promise.resolve() });
+    sessions.set(sessionId, {
+      installationId,
+      acceptsBuffer: serverFeatures.includes(FEATURE_PROGRESS_BUFFER_V1),
+      sequence: 0,
+      tail: Promise.resolve(),
+    });
   }
+}
+
+/** The sample as the server accepts it: the stop body never carries a buffer. */
+function sampleWire(sample: ProgressSample, withBuffer: boolean) {
+  const { buffered_through, ...rest } = sample;
+  return withBuffer && buffered_through !== undefined ? { ...rest, buffered_through } : rest;
 }
 
 /** Forgets every registered session; tests call this between cases. */
@@ -135,7 +161,7 @@ export function sendSessionProgress(
     return Promise.reject(new Error("Playback progress sequence exhausted"));
   state.latestSample = sample;
   const body = JSON.stringify({
-    ...sample,
+    ...sampleWire(sample, state.acceptsBuffer),
     sequence: ++state.sequence,
     installation_id: state.installationId,
   });
@@ -186,7 +212,7 @@ export function stopSequencedSession(
     state.stopBody = JSON.stringify({
       installation_id: state.installationId,
       stop_id: randomUUID(),
-      ...(sample ? { ...sample, sequence: ++state.sequence } : {}),
+      ...(sample ? { ...sampleWire(sample, false), sequence: ++state.sequence } : {}),
     });
   }
   const body = state.stopBody;

@@ -138,9 +138,10 @@ func adminSessionFixtureCases() []fixtureCase {
 // The native API names copied video with converted audio Direct Stream and
 // carries the transport's output format; the frozen bridge keeps its alpha shape.
 func TestAdminSessionOutputFormatProjection(t *testing.T) {
-	view := handlers.AdminPlaybackSessionView{EffectivePlayMethod: "audio", OutputContainer: "fmp4", OutputProtocol: "hls", DeliveredThroughSeconds: new(130.0), ProducedThroughSeconds: new(190.0), StartedAt: time.Now(), UpdatedAt: time.Now()}
+	view := handlers.AdminPlaybackSessionView{EffectivePlayMethod: "audio", OutputContainer: "fmp4", OutputProtocol: "hls", DeliveredThroughSeconds: new(130.0), ProducedThroughSeconds: new(190.0), ClientBufferedThroughSeconds: new(160.0), StartedAt: time.Now(), UpdatedAt: time.Now()}
 	if row := adminPlaybackSessionOf(view); row.EffectivePlayMethod != directStreamPlayMethod || row.OutputContainer != "fmp4" || row.OutputProtocol != "hls" ||
-		row.DeliveredThroughSeconds == nil || *row.DeliveredThroughSeconds != 130 || row.ProducedThroughSeconds == nil || *row.ProducedThroughSeconds != 190 {
+		row.DeliveredThroughSeconds == nil || *row.DeliveredThroughSeconds != 130 || row.ProducedThroughSeconds == nil || *row.ProducedThroughSeconds != 190 ||
+		row.ClientBufferedThroughSeconds == nil || *row.ClientBufferedThroughSeconds != 160 {
 		t.Fatalf("admin projection = %+v", row)
 	}
 	if got := playbackSessionOf(view).EffectivePlayMethod; got != directStreamPlayMethod {
@@ -159,7 +160,7 @@ func TestAdminSessionOutputFormatProjection(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil || rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if !caps.OutputFormat || !caps.DeliveryProgress || !caps.StreamLocation || !slices.Contains(caps.EffectivePlayMethodValues, directStreamPlayMethod) || slices.Contains(caps.EffectivePlayMethodValues, "audio") {
+	if !caps.OutputFormat || !caps.DeliveryProgress || !caps.ClientBuffer || !caps.StreamLocation || !slices.Contains(caps.EffectivePlayMethodValues, directStreamPlayMethod) || slices.Contains(caps.EffectivePlayMethodValues, "audio") {
 		t.Fatalf("capabilities = %+v", caps)
 	}
 }

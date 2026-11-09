@@ -19491,6 +19491,11 @@ export interface components {
       audio_decision?: string;
       /** Format: int64 */
       audio_track_index: number;
+      /**
+       * Format: double
+       * @description Media time, in whole seconds, that the player reported holding buffered through with its latest progress sample (buffered_through, see progress_buffer_v1). Absent when the player did not report one, including players that predate it, and while the session's progress lands on an API server that does not hold the session.
+       */
+      client_buffered_through_seconds?: number;
       client_build?: string;
       client_channel?: string;
       client_ip?: string;
@@ -19633,6 +19638,8 @@ export interface components {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
       available: boolean;
+      /** @description Rows may carry client_buffered_through_seconds */
+      client_buffer: boolean;
       client_build: boolean;
       client_channel: boolean;
       /** @description Rows may carry delivered_through_seconds and produced_through_seconds */
@@ -30998,6 +31005,11 @@ export interface components {
       transport: "wifi" | "ethernet" | "cellular" | "other";
     };
     PlaybackProgressBody: {
+      /**
+       * Format: double
+       * @description With progress_buffer_v1: the media time, on the same timeline as position, that the player holds buffered through at this sample. Omit it when the player cannot tell. Shown to administrators only; it does not take part in sequencing, so a retry may carry a different value.
+       */
+      buffered_through?: number;
       /**
        * @description Opaque identifier
        * @example 1

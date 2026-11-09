@@ -158,51 +158,52 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string, delivery se
 
 	delivered, produced := liveDeliveryProgress(s, delivery)
 	return worker.SessionSync{
-		SessionID:               s.ID,
-		UserID:                  s.UserID,
-		ProfileID:               s.ProfileID,
-		MediaFileID:             s.MediaFileID,
-		RequestedMediaFileID:    s.RequestedMediaFileID,
-		PlayMethod:              string(s.PlayMethod),
-		ReportingNode:           reportingNode,
-		ClientIP:                s.ClientIP,
-		StreamLocation:          s.StreamLocation,
-		ClientName:              s.ClientName,
-		ClientVersion:           s.ClientVersion,
-		ClientBuild:             s.ClientBuild,
-		ClientChannel:           s.ClientChannel,
-		ClientUserAgent:         s.ClientUserAgent,
-		DeviceID:                s.DeviceID,
-		DevicePlatform:          s.DevicePlatform,
-		AudioTrackIndex:         s.AudioTrackIndex,
-		TranscodeAudio:          s.TranscodeAudio,
-		StreamBitrateKbps:       s.StreamBitrateKbps,
-		TranscodeNodeURL:        s.TranscodeNodeURL,
-		TargetResolution:        s.TargetResolution,
-		TargetVideoCodec:        s.TargetVideoCodec,
-		OutputContainer:         s.OutputContainer,
-		OutputProtocol:          s.OutputProtocol,
-		TargetAudioCodec:        s.TargetAudioCodec,
-		TargetAudioChannels:     s.TargetAudioChannels,
-		TargetBitrateKbps:       s.TargetBitrateKbps,
-		TranscodeHWAccel:        s.TranscodeHWAccel,
-		ToneMapMode:             string(s.ToneMapMode),
-		RoutingNetworkProvider:  s.RoutingNetworkProvider,
-		RoutingWorkload:         s.RoutingWorkload,
-		RoutingExecution:        s.RoutingExecution,
-		RoutingExecutionNodeID:  s.RoutingExecutionNodeID,
-		RoutingExecutionNodeURL: s.RoutingExecutionNodeURL,
-		RoutingEgress:           s.RoutingEgress,
-		RoutingEgressNodeID:     s.RoutingEgressNodeID,
-		RoutingEgressNodeURL:    s.RoutingEgressNodeURL,
-		StartedAt:               s.StartedAt,
-		UpdatedAt:               s.UpdatedAt,
-		PositionSeconds:         s.Position,
-		IsPaused:                s.IsPaused,
-		HasWebSocket:            s.HasWebSocket,
-		IsJellyfinCompat:        s.IsJellyfinCompat,
-		DeliveredThroughSeconds: delivered,
-		ProducedThroughSeconds:  produced,
+		SessionID:                    s.ID,
+		UserID:                       s.UserID,
+		ProfileID:                    s.ProfileID,
+		MediaFileID:                  s.MediaFileID,
+		RequestedMediaFileID:         s.RequestedMediaFileID,
+		PlayMethod:                   string(s.PlayMethod),
+		ReportingNode:                reportingNode,
+		ClientIP:                     s.ClientIP,
+		StreamLocation:               s.StreamLocation,
+		ClientName:                   s.ClientName,
+		ClientVersion:                s.ClientVersion,
+		ClientBuild:                  s.ClientBuild,
+		ClientChannel:                s.ClientChannel,
+		ClientUserAgent:              s.ClientUserAgent,
+		DeviceID:                     s.DeviceID,
+		DevicePlatform:               s.DevicePlatform,
+		AudioTrackIndex:              s.AudioTrackIndex,
+		TranscodeAudio:               s.TranscodeAudio,
+		StreamBitrateKbps:            s.StreamBitrateKbps,
+		TranscodeNodeURL:             s.TranscodeNodeURL,
+		TargetResolution:             s.TargetResolution,
+		TargetVideoCodec:             s.TargetVideoCodec,
+		OutputContainer:              s.OutputContainer,
+		OutputProtocol:               s.OutputProtocol,
+		TargetAudioCodec:             s.TargetAudioCodec,
+		TargetAudioChannels:          s.TargetAudioChannels,
+		TargetBitrateKbps:            s.TargetBitrateKbps,
+		TranscodeHWAccel:             s.TranscodeHWAccel,
+		ToneMapMode:                  string(s.ToneMapMode),
+		RoutingNetworkProvider:       s.RoutingNetworkProvider,
+		RoutingWorkload:              s.RoutingWorkload,
+		RoutingExecution:             s.RoutingExecution,
+		RoutingExecutionNodeID:       s.RoutingExecutionNodeID,
+		RoutingExecutionNodeURL:      s.RoutingExecutionNodeURL,
+		RoutingEgress:                s.RoutingEgress,
+		RoutingEgressNodeID:          s.RoutingEgressNodeID,
+		RoutingEgressNodeURL:         s.RoutingEgressNodeURL,
+		StartedAt:                    s.StartedAt,
+		UpdatedAt:                    s.UpdatedAt,
+		PositionSeconds:              s.Position,
+		IsPaused:                     s.IsPaused,
+		HasWebSocket:                 s.HasWebSocket,
+		IsJellyfinCompat:             s.IsJellyfinCompat,
+		DeliveredThroughSeconds:      delivered,
+		ProducedThroughSeconds:       produced,
+		ClientBufferedThroughSeconds: liveClientBuffer(s),
 	}
 }
 
@@ -229,6 +230,15 @@ func liveDeliveryProgress(s *playback.Session, delivery sessionDelivery) (delive
 		produced = wholeSeconds(progress.ProducedThrough)
 	}
 	return delivered, produced
+}
+
+// liveClientBuffer is the media time the client last reported buffered
+// through, in whole seconds like the observed progress.
+func liveClientBuffer(s *playback.Session) *float64 {
+	if through, ok := s.ClientBufferedThroughSeconds(); ok {
+		return wholeSeconds(through)
+	}
+	return nil
 }
 
 func wholeSeconds(seconds float64) *float64 {

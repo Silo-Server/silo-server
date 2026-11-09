@@ -2823,6 +2823,9 @@ export interface AdminSession {
    * trail the position. HLS: the end of the fetched segment run holding the
    * position. Absent when the serving node does not observe it. */
   delivered_through_seconds?: number | null;
+  /** Media seconds the player reported holding buffered through. Absent when
+   * it did not report one. */
+  client_buffered_through_seconds?: number | null;
   /** Media seconds the transcode has produced through. Absent when unknown. */
   produced_through_seconds?: number | null;
   source_audio_codec?: string;

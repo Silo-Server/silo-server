@@ -15746,6 +15746,11 @@
             "format": "int64",
             "type": "integer"
           },
+          "client_buffered_through_seconds": {
+            "description": "Media time, in whole seconds, that the player reported holding buffered through with its latest progress sample (buffered_through, see progress_buffer_v1). Absent when the player did not report one, including players that predate it, and while the session's progress lands on an API server that does not hold the session.",
+            "format": "double",
+            "type": "number"
+          },
           "client_build": {
             "type": "string"
           },
@@ -16078,6 +16083,10 @@
           "available": {
             "type": "boolean"
           },
+          "client_buffer": {
+            "description": "Rows may carry client_buffered_through_seconds",
+            "type": "boolean"
+          },
           "client_build": {
             "type": "boolean"
           },
@@ -16185,6 +16194,7 @@
           "source_video_height",
           "device_identity",
           "delivery_progress",
+          "client_buffer",
           "lifecycle_events",
           "revision",
           "state",
@@ -44589,6 +44599,12 @@
       "PlaybackProgressBody": {
         "additionalProperties": false,
         "properties": {
+          "buffered_through": {
+            "description": "With progress_buffer_v1: the media time, on the same timeline as position, that the player holds buffered through at this sample. Omit it when the player cannot tell. Shown to administrators only; it does not take part in sequencing, so a retry may carry a different value.",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
           "installation_id": {
             "description": "Opaque identifier",
             "examples": [

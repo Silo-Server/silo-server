@@ -201,10 +201,11 @@ type PlaybackStartOutput struct {
 	Body PlaybackDecision
 }
 type PlaybackProgressBody struct {
-	InstallationID ID      `json:"installation_id" minLength:"1"`
-	Sequence       int64   `json:"sequence" minimum:"1"`
-	Position       float64 `json:"position" minimum:"0"`
-	IsPaused       bool    `json:"is_paused"`
+	InstallationID  ID       `json:"installation_id" minLength:"1"`
+	Sequence        int64    `json:"sequence" minimum:"1"`
+	Position        float64  `json:"position" minimum:"0"`
+	IsPaused        bool     `json:"is_paused"`
+	BufferedThrough *float64 `json:"buffered_through,omitempty" nullable:"false" minimum:"0" doc:"With progress_buffer_v1: the media time, on the same timeline as position, that the player holds buffered through at this sample. Omit it when the player cannot tell. Shown to administrators only; it does not take part in sequencing, so a retry may carry a different value."`
 }
 type PlaybackStopBody struct {
 	InstallationID ID       `json:"installation_id" minLength:"1"`
@@ -406,7 +407,7 @@ func registerPlayback(reg *Registry) {
 		if p != nil {
 			return nil, p
 		}
-		view, err := reg.deps.Playback.ApplyProgressV2(ctx, caller, string(in.SessionID), handlers.PlaybackProgressCommand{Sequence: in.Body.Sequence, Position: in.Body.Position, IsPaused: in.Body.IsPaused})
+		view, err := reg.deps.Playback.ApplyProgressV2(ctx, caller, string(in.SessionID), handlers.PlaybackProgressCommand{Sequence: in.Body.Sequence, Position: in.Body.Position, IsPaused: in.Body.IsPaused, BufferedThrough: in.Body.BufferedThrough})
 		return playbackMutation(view, err)
 	})
 	registerPlaybackReplan(reg, op)

@@ -7,6 +7,7 @@ import {
 } from "../session-mutations";
 import { isPlaybackSessionEndedError } from "../player-fetch";
 import { toMediaTime } from "../utils/mediaTimeline";
+import { bufferedAheadMs } from "./useAutoQualityDownshift";
 
 /**
  * Reports watch progress to the server every 10 seconds.
@@ -43,9 +44,13 @@ export function useWatchProgress(
     // position on this stream yet; reporting it would overwrite the resume point.
     if (!video || video.readyState === HTMLMediaElement.HAVE_NOTHING) return null;
 
+    const origin = streamOriginRef?.current ?? 0;
+    const ahead = bufferedAheadMs(video);
     return {
-      position: toMediaTime(video.currentTime ?? 0, streamOriginRef?.current ?? 0),
+      position: toMediaTime(video.currentTime ?? 0, origin),
       isPaused: video.paused ?? true,
+      bufferedThrough:
+        ahead > 0 ? toMediaTime(video.currentTime + ahead / 1000, origin) : undefined,
     };
   }, [streamOriginRef, videoRef]);
 
@@ -53,7 +58,13 @@ export function useWatchProgress(
     if (!sessionId) return;
     const read = () => {
       const sample = getProgressSnapshot();
-      return sample ? { position: sample.position, is_paused: sample.isPaused } : null;
+      return sample
+        ? {
+            position: sample.position,
+            is_paused: sample.isPaused,
+            buffered_through: sample.bufferedThrough,
+          }
+        : null;
     };
     const forget = observeSessionProgress(sessionId, read);
     const capture = () => captureSessionProgress(sessionId, read());
@@ -80,6 +91,7 @@ export function useWatchProgress(
         {
           position: snapshot.position,
           is_paused: options?.isPaused ?? snapshot.isPaused,
+          buffered_through: snapshot.bufferedThrough,
         },
         options?.keepalive,
       );

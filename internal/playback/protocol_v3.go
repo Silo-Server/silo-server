@@ -165,6 +165,10 @@ const (
 	DeviceQuirkRegistryRevisionV3     = "2026-07-13.1"
 )
 
+// FeatureProgressBufferV1 tells a client this server accepts buffered_through
+// on progress samples and shows it to administrators.
+const FeatureProgressBufferV1 = "progress_buffer_v1"
+
 // FeatureHLSVariableSubstitutionV3 is an hls delivery feature: the client
 // resolves EXT-X-DEFINE variables in media playlists, so a playlist the
 // server rewrites (FFmpeg's real copy playlist, a transcode node's

@@ -133,6 +133,10 @@ type Session struct {
 	// delivered is the media time a direct-play transport on this server has
 	// sent of the session's file. See NoteDelivered.
 	delivered deliveredSpans
+	// clientBuffered is the media time the client reported buffered through
+	// with progress sample clientBufferedSequence. See NoteClientBuffer.
+	clientBuffered         *float64
+	clientBufferedSequence int64
 }
 
 // SessionStreamState stores the mutable stream-specific details that can

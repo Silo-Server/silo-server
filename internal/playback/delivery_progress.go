@@ -116,6 +116,38 @@ func (s *Session) DeliveredThroughSeconds() (float64, bool) {
 	return span.End, ok
 }
 
+// NoteClientBuffer records the media time the client reported buffered
+// through with progress sample sequence. A sample without one clears it, so a
+// value never outlives the sample that carried it; a sample older than the
+// last one noted changes nothing.
+func (m *SessionManager) NoteClientBuffer(sessionID string, sequence int64, through *float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	if sequence < s.clientBufferedSequence {
+		return nil
+	}
+	s.clientBufferedSequence = sequence
+	s.clientBuffered = nil
+	if through != nil {
+		s.clientBuffered = new(*through)
+	}
+	return nil
+}
+
+// ClientBufferedThroughSeconds returns the media time the client last
+// reported buffered through.
+func (s *Session) ClientBufferedThroughSeconds() (float64, bool) {
+	if s == nil || s.clientBuffered == nil {
+		return 0, false
+	}
+	return *s.clientBuffered, true
+}
+
 // DeliveryNoter records delivered media time on a playback session.
 type DeliveryNoter interface {
 	NoteDelivered(sessionID string, fileID int, span MediaSpan) error

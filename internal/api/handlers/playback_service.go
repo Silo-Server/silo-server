@@ -114,6 +114,10 @@ type PlaybackProgressCommand struct {
 	Sequence int64   `json:"sequence"`
 	Position float64 `json:"position"`
 	IsPaused bool    `json:"is_paused"`
+	// BufferedThrough is the media time the client holds buffered through.
+	// It is display data for administrators, kept on the live session only,
+	// so it takes no part in sequencing or conflict detection.
+	BufferedThrough *float64 `json:"buffered_through,omitempty"`
 }
 
 // PlaybackStopCommand is one v2 stop. StopID is the client-minted identity of
@@ -192,7 +196,7 @@ func (h *PlaybackHandler) PlaybackCapabilities(ctx context.Context, userID int, 
 		return view, playbackOperationError(http.StatusConflict, "capability_not_configured", "Playback installation identity is not configured")
 	}
 	view.InstallationID = h.InstallationID
-	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1", playback.FeatureConnectionSpeedV1)
+	view.Features = append(playback.NativeServerFeaturesV3(), "sequenced_progress_v1", "fixed_media_file_v1", "marker_segments_v1", "trickplay_v1", "bandwidth_probe_v1", playback.FeatureConnectionSpeedV1, playback.FeatureProgressBufferV1)
 	if h.WatchTogetherAvailable {
 		view.Features = append(view.Features, "watch_party_source_fallback_v1", "watch_party_coordinator_v1")
 	}
@@ -364,6 +368,9 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 	if command.Sequence <= 0 || command.Position < 0 || math.IsNaN(command.Position) || math.IsInf(command.Position, 0) {
 		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "A positive progress sequence and a finite position are required")
 	}
+	if b := command.BufferedThrough; b != nil && (*b < 0 || math.IsNaN(*b) || math.IsInf(*b, 0)) {
+		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "buffered_through must be a finite, non-negative media time")
+	}
 	store, ok := h.PlanStoreV3.(playback.ProgressStoreV3)
 	if !ok {
 		return PlaybackMutationView{}, playbackOperationError(http.StatusNotImplemented, "capability_unsupported", "Sequenced playback progress is not supported by this plan store")
@@ -389,6 +396,9 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 	}
 	h.publishSequencedPause(ctx, sessionID, receipt.Lifecycle)
 	view := PlaybackMutationView{Outcome: receipt.Outcome, Accepted: acceptedProgressV2(receipt.Accepted)}
+	if receipt.Outcome == playback.ProgressAppliedV3 || receipt.Outcome == playback.ProgressReplayedV3 {
+		h.noteClientBufferV2(sessionID, command)
+	}
 	// An applied sample persists. A replayed one (the exact latest sample
 	// again) persists too: the client retried because the first reply was
 	// lost, which may have been before the side effects ran. The writers
@@ -398,6 +408,18 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 	}
 	h.persistProgressV2(ctx, store, record, sessionID, sample)
 	return view, nil
+}
+
+// noteClientBufferV2 keeps the client's buffered position from a progress
+// sample on the live session when this replica holds it, like the position.
+func (h *PlaybackHandler) noteClientBufferV2(sessionID string, command PlaybackProgressCommand) {
+	mgr, ok := h.sessionMgr.(interface {
+		NoteClientBuffer(string, int64, *float64) error
+	})
+	if !ok {
+		return
+	}
+	_ = mgr.NoteClientBuffer(sessionID, command.Sequence, command.BufferedThrough)
 }
 
 // maxProgressWritePassesV2 bounds how many times persistProgressV2 rewrites

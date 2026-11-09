@@ -109,8 +109,7 @@ type playbackSessionRow struct {
 	RoutingEgressNodeName    string  `json:"routing_egress_node_name,omitempty"`
 	CompatOrigin             bool    `json:"-"`
 	// Delivery progress is native-only: the frozen bridge payload omits it.
-	DeliveredThroughSeconds *float64 `json:"-"`
-	ProducedThroughSeconds  *float64 `json:"-"`
+	DeliveredThroughSeconds, ProducedThroughSeconds, ClientBufferedThroughSeconds *float64 `json:"-"`
 }
 
 // playbackSessionsCapabilitiesResponse advertises the additive fields of the
@@ -228,7 +227,7 @@ const lifecycleOnlySessions = `
 		'last_sync_at', a.updated_at,
 		'is_paused', lc.state = 'paused',
 		'position_seconds', COALESCE((a.last_sample->>'position')::double precision, (lc.start_facts->>'position_seconds')::double precision, 0),
-		'delivered_through_seconds', NULL::double precision, 'produced_through_seconds', NULL::double precision))).*
+		'delivered_through_seconds', NULL::double precision, 'produced_through_seconds', NULL::double precision, 'client_buffered_through_seconds', NULL::double precision))).*
 	FROM playback_session_lifecycle lc
 	JOIN playback_v3_attempts a ON a.session_id = lc.session_id AND a.stopped_at IS NULL AND a.expires_at > NOW()
 	WHERE lc.state <> 'stopped' AND lc.start_facts <> '{}'::jsonb
@@ -401,7 +400,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			COALESCE(s.stream_location, ''),
 			COALESCE(s.device_id, ''),
 			COALESCE(s.device_platform, ''),
-			s.delivered_through_seconds, s.produced_through_seconds,
+			s.delivered_through_seconds, s.produced_through_seconds, s.client_buffered_through_seconds,
 			` + lifecycleColumns + `
 		 FROM ` + source + ` s
 		 LEFT JOIN users u ON u.id = s.user_id
@@ -480,7 +479,7 @@ func (l *PlaybackSessionsLoader) load(ctx context.Context, query PlaybackSession
 			&s.CompatOrigin, &s.RoutingWorkload, &s.RoutingExecution, &s.RoutingExecutionNodeID,
 			&s.RoutingExecutionNodeName, &s.RoutingEgress, &s.RoutingEgressNodeID, &s.RoutingEgressNodeName, &s.RoutingNetworkProvider,
 			&s.OutputContainer, &s.OutputProtocol, &s.StreamLocation,
-			&s.DeviceID, &s.DevicePlatform, &s.DeliveredThroughSeconds, &s.ProducedThroughSeconds, &s.LifecycleSeq,
+			&s.DeviceID, &s.DevicePlatform, &s.DeliveredThroughSeconds, &s.ProducedThroughSeconds, &s.ClientBufferedThroughSeconds, &s.LifecycleSeq,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scanning playback session: %w", err)
 		}

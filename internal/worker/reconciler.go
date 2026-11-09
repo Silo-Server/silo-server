@@ -73,6 +73,9 @@ type SessionSync struct {
 	// observe it.
 	DeliveredThroughSeconds *float64
 	ProducedThroughSeconds  *float64
+	// ClientBufferedThroughSeconds is the media time the client reported
+	// buffered through, in whole seconds; nil when it did not report one.
+	ClientBufferedThroughSeconds *float64
 }
 
 // AggregateData represents the aggregate counts for a single user that are
@@ -215,8 +218,8 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				 routing_egress, routing_egress_node_id, routing_egress_node_url,
 				 position_seconds, is_paused, has_websocket, compat_origin, routing_network_provider,
 				 output_container, output_protocol, stream_location, device_id, device_platform,
-				 delivered_through_seconds, produced_through_seconds)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45)
+				 delivered_through_seconds, produced_through_seconds, client_buffered_through_seconds)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10::inet, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46)
 			ON CONFLICT (session_id) DO UPDATE SET
 				user_id             = EXCLUDED.user_id,
 				profile_id          = EXCLUDED.profile_id,
@@ -262,6 +265,7 @@ func (r *Reconciler) ReconcileNodeSessions(ctx context.Context, reportingNode st
 				device_platform     = EXCLUDED.device_platform,
 				delivered_through_seconds = EXCLUDED.delivered_through_seconds,
 				produced_through_seconds  = EXCLUDED.produced_through_seconds,
+				client_buffered_through_seconds = EXCLUDED.client_buffered_through_seconds,
 				last_sync_at        = NOW()
 		`, sessionSyncValues(s, sessionNode)...)
 		if err != nil {
@@ -366,7 +370,8 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			COALESCE(device_id, ''),
 			COALESCE(device_platform, ''),
 			delivered_through_seconds,
-			produced_through_seconds
+			produced_through_seconds,
+			client_buffered_through_seconds
 		FROM playback_sessions_sync
 		WHERE COALESCE(reporting_node, '') = $1
 		ORDER BY session_id
@@ -425,6 +430,7 @@ func loadNodeSessionsSnapshot(ctx context.Context, tx pgx.Tx, reportingNode stri
 			&s.DevicePlatform,
 			&s.DeliveredThroughSeconds,
 			&s.ProducedThroughSeconds,
+			&s.ClientBufferedThroughSeconds,
 		); err != nil {
 			return nil, err
 		}
@@ -463,13 +469,14 @@ func sessionSyncsEqual(a, b SessionSync) bool {
 	if !equalOptional(a.RoutingNetworkProvider, b.RoutingNetworkProvider) ||
 		!equalOptional(a.DeliveredThroughSeconds, b.DeliveredThroughSeconds) ||
 		!equalOptional(a.ProducedThroughSeconds, b.ProducedThroughSeconds) ||
+		!equalOptional(a.ClientBufferedThroughSeconds, b.ClientBufferedThroughSeconds) ||
 		!a.StartedAt.Equal(b.StartedAt) ||
 		!a.UpdatedAt.Equal(b.UpdatedAt) ||
 		normalizePositionSeconds(a.PositionSeconds) != normalizePositionSeconds(b.PositionSeconds) {
 		return false
 	}
 	for _, s := range []*SessionSync{&a, &b} {
-		s.RoutingNetworkProvider, s.DeliveredThroughSeconds, s.ProducedThroughSeconds = nil, nil, nil
+		s.RoutingNetworkProvider, s.DeliveredThroughSeconds, s.ProducedThroughSeconds, s.ClientBufferedThroughSeconds = nil, nil, nil, nil
 		s.StartedAt, s.UpdatedAt, s.PositionSeconds = time.Time{}, time.Time{}, 0
 	}
 	return a == b
@@ -490,7 +497,7 @@ var sessionSyncColumns = []string{
 	"routing_egress", "routing_egress_node_id", "routing_egress_node_url",
 	"position_seconds", "is_paused", "has_websocket", "compat_origin", "routing_network_provider",
 	"output_container", "output_protocol", "stream_location", "device_id", "device_platform",
-	"delivered_through_seconds", "produced_through_seconds",
+	"delivered_through_seconds", "produced_through_seconds", "client_buffered_through_seconds",
 }
 
 // sessionSyncValues is one session as a sync stores it, in
@@ -510,7 +517,7 @@ func sessionSyncValues(s SessionSync, sessionNode string) []any {
 		s.IsPaused, s.HasWebSocket, s.IsJellyfinCompat, s.RoutingNetworkProvider,
 		nullableString(s.OutputContainer), nullableString(s.OutputProtocol), s.StreamLocation,
 		nullableString(s.DeviceID), nullableString(s.DevicePlatform),
-		s.DeliveredThroughSeconds, s.ProducedThroughSeconds}
+		s.DeliveredThroughSeconds, s.ProducedThroughSeconds, s.ClientBufferedThroughSeconds}
 }
 
 // SessionSyncRowJSON renders a session as the playback_sessions_sync row a

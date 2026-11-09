@@ -56,6 +56,28 @@ describe("sequenced playback mutations", () => {
     expect(JSON.parse(bodies[2])).toMatchObject({ ...sample, position: 10, sequence: 2 });
   });
 
+  it("sends the buffered position only to a server that accepts it, and never on stop", async () => {
+    const fetcher = vi.fn().mockImplementation(async () => applied());
+    vi.stubGlobal("fetch", fetcher);
+    const buffered = { ...sample, buffered_through: 75 };
+    registerSessionMutations("buffer-older", "install");
+    registerSessionMutations("buffer-newer", "install", ["progress_buffer_v1"]);
+    await sendSessionProgress(config, "buffer-older", buffered);
+    await sendSessionProgress(config, "buffer-newer", buffered);
+    const bodies = fetcher.mock.calls.map((call) => JSON.parse(call[1].body));
+    expect(bodies[0]).not.toHaveProperty("buffered_through");
+    expect(bodies[1]).toMatchObject({ buffered_through: 75 });
+
+    fetcher.mockImplementation(async (_url: string, init: RequestInit) =>
+      receipt({ outcome: "stopped", stop_id: JSON.parse(String(init.body)).stop_id }),
+    );
+    captureSessionProgress("buffer-newer", buffered);
+    await stopSequencedSession(config, "buffer-newer");
+    const stopBody = JSON.parse(fetcher.mock.calls.at(-1)![1].body);
+    expect(stopBody).toMatchObject({ position: 30 });
+    expect(stopBody).not.toHaveProperty("buffered_through");
+  });
+
   it("retries a 5xx progress reply but not a 4xx", async () => {
     vi.useFakeTimers();
     const fetcher = vi
