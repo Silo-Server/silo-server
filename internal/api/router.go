@@ -1648,7 +1648,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			subscribe := func(ctx context.Context, handler func(playback.RealtimeEventName, string)) error {
 				return deps.EventBus.Subscribe(ctx, cache.ChannelPlayback, func(event cache.Event) {
 					switch event.Type {
-					case cache.EventSubtitleTimingChanged, cache.EventSubtitleSyncUpdated:
+					case cache.EventSubtitleReady, cache.EventSubtitleTimingChanged, cache.EventSubtitleSyncUpdated:
 						handler(playback.RealtimeEventName(event.Type), event.Payload)
 					}
 				})
@@ -1658,7 +1658,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 				busCtx = context.Background()
 			}
 			if err := subtitleAINotifier.UseEventBus(busCtx, publish, subscribe); err != nil {
-				slog.Warn("subscribe subtitle timing changes and sync updates failed", "component", "api", "error", err)
+				slog.Warn("subscribe subtitle events failed", "component", "api", "error", err)
 			}
 		}
 		adminPlaybackControlHandler = handlers.NewAdminPlaybackControlHandler(playbackHandler)
@@ -2002,6 +2002,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		mediaResolver := &pgSubtitleMediaResolver{pool: deps.DB}
 		subtitleSearchHandler = handlers.NewSubtitleSearchHandler(subtitleManager, subtitleRepo, mediaResolver)
+		if subtitleAINotifier != nil {
+			subtitleSearchHandler.SetSubtitleReadyAnnouncer(subtitleAINotifier)
+		}
 		if deps.FileRepo != nil && settingsRepo != nil {
 			syncService := newSubtitleSyncService(&deps, subtitleManager, subtitleRepo, settingsRepo, subtitleAINotifier)
 			subtitleSearchHandler.SetSyncService(syncService, subtitleRepo)
@@ -2774,7 +2777,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		if streamHandler != nil {
 			v2deps.PlaybackMedia.Original = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}", streamHandler.HandleStream)(w, r)
+				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}", streamHandler.HandleStream)(w, r.WithContext(handlers.WithNativeAPIV2(r.Context())))
 			})
 			v2deps.PlaybackMedia.Subtitle = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				observeNative(deps.StreamTelemetry, r.Method, "/api/v2/stream/{session_id}/subtitles/{track}", streamHandler.HandleSubtitle)(w, r.WithContext(handlers.WithNativeAPIV2(r.Context())))

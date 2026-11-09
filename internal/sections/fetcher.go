@@ -1431,7 +1431,7 @@ func (f *Fetcher) fetchCollection(ctx context.Context, s ResolvedSection, librar
 	// sort applies here — a viewer's personal override is honored on the
 	// collection's own browse page.
 	queryAccess := collectionRailQueryAccess(filter, libraryID, libraryIDs)
-	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess.AllowedLibraryIDs)
+	membership, err := catalog.ResolveLibraryCollectionMembership(collection, queryAccess)
 	if err != nil {
 		// The stored query no longer parses or validates, e.g. a legacy
 		// per-profile rule. Like jellycompat, list nothing rather than fail
@@ -3441,6 +3441,8 @@ func newTrendingEntry(tmdbID, tvdbID int, imdbID, mediaType string) trendingDisc
 
 // fetchTrendingDiscover surfaces external global trending (TMDB),
 // mixing movies + series, matched to titles in the viewer's enabled libraries.
+// A filter_type of "movie" or "series" keeps one of them. Every row reads the
+// same mixed snapshot, so the filter runs before the display limit.
 // The external fetch + ID resolution are cached briefly so it does not hit the
 // upstream API on every home-page load.
 func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, libraryID *int, libraryIDs []int, filter catalog.AccessFilter) ([]*models.MediaItem, int, error) {
@@ -3463,7 +3465,7 @@ func (f *Fetcher) fetchTrendingDiscover(ctx context.Context, s ResolvedSection, 
 		return []*models.MediaItem{}, 0, nil
 	}
 
-	items, err := f.fetchItemsByContentIDs(ctx, orderedIDs, libraryID, libraryIDs, filter)
+	items, err := f.fetchItemsByContentIDsFiltered(ctx, orderedIDs, libraryID, libraryIDs, SectionConfigFilters{FilterType: p.FilterType}, filter)
 	if err != nil {
 		return nil, 0, err
 	}

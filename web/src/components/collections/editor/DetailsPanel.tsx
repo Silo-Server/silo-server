@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   COLLECTION_MEDIA_FILTER_OPTIONS,
   COLLECTION_WATCH_FILTER_OPTIONS,
@@ -114,10 +115,9 @@ export function DetailsPanel({
         <label htmlFor={`${id}-description`} className="text-[14.5px] font-semibold">
           Description <span className="text-muted-foreground font-normal">Optional</span>
         </label>
-        <textarea
+        <Textarea
           id={`${id}-description`}
           rows={3}
-          className="border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 w-full rounded-md border bg-transparent px-3 py-2 text-base outline-none focus-visible:ring-[3px] md:text-sm"
           value={draft.description}
           onChange={(event) => {
             const description = event.target.value;

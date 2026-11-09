@@ -457,6 +457,26 @@ function InstalledPluginPage({
         </Banner>
       ) : null}
 
+      {installation.update_failure ? (
+        <Banner
+          tone="warning"
+          icon={
+            <AlertTriangle aria-hidden="true" className="text-warning mt-0.5 size-4 shrink-0" />
+          }
+        >
+          <p>
+            <strong className="font-semibold">
+              Silo couldn't update {name} to {installation.update_failure.version}.
+            </strong>{" "}
+            {installation.update_failure.reason}
+          </p>
+          <p className="text-muted-foreground">
+            It stays on version {installation.version}. Last tried{" "}
+            {formatDateTime(installation.update_failure.failed_at)}.
+          </p>
+        </Banner>
+      ) : null}
+
       {installation.enabled && missing.length > 0 ? (
         <Banner
           tone="warning"

@@ -7650,15 +7650,22 @@
         "properties": {
           "layout": {
             "additionalProperties": true,
-            "type": "object",
+            "description": "Stored layout; null when this account has none saved, and the client keeps its local or default arrangement",
+            "type": [
+              "object",
+              "null"
+            ],
             "x-silo-extension-bag": "admin-dashboard-layout"
           },
           "updated_at": {
-            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "description": "When the stored layout was last saved; null when none is saved",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -12620,7 +12627,8 @@
             "enum": [
               "pending",
               "matched",
-              "unmatched"
+              "unmatched",
+              null
             ],
             "type": [
               "string",
@@ -14856,7 +14864,7 @@
         "additionalProperties": false,
         "properties": {
           "profile_id": {
-            "description": "Opaque identifier",
+            "description": "A profile on the authenticated account. A profile or device on another account answers 404, as a device that does not exist does.",
             "examples": [
               "1"
             ],
@@ -17126,6 +17134,10 @@
             },
             "type": "array"
           },
+          "update_failure": {
+            "$ref": "#/components/schemas/AdminPluginUpdateFailure",
+            "description": "The last automatic update that failed, such as a download that did not match its catalog checksum. Absent when the last check did not fail for this plugin."
+          },
           "update_policy": {
             "type": "string"
           },
@@ -17481,6 +17493,32 @@
         },
         "required": [
           "enabled"
+        ],
+        "type": "object"
+      },
+      "AdminPluginUpdateFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "failed_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the update was refused, written for the administrator; it names no URL or checksum",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version Silo tried and failed to install",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "reason",
+          "failed_at"
         ],
         "type": "object"
       },
@@ -32097,6 +32135,7 @@
             "examples": [
               "https://silo.example.test/activate"
             ],
+            "format": "uri",
             "type": "string"
           },
           "verification_uri_complete": {
@@ -46862,6 +46901,15 @@
             ],
             "type": "boolean"
           },
+          "max_profiles": {
+            "description": "How many profiles this account may have, from its effective access policy; createProfile answers 409 once the household holds this many. Omitted on a remote-playback handoff, which lists only its own profile and cannot create one, and when the server could not read the limit; in that second case a client keeps offering new profiles and createProfile stays the check",
+            "examples": [
+              5
+            ],
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "page": {
             "$ref": "#/components/schemas/PageInfo",
             "description": "Cursor state; absent for bounded unpaginated collections"
@@ -47449,7 +47497,8 @@
             "description": "Playback ceiling; null removes it",
             "enum": [
               "1080p",
-              "2160p"
+              "2160p",
+              null
             ],
             "examples": [
               "1080p"
@@ -52565,6 +52614,11 @@
           },
           "source": {
             "type": "string"
+          },
+          "stored_subtitle_id": {
+            "description": "Stored subtitle row ID, matching subtitle_ready.subtitle_id. Present for downloaded, uploaded and generated tracks, including tracks without a URL or sync_key. Stable across inventory reordering; selection still uses combined_index.",
+            "format": "int64",
+            "type": "integer"
           },
           "stream_index": {
             "description": "Embedded tracks only: the absolute probed stream index, the namespace of subtitle.embedded.stream_index and the sidecar URL's embedded_stream_index",
@@ -180128,7 +180182,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The home page's sections with their cards, as the acting profile sees them.",
+        "summary": "The home page's sections that have cards for the acting profile, with those cards.",
         "tags": [
           "home"
         ],
@@ -187679,7 +187733,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The library's sections with their cards, as the acting profile sees them.",
+        "summary": "The library's sections that have cards for the acting profile, with those cards.",
         "tags": [
           "libraries"
         ],
@@ -220459,6 +220513,17 @@
             }
           },
           {
+            "description": "Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "header",
             "name": "If-Match",
             "schema": {
@@ -221032,6 +221097,17 @@
             "in": "query",
             "name": "st",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set to refuse by the server on a server_remux_progressive URL whose attempt listed progressive_range_refusal_v1 in deliveries.progressive.features. A progressive remux streams from its seek origin and cannot resume: with it, a GET whose Range starts past byte 0 (or is a suffix range) answers 409 before the remux starts, and the client reopens the stream at its current position. Without it such a range streams from the origin with 200.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
               "type": "string"
             }
           },
@@ -242170,9 +242246,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/remux/{token}",
@@ -242306,9 +242393,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/remux/{token}",
@@ -242361,9 +242459,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/remux/audio-v2/{token}",
@@ -242497,9 +242606,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Outer public middleware does not authorize content. Signed expiring playback token must select the committed proxy egress and the endpoint recipe family; partial routes fail409 and wrong egress/family fails503. Empty legacy routing retains only original method authority. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Only the exact versioned stereo AAC downmix shape is accepted; ordinary/partial recipes return404. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/remux/audio-v2/{token}",
@@ -242914,9 +243034,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
+        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised.",
         "listener": "proxy",
         "method": "GET",
         "path": "/stream/v3/{session_id}",
@@ -243071,9 +243202,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
+            "in": "query",
+            "name": "remux_range",
+            "schema": {
+              "enum": [
+                "refuse"
+              ],
+              "type": "string"
+            }
           }
         ],
-        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
+        "description": "Header-only bearer access JWT, current login-session validity and a stored grant owned by the same account are required on every request. No API key, cookie or query-token fallback. Missing grant404; wrong account403; unavailable dependencies503. Committed proxy egress and recipe family remain enforced. Local authorization errors are application/json objects with error and message; downstream/local media failures retain their existing media. This does not add a profile/PIN check or native v2 alias. Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. Identity dispatch selects remux only for the literal remux play method; after the endpoint family gate other accepted non-transcode methods fall through to direct-file serving. Boosted-remux grant compatibility is not established by this description. Direct files retain strongETag/ranges. The final origin response status and headers are forwarded except the private generation header; this relay is not restricted to a finite status/media list. Request construction failure500, missing origin400 and transport failure502 remain local. Read interruption can truncate committed bytes. No durable transfer, generic retry promise or websocket tunnel is advertised. The HTTP server suppresses all HEAD response bytes.",
         "listener": "proxy",
         "method": "HEAD",
         "path": "/stream/v3/{session_id}",
@@ -246124,6 +246266,9 @@
           "auto_fallback_ready": {
             "type": "boolean"
           },
+          "copy_audio_codec": {
+            "type": "string"
+          },
           "copy_fmp4_recipe_version": {
             "type": "string"
           },
@@ -246285,6 +246430,9 @@
         "additionalProperties": false,
         "properties": {
           "audio_recipe_version": {
+            "type": "string"
+          },
+          "copy_audio_codec": {
             "type": "string"
           },
           "copy_fmp4_recipe_version": {

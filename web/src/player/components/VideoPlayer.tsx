@@ -626,10 +626,18 @@ export function VideoPlayer({
   const mediaOutageRef = useRef(false);
   const outageBufferedEndRef = useRef(0);
   const reportedPlanFailureKeyRef = useRef<string | null>(null);
-  // Whether the current transport has shown a frame. A network error after
-  // that is a lost connection, not a route that cannot play. Reset whenever
-  // the transport is rebuilt (see the hls.js lifecycle effect).
+  // Whether the current transport has played a frame. Reset whenever the
+  // transport is rebuilt (see the hls.js lifecycle effect).
   const streamPlayedRef = useRef(false);
+  // Whether the current transport has shown a frame, by playing or by settling
+  // paused on it. A network error after that is a lost connection the
+  // reconnect can reopen, not a route that cannot play; reset with
+  // streamPlayedRef.
+  const streamFramedRef = useRef(false);
+  // Whether the viewer wants playback running, from the element's play and
+  // pause events. Chromium pauses the element before it reports a network
+  // error, so `video.paused` alone would reopen a playing stream paused.
+  const viewerPlayingRef = useRef(false);
   // When the current transport last stopped playing, or null while it plays.
   // Only a transport that has opened, shown a frame, or settled paused counts.
   const transportIdleSinceRef = useRef<number | null>(null);
@@ -758,6 +766,10 @@ export function VideoPlayer({
   );
   const lastSubtitleIndexRef = useRef<number | null>(null);
   const subtitleSelectionWasManualRef = useRef(false);
+  // Sync keys of the stored subtitles someone added while this session plays.
+  // Auto-selection never picks them, so another viewer's download or upload
+  // can't change this viewer's subtitle.
+  const announcedSubtitleKeysRef = useRef(new Set<string>());
   // Subtitle delay in ms; positive shows later. It is the profile's timing
   // offset, so a change here follows the profile to every device.
   const [subtitleDelayMs, setSubtitleDelayMs] = useSubtitleDelay();
@@ -958,19 +970,20 @@ export function VideoPlayer({
   }, [planRevision]);
 
   /**
-   * Hands a network failure to the session's reconnect when the stream has
-   * already played. Returns false before the first frame, where the failure
+   * Hands a network failure to the session's reconnect once the stream has
+   * shown a frame, played or settled paused, and reopens it playing when the
+   * viewer was. Returns false before the first frame, where the failure
    * keeps going through route recovery: a stream that never started may be
    * one this route cannot deliver.
    */
   const reportConnectionLost = useCallback((): boolean => {
     const video = videoRef.current;
-    if (!onConnectionLost || !video || !streamPlayedRef.current) return false;
+    if (!onConnectionLost || !video || !streamFramedRef.current) return false;
     if (connectionStatusRef.current === "connected") {
       // A seek still in flight is where the viewer wants to be.
       const positionSeconds =
         pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
-      onConnectionLost(positionSeconds, !video.paused);
+      onConnectionLost(positionSeconds, viewerPlayingRef.current);
     }
     return true;
   }, [onConnectionLost]);
@@ -2105,11 +2118,13 @@ export function VideoPlayer({
       };
       switch (event.name) {
         case "subtitle_ready": {
-          // Broadcast to every viewer of the file when a generated track is
-          // persisted. The payload carries the server-assigned ordinal, so the
-          // track is folded in at that ordinal without a round trip; only a
-          // payload the server could not resolve falls back to a replan.
-          if (event.payload.file_id === activeFileId) {
+          // Broadcast to every viewer of the file when a stored track is
+          // added: generated, downloaded or uploaded. The payload carries the
+          // server-assigned ordinal, so the track is folded in at that ordinal
+          // without a round trip; only a payload the server could not resolve
+          // falls back to a replan. The track is offered, never auto-selected.
+          if (isForActiveStream(event.payload)) {
+            announcedSubtitleKeysRef.current.add(`stored-${event.payload.subtitle_id}`);
             if (event.payload.track) {
               onApplySubtitleTrack?.(event.payload.track);
             } else {
@@ -2536,6 +2551,7 @@ export function VideoPlayer({
     // frame yet may be a route this browser cannot reach, so its network
     // failures go through startup recovery rather than the reconnect.
     streamPlayedRef.current = false;
+    streamFramedRef.current = false;
     transportIdleSinceRef.current = null;
     const video = videoRef.current;
     if (!video || !isPlayerReady || startupGuardRef.current?.hasFailed()) return;
@@ -2618,6 +2634,7 @@ export function VideoPlayer({
     // and the first frame is shown with the controls up.
     const settlePaused = () => {
       playbackStarted = true;
+      streamFramedRef.current = true;
       cleanupStartupListeners();
       startupGuardRef.current?.markPlaybackStarted();
       transportIdleSinceRef.current = Date.now();
@@ -3126,6 +3143,7 @@ export function VideoPlayer({
         video.pause();
         return;
       }
+      viewerPlayingRef.current = true;
       setPlaying(true);
       const idleSince = transportIdleSinceRef.current;
       transportIdleSinceRef.current = null;
@@ -3136,6 +3154,8 @@ export function VideoPlayer({
     const onPause = () => {
       resetRoomCatchupRate();
       setPlaying(false);
+      // The pause Chromium adds to a media error is not the viewer's.
+      if (!video.error) viewerPlayingRef.current = false;
       // Only a stream that played or has opened. The pause a teardown queues
       // arrives after the next transport has started over, before it has
       // metadata.
@@ -3153,6 +3173,7 @@ export function VideoPlayer({
     const markPlaybackStarted = () => {
       startupGuardRef.current?.markPlaybackStarted();
       streamPlayedRef.current = true;
+      streamFramedRef.current = true;
       setAwaitingFirstFrame(false);
       setFramedSessionId(sessionIdRef.current);
     };
@@ -3845,6 +3866,7 @@ export function VideoPlayer({
   const grantedSubtitleIndexRef = useRef<number | null>(null);
   grantedSubtitleIndexRef.current = plan.selected_tracks.subtitle?.index ?? null;
   useEffect(() => {
+    announcedSubtitleKeysRef.current = new Set();
     const reconnectFrom = reconnectFromSessionRef.current;
     if (reconnectFrom !== null && reconnectFrom !== sessionId) {
       reconnectFromSessionRef.current = null;
@@ -3867,7 +3889,15 @@ export function VideoPlayer({
       subtitleSelectionWasManualRef.current = false;
     }
 
-    if (effectiveSubtitleTracks.length === 0) {
+    const announced = announcedSubtitleKeysRef.current;
+    const candidateTracks = effectiveSubtitleTracks.filter((track) => {
+      if (track.index === activeSubtitleIndex) return true;
+      const key = track.stored_subtitle_id
+        ? `stored-${track.stored_subtitle_id}`
+        : syncKeyOf(track);
+      return key === null || !announced.has(key);
+    });
+    if (candidateTracks.length === 0) {
       setActiveSubtitleIndex(null);
       lastSubtitleIndexRef.current = null;
       return;
@@ -3880,7 +3910,7 @@ export function VideoPlayer({
 
     const match = resolveSubtitleAutoSelect({
       mode: effectiveMode,
-      tracks: effectiveSubtitleTracks,
+      tracks: candidateTracks,
       preferredLanguage: preferredSubtitleLanguage ?? null,
       preferredTrackSignature: preferredSubtitleTrackSignature ?? null,
       audioLanguage: audioLang,

@@ -31,6 +31,9 @@ type CatalogResult struct {
 	TotalExact        bool
 	SnapshotAt        time.Time // pagination fence timestamp
 	Next              *QueryCursor
+	// SectionCardProgress is set when browsing a Continue Watching or Next Up
+	// row, by content ID.
+	SectionCardProgress map[string]SectionCardProgress
 	// Provider, Mode, SemanticUsed, FallbackReason and IndexPendingEvents are
 	// per-query search diagnostics. They are only populated on the direct-search
 	// path (where a CatalogSearchProvider actually ran); browse / preview /
@@ -231,7 +234,21 @@ type SectionDefinition struct {
 	// row itself with up to limit items. The list starts with the items the
 	// row shows and is already scoped to the acting profile. Nil when the
 	// resolver cannot build rows.
-	FetchItems func(ctx context.Context, limit int) ([]*models.MediaItem, error)
+	FetchItems func(ctx context.Context, limit int) (SectionRowItems, error)
+}
+
+// SectionRowItems is a row-backed section as its fetcher built it.
+type SectionRowItems struct {
+	Items []*models.MediaItem
+	// Progress is set on Continue Watching and Next Up rows, by content ID.
+	Progress map[string]SectionCardProgress
+}
+
+// SectionCardProgress is what a client needs to remove a card from its
+// Continue Watching or Next Up row.
+type SectionCardProgress struct {
+	ProgressUpdatedAt *string
+	ItemSource        string
 }
 
 // SectionResolver shares the page's visibility and configuration with catalog
@@ -589,18 +606,19 @@ func resolveRowBackedSectionSource(ctx context.Context, req CatalogRequest, sect
 	if req.SnapshotAt != nil {
 		snapshot = req.SnapshotAt.UTC()
 	}
-	items, err := section.FetchItems(ctx, SectionBrowseItemCap)
+	row, err := section.FetchItems(ctx, SectionBrowseItemCap)
 	if err != nil {
 		return nil, err
 	}
-	paged := paginateCatalogItems(items, req.Offset, req.Limit)
+	paged := paginateCatalogItems(row.Items, req.Offset, req.Limit)
 	return &CatalogResult{
 		Items:   paged,
-		Total:   len(items),
-		HasMore: req.Offset+len(paged) < len(items),
+		Total:   len(row.Items),
+		HasMore: req.Offset+len(paged) < len(row.Items),
 		// A row cut at the cap may hold more than it lists.
-		TotalExact: len(items) < SectionBrowseItemCap,
-		SnapshotAt: snapshot,
+		TotalExact:          len(row.Items) < SectionBrowseItemCap,
+		SnapshotAt:          snapshot,
+		SectionCardProgress: row.Progress,
 	}, nil
 }
 
@@ -2035,7 +2053,7 @@ type catalogPageSection struct {
 	CollectionID     string // library collection ID
 	UserCollectionID string // personal user collection ID
 	// FetchItems builds a row-backed section; see SectionDefinition.
-	FetchItems func(ctx context.Context, limit int) ([]*models.MediaItem, error)
+	FetchItems func(ctx context.Context, limit int) (SectionRowItems, error)
 }
 
 type catalogSectionFilters struct {
@@ -2246,7 +2264,7 @@ func bytesTrimSpace(raw []byte) []byte {
 // catalogLibraryCollectionMembership resolves how the catalog lists a library
 // collection's members for the viewer, within the libraries access allows.
 func catalogLibraryCollectionMembership(collection *models.LibraryCollection, access AccessFilter) (LibraryCollectionMembership, error) {
-	membership, err := ResolveLibraryCollectionMembership(collection, access.AllowedLibraryIDs)
+	membership, err := ResolveLibraryCollectionMembership(collection, access)
 	if err != nil {
 		return LibraryCollectionMembership{}, fmt.Errorf("%w: library collection query_definition: %w", ErrInvalidCatalogRequest, err)
 	}

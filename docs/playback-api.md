@@ -33,9 +33,11 @@ server instance UUID that diagnostics also report. `protocol_versions` is
 `fixed_media_file_v1`, `marker_segments_v1`, `trickplay_v1`,
 `bandwidth_probe_v1` and `connection_speed_v1`. With `connection_speed_v1` the
 response adds `bandwidth_probe_url`, the media-path probe below, on the origin
-the request arrived on. A reverse proxy that rewrites `Host` to a bare IP
-address and sends no `X-Forwarded-Host` leaves only the address it dialed;
-then the URL is on `server.public_url` when one is configured. When the origin
+the request arrived on, with `X-Forwarded-Proto` and `X-Forwarded-Host`
+counted only from a trusted proxy. A reverse proxy that rewrites `Host` to a
+bare IP address and names no single client host in `X-Forwarded-Host` as a
+trusted proxy leaves only the address it dialed; then the URL is on
+`server.public_url` when one is configured. When the origin
 is the server's local-network origin (a local route), clients send the probe with the saved server's credentials and trust,
 as they do for any request to that server. The response also adds the speed
 test schedule:
@@ -385,7 +387,20 @@ always required. After a restart the session is rebuilt from the token the
 client re-presents
 ([restart-resilient playback](architecture/restart-resilient-playback.md)).
 Ranges, conditional requests and HEAD keep their HTTP semantics; an
-unsatisfiable range is `416 range_not_satisfiable`. A failure before the first
+unsatisfiable range is `416 range_not_satisfiable`. A `server_remux_progressive`
+stream is the exception: it is one forward-only response from its `seek`
+origin, so it answers `200` from that origin whatever the `Range`. A client that
+lists `progressive_range_refusal_v1` in `deliveries.progressive.features` gets
+`remux_range=refuse` on that URL, and a GET whose range starts past byte 0, or
+is a suffix range such as `bytes=-500`, is then `409` before the remux starts;
+the client reopens the stream at its current position. The API answers it as a
+v2 `conflict` problem and a proxy as plain text, so a client should act on the
+status. A proxy that does not advertise `remux_range_refusal_v1` would ignore
+the parameter, so the plan leaves it off that proxy's URL and the stream keeps
+the `200`. The web video player opts in on Chromium browsers only. The web
+audiobook player, which has no reopen at the current position, Firefox, Safari
+and native players keep the `200`; native players skip the bytes they already
+have. A failure before the first
 byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.

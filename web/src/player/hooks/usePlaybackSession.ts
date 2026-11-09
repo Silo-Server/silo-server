@@ -306,6 +306,7 @@ function mapSubtitleInventory(
     forced: item.forced,
     hearing_impaired: item.hearing_impaired,
     sync_key: item.sync_key,
+    stored_subtitle_id: item.stored_subtitle_id,
     url: item.url ? buildPlayerStreamUrl(config.apiBaseUrl, item.url, token) : "",
     font_bundle_url: item.font_bundle_url
       ? buildPlayerStreamUrl(config.apiBaseUrl, item.font_bundle_url, token)
@@ -448,7 +449,10 @@ export function usePlaybackSession(
     [probe, browserEngine.capabilities],
   );
   const clientPlaybackContext = useMemo(
-    () => buildClientPlaybackContextV3(probe, browserEngine.capabilities),
+    () =>
+      buildClientPlaybackContextV3(probe, browserEngine.capabilities, {
+        reopensProgressiveAtPosition: true,
+      }),
     [probe, browserEngine.capabilities],
   );
   const nativeOriginalSupport = useMemo<NativeOriginalSupport>(

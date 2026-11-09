@@ -137,6 +137,9 @@ type ProfileCollection struct {
 	// require_advisory_age, which arrived after max_advisory_age: a server can
 	// report the first and not the second.
 	RequireAdvisoryAgeSupported bool `json:"require_advisory_age_supported" doc:"Whether profiles accept require_advisory_age and the server enforces it" example:"true"`
+	// MaxProfiles is the household limit createProfile enforces, so a client
+	// can stop offering a new profile the server would refuse.
+	MaxProfiles *int `json:"max_profiles,omitempty" nullable:"false" minimum:"1" doc:"How many profiles this account may have, from its effective access policy; createProfile answers 409 once the household holds this many. Omitted on a remote-playback handoff, which lists only its own profile and cannot create one, and when the server could not read the limit; in that second case a client keeps offering new profiles and createProfile stays the check" example:"5"`
 }
 
 // ProfileCollectionOutput is the listProfiles response.
@@ -678,11 +681,18 @@ func (reg *Registry) listProfiles(ctx context.Context, _ *struct{}) (*ProfileCol
 		}
 		items = append(items, profile)
 	}
+	var maxProfiles *int
+	// The handoff list is filtered to one profile, so its length says nothing
+	// about room left in the household.
+	if view.MaxProfiles >= 1 && !claims.IsRemotePlayback() {
+		maxProfiles = &view.MaxProfiles
+	}
 	return &ProfileCollectionOutput{Body: ProfileCollection{
 		Collection:                  NewCollection(items),
 		AvatarUploadEnabled:         view.AvatarUploadEnabled,
 		MaxAdvisoryAgeSupported:     true,
 		RequireAdvisoryAgeSupported: true,
+		MaxProfiles:                 maxProfiles,
 	}}, nil
 }
 

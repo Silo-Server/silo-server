@@ -7,7 +7,7 @@ import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext"
 import { INTRO_PROMPT_SECONDS } from "../hooks/useIntroSkipPrompt";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
-import { fixturePlanV3 } from "../protocol-v3.fixtures";
+import { fixturePlanV3, fixtureSubtitleInventoryItemV3 } from "../protocol-v3.fixtures";
 import type { AvailableQualityV3, PlanV3 } from "../protocol-v3";
 import type {
   PlaybackRealtimeCommandEnvelope,
@@ -5285,6 +5285,111 @@ describe("VideoPlayer translation handoff", () => {
     expect(controls.current?.subtitleTracks).toEqual([downloadedTrack]);
   });
 
+  // Someone else's download or upload reaches every viewer of the file. The
+  // new track is offered, never chosen for this viewer.
+  it.each([
+    { selection: "no subtitle", initial: [], expected: null, withTrack: true },
+    {
+      selection: "a new session receiving an old session event",
+      initial: [],
+      expected: null,
+      withTrack: true,
+      staleSession: true,
+    },
+    {
+      selection: "no subtitle for a track without a URL",
+      initial: [],
+      expected: null,
+      withTrack: true,
+      withoutUrl: true,
+    },
+    {
+      selection: "no subtitle after a refresh without a URL",
+      initial: [],
+      expected: null,
+      withTrack: false,
+      withoutUrl: true,
+    },
+    {
+      selection: "an SDH track",
+      initial: [
+        {
+          index: 0,
+          media_file_id: 7,
+          language: "en",
+          label: "English SDH",
+          hearing_impaired: true,
+          source: "embedded" as const,
+          url: "/sdh.vtt",
+        },
+      ],
+      expected: 0,
+      withTrack: false,
+    },
+  ])(
+    "preserves automatic subtitle selection for $selection",
+    async ({ initial, expected, withTrack, withoutUrl, staleSession }) => {
+      const onSubtitleTrackChange = vi.fn();
+      const onApplySubtitleTrack = vi.fn();
+      const onRefreshSubtitles = vi.fn();
+      const { rerenderPlayer } = renderPlayer({
+        subtitleUrls: initial,
+        subtitleMode: "always",
+        preferredSubtitleLanguage: "en",
+        onSubtitleTrackChange,
+        onApplySubtitleTrack,
+        onRefreshSubtitles,
+      });
+      await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(expected));
+
+      const added: PlayerSubtitleInfo = {
+        index: initial.length,
+        media_file_id: 7,
+        language: "en",
+        label: "English",
+        source: "downloaded",
+        stored_subtitle_id: withoutUrl ? 44 : undefined,
+        codec: withoutUrl ? "sub" : "srt",
+        burn_in_only: withoutUrl,
+        sync_key: withoutUrl ? undefined : "stored-44",
+        url: withoutUrl ? "" : "/en.vtt",
+      };
+      act(() => {
+        realtimeOptions.current?.onEvent?.({
+          type: "event",
+          session_id: staleSession ? "previous-session" : "session-1",
+          name: "subtitle_ready",
+          payload: {
+            session_id: staleSession ? "previous-session" : "session-1",
+            file_id: 7,
+            subtitle_id: 44,
+            language: "en",
+            label: "Movie.EN",
+            ...(withTrack && {
+              track: fixtureSubtitleInventoryItemV3({
+                combined_index: added.index,
+                source: "downloaded",
+                language: "en",
+              }),
+            }),
+          },
+        });
+      });
+      rerenderPlayer({ subtitleUrls: [...initial, added] });
+
+      await act(async () => Promise.resolve());
+      expect(controls.current?.subtitleTracks).toContainEqual(added);
+      expect(controls.current?.activeSubtitleIndex).toBe(staleSession ? added.index : expected);
+      if (staleSession) {
+        expect(onApplySubtitleTrack).not.toHaveBeenCalled();
+        expect(onRefreshSubtitles).not.toHaveBeenCalled();
+      } else {
+        expect(withTrack ? onApplySubtitleTrack : onRefreshSubtitles).toHaveBeenCalledOnce();
+        expect(onSubtitleTrackChange).not.toHaveBeenCalledWith(added.index, expect.any(Number));
+      }
+    },
+  );
+
   it.each(["missing", "rejecting"])(
     "falls back to webkitEnterFullscreen when requestFullscreen is %s",
     async (mode) => {
@@ -5699,11 +5804,15 @@ describe("VideoPlayer lost connection", () => {
     if (!video) throw new Error("expected video element");
 
     fireFrameTimeUpdate(video);
-    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
     // The viewer seeks past the buffered range while the server is down.
     act(() => controls.current?.onSeek(1_200));
+    // Chromium pauses the element before it reports the network error, and
+    // fires that pause after the error.
+    Object.defineProperty(video, "paused", { configurable: true, value: true });
     setNetworkError(video);
     fireEvent.error(video);
+    fireEvent.pause(video);
 
     expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, true);
     expect(onPlanFailure).not.toHaveBeenCalled();
@@ -5756,6 +5865,24 @@ describe("VideoPlayer lost connection", () => {
 
     expect(onConnectionLost).not.toHaveBeenCalled();
     expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
+  it("hands a network error on a transport settled paused on its first frame to the reconnect", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({ onConnectionLost, onPlanFailure, shouldAutoPlay: false });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    markReady(video);
+    fireEvent.canPlay(video);
+
+    // Chromium refetches the paused progressive stream and the server refuses
+    // the range: the route works, so the stream reopens, still paused.
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(expect.any(Number), false);
+    expect(onPlanFailure).not.toHaveBeenCalled();
   });
 
   it("pauses behind a reconnecting notice the viewer can leave", async () => {

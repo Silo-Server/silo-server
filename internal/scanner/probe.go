@@ -461,7 +461,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				Profile:    s.Profile,
 				Layout:     s.ChannelLayout,
 				Channels:   s.Channels,
-				Bitrate:    parseNumeric(s.BitRate) / 1000,
+				Bitrate:    mediaprobe.StreamBitrateKbps(s),
 				SampleRate: parseNumeric(s.SampleRate),
 				BitDepth:   parseBitDepth(s),
 				Default:    s.Disposition.Default == 1,

@@ -1240,6 +1240,26 @@
       "body_file": "admin_collection_template_job_accepted.json"
     },
     {
+      "name": "admin_dashboard_layout_unsaved",
+      "operation_id": "getAdminDashboardLayout",
+      "scenario": "An account with no saved layout reads null for both members and still gets a validator for its first save.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/dashboard/layout",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "ETag": "\"4e70bed0e7ca91734d4c67a3.2yvhksboyyzbs\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDashboardLayout",
+      "body_file": "admin_dashboard_layout_unsaved.json"
+    },
+    {
       "name": "admin_device",
       "operation_id": "getAdminDevice",
       "scenario": "Device detail preserves profile identities and legacy compatibility settings; canonical overrides use the settings-values API.",

@@ -16,7 +16,11 @@ import { ProfileEditorDialog } from "@/components/profiles/ProfileEditorDialog";
 import { ProfilePinDialog } from "@/components/profiles/ProfilePinDialog";
 import { pinLockoutMessage } from "@/components/profiles/pinLockout";
 import { getProfileToken } from "@/api/client";
-import { buildProfileAccessSummary } from "@/lib/profile-management";
+import {
+  buildProfileAccessSummary,
+  canAddProfile,
+  profileLimitMessage,
+} from "@/lib/profile-management";
 import { HouseholdStreamsPanel } from "@/components/profiles/HouseholdStreamsPanel";
 
 function getDeleteGuardReason(
@@ -46,6 +50,7 @@ export default function ProfilesSettings() {
     avatarUploadEnabled,
     maxAdvisoryAgeSupported,
     requireAdvisoryAgeSupported,
+    maxProfiles,
   } = useProfiles();
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries();
   const { profile: activeProfile, selectProfile, verifyProfilePin } = useAuth();
@@ -58,6 +63,7 @@ export default function ProfilesSettings() {
 
   const activeProfileID = activeProfile?.id ?? null;
   const isLoading = profilesLoading || librariesLoading;
+  const householdFull = !canAddProfile(profiles.length, maxProfiles);
 
   const profilesByID = useMemo(
     () => new Map(profiles.map((profile) => [profile.id, profile])),
@@ -89,12 +95,18 @@ export default function ProfilesSettings() {
         title="Profiles"
         subtitle="Manage profile names, PINs, and access rules."
         actions={
-          <Button onClick={openCreateDialog}>
-            <Plus className="h-4 w-4" />
-            New profile
-          </Button>
+          householdFull ? undefined : (
+            <Button onClick={openCreateDialog}>
+              <Plus className="h-4 w-4" />
+              New profile
+            </Button>
+          )
         }
       />
+
+      {householdFull && maxProfiles !== null ? (
+        <p className="text-muted-foreground text-sm">{profileLimitMessage(maxProfiles)}</p>
+      ) : null}
 
       <HouseholdStreamsPanel />
 

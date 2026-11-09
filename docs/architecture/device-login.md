@@ -45,7 +45,9 @@ requests to a secret it keeps; see [Session binding](#session-binding).
 `<base>/activate?code=<8 digits>`, which keeps the TV's QR code small. `<base>`
 is `server.public_url` when it is configured and a valid origin, because a
 phone off the TV's network can't open a LAN address; otherwise it is the origin
-the device used. There is no shared short URL: each server's link is its own.
+the device used, from `clientip.RequestOrigin`: `X-Forwarded-Proto` and
+`X-Forwarded-Host` count only when a trusted proxy sent them. There is no
+shared short URL: each server's link is its own.
 The frozen v1 start keeps its own link; see Frozen v1 surface.
 
 ## Lifetimes

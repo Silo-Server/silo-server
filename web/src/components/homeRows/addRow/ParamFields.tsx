@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { sectionLibraryFilterIds, withSectionLibraryFilterIds } from "@/lib/sectionLibraryFilter";
 import { hasParamFields } from "@/lib/homeRows/paramFields";
 import { variantOf } from "@/lib/homeRows/variants";
+import { Segmented } from "@/components/collections/fields/Segmented";
 import { FamilyNightFields, HolidayFields } from "./SeasonalFields";
 
 type Config = Record<string, unknown>;
@@ -271,6 +272,28 @@ function SpotlightFields({ config, onChange }: FieldProps) {
   );
 }
 
+const TRENDING_SHOWS = [
+  { value: "all", label: "Both" },
+  { value: "movie", label: "Movies" },
+  { value: "series", label: "TV shows" },
+] as const;
+
+type TrendingShow = (typeof TRENDING_SHOWS)[number]["value"];
+
+/** Which titles a worldwide trending row keeps; Both leaves filter_type unset. */
+function TrendingShowField({ config, onChange }: FieldProps) {
+  const value: TrendingShow =
+    config.filter_type === "movie" || config.filter_type === "series" ? config.filter_type : "all";
+  return (
+    <Segmented<TrendingShow>
+      label="Show"
+      value={value}
+      options={TRENDING_SHOWS}
+      onChange={(next) => onChange({ ...config, filter_type: next === "all" ? undefined : next })}
+    />
+  );
+}
+
 /**
  * The plain settings a ready-made row keeps, in one of two places: next to
  * the variant ("primary") or under More options ("more"). The raw Anchor item
@@ -299,6 +322,7 @@ export function ParamFields({
         <HolidayFields {...props} />
       );
     }
+    if (sectionType === "trending_discover") return <TrendingShowField {...props} />;
     return <LibraryFilterField {...props} libraries={libraries} />;
   }
   switch (sectionType) {

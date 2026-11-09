@@ -57,6 +57,11 @@ reach a list. `getCollection` and the `/api/v1` list routes always count live.
 Smart rules on watch state, favorites and the watchlist, and display filters, are evaluated for
 the viewer. A shared collection never reveals its creator's activity.
 
+A smart collection needs at least one complete rule: `createCollection`, and an
+`updateCollection` that sends a smart collection's `query_definition`, answer
+`422 validation_failed` at `body.query_definition.groups` without one (see
+[catalog-api.md](catalog-api.md#rule-fields-and-operators)).
+
 ## Posters
 
 A collection's poster is an image its creator uploaded (`uploadCollectionPoster`), linked

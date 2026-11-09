@@ -78,7 +78,6 @@ export function RuleBuilder({
   libraries,
   allowPersonalized = false,
   context = "homeRow",
-  librariesRequired = false,
   allLibrariesLabel = "all libraries",
   librariesId,
 }: {
@@ -89,8 +88,6 @@ export function RuleBuilder({
   allowPersonalized?: boolean;
   /** What the rules fill: a Home row or a Smart collection. */
   context?: "homeRow" | "collection";
-  /** At least one library must be picked: there is no "all libraries" choice. */
-  librariesRequired?: boolean;
   /** How the sentence names every library, when none is picked. */
   allLibrariesLabel?: string;
   /** An id for the libraries control, so another part of the page can move focus to it. */
@@ -213,9 +210,8 @@ export function RuleBuilder({
             libraries={libraries}
             value={value.library_ids}
             onChange={(libraryIds) => onChange({ ...value, library_ids: libraryIds })}
-            emptyLabel={librariesRequired ? "choose libraries" : allLibrariesLabel}
+            emptyLabel={allLibrariesLabel}
             allOptionLabel={allLibrariesLabel.charAt(0).toUpperCase() + allLibrariesLabel.slice(1)}
-            hideAllOption={librariesRequired}
             triggerLabel="Libraries"
             triggerClassName={`${INLINE_TRIGGER} justify-between`}
           />
@@ -243,7 +239,7 @@ export function RuleBuilder({
         {groups.length === 0 ? (
           <p className="text-muted-foreground text-sm">
             {context === "collection"
-              ? "No rules yet, so the collection holds every title from these libraries."
+              ? "No rules yet. Add one to choose which titles it holds."
               : "No rules yet, so the row shows every title from these libraries."}
           </p>
         ) : null}
