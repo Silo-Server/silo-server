@@ -9,6 +9,7 @@ import type { ResolvedSection } from "@/api/types";
 import { Pin, PinOff } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { carouselCardWidthClasses, WIDE_CAROUSEL_CARD_WIDTH_CLASSES } from "@/lib/uiCustomization";
 import { initialCarouselSlideCount, visibleCarouselSlideCount } from "@/lib/carouselWindow";
 
@@ -75,6 +76,7 @@ export default memo(function SectionRow({
         : buildSectionCatalogHref({ scope: "home", sectionId: section.id, title: section.title }),
     [libraryId, section.id, section.title],
   );
+  const sectionTitle = useSectionTitle();
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
   const posterSize = cardPresentation.poster_size;
@@ -118,7 +120,7 @@ export default memo(function SectionRow({
 
   return (
     <MediaCarousel
-      title={section.title}
+      title={sectionTitle(section)}
       titleHref={browseHref}
       viewAllHref={browseHref}
       headerActions={headerActions}

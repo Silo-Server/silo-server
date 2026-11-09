@@ -10,6 +10,7 @@ import {
   type DescriptionPart,
 } from "@/lib/homeRows/describe";
 import type { HomeRow, Surface } from "@/lib/homeRows/types";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { GROUP_ICONS } from "./rowIcons";
 
 export interface RowLineProps extends Pick<
@@ -67,11 +68,13 @@ export function RowLine({
   onShownChange,
   ...rest
 }: RowLineProps) {
+  const sectionTitle = useSectionTitle();
+  const keyed = row.titleKey?.title === row.title ? row.titleKey : undefined;
   return (
     <ListRow
       {...rest}
       id={row.id}
-      title={row.title}
+      title={sectionTitle({ title: row.title, title_key: keyed?.key, title_args: keyed?.args })}
       collapsed={!row.shown}
       collapsedText={collapsedRowText(surface, pageLabel)}
       art={<PosterPeek icon={icon ?? GROUP_ICONS[rowKindGroup(row.sectionType)]} request={peek} />}
