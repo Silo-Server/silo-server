@@ -268,14 +268,14 @@ export function CollectionEditor<Raw extends WireCollection>({
   libraryId?: number | null;
   /** Create mode, Synced list: the tab the list step opens on. */
   syncedTab?: SyncedTab;
-  /** Create mode, Manual and Smart: told the new id before the page moves to its edit URL. */
+  /** Create mode, Manual and Smart: told the new id once it exists, before the page leaves. */
   onCreated?: (id: string) => void;
 }) {
   const navigate = useNavigate();
   const kind = snapshot ? snapshot.view.kind : createKind;
   const smart = kind === "smart";
   const synced = kind === "synced";
-  // A new Synced list leaves for its edit page once it exists.
+  // A new Synced list returns to the list once it exists.
   const newList = synced && !snapshot;
   const editor = useCollectionDraft(scope, { snapshot, kind, libraryId });
   const { draft, view } = editor;
@@ -298,8 +298,13 @@ export function CollectionEditor<Raw extends WireCollection>({
   const [afterSave, setAfterSave] = useState<AfterSave | null>(null);
   const [openEdit, setOpenEdit] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const location = useLocation();
+  // The library the editor was opened from (an edit link from a library page names it).
+  const editLibraryId = Number(new URLSearchParams(location.search).get("libraryId")) || null;
   const listPath = useListReturnPath(
-    scope.paths.list({ libraryId: isServer ? (draft.libraryIds[0] ?? null) : null }),
+    scope.paths.list({
+      libraryId: isServer ? (libraryId ?? editLibraryId ?? draft.libraryIds[0] ?? null) : null,
+    }),
   );
   const remove = useScopeDelete(scope, {
     onDeleted: () => setLeaving(listPath),
@@ -352,7 +357,6 @@ export function CollectionEditor<Raw extends WireCollection>({
   // A Create that left something unsaved moves to the collection's edit URL.
   // Until it gets there it reports clean, so the guard never asks; a poster
   // that failed to upload then counts as unsaved again.
-  const location = useLocation();
   const moving = openEdit !== null && location.pathname !== scope.paths.edit(openEdit);
   const dirty = editor.isDirty || (!created && (staged.length > 0 || syncedTouched(draft.synced)));
   useReportUnsavedChanges(!leaving && !detour && !moving && dirty);
@@ -468,7 +472,6 @@ export function CollectionEditor<Raw extends WireCollection>({
   const [savingFirst, setSavingFirst] = useState<{ where: string; path: string } | null>(null);
   function addAsRow(page: PageRef, where = rowPlaceInSentence(page, libraryNames)) {
     if (!editor.id) return;
-    const editLibraryId = Number(new URLSearchParams(location.search).get("libraryId")) || null;
     const returnTo = scope.paths.edit(editor.id, { libraryId: libraryId ?? editLibraryId });
     const path = isServer
       ? addRowPath(editor.id, page, returnTo)
@@ -580,7 +583,7 @@ export function CollectionEditor<Raw extends WireCollection>({
   // A saved list's changed source must be one it can follow.
   const listProblem =
     draft.list && editor.changed.includes("list") ? savedListProblem(draft.list) : null;
-  // A created Synced list keeps this bar until it moves to its edit page; one Create is enough.
+  // A created Synced list keeps this bar until it leaves for the list; one Create is enough.
   const canCreate = !editor.id && draft.name.trim() !== "" && !needsLibraries && !needsList;
   const pending = editor.pendingLabels;
   // What the save bar adds after the pending fields.
@@ -858,6 +861,7 @@ export function CollectionEditor<Raw extends WireCollection>({
             posterFallback={{ collages, collageUrl: poster.isCollage ? poster.url : undefined }}
             value={draft.artwork}
             errors={editor.artworkErrors}
+            // Retry stays on the editor, so the image it tried again shows here.
             onRetry={() => void editor.save()}
             onChange={(artwork) => editor.setDraft((current) => ({ ...current, artwork }))}
           />

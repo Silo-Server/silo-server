@@ -346,9 +346,16 @@ describe("creating a Manual collection", () => {
     const router = showEditorPage("/collections/new?type=manual");
     await addTitle("heat", "Heat");
     await addTitle("alien", "Alien");
-    fireEvent.change(await nameField(), { target: { value: "Rainy days" } });
+    const name = await nameField();
+    fireEvent.change(name, { target: { value: "Rainy days" } });
     fireEvent.click(screen.getByRole("button", { name: "Create collection" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/collections/c1/edit"));
+    // The same page carries on: no discard prompt, the same Name field, focus in the title search.
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(await nameField()).toBe(name);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("combobox", { name: /Add a title/ })),
+    );
     const notice = await screen.findByText("Created, but couldn't add 1 title");
     expect(screen.getByText("Couldn't add")).toBeTruthy();
     refuse = false;
