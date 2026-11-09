@@ -99,6 +99,7 @@ type AdminCatalogCapabilities struct {
 	ItemListing           bool `json:"item_listing" doc:"listAdminCatalogItems is served"`
 	ItemListingContentIDs int  `json:"item_listing_max_content_ids" doc:"Most content_ids one listAdminCatalogItems request accepts"`
 	ItemChangeEvents      bool `json:"item_change_events" doc:"catalog.item.changed on the v2 events socket also carries change added, removed and files_changed to administrators"`
+	ItemMatchHints        bool `json:"item_match_hints" doc:"getAdminItemMatchHints is served: the title, year and provider IDs the scanner parsed from an item's folder and file names"`
 	ItemMetadata          bool `json:"item_metadata" doc:"listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people"`
 }
 type AdminCatalogCapabilitiesOutput struct {
@@ -118,6 +119,7 @@ func registerAdminCatalogItems(reg *Registry) {
 			ItemListing:           served,
 			ItemListingContentIDs: adminCatalogItemsMaxContentIDs,
 			ItemChangeEvents:      served,
+			ItemMatchHints:        reg.deps.AdminCatalogMatch != nil,
 			ItemMetadata:          served,
 		}}, nil
 	})

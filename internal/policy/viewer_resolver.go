@@ -326,8 +326,15 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 	requireAdvisory := profile != nil && profile.RequireAdvisoryAge && decision.MaxAdvisoryAge > 0
 
 	var pinRevision int64
+	var allowedTitles []string
 	if profile != nil {
 		pinRevision = profile.PINRevision
+		// A household's allowances lift the profile's own limits only. When
+		// a custom scope policy tightens them, the administrator's limit
+		// wins and no allowance applies.
+		if !maturityOverridden(decision, profile) {
+			allowedTitles = profile.AllowedTitleIDs
+		}
 	}
 	return access.Scope{
 		UserID:              user.ID,
@@ -342,7 +349,7 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 			AllowUnratedContent: allowUnrated,
 			MaxAdvisoryAge:      decision.MaxAdvisoryAge,
 			RequireAdvisoryAge:  requireAdvisory,
-		},
+		}.WithAllowedTitles(allowedTitles),
 		MaxPlaybackQuality:         decision.MaxPlaybackQuality,
 		MaxRemoteStreamBitrateKbps: effective.MaxRemoteStreamBitrateKbps,
 		MaxLocalStreamBitrateKbps:  effective.MaxLocalStreamBitrateKbps,
@@ -364,4 +371,11 @@ func (r *ViewerResolver) ResolveFacts(ctx context.Context, input access.ResolveI
 		PINVerificationSkipped: profileVerified && decision.ProfileVerified &&
 			profile != nil && profile.PINHash != "" && input.SkipPINVerification,
 	}, nil
+}
+
+// maturityOverridden reports whether the scope policy set limits other than
+// the profile's own: a content-rating override, or an advisory-age limit
+// that is not the profile's.
+func maturityOverridden(decision ScopeDecision, profile *userstore.Profile) bool {
+	return access.HasCeiling(decision.MaxContentRatingOverride) || decision.MaxAdvisoryAge != profile.MaxAdvisoryAge
 }

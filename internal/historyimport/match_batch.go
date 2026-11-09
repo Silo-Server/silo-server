@@ -134,7 +134,7 @@ func (b *batchLookup) MatchEpisodeBySeries(_ context.Context, series string, sea
 	return match, nil
 }
 
-func (b *batchLookup) MatchEpisodesBySeries(context.Context, string, *int, *time.Time) ([]Match, error) {
+func (b *batchLookup) MatchEpisodesBySeries(context.Context, string, *int, *time.Time, []int) ([]Match, error) {
 	return nil, errors.New("batched matching does not expand series")
 }
 

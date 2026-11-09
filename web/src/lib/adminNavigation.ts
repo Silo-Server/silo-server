@@ -309,7 +309,7 @@ const PAGES = {
   apiKeys: {
     label: "API Keys",
     description: "Admin API keys and tier assignment.",
-    keywords: ["tokens", "keys", "access", "rate limit tier"],
+    keywords: ["tokens", "keys", "access", "scopes", "rate limit tier"],
     icon: KeyRound,
     href: "/admin/api-keys",
   },

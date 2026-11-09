@@ -1,5 +1,14 @@
 import type { Ref } from "react";
-import { Eye, House, Library as LibraryIcon, Pencil, RefreshCw, Trash2, Users } from "lucide-react";
+import {
+  Eye,
+  House,
+  Library as LibraryIcon,
+  Pencil,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+  Users,
+} from "lucide-react";
 
 import { ActionMenu, type ActionMenuItem } from "@/components/calm/ActionMenu";
 import {
@@ -112,6 +121,7 @@ export function CollectionActionsMenu({
   sync,
   addRow,
   share,
+  onAllowForProfiles,
   onDelete,
   triggerRef,
   placement = "poster",
@@ -122,6 +132,8 @@ export function CollectionActionsMenu({
   sync?: { onSync: () => void; syncing: boolean };
   addRow?: AddAsRow;
   share?: { shared: boolean; onChange: (shared: boolean) => void; disabled?: boolean };
+  /** Opens "Allow for…" for the household's limited profiles; primary profile only. */
+  onAllowForProfiles?: () => void;
   onDelete: () => void;
   triggerRef?: Ref<HTMLButtonElement>;
   placement?: "poster" | "row";
@@ -150,6 +162,16 @@ export function CollectionActionsMenu({
       checked: share.shared,
       disabled: share.disabled,
       onCheckedChange: share.onChange,
+    });
+  }
+  if (onAllowForProfiles) {
+    items.push({
+      key: "allow-for-profiles",
+      label: "Allow for…",
+      help: "Let limited profiles watch these titles above their limit",
+      icon: ShieldCheck,
+      group: !share,
+      onSelect: onAllowForProfiles,
     });
   }
   items.push({

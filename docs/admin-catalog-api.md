@@ -131,8 +131,10 @@ with `content_ids`, and drop any the listing no longer returns. Fetch on
 
 `GET /api/v2/admin/catalog/capabilities` reports `item_listing`,
 `item_listing_max_content_ids`, `item_change_events`, true when the socket
-carries those changes, and `item_metadata`, true when items carry the stored
-metadata above and the listing accepts `include_people`. The listing and the events have no Apple, Android, or
+carries those changes, `item_match_hints`, true when
+`GET /api/v2/admin/items/{id}/match/hints` is served, and `item_metadata`, true
+when items carry the stored metadata above and the listing accepts
+`include_people`. The listing and the events have no Apple, Android, or
 Jellyfin compatibility callers; Jellyfin clients read the catalog through their
 own item queries.
 
@@ -610,15 +612,27 @@ guarantee. Detached split identification retains the originating curation author
 
 ### Match repair
 
-`POST /api/v2/admin/items/{id}/match/search` and `/match/apply` require the
-item-scoped `metadata_curation` permission, including the existing item access
-check. Library IDs are strings. Search preserves the existing provider-ID
-normalization, title/year fallback, library selection and provider ranking.
-Its optional `limit` defaults to 100 and accepts 1–500. The response contains
+`POST /api/v2/admin/items/{id}/match/search`, `/match/apply` and
+`GET /api/v2/admin/items/{id}/match/hints` require the item-scoped
+`metadata_curation` permission, including the existing item access check.
+Library IDs are strings. Search preserves the existing provider-ID
+normalization, library selection and provider ranking. An empty `title` falls
+back to the item's title; an absent `year` searches without a year, because the
+stored year belongs to the current match, which is usually the one being
+corrected. The frozen v1 route keeps its fallback to the stored year.
+Search's optional `limit` defaults to 100 and accepts 1–500. The response contains
 `candidates` (never null) and `truncated`; refine the search when truncated.
 This bounds the response, not the provider fetch or normalization work, and
 provides no snapshot or continuation guarantee. The web requests 500 candidates
 and displays the refinement notice when needed.
+
+Hints return the `title`, `year` and `provider_ids` (`tmdb`, `imdb`, `tvdb`)
+the scanner read from the folder and file names of the content group holding
+the item's files in the selected library (`library_id`, required for an item in
+several libraries, as for search). When those files span several groups, the
+one holding most of them wins. Empty values mean the scanner found nothing; the web
+then suggests the item's own title and year. The web fills the Match Item
+fields the admin hasn't edited from the hints and waits for them before it allows a search.
 
 Apply requires nonempty provider IDs and runs the synchronous metadata
 pipeline. It returns `content_id` and `updated`; it is not a queued job. The
@@ -649,7 +663,9 @@ array. No current web, native or Jellyfin consumer needs migration for this rout
 `items`, `page`, `current`, and optional `provider_errors`. Pages default to 50
 choices and accept `limit` 1–200. On movie and series lists, local sidecar
 choices come first, in discovery order. Provider choices follow by rating,
-highest first; choice metadata breaks ties, so the order is stable.
+highest first; on a season list the season's own images come before the show
+artwork offered as a fallback, each group by rating. Choice metadata breaks
+ties, so the order is stable.
 Continuation binds the content ID, authority, limit and complete choice digest.
 Expiring display URLs are excluded from that digest. A provider choice change
 returns `invalid_cursor` and requires reloading. Each page fetches and resolves

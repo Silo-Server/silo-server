@@ -772,3 +772,22 @@ func TestViewerResolverContentAccessOnlyIgnoresHiddenLibraries(t *testing.T) {
 		})
 	}
 }
+
+// A household's allowances lift only the profile's own limits: a custom scope
+// policy that sets a rating override or a different advisory-age limit wins.
+func TestMaturityOverriddenRejectsAllowancesUnderPolicyLimits(t *testing.T) {
+	profile := &userstore.Profile{MaxContentRating: "PG", MaxAdvisoryAge: 10}
+	for _, tc := range []struct {
+		name     string
+		decision ScopeDecision
+		want     bool
+	}{
+		{"profile limits only", ScopeDecision{MaxContentRating: "PG", MaxAdvisoryAge: 10}, false},
+		{"rating override", ScopeDecision{MaxContentRating: "PG", MaxContentRatingOverride: "G", MaxAdvisoryAge: 10}, true},
+		{"advisory age lowered", ScopeDecision{MaxContentRating: "PG", MaxAdvisoryAge: 7}, true},
+	} {
+		if got := maturityOverridden(tc.decision, profile); got != tc.want {
+			t.Errorf("%s: maturityOverridden = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

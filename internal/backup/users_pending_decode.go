@@ -44,22 +44,20 @@ type decodeResult struct {
 	err     error
 }
 
-// startPendingDecodes starts decoding docs' documents on up to workers
+// startPendingDecodes starts decoding doc's data documents on up to workers
 // goroutines; stop ends it.
-func startPendingDecodes(docs []UserDocument, workers int) *pendingDecodes {
+func startPendingDecodes(doc *UserDocument, workers int) *pendingDecodes {
 	d := &pendingDecodes{index: map[decodeKey]int{}, window: make(chan struct{}, max(workers, 1)), done: make(chan struct{})}
-	for i := range docs {
-		for j := range docs[i].Profiles {
-			e := &docs[i].Profiles[j]
-			for _, t := range userDataTypes {
-				prepare, ok := t.(pendingPreparer)
-				data, has := e.Data[t.ID()]
-				if !ok || !has {
-					continue
-				}
-				d.index[decodeKey{e, t.ID()}] = len(d.jobs)
-				d.jobs = append(d.jobs, decodeJob{prepare: prepare, data: data, out: make(chan decodeResult, 1)})
+	for j := range doc.Profiles {
+		e := &doc.Profiles[j]
+		for _, t := range userDataTypes {
+			prepare, ok := t.(pendingPreparer)
+			data, has := e.Data[t.ID()]
+			if !ok || !has {
+				continue
 			}
+			d.index[decodeKey{e, t.ID()}] = len(d.jobs)
+			d.jobs = append(d.jobs, decodeJob{prepare: prepare, data: data, out: make(chan decodeResult, 1)})
 		}
 	}
 	go d.produce()

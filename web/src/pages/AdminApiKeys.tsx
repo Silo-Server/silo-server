@@ -18,11 +18,15 @@ import {
   type AdminAPIKeyMetadata,
 } from "@/api/v2/adminApiKeys";
 import { isCapturedProfileAuthorityActive } from "@/api/client";
+import type { components } from "@/api/v2/schema";
 import { V2ProblemError } from "@/api/v2/request";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
 import {
   Table,
   TableBody,
@@ -54,6 +58,7 @@ import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDate } from "@/lib/datetime";
 
 type Tier = AdminAPIKeyMetadata["rate_tier"];
+type Scope = components["schemas"]["APIKeyScope"];
 
 // `rate_tier` only selects which request rate limit the key's own counter
 // uses (Security & access → rate limits). It never changes what the key can
@@ -70,6 +75,19 @@ function rateLimitLabel(tier: Tier): string {
 function formatRateLimit(limit: { requests_per_second: number; requests_per_minute: number }) {
   const format = new Intl.NumberFormat();
   return `${format.format(limit.requests_per_second)} requests/s, ${format.format(limit.requests_per_minute)}/min`;
+}
+// An empty scope list is how the server stores a full-access key.
+function KeyAccess({ scopes }: { scopes: string[] }) {
+  if (!scopes.length) return <span>Full access</span>;
+  return (
+    <div className="flex max-w-xs flex-wrap gap-1">
+      {scopes.map((scope) => (
+        <Badge key={scope} variant="outline" className="font-mono">
+          {scope}
+        </Badge>
+      ))}
+    </div>
+  );
 }
 function message(error: unknown) {
   return error instanceof Error ? error.message : "The request could not be completed.";
@@ -177,6 +195,7 @@ function ApiKeyManager() {
                     <TableHead>Label</TableHead>
                     <TableHead>User</TableHead>
                     <TableHead>Key prefix</TableHead>
+                    <TableHead>Access</TableHead>
                     <TableHead>Rate limit</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Last Used</TableHead>
@@ -186,7 +205,7 @@ function ApiKeyManager() {
                 <TableBody>
                   {rows.length === 0 && !keys.isError && (
                     <TableRow>
-                      <TableCell colSpan={7}>No API keys yet.</TableCell>
+                      <TableCell colSpan={8}>No API keys yet.</TableCell>
                     </TableRow>
                   )}
                   {rows.map((key) => (
@@ -195,6 +214,9 @@ function ApiKeyManager() {
                       <TableCell>{key.username}</TableCell>
                       <TableCell>
                         <code>{key.key_prefix ? `${key.key_prefix}…` : "Unavailable"}</code>
+                      </TableCell>
+                      <TableCell>
+                        <KeyAccess scopes={key.scopes} />
                       </TableCell>
                       <TableCell>{rateLimitLabel(key.rate_tier)}</TableCell>
                       <TableCell>{formatDate(key.created_at)}</TableCell>
@@ -254,7 +276,11 @@ function ApiKeyManager() {
             <DialogDescription>The full credential is shown only once.</DialogDescription>
           </DialogHeader>
           {createOpen && (
-            <CreateApiKeyForm onClose={() => setCreateOpen(false)} onBusy={setCreating} />
+            <CreateApiKeyForm
+              scopes={capability.data?.scopes ?? []}
+              onClose={() => setCreateOpen(false)}
+              onBusy={setCreating}
+            />
           )}
         </DialogContent>
       </Dialog>
@@ -381,9 +407,11 @@ function ApiKeyEditor({
   );
 }
 function CreateApiKeyForm({
+  scopes,
   onClose,
   onBusy,
 }: {
+  scopes: Scope[];
   onClose: () => void;
   onBusy: (busy: boolean) => void;
 }) {
@@ -393,19 +421,28 @@ function CreateApiKeyForm({
   const [profileContext] = useState(captureAdminApiKeyAuthority);
   const [label, setLabel] = useState("");
   const [userId, setUserId] = useState(String(user?.id ?? ""));
+  const [access, setAccess] = useState<"full" | "scoped">("full");
+  const [chosen, setChosen] = useState<string[]>([]);
+  // The server reads an empty list as full access, so a scoped key needs at
+  // least one scope before it can be created.
+  const scopedWithoutScopes = access === "scoped" && chosen.length === 0;
   const [secret, setSecret] = useState<string | null>(null);
   const [error, setError] = useState("");
   const lock = useRef(false);
   const create = useAdminCreateApiKey();
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (lock.current) return;
+    if (lock.current || scopedWithoutScopes) return;
     lock.current = true;
     onBusy(true);
     setError("");
     try {
       const result = await create.mutateAsync({
-        body: { label, ...(userId ? { user_id: userId } : {}) },
+        body: {
+          label,
+          ...(userId ? { user_id: userId } : {}),
+          ...(access === "scoped" ? { scopes: chosen } : {}),
+        },
         profileContext,
       });
       if (isCapturedProfileAuthorityActive(profileContext)) setSecret(result.key);
@@ -471,13 +508,70 @@ function CreateApiKeyForm({
           </SelectContent>
         </Select>
       </div>
+      {scopes.length > 0 && (
+        <fieldset className="flex min-w-0 flex-col gap-2">
+          <legend className="mb-2 text-sm font-medium">Access</legend>
+          <RadioGroup
+            value={access}
+            onValueChange={(value) => setAccess(value as "full" | "scoped")}
+            aria-label="Access"
+          >
+            <RadioCardItem
+              value="full"
+              label="Full access"
+              hint="Everything the selected account can do."
+            />
+            <RadioCardItem
+              value="scoped"
+              label="Selected scopes"
+              hint="Only the requests the chosen scopes allow."
+            />
+          </RadioGroup>
+          {access === "scoped" && (
+            <div className="flex flex-col gap-3 pt-1">
+              {scopes.map((scope) => {
+                const id = `key-scope-${scope.name}`;
+                return (
+                  <div key={scope.name} className="flex items-start gap-3">
+                    <Checkbox
+                      id={id}
+                      className="mt-0.5"
+                      checked={chosen.includes(scope.name)}
+                      onCheckedChange={(value) =>
+                        setChosen((current) =>
+                          value === true
+                            ? [...current, scope.name]
+                            : current.filter((name) => name !== scope.name),
+                        )
+                      }
+                      aria-describedby={`${id}-description`}
+                    />
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <Label htmlFor={id} className="font-mono text-sm break-all">
+                        {scope.name}
+                      </Label>
+                      <p id={`${id}-description`} className="text-muted-foreground text-sm">
+                        {scope.description}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="text-muted-foreground text-sm">
+                Scopes only narrow a key: admin scopes work only on an admin account&apos;s key. A
+                key&apos;s scopes can&apos;t be changed later.
+              </p>
+            </div>
+          )}
+        </fieldset>
+      )}
       {users.isError && (
         <p role="alert">
           The user list could not be refreshed. The selected account remains unchanged.
         </p>
       )}
       {error && <p role="alert">{error}</p>}
-      <Button type="submit" disabled={create.isPending}>
+      <Button type="submit" disabled={create.isPending || scopedWithoutScopes}>
         {create.isPending ? "Creating…" : "Create"}
       </Button>
     </form>

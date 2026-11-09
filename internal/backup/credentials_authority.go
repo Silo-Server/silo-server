@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/requests"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // accountAuthority is what an account may do: its rank (the Owner over
@@ -36,7 +37,7 @@ type accountAuthority struct {
 // profileLimits are a profile's protections and restrictions: its PIN,
 // whether it manages the household (the primary profile), a child
 // profile, its rating and advisory-age ceilings, its library restriction,
-// and its playback-quality ceiling.
+// its playback-quality ceiling, and the titles allowed above its ceilings.
 type profileLimits struct {
 	pin                bool
 	primary            bool
@@ -47,6 +48,23 @@ type profileLimits struct {
 	restricted         bool
 	libraries          []int
 	quality            string
+	// allowedTitles are the titles the profile may watch above its
+	// ceilings: its title allowances and the titles of its live-allowed
+	// collections, resolved as the access scope resolves them.
+	allowedTitles []string
+	// directTitles are its own title allowances, every row: allowedTitles
+	// stops at userstore.MaxAllowedTitles, so a row past it would be
+	// invisible to the comparison yet could become effective later.
+	directTitles []string
+	// allowedCollections are the collections it is allowed live. They are
+	// compared on their own: a collection empty today resolves no title, yet
+	// allows whatever is added to it later.
+	allowedCollections []string
+	// collectionTitles are every member of those collections, uncapped:
+	// allowedTitles reads only a bounded number of live-collection entries,
+	// so a member past that bound would be invisible to the comparison yet
+	// could become effective later.
+	collectionTitles []string
 }
 
 // readAuthority reads the authority of the accounts ids in tx's database;
@@ -102,11 +120,16 @@ func roleRank(user *models.User) int {
 }
 
 func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]profileLimits, error) {
+	allowedTitles, directTitles, allowedCollections, collectionTitles, err := allowanceSQL(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT p.id, coalesce(p.pin_hash, '') <> '', p.is_primary, p.is_child, coalesce(p.max_content_rating, ''), p.max_advisory_age::int,
 			p.require_advisory_age, p.library_restrictions_enabled,
 			coalesce((SELECT array_agg(a.library_id ORDER BY a.library_id) FROM user_profile_allowed_libraries a WHERE a.user_id = p.user_id AND a.profile_id = p.id), '{}'),
-			coalesce(p.max_playback_quality, '')
+			coalesce(p.max_playback_quality, ''),
+			`+allowedTitles+`, `+directTitles+`, `+allowedCollections+`, `+collectionTitles+`
 		FROM user_profiles p WHERE p.user_id = $1`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("reading account %d's profiles: %w", userID, err)
@@ -117,12 +140,36 @@ func readProfileLimits(ctx context.Context, tx pgx.Tx, userID int) (map[string]p
 		var id string
 		var p profileLimits
 		if err := rows.Scan(&id, &p.pin, &p.primary, &p.child, &p.ceiling, &p.advisoryAge, &p.requireAdvisoryAge, &p.restricted, &p.libraries,
-			&p.quality); err != nil {
+			&p.quality, &p.allowedTitles, &p.directTitles, &p.allowedCollections, &p.collectionTitles); err != nil {
 			return nil, err
 		}
 		out[id] = p
 	}
 	return out, rows.Err()
+}
+
+// allowanceSQL is the select expressions for a profile row p's resolved
+// allowed titles, its own title allowances, its allowed collections, and
+// every member of those collections. A backup taken before title allowances
+// existed has neither table, and its profiles allow nothing above their
+// limits.
+func allowanceSQL(ctx context.Context, q queryer) (resolved, direct, collections, members string, err error) {
+	const none = "'{}'::text[]"
+	for _, table := range []string{"profile_title_allowances", "profile_collection_allowances"} {
+		present, err := tableExists(ctx, q, table)
+		if err != nil {
+			return "", "", "", "", err
+		}
+		if !present {
+			return none, none, none, none, nil
+		}
+	}
+	return "ARRAY(" + pgstore.ProfileAllowedTitleIDsSQL("p.user_id", "p.id") + ")",
+		"ARRAY(SELECT ta.content_id FROM profile_title_allowances ta WHERE ta.user_id = p.user_id AND ta.profile_id = p.id ORDER BY 1)",
+		"ARRAY(SELECT ca.collection_id FROM profile_collection_allowances ca WHERE ca.user_id = p.user_id AND ca.profile_id = p.id ORDER BY 1)",
+		`ARRAY(SELECT DISTINCT ci.media_item_id FROM profile_collection_allowances ca
+			JOIN user_personal_collection_items ci ON ci.user_id = ca.user_id AND ci.collection_id = ca.collection_id
+			WHERE ca.user_id = p.user_id AND ca.profile_id = p.id ORDER BY 1)`, nil
 }
 
 // widerThan reports whether restored grants anything live does not: a
@@ -192,6 +239,26 @@ func (p profileLimits) looserThan(live profileLimits) bool {
 			if !slices.Contains(live.libraries, id) {
 				return true
 			}
+		}
+	}
+	return hasOther(p.allowedTitles, live.allowedTitles) || hasOther(p.directTitles, live.directTitles) ||
+		hasOther(p.allowedCollections, live.allowedCollections) || hasOther(p.collectionTitles, live.collectionTitles)
+}
+
+// hasOther reports whether restored holds an ID live does not. The lists can
+// be long (every member of a profile's allowed collections), so live is read
+// into a set rather than searched for each ID.
+func hasOther(restored, live []string) bool {
+	if len(restored) == 0 {
+		return false
+	}
+	have := make(map[string]struct{}, len(live))
+	for _, id := range live {
+		have[id] = struct{}{}
+	}
+	for _, id := range restored {
+		if _, ok := have[id]; !ok {
+			return true
 		}
 	}
 	return false

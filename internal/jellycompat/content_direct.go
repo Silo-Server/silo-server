@@ -293,9 +293,15 @@ func clampMaxContentRating(existing, requested string) string {
 // clampMaturityLimits returns the viewer's maturity limits with the content
 // rating ceiling clamped to a Jellyfin client's MaxOfficialRating (see
 // clampMaxContentRating). Every other limit passes through unchanged, so a
-// client can tighten the ceiling but never drop the advisory-age limit.
+// client can tighten the ceiling but never drop the advisory-age limit. A
+// client that tightens the ceiling asked for less than the profile may see,
+// so the profile's allowed titles stop passing it too.
 func clampMaturityLimits(limits access.MaturityLimits, requested string) access.MaturityLimits {
-	limits.MaxContentRating = clampMaxContentRating(limits.MaxContentRating, requested)
+	clamped := clampMaxContentRating(limits.MaxContentRating, requested)
+	if clamped != limits.MaxContentRating {
+		limits.AllowedTitleIDs = nil
+	}
+	limits.MaxContentRating = clamped
 	return limits
 }
 
