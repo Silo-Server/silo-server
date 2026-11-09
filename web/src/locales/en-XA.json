@@ -83,6 +83,60 @@
       "value": "⟦Šûñđåý~~~⟧"
     }
   ],
+  "catalog.sort.added": [
+    {
+      "type": 0,
+      "value": "⟦Đåţé Åđđéđ~~~~⟧"
+    }
+  ],
+  "catalog.sort.author": [
+    {
+      "type": 0,
+      "value": "⟦Åûţĥöŕ~~~⟧"
+    }
+  ],
+  "catalog.sort.imdbRating": [
+    {
+      "type": 0,
+      "value": "⟦ÎṀĐƀ Ŕåţîñĝ~~~~~⟧"
+    }
+  ],
+  "catalog.sort.narrator": [
+    {
+      "type": 0,
+      "value": "⟦Ñåŕŕåţöŕ~~~~⟧"
+    }
+  ],
+  "catalog.sort.released": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļéåšé Đåţé~~~~~⟧"
+    }
+  ],
+  "catalog.sort.resolution": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéšöļûţîöñ~~~~⟧"
+    }
+  ],
+  "catalog.sort.series": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕîéš~~~⟧"
+    }
+  ],
+  "catalog.sort.title": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļé~~⟧"
+    }
+  ],
+  "catalog.sort.year": [
+    {
+      "type": 0,
+      "value": "⟦Ýéåŕ~~⟧"
+    }
+  ],
   "common.back": [
     {
       "type": 0,
@@ -539,6 +593,20 @@
       "value": "⟦Šöɱé ṽåļûéš åŕéñ’ţ ṽåļîđ. Çĥéçķ ţĥéɱ åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "home.section.becauseYouEnjoy": [
+    {
+      "type": 0,
+      "value": "⟦Ɓéçåûšé ýöû éñĵöý "
+    },
+    {
+      "type": 1,
+      "value": "genres"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
   "home.section.becauseYouWatched": [
     {
       "type": 0,
@@ -577,6 +645,12 @@
       "value": "⟦Çöñţîñûé Ŵåţçĥîñĝ~~~~~~~⟧"
     }
   ],
+  "home.section.forYou": [
+    {
+      "type": 0,
+      "value": "⟦Ƒöŕ Ýöû~~~⟧"
+    }
+  ],
   "home.section.hiddenGems": [
     {
       "type": 0,
@@ -601,10 +675,22 @@
       "value": "⟦Ñéẋţ Ûþ~~~⟧"
     }
   ],
+  "home.section.pickedFromYourHistory": [
+    {
+      "type": 0,
+      "value": "⟦Þîçķéđ ƒŕöɱ ýöûŕ ĥîšţöŕý~~~~~~~~~~⟧"
+    }
+  ],
   "home.section.popularOnServer": [
     {
       "type": 0,
       "value": "⟦Þöþûļåŕ öñ Ţĥîš Šéŕṽéŕ~~~~~~~~~⟧"
+    }
+  ],
+  "home.section.profilesLikeYouEnjoyed": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļéš Ļîķé Ýöû Éñĵöýéđ~~~~~~~~~~⟧"
     }
   ],
   "home.section.randomPicks": [
@@ -777,6 +863,12 @@
       "value": "⟦Ţöþ Ŕåţéđ ŢṼ~~~~~⟧"
     }
   ],
+  "home.section.trendingOnServer": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ öñ Šéŕṽéŕ~~~~~~~~⟧"
+    }
+  ],
   "home.section.trendingThisWeek": [
     {
       "type": 0,
@@ -801,6 +893,198 @@
       "value": "⟦Îñţŕö šķîþþéđ~~~~~~⟧"
     }
   ],
+  "language.ar": [
+    {
+      "type": 0,
+      "value": "⟦Åŕåƀîç~~~⟧"
+    }
+  ],
+  "language.cs": [
+    {
+      "type": 0,
+      "value": "⟦Çžéçĥ~~⟧"
+    }
+  ],
+  "language.da": [
+    {
+      "type": 0,
+      "value": "⟦Đåñîšĥ~~~⟧"
+    }
+  ],
+  "language.de": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéŕɱåñ~~~⟧"
+    }
+  ],
+  "language.el": [
+    {
+      "type": 0,
+      "value": "⟦Ĝŕééķ~~⟧"
+    }
+  ],
+  "language.en": [
+    {
+      "type": 0,
+      "value": "⟦Éñĝļîšĥ~~~⟧"
+    }
+  ],
+  "language.es": [
+    {
+      "type": 0,
+      "value": "⟦Šþåñîšĥ~~~⟧"
+    }
+  ],
+  "language.fa": [
+    {
+      "type": 0,
+      "value": "⟦Þéŕšîåñ~~~⟧"
+    }
+  ],
+  "language.fi": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîññîšĥ~~~⟧"
+    }
+  ],
+  "language.fr": [
+    {
+      "type": 0,
+      "value": "⟦Ƒŕéñçĥ~~~⟧"
+    }
+  ],
+  "language.he": [
+    {
+      "type": 0,
+      "value": "⟦Ĥéƀŕéŵ~~~⟧"
+    }
+  ],
+  "language.hi": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîñđî~~⟧"
+    }
+  ],
+  "language.hu": [
+    {
+      "type": 0,
+      "value": "⟦Ĥûñĝåŕîåñ~~~~⟧"
+    }
+  ],
+  "language.id": [
+    {
+      "type": 0,
+      "value": "⟦Îñđöñéšîåñ~~~~⟧"
+    }
+  ],
+  "language.is": [
+    {
+      "type": 0,
+      "value": "⟦Îçéļåñđîç~~~~⟧"
+    }
+  ],
+  "language.it": [
+    {
+      "type": 0,
+      "value": "⟦Îţåļîåñ~~~⟧"
+    }
+  ],
+  "language.ja": [
+    {
+      "type": 0,
+      "value": "⟦Ĵåþåñéšé~~~~⟧"
+    }
+  ],
+  "language.ko": [
+    {
+      "type": 0,
+      "value": "⟦Ķöŕéåñ~~~⟧"
+    }
+  ],
+  "language.nl": [
+    {
+      "type": 0,
+      "value": "⟦Đûţçĥ~~⟧"
+    }
+  ],
+  "language.no": [
+    {
+      "type": 0,
+      "value": "⟦Ñöŕŵéĝîåñ~~~~⟧"
+    }
+  ],
+  "language.pl": [
+    {
+      "type": 0,
+      "value": "⟦Þöļîšĥ~~~⟧"
+    }
+  ],
+  "language.pt": [
+    {
+      "type": 0,
+      "value": "⟦Þöŕţûĝûéšé~~~~⟧"
+    }
+  ],
+  "language.ro": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöɱåñîåñ~~~~⟧"
+    }
+  ],
+  "language.ru": [
+    {
+      "type": 0,
+      "value": "⟦Ŕûššîåñ~~~⟧"
+    }
+  ],
+  "language.sv": [
+    {
+      "type": 0,
+      "value": "⟦Šŵéđîšĥ~~~⟧"
+    }
+  ],
+  "language.ta": [
+    {
+      "type": 0,
+      "value": "⟦Ţåɱîļ~~⟧"
+    }
+  ],
+  "language.te": [
+    {
+      "type": 0,
+      "value": "⟦Ţéļûĝû~~~⟧"
+    }
+  ],
+  "language.th": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥåî~~⟧"
+    }
+  ],
+  "language.tr": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕķîšĥ~~~⟧"
+    }
+  ],
+  "language.uk": [
+    {
+      "type": 0,
+      "value": "⟦Ûķŕåîñîåñ~~~~⟧"
+    }
+  ],
+  "language.vi": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéţñåɱéšé~~~~⟧"
+    }
+  ],
+  "language.zh": [
+    {
+      "type": 0,
+      "value": "⟦Çĥîñéšé~~~⟧"
+    }
+  ],
   "marker.skipCredits": [
     {
       "type": 0,
@@ -817,6 +1101,58 @@
     {
       "type": 0,
       "value": "⟦Ĝö Ɓåçķ~~~⟧"
+    }
+  ],
+  "player.seekInterval.choice": [
+    {
+      "type": 6,
+      "value": "seconds",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéçöñđ~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " šéçöñđš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "requests.error.create": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šûƀɱîţ ŕéǫûéšţ~~~~~~~~~~⟧"
+    }
+  ],
+  "requests.error.follow": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþđåţé ñöţîƒîçåţîöñ~~~~~~~~~~~~⟧"
     }
   ],
   "settings.appLanguage.matchDevice": [
@@ -2251,6 +2587,30 @@
     {
       "type": 0,
       "value": "⟦Šĥöŵ ţîţļé åŕţ~~~~~~⟧"
+    }
+  ],
+  "settingsManifest.watch_party.guest_control_policy.description": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥö çåñ þļåý åñđ þåûšé îñ Ŵåţçĥ Þåŕţîéš ýöû ĥöšţ. Çĥåñĝîñĝ îţ îñ å þåŕţý šåṽéš îţ ƒöŕ ýöûŕ ñéẋţ öñé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "settingsManifest.watch_party.guest_control_policy.label": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ Þåŕţý þļåýƀåçķ çöñţŕöļš~~~~~~~~~~~~⟧"
+    }
+  ],
+  "settingsManifest.watch_party.guest_control_policy.option.guest_play_pause": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöšţ åñđ ĝûéšţš~~~~~~⟧"
+    }
+  ],
+  "settingsManifest.watch_party.guest_control_policy.option.host_only": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöšţ öñļý~~~~⟧"
     }
   ],
   "subtitleSearch.hearingImpaired": [
@@ -5247,66 +5607,6 @@
       "value": "⟦Ļööķûþ~~~⟧"
     }
   ],
-  "web.admin.activity.method.direct.description": [
-    {
-      "type": 0,
-      "value": "⟦Ţĥé öŕîĝîñåļ ƒîļé îš đéļîṽéŕéđ ŵîţĥöûţ ɱöđîƒîçåţîöñ.~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.activity.method.direct.label": [
-    {
-      "type": 0,
-      "value": "⟦Đîŕéçţ Þļåý~~~~~⟧"
-    }
-  ],
-  "web.admin.activity.method.directStream.description": [
-    {
-      "type": 0,
-      "value": "⟦Ṽîđéö îš çöþîéđ ŵîţĥöûţ ŕé-éñçöđîñĝ; åûđîö îš ţŕåñšçöđéđ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.activity.method.directStream.label": [
-    {
-      "type": 0,
-      "value": "⟦Đîŕéçţ Šţŕéåɱ~~~~~~⟧"
-    }
-  ],
-  "web.admin.activity.method.remux.description": [
-    {
-      "type": 0,
-      "value": "⟦Åûđîö åñđ ṽîđéö åŕé çöþîéđ îñţö å šţŕéåɱîñĝ çöñţåîñéŕ ŵîţĥöûţ ŕé-éñçöđîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.activity.method.remux.label": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéɱûẋ~~⟧"
-    }
-  ],
-  "web.admin.activity.method.transcode.description": [
-    {
-      "type": 0,
-      "value": "⟦Ṽîđéö îš ŕé-éñçöđéđ; åûđîö ɱåý ƀé çöþîéđ öŕ ţŕåñšçöđéđ.~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.activity.method.transcode.label": [
-    {
-      "type": 0,
-      "value": "⟦Ţŕåñšçöđé~~~~⟧"
-    }
-  ],
-  "web.admin.activity.method.unknown.description": [
-    {
-      "type": 0,
-      "value": "⟦Ţĥé šéŕṽéŕ ĥåš ñöţ ŕéþöŕţéđ å ŕéçöĝñîžéđ þļåýƀåçķ ɱéţĥöđ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.activity.method.unknown.label": [
-    {
-      "type": 0,
-      "value": "⟦Ûñķñöŵñ~~~⟧"
-    }
-  ],
   "web.admin.activity.page.liveCount": [
     {
       "type": 6,
@@ -5705,18 +6005,6 @@
       "value": "⟦Šöŕţ~~⟧"
     }
   ],
-  "web.admin.activity.subtitle.movie": [
-    {
-      "type": 0,
-      "value": "⟦Ṁöṽîé~~⟧"
-    }
-  ],
-  "web.admin.activity.subtitle.series": [
-    {
-      "type": 0,
-      "value": "⟦Šéŕîéš~~~⟧"
-    }
-  ],
   "web.admin.activity.summary.byNode": [
     {
       "type": 0,
@@ -5803,20 +6091,6 @@
     {
       "type": 0,
       "value": "⟦Ûñķñöŵñ šöûŕçé~~~~~~⟧"
-    }
-  ],
-  "web.admin.activity.title.file": [
-    {
-      "type": 0,
-      "value": "⟦Ƒîļé #"
-    },
-    {
-      "type": 1,
-      "value": "id"
-    },
-    {
-      "type": 0,
-      "value": "~~~⟧"
     }
   ],
   "web.admin.activity.toneMap.hardware": [
@@ -14125,9 +14399,8 @@
               "value": "Ŕéšţöŕé ƒŕöɱ "
             },
             {
-              "type": 8,
-              "value": "name",
-              "children": []
+              "type": 1,
+              "value": "name"
             },
             {
               "type": 0,
@@ -17582,9 +17855,8 @@
       "value": "⟦Ĥîđé "
     },
     {
-      "type": 8,
-      "value": "name",
-      "children": []
+      "type": 1,
+      "value": "name"
     },
     {
       "type": 0,
@@ -17763,9 +18035,8 @@
       "value": "⟦Šĥöŵ "
     },
     {
-      "type": 8,
-      "value": "name",
-      "children": []
+      "type": 1,
+      "value": "name"
     },
     {
       "type": 0,
@@ -17966,9 +18237,8 @@
         "weekday": {
           "value": [
             {
-              "type": 8,
-              "value": "day",
-              "children": []
+              "type": 1,
+              "value": "day"
             },
             {
               "type": 0,
@@ -18069,9 +18339,8 @@
         "weekday": {
           "value": [
             {
-              "type": 8,
-              "value": "day",
-              "children": []
+              "type": 1,
+              "value": "day"
             },
             {
               "type": 0,
@@ -21506,6 +21775,54 @@
       "value": "⟦Çöûļđñ'ţ çĥåñĝé îţ~~~~~~~~⟧"
     }
   ],
+  "web.admin.common.accounts.role": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "role",
+      "options": {
+        "owner": {
+          "value": [
+            {
+              "type": 0,
+              "value": "öŵñéŕ"
+            }
+          ]
+        },
+        "admin": {
+          "value": [
+            {
+              "type": 0,
+              "value": "åđɱîñ"
+            }
+          ]
+        },
+        "user": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ûšéŕ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "role"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
   "web.admin.common.adminUserSignIn.breakGlass.failed": [
     {
       "type": 0,
@@ -22202,6 +22519,138 @@
       "value": ".~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.common.autoscan.connectionCreateUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţîöñ çŕéåţîöñ çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Ŕéƒŕéšĥ çöññéçţîöñš ƀéƒöŕé šûƀɱîţţîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.connectionCreated": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ çöññéçţîöñ çŕéåţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.connectionDeleteUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţîöñ đéļéţîöñ çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Ŕéƒŕéšĥ çöññéçţîöñš åñđ çĥéçķ šöûŕçé ƀîñđîñĝš ƀéƒöŕé šûƀɱîţţîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.connectionDeleted": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ çöññéçţîöñ đéļéţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.connectionUpdateUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţîöñ ûþđåţé çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Ŕéƒŕéšĥ çöññéçţîöñš ƀéƒöŕé šûƀɱîţţîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.connectionUpdated": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ çöññéçţîöñ ûþđåţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.pollAlreadyRunning": [
+    {
+      "type": 0,
+      "value": "⟦Å þöļļ îš åļŕéåđý ŕûññîñĝ åñđ ɱåý šķîþ ŕéçéñţļý þöļļéđ šöûŕçéš. Þŕéšš Ŕûñ ñöŵ åĝåîñ ŵĥéñ îţ ƒîñîšĥéš ţö þöļļ éṽéŕý šöûŕçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.pollStartUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ šţåŕţ çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Çĥéçķ ţåšķ åñđ åçţîṽîţý šţåţé ƀéƒöŕé ŕûññîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.pollStarted": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ þöļļ šţåŕţéđ öñ ţĥîš šéŕṽéŕ þŕöçéšš. Çĥéçķ åçţîṽîţý ƒöŕ šöûŕçé öûţçöɱéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.rewriteSuggestionsFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ ŕéåđ ŕéŵŕîţé šûĝĝéšţîöñš~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.settingsSaved": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ šéţţîñĝš šåṽéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.settingsSavedNoRescheduler": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš šåṽéđ; ñö þöļļ-ţåšķ ŕéšçĥéđûļéŕ îš çöñƒîĝûŕéđ öñ ţĥîš šéŕṽéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.settingsSavedRescheduleFailed": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš šåṽéđ, ƀûţ þöļļ-ţåšķ ŕéšçĥéđûļîñĝ ƒåîļéđ. Ŕûñţîɱé ɱåý ŕéţåîñ îţš þŕéṽîöûš šçĥéđûļé ûñţîļ ŕéšţåŕţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.settingsUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš þéŕšîšţéñçé çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Ŕéļöåđ šéţţîñĝš ƀéƒöŕé šûƀɱîţţîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.sourceCreated": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ šöûŕçé çŕéåţéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.sourceDeleteUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Šöûŕçé đéļéţîöñ çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Ŕéƒŕéšĥ šöûŕçéš ƀéƒöŕé šûƀɱîţţîñĝ åĝåîñ; ŕûññîñĝ ŵöŕķ ɱåý çöñţîñûé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.sourceDeleted": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ šöûŕçé đéļéţéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.sourceSaved": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ šöûŕçé šåṽéđ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.sourceWriteUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Šöûŕçé ŵŕîţé çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Ŕéƒŕéšĥ šöûŕçéš ƀéƒöŕé åñöţĥéŕ éẋþļîçîţ šûƀɱîššîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.webhookCreated": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ éñđþöîñţ çŕéåţéđ öŕ åļŕéåđý çöñƒîĝûŕéđ~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.webhookRotated": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ ÛŔĻ ŕöţåţéđ. Çöþý ţĥé ñéŵ ÛŔĻ îñţö Šöñåŕŕ öŕ Ŕåđåŕŕ; ţĥé öļđ öñé ñö ļöñĝéŕ ŵöŕķš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.autoscan.webhookUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ çĥåñĝé çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Ŕéƒŕéšĥ šöûŕçé šţåţé ƀéƒöŕé åñöţĥéŕ éẋþļîçîţ šûƀɱîššîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.common.brandingAssetField.previewAlt": [
     {
       "type": 0,
@@ -22868,36 +23317,6 @@
       "value": "⟦Öṽéŕŕîđé îš šéţ öñ ţĥîš đéṽîçé~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.common.deviceOverrides.platformKind.desktop": [
-    {
-      "type": 0,
-      "value": "⟦Đéšķţöþ~~~⟧"
-    }
-  ],
-  "web.admin.common.deviceOverrides.platformKind.mobile": [
-    {
-      "type": 0,
-      "value": "⟦Ṁöƀîļé~~~⟧"
-    }
-  ],
-  "web.admin.common.deviceOverrides.platformKind.tablet": [
-    {
-      "type": 0,
-      "value": "⟦Ţåƀļéţ~~~⟧"
-    }
-  ],
-  "web.admin.common.deviceOverrides.platformKind.tv": [
-    {
-      "type": 0,
-      "value": "⟦ŢṼ~⟧"
-    }
-  ],
-  "web.admin.common.deviceOverrides.platformKind.unknown": [
-    {
-      "type": 0,
-      "value": "⟦Öţĥéŕ~~⟧"
-    }
-  ],
   "web.admin.common.deviceOverrides.reset": [
     {
       "type": 0,
@@ -22988,9 +23407,8 @@
       "value": "⟦ƒŕöɱ "
     },
     {
-      "type": 8,
-      "value": "name",
-      "children": []
+      "type": 1,
+      "value": "name"
     },
     {
       "type": 0,
@@ -23157,12 +23575,6 @@
     {
       "type": 0,
       "value": "⟦Ûññåɱéđ~~~⟧"
-    }
-  ],
-  "web.admin.common.deviceOverrides.unknownPlatform": [
-    {
-      "type": 0,
-      "value": "⟦Ûñķñöŵñ þļåţƒöŕɱ~~~~~~~⟧"
     }
   ],
   "web.admin.common.deviceOverrides.value.default": [
@@ -25179,6 +25591,868 @@
       "value": "⟦Šéŕîéš~~~⟧"
     }
   ],
+  "web.admin.common.pagination.polls": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵîñĝ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "from"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": "–"
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "to"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "total"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": " þöļļ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵîñĝ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "from"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": "–"
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "to"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "total"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": " þöļļš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.pagination.scans": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵîñĝ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "from"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": "–"
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "to"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "total"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": " šçåñ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šĥöŵîñĝ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "from"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": "–"
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "to"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 8,
+              "value": "num",
+              "children": [
+                {
+                  "type": 1,
+                  "value": "total"
+                }
+              ]
+            },
+            {
+              "type": 0,
+              "value": " šçåñš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.policy.changedConflict": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé þöļîçý çĥåñĝéđ. Ýöûŕ đŕåƒţ åñđ öŕîĝîñåļ ŕéṽîšîöñ åŕé ķéþţ. Ŕéṽîéŵ ţĥé çûŕŕéñţ þöļîçý ƀéƒöŕé šûƀɱîţţîñĝ å ñéŵ çĥåñĝé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.policy.outcomeUnknown": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "fallback"
+    },
+    {
+      "type": 0,
+      "value": " Ţĥé öûţçöɱé ɱåý ƀé ûñķñöŵñ. Ŕéṽîéŵ ţĥé šåṽéđ šţåţé ƀéƒöŕé ţŕýîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.policy.revisionUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ţĥîš þöļîçý ƀéƒöŕé éđîţîñĝ; îţš ŕéṽîšîöñ îš ûñåṽåîļåƀļé.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.policy.savedLoaded": [
+    {
+      "type": 0,
+      "value": "⟦Þöļîçý çĥåñĝé šåṽéđ åţ ĝéñéŕåţîöñ "
+    },
+    {
+      "type": 1,
+      "value": "generation"
+    },
+    {
+      "type": 0,
+      "value": ". Ţĥîš šéŕṽéŕ ļöåđéđ ĝéñéŕåţîöñ "
+    },
+    {
+      "type": 1,
+      "value": "loaded"
+    },
+    {
+      "type": 0,
+      "value": ". Öţĥéŕ šéŕṽéŕš åþþļý çĥåñĝéš îñđéþéñđéñţļý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.policy.savedNotReloaded": [
+    {
+      "type": 0,
+      "value": "⟦Þöļîçý çĥåñĝé šåṽéđ åţ ĝéñéŕåţîöñ "
+    },
+    {
+      "type": 1,
+      "value": "generation"
+    },
+    {
+      "type": 0,
+      "value": ". Ţĥîš šéŕṽéŕ çöûļđ ñöţ ŕéļöåđ îţ. Đö ñöţ ŕéþéåţ ţĥé ŵŕîţé; çĥéçķ ţĥé þöļîçý šéŕṽîçé ƀéƒöŕé ŕéļýîñĝ öñ ţĥé çĥåñĝé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.policy.savedNotifyFailed": [
+    {
+      "type": 0,
+      "value": "⟦Þöļîçý çĥåñĝé šåṽéđ åţ ĝéñéŕåţîöñ "
+    },
+    {
+      "type": 1,
+      "value": "generation"
+    },
+    {
+      "type": 0,
+      "value": ". Ţĥîš šéŕṽéŕ ŕéļöåđéđ ĝéñéŕåţîöñ "
+    },
+    {
+      "type": 1,
+      "value": "loaded"
+    },
+    {
+      "type": 0,
+      "value": ", ƀûţ ñöţîƒîçåţîöñ ƒåîļéđ. Öţĥéŕ šéŕṽéŕš ɱåý šţîļļ ûšé åñ éåŕļîéŕ þöļîçý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.policy.unsupportedDomain": [
+    {
+      "type": 0,
+      "value": "⟦Ûñšûþþöŕţéđ þöļîçý đöɱåîñ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.rateLimits.changedElsewhere": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţé ļîɱîţ šéţţîñĝš çĥåñĝéđ. Ŕéļöåđ åñđ ŕéṽîéŵ ţĥéɱ ƀéƒöŕé šåṽîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.rateLimits.reloadBeforeEditing": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ŕåţé ļîɱîţ šéţţîñĝš ƀéƒöŕé éđîţîñĝ.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.rateLimits.saveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šåṽé ŕåţé ļîɱîţ šéţţîñĝš~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.rateLimits.saved": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţé ļîɱîţ šéţţîñĝš šåṽéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.rateLimits.savedRestartRequired": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţé ļîɱîţ šéţţîñĝš šåṽéđ — ŕéšţåŕţ ţĥé šéŕṽéŕ ţö åþþļý ţĥéɱ~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.adminApproves": [
+    {
+      "type": 0,
+      "value": "⟦åñ åđɱîñ åþþŕöṽéš~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.approvedAutomatically": [
+    {
+      "type": 0,
+      "value": "⟦åþþŕöṽéđ åûţöɱåţîçåļļý~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.blockedAccount": [
+    {
+      "type": 0,
+      "value": "⟦çåñ'ţ ŕéǫûéšţ, ƀéçåûšé Ṁéđîå Ŕéǫûéšţš îš öƒƒ ƒöŕ ţĥîš åççöûñţ~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.blockedGroup": [
+    {
+      "type": 0,
+      "value": "⟦çåñ'ţ ŕéǫûéšţ, ƀéçåûšé "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": " ĥåš ŕéǫûéšţš ţûŕñéđ öƒƒ~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.blockedLegacy": [
+    {
+      "type": 0,
+      "value": "⟦çåñ'ţ ŕéǫûéšţ, ƀéçåûšé åñ öļđ ŕéǫûéšţ šéţţîñĝ ƀļöçķš ţĥîš åççöûñţ~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.blockedServerOff": [
+    {
+      "type": 0,
+      "value": "⟦çåñ'ţ ŕéǫûéšţ, ƀéçåûšé ŕéǫûéšţš åŕé ţûŕñéđ öƒƒ šéŕṽéŕ-ŵîđé~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.errorMaxRequests": [
+    {
+      "type": 0,
+      "value": "⟦Éñţéŕ å ŵĥöļé ñûɱƀéŕ öƒ ŕéǫûéšţš, 0 öŕ ɱöŕé.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.errorWindowDays": [
+    {
+      "type": 0,
+      "value": "⟦Ûšé åţ ļéåšţ 1 đåý.~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.group": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " ĝŕöûþ~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.inheritedFromGroup": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.inheritedFromServer": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕṽéŕ đéƒåûļţ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.inheritedViaGroup": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": " ûšéš ţĥé šéŕṽéŕ đéƒåûļţ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.noLimit": [
+    {
+      "type": 0,
+      "value": "⟦ñö ļîɱîţ~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.noLimitFrom": [
+    {
+      "type": 0,
+      "value": "⟦ñö ļîɱîţ ("
+    },
+    {
+      "type": 1,
+      "value": "source"
+    },
+    {
+      "type": 0,
+      "value": ")~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.noNewRequests": [
+    {
+      "type": 0,
+      "value": "⟦ñö ñéŵ ŕéǫûéšţš (0 "
+    },
+    {
+      "type": 1,
+      "value": "per_window"
+    },
+    {
+      "type": 0,
+      "value": ")~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.noNewRequestsFrom": [
+    {
+      "type": 0,
+      "value": "⟦ñö ñéŵ ŕéǫûéšţš (0 "
+    },
+    {
+      "type": 1,
+      "value": "per_window"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "source"
+    },
+    {
+      "type": 0,
+      "value": ")~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.perWindow": [
+    {
+      "type": 6,
+      "value": "days",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦þéŕ đåý~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦þéŕ "
+            },
+            {
+              "type": 1,
+              "value": "days_text"
+            },
+            {
+              "type": 0,
+              "value": " đåýš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.requestAccess.policy": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "quota"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "approval"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "source"
+    },
+    {
+      "type": 0,
+      "value": ")~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.quota": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ŕéǫûéšţ "
+            },
+            {
+              "type": 1,
+              "value": "per_window"
+            },
+            {
+              "type": 0,
+              "value": "~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ŕéǫûéšţš "
+            },
+            {
+              "type": 1,
+              "value": "per_window"
+            },
+            {
+              "type": 0,
+              "value": "~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.requestAccess.quotaFrom": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ŕéǫûéšţ "
+            },
+            {
+              "type": 1,
+              "value": "per_window"
+            },
+            {
+              "type": 0,
+              "value": " ("
+            },
+            {
+              "type": 1,
+              "value": "source"
+            },
+            {
+              "type": 0,
+              "value": ")~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ŕéǫûéšţš "
+            },
+            {
+              "type": 1,
+              "value": "per_window"
+            },
+            {
+              "type": 0,
+              "value": " ("
+            },
+            {
+              "type": 1,
+              "value": "source"
+            },
+            {
+              "type": 0,
+              "value": ")~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.requestAccess.sourceAccount": [
+    {
+      "type": 0,
+      "value": "⟦šéţ öñ ţĥîš åççöûñţ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.sourceGroup": [
+    {
+      "type": 0,
+      "value": "⟦ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "group"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.sourceServer": [
+    {
+      "type": 0,
+      "value": "⟦šéŕṽéŕ đéƒåûļţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.summaryAdminApproves": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ åþþŕöṽéš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.summaryAutoApproves": [
+    {
+      "type": 0,
+      "value": "⟦Åûţö-åþþŕöṽéš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.summaryCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ŕéǫûéšţ~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ŕéǫûéšţš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.requestAccess.summaryNoLimit": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ŕéǫûéšţ ļîɱîţ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requestAccess.summaryPerWindow": [
+    {
+      "type": 6,
+      "value": "days",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "max"
+            },
+            {
+              "type": 0,
+              "value": " þéŕ đåý~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "max"
+            },
+            {
+              "type": 0,
+              "value": " þéŕ "
+            },
+            {
+              "type": 1,
+              "value": "days_text"
+            },
+            {
+              "type": 0,
+              "value": " đåýš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.requestAccess.unknownGroup": [
+    {
+      "type": 0,
+      "value": "⟦îţš åççéšš ĝŕöûþ~~~~~~~⟧"
+    }
+  ],
   "web.admin.common.requestLimits.approval": [
     {
       "type": 0,
@@ -25299,6 +26573,302 @@
       "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.common.requests.country.ar": [
+    {
+      "type": 0,
+      "value": "⟦Åŕĝéñţîñå~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.at": [
+    {
+      "type": 0,
+      "value": "⟦Åûšţŕîå~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.au": [
+    {
+      "type": 0,
+      "value": "⟦Åûšţŕåļîå~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.be": [
+    {
+      "type": 0,
+      "value": "⟦Ɓéļĝîûɱ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.br": [
+    {
+      "type": 0,
+      "value": "⟦Ɓŕåžîļ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.ca": [
+    {
+      "type": 0,
+      "value": "⟦Çåñåđå~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.ch": [
+    {
+      "type": 0,
+      "value": "⟦Šŵîţžéŕļåñđ~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.cn": [
+    {
+      "type": 0,
+      "value": "⟦Çĥîñå~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.cz": [
+    {
+      "type": 0,
+      "value": "⟦Çžéçĥîå~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.de": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéŕɱåñý~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.dk": [
+    {
+      "type": 0,
+      "value": "⟦Đéñɱåŕķ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.eg": [
+    {
+      "type": 0,
+      "value": "⟦Éĝýþţ~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.es": [
+    {
+      "type": 0,
+      "value": "⟦Šþåîñ~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.fi": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîñļåñđ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.fr": [
+    {
+      "type": 0,
+      "value": "⟦Ƒŕåñçé~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.gb": [
+    {
+      "type": 0,
+      "value": "⟦Ûñîţéđ Ķîñĝđöɱ~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.gr": [
+    {
+      "type": 0,
+      "value": "⟦Ĝŕééçé~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.hk": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöñĝ Ķöñĝ~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.hu": [
+    {
+      "type": 0,
+      "value": "⟦Ĥûñĝåŕý~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.id": [
+    {
+      "type": 0,
+      "value": "⟦Îñđöñéšîå~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.ie": [
+    {
+      "type": 0,
+      "value": "⟦Îŕéļåñđ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.il": [
+    {
+      "type": 0,
+      "value": "⟦Îšŕåéļ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.in": [
+    {
+      "type": 0,
+      "value": "⟦Îñđîå~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.ir": [
+    {
+      "type": 0,
+      "value": "⟦Îŕåñ~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.is": [
+    {
+      "type": 0,
+      "value": "⟦Îçéļåñđ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.it": [
+    {
+      "type": 0,
+      "value": "⟦Îţåļý~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.jp": [
+    {
+      "type": 0,
+      "value": "⟦Ĵåþåñ~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.kr": [
+    {
+      "type": 0,
+      "value": "⟦Šöûţĥ Ķöŕéå~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.mx": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéẋîçö~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.ng": [
+    {
+      "type": 0,
+      "value": "⟦Ñîĝéŕîå~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.nl": [
+    {
+      "type": 0,
+      "value": "⟦Ñéţĥéŕļåñđš~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.no": [
+    {
+      "type": 0,
+      "value": "⟦Ñöŕŵåý~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.nz": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵ Žéåļåñđ~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.ph": [
+    {
+      "type": 0,
+      "value": "⟦Þĥîļîþþîñéš~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.pl": [
+    {
+      "type": 0,
+      "value": "⟦Þöļåñđ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.pt": [
+    {
+      "type": 0,
+      "value": "⟦Þöŕţûĝåļ~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.ru": [
+    {
+      "type": 0,
+      "value": "⟦Ŕûššîå~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.se": [
+    {
+      "type": 0,
+      "value": "⟦Šŵéđéñ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.th": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥåîļåñđ~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.tr": [
+    {
+      "type": 0,
+      "value": "⟦Ţûŕķéý~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.tw": [
+    {
+      "type": 0,
+      "value": "⟦Ţåîŵåñ~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.ua": [
+    {
+      "type": 0,
+      "value": "⟦Ûķŕåîñé~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.us": [
+    {
+      "type": 0,
+      "value": "⟦Ûñîţéđ Šţåţéš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.country.za": [
+    {
+      "type": 0,
+      "value": "⟦Šöûţĥ Åƒŕîçå~~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.decade": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "decade"
+    },
+    {
+      "type": 0,
+      "value": "š~⟧"
+    }
+  ],
+  "web.admin.common.requests.language.cn": [
+    {
+      "type": 0,
+      "value": "⟦Çåñţöñéšé~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.language.ml": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåļåýåļåɱ~~~~⟧"
+    }
+  ],
+  "web.admin.common.requests.language.tl": [
+    {
+      "type": 0,
+      "value": "⟦Ţåĝåļöĝ~~~⟧"
+    }
+  ],
   "web.admin.common.restartBanner.description": [
     {
       "type": 0,
@@ -25363,6 +26933,386 @@
     {
       "type": 0,
       "value": "⟦Šîļö îš šĥûţţîñĝ đöŵñ ţö ŕéšţåŕţ.~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.entireLibrary": [
+    {
+      "type": 0,
+      "value": "⟦Éñţîŕé ļîƀŕåŕý~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.mode.file": [
+    {
+      "type": 0,
+      "value": "⟦Šîñĝļé ƒîļé šçåñ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.mode.library": [
+    {
+      "type": 0,
+      "value": "⟦Ƒûļļ ļîƀŕåŕý šçåñ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.mode.subtree": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţŕéé šçåñ~~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.processingFiles": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöçéššîñĝ ƒîļéš~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.progress": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "message"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "processed"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%)~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.started": [
+    {
+      "type": 0,
+      "value": "⟦Šţåŕţéđ~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.startedDaysAgo": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šţåŕţéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "đ åĝö~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šţåŕţéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "đ åĝö~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.scans.startedHoursAgo": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šţåŕţéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "ĥ åĝö~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šţåŕţéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "ĥ åĝö~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.scans.startedJustNow": [
+    {
+      "type": 0,
+      "value": "⟦Šţåŕţéđ ĵûšţ ñöŵ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.startedMinutesAgo": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šţåŕţéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "ɱ åĝö~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šţåŕţéđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "ɱ åĝö~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.scans.trigger.autoscan": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.trigger.created": [
+    {
+      "type": 0,
+      "value": "⟦Çŕéåţéđ~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.trigger.fileChange": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļé çĥåñĝé~~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.trigger.manual": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåñûåļ~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.trigger.scheduled": [
+    {
+      "type": 0,
+      "value": "⟦Šçĥéđûļéđ~~~~⟧"
+    }
+  ],
+  "web.admin.common.scans.trigger.updated": [
+    {
+      "type": 0,
+      "value": "⟦Ûþđåţéđ~~~⟧"
+    }
+  ],
+  "web.admin.common.sections.deleteFailed": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ƒåîļéđ ţö đéļéţé "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéçţîöñ~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ƒåîļéđ ţö đéļéţé "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéçţîöñš~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.sections.deleted": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Đéļéţéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéçţîöñ~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Đéļéţéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéçţîöñš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.sections.partiallyDeleted": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Đéļéţéđ "
+            },
+            {
+              "type": 1,
+              "value": "deleted"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéçţîöñ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Đéļéţéđ "
+            },
+            {
+              "type": 1,
+              "value": "deleted"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéçţîöñš~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.common.serverActivity.connecting": [
@@ -26007,42 +27957,6 @@
       "value": "⟦Ṽîéŵ åļļ~~~~⟧"
     }
   ],
-  "web.admin.common.signingSecret.copied": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñîñĝ šéçŕéţ çöþîéđ~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.common.signingSecret.copy": [
-    {
-      "type": 0,
-      "value": "⟦Çöþý šîĝñîñĝ šéçŕéţ~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.common.signingSecret.copyFailed": [
-    {
-      "type": 0,
-      "value": "⟦Ƒåîļéđ ţö çöþý ţö çļîþƀöåŕđ~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.common.signingSecret.description": [
-    {
-      "type": 0,
-      "value": "⟦Šîļö šîĝñš éṽéŕý đéļîṽéŕý ŵîţĥ ţĥîš šéçŕéţ šö ýöûŕ ŕéçéîṽéŕ çåñ ṽéŕîƒý îţ. Îţ îš šĥöŵñ öñļý öñçé — šţöŕé îţ öñ ţĥé ŕéçéîṽîñĝ šéŕṽîçé ñöŵ. Ýöû çåñ ŕöţåţé îţ ļåţéŕ îƒ îţ îš ļöšţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.common.signingSecret.saved": [
-    {
-      "type": 0,
-      "value": "⟦Î'ṽé šåṽéđ îţ~~~~~~⟧"
-    }
-  ],
-  "web.admin.common.signingSecret.title": [
-    {
-      "type": 0,
-      "value": "⟦Šåṽé ýöûŕ šîĝñîñĝ šéçŕéţ~~~~~~~~~~⟧"
-    }
-  ],
   "web.admin.common.subtitleAppearanceDialog.createsOverride": [
     {
       "type": 0,
@@ -26523,6 +28437,372 @@
       "value": "⟦ƒåîļéđ~~~⟧"
     }
   ],
+  "web.admin.common.title.header.accessGroups": [
+    {
+      "type": 0,
+      "value": "⟦Åççéšš Ĝŕöûþš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.activity": [
+    {
+      "type": 0,
+      "value": "⟦Åçţîṽîţý~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.apiKeys": [
+    {
+      "type": 0,
+      "value": "⟦ÅÞÎ Ķéýš~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.autoscan": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.autoscanActivity": [
+    {
+      "type": 0,
+      "value": "⟦Åûţöšçåñ Åçţîṽîţý~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.backups": [
+    {
+      "type": 0,
+      "value": "⟦Ɓåçķûþš~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.collections": [
+    {
+      "type": 0,
+      "value": "⟦Çöļļéçţîöñš~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.devices": [
+    {
+      "type": 0,
+      "value": "⟦Đéṽîçéš~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.diagnostics": [
+    {
+      "type": 0,
+      "value": "⟦Çļîéñţ Đîåĝñöšţîçš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.downloads": [
+    {
+      "type": 0,
+      "value": "⟦Đöŵñļöåđš~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.history": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýƀåçķ Ĥîšţöŕý~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.historyImport": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîšţöŕý Îɱþöŕţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.libraries": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕîéš~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.logs": [
+    {
+      "type": 0,
+      "value": "⟦Ļöĝš~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.maintenance": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåîñţéñåñçé~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.markerHistory": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåŕķéŕ Ĥîšţöŕý~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.nodes": [
+    {
+      "type": 0,
+      "value": "⟦Ñöđéš~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.plugin": [
+    {
+      "type": 0,
+      "value": "⟦Þļûĝîñ~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.plugins": [
+    {
+      "type": 0,
+      "value": "⟦Þļûĝîñš~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.policy": [
+    {
+      "type": 0,
+      "value": "⟦Þöļîçý~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.recommendations": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéçöɱɱéñđåţîöñš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.requests": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţš~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.sections": [
+    {
+      "type": 0,
+      "value": "⟦Šéçţîöñš~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.settings": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.subtitles": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļéš~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.task": [
+    {
+      "type": 0,
+      "value": "⟦Ţåšķ~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.tasks": [
+    {
+      "type": 0,
+      "value": "⟦Ţåšķš~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.user": [
+    {
+      "type": 0,
+      "value": "⟦Ûšéŕ~~⟧"
+    }
+  ],
+  "web.admin.common.title.header.users": [
+    {
+      "type": 0,
+      "value": "⟦Ûšéŕš~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.accessGroups": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Åççéšš Ĝŕöûþš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.activity": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Åçţîṽîţý~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.admin": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.apiKeys": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ ÅÞÎ Ķéýš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.autoscan": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Åûţöšçåñ~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.autoscanActivity": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Åûţöšçåñ Åçţîṽîţý~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.backups": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ɓåçķûþš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.collectionEdit": [
+    {
+      "type": 0,
+      "value": "⟦Éđîţ Åđɱîñ Çöļļéçţîöñ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.collectionNew": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵ Åđɱîñ Çöļļéçţîöñ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.collections": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Çöļļéçţîöñš~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.devices": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Đéṽîçéš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.diagnostics": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Çļîéñţ Đîåĝñöšţîçš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.downloads": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Đöŵñļöåđš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.history": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Þļåýƀåçķ Ĥîšţöŕý~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.historyImport": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ĥîšţöŕý Îɱþöŕţ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.libraries": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ļîƀŕåŕîéš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.logs": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ļöĝš~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.maintenance": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ṁåîñţéñåñçé~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.markerHistory": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ṁåŕķéŕ Ĥîšţöŕý~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.nodes": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ñöđéš~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.plugin": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Þļûĝîñ~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.plugins": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Þļûĝîñš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.policy": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Þöļîçý~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.recommendations": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ŕéçöɱɱéñđåţîöñš~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.requests": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ŕéǫûéšţš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.sections": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Šéçţîöñš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.settings": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Šéţţîñĝš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.subtitles": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Šûƀţîţļéš~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.task": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ţåšķ~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.tasks": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ţåšķš~~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.user": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ûšéŕ~~~~⟧"
+    }
+  ],
+  "web.admin.common.title.tab.users": [
+    {
+      "type": 0,
+      "value": "⟦Åđɱîñ Ûšéŕš~~~~~⟧"
+    }
+  ],
   "web.admin.common.trickplay.badge.detail": [
     {
       "type": 0,
@@ -26949,6 +29229,182 @@
     {
       "type": 0,
       "value": "⟦Ƒåîļéđ~~~⟧"
+    }
+  ],
+  "web.admin.common.userProfiles.createFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ çŕéåţé ţĥé þŕöƒîļé~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.userProfiles.created": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé çŕéåţéđ~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.userProfiles.deleteFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ đéļéţé ţĥé þŕöƒîļé~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.userProfiles.deleted": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé đéļéţéđ~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.userProfiles.saveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđñ'ţ šåṽé ţĥé þŕöƒîļé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.clearLearnedLimitFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö çļéåŕ ļéåŕñéđ ļîɱîţ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.deviceOverrideReset": [
+    {
+      "type": 0,
+      "value": "⟦Đéṽîçé öṽéŕŕîđé ŕéšéţ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.deviceOverrideResetFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕéšéţ öṽéŕŕîđé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.deviceOverrideSaveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šåṽé đéṽîçé öṽéŕŕîđé~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.deviceOverrideUpdated": [
+    {
+      "type": 0,
+      "value": "⟦Đéṽîçé öṽéŕŕîđé ûþđåţéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.resetAllDone": [
+    {
+      "type": 0,
+      "value": "⟦Åļļ đéṽîçé öṽéŕŕîđéš ŕéšéţ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.resetAllFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕéšéţ đéṽîçé~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.resetAllRemainingFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ŕéɱåîñîñĝ öṽéŕŕîđé çöûļđ ñöţ ƀé ŕéšéţ.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.resetAllStopped": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ŕéšéţ šţöþþéđ åƒţéŕ "
+            },
+            {
+              "type": 1,
+              "value": "completed"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " öṽéŕŕîđé. Ŕéļöåđ ţĥé šéţţîñĝš ƀéƒöŕé çöñţîñûîñĝ. "
+            },
+            {
+              "type": 1,
+              "value": "reason"
+            },
+            {
+              "type": 0,
+              "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ŕéšéţ šţöþþéđ åƒţéŕ "
+            },
+            {
+              "type": 1,
+              "value": "completed"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " öṽéŕŕîđéš. Ŕéļöåđ ţĥé šéţţîñĝš ƀéƒöŕé çöñţîñûîñĝ. "
+            },
+            {
+              "type": 1,
+              "value": "reason"
+            },
+            {
+              "type": 0,
+              "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.common.users.settingReset": [
+    {
+      "type": 0,
+      "value": "⟦Ûšéŕ šéţţîñĝ ŕéšéţ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.settingResetFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕéšéţ šéţţîñĝ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.settingSaveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šåṽé šéţţîñĝ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.users.settingUpdated": [
+    {
+      "type": 0,
+      "value": "⟦Ûšéŕ šéţţîñĝ ûþđåţéđ~~~~~~~~⟧"
     }
   ],
   "web.admin.dashboard.addSheet.description": [
@@ -33661,14 +36117,8 @@
               "value": "⟦Ţĥé Šîļö åþþ öñ "
             },
             {
-              "type": 8,
-              "value": "owner",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "profile"
-                }
-              ]
+              "type": 1,
+              "value": "profile"
             },
             {
               "type": 0,
@@ -33691,14 +36141,8 @@
               "value": "⟦Ţĥé Šîļö åþþ öñ "
             },
             {
-              "type": 8,
-              "value": "owner",
-              "children": [
-                {
-                  "type": 1,
-                  "value": "profile"
-                }
-              ]
+              "type": 1,
+              "value": "profile"
             },
             {
               "type": 0,
@@ -40586,14 +43030,8 @@
       "value": "⟦Çöûļđñ'ţ ļîšţ "
     },
     {
-      "type": 8,
-      "value": "location",
-      "children": [
-        {
-          "type": 1,
-          "value": "name"
-        }
-      ]
+      "type": 1,
+      "value": "name"
     },
     {
       "type": 0,
@@ -51061,232 +53499,6 @@
       "value": "⟦Ŕéþöšîţöŕý ÛŔĻ~~~~~~⟧"
     }
   ],
-  "web.admin.plugins.schemaForm.hideSection": [
-    {
-      "type": 0,
-      "value": "⟦Ĥîđé~~⟧"
-    }
-  ],
-  "web.admin.plugins.schemaForm.invalid": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " îš îñṽåļîđ~~~~~⟧"
-    }
-  ],
-  "web.admin.plugins.schemaForm.max": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " ɱûšţ ƀé ≤ "
-    },
-    {
-      "type": 1,
-      "value": "max"
-    },
-    {
-      "type": 0,
-      "value": "~~~~~⟧"
-    }
-  ],
-  "web.admin.plugins.schemaForm.maxLength": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦"
-            },
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": " ɱûšţ ƀé åţ ɱöšţ "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " çĥåŕåçţéŕ~~~~~~~~~~~⟧"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦"
-            },
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": " ɱûšţ ƀé åţ ɱöšţ "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " çĥåŕåçţéŕš~~~~~~~~~~~~⟧"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.plugins.schemaForm.min": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " ɱûšţ ƀé ≥ "
-    },
-    {
-      "type": 1,
-      "value": "min"
-    },
-    {
-      "type": 0,
-      "value": "~~~~~⟧"
-    }
-  ],
-  "web.admin.plugins.schemaForm.minLength": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦"
-            },
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": " ɱûšţ ƀé åţ ļéåšţ "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " çĥåŕåçţéŕ~~~~~~~~~~~~⟧"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦"
-            },
-            {
-              "type": 1,
-              "value": "label"
-            },
-            {
-              "type": 0,
-              "value": " ɱûšţ ƀé åţ ļéåšţ "
-            },
-            {
-              "type": 1,
-              "value": "count_text"
-            },
-            {
-              "type": 0,
-              "value": " çĥåŕåçţéŕš~~~~~~~~~~~~⟧"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.admin.plugins.schemaForm.noOptions": [
-    {
-      "type": 0,
-      "value": "⟦Ñö öþţîöñš åṽåîļåƀļé.~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.plugins.schemaForm.notNumber": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " ɱûšţ ƀé å ñûɱƀéŕ~~~~~~~⟧"
-    }
-  ],
-  "web.admin.plugins.schemaForm.required": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "label"
-    },
-    {
-      "type": 0,
-      "value": " îš ŕéǫûîŕéđ~~~~~⟧"
-    }
-  ],
-  "web.admin.plugins.schemaForm.selectPlaceholder": [
-    {
-      "type": 0,
-      "value": "⟦Šéļéçţ~~~⟧"
-    }
-  ],
-  "web.admin.plugins.schemaForm.showSection": [
-    {
-      "type": 0,
-      "value": "⟦Šĥöŵ~~⟧"
-    }
-  ],
   "web.admin.plugins.settings.defaultSchedule": [
     {
       "type": 0,
@@ -55723,414 +57935,6 @@
     {
       "type": 0,
       "value": "⟦ṽîå ŵåţçĥļîšţ~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.admin.empty": [
-    {
-      "type": 0,
-      "value": "⟦Ñö åçţîṽé šîĝñ-îñš ƒöŕ ţĥîš åççöûñţ.~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.admin.groupDescription": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ öûţ öñé çļîéñţ, öŕ éñđ åļļ öƒ ţĥîš åççöûñţ’š šîĝñ-îñš.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.admin.groupTitle": [
-    {
-      "type": 0,
-      "value": "⟦Åçţîṽé šîĝñ-îñš~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.admin.ownerOnly": [
-    {
-      "type": 0,
-      "value": "⟦Öñļý ţĥé šéŕṽéŕ öŵñéŕ çåñ šîĝñ öûţ åñöţĥéŕ åđɱîñ öŕ ţĥé öŵñéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.descriptionClient": [
-    {
-      "type": 0,
-      "value": "⟦Ţĥîš çļîéñţ ŵîļļ ļöšé åççéšš öñ îţš ñéẋţ åûţĥéñţîçåţéđ ŕéǫûéšţ. Îţš öţĥéŕ šéššîöñš åñđ þåššŵöŕđ šţåý ûñçĥåñĝéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.descriptionClientOfUser": [
-    {
-      "type": 0,
-      "value": "⟦Ţĥîš çļîéñţ öñ "
-    },
-    {
-      "type": 1,
-      "value": "username"
-    },
-    {
-      "type": 0,
-      "value": "’š åççöûñţ ŵîļļ ļöšé åççéšš öñ îţš ñéẋţ åûţĥéñţîçåţéđ ŕéǫûéšţ. Îţš öţĥéŕ šéššîöñš åñđ þåššŵöŕđ šţåý ûñçĥåñĝéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.descriptionEverywhere": [
-    {
-      "type": 0,
-      "value": "⟦Éṽéŕý åçţîṽé šîĝñ-îñ ţö "
-    },
-    {
-      "type": 1,
-      "value": "username"
-    },
-    {
-      "type": 0,
-      "value": "’š åççöûñţ ŵîļļ ļöšé åççéšš öñ îţš ñéẋţ åûţĥéñţîçåţéđ ŕéǫûéšţ, îñçļûđîñĝ šéššîöñš ƀéýöñđ ţĥîš ļîšţ. Ţĥé þåššŵöŕđ šţåýš ţĥé šåɱé åñđ öţĥéŕ åççöûñţš šţåý šîĝñéđ îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.descriptionEverywhereThisBrowser": [
-    {
-      "type": 0,
-      "value": "⟦Éṽéŕý åçţîṽé šîĝñ-îñ ţö "
-    },
-    {
-      "type": 1,
-      "value": "username"
-    },
-    {
-      "type": 0,
-      "value": "’š åççöûñţ ŵîļļ ļöšé åççéšš öñ îţš ñéẋţ åûţĥéñţîçåţéđ ŕéǫûéšţ, îñçļûđîñĝ šéššîöñš ƀéýöñđ ţĥîš ļîšţ. Ţĥé þåššŵöŕđ šţåýš ţĥé šåɱé åñđ öţĥéŕ åççöûñţš šţåý šîĝñéđ îñ. Ţĥîš îñçļûđéš ţĥé ƀŕöŵšéŕ ýöû’ŕé ûšîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.descriptionThisBrowser": [
-    {
-      "type": 0,
-      "value": "⟦Ýöû’ļļ ŕéţûŕñ ţö ţĥé šîĝñ-îñ šçŕééñ. Ýöû çåñ šîĝñ îñ åĝåîñ ŵîţĥ ţĥé šåɱé þåššŵöŕđ öŕ šîĝñ-îñ þŕöṽîđéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.playbackNote": [
-    {
-      "type": 0,
-      "value": "⟦Å ṽîđéö åļŕéåđý þļåýîñĝ ɱåý çöñţîñûé ûñţîļ îţš ñéẋţ ŕéǫûéšţ. Šåṽéđ đéṽîçé šéţţîñĝš åŕé ķéþţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.signingOut": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñîñĝ öûţ…~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.titleDevice": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ öûţ "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "?~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.titleEverywhere": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ "
-    },
-    {
-      "type": 1,
-      "value": "username"
-    },
-    {
-      "type": 0,
-      "value": " öûţ éṽéŕýŵĥéŕé?~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.titleFallback": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ öûţ ţĥîš šéššîöñ?~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.dialog.titleThisBrowser": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ öûţ ţĥîš ƀŕöŵšéŕ?~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.error.signOutFailed": [
-    {
-      "type": 0,
-      "value": "⟦Çöûļđñ'ţ šîĝñ öûţ ţĥé šéššîöñ. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.footer.admin": [
-    {
-      "type": 0,
-      "value": "⟦Ļåšţ šééñ ŕéçöŕđš åûţĥéñţîçåţéđ åçţîṽîţý, ûþđåţéđ åţ ɱöšţ öñçé å ɱîñûţé. Öļđéŕ šéššîöñš ɱåý ĥåṽé ñö ŕéçöŕđéđ åçţîṽîţý ýéţ. Šîĝñîñĝ öûţ ķééþš ţĥé þåššŵöŕđ åñđ šåṽéđ đéṽîçé šéţţîñĝš. Öţĥéŕ åççöûñţš šţåý šîĝñéđ îñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.footer.self": [
-    {
-      "type": 0,
-      "value": "⟦Ļåšţ šééñ ŕéçöŕđš åûţĥéñţîçåţéđ åçţîṽîţý, ûþđåţéđ åţ ɱöšţ öñçé å ɱîñûţé. Öļđéŕ šéššîöñš ɱåý ĥåṽé ñö ŕéçöŕđéđ åçţîṽîţý ýéţ. Šîĝñîñĝ öûţ ķééþš ţĥé þåššŵöŕđ åñđ šåṽéđ đéṽîçé šéţţîñĝš. "
-    },
-    {
-      "type": 8,
-      "value": "link",
-      "children": [
-        {
-          "type": 0,
-          "value": "Ṁåñåĝé ýöûŕ åççöûñţ’š þåššŵöŕđ"
-        }
-      ]
-    },
-    {
-      "type": 0,
-      "value": "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.heading": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñéđ-îñ šéššîöñš~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.loadError": [
-    {
-      "type": 0,
-      "value": "⟦Çöûļđñ’ţ ļöåđ šéššîöñš. Ţŕý åĝåîñ.~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.loadMore": [
-    {
-      "type": 0,
-      "value": "⟦Ļöåđ ɱöŕé šéššîöñš~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.loading": [
-    {
-      "type": 0,
-      "value": "⟦Ļöåđîñĝ šéššîöñš…~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.loadingMore": [
-    {
-      "type": 0,
-      "value": "⟦Ļöåđîñĝ…~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.refresh": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéƒŕéšĥ~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.refreshAriaLabel": [
-    {
-      "type": 0,
-      "value": "⟦Ŕéƒŕéšĥ šéššîöñš~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.details": [
-    {
-      "type": 0,
-      "value": "⟦Đéţåîļš~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.detailsAriaLabel": [
-    {
-      "type": 0,
-      "value": "⟦Đéţåîļš ƒöŕ "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.expires": [
-    {
-      "type": 0,
-      "value": "⟦Éẋþîŕéš~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.ipAddress": [
-    {
-      "type": 0,
-      "value": "⟦ÎÞ åđđŕéšš åţ šîĝñ-îñ~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.lastSeen": [
-    {
-      "type": 0,
-      "value": "⟦Ļåšţ šééñ~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.notRecorded": [
-    {
-      "type": 0,
-      "value": "⟦Ñöţ ŕéçöŕđéđ ýéţ~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.notSent": [
-    {
-      "type": 0,
-      "value": "⟦Ñöţ šéñţ~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.signOutAriaLabel": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ öûţ "
-    },
-    {
-      "type": 1,
-      "value": "device"
-    },
-    {
-      "type": 0,
-      "value": "~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.signOutThisBrowser": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ öûţ ţĥîš ƀŕöŵšéŕ~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.signedIn": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñéđ îñ~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.summary": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 8,
-      "value": "status",
-      "children": [
-        {
-          "type": 1,
-          "value": "last_seen"
-        }
-      ]
-    },
-    {
-      "type": 0,
-      "value": " · Šîĝñéđ îñ "
-    },
-    {
-      "type": 1,
-      "value": "date"
-    },
-    {
-      "type": 0,
-      "value": "~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.thisBrowserBadge": [
-    {
-      "type": 0,
-      "value": "⟦Ţĥîš ƀŕöŵšéŕ~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.unknown": [
-    {
-      "type": 0,
-      "value": "⟦Ûñķñöŵñ~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.row.userAgent": [
-    {
-      "type": 0,
-      "value": "⟦Ûšéŕ-Åĝéñţ~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.self.currentDescription": [
-    {
-      "type": 0,
-      "value": "⟦Ţĥé šéššîöñ ýöû’ŕé ûšîñĝ ŕîĝĥţ ñöŵ.~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.self.currentTitle": [
-    {
-      "type": 0,
-      "value": "⟦Ţĥîš ƀŕöŵšéŕ~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.self.othersDescription": [
-    {
-      "type": 0,
-      "value": "⟦Öţĥéŕ ƀŕöŵšéŕš åñđ åþþš ŵîţĥ åççéšš ţö ýöûŕ åççöûñţ.~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.self.othersEmpty": [
-    {
-      "type": 0,
-      "value": "⟦Ñö öţĥéŕ šîĝñéđ-îñ šéššîöñš.~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.self.othersTitle": [
-    {
-      "type": 0,
-      "value": "⟦Öţĥéŕ šîĝñéđ-îñ šéššîöñš~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.signOut": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ öûţ~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.signOutEverywhere": [
-    {
-      "type": 0,
-      "value": "⟦Šîĝñ öûţ éṽéŕýŵĥéŕé~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.subtitle.admin": [
-    {
-      "type": 0,
-      "value": "⟦Ɓŕöŵšéŕš åñđ åþþš šîĝñéđ îñ ţö "
-    },
-    {
-      "type": 1,
-      "value": "username"
-    },
-    {
-      "type": 0,
-      "value": "’š åççöûñţ.~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.subtitle.self": [
-    {
-      "type": 0,
-      "value": "⟦Šéé ŵĥéŕé ýöûŕ åççöûñţ îš šîĝñéđ îñ, åñđ šîĝñ öûţ åñý šéššîöñ ýöû đöñ’ţ ŕéçöĝñîžé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.toast.signedOut": [
-    {
-      "type": 0,
-      "value": "⟦Šéššîöñ šîĝñéđ öûţ~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.sessions.login.toast.signedOutEverywhere": [
-    {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "username"
-    },
-    {
-      "type": 0,
-      "value": " îš šîĝñéđ öûţ éṽéŕýŵĥéŕé~~~~~~~~~~⟧"
     }
   ],
   "web.admin.sessions.playback.action.message": [
@@ -66435,9 +68239,8 @@
       "value": "⟦Ñöñé þîçķéđ, šö "
     },
     {
-      "type": 8,
-      "value": "server",
-      "children": []
+      "type": 1,
+      "value": "server"
     },
     {
       "type": 0,
@@ -81856,6 +83659,12 @@
       "value": "⟦Ţĥé šéŕṽéŕ öŵñéŕ çåñ'ţ ƀé ṽîéŵéđ åš~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.users.detail.overview.access.anyQuality": [
+    {
+      "type": 0,
+      "value": "⟦Åñý ǫûåļîţý~~~~~⟧"
+    }
+  ],
   "web.admin.users.detail.overview.access.autoApprove": [
     {
       "type": 0,
@@ -82666,14 +84475,8 @@
       "value": " çĥåñĝéđ öñ ţĥîš đéṽîçé îš ŕéɱöṽéđ, šö îţ ûšéš "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -82686,14 +84489,8 @@
       "value": "⟦Çļéåŕ "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -82732,14 +84529,8 @@
       "value": "⟦Îţ ûšéš "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -82790,14 +84581,8 @@
       "value": "⟦Ţĥé ŕöŵš öñ "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -82810,14 +84595,8 @@
       "value": "⟦Çöûļđñ'ţ ļöåđ "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -82848,14 +84627,8 @@
       "value": "⟦"
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -82876,14 +84649,8 @@
       "value": "⟦"
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -82902,14 +84669,8 @@
       "value": "⟦Ŕéšéţ "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -82986,14 +84747,8 @@
       "value": "⟦Ţĥéšé ŕéþļåçé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83014,14 +84769,8 @@
       "value": "⟦Ţĥéšé ŕéþļåçé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83050,14 +84799,8 @@
       "value": ". Ţĥéšé ŕéþļåçé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83078,14 +84821,8 @@
       "value": "⟦Ţĥéšé ŕéþļåçé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83120,14 +84857,8 @@
       "value": "⟦Ţĥéšé ŕéþļåçé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83462,14 +85193,8 @@
       "value": "⟦öñ "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83544,14 +85269,8 @@
       "value": "⟦Ûšé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83570,14 +85289,8 @@
       "value": "⟦Ûšé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83658,14 +85371,8 @@
       "value": " ĝöéš ƀåçķ ţö "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -83694,14 +85401,8 @@
       "value": " ĝöéš ƀåçķ ţö "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "profile"
-        }
-      ]
+      "type": 1,
+      "value": "profile"
     },
     {
       "type": 0,
@@ -84341,14 +86042,8 @@
       "value": "⟦Çĥåñĝé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "name"
-        }
-      ]
+      "type": 1,
+      "value": "name"
     },
     {
       "type": 0,
@@ -84477,14 +86172,8 @@
       "value": "⟦Ŕéɱöṽé "
     },
     {
-      "type": 8,
-      "value": "owner",
-      "children": [
-        {
-          "type": 1,
-          "value": "name"
-        }
-      ]
+      "type": 1,
+      "value": "name"
     },
     {
       "type": 0,
@@ -102150,6 +103839,2794 @@
       "value": ", þîññéđ ƒîŕšţ~~~~~~~⟧"
     }
   ],
+  "web.common.activity.method.direct.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé öŕîĝîñåļ ƒîļé îš đéļîṽéŕéđ ŵîţĥöûţ ɱöđîƒîçåţîöñ.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.activity.method.direct.label": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ Þļåý~~~~~⟧"
+    }
+  ],
+  "web.common.activity.method.directStream.description": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîđéö îš çöþîéđ ŵîţĥöûţ ŕé-éñçöđîñĝ; åûđîö îš ţŕåñšçöđéđ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.activity.method.directStream.label": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ Šţŕéåɱ~~~~~~⟧"
+    }
+  ],
+  "web.common.activity.method.remux.description": [
+    {
+      "type": 0,
+      "value": "⟦Åûđîö åñđ ṽîđéö åŕé çöþîéđ îñţö å šţŕéåɱîñĝ çöñţåîñéŕ ŵîţĥöûţ ŕé-éñçöđîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.activity.method.remux.label": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱûẋ~~⟧"
+    }
+  ],
+  "web.common.activity.method.transcode.description": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîđéö îš ŕé-éñçöđéđ; åûđîö ɱåý ƀé çöþîéđ öŕ ţŕåñšçöđéđ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.activity.method.transcode.label": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕåñšçöđé~~~~⟧"
+    }
+  ],
+  "web.common.activity.method.unknown.description": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šéŕṽéŕ ĥåš ñöţ ŕéþöŕţéđ å ŕéçöĝñîžéđ þļåýƀåçķ ɱéţĥöđ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.activity.method.unknown.label": [
+    {
+      "type": 0,
+      "value": "⟦Ûñķñöŵñ~~~⟧"
+    }
+  ],
+  "web.common.activity.subtitle.movie": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽîé~~⟧"
+    }
+  ],
+  "web.common.activity.subtitle.series": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕîéš~~~⟧"
+    }
+  ],
+  "web.common.activity.title.file": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļé #"
+    },
+    {
+      "type": 1,
+      "value": "id"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.common.catalog.sections.changedConflict": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥéšé šéçţîöñš çĥåñĝéđ. Ŕéļöåđ åñđ ŕéṽîéŵ ýöûŕ çĥåñĝéš ƀéƒöŕé ţŕýîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.catalog.sections.changedWhileLoading": [
+    {
+      "type": 0,
+      "value": "⟦Šéçţîöñš çĥåñĝéđ ŵĥîļé ļöåđîñĝ. Ŕéļöåđ ƀéƒöŕé éđîţîñĝ.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.catalog.sections.invalidScope": [
+    {
+      "type": 0,
+      "value": "⟦Šéļéçţ å ṽåļîđ šéçţîöñ šçöþé.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.catalog.sections.tooManyLibraries": [
+    {
+      "type": 0,
+      "value": "⟦Šéļéçţ åţ ɱöšţ 100 ļîƀŕåŕîéš þéŕ ŕéǫûéšţ.~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.catalog.sections.typeAndTitleRequired": [
+    {
+      "type": 0,
+      "value": "⟦Å šéçţîöñ ţýþé åñđ ţîţļé åŕé ŕéǫûîŕéđ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.catalog.sections.versionUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ţĥéšé šéçţîöñš ƀéƒöŕé éđîţîñĝ; ţĥéîŕ ṽéŕšîöñ îš ûñåṽåîļåƀļé.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.airingTodayTv": [
+    {
+      "type": 0,
+      "value": "⟦Åîŕîñĝ Ţöđåý ŢṼ Šĥöŵš~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.nowPlayingMovies": [
+    {
+      "type": 0,
+      "value": "⟦Ñöŵ Þļåýîñĝ Ṁöṽîéš~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.onTheAirTv": [
+    {
+      "type": 0,
+      "value": "⟦Öñ Ţĥé Åîŕ ŢṼ Šĥöŵš~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.popularMovies": [
+    {
+      "type": 0,
+      "value": "⟦Þöþûļåŕ Ṁöṽîéš~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.popularTv": [
+    {
+      "type": 0,
+      "value": "⟦Þöþûļåŕ ŢṼ Šĥöŵš~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.topRatedMovies": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ Ŕåţéđ Ṁöṽîéš~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.topRatedTv": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ Ŕåţéđ ŢṼ Šĥöŵš~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.trendingMoviesThisWeek": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ Ṁöṽîéš Ţĥîš Ŵééķ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.trendingMoviesToday": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ Ṁöṽîéš Ţöđåý~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.trendingThisWeek": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ Ţĥîš Ŵééķ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.trendingToday": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ Ţöđåý~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.trendingTvThisWeek": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ ŢṼ Šĥöŵš Ţĥîš Ŵééķ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.trendingTvToday": [
+    {
+      "type": 0,
+      "value": "⟦Ţŕéñđîñĝ ŢṼ Šĥöŵš Ţöđåý~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.chartName.upcomingMovies": [
+    {
+      "type": 0,
+      "value": "⟦Ûþçöɱîñĝ Ṁöṽîéš~~~~~~⟧"
+    }
+  ],
+  "web.common.collections.guidedUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥéšé ŕûļéš ûšé öþţîöñš ţĥé Ĝûîđéđ ṽîéŵ çåñ'ţ šĥöŵ.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.date.daysAgo": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "đ åĝö~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "đ åĝö~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.date.hoursAgo": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ĥ åĝö~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ĥ åĝö~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.date.justNow": [
+    {
+      "type": 0,
+      "value": "⟦ĵûšţ ñöŵ~~~~⟧"
+    }
+  ],
+  "web.common.date.minutesAgo": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ɱ åĝö~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ɱ åĝö~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.devicePlatform.kind.desktop": [
+    {
+      "type": 0,
+      "value": "⟦Đéšķţöþ~~~⟧"
+    }
+  ],
+  "web.common.devicePlatform.kind.mobile": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöƀîļé~~~⟧"
+    }
+  ],
+  "web.common.devicePlatform.kind.tablet": [
+    {
+      "type": 0,
+      "value": "⟦Ţåƀļéţ~~~⟧"
+    }
+  ],
+  "web.common.devicePlatform.kind.tv": [
+    {
+      "type": 0,
+      "value": "⟦ŢṼ~⟧"
+    }
+  ],
+  "web.common.devicePlatform.kind.unknown": [
+    {
+      "type": 0,
+      "value": "⟦Öţĥéŕ~~⟧"
+    }
+  ],
+  "web.common.devicePlatform.unknown": [
+    {
+      "type": 0,
+      "value": "⟦Ûñķñöŵñ þļåţƒöŕɱ~~~~~~~⟧"
+    }
+  ],
+  "web.common.format.bitrate.kbps": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    },
+    {
+      "type": 0,
+      "value": " ķƀþš~~⟧"
+    }
+  ],
+  "web.common.format.bitrate.mbps": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    },
+    {
+      "type": 0,
+      "value": " Ṁƀþš~~⟧"
+    }
+  ],
+  "web.common.format.channels.count": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çĥ~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çĥ~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.format.channels.stereo": [
+    {
+      "type": 0,
+      "value": "⟦šţéŕéö~~~⟧"
+    }
+  ],
+  "web.common.format.manga.chapter": [
+    {
+      "type": 0,
+      "value": "⟦Çĥåþţéŕ "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.common.format.manga.chapterFallback": [
+    {
+      "type": 0,
+      "value": "⟦Çĥåþţéŕ~~~⟧"
+    }
+  ],
+  "web.common.format.manga.volume": [
+    {
+      "type": 0,
+      "value": "⟦Ṽöļûɱé "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.common.format.manga.volumeChapter": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "volume"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "chapter"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
+  "web.common.format.runtime.hoursMinutes": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "hours"
+    },
+    {
+      "type": 0,
+      "value": "ĥ "
+    },
+    {
+      "type": 1,
+      "value": "minutes"
+    },
+    {
+      "type": 0,
+      "value": "ɱ~~⟧"
+    }
+  ],
+  "web.common.format.runtime.minutes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ɱ~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ɱ~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.format.sampleRate": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "rate"
+    },
+    {
+      "type": 0,
+      "value": " Ĥž~~⟧"
+    }
+  ],
+  "web.common.format.size.bytes": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " Ɓ~⟧"
+    }
+  ],
+  "web.common.format.size.gb": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ĜƁ~~⟧"
+    }
+  ],
+  "web.common.format.size.gib": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ĜîƁ~~⟧"
+    }
+  ],
+  "web.common.format.size.kb": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ĶƁ~~⟧"
+    }
+  ],
+  "web.common.format.size.kib": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ĶîƁ~~⟧"
+    }
+  ],
+  "web.common.format.size.mb": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ṀƁ~~⟧"
+    }
+  ],
+  "web.common.format.size.mib": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "size"
+    },
+    {
+      "type": 0,
+      "value": " ṀîƁ~~⟧"
+    }
+  ],
+  "web.common.genres.action": [
+    {
+      "type": 0,
+      "value": "⟦Åçţîöñ~~~⟧"
+    }
+  ],
+  "web.common.genres.actionAdventure": [
+    {
+      "type": 0,
+      "value": "⟦Åçţîöñ & Åđṽéñţûŕé~~~~~~~~⟧"
+    }
+  ],
+  "web.common.genres.adventure": [
+    {
+      "type": 0,
+      "value": "⟦Åđṽéñţûŕé~~~~⟧"
+    }
+  ],
+  "web.common.genres.animation": [
+    {
+      "type": 0,
+      "value": "⟦Åñîɱåţîöñ~~~~⟧"
+    }
+  ],
+  "web.common.genres.comedy": [
+    {
+      "type": 0,
+      "value": "⟦Çöɱéđý~~~⟧"
+    }
+  ],
+  "web.common.genres.crime": [
+    {
+      "type": 0,
+      "value": "⟦Çŕîɱé~~⟧"
+    }
+  ],
+  "web.common.genres.documentary": [
+    {
+      "type": 0,
+      "value": "⟦Đöçûɱéñţåŕý~~~~~⟧"
+    }
+  ],
+  "web.common.genres.drama": [
+    {
+      "type": 0,
+      "value": "⟦Đŕåɱå~~⟧"
+    }
+  ],
+  "web.common.genres.family": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåɱîļý~~~⟧"
+    }
+  ],
+  "web.common.genres.fantasy": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåñţåšý~~~⟧"
+    }
+  ],
+  "web.common.genres.history": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîšţöŕý~~~⟧"
+    }
+  ],
+  "web.common.genres.horror": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöŕŕöŕ~~~⟧"
+    }
+  ],
+  "web.common.genres.kids": [
+    {
+      "type": 0,
+      "value": "⟦Ķîđš~~⟧"
+    }
+  ],
+  "web.common.genres.music": [
+    {
+      "type": 0,
+      "value": "⟦Ṁûšîç~~⟧"
+    }
+  ],
+  "web.common.genres.mystery": [
+    {
+      "type": 0,
+      "value": "⟦Ṁýšţéŕý~~~⟧"
+    }
+  ],
+  "web.common.genres.news": [
+    {
+      "type": 0,
+      "value": "⟦Ñéŵš~~⟧"
+    }
+  ],
+  "web.common.genres.reality": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåļîţý~~~⟧"
+    }
+  ],
+  "web.common.genres.romance": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöɱåñçé~~~⟧"
+    }
+  ],
+  "web.common.genres.sciFiFantasy": [
+    {
+      "type": 0,
+      "value": "⟦Šçî-Ƒî & Ƒåñţåšý~~~~~~~⟧"
+    }
+  ],
+  "web.common.genres.scienceFiction": [
+    {
+      "type": 0,
+      "value": "⟦Šçîéñçé Ƒîçţîöñ~~~~~~⟧"
+    }
+  ],
+  "web.common.genres.soap": [
+    {
+      "type": 0,
+      "value": "⟦Šöåþ~~⟧"
+    }
+  ],
+  "web.common.genres.talk": [
+    {
+      "type": 0,
+      "value": "⟦Ţåļķ~~⟧"
+    }
+  ],
+  "web.common.genres.thriller": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥŕîļļéŕ~~~~⟧"
+    }
+  ],
+  "web.common.genres.tvMovie": [
+    {
+      "type": 0,
+      "value": "⟦ŢṼ Ṁöṽîé~~~~⟧"
+    }
+  ],
+  "web.common.genres.unknown": [
+    {
+      "type": 0,
+      "value": "⟦Ĝéñŕé "
+    },
+    {
+      "type": 1,
+      "value": "id"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.common.genres.war": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåŕ~~⟧"
+    }
+  ],
+  "web.common.genres.warPolitics": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåŕ & Þöļîţîçš~~~~~~⟧"
+    }
+  ],
+  "web.common.genres.western": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéšţéŕñ~~~⟧"
+    }
+  ],
+  "web.common.markers.sharingDisclosure": [
+    {
+      "type": 0,
+      "value": "⟦Ĥéļþ öţĥéŕ Šîļö šéŕṽéŕš šķîþ îñţŕöš, çŕéđîţš, ŕéçåþš åñđ þŕéṽîéŵš. Šîļö šĥåŕéš ţĥé ɱöṽîé, šĥöŵ åñđ éþîšöđé ÎĐš, éåçĥ ƒîļé'š ĥåšĥ, šîžé åñđ ļéñĝţĥ, åñđ ţĥé ɱåŕķéŕ ţîɱéš îţ ƒîñđš öŕ ýöû éđîţ, îñçļûđîñĝ šéçţîöñš ýöû ɱåŕķ åš ɱîššîñĝ, ŵîţĥ ĥöŵ éåçĥ ŵåš ƒöûñđ åñđ ĥöŵ šûŕé îţ îš. Îţ ñéṽéŕ šĥåŕéš ƒîļé ñåɱéš, þåţĥš öŕ ýöûŕ ļîƀŕåŕý ļîšţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.overlays.episodesLeft": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé ļéƒţ~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš ļéƒţ~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.overlays.previewSample": [
+    {
+      "type": 0,
+      "value": "⟦Þŕéṽîéŵ šåɱþļé~~~~~~⟧"
+    }
+  ],
+  "web.common.overlays.previewVariant.movie": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽîé~~⟧"
+    }
+  ],
+  "web.common.overlays.previewVariant.requested": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţéđ~~~~⟧"
+    }
+  ],
+  "web.common.overlays.previewVariant.show": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ~~⟧"
+    }
+  ],
+  "web.common.overlays.watched": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥéđ~~~⟧"
+    }
+  ],
+  "web.common.requests.toast.cancelFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö çåñçéļ ŕéǫûéšţ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.requests.toast.cancelled": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţ çåñçéļļéđ~~~~~~~⟧"
+    }
+  ],
+  "web.common.requests.toast.following": [
+    {
+      "type": 0,
+      "value": "⟦Ŵé'ļļ ļéţ ýöû ķñöŵ ŵĥéñ îţ'š åṽåîļåƀļé~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.requests.toast.removeFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕéɱöṽé ŕéǫûéšţ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.requests.toast.removed": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţ ŕéɱöṽéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.requests.toast.submitted": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţ šûƀɱîţţéđ~~~~~~~⟧"
+    }
+  ],
+  "web.common.requests.toast.unfollowed": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţîƒîçåţîöñ ţûŕñéđ öƒƒ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.scans.cancelFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö çåñçéļ šçåñš~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.scans.cancelRequested": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñ çåñçéļļåţîöñ ŕéǫûéšţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.scans.fullIngestStarted": [
+    {
+      "type": 0,
+      "value": "⟦Ƒûļļ îñĝéšţ šçåñ šţåŕţéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.scans.scanFailed": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñ ƒåîļéđ~~~~~⟧"
+    }
+  ],
+  "web.common.scans.selectAdminProfile": [
+    {
+      "type": 0,
+      "value": "⟦Šéļéçţ åñ åđɱîñîšţŕåţöŕ þŕöƒîļé ƀéƒöŕé šçåññîñĝ.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.schemaForm.hideSection": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé~~⟧"
+    }
+  ],
+  "web.common.schemaForm.invalid": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " îš îñṽåļîđ~~~~~⟧"
+    }
+  ],
+  "web.common.schemaForm.max": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " ɱûšţ ƀé ≤ "
+    },
+    {
+      "type": 1,
+      "value": "max"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.common.schemaForm.maxLength": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": " ɱûšţ ƀé åţ ɱöšţ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çĥåŕåçţéŕ~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": " ɱûšţ ƀé åţ ɱöšţ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çĥåŕåçţéŕš~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.schemaForm.min": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " ɱûšţ ƀé ≥ "
+    },
+    {
+      "type": 1,
+      "value": "min"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.common.schemaForm.minLength": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": " ɱûšţ ƀé åţ ļéåšţ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çĥåŕåçţéŕ~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "label"
+            },
+            {
+              "type": 0,
+              "value": " ɱûšţ ƀé åţ ļéåšţ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çĥåŕåçţéŕš~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.schemaForm.noOptions": [
+    {
+      "type": 0,
+      "value": "⟦Ñö öþţîöñš åṽåîļåƀļé.~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.schemaForm.notNumber": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " ɱûšţ ƀé å ñûɱƀéŕ~~~~~~~⟧"
+    }
+  ],
+  "web.common.schemaForm.required": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " îš ŕéǫûîŕéđ~~~~~⟧"
+    }
+  ],
+  "web.common.schemaForm.selectPlaceholder": [
+    {
+      "type": 0,
+      "value": "⟦Šéļéçţ~~~⟧"
+    }
+  ],
+  "web.common.schemaForm.showSection": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ~~⟧"
+    }
+  ],
+  "web.common.settingValue.invalidJson": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "key"
+    },
+    {
+      "type": 0,
+      "value": ": ţĥé ṽåļûé ɱûšţ ƀé ṽåļîđ ĴŠÖÑ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.settingValue.notANumber": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "key"
+    },
+    {
+      "type": 0,
+      "value": ": \""
+    },
+    {
+      "type": 1,
+      "value": "raw"
+    },
+    {
+      "type": 0,
+      "value": "\" îš ñöţ å ñûɱƀéŕ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.shell.endImpersonationFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö éñđ îɱþéŕšöñåţîöñ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.shell.loadingApplication": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ åþþļîçåţîöñ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.shell.loadingPage": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ þåĝé~~~~~⟧"
+    }
+  ],
+  "web.common.shell.loadingRequestAvailability": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ ŕéǫûéšţ åṽåîļåƀîļîţý~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.shell.manageLibraryVisibility": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåñåĝé ļîƀŕåŕý ṽîšîƀîļîţý îñ Šéţţîñĝš~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.shell.noLibraries": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ṽîšîƀļé ļîƀŕåŕîéš åŕé åṽåîļåƀļé ŕîĝĥţ ñöŵ.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.shell.pageLoaded": [
+    {
+      "type": 0,
+      "value": "⟦Þåĝé ļöåđéđ~~~~~⟧"
+    }
+  ],
+  "web.common.shell.pluginOpenFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ûñåƀļé ţö öþéñ ţĥé þļûĝîñ. Þļéåšé ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.signingSecret.copied": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñîñĝ šéçŕéţ çöþîéđ~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.signingSecret.copy": [
+    {
+      "type": 0,
+      "value": "⟦Çöþý šîĝñîñĝ šéçŕéţ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.signingSecret.copyFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö çöþý ţö çļîþƀöåŕđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.signingSecret.description": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö šîĝñš éṽéŕý đéļîṽéŕý ŵîţĥ ţĥîš šéçŕéţ šö ýöûŕ ŕéçéîṽéŕ çåñ ṽéŕîƒý îţ. Îţ îš šĥöŵñ öñļý öñçé — šţöŕé îţ öñ ţĥé ŕéçéîṽîñĝ šéŕṽîçé ñöŵ. Ýöû çåñ ŕöţåţé îţ ļåţéŕ îƒ îţ îš ļöšţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.signingSecret.saved": [
+    {
+      "type": 0,
+      "value": "⟦Î'ṽé šåṽéđ îţ~~~~~~⟧"
+    }
+  ],
+  "web.common.signingSecret.title": [
+    {
+      "type": 0,
+      "value": "⟦Šåṽé ýöûŕ šîĝñîñĝ šéçŕéţ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.sort.bitrate": [
+    {
+      "type": 0,
+      "value": "⟦Ɓîţŕåţé~~~⟧"
+    }
+  ],
+  "web.common.sort.contentRating": [
+    {
+      "type": 0,
+      "value": "⟦Çöñţéñţ Ŕåţîñĝ~~~~~~⟧"
+    }
+  ],
+  "web.common.sort.dateRead": [
+    {
+      "type": 0,
+      "value": "⟦Đåţé Ŕéåđ~~~~⟧"
+    }
+  ],
+  "web.common.sort.dateViewed": [
+    {
+      "type": 0,
+      "value": "⟦Đåţé Ṽîéŵéđ~~~~~⟧"
+    }
+  ],
+  "web.common.sort.duration": [
+    {
+      "type": 0,
+      "value": "⟦Đûŕåţîöñ~~~~⟧"
+    }
+  ],
+  "web.common.sort.latestEpisodeAdded": [
+    {
+      "type": 0,
+      "value": "⟦Ļåţéšţ Éþîšöđé Åđđéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.sort.latestEpisodeAirDate": [
+    {
+      "type": 0,
+      "value": "⟦Ļåţéšţ Éþîšöđé Åîŕ Đåţé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.sort.plays": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýš~~⟧"
+    }
+  ],
+  "web.common.sort.progress": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöĝŕéšš~~~~⟧"
+    }
+  ],
+  "web.common.sort.reads": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåđš~~⟧"
+    }
+  ],
+  "web.common.sort.rtAudienceRating": [
+    {
+      "type": 0,
+      "value": "⟦ŔŢ Åûđîéñçé Ŕåţîñĝ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.sort.rtCriticRating": [
+    {
+      "type": 0,
+      "value": "⟦ŔŢ Çŕîţîç Ŕåţîñĝ~~~~~~~⟧"
+    }
+  ],
+  "web.common.sort.tmdbRating": [
+    {
+      "type": 0,
+      "value": "⟦ŢṀĐƁ Ŕåţîñĝ~~~~~⟧"
+    }
+  ],
+  "web.common.speedTest.retryAfter": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ţŕý åĝåîñ îñ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéçöñđ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ţŕý åĝåîñ îñ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéçöñđš~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.subtitles.providers.invalidConfiguration": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ þŕöṽîđéŕ çöñƒîĝûŕåţîöñ. Ŕéļöåđ šåṽéđ çöñƒîĝûŕåţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.subtitles.providers.saveUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Ûñåƀļé ţö çöñƒîŕɱ ţĥé šåṽé ŕéšûļţ. Ŕéļöåđ šåṽéđ çöñƒîĝûŕåţîöñ ƀéƒöŕé ŕéţŕýîñĝ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.subtitles.providers.savedApplied": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš šåṽéđ åñđ åþþļîéđ öñ ţĥîš šéŕṽéŕ. Öţĥéŕ šéŕṽéŕš ɱåý šţîļļ ûšé öļđéŕ šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.subtitles.providers.savedDifferentRevision": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš šåṽéđ. Ţĥîš šéŕṽéŕ åþþļîéđ å đîƒƒéŕéñţ šåṽéđ ŕéṽîšîöñ; ŕéļöåđ ţö ŕéṽîéŵ ţĥé çûŕŕéñţ çöñƒîĝûŕåţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.subtitles.providers.savedNotApplied": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš šåṽéđ, ƀûţ ñöţ åþþļîéđ öñ ţĥîš šéŕṽéŕ. Öţĥéŕ šéŕṽéŕš ɱåý šţîļļ ûšé öļđéŕ šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.subtitles.providers.validatorRequired": [
+    {
+      "type": 0,
+      "value": "⟦Å šţŕöñĝ éđîţ ṽåļîđåţöŕ îš ŕéǫûîŕéđ. Ŕéļöåđ šåṽéđ çöñƒîĝûŕåţîöñ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.subtitles.unsupportedIdentifier": [
+    {
+      "type": 0,
+      "value": "⟦Ûñšûþþöŕţéđ šûƀţîţļé îđéñţîƒîéŕ~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.accessibility": [
+    {
+      "type": 0,
+      "value": "⟦Åççéššîƀîļîţý Šéţţîñĝš~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.account": [
+    {
+      "type": 0,
+      "value": "⟦Åççöûñţ Šéţţîñĝš~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.connectApps": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţ Åþþš Šéţţîñĝš~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.devices": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ Đéṽîçéš~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.historyImport": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîšţöŕý Îɱþöŕţ Šéţţîñĝš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.homeScreen": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöɱé Šçŕééñ Šéţţîñĝš~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.index": [
+    {
+      "type": 0,
+      "value": "⟦Šéţţîñĝš~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.interface": [
+    {
+      "type": 0,
+      "value": "⟦Ñåṽîĝåţîöñ & Çåŕđ Šéţţîñĝš~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.libraries": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕý Šéţţîñĝš~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.notifications": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţîƒîçåţîöñ Šéţţîñĝš~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.personalize": [
+    {
+      "type": 0,
+      "value": "⟦Þéŕšöñåļîžé~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.playback": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýƀåçķ Šéţţîñĝš~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.profiles": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé Šéţţîñĝš~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.requests": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţ Šéţţîñĝš~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.sessions": [
+    {
+      "type": 0,
+      "value": "⟦Šîĝñéđ-îñ šéššîöñš~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.subtitleAppearance": [
+    {
+      "type": 0,
+      "value": "⟦Ļåñĝûåĝé & Šûƀţîţļé Šéţţîñĝš~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.titlePages": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļé Þåĝé Šéţţîñĝš~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.watchProviders": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ Þŕöṽîđéŕ Šéţţîñĝš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.webhookSync": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ Šýñç Šéţţîñĝš~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.title.settings.yourData": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ Đåţå~~~~⟧"
+    }
+  ],
+  "web.common.toast.collections.deleteFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö đéļéţé~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.collections.deleted": [
+    {
+      "type": 0,
+      "value": "⟦Çöļļéçţîöñ đéļéţéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.collections.syncFailed": [
+    {
+      "type": 0,
+      "value": "⟦Šýñç ƒåîļéđ~~~~~⟧"
+    }
+  ],
+  "web.common.toast.collections.synced": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñçéđ — ɱåţçĥéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " îţéɱ~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñçéđ — ɱåţçĥéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " îţéɱš~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.toast.collections.syncedWithWarnings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñçéđ ŵîţĥ ŵåŕñîñĝš — ɱåţçĥéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " îţéɱ~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñçéđ ŵîţĥ ŵåŕñîñĝš — ɱåţçĥéđ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " îţéɱš~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.toast.favorites.added": [
+    {
+      "type": 0,
+      "value": "⟦Åđđéđ ţö ƒåṽöŕîţéš~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.favorites.removed": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽéđ ƒŕöɱ ƒåṽöŕîţéš~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.favorites.updateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþđåţé ƒåṽöŕîţéš~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.historyImport.acceptanceUnconfirmed": [
+    {
+      "type": 0,
+      "value": "⟦Îɱþöŕţ åççéþţåñçé çöûļđ ñöţ ƀé çöñƒîŕɱéđ. Ŕéƒŕéšĥ îɱþöŕţš ƀéƒöŕé šûƀɱîţţîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.historyImport.embyConnectFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šîĝñ îñ ŵîţĥ Éɱƀý Çöññéçţ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.historyImport.plexSignInFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šţåŕţ Þļéẋ šîĝñ-îñ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.historyImport.queued": [
+    {
+      "type": 0,
+      "value": "⟦Îɱþöŕţ ǫûéûéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.historyImport.startFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šţåŕţ îɱþöŕţ~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.historyImport.unexpectedLocation": [
+    {
+      "type": 0,
+      "value": "⟦Ûñéẋþéçţéđ îɱþöŕţ šţåţûš ļöçåţîöñ. Ŕéƒŕéšĥ îɱþöŕţš ƀéƒöŕé ţŕýîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.homeRows.reset": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéšéţ ţö ţĥé šéŕṽéŕ'š ŕöŵš.~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.homeRows.resetFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ ŕéšéţ ýöûŕ ŕöŵš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.markers.saveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šåṽé ɱåŕķéŕš~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.markers.saved": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåŕķéŕš šåṽéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notInterested.hidden": [
+    {
+      "type": 0,
+      "value": "⟦Ŵé ŵöñ'ţ ŕéçöɱɱéñđ ţĥîš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notInterested.restored": [
+    {
+      "type": 0,
+      "value": "⟦Ɓåçķ îñ ýöûŕ ŕéçöɱɱéñđåţîöñš~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notInterested.undo": [
+    {
+      "type": 0,
+      "value": "⟦Ûñđö~~⟧"
+    }
+  ],
+  "web.common.toast.notInterested.undoFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûñđö Ñöţ îñţéŕéšţéđ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notInterested.undoOtherProfile": [
+    {
+      "type": 0,
+      "value": "⟦Šŵîţçĥ ƀåçķ ţö ţĥé þŕöƒîļé ţĥåţ ɱåŕķéđ ţĥîš ţö ûñđö îţ~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notInterested.updateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþđåţé Ñöţ îñţéŕéšţéđ~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.createInProgress": [
+    {
+      "type": 0,
+      "value": "⟦Đéšţîñåţîöñ çŕéåţîöñ îš åļŕéåđý îñ þŕöĝŕéšš.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.deleteFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö đéļéţé ŵéƀĥööķ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.deleted": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ đéļéţéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.nameAndUrlRequired": [
+    {
+      "type": 0,
+      "value": "⟦Å ñåɱé åñđ ŵéƀĥööķ ÛŔĻ åŕé ŕéǫûîŕéđ.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.pushRemoveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕéɱöṽé þûšĥ šûƀšçŕîþţîöñ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.reloadBeforeDeleting": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ţĥé ŵéƀĥööķ ļîšţ ƀéƒöŕé đéļéţîñĝ ţĥîš đéšţîñåţîöñ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.reloadBeforeEditing": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ ţĥé ŵéƀĥööķ ļîšţ ƀéƒöŕé éđîţîñĝ ţĥîš đéšţîñåţîöñ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.rotateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕöţåţé šîĝñîñĝ šéçŕéţ~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.testInProgress": [
+    {
+      "type": 0,
+      "value": "⟦Å ţéšţ đéļîṽéŕý îš åļŕéåđý îñ þŕöĝŕéšš.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.notificationWebhooks.updateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþđåţé ŵéƀĥööķ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.avatarRemoveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕéɱöṽé åṽåţåŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.avatarRemoved": [
+    {
+      "type": 0,
+      "value": "⟦Åṽåţåŕ ŕéɱöṽéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.avatarUpdated": [
+    {
+      "type": 0,
+      "value": "⟦Åṽåţåŕ ûþđåţéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.avatarUploadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþļöåđ åṽåţåŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.created": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé çŕéåţéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.deleteFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö đéļéţé~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.deleted": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé đéļéţéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.saveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šåṽé þŕöƒîļé~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.profiles.updated": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé ûþđåţéđ~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.ratings.updateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþđåţé ŕåţîñĝ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.subtitles.downloadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö đöŵñļöåđ šûƀţîţļé~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.subtitles.downloaded": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļé đöŵñļöåđéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.subtitles.resetPreferenceFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕéšéţ šûƀţîţļé þŕéƒéŕéñçé~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.subtitles.savePreferenceFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šåṽé šûƀţîţļé þŕéƒéŕéñçé~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.subtitles.uploadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþļöåđ šûƀţîţļé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.subtitles.uploaded": [
+    {
+      "type": 0,
+      "value": "⟦Šûƀţîţļé ûþļöåđéđ~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.connectFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö çöññéçţ þŕöṽîđéŕ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.connected": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ þŕöṽîđéŕ çöññéçţéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.disconnectFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö đîšçöññéçţ þŕöṽîđéŕ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.disconnected": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ þŕöṽîđéŕ đîšçöññéçţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.finishAuthFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ƒîñîšĥ åûţĥ~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.reloadBeforeSaving": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéļöåđ þŕöṽîđéŕ šéţţîñĝš ƀéƒöŕé šåṽîñĝ çĥåñĝéš.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.startAuthFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šţåŕţ åûţĥ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.syncAvailableHours": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñç åṽåîļåƀļé îñ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ĥ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñç åṽåîļåƀļé îñ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ĥ~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.toast.watchProviders.syncAvailableHoursMinutes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñç åṽåîļåƀļé îñ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ĥ "
+            },
+            {
+              "type": 1,
+              "value": "minutes"
+            },
+            {
+              "type": 0,
+              "value": "ɱ~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñç åṽåîļåƀļé îñ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "ĥ "
+            },
+            {
+              "type": 1,
+              "value": "minutes"
+            },
+            {
+              "type": 0,
+              "value": "ɱ~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.toast.watchProviders.syncAvailableMinutes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñç åṽåîļåƀļé îñ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "ɱ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñç åṽåîļåƀļé îñ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "ɱ~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.toast.watchProviders.syncAvailableSeconds": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñç åṽåîļåƀļé îñ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "š~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šýñç åṽåîļåƀļé îñ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "š~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.toast.watchProviders.syncCoolingDown": [
+    {
+      "type": 0,
+      "value": "⟦Šýñç îš çööļîñĝ đöŵñ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.syncFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šţåŕţ šýñç~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.syncStarted": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ þŕöṽîđéŕ šýñç šţåŕţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchProviders.updateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþđåţé þŕöṽîđéŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.added": [
+    {
+      "type": 0,
+      "value": "⟦Åđđéđ ţö ýöûŕ ŵåţçĥļîšţ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.addedAndRequested": [
+    {
+      "type": 0,
+      "value": "⟦Åđđéđ ţö ýöûŕ ŵåţçĥļîšţ åñđ ŕéǫûéšţéđ~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.availableNotice": [
+    {
+      "type": 0,
+      "value": "⟦Ŵé'ļļ ļéţ ýöû ķñöŵ ŵĥéñ "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " îš åṽåîļåƀļé.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.notRequested": [
+    {
+      "type": 0,
+      "value": "⟦Îţ ŵåšñ'ţ ŕéǫûéšţéđ.~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.notRequestedReason": [
+    {
+      "type": 0,
+      "value": "⟦Îţ ŵåšñ'ţ ŕéǫûéšţéđ: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.notRequestedRequestsOff": [
+    {
+      "type": 0,
+      "value": "⟦Îţ ŵåšñ'ţ ŕéǫûéšţéđ, ƀéçåûšé ŵåţçĥļîšţ ŕéǫûéšţš åŕé öƒƒ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.removed": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽéđ ƒŕöɱ ýöûŕ ŵåţçĥļîšţ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.requestedNotice": [
+    {
+      "type": 0,
+      "value": "⟦Ŵé'ļļ ļéţ ýöû ķñöŵ ŵĥéñ "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " îš åṽåîļåƀļé. Îţ ɱöṽéš îñţö ýöûŕ ŵåţçĥļîšţ öñ îţš öŵñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.watchlist.updateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþđåţé ýöûŕ ŵåţçĥļîšţ~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.createFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö çŕéåţé ŵéƀĥööķ çöññéçţîöñ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.created": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ çöññéçţîöñ çŕéåţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.deleteFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö đéļéţé ŵéƀĥööķ çöññéçţîöñ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.deleted": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ çöññéçţîöñ đéļéţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.mappingsSaveFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö šåṽé þŕöƒîļé ɱåþþîñĝš~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.mappingsSaved": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé ɱåþþîñĝš šåṽéđ~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.rotateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ŕöţåţé ŵéƀĥööķ ÛŔĻ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.updateFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ûþđåţé ŵéƀĥööķ çöññéçţîöñ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.updated": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ çöññéçţîöñ ûþđåţéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.toast.webhookSync.urlRotated": [
+    {
+      "type": 0,
+      "value": "⟦Ŵéƀĥööķ ÛŔĻ ŕöţåţéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.daySelected": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", šéļéçţéđ~~~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.dayToday": [
+    {
+      "type": 0,
+      "value": "⟦Ţöđåý, "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.dayTodaySelected": [
+    {
+      "type": 0,
+      "value": "⟦Ţöđåý, "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": ", šéļéçţéđ~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.monthDropdown": [
+    {
+      "type": 0,
+      "value": "⟦Çĥööšé ţĥé Ṁöñţĥ~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.nextMonth": [
+    {
+      "type": 0,
+      "value": "⟦Ĝö ţö ţĥé Ñéẋţ Ṁöñţĥ~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.previousMonth": [
+    {
+      "type": 0,
+      "value": "⟦Ĝö ţö ţĥé Þŕéṽîöûš Ṁöñţĥ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.weekNumber": [
+    {
+      "type": 0,
+      "value": "⟦Ŵééķ "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.weekNumberHeader": [
+    {
+      "type": 0,
+      "value": "⟦Ŵééķ Ñûɱƀéŕ~~~~~⟧"
+    }
+  ],
+  "web.common.ui.calendar.yearDropdown": [
+    {
+      "type": 0,
+      "value": "⟦Çĥööšé ţĥé Ýéåŕ~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.carousel.label": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " çåŕöûšéļ~~~~⟧"
+    }
+  ],
+  "web.common.ui.carousel.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ ļöåđ "
+    },
+    {
+      "type": 1,
+      "value": "title_lower"
+    },
+    {
+      "type": 0,
+      "value": ".~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.carousel.scrollLeft": [
+    {
+      "type": 0,
+      "value": "⟦Šçŕöļļ ļéƒţ~~~~~⟧"
+    }
+  ],
+  "web.common.ui.carousel.scrollRight": [
+    {
+      "type": 0,
+      "value": "⟦Šçŕöļļ ŕîĝĥţ~~~~~⟧"
+    }
+  ],
+  "web.common.ui.dateTimePicker.anyTime": [
+    {
+      "type": 0,
+      "value": "⟦Åñý ţîɱé~~~~⟧"
+    }
+  ],
+  "web.common.ui.dateTimePicker.clear": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ~~⟧"
+    }
+  ],
+  "web.common.ui.dateTimePicker.timeOfDay": [
+    {
+      "type": 0,
+      "value": "⟦Ţîɱé öƒ đåý~~~~~⟧"
+    }
+  ],
+  "web.common.ui.imageUpload.delete": [
+    {
+      "type": 0,
+      "value": "⟦Đéļéţé îɱåĝé~~~~~⟧"
+    }
+  ],
+  "web.common.ui.imageUpload.drop": [
+    {
+      "type": 0,
+      "value": "⟦Çļîçķ öŕ đŕöþ îɱåĝé~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.imageUpload.removeSelected": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽé šéļéçţéđ ƒîļé~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.imageUpload.urlHelp": [
+    {
+      "type": 0,
+      "value": "⟦Þåšţé åñ îɱåĝé ÛŔĻ îñšţéåđ öƒ ûþļöåđîñĝ å ƒîļé. Îƒ ƀöţĥ åŕé þŕöṽîđéđ, ţĥé ûþļöåđéđ ƒîļé ŵîñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.libraryItemLink.noAccess": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ţîţļé îš îñ å ļîƀŕåŕý ţĥîš þŕöƒîļé çåñ'ţ öþéñ.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.loadError.generic": [
+    {
+      "type": 0,
+      "value": "⟦Šöɱéţĥîñĝ ŵéñţ ŵŕöñĝ ŵĥîļé ļöåđîñĝ îţ. Ţŕý åĝåîñ îñ å ɱöɱéñţ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.loadError.timeout": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé šéŕṽéŕ îšñ'ţ ŕéšþöñđîñĝ. Ţŕý åĝåîñ îñ å ɱöɱéñţ.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.loadMore.button": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđ ɱöŕé~~~~⟧"
+    }
+  ],
+  "web.common.ui.loadMore.loading": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ ɱöŕé~~~~~⟧"
+    }
+  ],
+  "web.common.ui.refreshFailed.timeout": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "message"
+    },
+    {
+      "type": 0,
+      "value": " Ţĥé šéŕṽéŕ îšñ'ţ ŕéšþöñđîñĝ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.selectMode.collections.group": [
+    {
+      "type": 0,
+      "value": "⟦Šéļéçţéđ çöļļéçţîöñš~~~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.selectMode.collections.limit": [
+    {
+      "type": 6,
+      "value": "limit",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ åţ å ţîɱé~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñš åţ å ţîɱé~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.ui.selectMode.collections.tooMany": [
+    {
+      "type": 6,
+      "value": "limit",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šéļéçţ ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ åţ å ţîɱé.~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šéļéçţ ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñš åţ å ţîɱé.~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.ui.selectMode.rows.group": [
+    {
+      "type": 0,
+      "value": "⟦Šéļéçţéđ ŕöŵš~~~~~~⟧"
+    }
+  ],
+  "web.common.ui.selectMode.rows.limit": [
+    {
+      "type": 6,
+      "value": "limit",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ŕöŵ åţ å ţîɱé~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ŕöŵš åţ å ţîɱé~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.ui.selectMode.rows.tooMany": [
+    {
+      "type": 6,
+      "value": "limit",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šéļéçţ ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ŕöŵ åţ å ţîɱé.~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Šéļéçţ ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ŕöŵš åţ å ţîɱé.~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.common.ui.tagInput.placeholder": [
+    {
+      "type": 0,
+      "value": "⟦Åđđ...~~~⟧"
+    }
+  ],
   "web.detail.actions.addToCollection": [
     {
       "type": 0,
@@ -102519,7 +106996,15 @@
   "web.detail.actions.startFromFirstEpisode": [
     {
       "type": 0,
-      "value": "⟦Šţåŕţ Ƒŕöɱ Éþîšöđé 1~~~~~~~~⟧"
+      "value": "⟦Šţåŕţ Ƒŕöɱ Éþîšöđé "
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
     }
   ],
   "web.detail.actions.startWatchParty": [
@@ -106899,6 +111384,20 @@
       "value": "~~~⟧"
     }
   ],
+  "web.home.addRow.rules.groupMatchLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöŵ ĝŕöûþ "
+    },
+    {
+      "type": 1,
+      "value": "number"
+    },
+    {
+      "type": 0,
+      "value": "'š ŕûļéš çöɱƀîñé~~~~~~~~~~~⟧"
+    }
+  ],
   "web.home.addRow.rules.groupSentence": [
     {
       "type": 0,
@@ -108836,24 +113335,6 @@
     {
       "type": 0,
       "value": "⟦Ţĥîš çåñ'ţ ƀé ûñđöñé.~~~~~~~~~⟧"
-    }
-  ],
-  "web.home.rows.collectionKinds.manual": [
-    {
-      "type": 0,
-      "value": "⟦Ṁåñûåļ~~~⟧"
-    }
-  ],
-  "web.home.rows.collectionKinds.smart": [
-    {
-      "type": 0,
-      "value": "⟦Šɱåŕţ~~⟧"
-    }
-  ],
-  "web.home.rows.collectionKinds.synced": [
-    {
-      "type": 0,
-      "value": "⟦Šýñçéđ ļîšţ~~~~~⟧"
     }
   ],
   "web.home.rows.delete.conflict": [
@@ -118333,14 +122814,72 @@
   ],
   "web.player.bitrateLimit.invalid": [
     {
-      "type": 0,
-      "value": "⟦Éñţéŕ å ṽåļûé åƀöṽé 0 Ṁƀþš, šûçĥ åš 8 öŕ 1.5 (ûþ ţö 3 đéçîɱåļ þļåçéš).~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "type": 6,
+      "value": "places",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Éñţéŕ å ṽåļûé åƀöṽé "
+            },
+            {
+              "type": 1,
+              "value": "min"
+            },
+            {
+              "type": 0,
+              "value": " Ṁƀþš, šûçĥ åš 8 öŕ 1.5 (ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đéçîɱåļ þļåçé).~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Éñţéŕ å ṽåļûé åƀöṽé "
+            },
+            {
+              "type": 1,
+              "value": "min"
+            },
+            {
+              "type": 0,
+              "value": " Ṁƀþš, šûçĥ åš 8 öŕ 1.5 (ûþ ţö "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đéçîɱåļ þļåçéš).~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.player.bitrateLimit.lowWarning": [
     {
       "type": 0,
-      "value": "⟦Ɓéļöŵ 1 Ṁƀþš, šţŕéåɱš åŕé ţŕåñšçöđéđ ţö ṽéŕý ļöŵ ǫûåļîţý.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ɓéļöŵ "
+    },
+    {
+      "type": 1,
+      "value": "mbps"
+    },
+    {
+      "type": 0,
+      "value": " Ṁƀþš, šţŕéåɱš åŕé ţŕåñšçöđéđ ţö ṽéŕý ļöŵ ǫûåļîţý.~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.player.bitrateLimit.unit": [
@@ -120269,46 +124808,6 @@
       "value": "×~⟧"
     }
   ],
-  "web.player.speedTest.retryAfter": [
-    {
-      "type": 6,
-      "value": "seconds",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦Ţŕý åĝåîñ îñ "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " šéçöñđ~~~~~~~~⟧"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "⟦Ţŕý åĝåîñ îñ "
-            },
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " šéçöñđš~~~~~~~~~⟧"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
   "web.player.subtitles.aiTranslation": [
     {
       "type": 0,
@@ -121697,6 +126196,12 @@
     {
       "type": 0,
       "value": "⟦Åļļ ļîƀŕåŕîéš~~~~~~⟧"
+    }
+  ],
+  "web.profiles.helpers.access.anyQuality": [
+    {
+      "type": 0,
+      "value": "⟦Åñý ǫûåļîţý~~~~~⟧"
     }
   ],
   "web.profiles.helpers.access.libraries": [
@@ -125091,6 +129596,12 @@
       "value": "⟦Åþþ ļåñĝûåĝé~~~~~⟧"
     }
   ],
+  "web.settings.accessibility.appLanguageDeviceClearFailed": [
+    {
+      "type": 0,
+      "value": "⟦Šåṽéđ, ƀûţ ţĥîš ƀŕöŵšéŕ šţîļļ ûšéš îţš öŵñ ļåñĝûåĝé. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.settings.accessibility.appLanguageSaveFailed": [
     {
       "type": 0,
@@ -125893,14 +130404,8 @@
       "value": "⟦Çöñƒîŕɱ ýöûŕ Šîļö þåššŵöŕđ ţö çöññéçţ "
     },
     {
-      "type": 8,
-      "value": "name",
-      "children": [
-        {
-          "type": 1,
-          "value": "owner"
-        }
-      ]
+      "type": 1,
+      "value": "owner"
     },
     {
       "type": 0,
@@ -126840,11 +131345,11 @@
     },
     {
       "type": 1,
-      "value": "owner"
+      "value": "name"
     },
     {
       "type": 0,
-      "value": " šţýļé~~~~⟧"
+      "value": "'š šţýļé~~~~~⟧"
     }
   ],
   "web.settings.device.appearance.resetOwn": [
@@ -127034,11 +131539,11 @@
         },
         {
           "type": 1,
-          "value": "owner"
+          "value": "name"
         },
         {
           "type": 0,
-          "value": " šéţţîñĝš, ñöţ ýöûŕ öŵñ."
+          "value": "'š šéţţîñĝš, ñöţ ýöûŕ öŵñ."
         }
       ]
     },
@@ -127052,7 +131557,7 @@
     },
     {
       "type": 0,
-      "value": " ŵîļļ šéé ţĥéšé çĥåñĝé öñ ţĥîš đéṽîçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": " ŵîļļ šéé ţĥéšé çĥåñĝé öñ ţĥîš đéṽîçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.device.privacyNote": [
@@ -127178,11 +131683,11 @@
             },
             {
               "type": 1,
-              "value": "owner"
+              "value": "name"
             },
             {
               "type": 0,
-              "value": " þŕöƒîļé šéţţîñĝš öñ "
+              "value": "'š þŕöƒîļé šéţţîñĝš öñ "
             },
             {
               "type": 1,
@@ -127198,7 +131703,7 @@
             },
             {
               "type": 0,
-              "value": " šéţţîñĝ çĥåñĝéđ öñ ţĥîš đéṽîçé. Šéţţîñĝš ţĥåţ öñļý åþþļý ţö đéṽîçéš ĝö ƀåçķ ţö ţĥé åþþ đéƒåûļţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+              "value": " šéţţîñĝ çĥåñĝéđ öñ ţĥîš đéṽîçé. Šéţţîñĝš ţĥåţ öñļý åþþļý ţö đéṽîçéš ĝö ƀåçķ ţö ţĥé åþþ đéƒåûļţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
             }
           ]
         },
@@ -127210,11 +131715,11 @@
             },
             {
               "type": 1,
-              "value": "owner"
+              "value": "name"
             },
             {
               "type": 0,
-              "value": " þŕöƒîļé šéţţîñĝš öñ "
+              "value": "'š þŕöƒîļé šéţţîñĝš öñ "
             },
             {
               "type": 1,
@@ -127230,7 +131735,7 @@
             },
             {
               "type": 0,
-              "value": " šéţţîñĝš çĥåñĝéđ öñ ţĥîš đéṽîçé. Šéţţîñĝš ţĥåţ öñļý åþþļý ţö đéṽîçéš ĝö ƀåçķ ţö ţĥé åþþ đéƒåûļţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+              "value": " šéţţîñĝš çĥåñĝéđ öñ ţĥîš đéṽîçé. Šéţţîñĝš ţĥåţ öñļý åþþļý ţö đéṽîçéš ĝö ƀåçķ ţö ţĥé åþþ đéƒåûļţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
             }
           ]
         }
@@ -127270,11 +131775,11 @@
     },
     {
       "type": 1,
-      "value": "owner"
+      "value": "name"
     },
     {
       "type": 0,
-      "value": " öţĥéŕ đéṽîçéš, åñđ åñýöñé éļšé ŵĥö ûšéš ţĥîš öñé, åŕé ûñåƒƒéçţéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "'š öţĥéŕ đéṽîçéš, åñđ åñýöñé éļšé ŵĥö ûšéš ţĥîš öñé, åŕé ûñåƒƒéçţéđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.device.scopeDetailOwn": [
@@ -127304,17 +131809,17 @@
         },
         {
           "type": 1,
-          "value": "owner"
+          "value": "name"
         },
         {
           "type": 0,
-          "value": " þŕöƒîļé öñļý"
+          "value": "'š þŕöƒîļé öñļý"
         }
       ]
     },
     {
       "type": 0,
-      "value": ".~~~~~~~~~~~~~~~~~~~⟧"
+      "value": ".~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.device.scopeOwn": [
@@ -127928,15 +132433,41 @@
   "web.settings.deviceSettingGroups.fromOwnerProfile": [
     {
       "type": 0,
-      "value": "⟦Ƒŕöɱ "
+      "value": "⟦"
     },
     {
-      "type": 1,
-      "value": "owner"
+      "type": 5,
+      "value": "owner",
+      "options": {
+        "self": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ƒŕöɱ ýöûŕ þŕöƒîļé"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ƒŕöɱ "
+            },
+            {
+              "type": 1,
+              "value": "name"
+            },
+            {
+              "type": 0,
+              "value": "'š þŕöƒîļé"
+            }
+          ]
+        }
+      }
     },
     {
       "type": 0,
-      "value": " þŕöƒîļé~~~~~~⟧"
+      "value": "~~~~~~~⟧"
     }
   ],
   "web.settings.deviceSettingGroups.householdLimit": [
@@ -127974,15 +132505,41 @@
   "web.settings.deviceSettingGroups.useOwnerSetting": [
     {
       "type": 0,
-      "value": "⟦Ûšé "
+      "value": "⟦"
     },
     {
-      "type": 1,
-      "value": "owner"
+      "type": 5,
+      "value": "owner",
+      "options": {
+        "self": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ûšé ýöûŕ šéţţîñĝ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ûšé "
+            },
+            {
+              "type": 1,
+              "value": "name"
+            },
+            {
+              "type": 0,
+              "value": "'š šéţţîñĝ"
+            }
+          ]
+        }
+      }
     },
     {
       "type": 0,
-      "value": " šéţţîñĝ~~~~~⟧"
+      "value": "~~~~~~~⟧"
     }
   ],
   "web.settings.historyImport.chooseProfile": [
@@ -139323,20 +143880,122 @@
   ],
   "web.subtitles.quotaWindow.day": [
     {
-      "type": 0,
-      "value": "⟦24 ĥöûŕš~~~~⟧"
+      "type": 6,
+      "value": "hours",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ĥöûŕ~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ĥöûŕš~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.subtitles.quotaWindow.month": [
     {
-      "type": 0,
-      "value": "⟦30 đåýš~~~⟧"
+      "type": 6,
+      "value": "days",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đåý~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đåýš~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.subtitles.quotaWindow.week": [
     {
-      "type": 0,
-      "value": "⟦7 đåýš~~~⟧"
+      "type": 6,
+      "value": "days",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đåý~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đåýš~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.subtitles.search.downloadFailed": [
@@ -140186,7 +144845,15 @@
   "web.subtitles.upload.help": [
     {
       "type": 0,
-      "value": "⟦Đŕåĝ åñđ đŕöþ öŕ ƀŕöŵšé ƒöŕ ŠŔŢ, ṼŢŢ, ÅŠŠ, ŠŠÅ, öŕ ŠÛƁ ƒîļéš ûþ ţö 5 ṀƁ. Ļåñĝûåĝé îš đéţéçţéđ åûţöɱåţîçåļļý ŵĥéñ þöššîƀļé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Đŕåĝ åñđ đŕöþ öŕ ƀŕöŵšé ƒöŕ ŠŔŢ, ṼŢŢ, ÅŠŠ, ŠŠÅ, öŕ ŠÛƁ ƒîļéš ûþ ţö "
+    },
+    {
+      "type": 1,
+      "value": "megabytes"
+    },
+    {
+      "type": 0,
+      "value": " ṀƁ. Ļåñĝûåĝé îš đéţéçţéđ åûţöɱåţîçåļļý ŵĥéñ þöššîƀļé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.subtitles.upload.languageLabel": [
