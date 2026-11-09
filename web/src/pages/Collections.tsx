@@ -102,6 +102,12 @@ const WALL_LABEL: Partial<Record<Show, string>> = {
 const SHOW_PARAM = "show";
 const LIBRARY_PARAM = "library";
 
+/**
+ * The Collections page: one poster wall of the profile's own collections, the
+ * ones other profiles share, and the server's, filtered by Show. The header
+ * button (docked at the bottom on narrow screens) is the one way to start a
+ * collection, and a view with nothing in it says so in one line.
+ */
 export default function Collections() {
   useDocumentTitle("Collections");
   const { data, isLoading, isSuccess: personalLoaded } = useCollections();
