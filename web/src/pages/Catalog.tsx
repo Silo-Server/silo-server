@@ -45,7 +45,13 @@ import {
   CollectionPageActions,
   ReadOnlyCollectionCallout,
 } from "@/components/collections/CollectionPageActions";
-import { useCollectionPageAccess } from "@/hooks/useCollectionPageAccess";
+import {
+  useCollectionPageAccess,
+  type CollectionPageTarget,
+} from "@/hooks/useCollectionPageAccess";
+import { useCollectionPageHeader } from "@/hooks/useCollectionPageHeader";
+import { HeroBackdropArtwork } from "@/components/HeroBackdropArtwork";
+import DetailOverview from "@/pages/ItemDetail/components/DetailOverview";
 import {
   buildHistoryRemovalTarget,
   historyRemovalDialogDescription,
@@ -362,15 +368,21 @@ function CatalogResults({
   // A collection the viewer cannot reach answers 404, the same for a deleted
   // collection and one they were never shown, so the page says neither.
   const collectionUnavailable = isCollectionSource && isNotFoundProblem(catalogQuery.sourceError);
-  const collectionAccess = useCollectionPageAccess(
+  const collectionTarget: CollectionPageTarget | null =
     isCollectionSource && state.collection_id
       ? {
           scope: state.source === "library_collection" ? "server" : "personal",
           id: state.collection_id,
           libraryId: state.library_id,
         }
-      : null,
-  );
+      : null;
+  const collectionAccess = useCollectionPageAccess(collectionTarget);
+  const collectionHeader = useCollectionPageHeader(collectionUnavailable ? null : collectionTarget);
+  const collectionBackdrop =
+    collectionHeader.status === "ready" &&
+    (collectionHeader.backdropUrl || collectionHeader.backdropThumbhash)
+      ? collectionHeader
+      : null;
   const title = collectionUnavailable
     ? "Not found"
     : (catalogQuery.data?.title ?? state.title ?? defaultCatalogTitle(state.source, state.q));
@@ -425,15 +437,55 @@ function CatalogResults({
       {searchParams.get("notice") === "read-only" ? (
         <ReadOnlyCollectionCallout access={collectionAccess} collectionName={title} />
       ) : null}
-      <header className="page-header">
-        <div className="space-y-3">
+      <header
+        className={cn(
+          "page-header",
+          collectionBackdrop &&
+            "relative isolate min-h-[clamp(16rem,42vh,26rem)] content-end overflow-hidden rounded-2xl px-4 pt-24 pb-5 sm:flex-nowrap sm:px-6 sm:pb-6",
+        )}
+      >
+        {collectionBackdrop ? (
+          <>
+            <HeroBackdropArtwork
+              backdropUrl={collectionBackdrop.backdropUrl}
+              backdropThumbhash={collectionBackdrop.backdropThumbhash}
+              className="absolute inset-0"
+            />
+            {/* Fade the artwork into the page below and behind the text. */}
+            <div
+              aria-hidden="true"
+              className="from-background via-background/70 absolute inset-0 bg-gradient-to-t to-transparent"
+            />
+            <div
+              aria-hidden="true"
+              className="from-background/80 absolute inset-0 bg-gradient-to-r via-transparent to-transparent"
+            />
+          </>
+        ) : null}
+        {/* Over the artwork the actions stay beside the title, not under it. */}
+        <div className={cn("space-y-3", collectionBackdrop && "relative sm:min-w-0 sm:flex-1")}>
           <h1 className="page-title text-[clamp(2rem,5vw,3.5rem)]">{title}</h1>
           <CollectionByline access={collectionAccess} />
-          <p className="page-subtitle text-sm sm:text-base">
-            {defaultCatalogSubtitle(state.source)}
-          </p>
+          {collectionHeader.status === "pending" ? null : collectionHeader.description ? (
+            // A description keeps the line breaks it was written with.
+            <div className="whitespace-pre-line">
+              <DetailOverview overview={collectionHeader.description} clamp />
+            </div>
+          ) : (
+            <p className="page-subtitle text-sm sm:text-base">
+              {defaultCatalogSubtitle(state.source)}
+            </p>
+          )}
         </div>
-        <div className="flex flex-col items-start gap-3 sm:items-end">
+        {/* A collection's actions, Shuffle and count share one centred row. */}
+        <div
+          className={cn(
+            isCollectionSource
+              ? "flex flex-wrap items-center gap-3 sm:justify-end"
+              : "flex flex-col items-start gap-3 sm:items-end",
+            collectionBackdrop && "relative shrink-0",
+          )}
+        >
           <CollectionPageActions access={collectionAccess} libraryId={state.library_id} />
           <div
             className={cn(
@@ -460,8 +512,20 @@ function CatalogResults({
             ) : null}
             <div className="hidden h-8 w-px bg-current opacity-15 sm:block" />
             {showExactResultCount ? (
-              <div className="text-right tabular-nums" role="status" aria-live="polite">
-                <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
+              <div
+                className={cn(
+                  "text-right tabular-nums",
+                  canShuffleCollection && "flex items-center",
+                )}
+                role="status"
+                aria-live="polite"
+              >
+                <span
+                  className={cn(
+                    "hidden text-3xl font-extralight tracking-tight sm:inline",
+                    canShuffleCollection && "leading-none",
+                  )}
+                >
                   {totalItems}
                 </span>
                 <span className="text-muted-foreground ml-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
