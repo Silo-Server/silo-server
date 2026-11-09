@@ -18,10 +18,10 @@ import (
 // one run per seek), so a few slots hold every range that matters.
 const deliveredSpanSlots = 8
 
-// deliveredPositionTolerance is how far outside an interval the position may
-// be and still count as inside it: a position report and a delivery report are
-// sampled at different moments, and the byte-to-time mapping is an estimate.
-const deliveredPositionTolerance = 2.0
+// fetchedPositionTolerance is how far outside the fetched HLS run the position
+// may be and still count as inside it: a position report and a segment
+// download are observed at different moments.
+const fetchedPositionTolerance = 2.0
 
 // MediaSpan is a range of media time in seconds.
 type MediaSpan struct {
@@ -29,18 +29,19 @@ type MediaSpan struct {
 	End   float64
 }
 
-// deliveredSpans is the delivered media time of a session's current file. It
-// is a fixed-size value so a Session copy never shares it.
+// deliveredSpans is the delivered media time of a session's current file,
+// ordered from the least to the most recently extended range. It is a
+// fixed-size value so a Session copy never shares it.
 type deliveredSpans struct {
 	fileID int
 	count  int
 	spans  [deliveredSpanSlots]MediaSpan
 }
 
-// note merges span into the set. When the set is full, the span farthest from
-// position is dropped, so the ranges around the viewer survive tail reads and
-// seeks.
-func (d *deliveredSpans) note(span MediaSpan, position float64) {
+// note merges span with the ranges it overlaps or touches and makes the result
+// the most recent. When the set is full, the least recently extended range is
+// dropped.
+func (d *deliveredSpans) note(span MediaSpan) {
 	merged := span
 	kept := d.spans[:0]
 	for _, existing := range d.spans[:d.count] {
@@ -51,52 +52,18 @@ func (d *deliveredSpans) note(span MediaSpan, position float64) {
 		kept = append(kept, existing)
 	}
 	if len(kept) == deliveredSpanSlots {
-		farthest := 0
-		for i := range kept {
-			if spanDistance(kept[i], position) > spanDistance(kept[farthest], position) {
-				farthest = i
-			}
-		}
-		if spanDistance(merged, position) >= spanDistance(kept[farthest], position) {
-			d.count = len(kept)
-			return
-		}
-		kept = append(kept[:farthest], kept[farthest+1:]...)
+		kept = append(kept[:0], kept[1:]...)
 	}
 	kept = append(kept, merged)
 	d.count = len(kept)
 }
 
-func (d *deliveredSpans) list() []MediaSpan {
-	return d.spans[:d.count]
-}
-
-func spanDistance(span MediaSpan, position float64) float64 {
-	switch {
-	case position < span.Start:
-		return span.Start - position
-	case position > span.End:
-		return position - span.End
-	default:
-		return 0
+// latest returns the most recently extended range.
+func (d *deliveredSpans) latest() (MediaSpan, bool) {
+	if d.count == 0 {
+		return MediaSpan{}, false
 	}
-}
-
-// DeliveredThroughAt returns the end of the span that contains position,
-// within deliveredPositionTolerance. A plain maximum would be wrong: players
-// read an index at the end of the file and keep ranges from before a seek, and
-// neither says anything about the media ahead of the viewer.
-func DeliveredThroughAt(spans []MediaSpan, position float64) (float64, bool) {
-	through, found := 0.0, false
-	for _, span := range spans {
-		if position < span.Start-deliveredPositionTolerance || position > span.End+deliveredPositionTolerance {
-			continue
-		}
-		if !found || span.End > through {
-			through, found = span.End, true
-		}
-	}
-	return through, found
+	return d.spans[d.count-1], true
 }
 
 // DeliveredMediaSpan maps the byte range [start, end) of a file of size bytes
@@ -129,18 +96,24 @@ func (m *SessionManager) NoteDelivered(sessionID string, fileID int, span MediaS
 	if s.delivered.fileID != fileID {
 		s.delivered = deliveredSpans{fileID: fileID}
 	}
-	s.delivered.note(span, s.Position)
+	s.delivered.note(span)
 	return nil
 }
 
-// DeliveredThroughSeconds returns how far the session's current file has been
-// delivered past the playback position, in media seconds, when a direct-play
-// transport on this server recorded it.
+// DeliveredThroughSeconds returns the end, in media seconds, of the range of
+// the session's current file that a direct-play transport on this server most
+// recently extended. The range is not matched against the playback position:
+// its media time is a linear estimate from byte offsets, which on a
+// variable-bitrate file can lead or trail the real position by minutes.
+// Recency instead picks the playing response over ranges from before a seek,
+// and a brief read elsewhere, such as an index at the file's tail, gives way
+// the next time the playing response reports.
 func (s *Session) DeliveredThroughSeconds() (float64, bool) {
-	if s == nil || s.delivered.count == 0 || s.delivered.fileID != s.MediaFileID {
+	if s == nil || s.delivered.fileID != s.MediaFileID {
 		return 0, false
 	}
-	return DeliveredThroughAt(s.delivered.list(), s.Position)
+	span, ok := s.delivered.latest()
+	return span.End, ok
 }
 
 // DeliveryNoter records delivered media time on a playback session.
@@ -198,13 +171,13 @@ type HLSDeliveryProgress struct {
 }
 
 // FetchedThroughAt returns the end of the fetched run when it contains
-// position. A run elsewhere (the client sought away from it) says nothing
-// about the media ahead of the viewer.
+// position, within fetchedPositionTolerance. A run elsewhere (the client
+// sought away from it) says nothing about the media ahead of the viewer.
 func (p HLSDeliveryProgress) FetchedThroughAt(position float64) (float64, bool) {
-	if !p.FetchedOK {
+	if !p.FetchedOK || position < p.Fetched.Start-fetchedPositionTolerance || position > p.Fetched.End+fetchedPositionTolerance {
 		return 0, false
 	}
-	return DeliveredThroughAt([]MediaSpan{p.Fetched}, position)
+	return p.Fetched.End, true
 }
 
 // DeliveryProgress reports how far the client has fetched and ffmpeg has

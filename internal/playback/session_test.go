@@ -1097,10 +1097,10 @@ func mustGetSession(t *testing.T, sm *playback.SessionManager, sessionID string)
 	return session
 }
 
-// Direct play reports how far the file is delivered past the viewer: the end
-// of the delivered range that holds the position, never the furthest byte
-// read, since players read an index at the file's tail and keep ranges from
-// before a seek.
+// Direct play reports the end of the delivered range most recently extended,
+// never the furthest byte read. It does not match ranges against the position:
+// their media time is a linear byte estimate that leads or trails the real
+// position on a variable-bitrate file.
 func TestSessionDeliveredThroughSeconds(t *testing.T) {
 	// A 1000-byte, 100-second file: 10 bytes are one second.
 	const fileID, size, duration = 42, 1000, 100.0
@@ -1108,7 +1108,7 @@ func TestSessionDeliveredThroughSeconds(t *testing.T) {
 		fileID     int // zero means the session's file
 		start, end int64
 	}
-	spread := make([]delivery, 0, 9)
+	spread := make([]delivery, 0, 10)
 	for i := range int64(9) {
 		spread = append(spread, delivery{start: i * 100, end: i*100 + 10})
 	}
@@ -1120,12 +1120,12 @@ func TestSessionDeliveredThroughSeconds(t *testing.T) {
 		wantOK     bool
 	}{
 		{name: "head read", position: 10, deliveries: []delivery{{start: 0, end: 300}}, want: 30, wantOK: true},
-		{name: "tail index read is ignored", position: 10, deliveries: []delivery{{start: 0, end: 300}, {start: 950, end: 1000}}, want: 30, wantOK: true},
-		{name: "seek past the delivered range", position: 50, deliveries: []delivery{{start: 0, end: 300}}},
-		{name: "range after a seek", position: 55, deliveries: []delivery{{start: 0, end: 300}, {start: 500, end: 700}}, want: 70, wantOK: true},
+		{name: "tail index read shows until the playing response reports", position: 10, deliveries: []delivery{{start: 0, end: 300}, {start: 950, end: 1000}}, want: 100, wantOK: true},
+		{name: "playing response supersedes a tail index read", position: 10, deliveries: []delivery{{start: 0, end: 300}, {start: 950, end: 1000}, {start: 0, end: 310}}, want: 31, wantOK: true},
+		{name: "estimate trailing the position", position: 50, deliveries: []delivery{{start: 0, end: 300}}, want: 30, wantOK: true},
+		{name: "range after a seek wins over an earlier range at the position", position: 58, deliveries: []delivery{{start: 0, end: 600}, {start: 650, end: 700}}, want: 70, wantOK: true},
 		{name: "adjacent responses merge", position: 10, deliveries: []delivery{{start: 0, end: 300}, {start: 300, end: 450}}, want: 45, wantOK: true},
-		{name: "position just past the end", position: 31, deliveries: []delivery{{start: 0, end: 300}}, want: 30, wantOK: true},
-		{name: "full set keeps the range at the position", position: 0.5, deliveries: spread, want: 1, wantOK: true},
+		{name: "full set drops the least recent range", position: 0.5, deliveries: append(spread, delivery{start: 0, end: 5}), want: 0.5, wantOK: true},
 		{name: "another file's ranges are discarded", position: 10, deliveries: []delivery{{start: 0, end: 300}, {fileID: 43, start: 0, end: 500}}},
 	} {
 		sm := playback.NewSessionManager(0, 0)

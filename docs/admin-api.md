@@ -282,13 +282,18 @@ does not carry the field.
 
 `delivery_progress: true` advertises two optional fields on v2 session rows, both
 in whole media seconds. `delivered_through_seconds` is the end of the contiguous
-range sent to the client that contains the playback position. For Direct Play it
-is a linear estimate from the file bytes the server delivered (offset ÷ file size
-× duration), so it describes what was sent, not what the client has buffered, and it advances
-as each 4 MiB slice of the response is sent;
-ranges a player reads elsewhere, such as an index at the end of the file or the
-media before a seek, do not count. For HLS it is the end of the run of segments
-the client finished downloading. `produced_through_seconds` is the end of the
+range most recently sent to the client. For Direct Play it is the end of the
+file range the server last extended, merged with the earlier ranges it overlaps
+or touches, and it advances as each 4 MiB slice of the response is sent. Its
+media time is a linear estimate from the file bytes (offset ÷ file size ×
+duration), so it describes what was sent, not what the client has buffered, and
+on a variable-bitrate file it can lead or trail the playback position by
+minutes. It is not matched against the position: recency picks the range a
+player reads after a seek over the ones before it, and a brief read elsewhere,
+such as an index at the end of the file, shows until the playing response sends
+its next slice. For HLS it is the end of the run of segments the client finished
+downloading, omitted while that run does not contain the playback position.
+`produced_through_seconds` is the end of the
 last segment the current transcode process wrote. The API server reports both
 only for streams it serves or transcodes itself: sessions on remote transcode
 nodes, proxy-served Direct Play, and progressive remux omit them for now. The
