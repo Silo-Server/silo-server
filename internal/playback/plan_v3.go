@@ -249,19 +249,10 @@ func (input PlannerInputV3) hlsToneMapCapabilities() tonemap.Capabilities {
 	return input.ToneMapCapabilities
 }
 
-// PlanPlaybackV3 chooses a playable protocol-v3 route from source and client facts.
-func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
-	// Registered first so it runs last, after any rewrite of the result.
-	defer func() {
-		if result.Plan != nil {
-			result.Plan.ActiveQuality = activeQualityV3(input.Request, *result.Plan)
-			file := input.EffectiveFile
-			if file == nil {
-				file = input.RequestedFile
-			}
-			markNativeSelectableV3(result.Plan, file, input)
-		}
-	}()
+// PlanPlaybackV3 chooses a playable protocol-v3 route from source and client
+// facts. planAudioOnlyV3 or planVideoV3 selects the route; the steps after it
+// apply to whatever either returns.
+func PlanPlaybackV3(input PlannerInputV3) PlannerResultV3 {
 	if input.RequestedFile == nil {
 		return terminalPlannerResultV3("source_unavailable", "The requested media source is unavailable.", false)
 	}
@@ -270,8 +261,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		file = input.RequestedFile
 	}
 	// A file ffprobe already rejected has nothing for any route to validate.
-	// Answer before the bitrate-cap wrapper below, which would otherwise
-	// rename the refusal after a policy that has nothing to do with it.
+	// Answer before the server bitrate cap is enforced below, which would
+	// otherwise rename the refusal after a policy that has nothing to do with
+	// it.
 	if file.ProbeRejected() {
 		return terminalPlannerResultV3(TerminalSourceUnreadableV3, TerminalSourceUnreadableMessageV3, false)
 	}
@@ -291,36 +283,63 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		input.Now = time.Now()
 	}
 	source := SourceDescriptorFromFileV3(file, input.AudioTrackIndex)
-	serverBitrateRequiresEncode := false
-	if input.ServerBitrateCapKbps > 0 {
-		if cap := optionalValueV3(input.Request.BandwidthCapKbps); cap == 0 || input.ServerBitrateCapKbps < cap {
-			input.Request.BandwidthCapKbps = &input.ServerBitrateCapKbps
-		}
-		// The video track rate excludes audio and container overhead. Only a
-		// known total rate can establish that a source-preserving route fits.
-		cap := optionalValueV3(input.Request.BandwidthCapKbps)
-		totalBitrateKbps := normalizeBitrateKbpsV3(file.Bitrate)
-		serverBitrateRequiresEncode = totalBitrateKbps <= 0 || totalBitrateKbps > cap || source.BitrateKbps > cap
-		if serverBitrateRequiresEncode {
-			defer func() {
-				compliant := result.Plan != nil &&
-					(result.PlayMethod == PlayTranscode || file.IsAudioOnly() && result.TranscodeAudio)
-				if result.Terminal != nil || !compliant {
-					// Keep a transient blocker (such as a missing toolchain)
-					// retryable after naming the bitrate limit as the refusal.
-					retryable := result.Terminal != nil && result.Terminal.Retryable
-					result = terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "This stream exceeds the server bitrate limit, and no compliant transcoding route is available.", retryable)
-				}
-			}()
-		}
-	}
-	// A source without any video track is audio-only (audiobooks, future
-	// music): the video, HDR, and subtitle-burn gates below have nothing to
-	// gate, and requiring complete video metadata would terminal a perfectly
-	// playable file. It gets its own reduced route family instead.
+	serverBitrateRequiresEncode := applyServerBitrateCapV3(&input, file, source)
+	var result PlannerResultV3
 	if file.IsAudioOnly() {
-		return planAudioOnlyV3(input, file, source)
+		// A source without any video track is audio-only (audiobooks, future
+		// music): the video, HDR, and subtitle-burn gates have nothing to
+		// gate, and requiring complete video metadata would terminal a
+		// perfectly playable file. It gets its own reduced route family.
+		result = planAudioOnlyV3(input, file, source)
+	} else {
+		result = planVideoV3(input, file, source, serverBitrateRequiresEncode)
 	}
+	if serverBitrateRequiresEncode {
+		result = enforceServerBitrateCapV3(result, file)
+	}
+	// Last, so it names the plan that survives the cap.
+	if result.Plan != nil {
+		result.Plan.ActiveQuality = activeQualityV3(input.Request, *result.Plan)
+		markNativeSelectableV3(result.Plan, file, input)
+	}
+	return result
+}
+
+// applyServerBitrateCapV3 folds the administrator's bitrate cap into the
+// request's own cap and reports whether the source must be encoded to fit it.
+func applyServerBitrateCapV3(input *PlannerInputV3, file *models.MediaFile, source SourceDescriptorV3) bool {
+	if input.ServerBitrateCapKbps <= 0 {
+		return false
+	}
+	if requestCapKbps := optionalValueV3(input.Request.BandwidthCapKbps); requestCapKbps == 0 || input.ServerBitrateCapKbps < requestCapKbps {
+		input.Request.BandwidthCapKbps = &input.ServerBitrateCapKbps
+	}
+	// The video track rate excludes audio and container overhead. Only a
+	// known total rate can establish that a source-preserving route fits.
+	capKbps := optionalValueV3(input.Request.BandwidthCapKbps)
+	totalBitrateKbps := normalizeBitrateKbpsV3(file.Bitrate)
+	return totalBitrateKbps <= 0 || totalBitrateKbps > capKbps || source.BitrateKbps > capKbps
+}
+
+// enforceServerBitrateCapV3 refuses any result that does not encode a source
+// the server bitrate cap requires encoding, whichever route produced it.
+func enforceServerBitrateCapV3(result PlannerResultV3, file *models.MediaFile) PlannerResultV3 {
+	compliant := result.Plan != nil &&
+		(result.PlayMethod == PlayTranscode || file.IsAudioOnly() && result.TranscodeAudio)
+	if result.Terminal == nil && compliant {
+		return result
+	}
+	// Keep a transient blocker (such as a missing toolchain) retryable after
+	// naming the bitrate limit as the refusal.
+	retryable := result.Terminal != nil && result.Terminal.Retryable
+	return terminalPlannerResultV3(TerminalBitratePolicyUnavailableV3, "This stream exceeds the server bitrate limit, and no compliant transcoding route is available.", retryable)
+}
+
+// planVideoV3 chooses the route for a source with a video track: the original
+// file, then a copy remux, then a transcode.
+//
+//nolint:funlen,gocyclo // PlanPlaybackV3's video route selection, moved as is behind the server-cap and annotation steps
+func planVideoV3(input PlannerInputV3, file *models.MediaFile, source SourceDescriptorV3, serverBitrateRequiresEncode bool) PlannerResultV3 {
 	// Subtitle renderability is delivery-specific, so every candidate route is
 	// validated against the capabilities of the delivery class that would
 	// execute it. A refusal on original_http must not suppress a viable
