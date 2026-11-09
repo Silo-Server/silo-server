@@ -92,7 +92,7 @@ func (r *EmailPrefsRepository) ClaimVerificationDispatch(ctx context.Context, no
 	if err != nil {
 		return nil, fmt.Errorf("claim verification dispatch: %w", err)
 	}
-	err = tx.QueryRow(ctx, `SELECT user_id,pending_token_hash FROM notification_email_prefs WHERE profile_id=$1`, c.ProfileID).Scan(&c.PrefsUser, &c.PrefsHash)
+	err = tx.QueryRow(ctx, `SELECT user_id,pending_token_hash FROM notification_email_prefs WHERE user_id=$1 AND profile_id=$2`, c.UserID, c.ProfileID).Scan(&c.PrefsUser, &c.PrefsHash)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		c.PrefsFound = false

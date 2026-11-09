@@ -230,6 +230,11 @@
 ./internal/notifications TestEmailVerificationDispatchRetriesUncertainSendOnceWithSameMessage
 ./internal/notifications TestEmailVerificationDispatchStopsAfterSecondUncertainty
 
+# Two accounts' profiles with the same id keep separate email settings and
+# addresses, and the upgrade resets a row they shared instead of guessing.
+./internal/notifications TestEmailPrefsStayOnTheAccountDB
+./internal/notifications TestEmailPrefsAccountKeyMigrationResetsSharedRowsDB
+
 # Legacy mobile registration protects account ownership under the installation lock.
 ./internal/notifications TestLegacyMobilePushRefusesForeignAccountDB
 ./internal/notifications TestLegacyMobilePushProfileSwitchRollbackDB
@@ -897,6 +902,7 @@
 # a restored library whose setup partly failed, or whose provider placement
 # could not be read, reports it so it is retried without a fallback chain.
 ./internal/backup TestBackupRestoreRoundTripDB
+./internal/backup TestCarryOntoAnOlderKeyDropsSharedRowsDB
 ./internal/backup TestEncryptedS3RoundTripDB
 ./internal/backup TestFullRestoresAreSerializedDB
 ./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB
