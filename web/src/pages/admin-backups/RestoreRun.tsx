@@ -18,6 +18,7 @@ import type {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { useT, type MessageKey } from "@/i18n";
 import { formatTime } from "@/lib/datetime";
 import { DATA_TYPE_LABELS, dataCountsPhrase, titleList } from "@/lib/profileDataTypes";
 import { cn } from "@/lib/utils";
@@ -34,26 +35,46 @@ import {
 } from "./restoreModel";
 
 const OUTCOME = {
-  restored: { label: "Restored", Icon: CircleCheck, tone: "text-green-600 dark:text-green-400" },
-  unchanged: { label: "Already the same", Icon: CircleMinus, tone: "text-muted-foreground" },
-  left_out: { label: "Left out", Icon: TriangleAlert, tone: "text-amber-600 dark:text-amber-400" },
-  failed: { label: "Failed", Icon: CircleX, tone: "text-destructive" },
-} satisfies Record<RestoreReportItem["outcome"], unknown>;
+  restored: {
+    label: "web.admin.backups.restore.outcome.restored",
+    Icon: CircleCheck,
+    tone: "text-green-600 dark:text-green-400",
+  },
+  unchanged: {
+    label: "web.admin.backups.restore.outcome.unchanged",
+    Icon: CircleMinus,
+    tone: "text-muted-foreground",
+  },
+  left_out: {
+    label: "web.admin.backups.restore.outcome.leftOut",
+    Icon: TriangleAlert,
+    tone: "text-amber-600 dark:text-amber-400",
+  },
+  failed: {
+    label: "web.admin.backups.restore.outcome.failed",
+    Icon: CircleX,
+    tone: "text-destructive",
+  },
+} satisfies Record<RestoreReportItem["outcome"], { label: MessageKey; [key: string]: unknown }>;
 
 function ReportRow({ item }: { item: RestoreReportItem }) {
+  const t = useT();
   const outcome = OUTCOME[item.outcome];
   const details = [
-    item.outcome === "left_out" && item.reason ? REASON_SENTENCES[item.reason] : null,
+    item.outcome === "left_out" && item.reason ? t(REASON_SENTENCES[item.reason]) : null,
     item.error ?? null,
     item.message ?? null,
     ...item.notes,
     item.missing_blobs.length > 0
-      ? `${item.missing_blobs.length === 1 ? "1 file was" : `${item.missing_blobs.length} files were`} missing from the backup.`
+      ? t("web.admin.backups.restore.run.filesMissing", {
+          count: item.missing_blobs.length,
+          count_text: String(item.missing_blobs.length),
+        })
       : null,
     item.restart_keys.length > 0
-      ? `Applies after a restart: ${item.restart_keys.join(", ")}.`
+      ? t("web.admin.backups.restore.run.restartKeys", { keys: item.restart_keys.join(", ") })
       : item.restart_required
-        ? "Applies after a restart."
+        ? t("web.admin.backups.restore.run.restart")
         : null,
   ].filter((detail): detail is string => Boolean(detail));
   return (
@@ -61,11 +82,13 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
       <div className="min-w-0 flex-1">
         <p className="text-sm">
-          <span className="font-medium">{displayLabel(item)}</span>
-          <span className="text-muted-foreground">
-            {" "}
-            · {SECTION_TITLES[item.section]} · {outcome.label}
-          </span>
+          {t("web.admin.backups.restore.run.itemLine", {
+            label: displayLabel(item),
+            section: t(SECTION_TITLES[item.section]),
+            outcome: t(outcome.label),
+            b: (chunks) => <span className="font-medium">{chunks}</span>,
+            muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+          })}
         </p>
         {details.map((detail, position) => (
           <p key={position} className="text-muted-foreground mt-0.5 text-[13px] break-words">
@@ -102,11 +125,14 @@ function AccountReport({
   /** The item's own message already says what happened to the account. */
   described: boolean;
 }) {
+  const t = useT();
   return (
     <div className="mt-2 space-y-2">
       {described ? null : (
         <p className="text-[13px]">
-          {account.created ? "Created on this server." : "Merged into the account here."}
+          {account.created
+            ? t("web.admin.backups.restore.run.accountCreated")
+            : t("web.admin.backups.restore.run.accountMerged")}
         </p>
       )}
       {account.profiles.length > 0 ? (
@@ -119,12 +145,16 @@ function AccountReport({
                   <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
                   <span className="font-medium">{profile.label}</span>
                   <span className="text-muted-foreground">
-                    · {profile.created ? "Created" : outcome.label}
+                    {t("web.admin.backups.restore.run.profileOutcome", {
+                      outcome: profile.created
+                        ? t("web.admin.backups.restore.outcome.created")
+                        : t(outcome.label),
+                    })}
                   </span>
                 </p>
                 {[
                   profile.outcome === "left_out" && profile.reason
-                    ? REASON_SENTENCES[profile.reason]
+                    ? t(REASON_SENTENCES[profile.reason])
                     : null,
                   profile.message ?? null,
                   ...profile.notes,
@@ -139,10 +169,13 @@ function AccountReport({
                   <ul className="mt-1 space-y-0.5 text-xs">
                     {profile.data.map((data) => (
                       <li key={data.type}>
-                        <span>{DATA_TYPE_LABELS[data.type]}:</span>{" "}
-                        <span className="text-muted-foreground tabular-nums">
-                          {dataCountsPhrase(data)}
-                        </span>
+                        {t("web.admin.backups.restore.run.dataLine", {
+                          label: DATA_TYPE_LABELS[data.type],
+                          counts: dataCountsPhrase(data),
+                          muted: (chunks) => (
+                            <span className="text-muted-foreground tabular-nums">{chunks}</span>
+                          ),
+                        })}
                         {data.notes.map((note, position) => (
                           <span key={position} className="text-muted-foreground block">
                             {note}
@@ -159,12 +192,12 @@ function AccountReport({
       ) : null}
       {account.unmatched.length > 0 ? (
         <p className="text-muted-foreground text-xs break-words">
-          Not in this server&apos;s catalog, so left out: {titleList(account.unmatched)}.
+          {t("web.admin.backups.restore.run.unmatched", { titles: titleList(account.unmatched) })}
         </p>
       ) : null}
       {account.hidden.length > 0 ? (
         <p className="text-muted-foreground text-xs break-words">
-          Not restored because this profile can&apos;t see them: {titleList(account.hidden)}.
+          {t("web.admin.backups.restore.run.hidden", { titles: titleList(account.hidden) })}
         </p>
       ) : null}
     </div>
@@ -206,6 +239,7 @@ export function RestoreRun({
   cancelPending,
   onChooseAgain,
 }: RestoreRunProps) {
+  const t = useT();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const report = job.backup_restore_result;
   const items = report?.items ?? [];
@@ -215,23 +249,33 @@ export function RestoreRun({
     const percent =
       progress && progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0;
     const stopping = job.state === "canceling";
+    const progressNote =
+      progress && progress.total > 0
+        ? t("web.admin.backups.restore.run.steps", {
+            total: progress.total,
+            current_text: String(progress.current),
+            total_text: String(progress.total),
+          })
+        : t("web.admin.backups.restore.run.backsUpFirst");
     return (
       <div className="max-w-[70rem] space-y-5">
         <div className="surface-panel space-y-3 rounded-2xl p-5" role="status">
           <div className="flex items-center gap-2 text-sm font-medium">
             <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
             {stopping
-              ? "Stopping after the current item…"
+              ? t("web.admin.backups.restore.run.stopping")
               : job.state === "queued"
-                ? "Waiting to start…"
-                : "Restoring…"}
+                ? t("web.admin.backups.restore.run.waiting")
+                : t("web.admin.backups.restore.run.restoring")}
           </div>
-          <Progress value={percent} aria-label="Restore progress" />
+          <Progress value={percent} aria-label={t("web.admin.backups.restore.run.progressLabel")} />
           <p className="text-muted-foreground text-[13px]">
-            {progress && progress.total > 0
-              ? `${progress.current} of ${progress.total} steps done. The first step backs up this server.`
-              : "Silo backs up this server first."}
-            {active?.operation === "restore" && active.message ? ` ${active.message}` : null}
+            {active?.operation === "restore" && active.message
+              ? t("web.admin.backups.restore.run.withServerMessage", {
+                  text: progressNote,
+                  message: active.message,
+                })
+              : progressNote}
           </p>
           <Button
             variant="outline"
@@ -239,17 +283,17 @@ export function RestoreRun({
             disabled={!job.cancelable || stopping || cancelPending}
             onClick={() => setConfirmCancel(true)}
           >
-            Stop restore
+            {t("web.admin.backups.restore.run.stop")}
           </Button>
         </div>
-        <ReportList label="Done so far" items={items} />
+        <ReportList label={t("web.admin.backups.restore.run.doneSoFar")} items={items} />
         <ConfirmDialog
           open={confirmCancel}
           onOpenChange={setConfirmCancel}
-          title="Stop this restore?"
-          description="Silo stops after the item it's working on. Items already restored stay restored, and the report lists them. Running the same restore again later is safe."
-          confirmLabel="Stop restore"
-          cancelLabel="Keep restoring"
+          title={t("web.admin.backups.restore.run.stopTitle")}
+          description={t("web.admin.backups.restore.run.stopDescription")}
+          confirmLabel={t("web.admin.backups.restore.run.stop")}
+          cancelLabel={t("web.admin.backups.restore.run.keepRestoring")}
           variant="destructive"
           onConfirm={onCancel}
         />
@@ -263,10 +307,9 @@ export function RestoreRun({
   const code = report?.error_code ?? (report?.interrupted ? "interrupted" : undefined);
   let ending: string | null = null;
   if (job.state === "canceled") {
-    ending =
-      "The restore was stopped before it finished. Items above were committed; running the same restore again is safe.";
-  } else if (code) ending = REPORT_ERROR_SENTENCES[code];
-  else if (job.state === "failed") ending = REPORT_ERROR_SENTENCES.failed;
+    ending = t("web.admin.backups.restore.run.canceled");
+  } else if (code) ending = t(REPORT_ERROR_SENTENCES[code]);
+  else if (job.state === "failed") ending = t(REPORT_ERROR_SENTENCES.failed);
   // The server's own words, when they add to the sentence above.
   const detail =
     ending && code !== "interrupted"
@@ -277,32 +320,35 @@ export function RestoreRun({
     <div className="max-w-[70rem] space-y-5">
       <div className="space-y-2">
         <p className="text-base font-medium">
-          {report ? reportHeadline(report.counts) : "The restore ended without a report."}
+          {report ? reportHeadline(report.counts) : t("web.admin.backups.restore.run.noReport")}
         </p>
         {job.finished_at ? (
           <p className="text-muted-foreground text-[13px]">
-            Finished {backupDateTime(job.finished_at)}.
+            {t("web.admin.backups.restore.run.finished", {
+              date: backupDateTime(job.finished_at),
+            })}
           </p>
         ) : null}
         {ending ? <SettingFieldStatus tone="warn">{ending}</SettingFieldStatus> : null}
         {detail ? <p className="text-muted-foreground text-[13px] break-words">{detail}</p> : null}
       </div>
 
-      <ReportList label="Report" items={items} />
+      <ReportList label={t("web.admin.backups.restore.run.report")} items={items} />
 
       {report?.before_restore_backup_id ? (
         <p className="text-muted-foreground text-sm leading-relaxed">
-          To go back to how this server was before, restore the{" "}
-          <Link
-            to={`/admin/backups?backup=${encodeURIComponent(report.before_restore_backup_id)}`}
-            className="text-foreground underline underline-offset-2"
-          >
-            {recovery
-              ? `${formatTime(recovery.created_at)} copy`
-              : `${report.before_restore_backup_id} copy`}
-          </Link>{" "}
-          in full with <code className="font-mono text-xs">silo backup restore</code>. That replaces
-          everything changed since then.
+          {t("web.admin.backups.restore.run.recovery", {
+            copy: recovery ? formatTime(recovery.created_at) : report.before_restore_backup_id,
+            link: (chunks) => (
+              <Link
+                to={`/admin/backups?backup=${encodeURIComponent(report.before_restore_backup_id!)}`}
+                className="text-foreground underline underline-offset-2"
+              >
+                {chunks}
+              </Link>
+            ),
+            code: (chunks) => <code className="font-mono text-xs">{chunks}</code>,
+          })}
         </p>
       ) : null}
 
@@ -310,11 +356,11 @@ export function RestoreRun({
         {report ? (
           <Button variant="outline" onClick={() => downloadReport(job)}>
             <Download data-icon="inline-start" aria-hidden="true" />
-            Download report
+            {t("web.admin.backups.restore.run.downloadReport")}
           </Button>
         ) : null}
         <Button variant="outline" onClick={onChooseAgain}>
-          Choose again
+          {t("web.admin.backups.restore.run.chooseAgain")}
         </Button>
       </div>
     </div>

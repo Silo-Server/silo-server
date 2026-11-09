@@ -14,7 +14,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useAdminMessages } from "@/i18n";
+import { useAdminMessages, useT } from "@/i18n";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
@@ -26,6 +26,8 @@ import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
 const ADMIN_DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
+/** The play-mark glyph on the phone header's logo tile; not text. */
+const LOGO_GLYPH = "▶";
 
 export default function AdminLayout() {
   // Admin text is its own catalog chunk; render once it has loaded.
@@ -33,6 +35,7 @@ export default function AdminLayout() {
 }
 
 function AdminLayoutContent() {
+  const t = useT();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const location = useLocation();
@@ -57,8 +60,13 @@ function AdminLayoutContent() {
   const audiobookPlayback = useAudiobookPlaybackController();
   const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
   const documentTitle = resolveAdminDocumentTitle(location.pathname);
+  // The admin root's own title marks the dashboard (and unknown pages). The
+  // "Admin " prefix strip still reads documentTitle's English; it needs a
+  // page-name resolver there before those titles translate.
   const mobileTitle =
-    documentTitle === "Admin" ? "Dashboard" : documentTitle.replace(/^Admin /, "");
+    documentTitle === resolveAdminDocumentTitle("/admin")
+      ? t("web.admin.shell.mobileHeader.dashboardTitle")
+      : documentTitle.replace(/^Admin /, "");
 
   useDocumentTitle(documentTitle);
 
@@ -99,7 +107,7 @@ function AdminLayoutContent() {
         href="#main-content"
         className="focus:bg-background focus:text-foreground focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-lg focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:outline-none"
       >
-        Skip to content
+        {t("web.admin.shell.skipToContent")}
       </a>
       <div className="from-primary/6 pointer-events-none fixed inset-x-0 top-0 z-0 h-40 bg-gradient-to-b to-transparent blur-3xl" />
       {/* Desktop sidebar, with the admin search at its top */}
@@ -114,18 +122,18 @@ function AdminLayoutContent() {
             <SheetTrigger asChild>
               <button
                 className="text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring/60 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-all focus-visible:ring-[3px] focus-visible:outline-none"
-                aria-label="Open admin navigation"
+                aria-label={t("web.admin.shell.mobileHeader.openNavigation")}
               >
                 <Menu className="h-5 w-5" />
               </button>
             </SheetTrigger>
             <div className="flex min-w-0 items-center gap-2">
               <div className="text-primary border-border/70 bg-surface flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-sm font-bold">
-                ▶
+                {LOGO_GLYPH}
               </div>
               <div className="min-w-0">
                 <span className="text-muted-foreground block text-[10px] leading-none font-semibold tracking-[0.16em] uppercase">
-                  Admin
+                  {t("web.admin.shell.mobileHeader.eyebrow")}
                 </span>
                 <span className="mt-1 block truncate text-[15px] leading-none font-extrabold tracking-tight">
                   {mobileTitle}
@@ -152,12 +160,12 @@ function AdminLayoutContent() {
           className="w-[320px] max-w-[calc(100vw-3rem)] gap-0 border-r-0 p-0 sm:max-w-[320px]"
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>Admin Navigation</SheetTitle>
+            <SheetTitle>{t("web.admin.shell.drawer.title")}</SheetTitle>
           </SheetHeader>
           <SheetClose asChild>
             <button
               type="button"
-              aria-label="Close admin navigation"
+              aria-label={t("web.admin.shell.drawer.close")}
               className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/60 absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
             >
               <X className="h-5 w-5" aria-hidden="true" />
@@ -202,12 +210,13 @@ function AdminLayoutContent() {
 
 /** The phone header's search button; desktop has the field in the sidebar. */
 function AdminSearchButton({ onClick }: { onClick: () => void }) {
+  const t = useT();
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label="Search admin sections"
-      title={`Search admin sections (${SEARCH_SHORTCUT_LABEL})`}
+      aria-label={t("web.admin.shell.search.label")}
+      title={t("web.admin.shell.search.title", { shortcut: SEARCH_SHORTCUT_LABEL })}
       className="text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring/60 border-border/70 bg-surface/70 flex h-11 w-11 items-center justify-center rounded-xl border transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
     >
       <Search className="h-4 w-4" aria-hidden="true" />

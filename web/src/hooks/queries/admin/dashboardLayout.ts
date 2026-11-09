@@ -11,6 +11,7 @@ import {
 import { v2 } from "@/api/v2/request";
 import type { AdminDashboardLayoutDocument, AdminDashboardLayoutResponse } from "@/api/types";
 import { adminKeys } from "../keys";
+import { t } from "@/i18n";
 
 // A single toast id per concern: a burst of failed saves (offline, server
 // down) collapses into one message instead of stacking one per attempt.
@@ -109,10 +110,9 @@ export function useSaveAdminDashboardLayout() {
     },
     onError: (_error, intent) => {
       if (isCapturedProfileAuthorityActive(intent.profileContext))
-        toast.error(
-          "Server layout save could not be confirmed. Local edits are retained; reload before another server submission.",
-          { id: SAVE_TOAST_ID },
-        );
+        toast.error(t("web.admin.dashboard.hooks.dashboardLayout.saveUnconfirmed"), {
+          id: SAVE_TOAST_ID,
+        });
     },
   });
   const rawMutate = mutation.mutate;
@@ -139,7 +139,7 @@ export function useSaveAdminDashboardLayout() {
       try {
         rawMutate(captureDashboardLayoutSave(layout, etag));
       } catch {
-        toast.error("Select an administrator profile before saving the server layout.", {
+        toast.error(t("web.admin.dashboard.hooks.dashboardLayout.saveSelectProfile"), {
           id: SAVE_TOAST_ID,
         });
       }
@@ -179,7 +179,7 @@ export function useResetAdminDashboardLayout() {
     },
     onError: (_error, authority) => {
       if (isCapturedProfileAuthorityActive(authority))
-        toast.error("Server layout reset could not be confirmed. Reload before submitting again.", {
+        toast.error(t("web.admin.dashboard.hooks.dashboardLayout.resetUnconfirmed"), {
           id: RESET_TOAST_ID,
         });
     },
@@ -190,7 +190,7 @@ export function useResetAdminDashboardLayout() {
       try {
         mutation.mutate(captureLayoutReset());
       } catch {
-        toast.error("Select an administrator profile before resetting the server layout.", {
+        toast.error(t("web.admin.dashboard.hooks.dashboardLayout.resetSelectProfile"), {
           id: RESET_TOAST_ID,
         });
       }

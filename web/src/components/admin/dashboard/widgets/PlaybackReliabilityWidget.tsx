@@ -9,6 +9,7 @@ import { useWidgetRange } from "../widgetChrome";
 import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
 
 /**
  * Coarse playback health for the chosen window.
@@ -21,13 +22,16 @@ import { formatLocale } from "@/lib/appLocale";
  * reverse-engineered from logs. See docs/admin-api.md.
  */
 export function PlaybackReliabilityWidget() {
+  const t = useT();
   const { range } = useWidgetRange();
   const query = useAdminPlaybackActivity(rangeHours(range));
   const reliability = query.data?.reliability;
 
   return (
     <Card className="h-full">
-      <WidgetHeader title={rangeTitle("Playback reliability", range)}>
+      <WidgetHeader
+        title={rangeTitle(t("web.admin.dashboard.widgets.playbackReliability.title"), range)}
+      >
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto">
@@ -38,31 +42,34 @@ export function PlaybackReliabilityWidget() {
             ))}
           </div>
         ) : query.error || !reliability ? (
-          <SectionError message="Failed to load playback reliability." />
+          <SectionError message={t("web.admin.dashboard.widgets.playbackReliability.loadFailed")} />
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat
-              label="Started"
+              label={t("web.admin.dashboard.widgets.playbackReliability.started")}
               value={reliability.sessions_started.toLocaleString(formatLocale())}
             />
             <MiniStat
-              label="Transcode starts"
+              label={t("web.admin.dashboard.widgets.playbackReliability.transcodeStarts")}
               value={reliability.transcode_starts.toLocaleString(formatLocale())}
             />
             <MiniStat
-              label="Completed"
+              label={t("web.admin.dashboard.widgets.playbackReliability.completed")}
               value={formatCompletionRate(
                 reliability.completion_rate,
                 reliability.finalized_sessions,
               )}
               detail={
                 reliability.finalized_sessions > 0
-                  ? `${reliability.completed_sessions.toLocaleString(formatLocale())} of ${reliability.finalized_sessions.toLocaleString(formatLocale())} finished`
-                  : "No finished sessions yet"
+                  ? t("web.admin.dashboard.widgets.playbackReliability.completedDetail", {
+                      completed: reliability.completed_sessions.toLocaleString(formatLocale()),
+                      finished: reliability.finalized_sessions.toLocaleString(formatLocale()),
+                    })
+                  : t("web.admin.dashboard.widgets.playbackReliability.noFinished")
               }
             />
             <MiniStat
-              label="Profiles"
+              label={t("web.admin.dashboard.widgets.playbackReliability.profiles")}
               value={reliability.unique_profiles.toLocaleString(formatLocale())}
             />
           </div>

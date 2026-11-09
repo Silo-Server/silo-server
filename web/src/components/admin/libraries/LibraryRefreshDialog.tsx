@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { LibraryRefreshMode } from "@/hooks/queries/admin/libraries";
+import { useT } from "@/i18n";
 
 interface LibraryRefreshDialogProps {
   libraryName: string | null;
@@ -22,14 +23,16 @@ export function LibraryRefreshDialog({
   onConfirm,
   isPending = false,
 }: LibraryRefreshDialogProps) {
+  const t = useT();
   return (
     <Dialog open={libraryName !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Refresh Library Metadata</DialogTitle>
+          <DialogTitle>{t("web.admin.common.libraryEditor.refresh.title")}</DialogTitle>
           <DialogDescription>
-            Choose how much of {libraryName ?? "this library"} to refresh from its metadata
-            providers.
+            {libraryName === null
+              ? t("web.admin.common.libraryEditor.refresh.descriptionUnnamed")
+              : t("web.admin.common.libraryEditor.refresh.description", { name: libraryName })}
           </DialogDescription>
         </DialogHeader>
 
@@ -46,10 +49,11 @@ export function LibraryRefreshDialog({
               <RefreshCw className="text-muted-foreground mt-0.5 size-5 shrink-0" />
             )}
             <div className="space-y-1">
-              <div className="text-sm font-semibold">Refresh Missing Metadata</div>
+              <div className="text-sm font-semibold">
+                {t("web.admin.common.libraryEditor.refresh.missingTitle")}
+              </div>
               <div className="text-muted-foreground text-sm">
-                Refresh matched items that were never refreshed, are missing an overview or artwork,
-                or failed a previous refresh.
+                {t("web.admin.common.libraryEditor.refresh.missingDescription")}
               </div>
             </div>
           </button>
@@ -66,11 +70,11 @@ export function LibraryRefreshDialog({
               <DatabaseBackup className="text-muted-foreground mt-0.5 size-5 shrink-0" />
             )}
             <div className="space-y-1">
-              <div className="text-sm font-semibold">Refresh All Metadata</div>
+              <div className="text-sm font-semibold">
+                {t("web.admin.common.libraryEditor.refresh.allTitle")}
+              </div>
               <div className="text-muted-foreground text-sm">
-                Re-fetch every item from its providers, including titles, artwork, seasons, and
-                episodes. Large libraries can take hours. Locked fields and artwork stay as they
-                are.
+                {t("web.admin.common.libraryEditor.refresh.allDescription")}
               </div>
             </div>
           </button>
@@ -78,7 +82,7 @@ export function LibraryRefreshDialog({
 
         <div className="flex justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       </DialogContent>

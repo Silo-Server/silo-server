@@ -1,13 +1,58 @@
 import { BookHeadphones, BookMarked, BookOpen, Film, Layers, Podcast, Tv } from "lucide-react";
 
+import { t } from "@/i18n";
+
+// Each type's name is read when shown, in the interface language.
 export const LIBRARY_TYPES = [
-  { value: "movies", label: "Movies", icon: Film },
-  { value: "series", label: "Series", icon: Tv },
-  { value: "mixed", label: "Mixed", icon: Layers },
-  { value: "audiobooks", label: "Audiobooks", icon: BookHeadphones },
-  { value: "ebooks", label: "Ebooks", icon: BookOpen },
-  { value: "manga", label: "Manga", icon: BookMarked },
-  { value: "podcasts", label: "Podcasts", icon: Podcast },
+  {
+    value: "movies",
+    icon: Film,
+    get label() {
+      return t("web.admin.common.libraryEditor.type.movies");
+    },
+  },
+  {
+    value: "series",
+    icon: Tv,
+    get label() {
+      return t("web.admin.common.libraryEditor.type.series");
+    },
+  },
+  {
+    value: "mixed",
+    icon: Layers,
+    get label() {
+      return t("web.admin.common.libraryEditor.type.mixed");
+    },
+  },
+  {
+    value: "audiobooks",
+    icon: BookHeadphones,
+    get label() {
+      return t("web.admin.common.libraryEditor.type.audiobooks");
+    },
+  },
+  {
+    value: "ebooks",
+    icon: BookOpen,
+    get label() {
+      return t("web.admin.common.libraryEditor.type.ebooks");
+    },
+  },
+  {
+    value: "manga",
+    icon: BookMarked,
+    get label() {
+      return t("web.admin.common.libraryEditor.type.manga");
+    },
+  },
+  {
+    value: "podcasts",
+    icon: Podcast,
+    get label() {
+      return t("web.admin.common.libraryEditor.type.podcasts");
+    },
+  },
 ] as const;
 
 // Other spellings internal/librarykind accepts for each library type; the
@@ -26,7 +71,7 @@ const LIBRARY_TYPE_ALIASES: Readonly<Record<string, string>> = {
 export function findLibraryType(type: string) {
   const kind = type.trim().toLowerCase();
   const value = LIBRARY_TYPE_ALIASES[kind] ?? kind;
-  return LIBRARY_TYPES.find((t) => t.value === value);
+  return LIBRARY_TYPES.find((entry) => entry.value === value);
 }
 
 export function libraryTypeMeta(type: string) {

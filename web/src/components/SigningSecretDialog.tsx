@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useT } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 
 /**
@@ -23,17 +24,14 @@ export function SigningSecretDialog({
   secret: string | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <Dialog open={secret != null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Save your signing secret</DialogTitle>
-          <DialogDescription>
-            Silo signs every delivery with this secret so your receiver can verify it. It is shown
-            only once — store it on the receiving service now. You can rotate it later if it is
-            lost.
-          </DialogDescription>
+          <DialogTitle>{t("web.admin.common.signingSecret.title")}</DialogTitle>
+          <DialogDescription>{t("web.admin.common.signingSecret.description")}</DialogDescription>
         </DialogHeader>
         <div className="bg-muted flex items-center gap-2 rounded-lg p-3 font-mono text-xs break-all">
           <span className="min-w-0 flex-1">{secret}</span>
@@ -41,14 +39,18 @@ export function SigningSecretDialog({
             variant="ghost"
             size="icon"
             className="h-7 w-7 shrink-0"
-            aria-label={copied ? "Signing secret copied" : "Copy signing secret"}
+            aria-label={
+              copied
+                ? t("web.admin.common.signingSecret.copied")
+                : t("web.admin.common.signingSecret.copy")
+            }
             onClick={async () => {
               if (!secret) return;
               try {
                 await copyTextToClipboard(secret);
                 setCopied(true);
               } catch {
-                toast.error("Failed to copy to clipboard");
+                toast.error(t("web.admin.common.signingSecret.copyFailed"));
               }
             }}
           >
@@ -56,7 +58,7 @@ export function SigningSecretDialog({
           </Button>
         </div>
         <DialogFooter>
-          <Button onClick={onClose}>I've saved it</Button>
+          <Button onClick={onClose}>{t("web.admin.common.signingSecret.saved")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

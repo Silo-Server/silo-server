@@ -26,6 +26,7 @@ import {
 } from "@/hooks/queries/admin/plugins";
 import { useTask } from "@/hooks/queries/admin/tasks";
 import { adminKeys } from "@/hooks/queries/keys";
+import { useAppLanguage, useT } from "@/i18n";
 import { catalogJobs, hasCapabilityJob } from "@/lib/pluginCapabilities";
 import {
   CATALOG_GROUPS,
@@ -74,6 +75,7 @@ function EmptyState({
 }
 
 function NoMatches({ label, onClear }: { label: string; onClear: () => void }) {
+  const t = useT();
   return (
     <div className="py-12 text-center">
       <p className="text-sm font-medium">{label}</p>
@@ -82,21 +84,29 @@ function NoMatches({ label, onClear }: { label: string; onClear: () => void }) {
         className="text-muted-foreground hover:text-foreground mt-1 text-xs transition-colors"
         onClick={onClear}
       >
-        Clear search and filters
+        {t("web.admin.plugins.list.clearFilters")}
       </button>
     </div>
   );
 }
 
 function ResultCount({ shown, total }: { shown: number; total: number }) {
+  const t = useT();
   return (
     <span className="text-muted-foreground ml-auto text-xs tabular-nums" aria-live="polite">
-      {shown === total ? `${total} plugins` : `${shown} of ${total} plugins`}
+      {shown === total
+        ? t("web.admin.plugins.list.resultCount", { count: total, count_text: String(total) })
+        : t("web.admin.plugins.list.resultCountFiltered", {
+            count: total,
+            count_text: String(total),
+            shown: String(shown),
+          })}
     </span>
   );
 }
 
 function PluginsBoard() {
+  const t = useT();
   const { installations, catalog, catalogSettings, repositories, repositoriesError, isLoading } =
     useAdminPlugins();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -140,8 +150,8 @@ function PluginsBoard() {
 
   const header = (
     <PageHeader
-      title="Plugins"
-      subtitle="Add metadata sources, playback markers, request routing, and watch sync to Silo."
+      title={t("web.admin.plugins.page.title")}
+      subtitle={t("web.admin.plugins.page.subtitle")}
       actions={
         <Button
           variant="outline"
@@ -149,7 +159,9 @@ function PluginsBoard() {
           disabled={checkPluginUpdates.isPending || isCheckingUpdates}
         >
           <Download className="mr-1.5 h-3.5 w-3.5" />
-          {isCheckingUpdates ? "Checking updates..." : "Check for updates"}
+          {isCheckingUpdates
+            ? t("web.admin.plugins.page.checkingUpdates")
+            : t("web.admin.plugins.page.checkUpdates")}
         </Button>
       }
     />
@@ -159,7 +171,9 @@ function PluginsBoard() {
     return (
       <div className="space-y-6 pb-4 sm:pb-6">
         {header}
-        <div className="text-muted-foreground py-12 text-center text-sm">Loading plugins...</div>
+        <div className="text-muted-foreground py-12 text-center text-sm">
+          {t("web.admin.plugins.page.loading")}
+        </div>
       </div>
     );
   }
@@ -176,7 +190,7 @@ function PluginsBoard() {
       >
         <TabsList variant="line" className="mb-2">
           <TabsTrigger value="installed">
-            Installed
+            {t("web.admin.plugins.page.installedTab")}
             {installations.length > 0 && (
               <Badge variant="secondary" className="ml-1.5 text-[10px]">
                 {installations.length}
@@ -184,7 +198,7 @@ function PluginsBoard() {
             )}
           </TabsTrigger>
           <TabsTrigger value="catalog">
-            Catalog
+            {t("web.admin.plugins.page.catalogTab")}
             {catalog.length > 0 && (
               <Badge variant="secondary" className="ml-1.5 text-[10px]">
                 {catalog.length}
@@ -240,6 +254,7 @@ function InstalledTab({
   filter: InstalledFilter;
   onChange: ViewUpdate;
 }) {
+  const t = useT();
   const catalogByPluginID = useMemo(
     () => new Map(catalog.map((entry) => [entry.plugin_id, entry])),
     [catalog],
@@ -274,8 +289,8 @@ function InstalledTab({
     return (
       <EmptyState
         icon={Blocks}
-        title="No plugins installed"
-        description="Browse the Catalog tab to find and install plugins."
+        title={t("web.admin.plugins.installed.emptyTitle")}
+        description={t("web.admin.plugins.installed.emptyDescription")}
       />
     );
   }
@@ -288,25 +303,37 @@ function InstalledTab({
       <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
         <PluginSearchField
           query={query}
-          placeholder="Search installed plugins"
+          placeholder={t("web.admin.plugins.installed.search")}
           onQueryChange={(next) => onChange({ installed_q: next || undefined })}
         />
         <FilterChips
-          label="Filter installed plugins"
+          label={t("web.admin.plugins.installed.filterLabel")}
           value={filter}
           onChange={(next) => onChange({ installed_filter: next === "all" ? undefined : next })}
           chips={[
-            { value: "all", label: "All", count: searched.length },
-            { value: "attention", label: "Needs attention", count: count("attention") },
-            { value: "update", label: "Update available", count: count("update") },
-            { value: "off", label: "Off", count: count("off") },
+            { value: "all", label: t("web.admin.plugins.list.filterAll"), count: searched.length },
+            {
+              value: "attention",
+              label: t("web.admin.plugins.installed.filterAttention"),
+              count: count("attention"),
+            },
+            {
+              value: "update",
+              label: t("web.admin.plugins.installed.filterUpdate"),
+              count: count("update"),
+            },
+            {
+              value: "off",
+              label: t("web.admin.plugins.installed.filterOff"),
+              count: count("off"),
+            },
           ]}
         />
         <ResultCount shown={visible.length} total={installations.length} />
       </div>
       {visible.length === 0 ? (
         <NoMatches
-          label="No installed plugins match"
+          label={t("web.admin.plugins.installed.noMatches")}
           onClear={() => onChange({ installed_q: undefined, installed_filter: undefined })}
         />
       ) : (
@@ -337,6 +364,7 @@ function CatalogTab({
   job: string;
   onChange: ViewUpdate;
 }) {
+  const t = useT();
   const installedIds = useMemo(
     () => new Set(installations.map((installation) => installation.plugin_id)),
     [installations],
@@ -357,9 +385,12 @@ function CatalogTab({
   );
   // Chips come from the whole catalog so a job filter still applies (and can
   // show no results) when the search narrows the list.
+  // The chips' labels are resolved in catalogJobs: rebuild them on a language change.
+  const language = useAppLanguage();
   const jobs = useMemo(
     () => catalogJobs(catalog.map((entry) => entry.capabilities ?? [])),
-    [catalog],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- labels are resolved inside catalogJobs
+    [catalog, language],
   );
   const activeJob = jobs.some((kind) => kind.job === job) ? job : "";
   const visible = activeJob
@@ -370,8 +401,8 @@ function CatalogTab({
     return (
       <EmptyState
         icon={Package}
-        title="No plugins available"
-        description="Add a repository or upload a plugin file."
+        title={t("web.admin.plugins.catalog.emptyTitle")}
+        description={t("web.admin.plugins.catalog.emptyDescription")}
       />
     );
   }
@@ -396,16 +427,16 @@ function CatalogTab({
       <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center">
         <PluginSearchField
           query={query}
-          placeholder="Search the plugin catalog"
+          placeholder={t("web.admin.plugins.catalog.search")}
           onQueryChange={(next) => onChange({ catalog_q: next || undefined })}
         />
         {jobs.length > 1 ? (
           <FilterChips
-            label="Filter by what plugins do"
+            label={t("web.admin.plugins.catalog.filterLabel")}
             value={activeJob}
             onChange={(next) => onChange({ catalog_job: next || undefined })}
             chips={[
-              { value: "", label: "All" },
+              { value: "", label: t("web.admin.plugins.list.filterAll") },
               ...jobs.map((kind) => ({ value: kind.job, label: kind.label })),
             ]}
           />
@@ -414,14 +445,14 @@ function CatalogTab({
       </div>
       {groups.length === 0 ? (
         <NoMatches
-          label="No catalog plugins match"
+          label={t("web.admin.plugins.catalog.noMatches")}
           onClear={() => onChange({ catalog_q: undefined, catalog_job: undefined })}
         />
       ) : (
         groups.map((group) => (
-          <section key={group.kind} className="space-y-2.5" aria-label={group.title}>
+          <section key={group.kind} className="space-y-2.5" aria-label={t(group.titleKey)}>
             <h2 className="flex items-baseline gap-2 text-[15px] font-semibold">
-              {group.title}
+              {t(group.titleKey)}
               <span className="text-muted-foreground text-[13.5px] font-medium tabular-nums">
                 {group.entries.length}
               </span>

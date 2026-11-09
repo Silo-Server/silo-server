@@ -2,6 +2,7 @@ import type { FormEvent, ReactNode } from "react";
 
 import type { Library } from "@/api/types";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 
 import { AdvancedFields, FolderFields, GeneralFields, MetadataFields } from "./LibraryFormSections";
 import { useLibraryForm } from "./useLibraryForm";
@@ -38,9 +39,10 @@ export function LibraryForm({
   onClose,
   onSaved,
   resetAfterCreate = false,
-  submitLabel = "Save",
-  savingLabel = "Saving...",
+  submitLabel,
+  savingLabel,
 }: LibraryFormProps) {
+  const t = useT();
   const form = useLibraryForm({ library, onClose, onSaved, resetAfterCreate });
 
   function handleSubmit(e: FormEvent) {
@@ -50,22 +52,24 @@ export function LibraryForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      <FormSection title="General">
+      <FormSection title={t("web.admin.common.libraryEditor.section.general")}>
         <GeneralFields form={form} />
       </FormSection>
-      <FormSection title="Folders">
+      <FormSection title={t("web.admin.common.libraryEditor.section.folders")}>
         <FolderFields form={form} />
       </FormSection>
-      <FormSection title="Metadata">
+      <FormSection title={t("web.admin.common.libraryEditor.section.metadata")}>
         <MetadataFields form={form} />
       </FormSection>
       {(form.settingSupport.chapterThumbnails || form.settingSupport.introDetection) && (
-        <FormSection title="Advanced">
+        <FormSection title={t("web.admin.common.libraryEditor.section.advanced")}>
           <AdvancedFields form={form} chapterThumbnailsSupported={chapterThumbnailsSupported} />
         </FormSection>
       )}
       <Button type="submit" className="w-full" disabled={form.isPending}>
-        {form.isPending ? savingLabel : submitLabel}
+        {form.isPending
+          ? (savingLabel ?? t("web.admin.common.libraryEditor.form.saving"))
+          : (submitLabel ?? t("common.save"))}
       </Button>
     </form>
   );

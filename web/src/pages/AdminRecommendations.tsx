@@ -45,7 +45,7 @@ interface RecLocalValues {
 }
 
 interface RecCollapsedState {
-  [title: string]: boolean;
+  [sectionId: string]: boolean;
 }
 
 interface RecSettingFieldProps {
@@ -451,8 +451,8 @@ export default function AdminRecommendations() {
     }
   }
 
-  function toggleSection(title: string) {
-    setCollapsed((prev) => ({ ...prev, [title]: !prev[title] }));
+  function toggleSection(id: string) {
+    setCollapsed((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
   function buildEmbeddingCheckRequest(
@@ -606,16 +606,16 @@ export default function AdminRecommendations() {
         )}
 
         {buildRecommendationSections().map((section) => {
-          const isOpen = !collapsed[section.title];
+          const isOpen = !collapsed[section.id];
           // The embedding section holds the model; its provider and check render with it.
           const isEmbeddingSection = section.fields.some(
             (field) => field.key === EMBEDDING_MODEL_KEY,
           );
           return (
-            <div key={section.title} className="surface-panel max-w-3xl rounded-2xl border-0">
+            <div key={section.id} className="surface-panel max-w-3xl rounded-2xl border-0">
               <button
                 type="button"
-                onClick={() => toggleSection(section.title)}
+                onClick={() => toggleSection(section.id)}
                 className="hover:bg-accent/40 flex w-full items-center justify-between rounded-2xl px-5 py-4 text-left transition-colors"
               >
                 <span className="text-sm font-semibold">{section.title}</span>

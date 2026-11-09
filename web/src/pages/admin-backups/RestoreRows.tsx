@@ -4,6 +4,7 @@ import type { RestoreItem, RestoreSectionId, RestoreSetting } from "@/api/v2/adm
 import { RestartBadge } from "@/components/settings/RestartBadge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import {
   Table,
   TableBody,
@@ -22,20 +23,24 @@ import { REASON_SENTENCES, displayLabel, toggleKeys } from "./restoreModel";
 /** Toggles item keys; stable for the page's life so memoized rows don't re-render. */
 export type ToggleKeys = (keys: string[], checked: boolean) => void;
 
-const STATE_TAGS: Record<ItemState, { label: string; className: string }> = {
+const STATE_TAGS: Record<ItemState, { label: MessageKey; className: string }> = {
   differs: {
-    label: "Differs",
+    label: "web.admin.backups.restore.tag.differs",
     className: "border-[var(--settings-accent-line)] text-[var(--settings-accent)]",
   },
-  new: { label: "New", className: "border-info/30 text-info" },
+  new: { label: "web.admin.backups.restore.tag.new", className: "border-info/30 text-info" },
   blocked: {
-    label: "Can't restore",
+    label: "web.admin.backups.restore.tag.blocked",
     className: "border-amber-500/30 text-amber-600 dark:text-amber-400",
   },
-  same: { label: "Same", className: "border-border text-muted-foreground" },
+  same: {
+    label: "web.admin.backups.restore.tag.same",
+    className: "border-border text-muted-foreground",
+  },
 };
 
 export function StateTag({ state }: { state: ItemState }) {
+  const t = useT();
   const tag = STATE_TAGS[state];
   return (
     <span
@@ -44,40 +49,46 @@ export function StateTag({ state }: { state: ItemState }) {
         tag.className,
       )}
     >
-      {tag.label}
+      {t(tag.label)}
     </span>
   );
 }
 
-function settingValues(setting: RestoreSetting): { now: string; backup: string } {
+function settingValues(t: Translate, setting: RestoreSetting): { now: string; backup: string } {
+  const set = t("web.admin.backups.restore.setting.set");
+  const empty = t("web.admin.backups.restore.setting.empty");
+  const current = setting.current_value || empty;
+  const backup = setting.backup_value || empty;
   if (setting.status === "needs_another_key") {
     return {
-      now: setting.masked ? "Set" : setting.current_value || "Empty",
-      backup: "Encrypted with another key",
+      now: setting.masked ? set : current,
+      backup: t("web.admin.backups.restore.setting.otherKey"),
     };
   }
   if (setting.status === "cleared") {
     return {
-      now: setting.masked ? "Set" : setting.current_value || "Empty",
+      now: setting.masked ? set : current,
       backup: setting.masked
-        ? "Cleared: not in the backup"
-        : `${setting.backup_value || "Empty"} (turned off)`,
+        ? t("web.admin.backups.restore.setting.cleared")
+        : t("web.admin.backups.restore.setting.turnedOff", { value: backup }),
     };
   }
   if (setting.status === "unverified_backup") {
     return {
-      now: setting.masked ? "Set" : setting.current_value || "Empty",
-      backup: "Not restored: unverified backup",
+      now: setting.masked ? set : current,
+      backup: t("web.admin.backups.restore.setting.unverified"),
     };
   }
   if (setting.status === "kept_stricter") {
     return {
-      now: `${setting.current_value || "Empty"} (kept: stricter)`,
-      backup: setting.backup_value || "Empty",
+      now: t("web.admin.backups.restore.setting.keptStricter", { value: current }),
+      backup,
     };
   }
-  if (setting.masked) return { now: "Set", backup: "Different, encrypted" };
-  return { now: setting.current_value || "Empty", backup: setting.backup_value || "Empty" };
+  if (setting.masked) {
+    return { now: set, backup: t("web.admin.backups.restore.setting.differentEncrypted") };
+  }
+  return { now: current, backup };
 }
 
 /**
@@ -102,20 +113,21 @@ function BreakableKey({ value }: { value: string }) {
 const PHONE_CELL = "max-sm:block max-sm:p-0";
 
 function SettingsDiff({ item }: { item: RestoreItem }) {
+  const t = useT();
   const rows = (item.settings ?? []).filter((setting) => setting.status !== "on_this_server");
   return (
     <div className="bg-background/60 overflow-hidden rounded-lg border">
       <Table className="max-sm:block">
         <TableHeader className="max-sm:hidden">
           <TableRow>
-            <TableHead>Setting</TableHead>
-            <TableHead>Now</TableHead>
-            <TableHead>In backup</TableHead>
+            <TableHead>{t("web.admin.backups.restore.setting.column")}</TableHead>
+            <TableHead>{t("web.admin.backups.restore.setting.now")}</TableHead>
+            <TableHead>{t("web.admin.backups.restore.setting.inBackup")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody className="max-sm:block">
           {rows.map((setting) => {
-            const values = settingValues(setting);
+            const values = settingValues(t, setting);
             return (
               <TableRow key={setting.key} className="max-sm:block max-sm:space-y-1 max-sm:p-3">
                 <TableCell className={cn("align-top whitespace-normal", PHONE_CELL)}>
@@ -127,7 +139,7 @@ function SettingsDiff({ item }: { item: RestoreItem }) {
                   </div>
                   {setting.class === "external_service" ? (
                     <p className="text-muted-foreground mt-0.5 text-xs">
-                      Connects to an outside service
+                      {t("web.admin.backups.restore.setting.external")}
                     </p>
                   ) : null}
                 </TableCell>
@@ -137,14 +149,20 @@ function SettingsDiff({ item }: { item: RestoreItem }) {
                     PHONE_CELL,
                   )}
                 >
-                  <span className="text-foreground sm:hidden">Now: </span>
-                  {values.now}
+                  {t("web.admin.backups.restore.setting.nowCell", {
+                    value: values.now,
+                    label: (chunks) => <span className="text-foreground sm:hidden">{chunks}</span>,
+                  })}
                 </TableCell>
                 <TableCell
                   className={cn("align-top text-xs break-words whitespace-normal", PHONE_CELL)}
                 >
-                  <span className="text-muted-foreground sm:hidden">In backup: </span>
-                  {values.backup}
+                  {t("web.admin.backups.restore.setting.inBackupCell", {
+                    value: values.backup,
+                    label: (chunks) => (
+                      <span className="text-muted-foreground sm:hidden">{chunks}</span>
+                    ),
+                  })}
                 </TableCell>
               </TableRow>
             );
@@ -170,8 +188,8 @@ function hasItemDetails(item: RestoreItem): boolean {
 }
 
 /** What a row's chevron opens; null when there is nothing more to say. */
-function itemDetails(item: RestoreItem): ReactNode {
-  const why = item.message || (item.reason ? REASON_SENTENCES[item.reason] : undefined);
+function itemDetails(t: Translate, item: RestoreItem): ReactNode {
+  const why = item.message || (item.reason ? t(REASON_SENTENCES[item.reason]) : undefined);
   const changes = item.home_section?.changes ?? item.collection?.changes ?? [];
   const settings = (item.settings ?? []).some((setting) => setting.status !== "on_this_server");
   const paths = item.library && item.library.paths.length > 1 ? item.library.paths : [];
@@ -191,24 +209,25 @@ function itemDetails(item: RestoreItem): ReactNode {
     ) : null,
     missingPaths.length > 0 ? (
       <p key="missing-paths" className="text-xs text-amber-600 dark:text-amber-400">
-        This server can&apos;t open {missingPaths.join(", ")}.
+        {t("web.admin.backups.restore.rows.cantOpen", { paths: missingPaths.join(", ") })}
       </p>
     ) : null,
     item.missing_blobs.length > 0 ? (
       <SettingFieldStatus key="files" tone="warn">
-        {item.missing_blobs.length === 1
-          ? "1 file was missing when the backup was taken."
-          : `${item.missing_blobs.length} files were missing when the backup was taken.`}
+        {t("web.admin.backups.restore.rows.filesMissing", {
+          count: item.missing_blobs.length,
+          count_text: String(item.missing_blobs.length),
+        })}
       </SettingFieldStatus>
     ) : null,
     item.restart_required ? (
       <p key="restart" className="text-muted-foreground flex items-center gap-2 text-xs">
-        <RestartBadge /> Applies after a restart.
+        <RestartBadge /> {t("web.admin.backups.restore.rows.restart")}
       </p>
     ) : null,
     changes.length > 0 ? (
       <div key="changes" className="text-xs">
-        <p className="text-muted-foreground">What changes:</p>
+        <p className="text-muted-foreground">{t("web.admin.backups.restore.rows.changes")}</p>
         <ul className="text-muted-foreground list-disc pl-5">
           {changes.map((change) => (
             <li key={change}>{change}</li>
@@ -239,10 +258,11 @@ export const ItemRow = memo(function ItemRow({
   onToggle: ToggleKeys;
   secondary: string | null;
 }) {
+  const t = useT();
   const controlId = useId();
   const detailsId = useId();
   const [open, setOpen] = useState(false);
-  const details = open ? itemDetails(item) : null;
+  const details = open ? itemDetails(t, item) : null;
   const hasDetails = hasItemDetails(item);
   const label = displayLabel(item);
   return (
@@ -273,7 +293,7 @@ export const ItemRow = memo(function ItemRow({
         </div>
         {item.kind === "template_collection" ? (
           <span className="text-muted-foreground hidden shrink-0 text-[11px] sm:inline">
-            Starter pack
+            {t("web.admin.backups.restore.rows.starterPack")}
           </span>
         ) : null}
         <StateTag state={itemState(item)} />
@@ -282,7 +302,11 @@ export const ItemRow = memo(function ItemRow({
             open={open}
             onOpenChange={setOpen}
             controls={detailsId}
-            label={open ? `Hide details of ${label}` : `Show details of ${label}`}
+            label={
+              open
+                ? t("web.admin.backups.restore.rows.hideDetails", { label })
+                : t("web.admin.backups.restore.rows.showDetails", { label })
+            }
           />
         ) : (
           <span aria-hidden="true" className="size-7 shrink-0" />
@@ -305,6 +329,7 @@ export const SameRow = memo(function SameRow({
   item: RestoreItem;
   secondary: string | null;
 }) {
+  useT();
   const label = displayLabel(item);
   return (
     <li className="flex min-w-0 items-baseline gap-2 py-1 text-[13px]">

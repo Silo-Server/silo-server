@@ -1,9 +1,17 @@
 import type { AICapability, AIProvider } from "@/hooks/queries/admin/aiProviders";
+import { t } from "@/i18n";
 
-export const AI_CAPABILITY_LABELS: Record<AICapability, string> = {
-  chat: "Chat",
-  embeddings: "Embeddings",
-  speech: "Speech",
+/** Display names of the AI capabilities, in the current language when read. */
+export const AI_CAPABILITY_LABELS: Readonly<Record<AICapability, string>> = {
+  get chat() {
+    return t("web.admin.settings.lib.aiProviders.capability.chat");
+  },
+  get embeddings() {
+    return t("web.admin.settings.lib.aiProviders.capability.embeddings");
+  },
+  get speech() {
+    return t("web.admin.settings.lib.aiProviders.capability.speech");
+  },
 };
 
 export function hostLabel(rawURL: string): string {
@@ -33,7 +41,9 @@ export function providerOptions(
     const stale = providers.find((provider) => provider.id === selected);
     options.push({
       value: selected,
-      label: stale ? `${stale.name} (cannot serve this)` : "Removed provider",
+      label: stale
+        ? t("web.admin.settings.lib.aiProviders.option.cannotServe", { name: stale.name })
+        : t("web.admin.settings.lib.aiProviders.option.removed"),
       disabled: true,
     });
   }

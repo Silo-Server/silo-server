@@ -69,6 +69,12 @@ import { toast } from "sonner";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { formatDate } from "@/lib/datetime";
+import { useT, type MessageKey, type Translate } from "@/i18n";
+
+/** Example address in the email box. */
+const EMAIL_PLACEHOLDER = "them@example.com";
+/** Shown in the Delivery column when the delivery is unknown. */
+const NO_DELIVERY = "—";
 
 // The claim-link box shown after create/resend. min-w-0 + overflow-hidden on
 // every level matters: the URL is one unbreakable token, and without them it
@@ -84,6 +90,7 @@ function ClaimLinkBox({
   onCopy: (text: string) => Promise<void>;
   onDone: () => void;
 }) {
+  const t = useT();
   return (
     <div className="min-w-0 space-y-4">
       <div className="bg-muted min-w-0 overflow-hidden rounded-md p-2.5">
@@ -92,32 +99,39 @@ function ClaimLinkBox({
       <p className="text-muted-foreground text-xs">{finePrint}</p>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button variant="outline" onClick={() => onCopy(claimUrl)}>
-          <Copy className="mr-1.5 h-4 w-4" /> Copy link
+          <Copy className="mr-1.5 h-4 w-4" /> {t("web.admin.settings.invitations.claimLink.copy")}
         </Button>
-        <Button onClick={onDone}>Done</Button>
+        <Button onClick={onDone}>{t("common.done")}</Button>
       </div>
     </div>
   );
 }
 
-const STATUS_BADGES: Record<InvitationStatus, { label: string; variant: "default" | "outline" }> = {
-  pending: { label: "Pending", variant: "default" },
-  accepted: { label: "Accepted", variant: "outline" },
-  expired: { label: "Expired", variant: "outline" },
-  revoked: { label: "Revoked", variant: "outline" },
+const STATUS_BADGES: Record<
+  InvitationStatus,
+  { label: MessageKey; variant: "default" | "outline" }
+> = {
+  pending: { label: "web.admin.settings.invitations.status.pending", variant: "default" },
+  accepted: { label: "web.admin.settings.invitations.status.accepted", variant: "outline" },
+  expired: { label: "web.admin.settings.invitations.status.expired", variant: "outline" },
+  revoked: { label: "web.admin.settings.invitations.status.revoked", variant: "outline" },
 };
 
-function deliveryMessage(result: InvitationDelivery) {
+function deliveryMessage(result: InvitationDelivery, t: Translate) {
   // A replaced link for an emailed invitation stays bound to its address.
   if (result.delivery_status === "not_requested" && result.invitation.email)
-    return `New link created for ${result.invitation.email}. Nothing was emailed; share this link with them yourself.`;
+    return t("web.admin.settings.invitations.delivery.newLinkForEmail", {
+      email: result.invitation.email,
+    });
   if (result.delivery_status === "not_requested")
-    return "Invitation link created. Share it with the person you're inviting. They'll enter their email address and choose a password.";
+    return t("web.admin.settings.invitations.delivery.linkCreated");
   if (result.delivery_status === "sent")
-    return `Email sent to ${result.invitation.email}. Recipient delivery is not guaranteed. You can copy the link below.`;
+    return t("web.admin.settings.invitations.delivery.sent", {
+      email: String(result.invitation.email),
+    });
   if (result.delivery_status === "not_configured")
-    return "Email is not configured. The invitation was created; deliver this link yourself.";
-  return "The invitation was created, but email delivery failed or is uncertain. This link remains active; deliver it yourself.";
+    return t("web.admin.settings.invitations.delivery.notConfigured");
+  return t("web.admin.settings.invitations.delivery.failed");
 }
 /** A pending link invitation has no address until someone accepts it. */
 function isLinkInvitation(invitation: Invitation) {
@@ -125,30 +139,40 @@ function isLinkInvitation(invitation: Invitation) {
 }
 
 function DeliveryLabel({ delivery }: { delivery: Invitation["delivery"] }) {
-  if (delivery === "link")
+  const t = useT();
+  if (delivery === "link") {
+    const label = t("web.admin.settings.invitations.deliveryLabel.link");
     return (
       <span className="inline-flex items-center gap-1.5 text-sm">
-        <Link2 className="h-3.5 w-3.5" aria-hidden="true" /> Link created
+        <Link2 className="h-3.5 w-3.5" aria-hidden="true" /> {label}
       </span>
     );
-  if (delivery === "email_sent")
+  }
+  if (delivery === "email_sent") {
+    const label = t("web.admin.settings.invitations.deliveryLabel.emailSent");
     return (
       <span className="inline-flex items-center gap-1.5 text-sm">
-        <Mail className="h-3.5 w-3.5" aria-hidden="true" /> Email sent
+        <Mail className="h-3.5 w-3.5" aria-hidden="true" /> {label}
       </span>
     );
-  if (delivery === "email_unconfirmed")
+  }
+  if (delivery === "email_unconfirmed") {
+    const unconfirmed = t("web.admin.settings.invitations.deliveryLabel.emailUnconfirmed");
     return (
       <span
         className="inline-flex items-center gap-1.5 text-sm text-amber-500"
-        title="The email failed or its delivery is uncertain. The link still works."
+        title={t("web.admin.settings.invitations.deliveryLabel.emailUnconfirmedTitle")}
       >
-        <MailX className="h-3.5 w-3.5" aria-hidden="true" /> Email not confirmed
+        <MailX className="h-3.5 w-3.5" aria-hidden="true" /> {unconfirmed}
       </span>
     );
+  }
   return (
-    <span className="text-muted-foreground text-sm" title="Created before delivery was recorded">
-      —
+    <span
+      className="text-muted-foreground text-sm"
+      title={t("web.admin.settings.invitations.deliveryLabel.unknownTitle")}
+    >
+      {NO_DELIVERY}
     </span>
   );
 }
@@ -168,6 +192,7 @@ export default function InvitationsTab() {
   return <InvitationManager key={invitationScope()} />;
 }
 function InvitationManager() {
+  const t = useT();
   const viewerId = useAuth().user?.id;
   const viewerIsOwner = useViewerIsOwner(viewerId);
   const capabilities = useInvitationCapabilities();
@@ -200,11 +225,10 @@ function InvitationManager() {
       await copyTextToClipboard(text);
       if (mounted.current) {
         setCopyError("");
-        toast.success("Copied to clipboard");
+        toast.success(t("web.admin.settings.invitations.copied"));
       }
     } catch {
-      if (mounted.current)
-        setCopyError("Could not copy the link. Select and copy it manually, or try again.");
+      if (mounted.current) setCopyError(t("web.admin.settings.invitations.copyFailed"));
     }
   }
   async function handleResend(id: string, delivery: InvitationDeliveryChoice) {
@@ -224,9 +248,7 @@ function InvitationManager() {
     } catch (error) {
       if (mounted.current)
         setResendError(
-          error instanceof Error
-            ? error.message
-            : "Unable to resend invitation. Reload history before continuing.",
+          error instanceof Error ? error.message : t("web.admin.settings.invitations.resendFailed"),
         );
     } finally {
       resend.reset();
@@ -245,21 +267,25 @@ function InvitationManager() {
       if (mounted.current) setConfirmRevoke(null);
     } catch (error) {
       if (mounted.current)
-        setRevokeError(error instanceof Error ? error.message : "Unable to revoke invitation.");
+        setRevokeError(
+          error instanceof Error ? error.message : t("web.admin.settings.invitations.revokeFailed"),
+        );
     } finally {
       revoke.reset();
       busy.current = false;
     }
   }
-  if (capabilities.isPending) return <p>Loading invitation capabilities...</p>;
+  if (capabilities.isPending)
+    return <p>{t("web.admin.settings.invitations.loadingCapabilities")}</p>;
   if (capabilities.isError)
     return (
       <div role="alert">
-        Could not load invitation capabilities.{" "}
-        <Button onClick={() => void capabilities.refetch()}>Reload capabilities</Button>
+        {t("web.admin.settings.invitations.capabilitiesFailed", {
+          button: (chunks) => <Button onClick={() => void capabilities.refetch()}>{chunks}</Button>,
+        })}
       </div>
     );
-  if (!available) return <p>Invitations are not configured on this server.</p>;
+  if (!available) return <p>{t("web.admin.settings.invitations.notConfigured")}</p>;
   return (
     <div className="space-y-6">
       <Dialog
@@ -270,11 +296,13 @@ function InvitationManager() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Revoke invitation</DialogTitle>
+            <DialogTitle>{t("web.admin.settings.invitations.revoke.title")}</DialogTitle>
             <DialogDescription>
               {confirmRevoke && isLinkInvitation(confirmRevoke.row)
-                ? "Revoke this link invitation? The link will stop working."
-                : `Revoke the invitation for ${confirmRevoke?.row.email}? Their link will stop working.`}
+                ? t("web.admin.settings.invitations.revoke.linkDescription")
+                : t("web.admin.settings.invitations.revoke.emailDescription", {
+                    email: String(confirmRevoke?.row.email),
+                  })}
             </DialogDescription>
           </DialogHeader>
           {revokeError && <p role="alert">{revokeError}</p>}
@@ -285,14 +313,14 @@ function InvitationManager() {
               if (!busy.current) setConfirmRevoke(null);
             }}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="destructive"
             disabled={revoke.isPending}
             onClick={() => void handleRevoke()}
           >
-            Revoke
+            {t("web.admin.settings.invitations.revoke.confirm")}
           </Button>
         </DialogContent>
       </Dialog>
@@ -308,18 +336,18 @@ function InvitationManager() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Fresh invitation link</DialogTitle>
+            <DialogTitle>{t("web.admin.settings.invitations.resend.title")}</DialogTitle>
             <DialogDescription>
               {resendResult
-                ? deliveryMessage(resendResult)
-                : "A replacement invalidates the previous link."}
+                ? deliveryMessage(resendResult, t)
+                : t("web.admin.settings.invitations.resend.description")}
             </DialogDescription>
           </DialogHeader>
-          {resend.isPending && <p>Creating a fresh invitation...</p>}
+          {resend.isPending && <p>{t("web.admin.settings.invitations.resend.creating")}</p>}
           {resendError && (
             <div role="alert">
               <p>{resendError}</p>
-              <p>The outcome may be uncertain. Reload history before another deliberate resend.</p>
+              <p>{t("web.admin.settings.invitations.resend.uncertain")}</p>
               <Button
                 onClick={async () => {
                   try {
@@ -333,7 +361,7 @@ function InvitationManager() {
                   }
                 }}
               >
-                Reload history
+                {t("web.admin.settings.invitations.reloadHistory")}
               </Button>
             </div>
           )}
@@ -341,7 +369,7 @@ function InvitationManager() {
           {resendResult && (
             <ClaimLinkBox
               claimUrl={resendResult.claim_url}
-              finePrint="The link works once. Any previous link has stopped working."
+              finePrint={t("web.admin.settings.invitations.resend.finePrint")}
               onCopy={handleCopy}
               onDone={() => {
                 setResendOpen(false);
@@ -354,8 +382,7 @@ function InvitationManager() {
       </Dialog>
       <div className="flex items-start justify-between gap-4">
         <p className="text-muted-foreground max-w-xl text-sm">
-          Invite someone by email, or create a link to share yourself. Their email address becomes
-          their username.
+          {t("web.admin.settings.invitations.intro")}
         </p>
         <Dialog
           open={createOpen}
@@ -369,14 +396,14 @@ function InvitationManager() {
           <DialogTrigger asChild>
             <Button size="sm" disabled={publicURLMissing}>
               <MailPlus className="mr-1 h-4 w-4" />
-              Invite someone
+              {t("web.admin.settings.invitations.invite.button")}
             </Button>
           </DialogTrigger>
           <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
             <DialogHeader>
-              <DialogTitle>Invite someone</DialogTitle>
+              <DialogTitle>{t("web.admin.settings.invitations.invite.title")}</DialogTitle>
               <DialogDescription>
-                Choose their access and how they get the invitation link.
+                {t("web.admin.settings.invitations.invite.description")}
               </DialogDescription>
             </DialogHeader>
             {copyError && <p role="alert">{copyError}</p>}
@@ -402,14 +429,17 @@ function InvitationManager() {
         <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
           <p className="text-[13px] leading-relaxed">
-            Set the Silo public URL to create invitation links.{" "}
-            <Link
-              to="/admin/settings/general"
-              className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
-            >
-              General settings
-              <ArrowRight className="h-3 w-3" aria-hidden="true" />
-            </Link>
+            {t("web.admin.settings.invitations.publicUrlMissing", {
+              link: (chunks) => (
+                <Link
+                  to="/admin/settings/general"
+                  className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+                >
+                  {chunks}
+                  <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                </Link>
+              ),
+            })}
           </p>
         </div>
       )}
@@ -426,30 +456,34 @@ function InvitationManager() {
               }
             }}
           >
-            Reload history
+            {t("web.admin.settings.invitations.reloadHistory")}
           </Button>
         </div>
       )}
       {history.isError && (
         <div role="alert">
-          <p>Could not load invitation history. {history.error.message}</p>
-          <Button onClick={() => void history.restart().catch(() => {})}>Reload history</Button>
+          <p>
+            {t("web.admin.settings.invitations.historyFailed", { error: history.error.message })}
+          </p>
+          <Button onClick={() => void history.restart().catch(() => {})}>
+            {t("web.admin.settings.invitations.reloadHistory")}
+          </Button>
         </div>
       )}
       {history.isPending ? (
-        <p>Loading invitations...</p>
+        <p>{t("web.admin.settings.invitations.loading")}</p>
       ) : invitations.length === 0 && !history.isError ? (
-        <p>No invitations yet. Invite someone to get started.</p>
+        <p>{t("web.admin.settings.invitations.empty")}</p>
       ) : (
         invitations.length > 0 && (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Recipient</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Delivery</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead>{t("web.admin.settings.invitations.table.recipient")}</TableHead>
+                <TableHead>{t("web.admin.settings.invitations.table.role")}</TableHead>
+                <TableHead>{t("web.admin.settings.invitations.table.status")}</TableHead>
+                <TableHead>{t("web.admin.settings.invitations.table.delivery")}</TableHead>
+                <TableHead>{t("web.admin.settings.invitations.table.created")}</TableHead>
                 <TableHead className="w-32" />
               </TableRow>
             </TableHeader>
@@ -482,7 +516,7 @@ function InvitationManager() {
           disabled={history.isFetchingNextPage || history.isError}
           onClick={() => void history.fetchNextPage()}
         >
-          Load more
+          {t("web.admin.settings.invitations.loadMore")}
         </Button>
       )}
     </div>
@@ -506,6 +540,7 @@ function InvitationRow({
   resendBlocked: boolean;
   resendAllowed: boolean;
 }) {
+  const t = useT();
   const badge = STATUS_BADGES[invitation.status];
   const showResend =
     resendAllowed && (invitation.status === "pending" || invitation.status === "expired");
@@ -515,25 +550,35 @@ function InvitationRow({
   // after acceptance fills in the address.
   const shared = invitation.delivery === "link";
   const details = [
-    !link && invitation.status === "accepted" && shared ? "Joined by link" : "",
-    shared && invitation.note ? `“${invitation.note}”` : "",
-    invitation.invited_by_name ? `Invited by ${invitation.invited_by_name}` : "",
+    !link && invitation.status === "accepted" && shared
+      ? t("web.admin.settings.invitations.row.joinedByLink")
+      : "",
+    shared && invitation.note
+      ? t("web.admin.settings.invitations.row.note", { note: invitation.note })
+      : "",
+    invitation.invited_by_name
+      ? t("web.admin.settings.invitations.row.invitedBy", { name: invitation.invited_by_name })
+      : "",
   ].filter(Boolean);
 
   return (
     <TableRow>
       <TableCell className="max-w-xs">
-        <div className="truncate font-medium">{link ? "Link invitation" : invitation.email}</div>
+        <div className="truncate font-medium">
+          {link ? t("web.admin.settings.invitations.row.linkInvitation") : invitation.email}
+        </div>
         {details.length > 0 && (
           <div className="text-muted-foreground truncate text-xs">{details.join(" · ")}</div>
         )}
       </TableCell>
       <TableCell className="text-muted-foreground capitalize">{invitation.role}</TableCell>
       <TableCell>
-        <Badge variant={badge.variant}>{badge.label}</Badge>
+        <Badge variant={badge.variant}>{t(badge.label)}</Badge>
         {invitation.status === "pending" && (
           <span className="text-muted-foreground ml-2 text-xs">
-            expires {formatDate(invitation.expires_at)}
+            {t("web.admin.settings.invitations.row.expires", {
+              date: formatDate(invitation.expires_at),
+            })}
           </span>
         )}
       </TableCell>
@@ -552,7 +597,11 @@ function InvitationRow({
               size="sm"
               onClick={() => onResend("link")}
               disabled={resending || resendBlocked}
-              title={link ? "Replace with a new link" : "Copy a new link without emailing"}
+              title={
+                link
+                  ? t("web.admin.settings.invitations.row.replaceLink")
+                  : t("web.admin.settings.invitations.row.copyNewLink")
+              }
             >
               {link ? <RotateCw className="h-4 w-4" /> : <Link2 className="h-4 w-4" />}
             </Button>
@@ -563,7 +612,7 @@ function InvitationRow({
               size="sm"
               onClick={() => onResend("email")}
               disabled={resending || resendBlocked}
-              title="Email a new link"
+              title={t("web.admin.settings.invitations.row.emailNewLink")}
             >
               <MailPlus className="h-4 w-4" />
             </Button>
@@ -573,7 +622,7 @@ function InvitationRow({
               variant="ghost"
               size="sm"
               onClick={onRevoke}
-              title="Revoke this link"
+              title={t("web.admin.settings.invitations.row.revokeLink")}
               disabled={resending}
             >
               <Trash2 className="h-4 w-4" />
@@ -600,6 +649,7 @@ function CreateInvitationForm({
   onClose: () => void;
   onCopy: (text: string) => Promise<void>;
 }) {
+  const t = useT();
   const create = useCreateInvitation();
   const { data: accessGroups = [] } = useAccessGroups();
   const { data: libraries = [] } = useAdminLibraries();
@@ -656,7 +706,9 @@ function CreateInvitationForm({
       if (mounted.current) setResult(delivered);
     } catch (err) {
       if (mounted.current) {
-        setError(err instanceof Error ? err.message : "Unable to create invitation.");
+        setError(
+          err instanceof Error ? err.message : t("web.admin.settings.invitations.create.failed"),
+        );
         setNeedsReload(true);
       }
     } finally {
@@ -669,13 +721,13 @@ function CreateInvitationForm({
   if (result) {
     return (
       <div className="min-w-0 space-y-4">
-        <p className="text-sm">{deliveryMessage(result)}</p>
+        <p className="text-sm">{deliveryMessage(result, t)}</p>
         <ClaimLinkBox
           claimUrl={result.claim_url}
           finePrint={
             result.delivery_status === "not_requested"
-              ? "The link works once and expires in 7 days. Anyone with the link can use it. Revoke it from the history if it ends up with the wrong person."
-              : "The link works once and expires in 7 days. Resending later mints a fresh link and kills this one."
+              ? t("web.admin.settings.invitations.create.finePrintLink")
+              : t("web.admin.settings.invitations.create.finePrintEmail")
           }
           onCopy={onCopy}
           onDone={onClose}
@@ -689,7 +741,7 @@ function CreateInvitationForm({
       {error && (
         <div role="alert">
           <p>{error}</p>
-          <p>Reload history before another deliberate attempt; the invitation may already exist.</p>
+          <p>{t("web.admin.settings.invitations.create.reloadBeforeRetry")}</p>
           <Button
             type="button"
             onClick={async () => {
@@ -697,9 +749,7 @@ function CreateInvitationForm({
                 await onReload();
               } catch {
                 if (mounted.current)
-                  setError(
-                    "Could not reload invitation history. Try again before creating another invitation.",
-                  );
+                  setError(t("web.admin.settings.invitations.create.reloadFailed"));
                 return;
               }
               if (mounted.current) {
@@ -708,19 +758,16 @@ function CreateInvitationForm({
               }
             }}
           >
-            Reload history
+            {t("web.admin.settings.invitations.reloadHistory")}
           </Button>
         </div>
       )}
       {!defaultProfile && (
-        <p role="status">
-          This server cannot create a default profile atomically. Turn off the profile option to
-          create a profileless invitation.
-        </p>
+        <p role="status">{t("web.admin.settings.invitations.create.noDefaultProfile")}</p>
       )}
       <div className="space-y-2">
         <p id={`${deliveryGroup}-label`} className="text-sm leading-none font-medium">
-          How should they get it?
+          {t("web.admin.settings.invitations.create.deliveryQuestion")}
         </p>
         <div
           role="radiogroup"
@@ -732,36 +779,39 @@ function CreateInvitationForm({
             value="link"
             selected={delivery === "link"}
             disabled={create.isPending}
-            title="Create link"
+            title={t("web.admin.settings.invitations.create.linkOption")}
             onSelect={setDelivery}
           >
-            You share the link yourself, for example in a chat.
+            {t("web.admin.settings.invitations.create.linkOptionBody")}
           </ChoiceOption>
           <ChoiceOption
             name={deliveryGroup}
             value="email"
             selected={delivery === "email"}
             disabled={!emailDelivery || create.isPending}
-            title="Send email"
+            title={t("web.admin.settings.invitations.create.emailOption")}
             onSelect={setDelivery}
           >
             {emailDelivery
-              ? "We email the link. You can copy it too."
-              : "Email isn't set up on this server."}
+              ? t("web.admin.settings.invitations.create.emailOptionBody")
+              : t("web.admin.settings.invitations.create.emailOptionUnavailable")}
           </ChoiceOption>
         </div>
         {!emailDelivery && (
           <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
             <p className="text-[13px] leading-relaxed">
-              To send invitations by email, set up the mail server in{" "}
-              <Link
-                to="/admin/settings/email"
-                className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
-              >
-                Email settings
-                <ArrowRight className="h-3 w-3" aria-hidden="true" />
-              </Link>
+              {t("web.admin.settings.invitations.create.emailSetup", {
+                link: (chunks) => (
+                  <Link
+                    to="/admin/settings/email"
+                    className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+                  >
+                    {chunks}
+                    <ArrowRight className="h-3 w-3" aria-hidden="true" />
+                  </Link>
+                ),
+              })}
             </p>
           </div>
         )}
@@ -769,7 +819,9 @@ function CreateInvitationForm({
 
       {delivery === "email" && (
         <div className="space-y-2">
-          <Label htmlFor="invitation-email">Email address</Label>
+          <Label htmlFor="invitation-email">
+            {t("web.admin.settings.invitations.create.emailLabel")}
+          </Label>
           <Input
             id="invitation-email"
             type="email"
@@ -778,7 +830,7 @@ function CreateInvitationForm({
               setEmail(e.target.value);
               if (emailInvalid) setEmailInvalid(false);
             }}
-            placeholder="them@example.com"
+            placeholder={EMAIL_PLACEHOLDER}
             aria-invalid={emailInvalid || undefined}
             aria-describedby={emailInvalid ? "invitation-email-error" : undefined}
             autoFocus
@@ -790,14 +842,14 @@ function CreateInvitationForm({
             </p>
           ) : null}
           <p className="text-muted-foreground text-xs">
-            This becomes both the destination and their sign-in username.
+            {t("web.admin.settings.invitations.create.emailHint")}
           </p>
         </div>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label>Access group</Label>
+          <Label>{t("web.admin.settings.invitations.create.accessGroup")}</Label>
           <Select
             value={role === "admin" || accessGroupID === null ? "default" : String(accessGroupID)}
             onValueChange={(v) => setAccessGroupID(v === "default" ? null : Number(v))}
@@ -808,7 +860,11 @@ function CreateInvitationForm({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="default">
-                {defaultGroup ? `${defaultGroup.name} (default)` : "Server default"}
+                {defaultGroup
+                  ? t("web.admin.settings.invitations.create.defaultGroup", {
+                      name: defaultGroup.name,
+                    })
+                  : t("web.admin.settings.invitations.create.serverDefault")}
               </SelectItem>
               {accessGroups
                 .filter((g) => !g.is_default)
@@ -821,21 +877,23 @@ function CreateInvitationForm({
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Role</Label>
+          <Label>{t("web.admin.settings.invitations.create.role")}</Label>
           <Select value={role} onValueChange={(value) => setRole(value as "user" | "admin")}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="user">User</SelectItem>
+              <SelectItem value="user">
+                {t("web.admin.settings.invitations.create.roleUser")}
+              </SelectItem>
               <SelectItem value="admin" disabled={!viewerIsOwner}>
-                Admin
+                {t("web.admin.settings.invitations.create.roleAdmin")}
               </SelectItem>
             </SelectContent>
           </Select>
           {!viewerIsOwner && (
             <p className="text-muted-foreground text-xs">
-              Only the server owner can invite an admin.
+              {t("web.admin.settings.invitations.create.ownerOnly")}
             </p>
           )}
         </div>
@@ -845,37 +903,41 @@ function CreateInvitationForm({
         libraries={libraries}
         value={libraryIDs}
         onChange={setLibraryIDs}
-        allLabel="Inherit from access group"
-        emptyHint="The account created at accept follows the selected group's library scope."
+        allLabel={t("web.admin.settings.invitations.create.inheritGroup")}
+        emptyHint={t("web.admin.settings.invitations.create.libraryHint")}
       />
 
       <div className="space-y-2">
         <Label htmlFor="invitation-note">
-          {delivery === "link" ? "Note (optional)" : "Personal note (optional)"}
+          {delivery === "link"
+            ? t("web.admin.settings.invitations.create.noteLabel")
+            : t("web.admin.settings.invitations.create.personalNoteLabel")}
         </Label>
         <textarea
           id="invitation-note"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="Hey — set yourself up whenever."
+          placeholder={t("web.admin.settings.invitations.create.notePlaceholder")}
           rows={2}
           className="border-border bg-background text-foreground focus:border-ring focus:ring-ring/50 w-full resize-y rounded-md border px-3 py-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none focus:ring-[3px]"
         />
         <p className="text-muted-foreground text-xs">
           {delivery === "link"
-            ? "Shown on the invitation page, and in your invitation history so you can tell links apart."
-            : "Appears in the email and on the invitation page. Plain text."}
+            ? t("web.admin.settings.invitations.create.noteHintLink")
+            : t("web.admin.settings.invitations.create.noteHintEmail")}
         </p>
       </div>
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <div>
-            <Label htmlFor="invitation-create-profile">Create their first profile</Label>
+            <Label htmlFor="invitation-create-profile">
+              {t("web.admin.settings.invitations.create.profileLabel")}
+            </Label>
             <p className="text-muted-foreground text-xs">
               {delivery === "link"
-                ? "Named from the part before the @ in the email they enter. They can rename it later."
-                : "Named from the part before the @. They can rename it later."}
+                ? t("web.admin.settings.invitations.create.profileHintLink")
+                : t("web.admin.settings.invitations.create.profileHintEmail")}
             </p>
           </div>
           <Switch
@@ -887,9 +949,11 @@ function CreateInvitationForm({
         </div>
         <div className="flex items-center justify-between">
           <div>
-            <Label htmlFor="invitation-show-tour">Show the feature tour on first sign-in</Label>
+            <Label htmlFor="invitation-show-tour">
+              {t("web.admin.settings.invitations.create.tourLabel")}
+            </Label>
             <p className="text-muted-foreground text-xs">
-              Walks through what this server can do, skipping anything turned off.
+              {t("web.admin.settings.invitations.create.tourHint")}
             </p>
           </div>
           <Switch id="invitation-show-tour" checked={showTour} onCheckedChange={setShowTour} />
@@ -897,10 +961,12 @@ function CreateInvitationForm({
       </div>
 
       <div className="flex items-center justify-between pt-2">
-        <p className="text-muted-foreground text-xs">Link expires in 7 days · single use</p>
+        <p className="text-muted-foreground text-xs">
+          {t("web.admin.settings.invitations.create.expiry")}
+        </p>
         <div className="flex gap-2">
           <Button type="button" variant="ghost" disabled={create.isPending} onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             type="submit"
@@ -908,11 +974,11 @@ function CreateInvitationForm({
           >
             {delivery === "link"
               ? create.isPending
-                ? "Creating..."
-                : "Create link"
+                ? t("web.admin.settings.invitations.create.creating")
+                : t("web.admin.settings.invitations.create.submitLink")
               : create.isPending
-                ? "Sending..."
-                : "Send invite"}
+                ? t("web.admin.settings.invitations.create.sending")
+                : t("web.admin.settings.invitations.create.submitEmail")}
           </Button>
         </div>
       </div>

@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useRequestIntegrationOptions } from "@/hooks/queries/admin/requests";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import {
@@ -161,6 +162,7 @@ export function ValuePicker({
   /** Shows only the chips; the caller offers its own way to add. */
   hideAdd?: boolean;
 }) {
+  const t = useT();
   const nameOf = (value: string) =>
     labelOf?.(value) ?? options.find((option) => option.value === value)?.label ?? value;
   const available = options.filter((option) => !selected.includes(option.value));
@@ -178,7 +180,9 @@ export function ValuePicker({
                 type="button"
                 size="icon-xs"
                 variant="ghost"
-                aria-label={`Remove ${nameOf(value)}`}
+                aria-label={t("web.admin.settings.requests.destination.removeValue", {
+                  value: nameOf(value),
+                })}
                 onClick={() => onChange(selected.filter((entry) => entry !== value))}
               >
                 <X />
@@ -240,6 +244,7 @@ function OverrideField({
   onChange: (raw: unknown) => void;
   error?: string;
 }) {
+  const t = useT();
   const controlId = useId();
   const serverValue = server.plugin_config?.[field.key] ?? field.default_value;
 
@@ -251,15 +256,24 @@ function OverrideField({
         className="sm:col-span-2"
         hint={
           selected.length === 0 && options.length > 0
-            ? `None picked, so ${server.name}'s own ${label.toLowerCase()} apply.`
+            ? String(
+                t("web.admin.settings.requests.destination.noneChosen", {
+                  server: () => server.name,
+                  setting: label.toLowerCase(),
+                }),
+              )
             : undefined
         }
         error={error}
       >
         {optionsLoading && options.length === 0 ? (
-          <p className="text-muted-foreground text-xs">Loading…</p>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.settings.requests.destination.optionsLoading")}
+          </p>
         ) : options.length === 0 ? (
-          <p className="text-muted-foreground text-xs">Nothing to choose on this server.</p>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.settings.requests.destination.noOptions")}
+          </p>
         ) : (
           <ChipToggleList label={label} options={options} selected={selected} onChange={onChange} />
         )}
@@ -270,8 +284,8 @@ function OverrideField({
   const choices: Choice[] =
     field.control === "SWITCH"
       ? [
-          { value: "true", label: "On" },
-          { value: "false", label: "Off" },
+          { value: "true", label: t("web.admin.settings.requests.destination.switchOn") },
+          { value: "false", label: t("web.admin.settings.requests.destination.switchOff") },
         ]
       : [...options];
   const current = overrideValue(value);
@@ -281,8 +295,8 @@ function OverrideField({
   const serverLabel =
     field.control === "SWITCH"
       ? serverValue === true || serverValue === "true"
-        ? "On"
-        : "Off"
+        ? t("web.admin.settings.requests.destination.switchOn")
+        : t("web.admin.settings.requests.destination.switchOff")
       : (choices.find((choice) => choice.value === overrideValue(serverValue))?.label ??
         overrideValue(serverValue));
 
@@ -304,7 +318,11 @@ function OverrideField({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={SERVER_SETTING}>
-            {serverLabel ? `Server default (${serverLabel})` : "Server default"}
+            {serverLabel
+              ? t("web.admin.settings.requests.destination.serverDefaultValue", {
+                  value: serverLabel,
+                })
+              : t("web.admin.settings.requests.destination.serverDefault")}
           </SelectItem>
           {choices.map((choice) => (
             <SelectItem key={choice.value} value={choice.value}>
@@ -339,6 +357,7 @@ function DestinationOverrides({
   errors: Record<string, string>;
   errorPrefix: string;
 }) {
+  const t = useT();
   const entry = serverInstallation(installations, server.installation_id, server.capability_id);
   const fieldTypes = parseFieldTypes(serverConfigSchema(entry).jsonSchema);
   const fields = serverOverrideFields(server, installations);
@@ -378,8 +397,13 @@ function DestinationOverrides({
     <>
       {options.isError ? (
         <p className="text-xs text-amber-600 dark:text-amber-400">
-          Couldn&apos;t read folders and profiles from {server.name}:{" "}
-          {options.error instanceof Error ? options.error.message : "unknown error"}
+          {t("web.admin.settings.requests.destination.optionsFailed", {
+            server: server.name,
+            error:
+              options.error instanceof Error
+                ? options.error.message
+                : t("web.admin.settings.requests.destination.unknownError"),
+          })}
         </p>
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
@@ -415,6 +439,7 @@ function MoreSettings({
   forceOpen: boolean;
   children: ReactNode;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(changed > 0);
   // Settings that arrive set (a conflict reload, a preset) open the panel, so
   // their values are not saved unseen.
@@ -439,8 +464,12 @@ function MoreSettings({
           className={cn("size-3.5 transition-transform", shown && "rotate-90")}
           aria-hidden="true"
         />
-        More settings
-        {changed > 0 ? <span className="text-foreground/80">· {changed} changed</span> : null}
+        {t("web.admin.settings.requests.destination.moreSettings")}
+        {changed > 0 ? (
+          <span className="text-foreground/80">
+            {t("web.admin.settings.requests.destination.moreSettingsChanged", { count: changed })}
+          </span>
+        ) : null}
       </button>
       {shown ? (
         <div id={panelId} className="pt-3">
@@ -496,6 +525,7 @@ export function RouteDestinationEditor({
   note?: ReactNode;
   errors: Record<string, string>;
 }) {
+  const t = useT();
   const controlId = useId();
   const { dest, skip } = value;
   const server = dest.integration_id
@@ -505,7 +535,9 @@ export function RouteDestinationEditor({
     .filter((candidate) => serverFitsTier(candidate, tier))
     .map((candidate) => ({
       value: candidate.id,
-      label: candidate.enabled ? candidate.name : `${candidate.name} (turned off)`,
+      label: candidate.enabled
+        ? candidate.name
+        : t("web.admin.settings.requests.destination.serverOff", { server: candidate.name }),
     }));
   if (
     dest.integration_id &&
@@ -513,23 +545,27 @@ export function RouteDestinationEditor({
   ) {
     // A saved choice that no longer fits stays visible, saying why, until
     // the admin picks another.
-    const why = !server
-      ? ""
-      : !servers.some((candidate) => candidate.id === server.id)
-        ? " (wrong type)"
-        : serverIs4K(server)
-          ? " (marked 4K)"
-          : " (not marked 4K)";
-    serverChoices.push({
-      value: dest.integration_id,
-      label: server ? `${server.name}${why}` : "Missing server",
-    });
+    const label = !server
+      ? t("web.admin.settings.requests.destination.serverMissing")
+      : t(
+          !servers.some((candidate) => candidate.id === server.id)
+            ? "web.admin.settings.requests.destination.serverWrongType"
+            : serverIs4K(server)
+              ? "web.admin.settings.requests.destination.serverMarkedUhd"
+              : "web.admin.settings.requests.destination.serverNotMarkedUhd",
+          { server: server.name },
+        );
+    serverChoices.push({ value: dest.integration_id, label });
   }
   const no4KServers =
     tier === "uhd" && !servers.some((candidate) => serverFitsTier(candidate, "uhd"));
   const selected = skip ? DEST_SKIP : dest.integration_id || (passLabel ? DEST_PASS : "");
   const error = errors[tier] ?? errors[`${tier}.integration_id`];
-  const label = tier === "hd" ? "HD version" : "4K version";
+  const label = t(
+    tier === "hd"
+      ? "web.admin.settings.requests.destination.hdVersion"
+      : "web.admin.settings.requests.destination.uhdVersion",
+  );
 
   function select(next: string) {
     if (next === DEST_SKIP) onChange({ dest: { integration_id: "", overrides: {} }, skip: true });
@@ -557,7 +593,12 @@ export function RouteDestinationEditor({
           </p>
         ) : null}
       </div>
-      <StackedField label="Send to" htmlFor={controlId} labelId={sendToId} error={error}>
+      <StackedField
+        label={t("web.admin.settings.requests.destination.sendTo")}
+        htmlFor={controlId}
+        labelId={sendToId}
+        error={error}
+      >
         <Select value={selected} onValueChange={select}>
           <SelectTrigger
             id={controlId}
@@ -566,7 +607,7 @@ export function RouteDestinationEditor({
             className="w-full min-w-0 sm:w-1/2"
             aria-invalid={Boolean(error)}
           >
-            <SelectValue placeholder="Choose a server" />
+            <SelectValue placeholder={t("web.admin.settings.requests.shared.chooseServer")} />
           </SelectTrigger>
           <SelectContent>
             {serverChoices.map((choice) => (
@@ -575,7 +616,9 @@ export function RouteDestinationEditor({
               </SelectItem>
             ))}
             {allowSkip ? (
-              <SelectItem value={DEST_SKIP}>Don&apos;t send a 4K version</SelectItem>
+              <SelectItem value={DEST_SKIP}>
+                {t("web.admin.settings.requests.destination.skipUhd")}
+              </SelectItem>
             ) : null}
             {passLabel ? <SelectItem value={DEST_PASS}>{passLabel}</SelectItem> : null}
           </SelectContent>
@@ -583,8 +626,7 @@ export function RouteDestinationEditor({
       </StackedField>
       {no4KServers ? (
         <p className="text-muted-foreground text-xs">
-          No server is marked 4K. Turn on &ldquo;4K server&rdquo; on a server to send 4K versions to
-          it.
+          {t("web.admin.settings.requests.destination.noUhdServers")}
         </p>
       ) : null}
       {server ? (

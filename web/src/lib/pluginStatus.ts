@@ -1,4 +1,6 @@
 import type { PluginInstallation, PluginPresentation } from "@/api/types";
+import { t } from "@/i18n";
+import { joinCommaList } from "@/lib/pluginCapabilities";
 import { missingRequiredConfig } from "@/lib/pluginConfigReady";
 import { pendingUpdateVersion, pluginDisplayName } from "@/lib/pluginPresentation";
 import { pluginStatusIndicator } from "@/lib/pluginStatusIndicator";
@@ -37,10 +39,12 @@ export function pluginStatus(installation: PluginInstallation): PluginStatus {
   const missing = missingRequiredConfig(installation);
   if (missing.length > 0) {
     return {
-      label: "Needs setup",
+      label: t("web.admin.plugins.status.needsSetup"),
       dotClass: "bg-warning",
       textClass: "text-warning",
-      title: `Missing: ${missing.map((entry) => entry.title || entry.key).join(", ")}`,
+      title: t("web.admin.plugins.status.missing", {
+        settings: joinCommaList(missing.map((entry) => entry.title || entry.key)),
+      }),
       attention: true,
       rank: 2,
     };

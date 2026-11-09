@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import type { AdminBackup, AdminBackupOmitted } from "@/api/v2/adminBackups";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
@@ -16,7 +17,6 @@ import {
   NAMES_SHOWN,
   nameSampleText,
   omissionGroupTitle,
-  omittedHeadline,
   warningDetailsReport,
   type MissingFileGroup,
   type OmissionGroup,
@@ -37,6 +37,7 @@ function Headline({ children }: { children: ReactNode }) {
 }
 
 function OmissionGroupRow({ group }: { group: OmissionGroup }) {
+  const t = useT();
   const listId = useId();
   const [open, setOpen] = useState(false);
   return (
@@ -54,7 +55,12 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
       <p className="text-muted-foreground text-xs break-words">{nameSampleText(group.labels)}</p>
       {group.labels.length > NAMES_SHOWN ? (
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open ? "Hide the names" : `Show all ${group.labels.length}`}
+          {open
+            ? t("web.admin.backups.warnings.hideNames")
+            : t("web.admin.backups.warnings.showAllNames", {
+                count: group.labels.length,
+                count_text: String(group.labels.length),
+              })}
         </Disclosure>
       ) : null}
       {open ? (
@@ -84,22 +90,24 @@ export function OmittedAccounts({
   omitted: readonly AdminBackupOmitted[];
   context: OmittedContext;
 }) {
+  const t = useT();
   const bodyId = useId();
   const [open, setOpen] = useState(false);
   if (omitted.length === 0) return null;
   const groups = groupOmissions(omitted);
-  const headline =
+  const headline = t(
     context === "restore"
-      ? `${omitted.length === 1 ? "1 account isn't" : `${omitted.length} accounts aren't`} in this backup's restore set, so ${omitted.length === 1 ? "it can't" : "they can't"} be restored here.`
-      : omittedHeadline(omitted.length);
+      ? "web.admin.backups.warnings.omittedRestore"
+      : "web.admin.backups.warnings.omittedBackup",
+    { count: omitted.length, count_text: String(omitted.length) },
+  );
   return (
     <div className="min-w-0 space-y-1.5">
-      <Headline>
-        {headline} A full restore with silo backup restore still includes{" "}
-        {omitted.length === 1 ? "it" : "them"}.
-      </Headline>
+      <Headline>{headline}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
-        {open ? "Hide the accounts" : "Show the accounts"}
+        {open
+          ? t("web.admin.backups.warnings.hideAccounts")
+          : t("web.admin.backups.warnings.showAccounts")}
       </Disclosure>
       {open ? (
         <ul id={bodyId} className="space-y-3 pt-1">
@@ -116,6 +124,7 @@ export function OmittedAccounts({
 }
 
 function MissingGroupRow({ group }: { group: MissingFileGroup }) {
+  const t = useT();
   const listId = useId();
   const [open, setOpen] = useState(false);
   return (
@@ -123,7 +132,9 @@ function MissingGroupRow({ group }: { group: MissingFileGroup }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-[13px]">{missingGroupTitle(group)}</span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open ? "Hide files" : "Show files"}
+          {open
+            ? t("web.admin.backups.warnings.hideGroupFiles")
+            : t("web.admin.backups.warnings.showGroupFiles")}
         </Disclosure>
       </div>
       {open ? (
@@ -141,6 +152,7 @@ function MissingGroupRow({ group }: { group: MissingFileGroup }) {
 
 /** Files missing when the backup copied them, grouped by what referenced them. */
 function MissingFiles({ blobs, total }: { blobs: AdminBackup["missing_blobs"]; total: number }) {
+  const t = useT();
   const bodyId = useId();
   const [open, setOpen] = useState(false);
   if (blobs.length === 0) return null;
@@ -148,13 +160,14 @@ function MissingFiles({ blobs, total }: { blobs: AdminBackup["missing_blobs"]; t
     <div className="min-w-0 space-y-1.5">
       <Headline>{missingHeadline(blobs.length, total)}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
-        {open ? "Hide the files" : "Show the files"}
+        {open
+          ? t("web.admin.backups.warnings.hideFiles")
+          : t("web.admin.backups.warnings.showFiles")}
       </Disclosure>
       {open ? (
         <div id={bodyId} className="space-y-2 pt-1">
           <p className="text-muted-foreground text-xs">
-            They&apos;re referenced in the database but weren&apos;t found in storage; restores
-            leave them out.
+            {t("web.admin.backups.warnings.missingExplanation")}
           </p>
           <ul className="space-y-2">
             {groupMissingBlobs(blobs).map((group) => (
@@ -169,6 +182,7 @@ function MissingFiles({ blobs, total }: { blobs: AdminBackup["missing_blobs"]; t
 
 /** A backup's warnings as headlines with grouped details, and a plain-text copy for an issue. */
 export function BackupWarningDetails({ backup }: { backup: AdminBackup }) {
+  const t = useT();
   const copy = () =>
     copyTextToClipboard(
       warningDetailsReport({
@@ -178,8 +192,8 @@ export function BackupWarningDetails({ backup }: { backup: AdminBackup }) {
         missingTotal: backup.missing_blobs_total,
       }),
     ).then(
-      () => toast.success("Details copied"),
-      () => toast.error("Couldn't copy the details. Open each list and copy it by hand."),
+      () => toast.success(t("web.admin.backups.warnings.copied")),
+      () => toast.error(t("web.admin.backups.warnings.copyFailed")),
     );
   return (
     <div className="min-w-0 space-y-3">
@@ -187,7 +201,7 @@ export function BackupWarningDetails({ backup }: { backup: AdminBackup }) {
       <MissingFiles blobs={backup.missing_blobs} total={backup.missing_blobs_total} />
       <Button variant="outline" size="sm" onClick={() => void copy()}>
         <Copy data-icon="inline-start" aria-hidden="true" />
-        Copy details
+        {t("web.admin.backups.warnings.copy")}
       </Button>
     </div>
   );

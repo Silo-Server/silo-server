@@ -1,5 +1,6 @@
 import type { useSettingsForm } from "@/hooks/useSettingsForm";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
+import { useT } from "@/i18n";
 import { SettingField } from "./SettingField";
 import { TRICKPLAY_NODE_CAPACITY_KEY as KEY, showsPreviewKey } from "./playbackSettings.utils";
 
@@ -13,13 +14,14 @@ export function TrickplayNodeCapacityField({
   form: SettingsForm;
   execution: string;
 }) {
+  const t = useT();
   const restartKeys = useRestartKeys();
   if (!showsPreviewKey(KEY, execution, form.isDirty)) return null;
   return (
     <SettingField
-      label="Seek previews per transcode node"
+      label={t("web.admin.settings.playback.previews.trickplayNodeCapacity")}
       type="number"
-      description="How many files one transcode node makes seek previews for at once, across every server, 1 to 64. Each counts toward the node's job limit, so leave room for playback."
+      description={t("web.admin.settings.playback.previews.trickplayNodeCapacityDescription")}
       dirty={form.isDirty(KEY)}
       value={form.getValue(KEY) || "1"}
       onChange={(v) => form.setValue(KEY, v)}

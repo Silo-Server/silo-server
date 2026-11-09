@@ -18,6 +18,7 @@ import {
   useLibraryMetadataMatchQueues,
   useRetryLibraryMetadataMatchQueue,
 } from "@/hooks/queries/admin/libraries";
+import { useT, type Translate } from "@/i18n";
 
 function formatFailureKind(kind: string): string {
   return kind.replace(/_/g, " ");
@@ -26,22 +27,34 @@ function formatFailureKind(kind: string): string {
 type MatchDecision = NonNullable<LibraryMetadataMatchFailureDetail["decision"]>;
 
 /** Why the matcher turned the candidates down, for a candidate_rejected decision. */
-function describeRejection(decision: MatchDecision): string | undefined {
+function describeRejection(decision: MatchDecision, t: Translate): string | undefined {
   if (decision.outcome !== "candidate_rejected") return undefined;
   switch (decision.rejection) {
     case "below_floor":
-      return "No eligible result reached the minimum score.";
+      return t("web.admin.common.libraryEditor.matcher.belowFloor");
     case "lone_candidate":
-      return "A single result needs a higher score when nothing else confirms it.";
+      return t("web.admin.common.libraryEditor.matcher.loneCandidate");
     case "year_mismatch":
-      return "The best result's year is more than 2 years from the item's year.";
+      return t("web.admin.common.libraryEditor.matcher.yearMismatch");
     case "ambiguous":
-      return "The top results scored too close together to choose one automatically.";
+      return t("web.admin.common.libraryEditor.matcher.ambiguous");
     case "trusted_id_missing":
-      return "No result has the provider ID set for this item.";
+      return t("web.admin.common.libraryEditor.matcher.trustedIdMissing");
     default:
       return undefined;
   }
+}
+
+/** A candidate's title with its year, as the provider gave them. */
+function candidateTitle(candidate: { title: string; year?: number | null }): string {
+  return candidate.year ? `${candidate.title} (${candidate.year})` : candidate.title;
+}
+
+/** A queue entry's state badge; a state this build does not know shows as sent. */
+function stateLabel(state: string, t: Translate): string {
+  if (state === "pending") return t("web.admin.common.libraryEditor.matcher.statePending");
+  if (state === "parked") return t("web.admin.common.libraryEditor.matcher.stateParked");
+  return state;
 }
 
 /** The score a candidate had to reach, or undefined when the rule is not a score bar. */
@@ -53,6 +66,7 @@ function scoreBar(decision: MatchDecision): number | undefined {
 }
 
 export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library[] }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [selectedLibraryID, setSelectedLibraryID] = useState<number | null>(null);
   // Index into the loaded pages of the detail query; the query retains every
@@ -105,7 +119,9 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
             path: entry.file_path,
             state: "pending" as const,
             failureKind: null,
-            message: identity ? `Awaiting initial match: ${identity}` : "Awaiting initial match",
+            message: identity
+              ? t("web.admin.common.libraryEditor.matcher.awaitingMatchFor", { identity })
+              : t("web.admin.common.libraryEditor.matcher.awaitingMatch"),
             decision: undefined,
           };
         }),
@@ -116,8 +132,8 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
 
   return (
     <CollapsibleDiagnosticsSection
-      title="Metadata Matcher"
-      description="Pending and parked items that still need a provider match."
+      title={t("web.admin.common.libraryEditor.matcher.title")}
+      description={t("web.admin.common.libraryEditor.matcher.description")}
       count={total}
       icon={<Wrench className="h-4 w-4 text-amber-500" />}
       open={open}
@@ -133,9 +149,13 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Library</TableHead>
-              <TableHead className="text-right">Pending</TableHead>
-              <TableHead className="text-right">Parked</TableHead>
+              <TableHead>{t("web.admin.common.libraryEditor.matcher.library")}</TableHead>
+              <TableHead className="text-right">
+                {t("web.admin.common.libraryEditor.matcher.pending")}
+              </TableHead>
+              <TableHead className="text-right">
+                {t("web.admin.common.libraryEditor.matcher.parked")}
+              </TableHead>
               <TableHead className="w-28" />
             </TableRow>
           </TableHeader>
@@ -153,7 +173,10 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                     }}
                   >
                     <TableCell className="font-medium">
-                      {library?.name ?? `Library ${queue.library_id}`}
+                      {library?.name ??
+                        t("web.admin.common.libraryEditor.matcher.libraryFallback", {
+                          id: String(queue.library_id),
+                        })}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{queue.pending_count}</TableCell>
                     <TableCell className="text-right tabular-nums">
@@ -175,7 +198,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                           retry.mutate(queue.library_id);
                         }}
                       >
-                        Retry now
+                        {t("web.admin.common.libraryEditor.matcher.retryNow")}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -185,7 +208,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                         <div className="space-y-2">
                           {detailEntries.map((entry) => {
                             const { path, failureKind, message, decision } = entry;
-                            const rejection = decision ? describeRejection(decision) : undefined;
+                            const rejection = decision ? describeRejection(decision, t) : undefined;
                             const bar = decision ? scoreBar(decision) : undefined;
                             return (
                               <div
@@ -203,7 +226,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                     <Badge
                                       variant={entry.state === "parked" ? "outline" : "secondary"}
                                     >
-                                      {entry.state}
+                                      {stateLabel(entry.state, t)}
                                     </Badge>
                                   </div>
                                 </div>
@@ -220,22 +243,41 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                         className="text-muted-foreground flex flex-wrap items-baseline gap-x-2"
                                       >
                                         <span className="text-foreground font-medium">
-                                          {candidate.title}
-                                          {candidate.year ? ` (${candidate.year})` : ""}
+                                          {candidateTitle(candidate)}
                                         </span>
                                         <span className="tabular-nums">
-                                          score {candidate.score.toFixed(1)}
-                                          {bar === undefined ? "" : ` / ${bar}`}
+                                          {bar === undefined
+                                            ? t("web.admin.common.libraryEditor.matcher.score", {
+                                                score: candidate.score.toFixed(1),
+                                              })
+                                            : t(
+                                                "web.admin.common.libraryEditor.matcher.scoreOfBar",
+                                                {
+                                                  score: candidate.score.toFixed(1),
+                                                  bar: String(bar),
+                                                },
+                                              )}
                                         </span>
                                         {candidate.matched_title &&
                                         candidate.matched_title !== candidate.title ? (
-                                          <span>matched “{candidate.matched_title}”</span>
+                                          <span>
+                                            {t(
+                                              "web.admin.common.libraryEditor.matcher.matchedTitle",
+                                              {
+                                                title: candidate.matched_title,
+                                              },
+                                            )}
+                                          </span>
                                         ) : null}
                                         {candidate.reasons?.length ? (
                                           <span>{candidate.reasons.join(", ")}</span>
                                         ) : null}
                                         {candidate.sources?.length ? (
-                                          <span>via {candidate.sources.join(", ")}</span>
+                                          <span>
+                                            {t("web.admin.common.libraryEditor.matcher.via", {
+                                              sources: candidate.sources.join(", "),
+                                            })}
+                                          </span>
                                         ) : null}
                                       </div>
                                     ))}
@@ -246,13 +288,15 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                           })}
                           {detail && detailEntries.length === 0 ? (
                             <p className="text-muted-foreground text-center">
-                              No queued item details.
+                              {t("web.admin.common.libraryEditor.matcher.noDetails")}
                             </p>
                           ) : null}
                           {hasPreviousDetailPage || hasNextDetailPage ? (
                             <div className="flex items-center justify-between pt-1">
                               <span className="text-muted-foreground text-xs">
-                                Page {detailPageIndex + 1}
+                                {t("web.admin.common.libraryEditor.matcher.page", {
+                                  page: String(detailPageIndex + 1),
+                                })}
                               </span>
                               <div className="flex gap-2">
                                 <Button
@@ -264,7 +308,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                     setDetailPageIndex((current) => Math.max(0, current - 1))
                                   }
                                 >
-                                  Previous
+                                  {t("web.admin.common.libraryEditor.matcher.previous")}
                                 </Button>
                                 <Button
                                   type="button"
@@ -284,7 +328,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                     });
                                   }}
                                 >
-                                  Next
+                                  {t("web.admin.common.libraryEditor.matcher.next")}
                                 </Button>
                               </div>
                             </div>

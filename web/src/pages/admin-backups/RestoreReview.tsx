@@ -2,6 +2,7 @@ import type { RestoreDataTypeId, RestoreSet } from "@/api/v2/adminBackupRestore"
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { useT } from "@/i18n";
 import { FieldGroup } from "@/pages/admin-settings/FieldGroup";
 
 import { restoreCaveats, restorePlan, type SelectionKeys } from "./restoreModel";
@@ -43,6 +44,7 @@ export function RestoreReview({
   onOpenRunning,
   onReloadPreview,
 }: RestoreReviewProps) {
+  const t = useT();
   const plan = restorePlan(set, selection, dataTypes);
   const caveats = restoreCaveats(set, selection);
   return (
@@ -51,18 +53,25 @@ export function RestoreReview({
         <FieldGroup key={group.section} label={group.title}>
           <ul className="list-disc space-y-1.5 py-3.5 pl-5 text-sm">
             {group.sentences.map((sentence, position) => (
-              <li key={position}>{sentence}.</li>
+              <li key={position}>{t("web.admin.backups.restore.plan.sentence", { sentence })}</li>
             ))}
           </ul>
         </FieldGroup>
       ))}
       {caveats.length > 0 ? (
-        <FieldGroup label="Left out" description="Parts of what you chose that won't be restored.">
+        <FieldGroup
+          label={t("web.admin.backups.restore.review.leftOut")}
+          description={t("web.admin.backups.restore.review.leftOutDescription")}
+        >
           <ul className="space-y-2 py-3.5 text-sm">
             {caveats.map((caveat) => (
               <li key={caveat.key}>
-                <span className="font-medium">{caveat.label}:</span>{" "}
-                <span className="text-muted-foreground">{caveat.text}</span>
+                {t("web.admin.backups.restore.review.caveat", {
+                  label: caveat.label,
+                  text: caveat.text,
+                  b: (chunks) => <span className="font-medium">{chunks}</span>,
+                  muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+                })}
               </li>
             ))}
           </ul>
@@ -74,18 +83,20 @@ export function RestoreReview({
           role="alert"
           className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm"
         >
-          <p className="min-w-0 flex-1">Silo didn&apos;t start the restore. {refusal.message}</p>
+          <p className="min-w-0 flex-1">
+            {t("web.admin.backups.restore.review.refused", { reason: refusal.message })}
+          </p>
           {refusal.runningJobId ? (
             <Button
               variant="outline"
               size="sm"
               onClick={() => onOpenRunning(refusal.runningJobId!)}
             >
-              Open the running restore
+              {t("web.admin.backups.restore.review.openRunning")}
             </Button>
           ) : refusal.previewChanged ? (
             <Button variant="outline" size="sm" onClick={onReloadPreview}>
-              Reload the preview
+              {t("web.admin.backups.restore.review.reloadPreview")}
             </Button>
           ) : null}
         </div>
@@ -93,10 +104,7 @@ export function RestoreReview({
 
       {!set.authenticated ? (
         <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
-          <p>
-            Silo can&apos;t confirm this backup is unchanged: it was written with a different
-            SECRET_KEY, so anyone who could write to its storage could have changed it.
-          </p>
+          <p>{t("web.admin.backups.restore.review.unauthenticated")}</p>
           <div className="flex items-center gap-2">
             <Checkbox
               id="restore-accept-unauthenticated"
@@ -104,7 +112,7 @@ export function RestoreReview({
               onCheckedChange={(value) => onAcceptUnauthenticated(value === true)}
             />
             <Label htmlFor="restore-accept-unauthenticated">
-              I trust this backup; restore from it anyway
+              {t("web.admin.backups.restore.review.trust")}
             </Label>
           </div>
         </div>
@@ -112,10 +120,10 @@ export function RestoreReview({
 
       <div className="border-border/60 flex flex-wrap items-center gap-3 border-t pt-4">
         <p className="text-muted-foreground min-w-0 flex-1 text-sm">
-          Takes about a minute. Silo backs up this server first.
+          {t("web.admin.backups.restore.review.duration")}
         </p>
         <Button variant="outline" onClick={onBack} disabled={pending}>
-          Back
+          {t("common.back")}
         </Button>
         <Button
           onClick={onRestore}
@@ -123,7 +131,7 @@ export function RestoreReview({
             pending || selection.size === 0 || (!set.authenticated && !acceptUnauthenticated)
           }
         >
-          Restore
+          {t("web.admin.backups.restore.review.restore")}
         </Button>
       </div>
     </div>

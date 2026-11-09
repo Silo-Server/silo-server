@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/i18n";
 
 import {
   effectiveValue,
@@ -130,6 +131,7 @@ function SchemaFormSection({
 }) {
   // null = operator hasn't toggled; fall back to collapsed_default. forceOpen
   // (the section has unresolved errors) always wins so setup can't be hidden.
+  const t = useT();
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
   if (!evaluateShowWhen(section.show_when, values, fields)) {
@@ -149,7 +151,9 @@ function SchemaFormSection({
         </div>
         {collapsible ? (
           <Button type="button" size="xs" variant="ghost" onClick={() => setUserOpen(!open)}>
-            {open ? "Hide" : "Show"}
+            {open
+              ? t("web.admin.plugins.schemaForm.hideSection")
+              : t("web.admin.plugins.schemaForm.showSection")}
           </Button>
         ) : null}
       </div>
@@ -171,6 +175,7 @@ export function SchemaForm({
   expandSections = false,
   lockedKeys = NO_LOCKED_KEYS,
 }: Props) {
+  const t = useT();
   const hidden = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
   const byKey = useMemo(() => {
     const map = new Map<string, PluginAdminFormField>();
@@ -181,10 +186,10 @@ export function SchemaForm({
   }, [descriptor.fields, hidden]);
 
   const clientErrors = useMemo(() => {
-    const all = validateSchemaValues(descriptor, values);
+    const all = validateSchemaValues(descriptor, values, t);
     if (hidden.size === 0) return all;
     return Object.fromEntries(Object.entries(all).filter(([key]) => !hidden.has(key)));
-  }, [descriptor, values, hidden]);
+  }, [descriptor, values, hidden, t]);
 
   const mergedErrors = useMemo(() => {
     return { ...clientErrors, ...(errors ?? {}) };
@@ -251,7 +256,9 @@ export function SchemaForm({
           disabled={locked}
         >
           <SelectTrigger id={id} className="w-full" aria-describedby={describedBy}>
-            <SelectValue placeholder={field.placeholder || "Select"} />
+            <SelectValue
+              placeholder={field.placeholder || t("web.admin.plugins.schemaForm.selectPlaceholder")}
+            />
           </SelectTrigger>
           <SelectContent>
             {options.map((option) => (
@@ -274,7 +281,7 @@ export function SchemaForm({
       if (options.length === 0) {
         return (
           <p className="text-muted-foreground rounded-md border border-dashed px-3 py-2 text-xs">
-            No options available.
+            {t("web.admin.plugins.schemaForm.noOptions")}
           </p>
         );
       }

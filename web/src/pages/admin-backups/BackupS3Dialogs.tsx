@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch";
 import { useAcknowledgeAdminBackupKey, useTestAdminBackupS3 } from "@/hooks/queries/admin/backups";
 import { useUpdateServerSettings } from "@/hooks/queries/admin/settings";
 import { adminKeys } from "@/hooks/queries/keys";
+import { useT, type Translate } from "@/i18n";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { backupErrorMessage } from "./backupPresentation";
@@ -32,10 +33,13 @@ import {
   type S3TestOutcome,
 } from "./s3SetupModel";
 
+/** An example endpoint, shown in the empty field. */
+const ENDPOINT_EXAMPLE = "https://s3.us-east-1.amazonaws.com";
+
 /** What to say when confirming the key failed. */
-function acknowledgeErrorMessage(error: unknown): string {
+function acknowledgeErrorMessage(t: Translate, error: unknown): string {
   if (error instanceof V2ProblemError && error.status === 409)
-    return "This server's SECRET_KEY changed since the page loaded. Check the new key check, then confirm again.";
+    return t("web.admin.backups.key.changedError");
   return backupErrorMessage(error);
 }
 
@@ -49,6 +53,7 @@ function KeyBox({
   kept: boolean;
   onKeptChange: (kept: boolean) => void;
 }) {
+  const t = useT();
   const headingId = useId();
   const checkLabelId = useId();
   const boxId = useId();
@@ -56,16 +61,14 @@ function KeyBox({
     <section aria-labelledby={headingId} className="bg-muted/40 space-y-3 rounded-xl border p-4">
       <h3 id={headingId} className="flex items-center gap-2 text-sm font-semibold">
         <Lock aria-hidden="true" className="size-4 shrink-0" />
-        Backups here are encrypted with SECRET_KEY
+        {t("web.admin.backups.key.heading")}
       </h3>
       <p className="text-muted-foreground text-[13px] leading-relaxed">
-        Restoring one needs this server&apos;s SECRET_KEY. Silo never shows the key and doesn&apos;t
-        keep a copy of it anywhere else. If the key exists only in this server&apos;s .env file and
-        the disk fails, these backups can&apos;t be restored, and no one can recover them.
+        {t("web.admin.backups.key.explanation")}
       </p>
       <div className="space-y-1">
         <p id={checkLabelId} className="text-xs font-medium">
-          Key check
+          {t("web.admin.backups.key.check")}
         </p>
         <p
           aria-labelledby={checkLabelId}
@@ -75,9 +78,9 @@ function KeyBox({
         </p>
       </div>
       <p className="text-muted-foreground text-[13px] leading-relaxed">
-        To check the copy you saved, run{" "}
-        <code className="font-mono text-xs">silo secret check</code> with it on any computer. The
-        same key gives the same code.
+        {t("web.admin.backups.key.checkHelp", {
+          code: (chunks) => <code className="font-mono text-xs">{chunks}</code>,
+        })}
       </p>
       <div className="flex items-start gap-2.5">
         <Checkbox
@@ -88,8 +91,7 @@ function KeyBox({
           className="mt-0.5"
         />
         <Label htmlFor={boxId} className="text-[13px] leading-relaxed font-normal">
-          I keep a copy of SECRET_KEY somewhere other than this server. Without it, these backups
-          can&apos;t be restored.
+          {t("web.admin.backups.key.kept")}
         </Label>
       </div>
     </section>
@@ -142,6 +144,7 @@ function S3SetupForm({
   onSaved: () => void;
   onDone: () => void;
 }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const [fields, setFields] = useState(initial);
   const [outcome, setOutcome] = useState<S3TestOutcome | null>(null);
@@ -175,7 +178,9 @@ function S3SetupForm({
       try {
         await acknowledge.mutateAsync(keyCheck);
       } catch (error) {
-        toast.error("Couldn't confirm the key", { description: acknowledgeErrorMessage(error) });
+        toast.error(t("web.admin.backups.key.confirmFailed"), {
+          description: acknowledgeErrorMessage(t, error),
+        });
         return;
       }
       try {
@@ -186,8 +191,8 @@ function S3SetupForm({
       }
       await queryClient.invalidateQueries({ queryKey: adminKeys.backups() });
       onSaved();
-      toast.success("Backups now go to the bucket", {
-        description: "The next backup is the first one there.",
+      toast.success(t("web.admin.backups.s3.saved"), {
+        description: t("web.admin.backups.s3.savedDescription"),
       });
       onDone();
     } finally {
@@ -198,10 +203,8 @@ function S3SetupForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Keep backups in an S3 bucket</DialogTitle>
-        <DialogDescription>
-          Use a bucket just for backups, with keys that can only reach it.
-        </DialogDescription>
+        <DialogTitle>{t("web.admin.backups.s3.title")}</DialogTitle>
+        <DialogDescription>{t("web.admin.backups.s3.description")}</DialogDescription>
       </DialogHeader>
       {/* The fields scroll between a fixed header and footer, so Save stays
           on screen however short the window is. */}
@@ -209,30 +212,44 @@ function S3SetupForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <TextField
-              label="Endpoint"
+              label={t("web.admin.backups.s3.endpoint")}
               value={fields.endpoint}
               onChange={set("endpoint")}
-              placeholder="https://s3.us-east-1.amazonaws.com"
+              placeholder={ENDPOINT_EXAMPLE}
               mono
             />
           </div>
-          <TextField label="Region" value={fields.region} onChange={set("region")} />
-          <TextField label="Bucket" value={fields.bucket} onChange={set("bucket")} mono />
+          <TextField
+            label={t("web.admin.backups.s3.region")}
+            value={fields.region}
+            onChange={set("region")}
+          />
+          <TextField
+            label={t("web.admin.backups.s3.bucket")}
+            value={fields.bucket}
+            onChange={set("bucket")}
+            mono
+          />
           <div className="sm:col-span-2">
             <TextField
-              label="Folder in the bucket"
+              label={t("web.admin.backups.s3.folder")}
               value={fields.keyPrefix}
               onChange={set("keyPrefix")}
               mono
             />
           </div>
-          <TextField label="Access key" value={fields.accessKey} onChange={set("accessKey")} mono />
           <TextField
-            label="Secret key"
+            label={t("web.admin.backups.s3.accessKey")}
+            value={fields.accessKey}
+            onChange={set("accessKey")}
+            mono
+          />
+          <TextField
+            label={t("web.admin.backups.s3.secretKey")}
             type="password"
             value={fields.secretKey}
             onChange={set("secretKey")}
-            placeholder={secretConfigured ? "Set" : undefined}
+            placeholder={secretConfigured ? t("web.admin.backups.s3.secretSet") : undefined}
           />
           <div className="flex items-center gap-2.5 sm:col-span-2">
             <Switch
@@ -240,7 +257,7 @@ function S3SetupForm({
               checked={fields.pathStyle}
               onCheckedChange={set("pathStyle")}
             />
-            <Label htmlFor={pathStyleId}>Path-style addressing</Label>
+            <Label htmlFor={pathStyleId}>{t("web.admin.backups.s3.pathStyle")}</Label>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -252,7 +269,7 @@ function S3SetupForm({
             {testS3.isPending ? (
               <LoaderCircle data-icon="inline-start" className="motion-safe:animate-spin" />
             ) : null}
-            Test connection
+            {t("web.admin.backups.s3.test")}
           </Button>
           {test && !testS3.isPending ? (
             <div role="status">
@@ -269,7 +286,7 @@ function S3SetupForm({
           </p>
         ) : null}
         <Button variant="ghost" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button
           onClick={() => void save()}
@@ -279,7 +296,7 @@ function S3SetupForm({
           {saving ? (
             <LoaderCircle data-icon="inline-start" className="motion-safe:animate-spin" />
           ) : null}
-          Save and use this bucket
+          {t("web.admin.backups.s3.save")}
         </Button>
       </DialogFooter>
     </>
@@ -323,36 +340,38 @@ export function S3SetupDialog({
 }
 
 function ConfirmKeyForm({ keyCheck, onDone }: { keyCheck: string; onDone: () => void }) {
+  const t = useT();
   const [kept, setKept] = useState(false);
   const acknowledge = useAcknowledgeAdminBackupKey();
   const confirm = () =>
     acknowledge.mutate(keyCheck, {
       onSuccess: () => {
-        toast.success("Key confirmed", { description: "Backups to the bucket run again." });
+        toast.success(t("web.admin.backups.key.confirmed"), {
+          description: t("web.admin.backups.key.confirmedDescription"),
+        });
         onDone();
       },
       onError: (error) =>
-        toast.error("Couldn't confirm the key", { description: acknowledgeErrorMessage(error) }),
+        toast.error(t("web.admin.backups.key.confirmFailed"), {
+          description: acknowledgeErrorMessage(t, error),
+        }),
     });
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Confirm the SECRET_KEY</DialogTitle>
-        <DialogDescription>
-          Backups to the bucket are paused until you confirm you keep a copy of this server&apos;s
-          SECRET_KEY.
-        </DialogDescription>
+        <DialogTitle>{t("web.admin.backups.key.confirmTitle")}</DialogTitle>
+        <DialogDescription>{t("web.admin.backups.key.confirmDescription")}</DialogDescription>
       </DialogHeader>
       <KeyBox keyCheck={keyCheck} kept={kept} onKeptChange={setKept} />
       <DialogFooter>
         <Button variant="ghost" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button onClick={confirm} disabled={!kept || acknowledge.isPending}>
           {acknowledge.isPending ? (
             <LoaderCircle data-icon="inline-start" className="motion-safe:animate-spin" />
           ) : null}
-          Confirm the key
+          {t("web.admin.backups.confirmKey.button")}
         </Button>
       </DialogFooter>
     </>

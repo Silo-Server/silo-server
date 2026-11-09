@@ -7,13 +7,14 @@ import type {
   RequestRouting,
   RequestRoutingMode,
 } from "@/api/v2/adminRequests";
+import { useT, type MessageKey } from "@/i18n";
 import { ChoiceCard } from "@/pages/admin/autoscan/ChoiceCard";
 
 import { serverKind } from "./requestServerModel";
 
-const MEDIA_TYPES: readonly { value: RequestRouteMediaType; label: string; kind: string }[] = [
-  { value: "movie", label: "Movies", kind: "Radarr" },
-  { value: "series", label: "Series", kind: "Sonarr" },
+const MEDIA_TYPES: readonly { value: RequestRouteMediaType; label: MessageKey; kind: string }[] = [
+  { value: "movie", label: "web.admin.settings.requests.routingMode.movies", kind: "Radarr" },
+  { value: "series", label: "web.admin.settings.requests.routingMode.series", kind: "Sonarr" },
 ];
 
 /** Standard or Advanced. Standard is offered only while the servers allow it. */
@@ -26,23 +27,28 @@ export function RoutingModeChoice({
   pending: boolean;
   onChange: (mode: RequestRoutingMode) => void;
 }) {
+  const t = useT();
   const blocked = Boolean(routing.standard_unavailable_reason);
   const reasonId = useId();
   const showReason = blocked && routing.mode === "advanced";
   return (
     <div className="space-y-2">
-      <div role="group" aria-label="Routing" className="grid gap-2 sm:grid-cols-2">
+      <div
+        role="group"
+        aria-label={t("web.admin.settings.requests.routingMode.label")}
+        className="grid gap-2 sm:grid-cols-2"
+      >
         <ChoiceCard
-          title="Standard"
-          description="Each request goes to the server for its type, with that server's own settings."
+          title={t("web.admin.settings.requests.routingMode.standard")}
+          description={t("web.admin.settings.requests.routingMode.standardDescription")}
           selected={routing.mode === "standard"}
           disabled={pending || (blocked && routing.mode !== "standard")}
           describedBy={showReason ? reasonId : undefined}
           onSelect={() => routing.mode !== "standard" && onChange("standard")}
         />
         <ChoiceCard
-          title="Advanced"
-          description="Rules send some requests elsewhere, like anime to a second Sonarr or kids' movies to their own folder."
+          title={t("web.admin.settings.requests.routingMode.advanced")}
+          description={t("web.admin.settings.requests.routingMode.advancedDescription")}
           selected={routing.mode === "advanced"}
           disabled={pending}
           onSelect={() => routing.mode !== "advanced" && onChange("advanced")}
@@ -50,7 +56,9 @@ export function RoutingModeChoice({
       </div>
       {showReason ? (
         <p id={reasonId} className="text-muted-foreground text-xs">
-          Standard isn&apos;t available. {routing.standard_unavailable_reason}
+          {t("web.admin.settings.requests.routingMode.standardUnavailable", {
+            reason: routing.standard_unavailable_reason ?? "",
+          })}
         </p>
       ) : null}
     </div>
@@ -70,6 +78,7 @@ export function StandardRoutingSummary({
   servers: readonly RequestIntegration[];
   routes: readonly RequestRoute[];
 }) {
+  const t = useT();
   const name = (id: string | undefined) => servers.find((server) => server.id === id)?.name;
   const pausedRules = routes.filter((route) => !route.is_fallback && route.enabled).length;
   const isArr = (id: string | undefined) => {
@@ -86,41 +95,44 @@ export function StandardRoutingSummary({
     // until an admin picks.
     return (
       <p className="text-muted-foreground pt-3 text-sm">
-        Standard can&apos;t route requests right now. {routing.standard_unavailable_reason} Until
-        you switch to Advanced or remove a server, the rules decide.
+        {t("web.admin.settings.requests.routingMode.standardBlocked", {
+          reason: routing.standard_unavailable_reason,
+        })}
       </p>
     );
   }
   return (
     <div className="space-y-3 pt-3">
-      <ul aria-label="Where Standard sends requests" className="space-y-2">
+      <ul
+        aria-label={t("web.admin.settings.requests.routingMode.summaryLabel")}
+        className="space-y-2"
+      >
         {MEDIA_TYPES.map((type) => {
           const destination = routing.standard.find((d) => d.media_type === type.value);
           const hd = name(destination?.hd_integration_id);
           const uhd = name(destination?.uhd_integration_id);
+          const problem = t(
+            uhd
+              ? "web.admin.settings.requests.routingMode.onlyUhdServer"
+              : "web.admin.settings.requests.routingMode.noServer",
+            { kind: type.kind },
+          );
           return (
             <li key={type.value} className="border-border/70 rounded-lg border px-3 py-2 text-sm">
-              <span className="font-medium">{type.label}</span>
+              <span className="font-medium">{t(type.label)}</span>
               {hd ? (
                 <>
                   {" → "}
                   {hd}
                 </>
-              ) : uhd ? (
-                <span className="text-muted-foreground">
-                  {" "}
-                  — only a 4K server, so HD versions go nowhere. Add a {type.kind} server that
-                  isn&apos;t marked 4K.
-                </span>
               ) : (
-                <span className="text-muted-foreground">
-                  {" "}
-                  — no server yet. Add a {type.kind} server above.
-                </span>
+                <span className="text-muted-foreground"> {problem}</span>
               )}
               {hd || uhd ? (
                 <span className="text-muted-foreground block text-xs">
-                  {uhd ? `4K versions → ${uhd}` : "No 4K versions"}
+                  {uhd
+                    ? t("web.admin.settings.requests.routingMode.uhdServer", { server: uhd })
+                    : t("web.admin.settings.requests.routingMode.noUhd")}
                 </span>
               ) : null}
             </li>
@@ -129,20 +141,20 @@ export function StandardRoutingSummary({
       </ul>
       {routing.standard.some((d) => d.media_type === "series" && isArr(d.hd_integration_id)) ? (
         <p className="text-muted-foreground text-xs">
-          Anime series go to Sonarr with the Anime series type, so episodes are numbered the way
-          anime releases are.
+          {t("web.admin.settings.requests.routingMode.animeNote")}
         </p>
       ) : null}
       {missing4K ? (
         <p className="text-muted-foreground text-xs">
-          To send 4K versions to their own server, add it and turn on &ldquo;4K server&rdquo;.
-          Adding a second server of the same type turns on Advanced.
+          {t("web.admin.settings.requests.routingMode.uhdNote")}
         </p>
       ) : null}
       {pausedRules > 0 ? (
         <p className="text-muted-foreground text-xs">
-          {pausedRules === 1 ? "1 rule is" : `${pausedRules} rules are`} paused. Switch to Advanced
-          to use {pausedRules === 1 ? "it" : "them"} again.
+          {t("web.admin.settings.requests.routingMode.pausedRules", {
+            count: pausedRules,
+            count_text: String(pausedRules),
+          })}
         </p>
       ) : null}
     </div>

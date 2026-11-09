@@ -1,7 +1,29 @@
 import type { TriggerConfig } from "@/api/types";
+import { t as appT, type MessageKey } from "@/i18n";
 
-const SHORT_DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const LONG_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+/** Interval units, largest first; each names its short and long message. */
+const UNITS: { size: number; short: MessageKey; long: MessageKey }[] = [
+  {
+    size: 86_400_000,
+    short: "web.admin.tasks.triggerText.everyDaysShort",
+    long: "web.admin.tasks.triggerText.everyDays",
+  },
+  {
+    size: 3_600_000,
+    short: "web.admin.tasks.triggerText.everyHoursShort",
+    long: "web.admin.tasks.triggerText.everyHours",
+  },
+  {
+    size: 60_000,
+    short: "web.admin.tasks.triggerText.everyMinutesShort",
+    long: "web.admin.tasks.triggerText.everyMinutes",
+  },
+  {
+    size: 1000,
+    short: "web.admin.tasks.triggerText.everySecondsShort",
+    long: "web.admin.tasks.triggerText.everySeconds",
+  },
+];
 
 /**
  * Describes one task trigger. The task list uses the short form ("Every 3h",
@@ -13,32 +35,38 @@ export function describeTrigger(t: TriggerConfig, style: "long" | "short" = "lon
   switch (t.type) {
     case "interval": {
       const ms = t.interval_ms ?? 0;
-      const units = [
-        { size: 86_400_000, shortLabel: "d", longLabel: "day(s)" },
-        { size: 3_600_000, shortLabel: "h", longLabel: "hour(s)" },
-        { size: 60_000, shortLabel: "m", longLabel: "minute(s)" },
-        { size: 1000, shortLabel: "s", longLabel: "second(s)" },
-      ];
-      const unit = units.find(
+      const unit = UNITS.find(
         ({ size }) => ms >= size && ms % size === 0 && (short || size < 86_400_000),
       );
-      if (unit)
-        return `Every ${ms / unit.size}${short ? "" : " "}${short ? unit.shortLabel : unit.longLabel}`;
-      return ms === 0
-        ? short
-          ? "Every 0s"
-          : "Every 0 second(s)"
-        : `Every ${ms}${short ? "ms" : " millisecond(s)"}`;
+      // Zero reads as seconds; an interval no unit divides stays in milliseconds.
+      const [key, count]: [MessageKey, number] = unit
+        ? [short ? unit.short : unit.long, ms / unit.size]
+        : ms === 0
+          ? [
+              short
+                ? "web.admin.tasks.triggerText.everySecondsShort"
+                : "web.admin.tasks.triggerText.everySeconds",
+              0,
+            ]
+          : [
+              short
+                ? "web.admin.tasks.triggerText.everyMillisecondsShort"
+                : "web.admin.tasks.triggerText.everyMilliseconds",
+              ms,
+            ];
+      return appT(key, { count, count_text: String(count) });
     }
     case "daily":
-      return `Daily at ${t.time_of_day ?? "00:00"}`;
-    case "weekly": {
-      const days = short ? SHORT_DAYS : LONG_DAYS;
-      const day = days[t.day_of_week ?? 0] ?? `Day ${t.day_of_week}`;
-      return `${day} at ${t.time_of_day ?? "00:00"}`;
-    }
+      return appT("web.admin.tasks.triggerText.daily", { time: t.time_of_day ?? "00:00" });
+    case "weekly":
+      return appT(
+        short ? "web.admin.tasks.triggerText.weeklyShort" : "web.admin.tasks.triggerText.weekly",
+        { day: String(t.day_of_week ?? 0), time: t.time_of_day ?? "00:00" },
+      );
     case "startup":
-      return short ? "On startup" : "On server startup";
+      return appT(
+        short ? "web.admin.tasks.triggerText.startupShort" : "web.admin.tasks.triggerText.startup",
+      );
     default:
       return t.type;
   }

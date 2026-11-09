@@ -1,6 +1,7 @@
 import type { AdminBackupUpload, UploadRejectionReason } from "@/api/v2/adminBackupUpload";
 import { StaleApiRequestContextError } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
+import { t, type MessageKey } from "@/i18n";
 
 import { backupDateTime, knownSiloVersion, sourceServerName } from "./backupPresentation";
 
@@ -34,7 +35,7 @@ export function progressLabel(sent: number, total: number): string {
   const totalText = show(total, Math.round);
   // Never show the total before the last byte arrived.
   const sentText = sent >= total ? totalText : show(sent, Math.floor);
-  return `${sentText} of ${totalText} ${label}`;
+  return t("web.admin.backups.upload.progress", { sent: sentText, total: totalText, unit: label });
 }
 
 export function progressPercent(sent: number, total: number): number {
@@ -81,8 +82,7 @@ export function sniffRestoreSet(head: Uint8Array): SniffResult {
  * Shown while an encrypted file uploads. Only the server can tell whose
  * SECRET_KEY encrypted it: an age file's header names no key, only a salt.
  */
-export const ENCRYPTED_NOTICE =
-  "Encrypted: this server can read it only if it was made with this server's SECRET_KEY.";
+export const ENCRYPTED_NOTICE: MessageKey = "web.admin.backups.upload.encryptedNotice";
 
 /**
  * What the dialog does with a sniffed file before uploading it: refuse what
@@ -92,7 +92,7 @@ export const ENCRYPTED_NOTICE =
  */
 export function sniffDecision(
   sniffed: SniffResult,
-): { upload: false } | { upload: true; notice: string | null } {
+): { upload: false } | { upload: true; notice: MessageKey | null } {
   if (sniffed === "not_a_restore_set") return { upload: false };
   return { upload: true, notice: sniffed === "encrypted" ? ENCRYPTED_NOTICE : null };
 }
@@ -125,7 +125,10 @@ export function failureOfError(
     )
       return {
         kind: "check_failed",
-        detail: error instanceof V2ProblemError ? error.message : "The server didn't answer.",
+        detail:
+          error instanceof V2ProblemError
+            ? error.message
+            : t("web.admin.backups.upload.noAnswerShort"),
       };
   }
   if (error instanceof V2ProblemError) {
@@ -136,7 +139,7 @@ export function failureOfError(
       return { kind: "busy" };
     return { kind: "error", detail: error.message };
   }
-  return { kind: "error", detail: "The server didn't answer. Check that Silo is running." };
+  return { kind: "error", detail: t("web.admin.backups.upload.noAnswer") };
 }
 
 export interface FailureCopy {
@@ -150,23 +153,26 @@ export interface FailureCopy {
   detail?: string;
 }
 
-const REJECTION_COPY: Record<UploadRejectionReason, Omit<FailureCopy, "resumable">> = {
+const REJECTION_COPY: Record<
+  UploadRejectionReason,
+  { title: MessageKey; body: MessageKey; command?: string }
+> = {
   not_a_restore_set: {
-    title: "This isn't a restore set",
-    body: "Use the restore-set.tar file from Download on a Silo server's Backups page.",
+    title: "web.admin.backups.upload.rejected.notRestoreSetTitle",
+    body: "web.admin.backups.upload.rejected.notRestoreSetBody",
   },
   newer_silo: {
-    title: "This backup is from a newer Silo",
-    body: "Upgrade this server first, then upload it again.",
+    title: "web.admin.backups.upload.rejected.newerSiloTitle",
+    body: "web.admin.backups.upload.rejected.newerSiloBody",
   },
   encrypted: {
-    title: "This file is encrypted",
-    body: "It's encrypted with another server's SECRET_KEY. Run this with that server's SECRET_KEY set, then upload restore-set.tar.",
+    title: "web.admin.backups.upload.rejected.encryptedTitle",
+    body: "web.admin.backups.upload.rejected.encryptedBody",
     command: DECRYPT_COMMAND,
   },
   checksum_mismatch: {
-    title: "The file changed while it was uploading",
-    body: "Upload it again.",
+    title: "web.admin.backups.upload.rejected.checksumTitle",
+    body: "web.admin.backups.upload.rejected.checksumBody",
   },
 };
 
@@ -174,30 +180,42 @@ export function failureCopy(failure: UploadFailure): FailureCopy {
   switch (failure.kind) {
     case "too_large":
       return {
-        title: "This file is too large",
-        body: `Uploads can be at most ${limitLabel(failure.limitBytes)}, and this file is ${limitLabel(failure.sizeBytes)}.`,
+        title: t("web.admin.backups.upload.failure.tooLargeTitle"),
+        body: t("web.admin.backups.upload.failure.tooLargeBody", {
+          limit: limitLabel(failure.limitBytes),
+          size: limitLabel(failure.sizeBytes),
+        }),
         resumable: false,
       };
     case "too_many":
       return {
-        title: "Too many uploads in progress",
-        body: "Three uploads are already in progress on this server. Finish or delete one first. Unfinished uploads are deleted after 24 hours.",
+        title: t("web.admin.backups.upload.failure.tooManyTitle"),
+        body: t("web.admin.backups.upload.failure.tooManyBody"),
         resumable: false,
       };
     case "busy":
       return {
-        title: "A backup or restore is running",
-        body: "The file arrived. Try again when it finishes to open it.",
+        title: t("web.admin.backups.upload.failure.busyTitle"),
+        body: t("web.admin.backups.upload.failure.busyBody"),
         resumable: true,
       };
     case "part_failed":
       return {
-        title: "The upload stopped",
-        body: `Part ${failure.part + 1} of ${failure.partCount} didn't arrive. The parts already sent are kept, so trying again picks up where it stopped.`,
+        title: t("web.admin.backups.upload.failure.stoppedTitle"),
+        body: t("web.admin.backups.upload.failure.partFailedBody", {
+          part: String(failure.part + 1),
+          part_count: String(failure.partCount),
+        }),
         resumable: true,
       };
     case "rejected": {
-      const copy = REJECTION_COPY[failure.reason];
+      const keys = REJECTION_COPY[failure.reason] as
+        | (typeof REJECTION_COPY)[keyof typeof REJECTION_COPY]
+        | undefined;
+      // A reason this build doesn't list shows the server's detail alone.
+      const copy = keys
+        ? { ...keys, title: t(keys.title), body: t(keys.body) }
+        : { title: "", body: "" };
       // An upload encrypted with another key is explained by the server's
       // message, decrypt command included: show it once, in place of the
       // page's own advice. The other reasons keep the page's line and add
@@ -208,29 +226,39 @@ export function failureCopy(failure: UploadFailure): FailureCopy {
     }
     case "signed_out":
       return {
-        title: "You were signed out",
-        body: `Sign in again as an administrator in this browser, then continue: the ${failure.part} of ${failure.partCount} parts already sent are kept.`,
+        title: t("web.admin.backups.upload.failure.signedOutTitle"),
+        body: t("web.admin.backups.upload.failure.signedOutBody", {
+          part_count: failure.partCount,
+          sent: String(failure.part),
+          part_count_text: String(failure.partCount),
+        }),
         resumable: true,
       };
     case "check_failed":
       return {
-        title: "The file arrived, but checking it stopped",
-        body: `${failure.detail} Check it again; nothing needs to be sent again.`,
+        title: t("web.admin.backups.upload.failure.checkStoppedTitle"),
+        body: t("web.admin.backups.upload.failure.checkStoppedBody", { detail: failure.detail }),
         resumable: true,
       };
     case "error":
-      return { title: "The upload stopped", body: failure.detail, resumable: false };
+      return {
+        title: t("web.admin.backups.upload.failure.stoppedTitle"),
+        body: failure.detail,
+        resumable: false,
+      };
   }
 }
 
 /** "Opened. Backup from Living room, Oct 30, 2026, 4:00 AM, Silo 0.9.1." */
 export function openedSentence(upload: AdminBackupUpload): string {
   const source = upload.source;
-  if (!source) return "Opened.";
-  const name = sourceServerName(source) ?? "another server";
+  if (!source) return t("web.admin.backups.upload.opened");
+  const server = sourceServerName(source) ?? t("web.admin.backups.upload.anotherServer");
   const taken = backupDateTime(source.created_at);
   const version = knownSiloVersion(source.silo_version);
-  return `Opened. Backup from ${name}, ${taken}${version ? `, Silo ${version}` : ""}.`;
+  return version
+    ? t("web.admin.backups.upload.openedFromWithVersion", { server, taken, version })
+    : t("web.admin.backups.upload.openedFrom", { server, taken });
 }
 
 /** A part that failed after its retries; the parts before it arrived. */

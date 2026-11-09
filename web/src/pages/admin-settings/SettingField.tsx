@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { RestartBadge } from "@/components/settings/RestartBadge";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -113,6 +114,7 @@ export function SettingFieldRow({
   // A group that already says "Changes apply after a restart" does not need the
   // same fact repeated on every row inside it.
   const groupSaysRestart = useGroupRestartAll();
+  const t = useT();
 
   return (
     <div
@@ -127,7 +129,7 @@ export function SettingFieldRow({
           {dirty ? (
             <span
               className="size-1.5 shrink-0 rounded-full bg-[var(--settings-accent)]"
-              title="Unsaved change"
+              title={t("web.admin.settings.fields.unsavedChange")}
             />
           ) : null}
           <Label htmlFor={htmlFor} className="text-sm font-medium">
@@ -212,6 +214,7 @@ export function SettingField({
   restartRequired,
   className,
 }: SettingFieldProps) {
+  const t = useT();
   const controlId = useId();
   const hintId = useId();
 
@@ -276,7 +279,11 @@ export function SettingField({
       <Input
         id={controlId}
         type="password"
-        placeholder={sensitiveConfigured ? "configured" : (hint ?? "Not configured")}
+        placeholder={
+          sensitiveConfigured
+            ? t("web.admin.settings.fields.passwordConfigured")
+            : (hint ?? t("web.admin.settings.fields.passwordNotConfigured"))
+        }
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}

@@ -1,12 +1,16 @@
 import type { ScanRun } from "@/api/types";
 import { formatActiveScanMode, formatActiveScanProgress } from "@/lib/scanRuns";
 import { formatLocale } from "@/lib/appLocale";
+import { t } from "@/i18n";
 
 export function formatFileCount(count: number | null | undefined) {
   if (count == null) {
     return "—";
   }
-  return count === 1 ? "1 file" : `${count.toLocaleString(formatLocale())} files`;
+  return t("web.admin.dashboard.format.fileCount", {
+    count,
+    count_text: count.toLocaleString(formatLocale()),
+  });
 }
 
 /**
@@ -80,12 +84,23 @@ export function formatDataTotal(bytes: number | null | undefined) {
 }
 
 export function formatDashboardLibraryScanProgress(scan: ScanRun, activeScanCount: number) {
-  const status = scan.status === "running" ? "Scanning" : "Queued";
+  const running = scan.status === "running";
   const progress = formatActiveScanProgress(scan);
   const detail =
-    progress || (scan.status === "running" ? formatActiveScanMode(scan) : "Waiting for capacity");
-  const extraScans = activeScanCount > 1 ? ` + ${activeScanCount - 1} more` : "";
-  return `${status}: ${detail}${extraScans}`;
+    progress ||
+    (running ? formatActiveScanMode(scan) : t("web.admin.dashboard.format.scanWaitingForCapacity"));
+  if (activeScanCount > 1) {
+    return t(
+      running
+        ? "web.admin.dashboard.format.scanRunningWithMore"
+        : "web.admin.dashboard.format.scanQueuedWithMore",
+      { detail, more: activeScanCount - 1, more_text: String(activeScanCount - 1) },
+    );
+  }
+  return t(
+    running ? "web.admin.dashboard.format.scanRunning" : "web.admin.dashboard.format.scanQueued",
+    { detail },
+  );
 }
 
 /**

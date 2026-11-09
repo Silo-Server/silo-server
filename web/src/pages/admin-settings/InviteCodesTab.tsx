@@ -37,8 +37,25 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatDate } from "@/lib/datetime";
 import { Link } from "react-router";
+import { useT } from "@/i18n";
+
+/** Shown in the Label column for a code without a label. */
+const NO_LABEL = "-";
+
+function SignupsSettingLink({ children }: { children: React.ReactNode }) {
+  return (
+    <Link
+      to="/admin/settings/sign-in"
+      className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
+    >
+      {children}
+      <ArrowRight className="h-3 w-3" aria-hidden="true" />
+    </Link>
+  );
+}
 
 export default function InviteCodesTab() {
+  const t = useT();
   const {
     data: codes = [],
     isLoading,
@@ -67,13 +84,13 @@ export default function InviteCodesTab() {
   async function handleCopy(text: string) {
     try {
       await copyTextToClipboard(text);
-      toast.success("Copied to clipboard");
+      toast.success(t("web.admin.settings.inviteCodes.copied"));
     } catch {
-      toast.error("Failed to copy to clipboard");
+      toast.error(t("web.admin.settings.inviteCodes.copyFailed"));
     }
   }
 
-  if (isLoading) return <div>Loading invite codes...</div>;
+  if (isLoading) return <div>{t("web.admin.settings.inviteCodes.loading")}</div>;
 
   return (
     <div className="space-y-6">
@@ -82,9 +99,11 @@ export default function InviteCodesTab() {
         onOpenChange={(open) => {
           if (!open) setConfirmDeleteCode(null);
         }}
-        title="Delete invite code"
-        description={`Delete invite code "${confirmDeleteCode?.code}"? This action cannot be undone.`}
-        confirmLabel="Delete"
+        title={t("web.admin.settings.inviteCodes.delete.title")}
+        description={t("web.admin.settings.inviteCodes.delete.description", {
+          code: String(confirmDeleteCode?.code),
+        })}
+        confirmLabel={t("web.admin.settings.inviteCodes.delete.confirm")}
         variant="destructive"
         onConfirm={() => {
           if (confirmDeleteCode) deleteCode.mutate(confirmDeleteCode.id);
@@ -100,10 +119,13 @@ export default function InviteCodesTab() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Top Up Invite Code</DialogTitle>
+            <DialogTitle>{t("web.admin.settings.inviteCodes.topUp.title")}</DialogTitle>
             <DialogDescription>
-              Add extra uses to {topUpCode?.code}. Current usage is {topUpCode?.use_count} /{" "}
-              {topUpCode?.max_uses}.
+              {t("web.admin.settings.inviteCodes.topUp.description", {
+                code: topUpCode?.code ?? "",
+                used: topUpCode ? String(topUpCode.use_count) : "",
+                max: topUpCode ? String(topUpCode.max_uses) : "",
+              })}
             </DialogDescription>
           </DialogHeader>
           {topUpCode && <TopUpInviteCodeForm code={topUpCode} onClose={() => setTopUpCode(null)} />}
@@ -114,12 +136,12 @@ export default function InviteCodesTab() {
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
-              <Plus className="mr-1 h-4 w-4" /> Create Code
+              <Plus className="mr-1 h-4 w-4" /> {t("web.admin.settings.inviteCodes.create.button")}
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Create Invite Code</DialogTitle>
+              <DialogTitle>{t("web.admin.settings.inviteCodes.create.title")}</DialogTitle>
             </DialogHeader>
             <CreateInviteCodeForm onClose={() => setCreateOpen(false)} />
           </DialogContent>
@@ -129,53 +151,47 @@ export default function InviteCodesTab() {
       {serverSettings !== undefined &&
         (signupsEnabled ? (
           <p className="text-muted-foreground text-sm">
-            Codes only work while public signups are on.{" "}
-            <Link
-              to="/admin/settings/sign-in"
-              className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
-            >
-              Public signups setting
-              <ArrowRight className="h-3 w-3" aria-hidden="true" />
-            </Link>
+            {t("web.admin.settings.inviteCodes.signupsOn", {
+              link: (chunks) => <SignupsSettingLink>{chunks}</SignupsSettingLink>,
+            })}
           </p>
         ) : (
           <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <p className="text-[13px] leading-relaxed">
-              <span className="font-medium text-amber-500">Public signups are off</span> — these
-              codes won't work until you enable them.{" "}
-              <Link
-                to="/admin/settings/sign-in"
-                className="text-foreground inline-flex items-center gap-1 font-medium hover:underline"
-              >
-                Public signups setting
-                <ArrowRight className="h-3 w-3" aria-hidden="true" />
-              </Link>
+              {t("web.admin.settings.inviteCodes.signupsOff", {
+                b: (chunks) => <span className="font-medium text-amber-500">{chunks}</span>,
+                link: (chunks) => <SignupsSettingLink>{chunks}</SignupsSettingLink>,
+              })}
             </p>
           </div>
         ))}
 
       {isError && (
         <div role="alert">
-          Unable to load invite codes. <Button onClick={() => void refetch()}>Retry</Button>
+          {t("web.admin.settings.inviteCodes.loadFailed", {
+            button: (chunks) => <Button onClick={() => void refetch()}>{chunks}</Button>,
+          })}
         </div>
       )}
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Code</TableHead>
-            <TableHead>Label</TableHead>
-            <TableHead>Usage</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Created</TableHead>
-            <TableHead className="w-32">Actions</TableHead>
+            <TableHead>{t("web.admin.settings.inviteCodes.table.code")}</TableHead>
+            <TableHead>{t("web.admin.settings.inviteCodes.table.label")}</TableHead>
+            <TableHead>{t("web.admin.settings.inviteCodes.table.usage")}</TableHead>
+            <TableHead>{t("web.admin.settings.inviteCodes.table.status")}</TableHead>
+            <TableHead>{t("web.admin.settings.inviteCodes.table.created")}</TableHead>
+            <TableHead className="w-32">
+              {t("web.admin.settings.inviteCodes.table.actions")}
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {codes.length === 0 && (
             <TableRow>
               <TableCell colSpan={6} className="text-muted-foreground text-center">
-                No invite codes yet. Create one to get started.
+                {t("web.admin.settings.inviteCodes.empty")}
               </TableCell>
             </TableRow>
           )}
@@ -197,18 +213,23 @@ export default function InviteCodesTab() {
                 </div>
               </TableCell>
               <TableCell>
-                {code.label || <span className="text-muted-foreground">-</span>}
+                {code.label || <span className="text-muted-foreground">{NO_LABEL}</span>}
               </TableCell>
               <TableCell>
                 <span className={code.use_count >= code.max_uses ? "text-destructive" : ""}>
-                  {code.use_count} / {code.max_uses}
+                  {t("web.admin.settings.inviteCodes.usageCount", {
+                    used: String(code.use_count),
+                    max: String(code.max_uses),
+                  })}
                 </span>
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
                   <Switch checked={code.enabled} onCheckedChange={() => handleToggleCode(code)} />
                   <Badge variant={code.enabled ? "outline" : "secondary"}>
-                    {code.enabled ? "Active" : "Disabled"}
+                    {code.enabled
+                      ? t("web.admin.settings.inviteCodes.status.active")
+                      : t("web.admin.settings.inviteCodes.status.disabled")}
                   </Badge>
                 </div>
               </TableCell>
@@ -222,7 +243,7 @@ export default function InviteCodesTab() {
                     size="icon"
                     className="h-7 w-7"
                     onClick={() => setTopUpCode(code)}
-                    aria-label={`Top up invite code ${code.code}`}
+                    aria-label={t("web.admin.settings.inviteCodes.topUpLabel", { code: code.code })}
                   >
                     <PlusCircle className="h-3 w-3" />
                   </Button>
@@ -231,7 +252,9 @@ export default function InviteCodesTab() {
                     size="icon"
                     className="h-7 w-7"
                     onClick={() => handleDelete(code)}
-                    aria-label={`Delete invite code ${code.code}`}
+                    aria-label={t("web.admin.settings.inviteCodes.deleteLabel", {
+                      code: code.code,
+                    })}
                   >
                     <Trash2 className="h-3 w-3" />
                   </Button>
@@ -243,7 +266,7 @@ export default function InviteCodesTab() {
       </Table>
       {hasNextPage && (
         <Button disabled={isFetchingNextPage} onClick={() => void fetchNextPage()}>
-          Load more
+          {t("web.admin.settings.inviteCodes.loadMore")}
         </Button>
       )}
     </div>
@@ -251,6 +274,7 @@ export default function InviteCodesTab() {
 }
 
 function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
+  const t = useT();
   const [code, setCode] = useState(() => randomUUID().replace(/-/g, "").slice(0, 16).toUpperCase());
   const [label, setLabel] = useState("");
   const [maxUses, setMaxUses] = useState("10");
@@ -260,7 +284,7 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     const max = parseInt(maxUses, 10);
     if (isNaN(max) || max <= 0) {
-      toast.error("Max uses must be a positive number");
+      toast.error(t("web.admin.settings.inviteCodes.form.maxUsesInvalid"));
       return;
     }
     createMutation.mutate({ code, label, max_uses: max }, { onSuccess: onClose });
@@ -269,24 +293,24 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label>Code</Label>
+        <Label>{t("web.admin.settings.inviteCodes.form.code")}</Label>
         <Input
           value={code}
           required
           onChange={(e) => setCode(e.target.value.toUpperCase())}
-          placeholder="e.g. BETA2026"
+          placeholder={t("web.admin.settings.inviteCodes.form.codePlaceholder")}
         />
       </div>
       <div className="space-y-2">
-        <Label>Label</Label>
+        <Label>{t("web.admin.settings.inviteCodes.form.label")}</Label>
         <Input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="e.g. Beta testers"
+          placeholder={t("web.admin.settings.inviteCodes.form.labelPlaceholder")}
         />
       </div>
       <div className="space-y-2">
-        <Label>Max uses</Label>
+        <Label>{t("web.admin.settings.inviteCodes.form.maxUses")}</Label>
         <Input
           type="number"
           min="1"
@@ -296,13 +320,16 @@ function CreateInviteCodeForm({ onClose }: { onClose: () => void }) {
         />
       </div>
       <Button type="submit" className="w-full" disabled={createMutation.isPending}>
-        {createMutation.isPending ? "Creating..." : "Create"}
+        {createMutation.isPending
+          ? t("web.admin.settings.inviteCodes.form.creating")
+          : t("web.admin.settings.inviteCodes.form.create")}
       </Button>
     </form>
   );
 }
 
 function TopUpInviteCodeForm({ code, onClose }: { code: InviteCode; onClose: () => void }) {
+  const t = useT();
   const [additionalUses, setAdditionalUses] = useState("1");
   const topUpMutation = useTopUpInviteCode();
 
@@ -310,7 +337,7 @@ function TopUpInviteCodeForm({ code, onClose }: { code: InviteCode; onClose: () 
     e.preventDefault();
     const amount = parseInt(additionalUses, 10);
     if (isNaN(amount) || amount <= 0) {
-      toast.error("Additional uses must be a positive number");
+      toast.error(t("web.admin.settings.inviteCodes.topUpForm.invalid"));
       return;
     }
 
@@ -323,7 +350,7 @@ function TopUpInviteCodeForm({ code, onClose }: { code: InviteCode; onClose: () 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label>Additional uses</Label>
+        <Label>{t("web.admin.settings.inviteCodes.topUpForm.additionalUses")}</Label>
         <Input
           type="number"
           min="1"
@@ -333,7 +360,9 @@ function TopUpInviteCodeForm({ code, onClose }: { code: InviteCode; onClose: () 
         />
       </div>
       <Button type="submit" className="w-full" disabled={topUpMutation.isPending}>
-        {topUpMutation.isPending ? "Adding..." : "Add Uses"}
+        {topUpMutation.isPending
+          ? t("web.admin.settings.inviteCodes.topUpForm.adding")
+          : t("web.admin.settings.inviteCodes.topUpForm.submit")}
       </Button>
     </form>
   );
