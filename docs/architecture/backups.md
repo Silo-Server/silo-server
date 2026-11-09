@@ -1302,7 +1302,7 @@ backup. `is_owner` and `break_glass` are never carried.
 **Profile fields:** name, avatar, `is_primary`, PIN hash, and every field the
 access resolver (`internal/access/resolver.go`) reads to decide access:
 `is_child`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`,
-`library_restrictions_enabled`, the allowed libraries
+`requests_blocked`, `library_restrictions_enabled`, the allowed libraries
 (`user_profile_allowed_libraries`), and `max_playback_quality`. The PIN
 revision is not carried; a restored profile starts its own.
 
@@ -2026,8 +2026,9 @@ neither list.
   since, which the credential's holder could select), or, for a profile
   both sides have, a
   protection or restriction lifted or loosened (its PIN, becoming the
-  primary profile, child profile, rating or advisory-age ceiling, library
-  restriction, playback-quality ceiling), or a looser request policy
+  primary profile, child profile, rating or advisory-age ceiling, block
+  from requests, library restriction, playback-quality ceiling), or a
+  looser request policy
   (requests at all, without limit, more titles or over a shorter window,
   or with automatic approval, as `requests.LayeredPolicy` resolves it from
   the server's, the access group's, and the account's limits). The PIN
@@ -2070,7 +2071,8 @@ neither list.
   settings (requests, auto-approval, watchlist requests); subtitle
   providers; marker sharing; per-account and per-group download,
   transcode, and request permissions; a profile's child flag, library
-  restriction, and advisory-age requirement (on wins); a personal
+  restriction, advisory-age requirement, and block from requests (on
+  wins); a personal
   collection's sharing; a profile's notification preferences; a
   watch-provider connection's sync switches; an account's `enabled`,
   `break_glass`, and `local_password_login_enabled` (off wins) and
