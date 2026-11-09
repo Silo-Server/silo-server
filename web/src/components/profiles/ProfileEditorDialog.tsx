@@ -52,6 +52,7 @@ import {
 } from "@/lib/profile-management";
 import { cn } from "@/lib/utils";
 import { AllowedTitlesSection } from "@/components/profiles/AllowedTitlesSection";
+import { ProfileLibraryAccess } from "@/components/profiles/ProfileLibraryAccess";
 import {
   profileHasMaturityLimit,
   useCanManageTitleAllowances,
@@ -247,7 +248,6 @@ function ProfileEditorForm({
   const requireAdvisoryAgeId = useId();
   const requireAdvisoryAgeHelpId = useId();
   const playbackQualityId = useId();
-  const restrictLibrariesId = useId();
   const selectedContentRatingValue =
     draft.maxContentRating === "" ? ANY_CONTENT_RATING_VALUE : draft.maxContentRating;
 
@@ -742,73 +742,19 @@ function ProfileEditorForm({
           </div>
         </div>
 
-        {isPrimary ? (
-          <div className="border-border space-y-0.5 rounded-md border p-3">
-            <p className="text-sm font-medium">Libraries</p>
-            <p className="text-muted-foreground text-xs">
-              The primary profile sees every library the account can access. It can hide libraries
-              in Settings → Libraries.
-            </p>
-          </div>
-        ) : (
-          <div className="border-border space-y-3 rounded-md border p-3">
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-0.5">
-                <Label htmlFor={restrictLibrariesId}>Restrict libraries</Label>
-                <p className="text-muted-foreground text-xs">
-                  Limit this profile to a specific set of libraries.
-                </p>
-              </div>
-              <Switch
-                id={restrictLibrariesId}
-                checked={draft.libraryRestrictionsEnabled}
-                onCheckedChange={(checked) => {
-                  setLibraryAccessTouched(true);
-                  updateDraft("libraryRestrictionsEnabled", checked);
-                  setErrors((current) => ({ ...current, libraries: undefined }));
-                }}
-              />
-            </div>
-
-            {draft.libraryRestrictionsEnabled ? (
-              <div className="space-y-2">
-                <div className="grid gap-2">
-                  {libraries.length === 0 ? (
-                    <p className="text-muted-foreground text-sm">No libraries available.</p>
-                  ) : (
-                    libraries.map((library) => {
-                      const checked = draft.allowedLibraryIDs.includes(library.id);
-
-                      return (
-                        <div
-                          key={library.id}
-                          className="border-border flex items-center justify-between rounded-md border px-3 py-2"
-                        >
-                          <div className="space-y-0.5">
-                            <div className="text-sm font-medium">{library.name}</div>
-                            <div className="text-muted-foreground text-xs capitalize">
-                              {library.type}
-                            </div>
-                          </div>
-                          <Switch
-                            checked={checked}
-                            onCheckedChange={(nextChecked) =>
-                              toggleLibrary(library.id, nextChecked)
-                            }
-                          />
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {errors.libraries ? (
-                  <p className="text-destructive text-sm">{errors.libraries}</p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        )}
+        <ProfileLibraryAccess
+          isPrimary={isPrimary}
+          libraries={libraries}
+          restricted={draft.libraryRestrictionsEnabled}
+          allowedLibraryIDs={draft.allowedLibraryIDs}
+          error={errors.libraries}
+          onRestrictedChange={(checked) => {
+            setLibraryAccessTouched(true);
+            updateDraft("libraryRestrictionsEnabled", checked);
+            setErrors((current) => ({ ...current, libraries: undefined }));
+          }}
+          onLibraryChange={toggleLibrary}
+        />
       </section>
 
       {showAllowedTitles && profile ? <AllowedTitlesSection profileId={profile.id} /> : null}
