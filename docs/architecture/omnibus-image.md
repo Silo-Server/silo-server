@@ -218,11 +218,12 @@ PostgreSQL image, whose file trusts every local connection.
 
 ## Search settings
 
-Meilisearch search keeps its paging sessions in Redis, and without Redis the
-v2 search capabilities and paged searches answer 503
-`search_continuation_unavailable`. So `ENABLE_MEILISEARCH=true`, or a
-deployment's own `SILO_SEARCH_PROVIDER=meilisearch`, also starts the bundled
-Redis unless `REDIS_URL` points elsewhere.
+Meilisearch search keeps its paging sessions in process for a single-node
+deployment without Redis. Redis provides shared paging sessions for multi-node
+deployments and keeps them available across Silo restarts. The omnibus image
+therefore still starts bundled Redis when `ENABLE_MEILISEARCH=true`, or when a
+deployment sets `SILO_SEARCH_PROVIDER=meilisearch`, unless `REDIS_URL` points
+elsewhere.
 
 With `ENABLE_MEILISEARCH=true`, `init-config` exports `SILO_SEARCH_PROVIDER`,
 `SILO_MEILISEARCH_URL`, and `SILO_MEILISEARCH_API_KEY` for the bundled instance,

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -55,7 +56,11 @@ type searchRankingSession struct {
 	ExpiresAt      time.Time `json:"expires_at"`
 }
 
-type searchSessionStore struct{ client redis.UniversalClient }
+type searchSessionStore struct {
+	client redis.UniversalClient
+	mu     sync.Mutex
+	memory map[int]map[string]searchRankingSession
+}
 
 func searchSessionPrefix(userID int) string {
 	// Redis Cluster keeps the account index and its session values together.
@@ -63,10 +68,13 @@ func searchSessionPrefix(userID int) string {
 }
 
 func (s *searchSessionStore) put(ctx context.Context, userID int, session searchRankingSession) (string, error) {
-	if s == nil || s.client == nil {
+	if s == nil {
 		return "", ErrSearchContinuationUnavailable
 	}
 	id := hex.EncodeToString(randomSearchSessionID())
+	if s.client == nil {
+		return s.putMemory(userID, id, session), nil
+	}
 	encoded, err := json.Marshal(session)
 	if err != nil {
 		return "", err
@@ -93,6 +101,43 @@ return 1`
 	return id, nil
 }
 
+func (s *searchSessionStore) putMemory(userID int, id string, session searchRankingSession) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.memory == nil {
+		s.memory = make(map[int]map[string]searchRankingSession)
+	}
+	now := time.Now()
+	for accountID, sessions := range s.memory {
+		for sessionID, candidate := range sessions {
+			if !candidate.ExpiresAt.After(now) {
+				delete(sessions, sessionID)
+			}
+		}
+		if len(sessions) == 0 {
+			delete(s.memory, accountID)
+		}
+	}
+	sessions := s.memory[userID]
+	if sessions == nil {
+		sessions = make(map[string]searchRankingSession)
+		s.memory[userID] = sessions
+	}
+	if len(sessions) >= searchSessionsPerAccount {
+		oldestID := ""
+		var oldestExpiry time.Time
+		for sessionID, candidate := range sessions {
+			if oldestID == "" || candidate.ExpiresAt.Before(oldestExpiry) {
+				oldestID, oldestExpiry = sessionID, candidate.ExpiresAt
+			}
+		}
+		delete(sessions, oldestID)
+	}
+	session.IDs = append([]string(nil), session.IDs...)
+	sessions[id] = session
+	return id
+}
+
 func randomSearchSessionID() []byte {
 	value := make([]byte, 24)
 	_, _ = rand.Read(value)
@@ -100,11 +145,26 @@ func randomSearchSessionID() []byte {
 }
 
 func (s *searchSessionStore) get(ctx context.Context, userID int, id string) (*searchRankingSession, error) {
-	if s == nil || s.client == nil {
+	if s == nil {
 		return nil, ErrSearchContinuationUnavailable
 	}
 	if raw, err := hex.DecodeString(id); err != nil || len(raw) != 24 {
 		return nil, ErrCatalogCursorChanged
+	}
+	if s.client == nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		sessions := s.memory[userID]
+		session, ok := sessions[id]
+		if !ok || !session.ExpiresAt.After(time.Now()) {
+			delete(sessions, id)
+			if len(sessions) == 0 {
+				delete(s.memory, userID)
+			}
+			return nil, ErrCatalogCursorChanged
+		}
+		session.IDs = append([]string(nil), session.IDs...)
+		return &session, nil
 	}
 	encoded, err := s.client.Get(ctx, searchSessionPrefix(userID)+id).Bytes()
 	if errors.Is(err, redis.Nil) {

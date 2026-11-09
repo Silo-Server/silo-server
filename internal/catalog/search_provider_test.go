@@ -921,7 +921,6 @@ func TestSearchContinuationCapabilitiesReportServingProvider(t *testing.T) {
 				schema = 1
 			}
 			provider.stateRepo = fakeMeilisearchIndexStateStore{state: SearchIndexState{ActiveIndexUID: tc.activeUID, SchemaVersion: schema}}
-			provider.sessions = &searchSessionStore{}
 			if tc.circuitOpen {
 				provider.tripCircuit(errors.New("meilisearch timed out"))
 			}
