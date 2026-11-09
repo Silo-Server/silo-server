@@ -113,6 +113,14 @@ capabilities. A different value is `409 installation_changed`: refresh
 capabilities and start a new attempt. There is no admission step and no
 per-account enrollment.
 
+## Watch library context
+
+On `GET /api/v2/watch/{id}`, `library_id` accepts an episode when either the
+episode or its series belongs to that library. The series must still pass the
+viewer's access checks. The response includes every file the viewer may access,
+even if the selected library has none of that episode's files;
+`catalog.scope_versions_to_library` does not narrow watch responses.
+
 ## Watch artwork
 
 `GET /api/v2/watch/{id}` includes optional `poster_url`, `poster_thumbhash`,
@@ -364,7 +372,7 @@ id); clients never retry automatically and treat `429` as drop.
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
 | HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
-| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment |
+| HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment, `sub_<track>_NNNNN.vtt` one of an on-demand rendition (`hls_subtitle_renditions_all_v1`) |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
@@ -379,7 +387,8 @@ client re-presents
 Ranges, conditional requests and HEAD keep their HTTP semantics; an
 unsatisfiable range is `416 range_not_satisfiable`. A failure before the first
 byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
-terminated session answers `410 playback_session_ended`.
+terminated session answers `410 playback_session_ended`. A subtitle sidecar the
+node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory

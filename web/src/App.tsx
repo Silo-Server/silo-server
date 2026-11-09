@@ -18,6 +18,10 @@ import { RouterProvider } from "react-router/dom";
 import { QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { captureProfileRequestContext } from "@/api/client";
+import { notificationScope } from "@/api/v2/notifications";
+import { notificationKeys } from "@/hooks/queries/keys";
+import { syncWebPushSubscription } from "@/lib/webPush";
 import { CHANGE_PASSWORD_PATH } from "@/hooks/usePostSignInNavigation";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -85,12 +89,14 @@ const LibraryPage = lazy(importLibraryPage);
 const ItemDetail = lazy(importItemDetail);
 const EbookReader = lazy(() => import("@/pages/EbookReader"));
 const PersonDetail = lazy(importPersonDetail);
+const BoxSetPage = lazy(() => import("@/pages/BoxSetPage"));
 const Collections = lazy(importCollections);
 const CollectionEditorPage = lazy(() => import("@/pages/CollectionEditorPage"));
 const Notifications = lazy(() => import("@/pages/Notifications"));
 const DeviceSettings = lazy(() => import("@/pages/settings/DeviceSettings"));
 const PlaybackSettings = lazy(() => import("@/pages/settings/PlaybackSettings"));
 const NotificationsSettings = lazy(() => import("@/pages/settings/NotificationsSettings"));
+const YourDataSettings = lazy(() => import("@/pages/settings/YourDataSettings"));
 const Requests = lazy(() => import("@/pages/Requests"));
 const RequestBrowse = lazy(() => import("@/pages/RequestBrowse"));
 const RequestDiscoverSection = lazy(() => import("@/pages/RequestDiscoverSection"));
@@ -115,6 +121,8 @@ const AdminCollections = lazy(() => import("@/pages/AdminCollections"));
 const AdminPlaybackHistory = lazy(() => import("@/pages/AdminPlaybackHistory"));
 const AdminMarkerHistory = lazy(() => import("@/pages/AdminMarkerHistory"));
 const AdminMaintenance = lazy(() => import("@/pages/AdminMaintenance"));
+const AdminBackups = lazy(() => import("@/pages/AdminBackups"));
+const AdminBackupRestore = lazy(() => import("@/pages/AdminBackupRestore"));
 const AdminApiKeys = lazy(() => import("@/pages/AdminApiKeys"));
 const AdminSubtitles = lazy(() => import("@/pages/AdminSubtitles"));
 const AdminUserDetail = lazy(() => import("@/pages/AdminUserDetail"));
@@ -292,6 +300,39 @@ function RequireRequestsEnabled({ children }: { children: ReactNode }) {
   }
   if (status.data?.requests_enabled !== true) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+/**
+ * Puts this browser's push subscription on the current login once per sign-in
+ * and profile, after the page's first content. A browser with no subscription
+ * makes no request. Impersonation is skipped: its session is not the account
+ * holder's, and the subscription would stop with it.
+ */
+function WebPushSubscriptionSync() {
+  const { user, profile } = useAuth();
+  const queryClient = useQueryClient();
+  const contentLoaded = useCriticalContentLoaded();
+  const userId = user && !user.impersonation ? user.id : null;
+  const scope = notificationScope();
+  const syncedScope = useRef<string | null>(null);
+  useEffect(() => {
+    if (userId == null || !profile || !contentLoaded) return;
+    if (syncedScope.current === scope) return;
+    syncedScope.current = scope;
+    const authority = captureProfileRequestContext();
+    if (!authority) return;
+    syncWebPushSubscription(userId, authority)
+      .then((registered) => {
+        if (registered)
+          void queryClient.invalidateQueries({
+            queryKey: [...notificationKeys.webPushSubscriptions(), scope],
+            exact: true,
+          });
+      })
+      // Nothing to show: the next page load tries again.
+      .catch(() => undefined);
+  }, [userId, profile, contentLoaded, scope, queryClient]);
+  return null;
 }
 
 /**
@@ -491,6 +532,12 @@ function AppRoutes() {
                   <Route path="diagnostics" element={<AdminDiagnostics />} />
                   <Route path="libraries" element={<AdminLibraries />} />
                   <Route path="maintenance" element={<AdminMaintenance />} />
+                  <Route path="backups" element={<AdminBackups />} />
+                  <Route path="backups/:id/restore" element={<AdminBackupRestore />} />
+                  <Route
+                    path="backups/uploads/:uploadId/restore"
+                    element={<AdminBackupRestore />}
+                  />
                   <Route path="collections" element={<AdminCollections />} />
                   {/* One page from /new to /:id/edit, so Create keeps the editor mounted. */}
                   <Route element={<CollectionEditorPage scope="server" />}>
@@ -601,6 +648,7 @@ function AppRoutes() {
                   <Route path="requests" element={<RequestsSettings />} />
                   <Route path="devices" element={<DeviceSettings />} />
                   <Route path="notifications" element={<NotificationsSettings />} />
+                  <Route path="your-data" element={<YourDataSettings />} />
                   <Route path="connect-apps" element={<ConnectAppsSettings />} />
                   <Route path="*" element={<Navigate to="/settings/playback" replace />} />
                 </Route>
@@ -626,6 +674,7 @@ function AppRoutes() {
                           <Route path="/browse" element={<LegacyBrowseRedirect />} />
                           <Route path="/item/:id" element={<ItemDetail />} />
                           <Route path="/person/:id" element={<PersonDetail />} />
+                          <Route path="/box-sets/:id" element={<BoxSetPage />} />
                           <Route path="/rooms" element={<WatchPartyHub />} />
                           <Route path="/rooms/:roomId" element={<WatchTogetherRoomPage />} />
                           <Route
@@ -862,6 +911,7 @@ function AppShell() {
                       <RouteChunkPrewarmer />
                       <BandwidthProbePrewarmer />
                       <ArtworkCapabilityReader />
+                      <WebPushSubscriptionSync />
                       <RealtimeEventChannels />
                       <ScrollRestorationManager />
                       <NavigationDirectionManager />

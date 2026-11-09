@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"slices"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/matroska"
 )
 
 // el encodes one EBML element with an 8-byte size, so an element's length
@@ -467,7 +469,7 @@ func TestReadBlockGroupDuration(t *testing.T) {
 		el(idBlock, []byte{0x80 | byte(videoTrack)}, ts[:], []byte{0}, bytes.Repeat([]byte{0xBB}, 16)),
 		uintEl(idBlockDuration, 70))
 	r := bytes.NewReader(group)
-	_, size, headerLen, err := readElementHeader(r, 0)
+	_, size, headerLen, err := matroska.ReadElementHeader(r, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

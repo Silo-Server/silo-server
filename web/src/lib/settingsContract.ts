@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 24;
+export const SETTINGS_REVISION = 27;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -330,6 +330,8 @@ export const SETTING_KEYS = {
   UI_TIME_FORMAT: "ui.time_format",
   /** Show title art */
   UI_TITLE_ART: "ui.title_art",
+  /** Watch Party playback controls */
+  WATCH_PARTY_GUEST_CONTROL_POLICY: "watch_party.guest_control_policy",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
@@ -1753,5 +1755,25 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "appearance",
     control: "switch",
     platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "watch_party.guest_control_policy": {
+    key: "watch_party.guest_control_policy",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 27,
+    scopes: ["profile"],
+    scopeIntroducedIn: [27],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: "host_only",
+    label: "Watch Party playback controls",
+    description:
+      "Who can play and pause in Watch Parties you host. Changing it in a party saves it for your next one.",
+    category: "watch_party",
+    control: "select",
+    values: [
+      { value: "host_only", label: "Host only", introducedIn: 27 },
+      { value: "guest_play_pause", label: "Host and guests", introducedIn: 27 },
+    ],
   },
 };

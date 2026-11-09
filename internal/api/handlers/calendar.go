@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -175,7 +176,28 @@ func (h *CalendarHandler) HandleGetCalendar(w http.ResponseWriter, r *http.Reque
 		writeAPIError(w, err)
 		return
 	}
+	withoutV2OnlyBadges(resp)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// withoutV2OnlyBadges drops the home-release badges /api/v1 never had. v1
+// lists events on the same dates as v2, because both read the same calendar.
+func withoutV2OnlyBadges(resp calendarResponse) {
+	for d := range resp.Events {
+		for i := range resp.Events[d].Items {
+			item := &resp.Events[d].Items[i]
+			item.Badges = v1CalendarBadges(item.Badges)
+		}
+	}
+}
+
+// v1CalendarBadges returns badges without the home-release badges, which the
+// frozen /api/v1 contract never had. It copies, because a badge slice can be
+// shared between responses.
+func v1CalendarBadges(badges []string) []string {
+	return slices.DeleteFunc(slices.Clone(badges), func(b string) bool {
+		return b == catalog.HomeReleaseDigital || b == catalog.HomeReleasePhysical
+	})
 }
 
 // Calendar answers the viewer's calendar for a validated query. The repo
@@ -448,6 +470,10 @@ func buildBadges(ev catalog.CalendarEvent) []string {
 	}
 	if ev.IsFinale {
 		badges = append(badges, "finale")
+	}
+	// A movie's badge names the home release it is listed on.
+	if ev.HomeRelease != "" {
+		badges = append(badges, ev.HomeRelease)
 	}
 	if badges == nil {
 		badges = []string{}

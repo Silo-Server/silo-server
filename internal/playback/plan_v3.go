@@ -2,6 +2,7 @@ package playback
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -96,9 +97,26 @@ type PlannerInputV3 struct {
 	// HLS copy remux, whose executors are chosen under the remux routing
 	// policy and must advertise TransportFeatureHLSRemuxSubtitleRenditionV1.
 	RemuxSubtitleRenditionExecutable func() bool
-	Now                              time.Time
-	AttemptedKeys                    []string
-	AdditionalSubtitles              []SubtitleInventoryEntryV3
+	// OnDemandSubtitleRenditionsExecutable and its remux twin report whether
+	// some policy-eligible executor of the delivery serves on-demand
+	// renditions (TransportFeatureHLSOnDemandSubtitleRenditionsV1). Nil means
+	// none can. Lazy for the same reason as the HLS registries.
+	OnDemandSubtitleRenditionsExecutable      func() bool
+	RemuxOnDemandSubtitleRenditionsExecutable func() bool
+	// CueIndexedSubtitleTracks answers which of EffectiveFile's subtitle
+	// tracks, by container track number, the source's index can read, and in
+	// which file version (CueIndexedSubtitleTracks). Nil, or a nil answer,
+	// means none: the plan keeps the single pipeline rendition. Lazy because
+	// it reads the file; it is consulted only once every other condition for
+	// on-demand renditions holds.
+	CueIndexedSubtitleTracks func() *CueIndexedSubtitles
+	Now                      time.Time
+	AttemptedKeys            []string
+	AdditionalSubtitles      []SubtitleInventoryEntryV3
+	// SubtitleTrackFacts answers what the server learned about embedded tracks
+	// by reading them, for the native_embedded limitations a client declares.
+	// Nil means nothing is known, which never rules a track out.
+	SubtitleTrackFacts SubtitleTrackFactsV3
 	// LocalNetwork reports that the request came from the server's local
 	// network (streamlocation.Local). False is treated as remote.
 	LocalNetwork bool
@@ -192,6 +210,14 @@ type PlannerResultV3 struct {
 	// subtitle rendition (Plan.Subtitle.HLSRendition): a transcode's, or an
 	// HLS copy remux's.
 	SubtitleRendition bool
+	// SubtitleRenditionTracks, with SubtitleRendition, lists every embedded
+	// text track the stream publishes as an on-demand rendition
+	// (TranscodeOpts.SubtitleRenditionTracks); the inventory rows they come
+	// from carry hls_rendition.
+	SubtitleRenditionTracks []SubtitleRenditionTrack
+	// SubtitleRenditionSource is the source version SubtitleRenditionTracks
+	// were chosen from.
+	SubtitleRenditionSource SubtitleRenditionSource
 	// DownloadedSubtitleID comes from the same inventory snapshot used for
 	// planning. Freezing must not re-list a mutable ordinal inventory after the
 	// route has already been accepted.
@@ -225,6 +251,11 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	defer func() {
 		if result.Plan != nil {
 			result.Plan.ActiveQuality = activeQualityV3(input.Request, *result.Plan)
+			file := input.EffectiveFile
+			if file == nil {
+				file = input.RequestedFile
+			}
+			markNativeSelectableV3(result.Plan, file, input)
 		}
 	}()
 	if input.RequestedFile == nil {
@@ -290,9 +321,9 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// validated against the capabilities of the delivery class that would
 	// execute it. A refusal on original_http must not suppress a viable
 	// progressive or HLS subtitle renderer.
-	subtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassOriginalHTTPV3, input.AdditionalSubtitles)
-	remuxSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassProgressiveV3, input.AdditionalSubtitles)
-	hlsSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassHLSV3, input.AdditionalSubtitles)
+	subtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassOriginalHTTPV3, input.AdditionalSubtitles, input.AudioTrackIndex, input.SubtitleTrackFacts)
+	remuxSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassProgressiveV3, input.AdditionalSubtitles, input.AudioTrackIndex, input.SubtitleTrackFacts)
+	hlsSubtitle := ResolveSubtitlePolicyV3(file, input.Request, input.Settings.TranscodeEnabled, DeliveryClassHLSV3, input.AdditionalSubtitles, input.AudioTrackIndex, input.SubtitleTrackFacts)
 	if subtitle.Terminal != nil && remuxSubtitle.Terminal != nil && hlsSubtitle.Terminal != nil {
 		return PlannerResultV3{Terminal: subtitle.Terminal, SubtitleTrackIndex: -1, SubtitleTransportTrackIndex: -1}
 	}
@@ -381,6 +412,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		dvStripEligibleHLS = false
 	}
 	clientDV81Eligible := canClientTransformDV7ToDV81V3(source, input.Request)
+	serverDV81Eligible := hlsDeliveryOK && canServerConvertDV7ToDV81V3(source, file, input.Request, input.hlsRemuxRegistry)
 	clientHDR10Eligible := canClientTransformDV7ToHDR10V3(source, input.Request)
 	// With the server strip gone, a client that cannot take the source range
 	// (either natively or by managing it itself) and cannot run its own DV
@@ -392,7 +424,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// instead — the client is then told the actual cause, a source whose Dolby
 	// Vision metadata cannot be removed, rather than a generic HDR message that
 	// sends the user looking for a missing encoder.
-	if dvStripUnsupportedBySource && !originalRangeOK && !clientDV81Eligible && !clientHDR10Eligible {
+	if dvStripUnsupportedBySource && !originalRangeOK && !serverDV81Eligible && !clientDV81Eligible && !clientHDR10Eligible {
 		_, _, _, _, toneMapEligible := toneMapRecipeV3(input, source)
 		if !toneMapEligible || !videoTranscodeExecutableV3(input, source) {
 			return terminalPlannerResultV3(TerminalDVConversionUnsupportedV3,
@@ -462,7 +494,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	// qualities can carry the reduction, so the planner refuses the source and
 	// the handler's alternate-version fallback transcodes that version instead.
 	if input.ServerBitrateCapKbps == 0 && quality.RequiresTranscode && !quality.ExplicitRung && (originalSubtitleOK || remuxSubtitleOK || hlsRemuxSubtitleOK) && videoOK &&
-		(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
+		(originalRangeOK || dvStripEligible || serverDV81Eligible || clientDV81Eligible || clientHDR10Eligible) &&
 		!videoTranscodeExecutableV3(input, source) && !lowerVersionServesQualitiesV3(input) {
 		warnings := append(quality.Warnings, DegradationWarningV3{
 			Code:    "quality_reduction_unavailable",
@@ -474,7 +506,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 	base.DegradationWarnings = append(base.DegradationWarnings, quality.Warnings...)
 
 	if quality.RequiresTranscode || !videoOK ||
-		(!originalRangeOK && !dvStripEligible && !clientDV81Eligible && !clientHDR10Eligible) ||
+		(!originalRangeOK && !dvStripEligible && !serverDV81Eligible && !clientDV81Eligible && !clientHDR10Eligible) ||
 		(!originalSubtitleOK && !remuxSubtitleOK && !hlsRemuxSubtitleOK) {
 		reasonOverride := ""
 		if !quality.RequiresTranscode && !videoOK && videoEvidenceInsufficient {
@@ -486,7 +518,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// True when the burn requirement is the sole disjunct that fired: every
 		// other route condition still permits a source-preserving delivery.
 		subtitleForcedAdaptation := !quality.RequiresTranscode && videoOK &&
-			(originalRangeOK || dvStripEligible || clientDV81Eligible || clientHDR10Eligible) &&
+			(originalRangeOK || dvStripEligible || serverDV81Eligible || clientDV81Eligible || clientHDR10Eligible) &&
 			!originalSubtitleOK && !remuxSubtitleOK && !hlsRemuxSubtitleOK
 		return planVideoTranscodeV3(input, base, source, quality, hlsSubtitle, reasonOverride, subtitleForcedAdaptation)
 	}
@@ -505,7 +537,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			plan.Claims.Video = VideoClaimsV3{DolbyVision: true, DolbyVisionReason: "client_profile7_to_profile81"}
 			plan.Transformations = append(plan.Transformations, TransformationV3{
 				Name: ClientDV7ToDV81V3, Executor: ExecutorClientV3, RecipeVersion: ClientDVTransformVersionV3,
-				ValidatedClaims: []string{"profile7_rpu_converted_to_profile81", "hdr10_base_layer_preserved", "enhancement_layer_discarded"},
+				ValidatedClaims: DV7ToDV81ClaimsV3(),
 			})
 			plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{
 				Code:    "dolby_vision_enhancement_layer_discarded",
@@ -597,11 +629,11 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		}
 	}
 
-	// A progressive remux maps only the base-layer video stream, so dual-layer
-	// Profile 7 can never ship as native Dolby Vision here regardless of the
-	// client's decoder claims; the validated HDR10 strip is the only eligible
-	// P7 remux recipe.
-	remuxRangeOK := rangeOK && source.DVProfile != 7
+	// A remux maps only the base-layer video stream, so dual-layer Profile 7
+	// can never ship as native Dolby Vision here regardless of the client's
+	// decoder claims; its remux recipes are the server's HLS 8.1 conversion
+	// and the validated HDR10 strip.
+	remuxRangeOK := rangeOK && source.DVProfile != 7 || serverDV81Eligible
 	// A copy-unsafe source (H.264 with conflicting in-band PPS) must not take a
 	// video stream-copy route: the avc1/fMP4 segment would desync strict
 	// decoders. Skipping the remux branch drops through to the HLS transcode.
@@ -663,15 +695,31 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 		// first; once every native-DV remux has been attempted on this output
 		// route, the strip is the next source-preserving recipe, ahead of any
 		// transcode. Profile 7 and outputs without the source range only ever
-		// take the strip.
-		dvStripModes := []bool{dvStripEligible && (source.DVProfile == 7 || !rangeOK)}
-		if !dvStripModes[0] && dvStripEligible {
-			dvStripModes = append(dvStripModes, true)
+		// take the strip, after the server's HLS 8.1 conversion when the output
+		// takes Profile 8.1.
+		var dvModes []dvRemuxModeV3
+		if serverDV81Eligible {
+			dvModes = append(dvModes, dvRemuxDV81V3)
+		}
+		// A Profile 7 copy is never preserved as-is: it would carry the
+		// enhancement layer and Profile 7 RPUs to a client that cannot take them.
+		if source.DVProfile != 7 && (rangeOK || !dvStripEligible) {
+			dvModes = append(dvModes, dvRemuxPreserveV3)
+		}
+		if dvStripEligible {
+			dvModes = append(dvModes, dvRemuxStripV3)
 		}
 		hlsAudioConversionUnavailable := ""
-		for _, dvStrip := range dvStripModes {
+		for _, dvMode := range dvModes {
+			dvStrip, dv81 := dvMode == dvRemuxStripV3, dvMode == dvRemuxDV81V3
 			hlsTranscodeAudio := hlsTranscodeAudio
 			remuxBase := cloneRemuxPlanCandidateV3(base)
+			if dv81 {
+				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7DV81V3, Executor: ExecutorServerV3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, ValidatedClaims: DV7ToDV81ClaimsV3()})
+				remuxBase.EffectiveRecipe.DynamicRange = DynamicRangeDolbyVisionV3
+				remuxBase.Claims.Video = VideoClaimsV3{DolbyVision: true, DolbyVisionReason: "server_profile7_to_profile81"}
+				remuxBase.DegradationWarnings = append(remuxBase.DegradationWarnings, DegradationWarningV3{Code: "dolby_vision_enhancement_layer_discarded", Message: "Dolby Vision Profile 7 is converted to Profile 8.1 base-layer Dolby Vision; enhancement-layer pixel data is discarded."})
+			}
 			if dvStrip {
 				remuxBase.Transformations = append(remuxBase.Transformations, TransformationV3{Name: TransformationServerDV7HDR10V3, Executor: ExecutorServerV3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, ValidatedClaims: DV7ToHDR10ClaimsV3()})
 				remuxBase.EffectiveRecipe.DynamicRange = DynamicRangeHDR10V3
@@ -697,10 +745,10 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 			if normalizeMatroskaAAC {
 				appendAppliedQuirkV3(&progressivePlan, *firefoxAACTimingQuirk, "")
 			}
-			if !dvStrip {
+			if !dvStrip && !dv81 {
 				applyCopiedVideoQuirksV3(&progressivePlan, source, input.Request, high10Quirk)
 			}
-			progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive)
+			progressiveExecutable := (!progressiveTranscodeAudio || progressiveAudioConvertOK) && (!dvStrip || dvStripEligibleProgressive) && !dv81
 			tryProgressive := func() (PlannerResultV3, bool) {
 				if !remuxSubtitleOK || !progressiveExecutable || progressiveTranscodeAudio && !audioRemuxFitsServerCapV3(input, file, progressiveAudioChannels) {
 					return PlannerResultV3{}, false
@@ -739,14 +787,14 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				plan.Delivery = DeliveryRemuxHLSV3
 				plan.Stream = StreamV3{Protocol: StreamHLSV3, Container: containerHLSV3, MIMEType: "application/vnd.apple.mpegurl", Headers: map[string]string{}, HeaderRefresh: HeaderRefreshNoneV3}
 				if deliverySupportsFeatureV3(input.Request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) &&
-					(source.VideoCodec == transcodeCodecH264 || source.VideoCodec == transcodeCodecHEVC) {
+					HLSCopyFitsMPEGTS(source.VideoCodec, "") {
 					// HLS carries only H.264 and HEVC in MPEG-TS; other copied
 					// codecs keep fMP4. MPEG-TS has no sample entry; the
 					// executor still keeps a preserved Dolby Vision
 					// configuration (see videoSampleEntryForPlanV3).
 					plan.EffectiveRecipe.SegmentContainer = SegmentContainerMPEGTSV3
 				} else {
-					plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip)
+					plan.EffectiveRecipe.VideoSampleEntry = hlsVideoSampleEntryV3(source, input.Request, dvStrip || dv81)
 				}
 				hlsAudioChannels := 0
 				if hlsTranscodeAudio && !hlsQuirkConvertsAudio {
@@ -776,7 +824,7 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 					plan.DegradationWarnings = append(plan.DegradationWarnings, DegradationWarningV3{Code: degradationAudioConvertedV3, Message: fmt.Sprintf("The selected audio track is converted to AAC %s for this device's HLS route.", audioLayoutForChannelsV3(hlsAudioChannels))})
 					appendAppliedQuirkV3(&plan, *hlsAudioQuirk, "")
 				}
-				if !dvStrip {
+				if !dvStrip && !dv81 {
 					applyCopiedVideoQuirksV3(&plan, source, input.Request, high10Quirk)
 				}
 				if hlsTranscodeAudio {
@@ -787,17 +835,13 @@ func PlanPlaybackV3(input PlannerInputV3) (result PlannerResultV3) {
 				applySubtitleDecisionV3(&plan, hlsSubtitle.Decision)
 				plan.Claims.Subtitles = hlsSubtitle.Claims
 				finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
-				subtitleRendition := false
-				if HasFeatureV3(input.Request.ClientFeatures, FeatureHLSRemuxSubtitleRenditionsV3) &&
-					hlsSubtitleRenditionEligibleV3(input, hlsSubtitle, input.RemuxSubtitleRenditionExecutable) {
-					subtitleRendition = applyHLSSubtitleRenditionUnlessAttemptedV3(input, &plan, hlsSubtitle)
-				}
+				renditions := applyHLSSubtitleRenditionsV3(input, &plan, hlsSubtitle, true)
 				if deliverySupportsPlanV3(input.Request, DeliveryClassHLSV3, plan) && !planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 					targetAudio := codecCopyV3
 					if hlsTranscodeAudio {
 						targetAudio = audioCodecAACV3
 					}
-					return PlannerResultV3{SubtitleRendition: subtitleRendition, Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: codecCopyV3, TargetAudioCodec: targetAudio, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, hlsAudioChannels, hlsTranscodeAudio), TargetAudioChannels: hlsAudioChannels, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: hlsSubtitle.SelectedIndex, SubtitleTransportTrackIndex: hlsSubtitle.TransportIndex, SubtitleCodec: hlsSubtitle.Codec, DownloadedSubtitleID: hlsSubtitle.DownloadedSubtitleID}
+					return PlannerResultV3{SubtitleRendition: renditions.carried, SubtitleRenditionTracks: renditions.tracks, SubtitleRenditionSource: renditions.source, Plan: &plan, PlayMethod: PlayRemux, TranscodeAudio: hlsTranscodeAudio, TargetVideoCodec: codecCopyV3, TargetAudioCodec: targetAudio, SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, hlsAudioChannels, hlsTranscodeAudio), TargetAudioChannels: hlsAudioChannels, TargetResolution: resolutionLabelV3(source.Height), TargetBitrateKbps: source.BitrateKbps, SubtitleTrackIndex: hlsSubtitle.SelectedIndex, SubtitleTransportTrackIndex: hlsSubtitle.TransportIndex, SubtitleCodec: hlsSubtitle.Codec, DownloadedSubtitleID: hlsSubtitle.DownloadedSubtitleID}
 				}
 			}
 			if !progressiveFirst {
@@ -1433,14 +1477,11 @@ func planVideoTranscodeV3(input PlannerInputV3, base PlanV3, source SourceDescri
 		}
 		finalizePlanIdentityV3(&plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
 	}
-	subtitleRendition := false
-	if hlsSubtitleRenditionEligibleV3(input, subtitle, input.SubtitleRenditionExecutable) {
-		subtitleRendition = applyHLSSubtitleRenditionUnlessAttemptedV3(input, &plan, subtitle)
-	}
+	renditions := applyHLSSubtitleRenditionsV3(input, &plan, subtitle, false)
 	if planAttemptedV3(plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
 		return terminalPlannerResultV3("adaptation_exhausted", "All compatible playback recipes have already failed for this output route.", false)
 	}
-	return PlannerResultV3{SubtitleRendition: subtitleRendition, Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
+	return PlannerResultV3{SubtitleRendition: renditions.carried, SubtitleRenditionTracks: renditions.tracks, SubtitleRenditionSource: renditions.source, Plan: &plan, PlayMethod: PlayTranscode, TranscodeAudio: true, TargetVideoCodec: targetVideoCodec, TargetAudioCodec: "aac", SourceAudioChannels: stereoDownmixSourceChannelsV3(source.AudioChannels, targetAudioChannels, true), TargetAudioChannels: targetAudioChannels, TargetAudioBitrateKbps: targetAudioBitrateKbps, TargetResolution: quality.Label, TargetBitrateKbps: quality.BitrateKbps, SubtitleTrackIndex: subtitle.SelectedIndex, SubtitleTransportTrackIndex: subtitle.TransportIndex, SubtitleBurnIn: subtitle.RequiresBurn, SubtitleCodec: subtitle.Codec, DownloadedSubtitleID: subtitle.DownloadedSubtitleID, ToneMapPolicy: toneMapPolicy, ToneMapMode: toneMapMode, ToneMapSourceKind: toneMapSourceKind, ToneMapRecipeVersion: toneMapRecipeVersionV3(toneMapOK), ToneMapPreflightRequired: toneMapResolution.PreflightRequired, ToneMapSourceRevision: toneMapRevision}
 }
 
 // h264BoundedQualityV3 fits a transcode target to the client's attested
@@ -1612,11 +1653,192 @@ func hlsSubtitleRenditionEligibleV3(input PlannerInputV3, subtitle SubtitlePolic
 		subtitle.Decision.Embedded != nil || !SubtitleRenditionCodecSupported(subtitle.Codec) {
 		return false
 	}
+	// The pipeline rendition is a WebVTT output of the stream's own FFmpeg,
+	// which can't demux an index-only track; on-demand renditions read it
+	// through the index instead.
+	if tracks := input.EffectiveFile.SubtitleTracks; subtitle.TransportIndex >= len(tracks) || tracks[subtitle.TransportIndex].IndexOnly {
+		return false
+	}
 	if subtitle.Decision.Mode != SubtitleRenderV3 && subtitle.Decision.Mode != SubtitleConvertV3 ||
 		IsASS(subtitle.Codec) && input.Request.SubtitleFidelityPreference == SubtitleFidelityPreserveV3 {
 		return false
 	}
 	return SubtitleRenditionExecutable(float64(input.EffectiveFile.Duration), DefaultSegmentDuration) && executable()
+}
+
+// hlsRenditionsV3 is the subtitle renditions an HLS plan's stream carries:
+// whether any, and the tracks it reads on demand, from which source version.
+type hlsRenditionsV3 struct {
+	carried bool
+	tracks  []SubtitleRenditionTrack
+	source  SubtitleRenditionSource
+}
+
+// applyHLSSubtitleRenditionsV3 gives a server_transcode_hls or (remux)
+// server_remux_hls plan its subtitle renditions. Every embedded text track
+// the source's index can read becomes an on-demand rendition when the client
+// and an executor support them (hlsOnDemandSubtitleRenditionsV3); otherwise
+// the selected track may become the single pipeline rendition
+// (hlsSubtitleRenditionEligibleV3). Either falls back to the next when its
+// plan has already failed.
+func applyHLSSubtitleRenditionsV3(input PlannerInputV3, plan *PlanV3, subtitle SubtitlePolicyResultV3, remux bool) hlsRenditionsV3 {
+	if renditions, source := hlsOnDemandSubtitleRenditionsV3(input, *plan, subtitle, remux); len(renditions) > 0 {
+		before := *plan
+		tracks := applyHLSOnDemandSubtitleRenditionsV3(plan, renditions)
+		finalizePlanIdentityV3(plan, input.Request.PlaybackAttemptID, input.Request.ClientPlaybackContext.Output.OutputContextID)
+		if !planAttemptedV3(*plan, input.Request.ClientPlaybackContext.Output.OutputContextID, input.AttemptedKeys) {
+			return hlsRenditionsV3{carried: true, tracks: tracks, source: source}
+		}
+		*plan = before
+	}
+	executable := input.SubtitleRenditionExecutable
+	if remux {
+		if !HasFeatureV3(input.Request.ClientFeatures, FeatureHLSRemuxSubtitleRenditionsV3) {
+			return hlsRenditionsV3{}
+		}
+		executable = input.RemuxSubtitleRenditionExecutable
+	}
+	if !hlsSubtitleRenditionEligibleV3(input, subtitle, executable) {
+		return hlsRenditionsV3{}
+	}
+	return hlsRenditionsV3{carried: applyHLSSubtitleRenditionUnlessAttemptedV3(input, plan, subtitle)}
+}
+
+// maxOnDemandSubtitleRenditions bounds the on-demand renditions one plan
+// lists, and with them its multivariant playlist and recipe. Real files
+// rarely carry more text tracks; the rest keep their sidecar.
+const maxOnDemandSubtitleRenditions = 64
+
+// onDemandRenditionV3 is an inventory row an HLS plan lists as an on-demand
+// rendition: its position in the plan's inventory and the track.
+type onDemandRenditionV3 struct {
+	row   int
+	track SubtitleRenditionTrack
+}
+
+// hlsOnDemandSubtitleRenditionsV3 returns the embedded text tracks an HLS plan
+// lists as on-demand renditions, in inventory order: every one whose codec
+// WebVTT can carry (ASS too, unless the client requires authored fidelity,
+// when it keeps its sidecar) and whose packets the source's index finds. Nil
+// keeps the plan on the single pipeline rendition: the client or every
+// executor lacks on-demand renditions, a burned-in subtitle changes the
+// video, the media outruns the bounded playlist, no track qualifies, or the
+// selected track would be a rendition but its packets can't be found
+// through the index. It also returns the source version the index described.
+func hlsOnDemandSubtitleRenditionsV3(input PlannerInputV3, plan PlanV3, subtitle SubtitlePolicyResultV3, remux bool) ([]onDemandRenditionV3, SubtitleRenditionSource) {
+	features := input.Request.ClientFeatures
+	if !HasFeatureV3(features, FeatureHLSSubtitleRenditionsV3) || !HasFeatureV3(features, FeatureHLSSubtitleRenditionsAllV3) ||
+		remux && !HasFeatureV3(features, FeatureHLSRemuxSubtitleRenditionsV3) {
+		return nil, SubtitleRenditionSource{}
+	}
+	executable := input.OnDemandSubtitleRenditionsExecutable
+	if remux {
+		executable = input.RemuxOnDemandSubtitleRenditionsExecutable
+	}
+	file := input.EffectiveFile
+	if executable == nil || input.CueIndexedSubtitleTracks == nil || file == nil || subtitle.RequiresBurn ||
+		!SubtitleRenditionExecutable(float64(file.Duration), DefaultSegmentDuration) {
+		return nil, SubtitleRenditionSource{}
+	}
+	candidates := onDemandRenditionCandidatesV3(input, plan, subtitle, file)
+	if len(candidates) == 0 || !executable() {
+		return nil, SubtitleRenditionSource{}
+	}
+	indexed := input.CueIndexedSubtitleTracks()
+	if indexed == nil {
+		return nil, SubtitleRenditionSource{}
+	}
+	renditions := candidates[:0]
+	selectedListed := false
+	for _, candidate := range candidates {
+		if indexed.Tracks[candidate.track.TrackNumber] {
+			renditions = append(renditions, candidate)
+			selectedListed = selectedListed || candidate.track.Default
+		}
+	}
+	if len(renditions) == 0 || !selectedListed && selectedTextRenditionV3(subtitle, input.Request) {
+		return nil, SubtitleRenditionSource{}
+	}
+	renditions = firstOnDemandRenditionsV3(renditions, maxOnDemandSubtitleRenditions)
+	labels, languages := make([]string, len(renditions)), make([]string, len(renditions))
+	for i, rendition := range renditions {
+		labels[i], languages[i] = plan.Subtitle.Inventory[rendition.row].Label, rendition.track.Language
+	}
+	for i, name := range SubtitleRenditionNames(labels, languages) {
+		renditions[i].track.Name = name
+	}
+	return renditions, indexed.Source
+}
+
+// firstOnDemandRenditionsV3 keeps the first limit renditions, in inventory
+// order, with the selected one taking the last place when it comes later.
+func firstOnDemandRenditionsV3(renditions []onDemandRenditionV3, limit int) []onDemandRenditionV3 {
+	if len(renditions) <= limit {
+		return renditions
+	}
+	if i := slices.IndexFunc(renditions[limit:], func(r onDemandRenditionV3) bool { return r.track.Default }); i >= 0 {
+		renditions[limit-1] = renditions[limit+i]
+	}
+	return renditions[:limit]
+}
+
+// onDemandRenditionCandidatesV3 returns the plan's embedded inventory rows a
+// WebVTT rendition can carry, with a known container track number, before
+// the index is consulted. A track number repeated by a malformed file names
+// only its first track.
+func onDemandRenditionCandidatesV3(input PlannerInputV3, plan PlanV3, subtitle SubtitlePolicyResultV3, file *models.MediaFile) []onDemandRenditionV3 {
+	preserveASS := input.Request.SubtitleFidelityPreference == SubtitleFidelityPreserveV3
+	var candidates []onDemandRenditionV3
+	seen := map[uint64]bool{}
+	for row, item := range plan.Subtitle.Inventory {
+		ordinal := item.CombinedIndex - len(file.ExternalSubtitles)
+		if item.Source != SubtitleSourceEmbeddedV3 || ordinal < 0 || ordinal >= len(file.SubtitleTracks) {
+			continue
+		}
+		track := file.SubtitleTracks[ordinal]
+		number, err := strconv.ParseUint(track.ContainerTrackID, 10, 64)
+		if err != nil || number == 0 || seen[number] || !SubtitleRenditionCodecSupported(track.Codec) || IsASS(track.Codec) && preserveASS {
+			continue
+		}
+		seen[number] = true
+		candidates = append(candidates, onDemandRenditionV3{row: row, track: SubtitleRenditionTrack{
+			StreamIndex: track.Index, TrackNumber: number, Codec: track.Codec, Language: item.Language, Forced: item.Forced,
+			Default: subtitle.Source == SubtitleSourceEmbeddedV3 && subtitle.SelectedIndex == item.CombinedIndex,
+		}})
+	}
+	return candidates
+}
+
+// selectedTextRenditionV3 reports whether the plan's selected subtitle is one
+// an HLS rendition would carry: an embedded text track shown as text.
+func selectedTextRenditionV3(subtitle SubtitlePolicyResultV3, request StartRequestV3) bool {
+	return subtitle.Source == SubtitleSourceEmbeddedV3 && subtitle.SelectedIndex >= 0 && subtitle.TransportIndex >= 0 &&
+		subtitle.Decision.Embedded == nil && SubtitleRenditionCodecSupported(subtitle.Codec) &&
+		(subtitle.Decision.Mode == SubtitleRenderV3 || subtitle.Decision.Mode == SubtitleConvertV3) &&
+		(!IsASS(subtitle.Codec) || request.SubtitleFidelityPreference != SubtitleFidelityPreserveV3)
+}
+
+// applyHLSOnDemandSubtitleRenditionsV3 marks each rendition's inventory row
+// with its place in the group and, when the selected track is one of them,
+// moves the plan's subtitle into the stream as the pipeline rendition does.
+// It returns the tracks for the recipe.
+func applyHLSOnDemandSubtitleRenditionsV3(plan *PlanV3, renditions []onDemandRenditionV3) []SubtitleRenditionTrack {
+	// The planner's candidate plans share one inventory; mark a copy.
+	inventory := slices.Clone(plan.Subtitle.Inventory)
+	tracks := make([]SubtitleRenditionTrack, len(renditions))
+	for i, rendition := range renditions {
+		tracks[i] = rendition.track
+		inventory[rendition.row].HLSRendition = &SubtitleInventoryHLSRenditionV3{
+			GroupID: SubtitleRenditionGroupID, Name: rendition.track.Name, Index: i + 1,
+		}
+		if rendition.track.Default {
+			applyHLSSubtitleRenditionV3(plan)
+			plan.Subtitle.HLSRendition.Name, plan.Subtitle.HLSRendition.Index = rendition.track.Name, i+1
+		}
+	}
+	// Off, or a sidecar, keeps the plan's own subtitle decision.
+	plan.Subtitle.Inventory = inventory
+	return tracks
 }
 
 // applyHLSSubtitleRenditionUnlessAttemptedV3 gives an HLS plan its subtitle
@@ -1669,6 +1891,50 @@ func canStripDolbyVisionToHDR10V3(source SourceDescriptorV3, request StartReques
 	// Profile 7 always carries an HDR10-viewable base layer. Profile 8 is
 	// safe only when the DOVI compatibility id explicitly identifies HDR10.
 	return source.DVProfile == 7 || source.DVProfile == 8 && source.DVBLCompatID == 1
+}
+
+// dvRemuxModeV3 is the Dolby Vision recipe of one remux candidate.
+type dvRemuxModeV3 int
+
+const (
+	dvRemuxPreserveV3 dvRemuxModeV3 = iota
+	dvRemuxDV81V3
+	dvRemuxStripV3
+)
+
+// canServerConvertDV7ToDV81V3 reports whether an HLS copy can carry this
+// Profile 7 source as Profile 8.1 to a client that takes it. Only a
+// single-track source qualifies: its DOVI record says the RPUs and the
+// enhancement layer travel in the base-layer track, which is the track a
+// remux copies. The conversion rewrites fMP4 only, so a client that needs
+// MPEG-TS copies (hls_copy_mpegts_v1) does not get it. The HLS delivery's
+// own HDR details must take the 8.1 output too, as deliverySupportsPlanV3
+// later requires; otherwise this would lift the planner's Dolby Vision gates
+// for a plan that can never be accepted. The registry is consulted last
+// because it may fetch node capabilities.
+func canServerConvertDV7ToDV81V3(source SourceDescriptorV3, file *models.MediaFile, request StartRequestV3, registry func() *TransformationRegistryV3) bool {
+	if source.DynamicRange != DynamicRangeDolbyVisionV3 || source.DVProfile != 7 || source.VideoCodec != transcodeCodecHEVC ||
+		file == nil || len(file.VideoTracks) == 0 {
+		return false
+	}
+	if track := file.VideoTracks[0]; !track.DVConfigPresent || !track.DVRPUPresent || !track.DVELPresent || !track.DVBLPresent {
+		return false
+	}
+	if deliverySupportsFeatureV3(request, DeliveryClassHLSV3, FeatureHLSCopyMPEGTSV3) {
+		return false
+	}
+	source.DVBLCompatID = 1
+	if !clientSupportsDVProfileV3(request, source, 8) {
+		return false
+	}
+	if hls := request.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]; hls.HDRDetails != nil {
+		source.DVProfile = 8
+		if !hdrSupportsDolbyVisionSourceV3(*hls.HDRDetails, source) {
+			return false
+		}
+	}
+	r := registry()
+	return r != nil && r.Available(TransformationServerDV7DV81V3)
 }
 
 func canClientTransformDV7ToDV81V3(source SourceDescriptorV3, request StartRequestV3) bool {
@@ -2020,6 +2286,16 @@ func sourceFrameV3(source SourceDescriptorV3) (label string, width, height int) 
 	return heightLabel(height), width, height
 }
 
+// HLSCopyFitsMPEGTS reports whether HLS can carry a copied video and audio
+// codec in MPEG-TS segments. An empty audio codec checks the video alone.
+func HLSCopyFitsMPEGTS(videoCodec, audioCodec string) bool {
+	switch normalizeCodecV3(videoCodec) {
+	case transcodeCodecH264, transcodeCodecHEVC:
+		return audioCodec == "" || hlsNativeAudioCodecV3(audioCodec)
+	}
+	return false
+}
+
 // hlsNativeAudioCodecV3 reports whether an audio codec can be stream-copied
 // into an HLS delivery. The allowlist follows the HLS authoring spec (AAC,
 // AC-3, E-AC-3, MP3); everything else — DTS, TrueHD, PCM, Opus — must be
@@ -2154,17 +2430,25 @@ func audioSelectionUsesContainerDefaultV3(file *models.MediaFile, audioIndex int
 	if file == nil || len(file.AudioTracks) == 0 {
 		return true
 	}
-	defaultIndex := 0
+	return playedAudioIndexV3(file, audioIndex) == playedAudioIndexV3(file, -1)
+}
+
+// playedAudioIndexV3 is the audio ordinal a plan selecting audioIndex plays:
+// that track when the file has it, otherwise the container default (the first
+// default-flagged track, else the first). It is -1 for a file without audio.
+func playedAudioIndexV3(file *models.MediaFile, audioIndex int) int {
+	if file == nil || len(file.AudioTracks) == 0 {
+		return -1
+	}
+	if audioIndex >= 0 && audioIndex < len(file.AudioTracks) {
+		return audioIndex
+	}
 	for index, track := range file.AudioTracks {
 		if track.Default {
-			defaultIndex = index
-			break
+			return index
 		}
 	}
-	if audioIndex < 0 || audioIndex >= len(file.AudioTracks) {
-		audioIndex = defaultIndex
-	}
-	return audioIndex == defaultIndex
+	return 0
 }
 
 func finalizePlanIdentityV3(plan *PlanV3, attemptID string, outputContextID string) {
@@ -2564,7 +2848,7 @@ func hdrDetailsSupportPlanV3(hdr HDRCapabilitiesV3, plan PlanV3) bool {
 	case DynamicRangeDolbyVisionV3:
 		candidate := plan.Source
 		for _, transformation := range plan.Transformations {
-			if transformation.Name == ClientDV7ToDV81V3 {
+			if transformation.Name == ClientDV7ToDV81V3 || transformation.Name == TransformationServerDV7DV81V3 {
 				candidate.DVProfile = 8
 				candidate.DVBLCompatID = 1
 				break

@@ -71,12 +71,12 @@ func (h *NotificationsHandler) UnsubscribeNotificationWebPush(ctx context.Contex
 	return svc.Unsubscribe(ctx, user, profile, "", endpoint)
 }
 
-func (h *NotificationsHandler) SubscribeNotificationWebPush(ctx context.Context, user int, profile, endpoint, p256dh, auth, deviceName string) (*notifications.WebPushSubscription, error) {
+func (h *NotificationsHandler) SubscribeNotificationWebPush(ctx context.Context, user int, profile, endpoint, p256dh, auth, deviceName, loginSessionID string) (*notifications.WebPushSubscription, error) {
 	svc := h.webPush()
 	if svc == nil {
 		return nil, apiError(503, "unavailable", "Web push is not available")
 	}
-	return svc.Subscribe(ctx, user, profile, endpoint, p256dh, auth, deviceName)
+	return svc.Subscribe(ctx, user, profile, endpoint, p256dh, auth, deviceName, loginSessionID)
 }
 
 func (h *NotificationsHandler) DeleteNotificationWebhook(ctx context.Context, user int, profile, id string, check func(int64) error) error {

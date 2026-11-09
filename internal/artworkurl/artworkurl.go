@@ -20,6 +20,9 @@ import (
 var (
 	ErrExpired      = errors.New("artwork URL expired")
 	ErrBadSignature = errors.New("artwork URL signature invalid")
+	// ErrRefusedKey is a key the artwork signer never signs
+	// (blobstore.UnservedNamespaces).
+	ErrRefusedKey = errors.New("artwork URL names a key artwork does not serve")
 )
 
 // Capability domains. Each names a distinct kind of signed URL: a key derived
@@ -32,6 +35,10 @@ const (
 	jobArtifactDomain = "silo-job-artifact-url-v1"
 	jobArtifactLabel  = "job-artifact-v1"
 	jobArtifactRoute  = "/api/v2/admin/jobs/"
+	// A backup object's signed key is "<backup id>/objects/<name>".
+	backupObjectDomain = "silo-backup-object-url-v1"
+	backupObjectLabel  = "backup-object-v1"
+	backupObjectRoute  = "/api/v2/admin/backups/"
 )
 
 // Issuance windows. Clients and CDNs cache images by full URL, so every new URL
@@ -65,11 +72,14 @@ type Signer struct {
 	// dayWindows lets revisioned keys use the day-long window. Job artifacts
 	// are downloads, not cached images, so they keep short buckets.
 	dayWindows bool
+	// artwork marks the artwork signer, which never signs or accepts a key
+	// under blobstore.UnservedNamespaces.
+	artwork bool
 }
 
 func NewSigner(jwtSecret string, ttl time.Duration) *Signer {
 	s := newSigner(jwtSecret, artworkDomain, artworkLabel, artworkRoute, ttl)
-	s.dayWindows = true
+	s.dayWindows, s.artwork = true, true
 	return s
 }
 
@@ -80,6 +90,16 @@ func NewSigner(jwtSecret string, ttl time.Duration) *Signer {
 func NewJobArtifactSigner(jwtSecret string, ttl time.Duration) *Signer {
 	return newSigner(jwtSecret, jobArtifactDomain, jobArtifactLabel, jobArtifactRoute, ttl)
 }
+
+// NewBackupObjectSigner signs downloads of one object of one backup from a
+// destination that cannot presign. Like a job artifact link, the browser
+// opens it with no Authorization header, so it authorizes itself.
+func NewBackupObjectSigner(jwtSecret string, ttl time.Duration) *Signer {
+	return newSigner(jwtSecret, backupObjectDomain, backupObjectLabel, backupObjectRoute, ttl)
+}
+
+// BackupObjectKey is the key a backup object link signs.
+func BackupObjectKey(backupID, name string) string { return backupID + "/objects/" + name }
 
 func newSigner(jwtSecret, domain, label, route string, ttl time.Duration) *Signer {
 	ttl = clampTTL(ttl, 4*time.Hour)
@@ -111,6 +131,9 @@ func (s *Signer) Sign(key string, now time.Time) (string, time.Time) {
 // short window under S3, such as avatars and chapter thumbnails, keep that
 // window under local delivery. A non-positive ttl means the default.
 func (s *Signer) SignFor(key string, now time.Time, ttl time.Duration) (string, time.Time) {
+	if s.refuses(key) {
+		return "", time.Time{}
+	}
 	ttl = clampTTL(ttl, s.ttl)
 	// Keep URLs stable within an issuance bucket and valid for at least ttl.
 	// Short TTLs use shorter buckets, bounding the extra lifetime to ttl. A
@@ -134,6 +157,9 @@ func (s *Signer) suffix() string {
 	return ""
 }
 func (s *Signer) Verify(key string, exp int64, sig string, now time.Time) error {
+	if s.refuses(key) {
+		return ErrRefusedKey
+	}
 	if now.Unix() >= exp {
 		return ErrExpired
 	}
@@ -142,6 +168,14 @@ func (s *Signer) Verify(key string, exp int64, sig string, now time.Time) error 
 		return ErrBadSignature
 	}
 	return nil
+}
+
+// refuses reports whether the artwork signer must not sign or accept key:
+// a backup, diagnostic bundle, or job artifact, which share a local root
+// with artwork but are never artwork. Signing one, whatever stored path
+// named it, would let a link holder read it without a session.
+func (s *Signer) refuses(key string) bool {
+	return s.artwork && blobstore.Unserved(key)
 }
 
 // SignedKey returns the key named by rawURL when it is a root-relative URL

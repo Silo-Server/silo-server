@@ -1,3 +1,6 @@
+// Keep default listeners on TCP to reduce CVE-2026-98432 exposure on Linux.
+//go:debug multipathtcp=0
+
 package main
 
 import (
@@ -52,8 +55,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/audiobooks/podcastfeed"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/autoscan"
+	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/blobgc"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/boxsets"
 	"github.com/Silo-Server/silo-server/internal/branding"
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
 	"github.com/Silo-Server/silo-server/internal/cache"
@@ -76,6 +81,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/intromarkers"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
+	"github.com/Silo-Server/silo-server/internal/keptsub"
 	"github.com/Silo-Server/silo-server/internal/lantls"
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/librarymonitor"
@@ -91,6 +97,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/metadata/tmdb"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/netadmin"
+	"github.com/Silo-Server/silo-server/internal/overlays"
 
 	// Built-in metadata providers self-register into the metadata package's
 	// builtin registry on import; buildProviders resolves their seeded chain
@@ -485,6 +492,23 @@ func configureActivityLogging(pool *pgxpool.Pool, logStreamHub *logstream.Hub) (
 	return buffer, startLogDrain(func(ctx context.Context) { consumer.Run(ctx, buffer.Chan()) })
 }
 
+// keptSubtitleStore is where embedded subtitle tracks read whole are kept.
+// They come from users' media, so never a store whose objects are delivered
+// outside the server's own authorization: the operational store, which is a
+// private bucket or the local root that holds operational blobs, or, with
+// neither, the assets bucket only while its reads are presigned. A public or
+// token-delivered assets bucket gets nil, and nothing is kept: tracks are
+// read through their index or demuxed instead.
+func keptSubtitleStore(stores blobstore.Stores, assetsS3 *s3client.Client) blobstore.Store {
+	if stores.Operational != nil {
+		return stores.Operational
+	}
+	if stores.Assets != nil && assetsS3 != nil && !assetsS3.UsesExternalAuth() {
+		return stores.Assets
+	}
+	return nil
+}
+
 // configureOperationalLogging installs the slog default that captures records
 // into this node's in-memory operational log queue. stop flushes what is
 // queued.
@@ -776,6 +800,27 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "postgres-tune-conf" {
+		if err := runPostgresTuneConfCommand(os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("postgres-tune-conf: %v", err)
+		}
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		if err := runBackupMain(os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			log.Fatalf("backup: %v", err)
+		}
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "secret" {
+		if err := runSecretCommand(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	envFile := flag.String("env", ".env", "path to .env bootstrap file")
 	migrateOnly := flag.Bool("migrate-only", false, "apply database migrations and exit")
 	migrateStatus := flag.Bool("migrate-status", false, "show database migration status and exit")
@@ -864,11 +909,17 @@ func main() {
 		return
 	}
 
+	// Every server that migrates runs the same sequence: wait for any other
+	// server's, back up the database when migrations are pending, then
+	// migrate (database.MigrateAtStartup, docs/architecture/backups.md).
+	migrationWait := database.MigrationWait()
+	startupMigrations := database.StartupOptions{
+		Wait:          migrationWait,
+		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait),
+	}
+
 	if *migrateOnly {
-		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
-		migCancel()
-		if migErr != nil {
+		if migErr := database.MigrateAtStartup(ctx, pool, migrations.FS, "sql", startupMigrations); migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
 		slog.Info("database migrations applied")
@@ -883,13 +934,9 @@ func main() {
 	// ciphertext; secondary nodes read whatever the primary encrypted.
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	if isPrimaryNode {
-		migCtx, migCancel := database.MigrationContext(ctx)
-		migErr := database.MigrateOnly(migCtx, pool, migrations.FS, "sql")
-		if migErr != nil {
-			migCancel()
+		if migErr := database.MigrateAtStartup(ctx, pool, migrations.FS, "sql", startupMigrations); migErr != nil {
 			log.Fatalf("failed to run migrations: %v", migErr)
 		}
-		migCancel()
 		slog.Info("database migrations applied")
 	}
 
@@ -1247,6 +1294,11 @@ func main() {
 			// and admin terminate before serving media, so a revoked stream
 			// token or grant stops here instead of at its 24h TTL.
 			srv.SetStreamDeny(playback.NewStreamDeny(redisClient))
+			// Follow a Jellyfin-compatible transcode that the API moved off a
+			// transcode node this proxy cannot reach: the shared recipe store
+			// names the node it runs on now, and the event bus carries the
+			// request to move it.
+			srv.SetTranscodeMoveFollower(noderecipe.NewStore(redisClient, 0), eventBus)
 			srv.SetRemoteArtifactMissReporter(downloads.NewArtifactManager(
 				downloads.NewArtifactRepository(pool),
 				downloads.NewRepository(pool),
@@ -1392,6 +1444,19 @@ func main() {
 		ratelimit.NewOutboundLimiter(tmdbRedisClient, "outbound:tmdb", tmdb.RequestsPerSecond))
 	defer tmdbClient.Close()
 
+	// The playback control relay bounds each lane ownership read and write
+	// at one second; this client's sockets give up at that deadline.
+	var playbackControlRedisClient *redis.Client
+	if apiRedisClient != nil {
+		controlClient, controlErr := cache.NewDeadlineRedisClientForRole(cfg.Redis, "api")
+		if controlErr != nil {
+			slog.Warn("redis client init failed; administrator playback commands reach only sessions on this replica", "error", controlErr)
+		} else if controlClient != nil {
+			defer func() { _ = cache.CloseRedisClient(controlClient) }()
+			playbackControlRedisClient = controlClient
+		}
+	}
+
 	if mode == "" || mode == "integrated" || mode == "api" {
 		streamTelemetryRegistry = newStreamTelemetryRegistry(appCtx, nodeID, apiRedisClient)
 		streamTelemetryRegistry.Start(appCtx)
@@ -1437,6 +1502,7 @@ func main() {
 		SecretCipher:                 dataCipher,
 		EventBus:                     eventBus,
 		RedisClient:                  apiRedisClient,
+		PlaybackControlRedisClient:   playbackControlRedisClient,
 		TMDB:                         tmdbClient,
 		DownloadBandwidthRedis:       downloadBandwidthRedis,
 		LogStreamHub:                 logStreamHub,
@@ -1539,7 +1605,8 @@ func main() {
 		markerContributionStore := markers.NewContributionStore(deps.DB)
 		deps.MarkerContributionStore = markerContributionStore
 		deps.MarkerContributionService = markers.NewContributionService(
-			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore, slog.Default(),
+			markerRegistry, markerResolver, markerProviderConfig, markerContributionStore,
+			slog.Default().With("component", "markers.contribute"),
 		)
 	}
 	var watchProviderService *watchsync.Service
@@ -1665,6 +1732,12 @@ func main() {
 	// Runs after configureS3Clients: an S3 backend takes both buckets from deps.
 	if err := configureBlobStorage(appCtx, mode, cfg, &deps, settingsRepo); err != nil {
 		log.Fatalf("configure blob storage: %v", err)
+	}
+	if needsWorkers && deps.DB != nil {
+		deps.Backups = newBackupService(pool, bc, settingsRepo, &deps)
+	}
+	if deps.DB != nil {
+		deps.ProfileTransfer = newProfileTransfer(pool, settingsRepo, cfg)
 	}
 	if storageAdmission != nil {
 		// While a failed admission session is replaced, no blob write may land:
@@ -2138,15 +2211,11 @@ func main() {
 		}
 		if deps.Blobs.Assets != nil {
 			imageResolver.SetArtworkResolver(deps.ArtworkResolver)
-			// Every backend reads the publication manifest, because a key the
-			// catalog holds can name a rung its revision predates: after a
-			// ladder change, existing artwork lacks the new widest rung until
-			// the ladder backfill regenerates it. Only external delivery (a
-			// public or token-authenticated read endpoint in front of S3) can
-			// also lag behind a write, so only it runs the verifier.
-			imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkDeliveryStore(
-				deps.DB, deps.ArtworkDelivery.Scope, deps.ArtworkDelivery.External,
-			))
+			// The publication manifest answers for a key the catalog holds
+			// that names a rung its revision predates: after a ladder change,
+			// existing artwork lacks the new widest rung until the ladder
+			// backfill regenerates it.
+			imageResolver.SetArtworkAvailabilityReader(metadata.NewArtworkPublicationStore(deps.DB))
 		}
 		deps.ImageResolver = imageResolver
 		deps.PluginImageResolver = imageResolver
@@ -2681,8 +2750,41 @@ func main() {
 	if watchProviderService != nil {
 		historyRepo := historyimport.NewRepository(deps.DB, deps.SecretCipher)
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
+		// A sync's episodes follow what the profile may open, as any viewer
+		// read does, so it resolves scope the same way.
+		var watchProviderScopes interface {
+			Resolve(context.Context, access.ResolveInput) (access.Scope, error)
+		}
+		if policySystem != nil {
+			watchProviderScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		} else {
+			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path.
+			watchProviderScopes = access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
+		}
+		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
+			WithProfileAccess(func(ctx context.Context, userID int, profileID string) (watchsync.ProfileAccess, error) {
+				// A sync runs for the connection's profile without a viewer,
+				// so a PIN does not apply; the profile's hidden-library
+				// preference is not an access rule.
+				scope, err := watchProviderScopes.Resolve(ctx, access.ResolveInput{
+					UserID: userID, ProfileID: profileID, SkipPINVerification: true, ContentAccessOnly: true,
+				})
+				if err != nil {
+					return watchsync.ProfileAccess{}, err
+				}
+				allowed := scope.AllowedLibraryIDs
+				if scope.LibrariesRestricted && allowed == nil {
+					allowed = []int{}
+				}
+				return watchsync.ProfileAccess{
+					AllowedLibraryIDs: allowed,
+					Accessible: func(ctx context.Context, contentIDs []string) (map[string]bool, error) {
+						return watchProviderLibrary.FilterAccessibleContentIDs(ctx, contentIDs, allowed, scope.DisabledLibraryIDs, scope.MaturityLimits)
+					},
+				}, nil
+			}).
 			WithWatchState(watchstate.NewService(userStoreProvider).WithStableIdentityResolver(historyIdentity)).
 			WithUserStoreProvider(userStoreProvider).
 			WithRatingStore(catalog.NewRatingsRepo(deps.DB)).
@@ -3231,13 +3333,29 @@ func main() {
 			taskMgr.Register(tasks.NewBackfillHDR10PlusTask(deps.DB, scanner.NewHDR10PlusBackfiller(deps.FileRepo, scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath))))
 		}
 		taskMgr.Register(tasks.NewRefreshSeriesAirDatesTask(catalog.NewEpisodeRepository(deps.DB)))
+		boxSetSyncer := boxsets.NewSyncer(catalog.NewBoxSetRepository(deps.DB), tmdbClient)
+		if metadataService != nil {
+			boxSetSyncer.WithImages(metadataService.AutoImageCacher)
+		}
+		taskMgr.Register(tasks.NewSyncMovieBoxSetsTask(deps.DB, boxSetSyncer))
+		go boxsets.Watch(appCtx, deps.EventsHub, func() {
+			if _, err := taskMgr.StartTask(tasks.SyncMovieBoxSetsTaskKey); err != nil {
+				slog.Debug("box set sync not started", "component", "app", "error", err)
+			}
+		})
 		if deps.Blobs.Assets != nil {
 			taskMgr.Register(tasks.NewCleanupArtworkRevisionsTask(
 				metadata.NewArtworkRevisionGarbageCollector(deps.DB, deps.Blobs.Assets),
 			))
-			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(), trickplay.BlobNamespace()}
-			// Replaced chapter images are queued by key; the sweep lists by file.
-			collected := append([]blobgc.Namespace{chapterthumbs.ImageBlobNamespace()}, mediaImages...)
+			// Kept subtitle tracks live in their own store (keptSubtitleStore).
+			keptFiles, keptStreams := keptsub.FileBlobNamespace(), keptsub.StreamBlobNamespace()
+			if kept := keptSubtitleStore(deps.Blobs, deps.S3Public); kept != nil {
+				keptFiles.Store, keptStreams.Store = kept, kept
+			}
+			mediaImages := []blobgc.Namespace{chapterthumbs.BlobNamespace(), trickplay.BlobNamespace(), keptFiles}
+			// Replaced chapter images and kept subtitle tracks are queued by key;
+			// the sweep lists by file.
+			collected := append([]blobgc.Namespace{chapterthumbs.ImageBlobNamespace(), keptStreams}, mediaImages...)
 			if collector := blobgc.NewCollector(deps.DB, deps.Blobs.Assets, collected...); collector != nil {
 				taskMgr.Register(tasks.NewCleanupRemovedMediaImagesTask(collector))
 			}
@@ -3246,10 +3364,17 @@ func main() {
 			}
 			trickplayExtractor := trickplay.NewNodeExtractor(trickplay.NewLocalExtractor(settingsRepo), deps.NodePlanner, settingsRepo)
 			if trickplayService := trickplay.NewService(deps.DB, deps.Blobs.Assets, settingsRepo, trickplayExtractor, deps.NodeID); trickplayService != nil {
+				trickplayReader := trickplay.NewReader(deps.DB, deps.Blobs.Assets, trickplayURLResolver(&deps))
+				if checker, ok := deps.Blobs.Assets.(trickplay.DeliveryChecker); ok && deps.ArtworkDelivery.External {
+					// Sheets confirmed fetchable through the external endpoint
+					// are read from it; the rest use the signed server route.
+					trickplayService.SetExternalDelivery(deps.ArtworkDelivery.Scope, checker)
+					trickplayReader.SetExternalDelivery(deps.ArtworkDelivery.Scope, deps.ArtworkResolver)
+				}
 				trickplayService.Start(appCtx)
 				taskMgr.Register(tasks.NewQueueSeekPreviewsTask(trickplayService))
 				deps.Trickplay = trickplayService
-				deps.TrickplayReader = trickplay.NewReader(deps.DB, deps.Blobs.Assets, trickplayURLResolver(&deps))
+				deps.TrickplayReader = trickplayReader
 				deps.TrickplayAdmin = trickplay.NewAdmin(deps.DB, deps.Blobs.Assets, trickplayService.Kick)
 			}
 		}
@@ -3289,7 +3414,6 @@ func main() {
 			// Wired outside the autoscan service so events left by a disabled
 			// or unconfigured autoscan still age out.
 			tasks.NewAutoscanEventCleanupTask(autoscan.NewRepository(deps.DB, deps.SecretCipher), settingsRepo),
-			tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)),
 			tasks.NewDeviceLoginCleanupTask(auth.NewDeviceLoginRetention(deps.DB)),
 			tasks.NewOAuthFlowCleanupTask(auth.NewPGOAuthStore(deps.DB)),
 		)
@@ -3384,6 +3508,9 @@ func main() {
 			taskMgr.Register(tasks.NewRebuildReleaseInterestTask(notificationSystem))
 			maintenanceSteps = append(maintenanceSteps, tasks.NewNotificationsRetentionTask(notificationSystem))
 		}
+		// After notification retention, which reads ended sessions to tell whether
+		// an older push registration's device still has a login.
+		maintenanceSteps = append(maintenanceSteps, tasks.NewAuthSessionCleanupTask(auth.NewSessionRepository(deps.DB)))
 		if userStoreProvider != nil {
 			taskMgr.Register(tasks.NewSettingMutationsRetentionTask(userstore.NewSettingMutationSweeper(
 				auth.NewUserRepository(deps.DB), userStoreProvider,
@@ -3436,12 +3563,6 @@ func main() {
 		}
 		if deps.Blobs.Assets != nil {
 			identity := deps.Blobs.Assets.Identity()
-			if deps.ArtworkDelivery.External {
-				taskMgr.Register(tasks.NewVerifyArtworkDeliveryTask(
-					metadata.NewArtworkDeliveryStore(deps.DB, deps.ArtworkDelivery.Scope, true),
-					deps.Blobs.Assets,
-				))
-			}
 			var brandingReconciler tasks.BrandingAssetReconciler
 			if brandingSvc != nil {
 				brandingReconciler = brandingSvc
@@ -3594,9 +3715,17 @@ func main() {
 			}
 		}
 
+		if deps.Backups != nil {
+			taskMgr.Register(backup.NewTask(deps.Backups))
+			deps.Backups.SetTaskStarter(taskMgr)
+		}
+
 		taskMgr.Start(appCtx)
 		defer taskMgr.Stop()
 		deps.TaskManager = taskMgr
+		if deps.Backups != nil {
+			syncBackupSchedule(appCtx, deps.Backups, taskMgr, eventBus, configWatcher)
+		}
 		slog.Info("task manager started")
 	}
 
@@ -3715,6 +3844,13 @@ func main() {
 	// API and the frontend handler.
 	deps.BrandingService = brandingSvc
 	server.Branding = brandingSvc
+	// Card overlay images share the assets store with branding; without one the
+	// library lists nothing new and uploads report storage as unconfigured.
+	var overlayImageStore overlays.ImageStore
+	if deps.Blobs.Assets != nil {
+		overlayImageStore = deps.Blobs.Assets
+	}
+	deps.OverlayImages = overlays.NewImageLibrary(deps.DB, overlayImageStore)
 	var transitionPrivate blobstore.Store
 	if deps.S3Private != nil {
 		transitionPrivate = deps.Blobs.Operational
@@ -3733,6 +3869,31 @@ func main() {
 		// HTTP listeners serve the old location.
 		if err := storageAdmission.Probe(appCtx); err != nil {
 			log.Fatalf("storage node admission before serving: %v", err)
+		}
+	}
+
+	if kept := keptSubtitleStore(deps.Blobs, deps.S3Public); deps.DB != nil && kept != nil {
+		// Embedded subtitle tracks read whole are kept in a private store and
+		// copied under the transcode directory, beside the subtitle cache.
+		deps.KeptSubtitles = keptsub.NewStore(keptsub.NewPgRepo(deps.DB), kept, keptsub.Options{
+			FFmpegPath: func() string { return deps.CurrentConfig().Playback.FFmpegPath },
+			MirrorDir: func() string {
+				if dir := deps.CurrentConfig().Playback.TranscodeDir; dir != "" {
+					return filepath.Join(dir, "subtitle-cache", "kept")
+				}
+				return ""
+			},
+		})
+		var nextEpisode keptsub.NextFileFunc
+		if deps.FileRepo != nil {
+			nextEpisode = keptsub.NextEpisodeFile(catalog.NewEpisodeRepository(deps.DB), deps.FileRepo)
+		}
+		deps.SubtitlePrefetch = keptsub.NewPrefetcher(deps.KeptSubtitles, nextEpisode)
+		deps.SubtitlePrefetch.Start(appCtx)
+		// The HLS streams this server runs read their on-demand subtitle
+		// renditions from kept tracks too.
+		if deps.KeptSubtitles != nil {
+			playback.SetRenditionKeptTracks(deps.KeptSubtitles)
 		}
 	}
 
@@ -3823,6 +3984,9 @@ func main() {
 		)
 		adminJobRunner.SetCancelRegistry(adminJobCancelRegistry)
 		adminJobRunner.SetStorageTransitionExecutor(storageTransitionSvc)
+		if deps.Backups != nil {
+			adminJobRunner.SetBackupRestoreExecutor(backupRestoreExecutor{svc: deps.Backups})
+		}
 		adminJobRunner.SetStorageTransitionCommitted(deps.RequestServerRestart)
 		adminJobRunner.Start()
 		defer adminJobRunner.Stop()
@@ -3871,10 +4035,12 @@ func main() {
 			NodeID:               deps.NodeID,
 			StreamTelemetry:      streamTelemetryRegistry,
 			NodePlanner:          deps.NodePlanner,
+			EventBus:             eventBus,
 			JWTSecret:            cfg.Auth.JWTSecret,
 			RecWorker:            recWorker,
 			FrontendFS:           deps.FrontendFS,
 			ArtworkStore:         deps.Blobs.Assets,
+			AvatarStore:          handlers.NewProfileAvatarStore(deps.Blobs),
 			// Hand remote-transcode recipes to the shared recipe store so a dedicated
 			// transcode node that restarts can rebuild a jellycompat session.
 			RecipeNodeStore:  noderecipe.NewStore(apiRedisClient, 0),
@@ -3950,6 +4116,9 @@ func main() {
 
 			if blobs := blobstore.NewByteStore(deps.Blobs.Assets); blobs != nil {
 				compatDeps.SubtitleBlobs = blobs
+			}
+			if deps.KeptSubtitles != nil {
+				compatDeps.KeptSubtitles = deps.KeptSubtitles
 			}
 			if deps.TrickplayReader != nil {
 				compatDeps.Trickplay = deps.TrickplayReader
@@ -4344,7 +4513,8 @@ func newS3ClientIfConfigured(cfg s3client.BucketConfig) *s3client.Client {
 func trickplayURLResolver(deps *api.Dependencies) artworkurl.Resolver {
 	if deps.ArtworkDelivery.External {
 		// An external read endpoint can lag behind the S3 write that published
-		// the manifest. The signed server route reads the storage API directly.
+		// the manifest. Until the service confirms the endpoint serves a
+		// revision, the signed server route reads the storage API directly.
 		return artworkurl.NewServerResolver(deps.ArtworkSigner)
 	}
 	return deps.ArtworkResolver

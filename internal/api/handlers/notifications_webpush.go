@@ -62,6 +62,10 @@ func (h *NotificationsHandler) HandleWebPushSubscribe(w http.ResponseWriter, r *
 	}
 	userID := apimw.GetUserID(r.Context())
 	profileID := apimw.GetProfileID(r.Context())
+	loginSessionID := ""
+	if claims := apimw.GetClaims(r.Context()); claims != nil {
+		loginSessionID = claims.SessionID
+	}
 
 	var req webPushSubscribeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -69,7 +73,7 @@ func (h *NotificationsHandler) HandleWebPushSubscribe(w http.ResponseWriter, r *
 		return
 	}
 	sub, err := service.Subscribe(r.Context(), userID, profileID,
-		req.Endpoint, req.Keys.P256dh, req.Keys.Auth, req.DeviceName)
+		req.Endpoint, req.Keys.P256dh, req.Keys.Auth, req.DeviceName, loginSessionID)
 	if err != nil {
 		if errors.Is(err, notifications.ErrWebPushInvalid) {
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())

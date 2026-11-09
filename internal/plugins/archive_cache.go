@@ -10,12 +10,17 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"golang.org/x/sync/singleflight"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 )
 
 type archiveStore interface {
@@ -27,7 +32,10 @@ type ArchiveCache struct {
 	// mu protects rehydration and pruning from concurrent status and
 	// reconcile calls, including cache-hit validation during extraction, and
 	// guards verified.
-	mu       sync.Mutex
+	mu sync.Mutex
+	// loads shares one archive read among concurrent loads of an
+	// installation from archives; mu is never held across one.
+	loads    singleflight.Group
 	archives archiveStore
 	// root, when set, is this host's own plugin cache dir. Installations are
 	// then rehydrated under it (see LocalInstallPath) instead of at the
@@ -124,14 +132,109 @@ func (c *ArchiveCache) Manifest(ctx context.Context, installation *Installation)
 	return c.ensure(ctx, installation, true)
 }
 
+// ManifestFrom is Manifest reading a stored archive, when it needs one,
+// through archives (a store bound to the caller's transaction) and never
+// writing one back: inside a transaction that holds a pool's last
+// connection, nothing may wait on the pool.
+func (c *ArchiveCache) ManifestFrom(ctx context.Context, installation *Installation, archives archiveStore) (*pluginv1.PluginManifest, error) {
+	return c.ensureFrom(ctx, installation, true, archives, false)
+}
+
 func (c *ArchiveCache) ensure(
 	ctx context.Context,
 	installation *Installation,
 	trustVerified bool,
 ) (*pluginv1.PluginManifest, error) {
+	return c.ensureFrom(ctx, installation, trustVerified, c.archives, true)
+}
+
+// checkStoredArchive requires a stored archive to be the installation's:
+// its checksum, manifest, plugin id, and version.
+func checkStoredArchive(installation *Installation, archive *InstallationArchive, manifestBytes []byte, manifest *pluginv1.PluginManifest) error {
+	if archive.Checksum != manifest.GetChecksum() {
+		return unreadableArchivef("stored plugin archive checksum mismatch for installation %d", installation.ID)
+	}
+	if len(archive.ManifestJSON) > 0 && !bytes.Equal(archive.ManifestJSON, manifestBytes) {
+		return unreadableArchivef("stored plugin manifest mismatch for installation %d", installation.ID)
+	}
+	if manifest.GetPluginId() != installation.PluginID {
+		return unreadableArchivef("stored plugin archive plugin_id %q does not match installation %q", manifest.GetPluginId(), installation.PluginID)
+	}
+	if manifest.GetVersion() != installation.Version {
+		return unreadableArchivef("stored plugin archive version %q does not match installation %q", manifest.GetVersion(), installation.Version)
+	}
+	return nil
+}
+
+// ensureFrom never holds mu while it reads or writes archives: a store on
+// the pool may wait for a connection, and a caller inside a transaction
+// that holds the pool's last connection (a restore) waits on mu. It checks
+// the installed files under mu, reads the stored archive without it, and
+// takes mu again to rehydrate, unless another caller already did. A read
+// through another store (ManifestFrom's transaction) never joins a load
+// from the cache's own, which may wait on the pool.
+func (c *ArchiveCache) ensureFrom(
+	ctx context.Context,
+	installation *Installation,
+	trustVerified bool,
+	archives archiveStore,
+	persist bool,
+) (*pluginv1.PluginManifest, error) {
 	if installation == nil {
 		return nil, fmt.Errorf("plugin installation is required")
 	}
+	if manifest, err := c.installed(ctx, installation, trustVerified); manifest != nil || err != nil {
+		return manifest, err
+	}
+	if !persist {
+		return c.load(ctx, installation, trustVerified, archives, false)
+	}
+	// Concurrent loads of one installation from the cache's own store share
+	// one read of its archive.
+	key := fmt.Sprintf("%d/%t", installation.ID, trustVerified)
+	result := c.loads.DoChan(key, func() (any, error) {
+		ctx := context.WithoutCancel(ctx)
+		c.mu.Lock()
+		manifest, err := c.rehydratedMeanwhile(installation, trustVerified)
+		c.mu.Unlock()
+		if manifest != nil || err != nil {
+			return manifest, err
+		}
+		return c.load(ctx, installation, trustVerified, archives, true)
+	})
+	select {
+	case r := <-result:
+		manifest, _ := r.Val.(*pluginv1.PluginManifest)
+		return manifest, r.Err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// load reads the installation's stored archive, without mu, rehydrates
+// its files, and, when persist is set, stores an archive it repaired.
+func (c *ArchiveCache) load(ctx context.Context, installation *Installation, trustVerified bool, archives archiveStore, persist bool) (*pluginv1.PluginManifest, error) {
+	archive, err := archives.GetArchive(ctx, installation.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load stored plugin archive for installation %d: %w", installation.ID, err)
+	}
+	manifest, repaired, err := c.rehydrate(ctx, installation, trustVerified, archive)
+	if err != nil || repaired == nil || !persist {
+		return manifest, err
+	}
+	// Persist the repaired archive so future preloads skip recovery, but don't
+	// fail startup over a write error — the in-memory archive is already valid
+	// and recovery will retry on the next preload.
+	if err := archives.SaveArchive(ctx, installation.ID, repaired.manifest, manifest.GetChecksum(), repaired.archive); err != nil {
+		slog.WarnContext(ctx, "failed to persist recovered legacy plugin archive; will retry on next preload",
+			"component", "plugins", "installation_id", installation.ID, "error", err)
+	}
+	return manifest, nil
+}
+
+// installed returns the installed manifest when the installed files pass
+// the check, and nil when they need rehydrating.
+func (c *ArchiveCache) installed(ctx context.Context, installation *Installation, trustVerified bool) (*pluginv1.PluginManifest, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -141,7 +244,6 @@ func (c *ArchiveCache) ensure(
 	if err != nil {
 		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
 	}
-
 	if manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath)); err == nil {
 		if trustVerified && c.stillVerified(installation.ID, binaryPath, manifest) {
 			return manifest, nil
@@ -158,68 +260,107 @@ func (c *ArchiveCache) ensure(
 	}
 	// The installed files failed the check; forget any earlier verification.
 	delete(c.verified, installation.ID)
+	return nil, nil
+}
 
-	archive, err := c.archives.GetArchive(ctx, installation.ID)
+// rehydratedMeanwhile returns the installed manifest when another caller
+// rehydrated the files since this one's check failed: that check forgot the
+// installation's verification, so one recorded now is the other caller's.
+// It hashes nothing for Manifest; Ensure still hashes the files itself.
+// Callers hold mu.
+func (c *ArchiveCache) rehydratedMeanwhile(installation *Installation, trustVerified bool) (*pluginv1.PluginManifest, error) {
+	binaryPath, err := c.LocalInstallPath(installation)
 	if err != nil {
-		return nil, fmt.Errorf("load stored plugin archive for installation %d: %w", installation.ID, err)
+		return nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
 	}
+	manifest, err := LoadManifestFile(InstalledManifestPath(binaryPath))
+	if err != nil || !c.stillVerified(installation.ID, binaryPath, manifest) {
+		return nil, nil //nolint:nilerr // no installed files: not rehydrated yet
+	}
+	if trustVerified {
+		return manifest, nil
+	}
+	info, err := c.validateInstalledFiles(binaryPath, manifest)
+	if err != nil {
+		return nil, nil //nolint:nilerr // changed again since: rehydrate
+	}
+	c.markVerified(installation.ID, binaryPath, manifest, info)
+	return manifest, nil
+}
 
+// repairedArchive is a legacy archive rebuilt in memory, for its store.
+type repairedArchive struct{ manifest, archive []byte }
+
+// rehydrate writes the installation's files from its stored archive under
+// mu, unless a concurrent caller already put valid files in place. It
+// returns the archive it repaired from a legacy one, if any, to persist.
+func (c *ArchiveCache) rehydrate(ctx context.Context, installation *Installation, trustVerified bool,
+	archive *InstallationArchive) (*pluginv1.PluginManifest, *repairedArchive, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	if manifest, err := c.rehydratedMeanwhile(installation, trustVerified); manifest != nil || err != nil {
+		return manifest, nil, err
+	}
+	binaryPath, err := c.LocalInstallPath(installation)
+	if err != nil {
+		return nil, nil, fmt.Errorf("plugin cache path for installation %d: %w", installation.ID, err)
+	}
+	var repaired *repairedArchive
 	reader, manifestBytes, manifest, err := openPluginArchive(archive.Bytes)
 	if err != nil {
-		reader, manifestBytes, manifest, err = c.recoverLegacyBinaryArchive(ctx, installation.ID, archive, err)
+		var archiveBytes []byte
+		reader, manifestBytes, manifest, archiveBytes, err = recoverLegacyBinaryArchive(archive, err)
 		if err != nil {
-			return nil, fmt.Errorf("open stored plugin archive for installation %d: %w", installation.ID, err)
+			return nil, nil, unreadableArchivef("open stored plugin archive for installation %d: %w", installation.ID, err)
 		}
+		repaired = &repairedArchive{manifest: manifestBytes, archive: archiveBytes}
 	}
-	if archive.Checksum != manifest.GetChecksum() {
-		return nil, fmt.Errorf("stored plugin archive checksum mismatch for installation %d", installation.ID)
-	}
-	if len(archive.ManifestJSON) > 0 && !bytes.Equal(archive.ManifestJSON, manifestBytes) {
-		return nil, fmt.Errorf("stored plugin manifest mismatch for installation %d", installation.ID)
-	}
-	if manifest.GetPluginId() != installation.PluginID {
-		return nil, fmt.Errorf(
-			"stored plugin archive plugin_id %q does not match installation %q",
-			manifest.GetPluginId(),
-			installation.PluginID,
-		)
-	}
-	if manifest.GetVersion() != installation.Version {
-		return nil, fmt.Errorf(
-			"stored plugin archive version %q does not match installation %q",
-			manifest.GetVersion(),
-			installation.Version,
-		)
+	if err := checkStoredArchive(installation, archive, manifestBytes, manifest); err != nil {
+		return nil, nil, err
 	}
 
 	installDir := filepath.Dir(binaryPath)
 	if err := os.RemoveAll(installDir); err != nil {
-		return nil, fmt.Errorf("clear plugin cache dir %q: %w", installDir, err)
+		return nil, nil, fmt.Errorf("clear plugin cache dir %q: %w", installDir, err)
 	}
 	if err := os.MkdirAll(installDir, 0755); err != nil {
-		return nil, fmt.Errorf("create plugin cache dir %q: %w", installDir, err)
+		return nil, nil, fmt.Errorf("create plugin cache dir %q: %w", installDir, err)
 	}
 	if err := extractArchiveFiles(reader, installDir); err != nil {
 		_ = os.RemoveAll(installDir)
-		return nil, fmt.Errorf("extract stored plugin archive for installation %d: %w", installation.ID, err)
+		// Creating or writing the files fails with a *fs.PathError, a fault
+		// of this host's disk. Anything else came from the archive: an entry
+		// that doesn't decompress or match its CRC, or an unsafe entry name.
+		if _, ok := errors.AsType[*fs.PathError](err); ok {
+			return nil, nil, fmt.Errorf("extract stored plugin archive for installation %d: %w", installation.ID, err)
+		}
+		return nil, nil, unreadableArchivef("extract stored plugin archive for installation %d: %w", installation.ID, err)
 	}
 	info, err := c.validateInstalledFiles(binaryPath, manifest)
 	if err != nil {
 		_ = os.RemoveAll(installDir)
-		return nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
+		// The files were just written from the archive, so a failure other
+		// than this host's disk is the archive's too: the binary or a packaged
+		// asset stored as a directory entry.
+		if _, ok := errors.AsType[*fs.PathError](err); ok {
+			return nil, nil, fmt.Errorf("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
+		}
+		return nil, nil, unreadableArchivef("validate rehydrated plugin cache for installation %d: %w", installation.ID, err)
 	}
 	if c.root != "" {
 		// Proxy caches may contain a binary installed by an API host on a
 		// different platform. Apply the same check to fresh and cached files.
 		if err := checkBinaryPlatform(binaryPath); err != nil {
 			_ = os.RemoveAll(installDir)
-			return nil, fmt.Errorf("rehydrate plugin for installation %d: %w", installation.ID, err)
+			return nil, nil, fmt.Errorf("rehydrate plugin for installation %d: %w", installation.ID, err)
 		}
 	}
 	c.markVerified(installation.ID, binaryPath, manifest, info)
 	c.pruneStaleReleases(ctx, installation, installDir)
-
-	return manifest, nil
+	return manifest, repaired, nil
 }
 
 // stillVerified reports whether the installed files are present and the
@@ -291,51 +432,47 @@ func (c *ArchiveCache) pruneStaleReleases(ctx context.Context, installation *Ins
 	}
 }
 
-func (c *ArchiveCache) recoverLegacyBinaryArchive(
-	ctx context.Context,
-	installationID int,
-	archive *InstallationArchive,
-	openErr error,
-) (*zip.Reader, []byte, *pluginv1.PluginManifest, error) {
+// recoverLegacyBinaryArchive rebuilds a legacy archive (a raw binary
+// beside its manifest) as a plugin archive, in memory; the caller persists
+// it.
+func recoverLegacyBinaryArchive(archive *InstallationArchive, openErr error) (*zip.Reader, []byte, *pluginv1.PluginManifest, []byte, error) {
 	if archive == nil || len(archive.ManifestJSON) == 0 || len(archive.Bytes) == 0 {
-		return nil, nil, nil, openErr
+		return nil, nil, nil, nil, openErr
 	}
 
 	manifest, err := LoadManifestBytes(archive.ManifestJSON)
 	if err != nil {
-		return nil, nil, nil, openErr
+		return nil, nil, nil, nil, openErr
 	}
 
 	checksum := sha256.Sum256(archive.Bytes)
 	actualChecksum := hex.EncodeToString(checksum[:])
 	if actualChecksum != archive.Checksum || actualChecksum != manifest.GetChecksum() {
-		return nil, nil, nil, openErr
+		return nil, nil, nil, nil, openErr
 	}
 
 	archiveBytes, err := buildBinaryPluginArchive(archive.ManifestJSON, archive.Bytes)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w; recover legacy raw binary archive: %v", openErr, err) //nolint:errorlint // callers classify the original open error; the recovery failure is only reported
+		return nil, nil, nil, nil, fmt.Errorf("%w; recover legacy raw binary archive: %v", openErr, err) //nolint:errorlint // callers classify the original open error; the recovery failure is only reported
 	}
 
 	reader, manifestBytes, manifest, err := openPluginArchive(archiveBytes)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%w; recover legacy raw binary archive: %v", openErr, err) //nolint:errorlint // callers classify the original open error; the recovery failure is only reported
+		return nil, nil, nil, nil, fmt.Errorf("%w; recover legacy raw binary archive: %v", openErr, err) //nolint:errorlint // callers classify the original open error; the recovery failure is only reported
 	}
+	return reader, manifestBytes, manifest, archiveBytes, nil
+}
 
-	// Persist the repaired archive so future preloads skip recovery, but don't
-	// fail startup over a write error — the in-memory archive is already valid
-	// and recovery will retry on the next preload.
-	if err := c.archives.SaveArchive(ctx, installationID, manifestBytes, manifest.GetChecksum(), archiveBytes); err != nil {
-		slog.WarnContext(
-			ctx,
-			"failed to persist recovered legacy plugin archive; will retry on next preload",
-			"component", "plugins",
-			"installation_id", installationID,
-			"error", err,
-		)
-	}
+// unreadableArchiveError is a failure of a stored archive's own contents. It
+// matches ErrArchiveUnreadable and keeps its cause's message and chain.
+type unreadableArchiveError struct{ err error }
 
-	return reader, manifestBytes, manifest, nil
+func (e *unreadableArchiveError) Error() string { return e.err.Error() }
+
+func (e *unreadableArchiveError) Unwrap() []error { return []error{ErrArchiveUnreadable, e.err} }
+
+func unreadableArchivef(format string, args ...any) error {
+	return &unreadableArchiveError{err: fmt.Errorf(format, args...)}
 }
 
 func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManifest, error) {
@@ -344,18 +481,41 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 		return nil, nil, nil, fmt.Errorf("open plugin archive: %w", err)
 	}
 
+	// The checks below read entries by name, but extraction writes each one to
+	// its cleaned path. Refuse any layout extraction would not reproduce
+	// exactly: two entries for the same file, on a case- or
+	// normalization-insensitive filesystem too, or an entry inside a file.
 	files := make(map[string]*zip.File, len(reader.File))
+	extracted := make(map[string]*zip.File, len(reader.File))
 	for _, file := range reader.File {
+		if err := validateRelativePath(file.Name, "plugin archive"); err != nil {
+			return nil, nil, nil, err
+		}
+		key, err := archivePathKey(file.Name)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if other, ok := extracted[key]; ok && (!other.FileInfo().IsDir() || !file.FileInfo().IsDir()) {
+			return nil, nil, nil, fmt.Errorf("plugin archive entries %q and %q extract to the same path", other.Name, file.Name)
+		}
+		extracted[key] = file
 		files[file.Name] = file
 	}
-
-	manifestFile, ok := files["manifest.json"]
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("plugin archive is missing manifest.json")
+	for key, file := range extracted {
+		for child, parent := key, filepath.Dir(key); parent != child; child, parent = parent, filepath.Dir(parent) {
+			if entry, ok := extracted[parent]; ok && !entry.FileInfo().IsDir() {
+				return nil, nil, nil, fmt.Errorf("plugin archive entry %q is inside file %q", file.Name, entry.Name)
+			}
+		}
 	}
-	binaryFile, ok := files["plugin"]
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("plugin archive is missing plugin binary")
+
+	manifestFile, err := regularArchiveEntry(files, "manifest.json")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	binaryFile, err := regularArchiveEntry(files, "plugin")
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	manifestBytes, err := readZipFile(manifestFile)
@@ -377,12 +537,37 @@ func openPluginArchive(data []byte) (*zip.Reader, []byte, *pluginv1.PluginManife
 	}
 
 	for _, asset := range manifest.GetAssets() {
-		if _, ok := files[asset.GetPath()]; !ok {
-			return nil, nil, nil, fmt.Errorf("plugin archive is missing packaged asset %q", asset.GetPath())
+		if _, err := regularArchiveEntry(files, asset.GetPath()); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 
 	return reader, manifestBytes, manifest, nil
+}
+
+// archivePathKey is the path extraction writes an entry to, in a form where
+// names a case- and normalization-insensitive filesystem (such as APFS) treats
+// as one file compare equal: the Unicode canonical caseless match. It refuses
+// a name no file can have (NUL), and one whose key holds a combining grapheme
+// joiner: NFD inserts one after 30 combining marks in a row, so canonically
+// equivalent names could then get different keys.
+func archivePathKey(name string) (string, error) {
+	key := norm.NFD.String(cases.Fold().String(norm.NFD.String(filepath.Clean(name))))
+	if strings.ContainsAny(key, "\x00\u034f") {
+		return "", fmt.Errorf("plugin archive entry %q has an unsupported file name", name)
+	}
+	return key, nil
+}
+
+func regularArchiveEntry(files map[string]*zip.File, name string) (*zip.File, error) {
+	file, ok := files[name]
+	if !ok {
+		return nil, fmt.Errorf("plugin archive is missing %q", name)
+	}
+	if !file.Mode().IsRegular() {
+		return nil, fmt.Errorf("plugin archive entry %q is not a regular file", name)
+	}
+	return file, nil
 }
 
 func buildBinaryPluginArchive(manifestBytes []byte, binaryData []byte) ([]byte, error) {

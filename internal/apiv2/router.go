@@ -94,6 +94,7 @@ type Dependencies struct {
 	ViewerSubtitleDelete            ViewerSubtitleDeleteService
 	OrderedApplePush                OrderedApplePushService
 	ApplePushRetirement             ApplePushRetirementService
+	ApplePushReset                  ApplePushResetService
 	NotificationEmailVerification   NotificationEmailVerificationService
 	AdminAutoscanSourceDeletes      AdminAutoscanSourceDeleteService
 	AdminAutoscanSourceWrites       AdminAutoscanSourceWriteService
@@ -205,6 +206,12 @@ type Dependencies struct {
 	AdminDiagnosticDownloads      AdminDiagnosticDownloadService
 	AdminJobArtifacts             AdminJobArtifactService
 	AdminJobArtifactSigner        *artworkurl.Signer
+	AdminBackups                  AdminBackupService
+	// AdminBackupSigner signs backup object links for destinations that
+	// cannot presign.
+	AdminBackupSigner *artworkurl.Signer
+	// ProfileTransfer exports and imports the acting profile's own data.
+	ProfileTransfer               ProfileTransferService
 	AdminDiagnosticReads          AdminDiagnosticReadsService
 	AdminDashboardInsights        AdminDashboardInsightsService
 	AdminAPIClients               AdminAPIClientsService
@@ -411,6 +418,10 @@ type Dependencies struct {
 	// NotInterested reads and edits a profile's Not interested marks
 	// (*handlers.PersonalDataHandler).
 	NotInterested NotInterestedService
+	// TitleAllowances keeps the movies, series and collections a household's
+	// primary profile allowed limited profiles above their maturity limits
+	// (*handlers.TitleAllowanceHandler).
+	TitleAllowances TitleAllowanceService
 	// WatchlistTitles keeps a profile's watchlist entries for titles the
 	// library doesn't have (*handlers.PersonalDataHandler).
 	WatchlistTitles WatchlistTitleService
@@ -445,6 +456,7 @@ type Dependencies struct {
 	PersonalAPIKeys                    PersonalAPIKeyService
 	PolicyCapability                   PolicyCapabilityService
 	Branding                           BrandingService
+	OverlayImages                      OverlayImageService
 	ArtworkStore                       blobstore.Store
 	ArtworkBackend                     string
 	ArtworkSigner                      *artworkurl.Signer
@@ -483,10 +495,15 @@ type Dependencies struct {
 	People PeopleService
 	// LiteraryWorks answers literary works (*handlers.LiteraryWorkHandler).
 	LiteraryWorks LiteraryWorkService
+	// BoxSets answers box set search and detail (*handlers.CatalogHandler).
+	BoxSets BoxSetService
 
 	// bodyReadTimeout overrides BodyReadTimeout; tests use it to exercise the
 	// 408 boundary without waiting for the production deadline.
 	bodyReadTimeout time.Duration
+	// uploadPartReadTimeout overrides the backup upload part's read
+	// deadline, for the same reason.
+	uploadPartReadTimeout time.Duration
 	// testRegister registers probe operations; tests only.
 	testRegister func(*Registry)
 }
@@ -859,6 +876,7 @@ type ProgressService interface {
 // operations use.
 type ProfileService interface {
 	ListProfiles(ctx context.Context, userID int) (handlers.ProfileListView, error)
+	GetProfile(ctx context.Context, userID int, profileID string) (handlers.ProfileView, error)
 	CreateProfile(ctx context.Context, cmd handlers.ProfileCreateCommand) (handlers.ProfileView, error)
 	UpdateProfile(ctx context.Context, cmd handlers.ProfileUpdateCommand) (handlers.ProfileView, error)
 	DeleteProfile(ctx context.Context, cmd handlers.ProfileDeleteCommand) error
@@ -983,7 +1001,7 @@ type LibraryAdminService interface {
 // LibrarySectionService is the slice of *handlers.SectionHandler the
 // viewer-facing library section reads use.
 type LibrarySectionService interface {
-	LibraryLayout(ctx context.Context, libraryID int) (handlers.SectionLayoutView, error)
+	LibraryLayout(ctx context.Context, libraryID int, viewer handlers.SectionViewer) (handlers.SectionLayoutView, error)
 	LibrarySections(ctx context.Context, libraryID int, viewer handlers.SectionViewer) (handlers.SectionsView, error)
 	LibrarySectionItems(ctx context.Context, libraryID int, sectionID string, viewer handlers.SectionViewer) (handlers.SectionView, error)
 }
@@ -1057,13 +1075,15 @@ type PersonalListService interface {
 // RatingService is the slice of *handlers.RatingsHandler the ratings
 // operations use.
 type RatingService interface {
-	// ListRatingsPage answers at most limit of the profile's ratings ordered
-	// by (rated_at DESC, media_item_id DESC) strictly after the key (nil =
-	// from the most recently rated).
-	ListRatingsPage(ctx context.Context, userID int, profileID string, after *mediacatalog.RatingKey, limit int) ([]mediacatalog.UserRating, error)
-	// GetRating answers the profile's rating of the item; found is false
-	// when the profile has not rated it.
-	GetRating(ctx context.Context, userID int, profileID, itemID string) (rating mediacatalog.UserRating, found bool, err error)
+	// ListRatingsPage answers at most limit of the profile's ratings of items
+	// the access filter admits, ordered by (rated_at DESC, media_item_id
+	// DESC) strictly after the key (nil = from the most recently rated). The
+	// store applies the filter, so fewer than limit rows means no more follow.
+	ListRatingsPage(ctx context.Context, userID int, profileID string, access mediacatalog.AccessFilter, after *mediacatalog.RatingKey, limit int) ([]mediacatalog.UserRating, error)
+	// GetRating answers the profile's rating of an item the access filter
+	// admits; found is false when the profile has not rated it, and an item
+	// outside the filter is a 404 error.
+	GetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter) (rating mediacatalog.UserRating, found bool, err error)
 	// SetRating records a validated rating of an item the access filter
 	// admits; an item outside it is a 404 error.
 	SetRating(ctx context.Context, userID int, profileID, itemID string, access mediacatalog.AccessFilter, rating int) error
@@ -1283,7 +1303,7 @@ type DeviceLoginService interface {
 	DeviceLoginConfigured() bool
 	StartDeviceLogin(ctx context.Context, input auth.DeviceLoginStartInput) (*auth.DeviceLoginStartResult, error)
 	LookupDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput) (*auth.DeviceLoginInfo, error)
-	PollDeviceLogin(ctx context.Context, deviceCode string) (*handlers.DeviceLoginPollView, error)
+	PollDeviceLogin(ctx context.Context, deviceCode, bindingSecret string) (*handlers.DeviceLoginPollView, error)
 	ApproveDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
 	ApproveDeviceHandoff(ctx context.Context, input auth.DeviceLoginLookupInput, userID int, profileID string) (handlers.DeviceLoginDecision, error)
 	DenyDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)

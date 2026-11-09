@@ -297,6 +297,9 @@ func emptyQueryResult(startIndex int) queryResultDTO {
 // default path's ListSeasons yields an empty set and writes an empty page.
 func (h *ItemsHandler) handleItemParentChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	switch {
+	case itemTypesContain(query.itemTypes, "episode") && !query.allowsVideo():
+		// Episodes are video; MediaTypes=Audio and the like select none.
+		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 	case itemTypesContain(query.itemTypes, "episode"):
 		h.writeSeriesEpisodesResponse(w, r, session, query, query.parentItemID, "", true)
 	case !query.hasItemTypeFilter || itemTypesContain(query.itemTypes, "season"):
@@ -311,9 +314,10 @@ func (h *ItemsHandler) handleItemParentChildren(w http.ResponseWriter, r *http.R
 // shared episode-listing path (also used by /Shows/{id}/Episodes) can be reused.
 func (h *ItemsHandler) handleSeasonEpisodeChildren(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	// A season's only children are its episodes; a type filter that excludes
-	// Episode (e.g. IncludeItemTypes=Movie) yields nothing, mirroring the
-	// series-parent path's handling of unsatisfiable type filters.
-	if query.hasItemTypeFilter && !itemTypesContain(query.itemTypes, "episode") {
+	// Episode (e.g. IncludeItemTypes=Movie) or a MediaTypes filter that
+	// excludes Video yields nothing, mirroring the series-parent path's
+	// handling of unsatisfiable filters.
+	if (query.hasItemTypeFilter && !itemTypesContain(query.itemTypes, "episode")) || !query.allowsVideo() {
 		writeJSON(w, http.StatusOK, emptyQueryResult(query.startIndex))
 		return
 	}
@@ -1456,6 +1460,12 @@ func (h *ItemsHandler) HandleLatest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Jellyfin applies HidePlayedInLatest when the client doesn't send
+	// IsPlayed; Jellyfin Web's home Latest rows never send it.
+	if query.isPlayed == nil && h.hidePlayedInLatest(r.Context(), session) {
+		query.isPlayed = new(false)
+	}
+
 	// Jellyfin's /Items/Latest auto-infers item types from the parent
 	// library's collection type when no explicit IncludeItemTypes is given.
 	// Without this, clients like Infuse may not display "Latest Movies"
@@ -1657,7 +1667,7 @@ func (h *ItemsHandler) loadLatestViaSections(ctx context.Context, session *Sessi
 	// Fold the client's clamped max content rating into the access filter so the
 	// shared cached list respects the client's cap AND the cache key captures it
 	// — identical to the clamp BrowseItems applies.
-	filter.MaxContentRating = clampMaxContentRating(filter.MaxContentRating, query.maxOfficialRating)
+	filter.MaturityLimits = clampMaturityLimits(filter.MaturityLimits, query.maxOfficialRating)
 
 	limit := query.limit
 	if limit <= 0 {
@@ -2159,7 +2169,7 @@ var errConfiguredUserStoreUnavailable = errors.New("configured user store unavai
 // browse applies for query.
 func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Session, query itemsQuery) (catalog.AccessFilter, catalog.BrowseFilters) {
 	access := h.resolveAccessFilter(ctx, session)
-	access.MaxContentRating = clampMaxContentRating(access.MaxContentRating, query.maxOfficialRating)
+	access.MaturityLimits = clampMaturityLimits(access.MaturityLimits, query.maxOfficialRating)
 	sortKey, order := "", ""
 	if query.sortExplicit {
 		sortKey = query.sort
@@ -2562,6 +2572,20 @@ func (h *ItemsHandler) nextUpNewReleasesFirst(ctx context.Context, session *Sess
 		return false
 	}
 	return access.ResolveViewerPreferences(ctx, store, h.adminDefaults, session.ProfileID).NextUpNewReleasesFirst
+}
+
+// hidePlayedInLatest reads the profile's home.hide_watched_items, which
+// Jellyfin clients see as HidePlayedInLatest, so Latest hides watched items
+// the way Silo's Home does. Without a store, or when the read fails, it is off.
+func (h *ItemsHandler) hidePlayedInLatest(ctx context.Context, session *Session) bool {
+	if h.storeProvider == nil || session.ProfileID == "" {
+		return false
+	}
+	store, err := h.storeProvider.ForUser(ctx, session.StreamAppUserID)
+	if err != nil {
+		return false
+	}
+	return sections.HideWatchedItemsFromHome(ctx, store, session.ProfileID)
 }
 
 // writeNextUpResponse renders a slice of catalog.NextUpResult into the
@@ -4087,7 +4111,7 @@ func validatePseudoUser(w http.ResponseWriter, userID string, session *Session) 
 		writeError(w, http.StatusUnauthorized, "Unauthorized", "Missing authentication token")
 		return false
 	}
-	if userID == "" || userID == session.PseudoUserID.String() {
+	if userID == "" || isPseudoUser(userID, session.PseudoUserID) {
 		return true
 	}
 	writeError(w, http.StatusNotFound, "NotFound", "User not found")

@@ -36,6 +36,7 @@ func DeterministicPlanIDV3(attemptID string, requestedFileID, effectiveFileID in
 	}
 	parts = appendEmbeddedSubtitleIdentityV3(parts, plan.Subtitle.Embedded)
 	parts = appendHLSSubtitleRenditionIdentityV3(parts, plan.Subtitle.HLSRendition)
+	parts = appendHLSSubtitleRenditionsIdentityV3(parts, plan.Subtitle.Inventory)
 	parts = appendVideoSampleEntryIdentityV3(parts, plan.EffectiveRecipe.VideoSampleEntry)
 	parts = appendSegmentContainerIdentityV3(parts, plan.EffectiveRecipe.SegmentContainer)
 	parts = appendQuirkIdentityV3(parts, plan)
@@ -69,6 +70,7 @@ func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []stri
 	}
 	parts = appendEmbeddedSubtitleIdentityV3(parts, plan.Subtitle.Embedded)
 	parts = appendHLSSubtitleRenditionIdentityV3(parts, plan.Subtitle.HLSRendition)
+	parts = appendHLSSubtitleRenditionsIdentityV3(parts, plan.Subtitle.Inventory)
 	parts = appendVideoSampleEntryIdentityV3(parts, plan.EffectiveRecipe.VideoSampleEntry)
 	parts = appendSegmentContainerIdentityV3(parts, plan.EffectiveRecipe.SegmentContainer)
 	parts = appendQuirkIdentityV3(parts, plan)
@@ -80,6 +82,23 @@ func PlanAttemptKeyV3(plan PlanV3, outputContextID string, localMutations []stri
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(canonical))
 	return fmt.Sprintf("v3:%016x", h.Sum64())
+}
+
+// appendHLSSubtitleRenditionsIdentityV3 keeps a plan that lists embedded text
+// tracks as on-demand renditions apart from the plan that doesn't, whatever
+// it selects: the stream's playlists differ. It names the rows by combined
+// index. Plans without them keep their historical identity.
+func appendHLSSubtitleRenditionsIdentityV3(parts []string, inventory []SubtitleInventoryItemV3) []string {
+	var rows []string
+	for _, item := range inventory {
+		if item.HLSRendition != nil {
+			rows = append(rows, strconv.Itoa(item.CombinedIndex))
+		}
+	}
+	if len(rows) == 0 {
+		return parts
+	}
+	return append(parts, "hls_subtitle_renditions="+strings.Join(rows, ","))
 }
 
 func appendVideoSampleEntryIdentityV3(parts []string, sampleEntry string) []string {

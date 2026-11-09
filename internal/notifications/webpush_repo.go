@@ -25,8 +25,11 @@ type WebPushSubscription struct {
 	LastSuccessAt       *time.Time
 	LastFailureAt       *time.Time
 	LastFailureStatus   *int
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	// LoginSessionID is the login session that last registered this browser;
+	// empty when none is known (see webPushLoginLive).
+	LoginSessionID string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // WebPushRepository owns web_push_subscriptions and
@@ -43,16 +46,28 @@ func NewWebPushRepository(pool *pgxpool.Pool) *WebPushRepository {
 const webPushColumns = `
 	id, user_id, profile_id, endpoint, p256dh, auth, device_name, enabled,
 	consecutive_failures, last_success_at, last_failure_at, last_failure_status,
-	created_at, updated_at`
+	COALESCE(login_session_id, ''), created_at, updated_at`
 
-func scanWebPushSubscription(row pgx.Row) (*WebPushSubscription, error) {
+// webPushLoginLive is true for a subscription whose registering login session
+// has not ended. It is checked when sending rather than written when a session
+// ends because sessions end on many paths, and expiry happens without any code
+// running. A session that no longer exists has ended: backups carry
+// web_push_subscriptions but not auth_sessions. A subscription with no recorded
+// session (an API key, or one older than the column) keeps delivering.
+const webPushLoginLive = `(web_push_subscriptions.login_session_id IS NULL OR EXISTS (
+	SELECT 1 FROM auth_sessions s
+	WHERE s.id = web_push_subscriptions.login_session_id AND ` + authSessionLive + `))`
+
+// scanWebPushSubscription scans webPushColumns, then any extra selected columns
+// into extra.
+func scanWebPushSubscription(row pgx.Row, extra ...any) (*WebPushSubscription, error) {
 	var sub WebPushSubscription
-	err := row.Scan(
+	err := row.Scan(append([]any{
 		&sub.ID, &sub.UserID, &sub.ProfileID, &sub.Endpoint, &sub.P256dh, &sub.Auth,
 		&sub.DeviceName, &sub.Enabled, &sub.ConsecutiveFailures,
 		&sub.LastSuccessAt, &sub.LastFailureAt, &sub.LastFailureStatus,
-		&sub.CreatedAt, &sub.UpdatedAt,
-	)
+		&sub.LoginSessionID, &sub.CreatedAt, &sub.UpdatedAt,
+	}, extra...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +89,8 @@ func scanWebPushSubscriptions(rows pgx.Rows) ([]WebPushSubscription, error) {
 
 // Upsert registers a subscription. An existing endpoint is reassigned to the
 // caller's (user, profile): one browser endpoint notifies exactly one
-// profile, the one that subscribed most recently.
+// profile, the one that subscribed most recently. The caller's login session
+// replaces the recorded one, so delivery follows the newest registration.
 func (r *WebPushRepository) Upsert(ctx context.Context, sub WebPushSubscription) (*WebPushSubscription, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -100,19 +116,20 @@ func (r *WebPushRepository) Upsert(ctx context.Context, sub WebPushSubscription)
 
 	row := tx.QueryRow(ctx, `
 		INSERT INTO web_push_subscriptions
-			(id, user_id, profile_id, endpoint, p256dh, auth, device_name)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+			(id, user_id, profile_id, endpoint, p256dh, auth, device_name, login_session_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''))
 		ON CONFLICT (endpoint) DO UPDATE SET
 			user_id = EXCLUDED.user_id,
 			profile_id = EXCLUDED.profile_id,
 			p256dh = EXCLUDED.p256dh,
 			auth = EXCLUDED.auth,
 			device_name = EXCLUDED.device_name,
+			login_session_id = EXCLUDED.login_session_id,
 			enabled = true,
 			consecutive_failures = 0,
 			updated_at = now()
 		RETURNING `+webPushColumns,
-		sub.ID, sub.UserID, sub.ProfileID, sub.Endpoint, sub.P256dh, sub.Auth, sub.DeviceName)
+		sub.ID, sub.UserID, sub.ProfileID, sub.Endpoint, sub.P256dh, sub.Auth, sub.DeviceName, sub.LoginSessionID)
 	saved, err := scanWebPushSubscription(row)
 	if err != nil {
 		return nil, fmt.Errorf("upsert web push subscription: %w", err)
@@ -147,7 +164,8 @@ func (r *WebPushRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx
 	userIDs, profileIDs := profileKeyArrays(profiles)
 	rows, err := tx.Query(ctx,
 		`SELECT `+webPushColumns+` FROM web_push_subscriptions
-		WHERE (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])) AND enabled`,
+		WHERE (user_id, profile_id) IN (SELECT * FROM unnest($1::int[], $2::text[])) AND enabled
+		  AND `+webPushLoginLive,
 		userIDs, profileIDs)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled web push subscriptions: %w", err)
@@ -163,16 +181,19 @@ func (r *WebPushRepository) ListEnabledByProfiles(ctx context.Context, tx pgx.Tx
 	return out, nil
 }
 
-func (r *WebPushRepository) getByIDUnscoped(ctx context.Context, id string) (*WebPushSubscription, error) {
+// getByIDUnscoped loads a subscription and whether its login is still live. The
+// subscription is nil, with no error, when the row is gone.
+func (r *WebPushRepository) getByIDUnscoped(ctx context.Context, id string) (*WebPushSubscription, bool, error) {
+	var loginLive bool
 	sub, err := scanWebPushSubscription(r.pool.QueryRow(ctx,
-		`SELECT `+webPushColumns+` FROM web_push_subscriptions WHERE id = $1`, id))
+		`SELECT `+webPushColumns+`, `+webPushLoginLive+` FROM web_push_subscriptions WHERE id = $1`, id), &loginLive)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get web push subscription: %w", err)
+		return nil, false, fmt.Errorf("get web push subscription: %w", err)
 	}
-	return sub, nil
+	return sub, loginLive, nil
 }
 
 // Delete removes one subscription scoped to the account profile. Idempotent.
@@ -206,6 +227,38 @@ func (r *WebPushRepository) DeleteAllForProfile(ctx context.Context, userID int,
 	_, err := r.pool.Exec(ctx,
 		`DELETE FROM web_push_subscriptions WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
 	return err
+}
+
+// DeleteEndedLoginSubscriptions removes the subscriptions, keys included, of
+// login sessions that have ended. Their pushes already stopped at
+// webPushLoginLive. The attempts cascade.
+func (r *WebPushRepository) DeleteEndedLoginSubscriptions(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM web_push_subscriptions WHERE NOT `+webPushLoginLive)
+	if err != nil {
+		return 0, fmt.Errorf("delete web push subscriptions of ended logins: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DeleteSubscriptionsWithNoLogin removes subscriptions with no recorded login
+// whose account has no live login and no API key. Such a subscription predates
+// login_session_id, or was carried through a restore of a backup taken before
+// it, which drops the column; a browser already signed out can never record
+// one, so it would otherwise receive real titles indefinitely. The web app
+// cannot bring it back by itself, because it remembers only subscriptions it
+// registered on a login; turning push on again in Settings does.
+func (r *WebPushRepository) DeleteSubscriptionsWithNoLogin(ctx context.Context) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM web_push_subscriptions w
+		WHERE w.login_session_id IS NULL
+		  -- An API key registers with no session, and it has no revoked state.
+		  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = w.user_id)
+		  -- A full restore leaves auth_sessions empty, so this covers its rows too.
+		  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = w.user_id AND `+authSessionLive+`)`)
+	if err != nil {
+		return 0, fmt.Errorf("delete web push subscriptions with no login: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // RecordSuccess resets the failure streak after a delivered push.

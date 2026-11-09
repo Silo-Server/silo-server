@@ -19,6 +19,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
+	"github.com/Silo-Server/silo-server/internal/themesongs"
 )
 
 // Section catalog-items: the profile-scoped catalog browse, facet documents,
@@ -397,9 +398,6 @@ type CatalogItemDetail struct {
 	SortTitle                       string                               `json:"sort_title,omitempty"`
 	OriginalTitle                   string                               `json:"original_title,omitempty"`
 	Tagline                         string                               `json:"tagline,omitempty"`
-	ImdbID                          string                               `json:"imdb_id,omitempty"`
-	TmdbID                          string                               `json:"tmdb_id,omitempty"`
-	TvdbID                          string                               `json:"tvdb_id,omitempty"`
 	BannerURL                       string                               `json:"banner_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived. A wide banner strip. Movies and series only; see getImageCapabilities extended_item_artwork"`
 	BannerThumbhash                 string                               `json:"banner_thumbhash,omitempty"`
 	ThumbURL                        string                               `json:"thumb_url,omitempty" format:"uri-reference" doc:"Presigned, short-lived. A 16:9 landscape thumb, which usually carries the title. Movies and series only"`
@@ -627,6 +625,7 @@ const (
 func registerCatalogItems(reg *Registry) {
 	registerCatalogSearchCapabilities(reg)
 	registerCatalogLetters(reg)
+	registerCatalogBoxSets(reg)
 	registerThemeSongs(reg)
 	cursors := NewCursors(reg.deps.CursorSecret)
 	// Browsing, audiobook groups and the query form answer 501
@@ -717,6 +716,7 @@ func (reg *Registry) itemViewerOnDevice(ctx context.Context, deviceID string, ar
 		}
 		opts.PresentationLibraryID = &n
 		opts.ScopeFilesToLibrary = reg.versionsScopedToLibrary(ctx)
+		opts.SeriesLibraryCoversEpisodes = true
 	}
 	if fileID != "" {
 		n, p := fileID.positive("query.file_id")
@@ -1226,7 +1226,9 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 	}
 	out := catalogItemDetailOf(detail, reg.ratingSelection(ctx))
 	if reg.deps.ThemeSongs != nil && (detail.Type == themeOwnerMovie || detail.Type == themeOwnerSeries || detail.Type == themeOwnerSeason || detail.Type == themeOwnerEpisode) {
-		themes, err := reg.deps.ThemeSongs.Discover(ctx, in.ID, true, viewer.Access)
+		// The detail authorized the item under the same filter and carries
+		// its owner fields, so the theme lookup repeats neither.
+		themes, err := reg.deps.ThemeSongs.Discover(ctx, themeItemOf(detail), true, viewer.Access)
 		if err != nil {
 			slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "catalog theme lookup failed", "component", "apiv2", "item_id", in.ID, "error", err)
 			return &CatalogItemDetailOutput{Body: out}, nil
@@ -1237,6 +1239,19 @@ func (reg *Registry) getCatalogItem(ctx context.Context, in *CatalogItemDeviceIn
 		}
 	}
 	return &CatalogItemDetailOutput{Body: out}, nil
+}
+
+// themeItemOf is the theme owner a movie, series, season, or episode detail
+// describes. A movie or series is its own series.
+func themeItemOf(d *catalogpkg.ItemDetail) themesongs.Item {
+	item := themesongs.Item{ID: d.ContentID, Type: d.Type, SeriesID: d.SeriesID, SeasonID: d.SeasonID}
+	if d.Type == themeOwnerMovie || d.Type == themeOwnerSeries {
+		item.SeriesID = d.ContentID
+	}
+	if d.SeasonNumber != nil {
+		item.SeasonNumber = *d.SeasonNumber
+	}
+	return item
 }
 
 func (reg *Registry) listCatalogItemVersions(ctx context.Context, in *CatalogItemDeviceInput) (*FileVersionCollectionOutput, error) {
@@ -1419,6 +1434,7 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		SeriesPosterURL: d.SeriesPosterURL, SeriesPosterThumbhash: d.SeriesPosterThumbhash,
 		SeriesBackdropURL: d.SeriesBackdropURL, SeriesBackdropThumbhash: d.SeriesBackdropThumbhash,
 		SeasonPosterURL: d.SeasonPosterURL, SeasonPosterThumbhash: d.SeasonPosterThumbhash,
+		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID,
 		OverlaySummary: catalogOverlayOf(d.OverlaySummary), WorkID: d.WorkID, WorkTitle: d.WorkTitle,
 		PendingTranslationLanguage: d.PendingTranslationLanguage, MachineTranslatedFields: d.MachineTranslatedFields,
 	}
@@ -1452,7 +1468,7 @@ func catalogItemDetailOf(d *catalogpkg.ItemDetail, sel ratingsources.Selection) 
 	out := CatalogItemDetail{
 		CatalogItem: card, PlaySeasonNumber: d.PlaySeasonNumber,
 		SortTitle: d.SortTitle, OriginalTitle: d.OriginalTitle, Tagline: d.Tagline,
-		ImdbID: d.ImdbID, TmdbID: d.TmdbID, TvdbID: d.TvdbID, Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
+		Cast: NonNil(d.Cast), Crew: NonNil(d.Crew), Countries: d.Countries, LockedFields: d.LockedFields,
 		BannerURL: d.BannerURL, BannerThumbhash: d.BannerThumbhash, ThumbURL: d.ThumbURL, ThumbThumbhash: d.ThumbThumbhash,
 		ClearArtURL: d.ClearArtURL, DiscURL: d.DiscURL, BackdropURLs: d.BackdropURLs,
 		FirstAirDate: calendarDatePtr(d.FirstAirDate), AirTime: d.AirTime, AirTimezone: d.AirTimezone, SeasonCount: d.SeasonCount, EpisodeCount: d.EpisodeCount,

@@ -11,14 +11,14 @@ type BadgeProps = ComponentProps<typeof Badge>;
 type BadgeVariant = NonNullable<BadgeProps["variant"]>;
 
 // Theme variants only, so every theme (light ones included) colors them.
-// Available is the one primary badge and Failed the one destructive badge;
+// None takes the accent color; Failed is the one destructive badge, and
 // closed requests recede behind open ones.
 const STATE_STYLES: Record<RequestDisplayState, { variant: BadgeVariant; className?: string }> = {
   pending: { variant: "outline" },
   approved: { variant: "secondary" },
   processing: { variant: "secondary" },
   partially_available: { variant: "secondary" },
-  available: { variant: "default" },
+  available: { variant: "secondary" },
   declined: { variant: "outline", className: "text-muted-foreground" },
   cancelled: { variant: "outline", className: "text-muted-foreground" },
   failed: { variant: "destructive" },

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { randomUUID } from "@/lib/uuid";
 import type { FormEvent } from "react";
 import type { InviteCode } from "@/hooks/queries/admin/inviteCodes";
@@ -63,9 +64,13 @@ export default function InviteCodesTab() {
     setConfirmDeleteCode(code);
   }
 
-  function handleCopy(text: string) {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
+  async function handleCopy(text: string) {
+    try {
+      await copyTextToClipboard(text);
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Failed to copy to clipboard");
+    }
   }
 
   if (isLoading) return <div>Loading invite codes...</div>;
@@ -185,7 +190,7 @@ export default function InviteCodesTab() {
                     variant="ghost"
                     size="icon"
                     className="h-6 w-6"
-                    onClick={() => handleCopy(code.code)}
+                    onClick={() => void handleCopy(code.code)}
                   >
                     <Copy className="h-3 w-3" />
                   </Button>

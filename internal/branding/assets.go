@@ -2,6 +2,9 @@ package branding
 
 import (
 	"fmt"
+	"net/http"
+	"path"
+	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/imageutil"
 )
@@ -133,6 +136,38 @@ func MaxUploadBytes(kind AssetKind) int64 {
 	return 0
 }
 
+// CheckStoredAsset applies an upload's checks to an asset stored under key,
+// as a restore writes one: key names a kind's object, data is within the
+// kind's size limit, its bytes are the type its extension serves (an SVG
+// favicon is not sniffed, as uploads do not sniff it), and the kind's
+// processing accepts them and stores that extension. It wraps
+// ErrUnsupportedImage, or ErrInvalidKind for a key no kind stores.
+func CheckStoredAsset(key string, data []byte) error {
+	prefix, ref := path.Split(key)
+	var spec assetSpec
+	found := false
+	for _, s := range assetSpecs {
+		if s.s3Prefix+"/" == prefix {
+			spec, found = s, true
+		}
+	}
+	if !found || ref == "" {
+		return fmt.Errorf("%w: %s", ErrInvalidKind, key)
+	}
+	if int64(len(data)) > spec.maxBytes {
+		return fmt.Errorf("%w: %d bytes is over the %d a %s may be", ErrUnsupportedImage, len(data), spec.maxBytes, spec.kind)
+	}
+	ext := path.Ext(ref)
+	served := contentTypeForExt(ext)
+	if served != "image/svg+xml" && http.DetectContentType(data) != served {
+		return fmt.Errorf("%w: the file is not %s", ErrUnsupportedImage, served)
+	}
+	if _, _, stored, err := spec.process(data, served); err != nil || stored != ext {
+		return fmt.Errorf("%w: a %s upload is not stored as %s", ErrUnsupportedImage, spec.kind, ext)
+	}
+	return nil
+}
+
 // contentTypeForExt maps a stored ref's extension to the Content-Type used when
 // serving it.
 func contentTypeForExt(ext string) string {
@@ -148,4 +183,29 @@ func contentTypeForExt(ext string) string {
 	default:
 		return "application/octet-stream"
 	}
+}
+
+// AssetSettingKeys lists the server_settings keys that hold a branding
+// asset's content ref, sorted. Backups read them to find the asset objects.
+func AssetSettingKeys() []string {
+	keys := make([]string, 0, len(assetSpecs))
+	for _, spec := range assetSpecs {
+		keys = append(keys, spec.settingKey)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// AssetObjectKey is the blob key of the asset whose ref is stored under
+// settingKey, or "" when the key holds no asset or the ref is empty.
+func AssetObjectKey(settingKey, ref string) string {
+	if ref == "" {
+		return ""
+	}
+	for _, spec := range assetSpecs {
+		if spec.settingKey == settingKey {
+			return spec.s3Prefix + "/" + ref
+		}
+	}
+	return ""
 }

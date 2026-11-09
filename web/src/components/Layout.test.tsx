@@ -80,7 +80,6 @@ vi.mock("@/components/AppSidebar", () => ({
         data-testid="sidebar-surface"
       >
         <div className="sidebar-inner" data-testid="sidebar-inner" />
-        <div className="sidebar-row-shift" data-testid="sidebar-row" />
       </aside>
     ) : null,
 }));
@@ -437,7 +436,6 @@ describe("Layout detail reveal", () => {
     surface.setAttribute("data-collapsed", "true");
 
     fireEvent.transitionEnd(screen.getByTestId("sidebar-inner"), { propertyName: "transform" });
-    fireEvent.transitionEnd(screen.getByTestId("sidebar-row"), { propertyName: "transform" });
     fireEvent.transitionEnd(surface, { propertyName: "opacity" });
     expect(screen.getByRole("status", { name: "details-ready" })).toHaveTextContent("false");
 

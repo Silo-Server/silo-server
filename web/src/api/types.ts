@@ -797,6 +797,12 @@ export interface MediaItemUserState {
   in_watchlist: boolean;
   /** The profile marked the movie or series Not interested. */
   not_interested?: boolean;
+  /**
+   * Episodes watched and episodes left, on a series or season the profile
+   * has not finished. Absent on everything else.
+   */
+  watched_count?: number;
+  unplayed_count?: number;
 }
 
 export interface BrowseItemSortMetrics {
@@ -810,6 +816,25 @@ export interface BrowseItemSortMetrics {
   author?: string;
   narrator?: string;
   series_name?: string;
+}
+
+/**
+ * A movie box set: the movies TMDB lists in one collection that a viewer can
+ * see in one library. `id` is the TMDB collection ID.
+ */
+export interface BoxSetSummary {
+  id: string;
+  library_id: string;
+  title: string;
+  overview?: string;
+  poster_url?: string;
+  poster_thumbhash?: string;
+  backdrop_url?: string;
+  backdrop_thumbhash?: string;
+  movie_count: number;
+  played_count: number;
+  first_year?: number;
+  last_year?: number;
 }
 
 export interface BrowseItem {
@@ -2901,6 +2926,7 @@ export interface ClientDiagnosticManifest {
     platform: DiagnosticPlatform;
     os_version: string;
     profile_id?: string;
+    occurrence_count?: number;
     [key: string]: unknown;
   };
   destination: {
@@ -2917,7 +2943,7 @@ export interface ClientDiagnosticManifest {
     stack_excerpt?: string;
     thread?: string;
     foreground?: boolean;
-    source: "ueh" | "exit_info" | "metrickit" | "exit_sentinel";
+    source: "ueh" | "exit_info" | "metrickit" | "exit_sentinel" | "watchdog";
     provenance: "pre_failure" | "post_restart" | "metric_reporting_period";
     occurred_at: string;
     [key: string]: unknown;
@@ -3448,6 +3474,12 @@ export interface Library {
   trickplay_enabled?: boolean;
   /** The server can generate seek-bar previews (public asset storage is configured). Absent from servers without seek previews. */
   trickplay_supported?: boolean;
+  /** Gather movies of one TMDB collection into a box set for movie pages and search. Absent from servers without box sets. */
+  box_sets_enabled?: boolean;
+  /** The fewest of a collection's movies that form a box set. */
+  box_set_min_movies?: number;
+  /** List matching box sets in search. */
+  box_sets_in_search?: boolean;
   /** Allow-list of video kinds fetched during metadata refresh; empty disables. */
   trailer_kinds: string[];
   /**
@@ -3504,6 +3536,10 @@ export interface LibraryMetadataMatchFailureDetail {
     outcome: string;
     candidate_count: number;
     threshold: number;
+    /** The rule behind a candidate_rejected outcome, such as "lone_candidate". */
+    rejection?: string;
+    /** The score that rule required, when the rule is a score bar. */
+    required_score?: number;
     top_candidates?: Array<{
       title: string;
       matched_title?: string;
@@ -3595,6 +3631,10 @@ export interface CreateLibraryRequest {
   intro_detection_enabled?: boolean;
   /** Sent only when it changes, so a server without seek previews never sees it. */
   trickplay_enabled?: boolean;
+  /** The box set settings are sent only when they change, like trickplay_enabled. */
+  box_sets_enabled?: boolean;
+  box_set_min_movies?: number;
+  box_sets_in_search?: boolean;
   trailer_kinds?: string[];
   /** Omitted on create means on. */
   realtime_monitoring?: boolean;
@@ -4464,6 +4504,8 @@ export interface UserLibrary {
   type: string;
   sort_order: number;
   poster_url?: string;
+  /** The library gathers a TMDB collection's movies into a box set for movie pages and search. */
+  box_sets_enabled?: boolean;
 }
 
 // Sections
@@ -4602,6 +4644,8 @@ export interface PageSectionConfig {
   item_limit: number;
   config: Record<string, unknown>;
   enabled: boolean;
+  /** The hero banner is kept off the apps. Absent from a server that predates it. */
+  web_only?: boolean;
   created_at: string;
   updated_at: string;
 }

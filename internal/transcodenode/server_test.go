@@ -2404,6 +2404,49 @@ func TestReconstructFromToken_TokenlessRebuildsFromTheStoredTransportRecipe(t *t
 	}
 }
 
+func TestReconstructFromTokenKeepsSubtitleRenditionMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		change  func(*playback.RecipeCard)
+		hydrate bool
+	}{
+		{name: "matching record", change: func(c *playback.RecipeCard) { c.SubtitleRenditionTracks[0].Default = false }, hydrate: true},
+		{name: "different source", change: func(c *playback.RecipeCard) { c.SubtitleRenditionSource.Size++ }},
+		{name: "different track", change: func(c *playback.RecipeCard) { c.SubtitleRenditionTracks[0].TrackNumber++ }},
+		{name: "different owner", change: func(c *playback.RecipeCard) { c.UserID++ }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const sessionID = "sess-rendition-metadata"
+			const transportID = sessionID + "-plan1234-abcd1234"
+			s := newLoopingFFmpegServer(t)
+			card := nativeTransportCard(sessionID, transportID)
+			card.SubtitleRendition = true
+			card.SubtitleRenditionSource = playback.SubtitleRenditionSource{Size: 100, ModTimeUnixNano: 10}
+			card.SubtitleRenditionTracks = []playback.SubtitleRenditionTrack{{StreamIndex: 2, TrackNumber: 3, Codec: "subrip", Name: "English forced", Language: "en", Forced: true, Default: true}}
+			stored := *card
+			stored.SubtitleRenditionTracks = slices.Clone(card.SubtitleRenditionTracks)
+			tc.change(&stored)
+			s.SetRecipeStore(&stubRecipeStore{ok: true, card: &stored})
+			session, err := s.reconstructFromToken(requestWithToken(transportID, signCard(t, *card)), transportID, 5)
+			if err != nil || session == nil {
+				t.Fatalf("reconstruct: %v, %v", session, err)
+			}
+			t.Cleanup(func() { _ = session.CloseProcess() })
+			want := playback.RecipeCardFromClaims(new(card.ToClaims())).SubtitleRenditionTracks
+			if tc.hydrate {
+				want = card.SubtitleRenditionTracks
+			}
+			opts := session.Opts()
+			if !slices.Equal(opts.SubtitleRenditionTracks, want) {
+				t.Fatalf("reconstructed rendition metadata = %+v, want %+v", opts.SubtitleRenditionTracks, want)
+			}
+			if opts.SubtitleRenditionSource != card.SubtitleRenditionSource {
+				t.Fatalf("reconstruction changed token source: %+v", opts.SubtitleRenditionSource)
+			}
+		})
+	}
+}
+
 // Without a recipe to rebuild from, a tokenless request is still a genuine
 // not-found: the node must never spawn ffmpeg on a guess.
 func TestReconstructFromToken_TokenlessWithoutARecipeIsNotFound(t *testing.T) {

@@ -16,6 +16,8 @@ import CatalogFiltersPanel from "@/components/catalog/CatalogFiltersPanel";
 import SearchScopeChips from "@/components/catalog/SearchScopeChips";
 import { useCatalogWindow } from "@/hooks/queries/catalog";
 import { usePersonSearch } from "@/hooks/queries/personSearch";
+import { useBoxSetSearch } from "@/hooks/queries/boxSets";
+import BoxSetSearchResults from "@/components/boxsets/BoxSetSearchResults";
 import { useSetCollectionSortPreference } from "@/hooks/queries/collections";
 import { querySortToSelectValue } from "@/lib/collectionSortConfig";
 import { useSearchMediaScope, type SearchMediaScope } from "@/hooks/useSearchMediaScope";
@@ -181,6 +183,15 @@ function CatalogResults({
 
   const mediaScope = effectiveState.query_definition.media_scope;
   const peopleQuery = usePersonSearch(state.q ?? "", 20, isQuerySource, mediaScope);
+  // Box sets are movies; a scope without movies leaves them out.
+  const boxSetsInScope =
+    isQuerySource && (!mediaScope || mediaScope === "movie" || mediaScope === "video");
+  const boxSetQuery = useBoxSetSearch(state.q ?? "", {
+    enabled: boxSetsInScope,
+    libraryId: state.library_id ? String(state.library_id) : undefined,
+  });
+  // A disabled query still holds its last answer, so another scope hides it.
+  const boxSets = boxSetsInScope ? (boxSetQuery.data ?? []) : [];
   const people = peopleQuery.data ?? [];
   const activeChipScope: SearchMediaScope =
     mediaScope === "audiobook" ? "audiobook" : mediaScope ? "video" : "all";
@@ -409,7 +420,8 @@ function CatalogResults({
   }
 
   return (
-    <div className="page-shell space-y-6 py-4 sm:py-6">
+    // A collection uses the whole width, like the library view and the Collections wall.
+    <div className={cn(!isCollectionSource && "page-shell", "space-y-6 py-4 sm:py-6")}>
       {searchParams.get("notice") === "read-only" ? (
         <ReadOnlyCollectionCallout access={collectionAccess} collectionName={title} />
       ) : null}
@@ -585,6 +597,8 @@ function CatalogResults({
               </div>
             </section>
           )}
+
+          {isQuerySource && boxSets.length > 0 ? <BoxSetSearchResults boxSets={boxSets} /> : null}
 
           {showPeopleSection ? (
             <section aria-label="People" className="space-y-3">

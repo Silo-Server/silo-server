@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, type ChangeEvent } from "react";
 import { Copy, Folder, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -13,10 +13,12 @@ import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
 import {
   useApplyItemMatch,
   useItemFiles,
+  useItemMatchHints,
   useSearchItemMatchCandidates,
 } from "@/hooks/queries/items";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { libraryIdsOfFiles } from "@/lib/itemLibraries";
 import { cn } from "@/lib/utils";
 
@@ -114,6 +116,38 @@ export default function MatchItemDialog({
   // Also blocks Apply: a candidate found in a library the item has since left
   // would otherwise apply unscoped, which the server refuses.
   const searchBlocked = libraryLookupLoading || (needsLibraryPick && currentPick === undefined);
+
+  // The item's own title and year come from its current match, which is the
+  // one an admin usually opens this dialog to correct. Suggest what the
+  // scanner read from the folder and file names instead, once per answer,
+  // leaving any field the admin has edited. Search waits for it, so a quick click
+  // cannot search the stale year.
+  const { data: hints, isLoading: hintsLoading } = useItemMatchHints(
+    open && !searchBlocked ? item.content_id : undefined,
+    libraryId,
+  );
+  const [seededHints, setSeededHints] = useState<typeof hints>();
+  const [editedFields, setEditedFields] = useState<ReadonlySet<(value: string) => void>>(new Set());
+  const suggest = (set: (value: string) => void, value: string) => {
+    if (!editedFields.has(set)) set(value);
+  };
+  if (hints && hints !== seededHints) {
+    setSeededHints(hints);
+    // An answer without a parsed title (another library's, say) falls back to
+    // the item's own title and year rather than keeping the last suggestion.
+    const suggestedYear = hints.title ? hints.year : item.year;
+    suggest(setTitle, hints.title || item.title);
+    suggest(setYear, suggestedYear ? String(suggestedYear) : "");
+    if (showVideoExternalIds) {
+      suggest(setImdbId, hints.provider_ids.imdb ?? "");
+      suggest(setTmdbId, hints.provider_ids.tmdb ?? "");
+      suggest(setTvdbId, hints.provider_ids.tvdb ?? "");
+    }
+  }
+  const editField = (set: (value: string) => void) => (e: ChangeEvent<HTMLInputElement>) => {
+    setEditedFields((edited) => new Set(edited).add(set));
+    set(e.target.value);
+  };
   // The library a search resolves to, including the one an unscoped search of
   // a single-library item lands in.
   const searchScope = libraryId ?? (itemLibraryIds.length === 1 ? itemLibraryIds[0] : undefined);
@@ -275,7 +309,7 @@ export default function MatchItemDialog({
               <Input
                 id="match-title"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={editField(setTitle)}
                 placeholder="Title"
               />
             </div>
@@ -284,7 +318,7 @@ export default function MatchItemDialog({
               <Input
                 id="match-year"
                 value={year}
-                onChange={(e) => setYear(e.target.value)}
+                onChange={editField(setYear)}
                 placeholder="Year"
                 type="number"
               />
@@ -296,7 +330,7 @@ export default function MatchItemDialog({
                   <Input
                     id="match-imdb"
                     value={imdbId}
-                    onChange={(e) => setImdbId(e.target.value)}
+                    onChange={editField(setImdbId)}
                     placeholder="tt1234567"
                   />
                 </div>
@@ -305,7 +339,7 @@ export default function MatchItemDialog({
                   <Input
                     id="match-tmdb"
                     value={tmdbId}
-                    onChange={(e) => setTmdbId(e.target.value)}
+                    onChange={editField(setTmdbId)}
                     placeholder="12345"
                   />
                 </div>
@@ -314,7 +348,7 @@ export default function MatchItemDialog({
                   <Input
                     id="match-tvdb"
                     value={tvdbId}
-                    onChange={(e) => setTvdbId(e.target.value)}
+                    onChange={editField(setTvdbId)}
                     placeholder="12345"
                   />
                 </div>
@@ -380,7 +414,7 @@ export default function MatchItemDialog({
 
           <Button
             onClick={handleSearch}
-            disabled={searchMutation.isPending || searchBlocked}
+            disabled={searchMutation.isPending || searchBlocked || hintsLoading}
             className="w-full shrink-0 gap-2"
           >
             <Search className={cn("h-4 w-4", searchMutation.isPending && "animate-spin")} />
@@ -602,7 +636,7 @@ function FolderPathsList({ paths }: { paths: string[] }) {
                 className="text-muted-foreground hover:text-foreground h-6 w-6 shrink-0"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(folderData.rootPath);
+                    await copyTextToClipboard(folderData.rootPath);
                     toast.success("Copied root path");
                   } catch {
                     toast.error("Failed to copy path");
@@ -633,7 +667,7 @@ function FolderPathsList({ paths }: { paths: string[] }) {
                 className="text-muted-foreground hover:text-foreground h-6 w-6 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
                 onClick={async () => {
                   try {
-                    await navigator.clipboard.writeText(fullPath);
+                    await copyTextToClipboard(fullPath);
                     toast.success("Copied folder path");
                   } catch {
                     toast.error("Failed to copy path");

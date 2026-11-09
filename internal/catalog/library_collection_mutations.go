@@ -232,6 +232,15 @@ func (r *LibraryCollectionRepository) AddItemIfAbsent(ctx context.Context, colle
 // triggers can run. Definition updates already acquire parents first. This
 // ordering prevents items->revision->parent and membership->revision inversions
 // between these repository writers, including the legacy entry points.
+// LockLibraryCollectionInTx takes a collection's parent lock, the first
+// lock of every edit of an existing collection: a caller that then creates a
+// group, adds items, or regroups a membership (each of which can take a
+// library's order revision) takes it before any of them, as the library
+// editor takes the parents before the order revision.
+func LockLibraryCollectionInTx(ctx context.Context, tx pgx.Tx, id string) error {
+	return lockLibraryCollectionParent(ctx, tx, id)
+}
+
 func lockLibraryCollectionParent(ctx context.Context, tx pgx.Tx, id string) error {
 	var found string
 	err := tx.QueryRow(ctx, `SELECT id FROM library_collections WHERE id=$1 FOR NO KEY UPDATE`, id).Scan(&found)
@@ -327,4 +336,35 @@ func lockManualLibraryCollection(ctx context.Context, tx pgx.Tx, id string) (int
 		return 0, ErrLibraryCollectionNotManual
 	}
 	return libraryID, nil
+}
+
+// AddLibraryCollectionLibrariesInTx adds libraryIDs to a collection's library
+// scope in the caller's transaction, under the parent and membership-order
+// locks an edit takes, and keeps the libraries already in scope as they are.
+// It returns how many it added.
+func AddLibraryCollectionLibrariesInTx(ctx context.Context, tx pgx.Tx, collectionID string, libraryIDs []int) (int, error) {
+	libraryIDs = normalizeCollectionLibraryIDs(0, libraryIDs)
+	if len(libraryIDs) == 0 {
+		return 0, nil
+	}
+	if err := lockLibraryCollectionParent(ctx, tx, collectionID); err != nil {
+		return 0, err
+	}
+	if err := lockLibraryCollectionMembershipOrders(ctx, tx, collectionID, libraryIDs); err != nil {
+		return 0, err
+	}
+	added := 0
+	for _, libraryID := range libraryIDs {
+		tag, err := tx.Exec(ctx, `
+			INSERT INTO library_collection_libraries (collection_id, library_id, group_id, sort_order)
+			SELECT $1, $2, NULL, COALESCE((
+				SELECT MAX(sort_order) + 1 FROM library_collection_libraries WHERE library_id = $2 AND group_id IS NULL
+			), 0)
+			ON CONFLICT (collection_id, library_id) DO NOTHING`, collectionID, libraryID)
+		if err != nil {
+			return added, fmt.Errorf("writing collection library scope: %w", err)
+		}
+		added += int(tag.RowsAffected())
+	}
+	return added, nil
 }

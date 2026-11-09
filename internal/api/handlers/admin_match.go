@@ -29,6 +29,12 @@ type MatchFolderLookup interface {
 	GetFolderIDsForItem(ctx context.Context, contentID string) ([]int, error)
 }
 
+// MatchGroupLookup reads the scanner's identity for the content group of an
+// item's files in a library folder.
+type MatchGroupLookup interface {
+	GetForItem(ctx context.Context, folderID int, contentID string) (*models.ScannedMediaGroup, error)
+}
+
 // MatchMetadataService exposes search and process operations needed by the
 // admin match endpoints.
 type MatchMetadataService interface {
@@ -43,6 +49,8 @@ type AdminMatchHandler struct {
 	folders  MatchFolderLookup
 	metadata MatchMetadataService
 	EventBus cache.EventBus
+	// Groups supplies AdminItemMatchHints; without it the hints are empty.
+	Groups MatchGroupLookup
 }
 
 // NewAdminMatchHandler creates a handler for admin match search/apply endpoints.
@@ -101,6 +109,14 @@ func (h *AdminMatchHandler) HandleSearchItemMatchCandidates(w http.ResponseWrite
 		return
 	}
 
+	// The frozen /api/v1 route keeps its historical fallback to the item's
+	// stored year.
+	if req.Year == 0 {
+		if item, err := h.items.GetByID(r.Context(), contentID); err == nil {
+			req.Year = item.Year
+		}
+	}
+
 	out, err := h.SearchAdminItemMatches(r.Context(), contentID, req)
 	if err != nil {
 		writeAPIError(w, err)
@@ -113,23 +129,15 @@ type AdminMatchSearchResult = matchSearchResponse
 type AdminMatchSearchRequest = matchSearchRequest
 
 func (h *AdminMatchHandler) SearchAdminItemMatches(ctx context.Context, contentID string, req AdminMatchSearchRequest) (AdminMatchSearchResult, error) {
-	// Load the existing item to infer content type.
-	item, err := h.items.GetByID(ctx, contentID)
+	// The item supplies the content type and the title fallback.
+	item, folderID, err := h.matchTarget(ctx, contentID, req.LibraryID, "search", errInvalidMatchLibrary)
 	if err != nil {
-		slog.WarnContext(ctx, "admin match: item not found", "component", "api", "content_id", contentID, "error", err)
-		return AdminMatchSearchResult{}, apiError(http.StatusNotFound, "not_found", "Item not found")
+		return AdminMatchSearchResult{}, err
 	}
 
-	folderID, err := h.resolveMatchFolderID(ctx, contentID, req.LibraryID)
-	if err != nil {
-		if err.Error() == "ambiguous_library" {
-			return AdminMatchSearchResult{}, apiError(http.StatusBadRequest, "bad_request", "library_id is required for items in multiple libraries")
-		}
-		slog.WarnContext(ctx, "admin match: resolve folder failed", "component", "api", "content_id", contentID, "error", err)
-		return AdminMatchSearchResult{}, apiError(http.StatusBadRequest, "bad_request", "Invalid library_id")
-	}
-
-	// Build the search query from the request, falling back to item metadata.
+	// Build the search query from the request. An empty title falls back to
+	// the item's; an absent year stays absent, because the stored year belongs
+	// to the current match, which is the one an admin is usually correcting.
 	query := metadata.SearchQuery{
 		Title:       req.Title,
 		Year:        req.Year,
@@ -138,9 +146,6 @@ func (h *AdminMatchHandler) SearchAdminItemMatches(ctx context.Context, contentI
 	}
 	if query.Title == "" {
 		query.Title = item.Title
-	}
-	if query.Year == 0 {
-		query.Year = item.Year
 	}
 
 	// Inject any provider IDs from the request.
@@ -155,6 +160,44 @@ func (h *AdminMatchHandler) SearchAdminItemMatches(ctx context.Context, contentI
 	}
 
 	return AdminMatchSearchResult{Candidates: candidates}, nil
+}
+
+// AdminMatchHints is what the scanner read from an item's folder and file
+// names: the search Match Item suggests instead of the item's current, often
+// wrong, metadata. Empty fields mean the scanner found nothing for them.
+type AdminMatchHints struct {
+	Title       string
+	Year        int
+	ProviderIDs map[string]string
+}
+
+// AdminItemMatchHints returns the title, year and provider IDs the scanner
+// parsed for the content group of the item's files in the resolved library.
+func (h *AdminMatchHandler) AdminItemMatchHints(ctx context.Context, contentID string, libraryID *int) (AdminMatchHints, error) {
+	_, folderID, err := h.matchTarget(ctx, contentID, libraryID, "hints", apiError(http.StatusInternalServerError, "internal_error", "Failed to resolve the item's library"))
+	if err != nil {
+		return AdminMatchHints{}, err
+	}
+	if h.Groups == nil || folderID <= 0 {
+		return AdminMatchHints{}, nil
+	}
+	group, err := h.Groups.GetForItem(ctx, folderID, contentID)
+	if err != nil {
+		slog.ErrorContext(ctx, "admin match: scanned group lookup failed", "component", "api", "content_id", contentID, "folder_id", folderID, "error", err)
+		return AdminMatchHints{}, apiError(http.StatusInternalServerError, "internal_error", "Failed to read the scanned identity")
+	}
+	if group == nil {
+		return AdminMatchHints{}, nil
+	}
+	hints := AdminMatchHints{
+		Title:       strings.TrimSpace(group.BaseTitle),
+		Year:        group.BaseYear,
+		ProviderIDs: map[string]string{},
+	}
+	setMatchProviderID(hints.ProviderIDs, "tmdb", group.TmdbID)
+	setMatchProviderID(hints.ProviderIDs, "imdb", group.ImdbID)
+	setMatchProviderID(hints.ProviderIDs, "tvdb", group.TvdbID)
+	return hints, nil
 }
 
 // HandleApplyItemMatch handles POST /admin/items/{id}/match/apply.
@@ -194,20 +237,9 @@ func (h *AdminMatchHandler) ApplyAdminItemMatch(ctx context.Context, contentID s
 		return AdminMatchApplyResult{}, apiError(http.StatusBadRequest, "bad_request", "At least one provider ID is required")
 	}
 
-	// Verify the item exists.
-	_, err := h.items.GetByID(ctx, contentID)
+	_, folderID, err := h.matchTarget(ctx, contentID, req.LibraryID, "apply", errInvalidMatchLibrary)
 	if err != nil {
-		slog.WarnContext(ctx, "admin match: item not found for apply", "component", "api", "content_id", contentID, "error", err)
-		return AdminMatchApplyResult{}, apiError(http.StatusNotFound, "not_found", "Item not found")
-	}
-
-	folderID, err := h.resolveMatchFolderID(ctx, contentID, req.LibraryID)
-	if err != nil {
-		if err.Error() == "ambiguous_library" {
-			return AdminMatchApplyResult{}, apiError(http.StatusBadRequest, "bad_request", "library_id is required for items in multiple libraries")
-		}
-		slog.WarnContext(ctx, "admin match: resolve folder failed for apply", "component", "api", "content_id", contentID, "error", err)
-		return AdminMatchApplyResult{}, apiError(http.StatusBadRequest, "bad_request", "Invalid library_id")
+		return AdminMatchApplyResult{}, err
 	}
 	folderIDStr := ""
 	if folderID > 0 {
@@ -293,6 +325,33 @@ func (l *PoolFolderLookup) GetFolderIDsForItem(ctx context.Context, contentID st
 		folderIDs = append(folderIDs, folderID)
 	}
 	return folderIDs, rows.Err()
+}
+
+var errInvalidMatchLibrary = apiError(http.StatusBadRequest, "bad_request", "Invalid library_id")
+
+// matchTarget loads the item and resolves the library folder a match action
+// runs in, mapping failures to API errors. lookupFailure is returned when the
+// folder lookup fails on a request that named no library: search and apply
+// keep their historical 400, which the frozen /api/v1 routes share.
+func (h *AdminMatchHandler) matchTarget(ctx context.Context, contentID string, libraryID *int, action string, lookupFailure error) (*models.MediaItem, int, error) {
+	item, err := h.items.GetByID(ctx, contentID)
+	if err != nil {
+		slog.WarnContext(ctx, "admin match: item not found", "component", "api", "action", action, "content_id", contentID, "error", err)
+		return nil, 0, apiError(http.StatusNotFound, "not_found", "Item not found")
+	}
+	folderID, err := h.resolveMatchFolderID(ctx, contentID, libraryID)
+	switch {
+	case err == nil:
+		return item, folderID, nil
+	case err.Error() == "ambiguous_library":
+		return nil, 0, apiError(http.StatusBadRequest, "bad_request", "library_id is required for items in multiple libraries")
+	case libraryID == nil:
+		slog.ErrorContext(ctx, "admin match: folder lookup failed", "component", "api", "action", action, "content_id", contentID, "error", err)
+		return nil, 0, lookupFailure
+	default:
+		slog.WarnContext(ctx, "admin match: resolve folder failed", "component", "api", "action", action, "content_id", contentID, "error", err)
+		return nil, 0, errInvalidMatchLibrary
+	}
 }
 
 func (h *AdminMatchHandler) resolveMatchFolderID(ctx context.Context, contentID string, requestedLibraryID *int) (int, error) {

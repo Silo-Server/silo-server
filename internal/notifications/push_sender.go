@@ -200,7 +200,7 @@ func newPushSender(devices *PushDeviceRepository, deliveries *DeliveryRepository
 }
 
 func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAttempt) *PushDeliveryAttempt {
-	device, err := s.devices.getPushDeviceByID(ctx, attempt.PushDeviceID)
+	device, loginLive, err := s.devices.getPushDeviceByID(ctx, attempt.PushDeviceID)
 	if err != nil || device == nil {
 		if err == nil {
 			return s.finalize(ctx, attempt, PushOutcomeFailed, "", "push device deleted", nil, "", nil)
@@ -216,6 +216,11 @@ func (s *pushSender) processAttempt(ctx context.Context, attempt PushDeliveryAtt
 	}
 	if !device.Enabled || device.PushMode != PushModePrivatePush || !deliveryEnabled {
 		return s.finalize(ctx, attempt, PushOutcomeFailed, "delivery_disabled", "push delivery disabled", nil, "", nil)
+	}
+	// The attempt may have been queued while the login was live; retries run for
+	// half an hour after that.
+	if !loginLive {
+		return s.finalize(ctx, attempt, PushOutcomeFailed, "login_session_ended", "login session ended", nil, "", nil)
 	}
 	if attempt.NotificationDeliveryID != nil {
 		row, err := s.deliveries.GetRowByID(ctx, *attempt.NotificationDeliveryID)

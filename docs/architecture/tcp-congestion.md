@@ -16,7 +16,7 @@ their startup wiring in `cmd/silo/main.go`, and the shipped Compose file.
 | Jellyfin compatibility | `jellyfin` | Request BBR and evaluate send-buffer forcing |
 | Audiobookshelf compatibility | `abs` | Request BBR and evaluate send-buffer forcing |
 | Standalone proxy mode | `proxy` | Request BBR and evaluate send-buffer forcing |
-| Transcode mode, metrics and debug listeners | None | Keep the existing socket configuration |
+| Transcode mode, metrics and debug listeners | None | No congestion or send-buffer tuning; TCP by default |
 
 On Linux, `Listen` sets `TCP_CONGESTION` to `bbr`, then reads it back.
 A running helper performs the set; Silo performs the read. Without the helper,
@@ -37,6 +37,14 @@ clients keep the same protocol. The helper accepts only TCP stream sockets, so
 it refuses an MPTCP listener. MPTCP also fails to pass `TCP_NOTSENT_LOWAT` to
 accepted TCP connections. Plain TCP keeps both the helper and the memory guard
 working on these listeners.
+
+The Silo executable sets `//go:debug multipathtcp=0`, so transcode, metrics and
+debug listeners also default to plain TCP in both module and workspace builds.
+This reduces exposure to the published MPTCP exploit for CVE-2026-98432; the
+underlying Linux kernel flaw still needs a patched kernel. An operator's
+`GODEBUG` can override this executable default, but not the explicit
+`SetMultipathTCP(false)` above. Separately built plugin binaries have their own
+defaults.
 
 A TLS-terminating reverse proxy owns the client connection. Silo's socket policy
 then affects only the hop between that proxy and Silo. A network access provider

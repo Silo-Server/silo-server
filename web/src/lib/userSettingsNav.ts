@@ -1,4 +1,5 @@
 import {
+  ArrowDownUp,
   Bell,
   Bookmark,
   Cast,
@@ -520,6 +521,15 @@ export const USER_SETTINGS_GROUPS: UserSettingsNavGroup[] = [
           "Webhooks",
           "Webhook URL",
         ),
+      },
+      {
+        path: "your-data",
+        label: "Your Data",
+        icon: ArrowDownUp,
+        description:
+          "Download this profile's history, ratings, and lists, or merge a download back in.",
+        keywords: ["export", "import", "download", "backup", "move", "migrate", "json", "my data"],
+        settings: settingIndex("Export my data", "Import data", "Choose an export file"),
       },
       {
         path: "profiles",

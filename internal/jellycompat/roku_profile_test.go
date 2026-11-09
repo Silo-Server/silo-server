@@ -165,7 +165,7 @@ func TestRoku1080pProfileEncodesWithinItsLimits(t *testing.T) {
 		{name: "H.264 AAC direct plays", video: models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, audio: models.AudioTrack{Codec: "aac", Profile: "LC", Channels: 2}, bitrateKbps: 8000, wantDirect: true},
 		{name: "H.264 E-AC-3 remuxes", video: models.VideoTrack{Codec: "h264", Profile: "High", Level: 40, Width: 1920, Height: 1080}, audio: models.AudioTrack{Codec: "eac3", Channels: 6}, bitrateKbps: 8000, wantRemux: true},
 		{name: "H.264 over 10 Mb/s encodes", video: models.VideoTrack{Codec: "h264", Profile: "High", Level: 41, Width: 1920, Height: 1080}, audio: models.AudioTrack{Codec: "aac", Profile: "LC", Channels: 2}, bitrateKbps: 20000},
-		{name: "HEVC encodes", video: models.VideoTrack{Codec: "hevc", Profile: "Main 10", Level: 120, Width: 1920, Height: 1080}, audio: models.AudioTrack{Codec: "eac3", Channels: 6}, bitrateKbps: 5000},
+		{name: "HEVC encodes", video: models.VideoTrack{Codec: "hevc", Profile: "Main 10", Level: 120, Width: 1920, Height: 1080}, audio: models.AudioTrack{Codec: "eac3", Channels: 6}, bitrateKbps: 7000},
 		{name: "4K HEVC scales to 1080p", video: models.VideoTrack{Codec: "hevc", Profile: "Main 10", Level: 150, Width: 3840, Height: 2160}, audio: models.AudioTrack{Codec: "eac3", Channels: 6}, bitrateKbps: 20000, wantResolution: "1080p"},
 		{name: "4K scope fits the width", video: models.VideoTrack{Codec: "hevc", Profile: "Main 10", Level: 150, Width: 3840, Height: 1608}, audio: models.AudioTrack{Codec: "eac3", Channels: 6}, bitrateKbps: 20000, wantResolution: "804p"},
 	} {

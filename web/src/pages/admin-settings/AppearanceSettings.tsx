@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { AlertTriangle, Check, RotateCcw } from "lucide-react";
+import { AlertTriangle, Check, ImageIcon, RotateCcw } from "lucide-react";
 
 import { BrandingAssetField } from "@/components/admin/BrandingAssetField";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -8,6 +8,11 @@ import {
   type OverlayPreviewVariant,
 } from "@/components/overlays/OverlayPreviewCard";
 import { OverlayPreviewVariantToggle } from "@/components/overlays/OverlayPreviewVariantToggle";
+import { BadgeImagesControl } from "@/components/overlays/settings/BadgeImagesControl";
+import { OverlayImageLibrary } from "@/components/overlays/settings/OverlayImageLibrary";
+import { OverlayLookControls } from "@/components/overlays/settings/OverlayLookControls";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { SettingsSubheading } from "@/components/settings/SettingsSubheading";
 import {
@@ -22,28 +27,28 @@ import { useBranding } from "@/hooks/useBranding";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import {
   buildDefaultPrefs,
   CATEGORY_META,
   OVERLAY_CATEGORIES,
-  OVERLAY_PRESETS,
   OVERLAY_REGISTRY,
   isOverlayOffered,
   POSITION_OPTIONS,
-  PRESET_IDS,
   parseOverlayPrefs,
   serializeOverlayPrefs,
   type CardOverlayPrefs,
   type OverlayId,
   type OverlayPosition,
-  type PresetId,
 } from "@/lib/overlays";
 import { adminDefaultServerKey } from "@/lib/settingsAdminDefaults";
 import { SETTING_DEFINITIONS, SETTING_KEYS } from "@/lib/settingsContract";
+import { parseCardPresentation } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 import { FieldGroup } from "./FieldGroup";
 import { SaveBar } from "@/components/SaveBar";
-import { SETTINGS_CONTROL_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
+import { SettingField, SettingFieldRow } from "./SettingField";
 
 const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp";
 const FAVICON_ACCEPT =
@@ -95,6 +100,14 @@ export default function AppearanceSettings() {
   const branding = useBranding();
   const restartKeys = useRestartKeys();
   const shownRatingSources = useShownRatingSources();
+  const { images, imageUploadsAvailable, supportsStyles } = useOverlayPrefs();
+  // Poster size is each profile's own choice with no server default, so the
+  // preview draws at the administrator's. Admin pages sit outside the
+  // provider that resolves it for the app, so it is read here.
+  const presentationQuery = useEffectiveSettings({ keys: [SETTING_KEYS.UI_CARD_PRESENTATION] });
+  const { poster_size: posterSize } = parseCardPresentation(
+    presentationQuery.data?.[SETTING_KEYS.UI_CARD_PRESENTATION]?.value,
+  );
 
   const [confirmRestoreOverlaysOpen, setConfirmRestoreOverlaysOpen] = useState(false);
   // Which sample the badge preview stands in for. View state only — show-only
@@ -306,26 +319,17 @@ export default function AppearanceSettings() {
             inert={!overlaysEnabled}
             className={overlaysEnabled ? undefined : "pointer-events-none opacity-50"}
           >
-            <SettingFieldRow
-              label="Badge style"
-              description="Default for people who have not chosen their own."
-            >
-              <Select
-                value={overlayPrefs.preset}
-                onValueChange={(v) => setOverlayPrefs({ ...overlayPrefs, preset: v as PresetId })}
-              >
-                <SelectTrigger className={SETTINGS_CONTROL_WIDTH} aria-label="Badge style">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PRESET_IDS.map((id) => (
-                    <SelectItem key={id} value={id}>
-                      {OVERLAY_PRESETS[id].label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </SettingFieldRow>
+            <div className="space-y-2 py-4">
+              <p className="text-sm font-medium">Badge style</p>
+              <p className="text-muted-foreground text-[13px] leading-relaxed">
+                Default for people who have not chosen their own.
+              </p>
+              <OverlayLookControls
+                prefs={overlayPrefs}
+                onChange={setOverlayPrefs}
+                supportsStyles={supportsStyles}
+              />
+            </div>
             <div className="border-border/70 bg-foreground/[0.02] mb-4 rounded-xl border p-3">
               <div className="flex items-center justify-between gap-3 px-1">
                 <span className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -334,7 +338,11 @@ export default function AppearanceSettings() {
                 <OverlayPreviewVariantToggle value={previewVariant} onChange={setPreviewVariant} />
               </div>
               <div className="mt-3 flex justify-center pb-1">
-                <OverlayPreviewCard prefs={overlayPrefs} size="sm" variant={previewVariant} />
+                <OverlayPreviewCard
+                  prefs={overlayPrefs}
+                  posterSize={posterSize}
+                  variant={previewVariant}
+                />
               </div>
             </div>
           </div>
@@ -367,7 +375,10 @@ export default function AppearanceSettings() {
                               updateOverlayItem(def.id, { position: pos as OverlayPosition })
                             }
                           >
-                            <SelectTrigger className="w-[130px]" aria-label={`${def.label} corner`}>
+                            <SelectTrigger
+                              className="w-[140px]"
+                              aria-label={`${def.label} position`}
+                            >
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -378,6 +389,33 @@ export default function AppearanceSettings() {
                               ))}
                             </SelectContent>
                           </Select>
+                          {supportsStyles &&
+                          (images.length > 0 || config.image || config.valueImages) ? (
+                            <Popover>
+                              <PopoverTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  disabled={!config.enabled}
+                                  aria-label={`${def.label} images`}
+                                  className={cn(
+                                    (config.image || config.valueImages) && "text-primary",
+                                  )}
+                                >
+                                  <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent align="end" className="w-80 p-4">
+                                <BadgeImagesControl
+                                  def={def}
+                                  config={config}
+                                  images={images}
+                                  onChange={(patch) => updateOverlayItem(def.id, patch)}
+                                />
+                              </PopoverContent>
+                            </Popover>
+                          ) : null}
                           <Switch
                             checked={config.enabled}
                             aria-label={`Show ${def.label}`}
@@ -394,6 +432,12 @@ export default function AppearanceSettings() {
             })}
           </div>
         </FieldGroup>
+
+        {supportsStyles ? (
+          <FieldGroup label="Badge images">
+            <OverlayImageLibrary images={images} uploadsAvailable={imageUploadsAvailable} />
+          </FieldGroup>
+        ) : null}
 
         <FieldGroup label="Title pages" restartAll={allRestart(TITLE_ART_KEYS)}>
           <SettingField

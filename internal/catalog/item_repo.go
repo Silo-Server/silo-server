@@ -242,6 +242,7 @@ var itemColumnNames = []string{
 	"matched_at", "last_refreshed", "refresh_failures",
 	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
 	advisoryAgeColumn, advisorySourceColumn,
+	"digital_release_date::text", "physical_release_date::text",
 }
 
 // nullableStringItemColumns are media_items columns that may hold NULL but
@@ -380,6 +381,8 @@ func scanItem(row pgx.Row) (*models.MediaItem, error) {
 		&item.UpdatedAt,
 		&item.AdvisoryAge,
 		&item.AdvisorySource,
+		&item.DigitalReleaseDate,
+		&item.PhysicalReleaseDate,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -458,6 +461,8 @@ func listItemScanDests(item *models.MediaItem) []any {
 		&item.UpdatedAt,
 		&item.AdvisoryAge,
 		&item.AdvisorySource,
+		&item.DigitalReleaseDate,
+		&item.PhysicalReleaseDate,
 	}
 }
 
@@ -685,7 +690,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			content_rating_age,
 			advisory_age, advisory_source,
 			banner_path, banner_source_path, banner_thumbhash, thumb_path, thumb_source_path, thumb_thumbhash,
-			clearart_path, clearart_source_path, disc_path, disc_source_path
+			clearart_path, clearart_source_path, disc_path, disc_source_path,
+			digital_release_date, physical_release_date
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
 			$9, $10, $11, $12,
@@ -700,7 +706,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			$48,
 			$49, $50,
 			$51, $52, $53, $54, $55, $56,
-			$57, $58, $59, $60
+			$57, $58, $59, $60,
+			$61, $62
 		)`
 	conflict := `
 		ON CONFLICT (content_id) DO NOTHING`
@@ -738,6 +745,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 			keywords = EXCLUDED.keywords,
 			original_language = EXCLUDED.original_language,
 			release_date = EXCLUDED.release_date,
+			digital_release_date = EXCLUDED.digital_release_date,
+			physical_release_date = EXCLUDED.physical_release_date,
 			first_air_date = EXCLUDED.first_air_date,
 			last_air_date = EXCLUDED.last_air_date,
 			air_time = EXCLUDED.air_time,
@@ -822,6 +831,8 @@ func (r *ItemRepository) writeItem(ctx context.Context, execer itemExecer, item 
 		item.ClearArtSourcePath,
 		item.DiscPath,
 		item.DiscSourcePath,
+		item.DigitalReleaseDate,
+		item.PhysicalReleaseDate,
 	)
 	if err != nil {
 		return false, fmt.Errorf("writing media item: %w", err)
@@ -904,13 +915,24 @@ func (r *ItemRepository) GetStatusByIDs(ctx context.Context, ids []string) (map[
 // (libraryAccessConditions), the same semantics EnsureAccessible and
 // EnsureAccessibleIDs enforce.
 func (r *ItemRepository) GetByIDsWithAccess(ctx context.Context, contentIDs []string, access AccessFilter) ([]*models.MediaItem, error) {
+	return r.getByIDsWithAccess(ctx, contentIDs, access, itemAccessConditions)
+}
+
+// GetListedByIDsWithAccess is GetByIDsWithAccess for a listing built from
+// stored IDs, such as a collection's member page: it also leaves out items in
+// no library, as listedItemAccessConditions does.
+func (r *ItemRepository) GetListedByIDsWithAccess(ctx context.Context, contentIDs []string, access AccessFilter) ([]*models.MediaItem, error) {
+	return r.getByIDsWithAccess(ctx, contentIDs, access, listedItemAccessConditions)
+}
+
+func (r *ItemRepository) getByIDsWithAccess(ctx context.Context, contentIDs []string, access AccessFilter, conditions itemConditions) ([]*models.MediaItem, error) {
 	if len(contentIDs) == 0 {
 		return []*models.MediaItem{}, nil
 	}
 	if access.AllowedLibraryIDs != nil && len(access.AllowedLibraryIDs) == 0 {
 		return []*models.MediaItem{}, nil
 	}
-	sql, args := r.buildGetByIDsWithAccessSQL(contentIDs, access)
+	sql, args := r.buildGetByIDsWithAccessSQL(contentIDs, access, conditions)
 	rows, err := r.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fetching media items by IDs with access: %w", err)
@@ -919,14 +941,17 @@ func (r *ItemRepository) GetByIDsWithAccess(ctx context.Context, contentIDs []st
 	return scanItems(rows)
 }
 
-func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access AccessFilter) (string, []any) {
+// itemConditions renders access predicates over media_items mi.
+type itemConditions func(access AccessFilter, args *[]any, argIdx *int) []string
+
+func (r *ItemRepository) buildGetByIDsWithAccessSQL(contentIDs []string, access AccessFilter, conditions itemConditions) (string, []any) {
 	sql := `SELECT ` + itemColumns + `
             FROM media_items mi
             WHERE mi.content_id = ANY($1)`
 	args := []any{contentIDs}
 	argIdx := 2
 
-	for _, c := range itemAccessConditions(access, &args, &argIdx) {
+	for _, c := range conditions(access, &args, &argIdx) {
 		sql += "\n            AND " + c
 	}
 
@@ -941,6 +966,18 @@ func itemAccessConditions(access AccessFilter, args *[]any, argIdx *int) []strin
 	var conditions []string
 	appendLibraryAccessConditions("mi.content_id", access, &conditions, args, argIdx)
 	applyAccessFilter("mi", AccessFilter{MaturityLimits: access.MaturityLimits, ExcludedMediaTypes: access.ExcludedMediaTypes}, &conditions, args, argIdx)
+	return conditions
+}
+
+// listedItemAccessConditions is itemAccessConditions for listings and their
+// counts: with no library restriction it still requires the item to be in a
+// library, so an item held only by the scanner's file removal grace is left
+// out (see InSomeLibraryWhere).
+func listedItemAccessConditions(access AccessFilter, args *[]any, argIdx *int) []string {
+	conditions := itemAccessConditions(access, args, argIdx)
+	if access.AllowedLibraryIDs == nil && len(access.DisabledLibraryIDs) == 0 {
+		conditions = append(conditions, InSomeLibraryWhere("mi.content_id"))
+	}
 	return conditions
 }
 
@@ -980,7 +1017,7 @@ func buildCountVisiblePersonalCollectionMembersSQL(userID int, collectionIDs []s
             WHERE upci.user_id = $1 AND upci.collection_id = ANY($2) AND upci.sub_item_id = ''`
 	args := []any{userID, collectionIDs}
 	argIdx := 3
-	for _, c := range itemAccessConditions(access, &args, &argIdx) {
+	for _, c := range listedItemAccessConditions(access, &args, &argIdx) {
 		sql += "\n            AND " + c
 	}
 	// The catalog view never lists manga chapters as items.

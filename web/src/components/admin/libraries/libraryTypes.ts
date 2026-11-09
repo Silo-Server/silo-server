@@ -10,11 +10,35 @@ export const LIBRARY_TYPES = [
   { value: "podcasts", label: "Podcasts", icon: Podcast },
 ] as const;
 
+// Other spellings internal/librarykind accepts for each library type; the
+// server stores the type as free text.
+const LIBRARY_TYPE_ALIASES: Readonly<Record<string, string>> = {
+  movie: "movies",
+  tv: "series",
+  show: "series",
+  tvshows: "series",
+  audiobook: "audiobooks",
+  ebook: "ebooks",
+  podcast: "podcasts",
+};
+
+/** The library type a stored type string means, or undefined for an unknown type. */
+export function findLibraryType(type: string) {
+  const kind = type.trim().toLowerCase();
+  const value = LIBRARY_TYPE_ALIASES[kind] ?? kind;
+  return LIBRARY_TYPES.find((t) => t.value === value);
+}
+
 export function libraryTypeMeta(type: string) {
-  return LIBRARY_TYPES.find((t) => t.value === type) ?? LIBRARY_TYPES[0];
+  return findLibraryType(type) ?? LIBRARY_TYPES[0];
 }
 
 // Keep these aligned with the video scanner and intro-marker library filters.
+/** The box set size a library starts with, as the server defaults it. */
+export const DEFAULT_BOX_SET_MIN_MOVIES = 2;
+/** The minimum box set sizes the form offers; the server accepts 2 to 10. */
+export const BOX_SET_MIN_MOVIE_OPTIONS = [2, 3, 4, 5] as const;
+
 export function librarySettingSupport(type: string) {
   const kind = type.trim().toLowerCase();
   // The scanner routes these types to dedicated pipelines; everything else
@@ -38,5 +62,7 @@ export function librarySettingSupport(type: string) {
     // which get intros too, so they keep detection on.
     creditsOnlyDetection: kind === "movies",
     movieCreditsDetection: kind === "movies" || kind === "mixed",
+    // Box sets group movies, so only libraries that hold movies offer them.
+    boxSets: ["movie", "movies", "mixed"].includes(kind),
   };
 }
