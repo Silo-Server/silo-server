@@ -1211,7 +1211,7 @@ Jellyfin protocol.
 
 ## App language
 
-Revision 27 adds `ui.app_language`, the language of a client's menus, buttons and messages. It
+Revision 28 adds `ui.app_language`, the language of a client's menus, buttons and messages. It
 is a nullable `language_tag` stored at `profile` or `profile_device` and resolved
 `profile_device` → `profile` → `default`. The default `null` means "follow the device or browser
 language". The value is an open tag that the server canonicalizes on write (`pt_br` is stored as

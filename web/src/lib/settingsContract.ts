@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 27;
+export const SETTINGS_REVISION = 28;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -25,14 +25,14 @@ export const SETTING_OPTION_SETS = {
   app_languages: {
     type: "language_tag",
     options: [
-      { value: "en", introducedIn: 27 },
-      { value: "es", introducedIn: 27 },
-      { value: "de", introducedIn: 27 },
-      { value: "fr", introducedIn: 27 },
-      { value: "pt-BR", introducedIn: 27 },
-      { value: "ja", introducedIn: 27 },
-      { value: "zh-Hans", introducedIn: 27 },
-      { value: "ar", introducedIn: 27 },
+      { value: "en", introducedIn: 28 },
+      { value: "es", introducedIn: 28 },
+      { value: "de", introducedIn: 28 },
+      { value: "fr", introducedIn: 28 },
+      { value: "pt-BR", introducedIn: 28 },
+      { value: "ja", introducedIn: 28 },
+      { value: "zh-Hans", introducedIn: 28 },
+      { value: "ar", introducedIn: 28 },
     ],
   },
   catalog_metadata_languages: {
@@ -1374,9 +1374,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     type: "language_tag",
     nullable: true,
     persistence: "remote",
-    introducedIn: 27,
+    introducedIn: 28,
     scopes: ["profile", "profile_device"],
-    scopeIntroducedIn: [27, 27],
+    scopeIntroducedIn: [28, 28],
     resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: null,
     label: "App language",

@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 27,
+  "revision": 28,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -158,14 +158,14 @@
     "app_languages": {
       "type": "language_tag",
       "options": [
-        { "value": "en", "introduced_in": 27 },
-        { "value": "es", "introduced_in": 27 },
-        { "value": "de", "introduced_in": 27 },
-        { "value": "fr", "introduced_in": 27 },
-        { "value": "pt-BR", "introduced_in": 27 },
-        { "value": "ja", "introduced_in": 27 },
-        { "value": "zh-Hans", "introduced_in": 27 },
-        { "value": "ar", "introduced_in": 27 }
+        { "value": "en", "introduced_in": 28 },
+        { "value": "es", "introduced_in": 28 },
+        { "value": "de", "introduced_in": 28 },
+        { "value": "fr", "introduced_in": 28 },
+        { "value": "pt-BR", "introduced_in": 28 },
+        { "value": "ja", "introduced_in": 28 },
+        { "value": "zh-Hans", "introduced_in": 28 },
+        { "value": "ar", "introduced_in": 28 }
       ]
     }
   },
@@ -1157,7 +1157,7 @@
     },
     {
       "key": "ui.app_language",
-      "introduced_in": 27,
+      "introduced_in": 28,
       "persistence": "remote",
       "allowed_scopes": ["profile", "profile_device"],
       "resolution_order": ["profile_device", "profile", "default"],
