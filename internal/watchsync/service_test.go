@@ -2146,6 +2146,7 @@ func TestServiceImportWatchedSkipsProviderCopyOfScrobbledPlay(t *testing.T) {
 		wantRecorded bool
 	}{
 		{name: "provider stamp at the stop", connectionID: "conn-1", remote: stopSent},
+		{name: "provider stamp two minutes before the stop", connectionID: "conn-1", remote: stopSent.Add(-2 * time.Minute)},
 		{name: "provider stamp a minute after the stop", connectionID: "conn-1", remote: stopSent.Add(time.Minute)},
 		{name: "a second play of a short item", connectionID: "conn-1", remote: stopSent.Add(3 * time.Minute), wantRecorded: true},
 		{name: "a play this connection didn't scrobble", remote: stopSent, wantRecorded: true},
