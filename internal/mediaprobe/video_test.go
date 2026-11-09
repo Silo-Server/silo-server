@@ -131,6 +131,9 @@ func TestStreamBitrateKbps(t *testing.T) {
 		{name: "older BPS-eng tag", stream: Stream{Tags: map[string]string{matroskaBPSEngTag: "448000"}}, want: 448},
 		{name: "BPS-eng wins over BPS", stream: Stream{Tags: map[string]string{matroskaBPSEngTag: "448000", matroskaBPSTag: "640000"}}, want: 448},
 		{name: "unparseable tag", stream: Stream{Tags: map[string]string{matroskaBPSTag: "fast"}}, want: 0},
+		// A corrupt tag must stay unknown, not become a huge bitrate.
+		{name: "overflowing tag falls through", stream: Stream{Tags: map[string]string{matroskaBPSEngTag: "99999999999999999999", matroskaBPSTag: "640000"}}, want: 640},
+		{name: "implausible tag", stream: Stream{Tags: map[string]string{matroskaBPSTag: "3000000000000"}}, want: 0},
 		{name: "unknown", stream: Stream{}, want: 0},
 	}
 	for _, tt := range tests {

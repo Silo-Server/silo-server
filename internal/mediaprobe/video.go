@@ -376,17 +376,35 @@ const (
 // BPS statistics tag (BPS-eng in older muxers), which is the fallback. The
 // tag order matches Jellyfin's ProbeResultNormalizer.
 func StreamBitrateKbps(stream Stream) int {
-	if bps := parseNumeric(stream.BitRate); bps > 0 {
-		return bps / 1000
+	if kbps := bitrateKbps(stream.BitRate); kbps > 0 {
+		return kbps
 	}
 	for _, key := range []string{matroskaBPSEngTag, matroskaBPSTag} {
 		for tag, value := range stream.Tags {
 			if strings.EqualFold(tag, key) {
-				if bps := parseNumeric(strings.TrimSpace(value)); bps > 0 {
-					return bps / 1000
+				if kbps := bitrateKbps(value); kbps > 0 {
+					return kbps
 				}
 			}
 		}
+	}
+	return 0
+}
+
+// maxStreamBitrateKbps (10 Gb/s) is far above any real audio stream or
+// compressed video. A larger value is a corrupt tag, and storing it would fail
+// every client bitrate limit and overflow clients' 32-bit bitrate fields.
+const maxStreamBitrateKbps = 10_000_000
+
+// bitrateKbps converts a bits-per-second string to kbps, or 0 when it is
+// unparseable or out of range.
+func bitrateKbps(raw string) int {
+	bps, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0
+	}
+	if kbps := bps / 1000; kbps > 0 && kbps <= maxStreamBitrateKbps {
+		return kbps
 	}
 	return 0
 }
