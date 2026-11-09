@@ -207,6 +207,14 @@ describe("TranscodeNodesWidget", () => {
       ],
       header: "2 groups · 3/3 healthy · 0 streams · 0 Mbps",
     },
+    {
+      scenario: "leaves out the last counts of a switched-off node",
+      fleet: [
+        node({ id: 1, type: "proxy", active_jobs: 2, egress_kbps: 10_000 }),
+        node({ id: 2, type: "proxy", enabled: false, active_jobs: 5, egress_kbps: 50_000 }),
+      ],
+      header: "1/1 healthy · 2 streams · 10 Mbps",
+    },
   ])("header $scenario", ({ fleet, header }) => {
     renderFleet(fleet);
 
@@ -236,13 +244,30 @@ describe("TranscodeNodesWidget", () => {
       );
     });
 
-    it("shows dashes rather than an old sample for a node that stopped answering", () => {
-      renderFleet([node({ name: "down", healthy: false, last_stats: sample() })]);
+    it.each([
+      { scenario: "stopped answering", overrides: { healthy: false } },
+      {
+        // Switched off, so no check has updated it since.
+        scenario: "is switched off",
+        overrides: {
+          enabled: false,
+          last_health_check: new Date(Date.now() - 10 * 60_000).toISOString(),
+        },
+      },
+    ])("shows dashes rather than old readings for a node that $scenario", ({ overrides }) => {
+      renderFleet([
+        node({
+          name: "down",
+          active_jobs: 3,
+          egress_kbps: 60_000,
+          last_stats: sample(),
+          ...overrides,
+        }),
+      ]);
 
       const cells = cellsOf("down");
-      // A failed check reports zeros, which would read as an idle node.
       expect(cells.filter((text) => text === "–")).toHaveLength(5);
-      expect(cells.join()).not.toMatch(/%|\d/);
+      expect(cells.join()).not.toMatch(/%|trns|60/);
     });
 
     it("gives a proxy no GPU reading, since it never transcodes on hardware", () => {

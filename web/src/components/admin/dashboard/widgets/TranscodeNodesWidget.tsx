@@ -254,14 +254,19 @@ function transcodeDirectoryWarning(node: StreamNode): ResourceMetric | null {
 /**
  * Group count, healthy count, then the work and egress across the fleet.
  * Disabled nodes are left out of the healthy ratio for the same reason the
- * health strip leaves them out: an operator turned them off on purpose.
+ * health strip leaves them out: an operator turned them off on purpose. Work
+ * and egress count only the nodes whose last check is current, as the server's
+ * egress chart does: a disabled node keeps its last reported counts forever.
  */
 function FleetSummary({ nodes }: { nodes: StreamNode[] }) {
   const enabled = nodes.filter((node) => node.enabled);
-  const healthy = enabled.filter((node) => node.healthy).length;
-  const egressKbps = nodes.reduce((sum, node) => sum + node.egress_kbps, 0);
+  const live = enabled.filter((node) => node.healthy);
+  const healthy = live.length;
+  const egressKbps = live.reduce((sum, node) => sum + node.egress_kbps, 0);
   const work = (unit: string, list: StreamNode[]) => {
-    const active = list.reduce((sum, node) => sum + node.active_jobs, 0);
+    const active = list
+      .filter((node) => live.includes(node))
+      .reduce((sum, node) => sum + node.active_jobs, 0);
     return `${active.toLocaleString()} ${unit}${active === 1 ? "" : "s"}`;
   };
   const proxies = nodes.filter((node) => node.type === "proxy");
@@ -449,7 +454,7 @@ function NodeRow({
   const readings = nodeReadings(node);
   const build = node.last_stats?.build;
   const storage = transcodeDirectoryWarning(node);
-  const unreachable = state === "unhealthy";
+  const noCountsTitle = staleCountsTitle(state);
 
   return (
     <tr className={state === "disabled" ? "text-muted-foreground" : undefined}>
@@ -482,18 +487,14 @@ function NodeRow({
           ) : null}
         </div>
       </th>
-      {/* A failed check reports zeros, which would read as an idle node. */}
-      <td
-        className={cn(CELL, ACTIVE_COLUMN)}
-        title={unreachable ? UNREACHABLE_TITLE : describeNodeJobs(node).title}
-      >
-        {unreachable ? <NoReading /> : <ActiveCount node={node} />}
+      <td className={cn(CELL, ACTIVE_COLUMN)} title={noCountsTitle ?? describeNodeJobs(node).title}>
+        {noCountsTitle ? <NoReading /> : <ActiveCount node={node} />}
       </td>
       <td
         className={cn(CELL, EGRESS_COLUMN)}
-        title={unreachable ? UNREACHABLE_TITLE : describeNodeEgress(node).title}
+        title={noCountsTitle ?? describeNodeEgress(node).title}
       >
-        {unreachable ? <NoReading /> : <EgressValue node={node} />}
+        {noCountsTitle ? <NoReading /> : <EgressValue node={node} />}
       </td>
       <td className={cn(CELL, CPU_COLUMN)}>
         <LoadReading name={`${node.name} CPU`} metric={readings.cpu} />
@@ -521,7 +522,21 @@ function NodeRow({
   );
 }
 
-const UNREACHABLE_TITLE = "The last health check did not reach this node.";
+/**
+ * Why a node's work counts are not current, or null when they are. A failed
+ * check reports zeros, which would read as an idle node, and a switched-off node
+ * leaves the pool and is never checked again, so it keeps whatever its last
+ * check reported.
+ */
+function staleCountsTitle(state: NodeState): string | null {
+  if (state === "unhealthy") {
+    return "The last health check did not reach this node.";
+  }
+  if (state === "disabled") {
+    return "This node is switched off, so health checks no longer update it.";
+  }
+  return null;
+}
 
 function NoReading() {
   return <span className="text-muted-foreground">–</span>;
