@@ -92,6 +92,8 @@ list=.silo-translations-files
 # The new list is set aside and installed only after copying and pruning, so a failed run leaves
 # the old list in place and a retry still knows which files to remove.
 mv "$tmp/tree/$list" "$tmp/new-list"
+# Every check below reads the list line by line; a final entry without a newline would skip them.
+[ -z "$(tail -c 1 "$tmp/new-list")" ] || die "$list does not end with a newline"
 
 # A listed path must be relative and stay inside the client.
 unsafe() { grep -E '^/|(^|/)\.\.(/|$)|^$' "$1"; }
