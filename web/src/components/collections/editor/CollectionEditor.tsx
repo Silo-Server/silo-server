@@ -239,10 +239,18 @@ function syncedTouched(synced: SyncedDraft | undefined) {
 }
 
 /**
+ * Where a save that worked goes once it settles: Save and Create back to the
+ * list (`created`: the new collection's edit page instead, when Create left
+ * something unsaved), Save and continue on to its detour.
+ */
+type AfterSave = { to: "list"; created?: string } | { to: "detour"; path: string };
+
+/**
  * The editor page for every collection type, both scopes, create and edit.
- * A Manual or Smart collection's instance carries on from `/new` to
- * `/:id/edit` after Create; a new Synced list moves to its own edit page,
- * which opens it fresh with its first sync's state.
+ * Save and Create return to the list the editor was opened from. When Create
+ * leaves something unsaved (a title or image that failed), a Manual or Smart
+ * collection's instance carries on from `/new` to `/:id/edit` with it; a new
+ * Synced list always returns, since its edit page would open it fresh.
  */
 export function CollectionEditor<Raw extends WireCollection>({
   scope,
@@ -286,8 +294,8 @@ export function CollectionEditor<Raw extends WireCollection>({
   const [leaving, setLeaving] = useState<string | null>(null);
   // A trip to Home rows (Add as a row), from which the editor expects to be handed back.
   const [detour, setDetour] = useState<string | null>(null);
-  // Save and continue saved: the trip to take once that save has settled.
-  const [afterSave, setAfterSave] = useState<string | null>(null);
+  // A save or Create that worked: where to go once it has settled.
+  const [afterSave, setAfterSave] = useState<AfterSave | null>(null);
   const [openEdit, setOpenEdit] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const listPath = useListReturnPath(
@@ -341,9 +349,9 @@ export function CollectionEditor<Raw extends WireCollection>({
   }
 
   const staged = draft.stagedItems ?? NO_TITLES;
-  // After Create the page moves to the collection's edit URL. Until it gets
-  // there it reports clean, so the guard never asks; a poster that failed to
-  // upload then counts as unsaved again.
+  // A Create that left something unsaved moves to the collection's edit URL.
+  // Until it gets there it reports clean, so the guard never asks; a poster
+  // that failed to upload then counts as unsaved again.
   const location = useLocation();
   const moving = openEdit !== null && location.pathname !== scope.paths.edit(openEdit);
   const dirty = editor.isDirty || (!created && (staged.length > 0 || syncedTouched(draft.synced)));
@@ -381,11 +389,18 @@ export function CollectionEditor<Raw extends WireCollection>({
     smart,
   ]);
 
-  // Something the save couldn't keep (artwork that failed to upload, an edit
-  // made while saving) stays here with its message rather than being dropped.
+  // Something the save couldn't keep (artwork that failed to upload, a title
+  // that failed to add, an edit made while saving) stays here with its message
+  // rather than being dropped. Otherwise Save and Create return to the list.
   if (afterSave && !editor.isSaving) {
     setAfterSave(null);
-    if (!editor.isDirty) setDetour(afterSave);
+    if (afterSave.to === "detour") {
+      if (!editor.isDirty) setDetour(afterSave.path);
+    } else if (!editor.isDirty && staged.length === 0) {
+      setLeaving(listPath);
+    } else if (afterSave.created) {
+      setOpenEdit(afterSave.created);
+    }
   }
 
   const libraryOptions = adminLibraries.map(({ id, name, type }) => ({ id, name, type }));
@@ -465,7 +480,10 @@ export function CollectionEditor<Raw extends WireCollection>({
     if (!savingFirst || saveBlockedReason) return;
     const saved = await editor.save();
     setSavingFirst(null);
-    if (saved) setAfterSave(savingFirst.path);
+    if (saved) setAfterSave({ to: "detour", path: savingFirst.path });
+  }
+  async function save() {
+    if (await editor.save()) setAfterSave({ to: "list" });
   }
   // Only a hidden server collection waits to be shown: a personal row's See all
   // opens however its Collections tab switch is set.
@@ -549,10 +567,12 @@ export function CollectionEditor<Raw extends WireCollection>({
       const description = result.warnings.length > 0 ? result.warnings.join(" ") : undefined;
       if (tone === "warning" || description) toast.warning(text, { description });
       else toast.success(text);
-    } else {
-      onCreated?.(result.id);
+      // Its edit page would open it fresh anyway, so nothing here is kept.
+      setLeaving(listPath);
+      return;
     }
-    setOpenEdit(result.id);
+    onCreated?.(result.id);
+    setAfterSave({ to: "list", created: result.id });
   }
 
   const needsLibraries = scope.requireLibraries && draft.libraryIds.length === 0;
@@ -593,7 +613,7 @@ export function CollectionEditor<Raw extends WireCollection>({
       isSaving={editor.isSaving}
       saveLabel={editor.saveError ? "Try again" : "Save"}
       canSave={!saveBlockedReason}
-      onSave={() => void editor.save()}
+      onSave={() => void save()}
       onDiscard={() => {
         editor.discard();
         setDiscards((count) => count + 1);
