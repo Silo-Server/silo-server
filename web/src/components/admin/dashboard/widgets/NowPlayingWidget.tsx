@@ -3,12 +3,14 @@ import { Link } from "react-router";
 import { Pause, Play } from "lucide-react";
 import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { PlaybackRouteBadges } from "@/components/PlaybackRouteBadges";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminSessions } from "@/hooks/queries/admin/stats";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   activityMethodMeta,
   classifyActivityMethod,
+  formatPlaybackPosition,
   getSessionClientLabel,
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
@@ -230,10 +232,9 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
     ? session.episode_name || `S${session.season_number}E${session.episode_number}`
     : session.media_title || `File #${session.media_file_id}`;
   const username = session.username || `User #${session.user_id}`;
-  const elapsed = formatRelativeTime(session.started_at, {
-    rounding: "floor",
-    justNowLabel: "Just now",
-  });
+  const startedAgo = formatRelativeTime(session.started_at, { rounding: "floor" });
+  const position = formatPlaybackPosition(session);
+  const duration = session.file_duration ?? 0;
   const clientLabel = getSessionClientLabel(session);
   const method = classifyActivityMethod(session);
   const methodMeta = activityMethodMeta(method);
@@ -325,16 +326,37 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           )}
         </div>
 
-        {/* User */}
-        <div className="mt-auto flex items-center gap-1.5">
-          <div
-            className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
-            style={{ background: `var(--primary)` }}
-          >
-            {username.charAt(0).toUpperCase()}
+        <div className="mt-auto">
+          {/* Position: the bar needs a duration; the time shows either way. */}
+          <div className="mb-1.5 flex items-center gap-2">
+            {duration > 0 ? (
+              <Progress
+                value={(session.position_seconds / duration) * 100}
+                aria-label="Playback position"
+                aria-valuetext={position}
+                className={cn("h-1 flex-1 rounded-full", session.is_paused && "opacity-45")}
+              />
+            ) : null}
+            <span className="text-muted-foreground ml-auto shrink-0 text-[10px] tabular-nums">
+              {position}
+            </span>
           </div>
-          <span className="min-w-0 truncate text-xs font-medium">{username}</span>
-          <span className="text-muted-foreground ml-auto shrink-0 text-[10px]">{elapsed}</span>
+
+          {/* User */}
+          <div className="flex items-center gap-1.5">
+            <div
+              className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+              style={{ background: `var(--primary)` }}
+            >
+              {username.charAt(0).toUpperCase()}
+            </div>
+            <span className="min-w-0 truncate text-xs font-medium">{username}</span>
+            {startedAgo ? (
+              <span className="text-muted-foreground ml-auto shrink-0 text-[10px]">
+                Started {startedAgo}
+              </span>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>

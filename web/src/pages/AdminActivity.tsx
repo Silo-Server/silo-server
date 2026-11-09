@@ -27,6 +27,7 @@ import {
   formatDeliveredVideoSummary,
   formatAudioSummary,
   formatDecisionLabel,
+  formatPlaybackPosition,
   formatSessionBitrate,
   formatSourceContainerSummary,
   formatToneMapSummary,
@@ -1424,25 +1425,6 @@ function getElapsed(dateStr: string): string {
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function formatPlaybackPosition(session: AdminSession): string {
-  const position = formatClockTime(session.position_seconds);
-  if (session.file_duration == null || session.file_duration <= 0) {
-    return position;
-  }
-  return `${position} / ${formatClockTime(session.file_duration)}`;
-}
-
-function formatClockTime(seconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
-  const h = Math.floor(safeSeconds / 3600);
-  const m = Math.floor((safeSeconds % 3600) / 60);
-  const s = safeSeconds % 60;
-  if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
