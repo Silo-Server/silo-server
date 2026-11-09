@@ -2,11 +2,14 @@ package historyimport
 
 import (
 	"context"
+	"crypto/md5" //nolint:gosec // LeafSetHash is a change fingerprint
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -973,11 +976,51 @@ type mediaLookupRow struct {
 	Year      int
 }
 
+// catalogLookup runs the matcher's catalog reads on q: the pool, or a
+// caller's transaction.
+type catalogLookup struct{ q lookupQuerier }
+
+// lookupQuerier is what the matcher's reads need: a pool, a connection, or a
+// transaction.
+type lookupQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// NewMatcherOn returns a Matcher whose catalog reads run on q. A caller
+// inside a transaction passes it, so matching never waits on the pool for a
+// second connection while the caller holds one: with a pool of one
+// connection that wait would never end, and concurrent callers could
+// exhaust a larger pool.
+func NewMatcherOn(q lookupQuerier) *Matcher {
+	return NewMatcher(catalogLookup{q: q})
+}
+
 func (r *Repository) MatchMediaByExternalID(ctx context.Context, kind, column, value string) ([]mediaLookupRow, error) {
+	return catalogLookup{q: r.pool}.MatchMediaByExternalID(ctx, kind, column, value)
+}
+
+func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error) {
+	return catalogLookup{q: r.pool}.MatchEpisodeByExternalID(ctx, column, value)
+}
+
+func (r *Repository) MatchEpisodeBySeriesExternalID(ctx context.Context, column, value string, seasonNumber, episodeNumber int) ([]mediaLookupRow, error) {
+	return catalogLookup{q: r.pool}.MatchEpisodeBySeriesExternalID(ctx, column, value, seasonNumber, episodeNumber)
+}
+
+func (r *Repository) MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error) {
+	return catalogLookup{q: r.pool}.MatchEpisodeBySeries(ctx, seriesID, seasonNumber, episodeNumber)
+}
+
+func (r *Repository) MatchEpisodesBySeries(ctx context.Context, seriesID string, seasonNumber *int, watchedAt *time.Time, allowedLibraryIDs []int) ([]Match, error) {
+	return catalogLookup{q: r.pool}.MatchEpisodesBySeries(ctx, seriesID, seasonNumber, watchedAt, allowedLibraryIDs)
+}
+
+func (l catalogLookup) MatchMediaByExternalID(ctx context.Context, kind, column, value string) ([]mediaLookupRow, error) {
 	if value == "" {
 		return nil, nil
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := l.q.Query(ctx, `
 		SELECT content_id, title, COALESCE(year, 0)
 		FROM media_items
 		WHERE type = $1 AND status = 'matched' AND `+column+` = $2
@@ -1002,11 +1045,11 @@ func (r *Repository) MatchMediaByExternalID(ctx context.Context, kind, column, v
 	return matches, nil
 }
 
-func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error) {
+func (l catalogLookup) MatchEpisodeByExternalID(ctx context.Context, column, value string) ([]mediaLookupRow, error) {
 	if value == "" {
 		return nil, nil
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := l.q.Query(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		LEFT JOIN media_items series ON series.content_id = e.series_id
@@ -1033,7 +1076,7 @@ func (r *Repository) MatchEpisodeByExternalID(ctx context.Context, column, value
 	return matches, nil
 }
 
-func (r *Repository) MatchEpisodeBySeriesExternalID(
+func (l catalogLookup) MatchEpisodeBySeriesExternalID(
 	ctx context.Context,
 	column, value string,
 	seasonNumber, episodeNumber int,
@@ -1041,7 +1084,7 @@ func (r *Repository) MatchEpisodeBySeriesExternalID(
 	if value == "" {
 		return nil, nil
 	}
-	rows, err := r.pool.Query(ctx, `
+	rows, err := l.q.Query(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		JOIN media_items series ON series.content_id = e.series_id
@@ -1072,8 +1115,8 @@ func (r *Repository) MatchEpisodeBySeriesExternalID(
 	return matches, nil
 }
 
-func (r *Repository) MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error) {
-	row := r.pool.QueryRow(ctx, `
+func (l catalogLookup) MatchEpisodeBySeries(ctx context.Context, seriesID string, seasonNumber, episodeNumber int) (*Match, error) {
+	row := l.q.QueryRow(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		LEFT JOIN media_items series ON series.content_id = e.series_id
@@ -1090,24 +1133,89 @@ func (r *Repository) MatchEpisodeBySeries(ctx context.Context, seriesID string, 
 	return &match, nil
 }
 
-func (r *Repository) MatchEpisodesBySeries(
+// seriesLeafFilter limits a series' episodes, aliased e, to those a watched
+// marker covers: in a library the profile may see (libraries, an integer
+// array of library ids; NULL for every library) with the series in one too,
+// as detail and playback require; aired by the marker's time (cutoff, a
+// timestamptz; NULL covers every air date) or with no air date; and, for a
+// whole-series marker (season, an integer, NULL), in a regular season, since
+// providers leave specials out of a finished show's episode count.
+const seriesLeafFilter = `
+	(%[1]s::integer IS NULL OR e.season_number = %[1]s)
+	AND (%[1]s::integer IS NOT NULL OR e.season_number <> 0)
+	AND (%[2]s::timestamptz IS NULL OR e.air_date IS NULL OR e.air_date <= (%[2]s::timestamptz AT TIME ZONE 'UTC')::date)
+	AND EXISTS (
+		SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id
+		  AND (%[3]s::integer[] IS NULL OR el.media_folder_id = ANY(%[3]s::integer[]))
+	)
+	AND (%[3]s::integer[] IS NULL OR EXISTS (
+		SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = e.series_id
+		  AND mil.media_folder_id = ANY(%[3]s::integer[])
+	))`
+
+// LeafSetHash identifies a set of matched episodes by their content ids:
+// the MD5 of the ids in byte order, joined by commas. SeriesLeafHashes
+// computes the same value in SQL.
+func LeafSetHash(matches []Match) string {
+	ids := make([]string, len(matches))
+	for i, match := range matches {
+		ids[i] = match.MediaItemID
+	}
+	sort.Strings(ids)
+	sum := md5.Sum([]byte(strings.Join(ids, ","))) //nolint:gosec // a change fingerprint, not a security boundary
+	return hex.EncodeToString(sum[:])
+}
+
+// SeriesLeafHashes returns, for each whole-series marker (series id and
+// watched time, by index), the LeafSetHash of the episodes
+// MatchEpisodesBySeries would return with the same allowed libraries, in one
+// query.
+func SeriesLeafHashes(ctx context.Context, q lookupQuerier, seriesIDs []string, watchedAt []time.Time, allowedLibraryIDs []int) ([]string, error) {
+	hashes := make([]string, len(seriesIDs))
+	if len(seriesIDs) == 0 {
+		return hashes, nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT m.idx, md5(COALESCE(string_agg(e.content_id, ',' ORDER BY e.content_id COLLATE "C"), ''))
+		FROM unnest($1::text[], $2::timestamptz[]) WITH ORDINALITY AS m(series_id, cutoff, idx)
+		LEFT JOIN episodes e ON e.series_id = m.series_id AND `+fmt.Sprintf(seriesLeafFilter, "NULL", "m.cutoff", "$3")+`
+		GROUP BY m.idx`,
+		seriesIDs, watchedAt, allowedLibraryIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("hashing series episodes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var idx int64
+		var hash string
+		if err := rows.Scan(&idx, &hash); err != nil {
+			return nil, fmt.Errorf("scanning series episode hash: %w", err)
+		}
+		hashes[idx-1] = hash
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating series episode hashes: %w", err)
+	}
+	return hashes, nil
+}
+
+// MatchEpisodesBySeries returns the series' episodes a watched marker covers
+// (seriesLeafFilter), in season and episode order.
+func (l catalogLookup) MatchEpisodesBySeries(
 	ctx context.Context,
 	seriesID string,
 	seasonNumber *int,
 	watchedAt *time.Time,
+	allowedLibraryIDs []int,
 ) ([]Match, error) {
-	rows, err := r.pool.Query(ctx, `
+	rows, err := l.q.Query(ctx, `
 		SELECT e.content_id, COALESCE(e.title, ''), COALESCE(series.year, 0)
 		FROM episodes e
 		LEFT JOIN media_items series ON series.content_id = e.series_id
-		WHERE e.series_id = $1
-		  AND ($2::integer IS NULL OR e.season_number = $2)
-		  AND ($3::timestamptz IS NULL OR e.air_date IS NULL OR e.air_date <= ($3::timestamptz AT TIME ZONE 'UTC')::date)
-		  AND EXISTS (
-			SELECT 1 FROM episode_libraries el WHERE el.episode_id = e.content_id
-		  )
+		WHERE e.series_id = $1 AND `+fmt.Sprintf(seriesLeafFilter, "$2", "$3", "$4")+`
 		ORDER BY e.season_number, e.episode_number, e.content_id`,
-		seriesID, seasonNumber, watchedAt,
+		seriesID, seasonNumber, watchedAt, allowedLibraryIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("matching episodes by series: %w", err)
@@ -1196,17 +1304,18 @@ func scanRun(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
 	return finalizeRunScan(&run, warningsJSON, unmatchedJSON)
 }
 
-// scanRunWithMappingID scans a run row that includes the mapping_id column.
-func scanRunWithMappingID(scanner interface{ Scan(dest ...any) error }) (*Run, error) {
+// scanRunWithMappingID reads the shared run columns, then any extra columns a
+// query selects after them into extra.
+func scanRunWithMappingID(scanner interface{ Scan(dest ...any) error }, extra ...any) (*Run, error) {
 	var run Run
 	var warningsJSON []byte
 	var unmatchedJSON []byte
-	if err := scanner.Scan(
+	if err := scanner.Scan(append([]any{
 		&run.ID, &run.UserID, &run.ProfileID, &run.SourceType, &run.ConnectionMode, &run.Status,
 		&run.MappingID,
 		&run.Fetched, &run.Matched, &run.Unmatched, &run.ProgressUpdated, &run.HistoryCreated, &run.WatchlistAdded, &run.FavoritesImported, &run.Skipped,
 		&warningsJSON, &unmatchedJSON, &run.ErrorMessage, &run.CreatedAt, &run.StartedAt, &run.CompletedAt, &run.CancelRequested,
-	); err != nil {
+	}, extra...)...); err != nil {
 		return nil, err
 	}
 	return finalizeRunScan(&run, warningsJSON, unmatchedJSON)

@@ -39,6 +39,7 @@ import {
   CirclePause,
   CirclePlay,
 } from "lucide-react";
+import { LoadMeter } from "@/components/admin/LoadMeter";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { formatDateTime } from "@/lib/datetime";
 import { formatRelativeTime } from "@/lib/date";
@@ -129,38 +130,6 @@ const NODE_STATE_DOT: Record<NodeState, string> = {
 /** Micro-caps block label inside a node unit; the app's existing eyebrow idiom. */
 function UnitLabel({ children }: { children: ReactNode }) {
   return <p className="hero-eyebrow mb-2.5 text-[0.62rem]">{children}</p>;
-}
-
-/**
- * A load bar, and the fixed-height slot it sits in so rows stay aligned whether
- * or not they have one.
- *
- * A null fill draws no bar at all. `ResourceMetric.fill` is null both when
- * nothing measured the reading and when it has no ceiling to measure against,
- * and a bar at zero for either would read as "measured and idle" — the mistake
- * every dash on this page exists to avoid. A measured zero does still draw, as
- * a stub, so that it stays distinguishable from no measurement.
- */
-function LoadMeter({ fill, warning }: { fill: number | null; warning?: boolean }) {
-  return (
-    <div className="h-[3px]" aria-hidden="true">
-      {fill !== null && (
-        <div className="bg-border/70 h-full overflow-hidden rounded-full">
-          <div
-            className={cn(
-              // The table polls every 30s, so the width change is the only thing
-              // on the page that shows a node's load moving rather than just
-              // being different. motion-safe, because that is also the only
-              // reason anyone would want it off.
-              "h-full min-w-[3px] rounded-full motion-safe:transition-[width]",
-              warning ? "bg-warning" : "bg-foreground/55",
-            )}
-            style={{ width: `${Math.min(100, Math.max(0, fill))}%` }}
-          />
-        </div>
-      )}
-    </div>
-  );
 }
 
 /**
@@ -990,7 +959,7 @@ function NodeForm({
     const parsedMaxBandwidthMbps = parseFloat(maxBandwidthMbps);
     const fields = {
       name,
-      url,
+      url: url.trim(),
       group: group.trim(),
       max_jobs: Number.isNaN(parsedMaxJobs) ? 0 : parsedMaxJobs,
       max_bandwidth_kbps: Number.isNaN(parsedMaxBandwidthMbps)

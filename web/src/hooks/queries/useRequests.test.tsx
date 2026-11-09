@@ -88,15 +88,23 @@ describe("infinite request browse paging", () => {
     expect(nextDiscoverySectionPage(last, [first, last], 3)).toBeUndefined();
   });
 
-  it("follows a rating-restricted row's cursor and ends where the cursor does", () => {
-    // Page 1 covers TMDB pages 1–3 and page 4 covers 4–8; page 9 reaches the end.
+  it("follows a row's cursor, then numbered pages when a page reads only one", () => {
+    // Page 1 covers source pages 1–3 and page 4 covers 4–8; page 9 read one page.
     const first = sectionPage(1, 40, 4);
     const second = sectionPage(4, 40, 9);
-    const last = sectionPage(9, 40);
+    const single = sectionPage(9, 40);
     expect(nextDiscoverySectionPage(first, [first], 1)).toBe(4);
     expect(nextDiscoverySectionPage(second, [first, second], 4)).toBe(9);
-    // No cursor after cursor pages: the end, even though TMDB counts 40 pages.
-    expect(nextDiscoverySectionPage(last, [first, second, last], 9)).toBeUndefined();
+    expect(nextDiscoverySectionPage(single, [first, second, single], 9)).toBe(10);
+    // A read that reached the end answers with a cursor past the last page.
+    const end = sectionPage(10, 40, 41);
+    expect(nextDiscoverySectionPage(end, [first, second, single, end], 10)).toBeUndefined();
+  });
+
+  it("ends when the first read used up a short row", () => {
+    // Page 1 read both pages of a two-page list; its cursor points past them.
+    const only = sectionPage(1, 2, 3);
+    expect(nextDiscoverySectionPage(only, [only], 1)).toBeUndefined();
   });
 
   it("ignores a cursor that does not move forward", () => {

@@ -22,10 +22,32 @@ func TestDeleteRemoteTranscodeSignsTheRequest(t *testing.T) {
 
 	manager := NewTranscodeManager()
 	manager.JWTSecretFn = func() string { return secret }
-	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL); err != nil {
+	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL, true); err != nil {
 		t.Fatalf("deleteRemoteTranscode: %v", err)
 	}
 	if !signed.Load() {
 		t.Fatal("remote DELETE was not signed with the shared secret")
+	}
+}
+
+func TestDeleteRemoteTranscodeDoesNotFollowRedirects(t *testing.T) {
+	var followed atomic.Bool
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		followed.Store(true)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(elsewhere.Close)
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(node.Close)
+
+	manager := NewTranscodeManager()
+	manager.JWTSecretFn = func() string { return "delete-secret" }
+	if err := manager.deleteRemoteTranscode(t.Context(), "session-1", node.URL, true); err == nil {
+		t.Fatal("deleteRemoteTranscode succeeded on a redirect, want an error")
+	}
+	if followed.Load() {
+		t.Fatal("remote DELETE followed the node's redirect")
 	}
 }

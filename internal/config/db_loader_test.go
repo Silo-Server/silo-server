@@ -194,3 +194,21 @@ func yamlSettingsMapFromString(t *testing.T, body string) map[string]string {
 	}
 	return m
 }
+
+func TestLoadFromDBBandwidthProbeSchedule(t *testing.T) {
+	cfg, err := LoadFromDB(map[string]string{PlaybackBandwidthProbeAutomaticSettingKey: "false", PlaybackBandwidthProbeMaxAgeDaysSettingKey: "30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Playback.AutomaticBandwidthProbeOff || cfg.Playback.BandwidthProbeMaxAge() != 30*24*time.Hour {
+		t.Fatalf("configured: off=%v max age=%s", cfg.Playback.AutomaticBandwidthProbeOff, cfg.Playback.BandwidthProbeMaxAge())
+	}
+	for _, value := range []string{"0", "31"} {
+		if _, err := LoadFromDB(map[string]string{PlaybackBandwidthProbeMaxAgeDaysSettingKey: value}); err == nil || !strings.Contains(err.Error(), PlaybackBandwidthProbeMaxAgeDaysSettingKey) {
+			t.Fatalf("max age %s: error = %v, want a bounds error", value, err)
+		}
+		if _, err := NormalizeAdminSetting(PlaybackBandwidthProbeMaxAgeDaysSettingKey, value); err == nil {
+			t.Fatalf("admin write of max age %s accepted", value)
+		}
+	}
+}

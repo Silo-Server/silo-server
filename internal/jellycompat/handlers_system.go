@@ -2,6 +2,9 @@ package jellycompat
 
 import (
 	"net/http"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/streamlocation"
@@ -26,6 +29,16 @@ type systemInfoResponse struct {
 type brandingConfigurationResponse struct {
 	LoginDisclaimer     string `json:"LoginDisclaimer"`
 	SplashscreenEnabled bool   `json:"SplashscreenEnabled"`
+}
+
+// encodingConfigurationResponse is the part of Jellyfin's EncodingOptions that
+// clients read to set up subtitles. Jellyfin Web reads EnableFallbackFont
+// before it starts its ASS/SSA renderer; Silo serves no fallback fonts. The
+// Kodi add-on indexes EnableSubtitleExtraction before offering embedded text
+// subtitles, which Silo extracts and serves as External.
+type encodingConfigurationResponse struct {
+	EnableFallbackFont       bool `json:"EnableFallbackFont"`
+	EnableSubtitleExtraction bool `json:"EnableSubtitleExtraction"`
 }
 
 type endpointInfoResponse struct {
@@ -69,6 +82,18 @@ func (h *SystemHandler) HandleBrandingConfiguration(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, brandingConfigurationResponse{
 		LoginDisclaimer: "Silo provides Jellyfin-compatible app support. Silo is not affiliated with or endorsed by the Jellyfin project.",
 	})
+}
+
+// HandleNamedConfiguration serves GET /System/Configuration/{key}. Jellyfin Web
+// waits on the "encoding" key before drawing ASS/SSA subtitles and draws nothing
+// if the request fails. Like Jellyfin, keys match case-insensitively and an
+// unknown key is 404.
+func (h *SystemHandler) HandleNamedConfiguration(w http.ResponseWriter, r *http.Request) {
+	if !strings.EqualFold(chi.URLParam(r, "key"), "encoding") {
+		writeError(w, http.StatusNotFound, "NotFound", "Configuration not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, encodingConfigurationResponse{EnableSubtitleExtraction: true})
 }
 
 // HandleEndpoint serves GET /System/Endpoint. Jellyfin Web keys its saved max

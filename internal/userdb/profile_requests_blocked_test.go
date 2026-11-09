@@ -42,9 +42,9 @@ func TestSQLiteProfileRequestsBlockedRoundTrips(t *testing.T) {
 	}
 }
 
-// An existing v34 store gains profiles.requests_blocked, off for every
+// An existing v37 store gains profiles.requests_blocked, off for every
 // profile it already holds.
-func TestMigrateToV35AddsProfileRequestsBlocked(t *testing.T) {
+func TestMigrateToV38AddsProfileRequestsBlocked(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -61,7 +61,7 @@ func TestMigrateToV35AddsProfileRequestsBlocked(t *testing.T) {
 	if _, err := db.Exec(`ALTER TABLE profiles DROP COLUMN requests_blocked`); err != nil {
 		t.Fatalf("drop column: %v", err)
 	}
-	if _, err := db.Exec("PRAGMA user_version = 34"); err != nil {
+	if _, err := db.Exec("PRAGMA user_version = 37"); err != nil {
 		t.Fatalf("set user_version: %v", err)
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -119,12 +118,16 @@ func (s *PostgresUserStore) listKeysetQuery(selectClause, profileID string, afte
 
 func (s *PostgresUserStore) IsFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
 	var count int
-	err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM user_favorites WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		s.userID, profileID, mediaItemID,
-	).Scan(&count)
+	err := s.pool.QueryRow(ctx, isFavoriteSQL, s.userID, profileID, mediaItemID).Scan(&count)
 	return count > 0, err
 }
+
+// isFavoriteSQL and inWatchlistSQL count one item's row: $1 user, $2
+// profile, $3 media item.
+const (
+	isFavoriteSQL  = `SELECT COUNT(*) FROM user_favorites WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`
+	inWatchlistSQL = `SELECT COUNT(*) FROM user_watchlist WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`
+)
 
 func (s *PostgresUserStore) GetFavorite(ctx context.Context, profileID, mediaItemID string) (*userstore.Favorite, error) {
 	var f userstore.Favorite
@@ -168,18 +171,11 @@ func (s *PostgresUserStore) ListFavoritesByMediaItems(ctx context.Context, profi
 		return result, nil
 	}
 
-	placeholders := make([]string, len(mediaItemIDs))
-	args := make([]any, 0, len(mediaItemIDs)+2)
-	args = append(args, s.userID, profileID)
-	for i, mediaItemID := range mediaItemIDs {
-		placeholders[i] = fmt.Sprintf("$%d", i+3)
-		args = append(args, mediaItemID)
-	}
-
+	// One statement shape for every batch size, as ListProgressByMediaItems.
 	rows, err := s.pool.Query(ctx,
 		`SELECT media_item_id FROM user_favorites
-		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id IN (`+strings.Join(placeholders, ",")+`)`,
-		args...,
+		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id = ANY($3::text[])`,
+		s.userID, profileID, mediaItemIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing favorites by media items: %w", err)
@@ -281,10 +277,7 @@ func (s *PostgresUserStore) ListWatchlistPage(ctx context.Context, profileID str
 
 func (s *PostgresUserStore) InWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
 	var count int
-	err := s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM user_watchlist WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
-		s.userID, profileID, mediaItemID,
-	).Scan(&count)
+	err := s.pool.QueryRow(ctx, inWatchlistSQL, s.userID, profileID, mediaItemID).Scan(&count)
 	return count > 0, err
 }
 
@@ -361,18 +354,11 @@ func (s *PostgresUserStore) ListWatchlistByMediaItems(ctx context.Context, profi
 		return result, nil
 	}
 
-	placeholders := make([]string, len(mediaItemIDs))
-	args := make([]any, 0, len(mediaItemIDs)+2)
-	args = append(args, s.userID, profileID)
-	for i, mediaItemID := range mediaItemIDs {
-		placeholders[i] = fmt.Sprintf("$%d", i+3)
-		args = append(args, mediaItemID)
-	}
-
+	// One statement shape for every batch size, as ListProgressByMediaItems.
 	rows, err := s.pool.Query(ctx,
 		`SELECT media_item_id FROM user_watchlist
-		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id IN (`+strings.Join(placeholders, ",")+`)`,
-		args...,
+		 WHERE user_id = $1 AND profile_id = $2 AND media_item_id = ANY($3::text[])`,
+		s.userID, profileID, mediaItemIDs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing watchlist by media items: %w", err)

@@ -143,10 +143,6 @@ type historyPrecisionExporter interface {
 	HistoryTimePrecision() time.Duration
 }
 
-type UnwatchedExporter interface {
-	RemoveHistory(ctx context.Context, cfg ServerConfig, conn Connection, plays []LocalPlay) (ExportResult, error)
-}
-
 type FavoriteImporter interface {
 	FetchFavorites(ctx context.Context, cfg ServerConfig, conn Connection) ([]RemoteFavorite, error)
 }
@@ -407,10 +403,17 @@ func AsRateLimited(err error) (RateLimitedError, bool) {
 
 type retryableProviderError struct {
 	message string
+	// cause, when set, is a sentinel such as ErrConnectionNotFound that
+	// callers match with errors.Is.
+	cause error
 }
 
 func (e retryableProviderError) Error() string {
 	return e.message
+}
+
+func (e retryableProviderError) Unwrap() error {
+	return e.cause
 }
 
 func isRetryableProviderError(err error) bool {
@@ -456,24 +459,26 @@ type ProviderAccount struct {
 	Username string
 }
 
+// RemoteWatch is a watched item a provider reports. Its JSON form is stored in
+// watch_provider_pending_watches.watch, so a field keeps its JSON name.
 type RemoteWatch struct {
-	Provider        string
-	ProviderItemKey string
-	Kind            string
-	Title           string
-	Year            int
-	IMDbID          string
-	TMDBID          string
-	TVDBID          string
-	SeriesTitle     string
-	SeriesYear      int
-	SeriesIMDbID    string
-	SeriesTMDBID    string
-	SeriesTVDBID    string
-	SeasonNumber    int
-	EpisodeNumber   int
-	PlayCount       int
-	LastWatchedAt   *time.Time
+	Provider        string     `json:"provider"`
+	ProviderItemKey string     `json:"provider_item_key"`
+	Kind            string     `json:"kind"`
+	Title           string     `json:"title,omitempty"`
+	Year            int        `json:"year,omitempty"`
+	IMDbID          string     `json:"imdb_id,omitempty"`
+	TMDBID          string     `json:"tmdb_id,omitempty"`
+	TVDBID          string     `json:"tvdb_id,omitempty"`
+	SeriesTitle     string     `json:"series_title,omitempty"`
+	SeriesYear      int        `json:"series_year,omitempty"`
+	SeriesIMDbID    string     `json:"series_imdb_id,omitempty"`
+	SeriesTMDBID    string     `json:"series_tmdb_id,omitempty"`
+	SeriesTVDBID    string     `json:"series_tvdb_id,omitempty"`
+	SeasonNumber    int        `json:"season_number,omitempty"`
+	EpisodeNumber   int        `json:"episode_number,omitempty"`
+	PlayCount       int        `json:"play_count,omitempty"`
+	LastWatchedAt   *time.Time `json:"last_watched_at,omitempty"`
 }
 
 type RemoteProgress struct {
@@ -653,8 +658,7 @@ type LocalDroppedEvent struct {
 type LocalWatchEventKind string
 
 const (
-	LocalWatchEventMarkedWatched   LocalWatchEventKind = "marked_watched"
-	LocalWatchEventMarkedUnwatched LocalWatchEventKind = "marked_unwatched"
+	LocalWatchEventMarkedWatched LocalWatchEventKind = "marked_watched"
 )
 
 type LocalWatchEvent struct {
@@ -785,7 +789,11 @@ type ScrobbleEvent struct {
 	PositionSeconds   float64
 	DurationSeconds   float64
 	Completed         bool
-	OccurredAt        time.Time
+	// SessionEnded marks a pause sent because the playback session itself
+	// ended without a user stop: it expired idle or was aborted. Providers
+	// that mirror live sessions, which are plugins, receive a stop instead.
+	SessionEnded bool
+	OccurredAt   time.Time
 }
 
 func (w RemoteWatch) HistoryRecord() historyimport.Record {

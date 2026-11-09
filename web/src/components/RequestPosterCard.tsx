@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Bookmark, BookmarkCheck, Library, Loader2, Plus } from "lucide-react";
+import { Bookmark, BookmarkCheck, Loader2, Plus } from "lucide-react";
 import type { MediaRequest, RequestMediaResult, RequestMediaType } from "@/api/types";
 import { cn } from "@/lib/utils";
 import {
@@ -27,18 +27,13 @@ import {
   mediaItemMenuTriggerClassName,
 } from "@/components/mediaItemMenuTrigger";
 
-// The badge takes the top-right corner and truncates before it reaches the
-// Library chip on the left.
+// The badge takes the top-right corner and truncates when the card is narrow.
 const BADGE_CLASS = "ml-auto max-w-full shrink-0";
 const DETAIL_CLASS = "text-muted-foreground mt-1 truncate text-[0.75rem] font-medium";
 
 type DiscoverProps = {
   variant: "discover";
   item: RequestMediaResult;
-  /** Called when the hover Request action is clicked. Omit to suppress the action. */
-  onRequest?: () => void;
-  /** Shows the pending state on the hover Request action. Ignored when onRequest is omitted. */
-  isSubmitting?: boolean;
   /**
    * Called when the hover watchlist action is clicked; it reads
    * item.in_watchlist. Omit to suppress the action.
@@ -81,8 +76,6 @@ export default function RequestPosterCard(props: RequestPosterCardProps) {
   return (
     <DiscoverCard
       item={props.item}
-      isSubmitting={props.isSubmitting}
-      onRequest={props.onRequest}
       onToggleWatchlist={props.onToggleWatchlist}
       isWatchlistPending={props.isWatchlistPending}
       fluid={props.fluid}
@@ -92,8 +85,6 @@ export default function RequestPosterCard(props: RequestPosterCardProps) {
 
 function DiscoverCard({
   item,
-  isSubmitting,
-  onRequest,
   onToggleWatchlist,
   isWatchlistPending,
   fluid,
@@ -113,7 +104,6 @@ function DiscoverCard({
       year={item.year}
       posterPath={item.poster_path}
       href={requestDetailHref(item.media_type, item.tmdb_id)}
-      libraryContentId={item.library_content_id}
       fluid={fluid}
       dim={!requestable}
       badge={
@@ -121,15 +111,6 @@ function DiscoverCard({
           <RequestStatusBadge state={state} overlay className={BADGE_CLASS} />
         ) : !requestable ? (
           <RequestReasonBadge reason={item.request.reason} overlay className={BADGE_CLASS} />
-        ) : null
-      }
-      action={
-        requestable && onRequest ? (
-          <RequestAction
-            title={`${item.title} (${[formatMediaType(item.media_type), item.year].filter(Boolean).join(" · ")})`}
-            pending={Boolean(isSubmitting)}
-            onRequest={onRequest}
-          />
         ) : null
       }
       cornerAction={
@@ -168,7 +149,6 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
       year={request.year}
       posterPath={request.poster_path}
       href={requestDetailHref(request.media_type, request.tmdb_id)}
-      libraryContentId={request.library_content_id}
       fluid={fluid}
       dim={isClosed}
       badge={state ? <RequestStatusBadge state={state} overlay className={BADGE_CLASS} /> : null}
@@ -213,8 +193,8 @@ function MineCard({ request, fluid, onCancel, isCancelling }: Omit<MineProps, "v
 
 /**
  * The library poster card for a title outside the library: the same artwork
- * frame, hover reveal, and caption, with a request badge where library cards
- * carry their overlay badges and a Request action where they carry Play.
+ * frame and caption, with a request badge where library cards carry their
+ * overlay badges. Requesting happens on the title's detail page.
  */
 function ExternalTitleCard({
   title,
@@ -222,11 +202,9 @@ function ExternalTitleCard({
   year,
   posterPath,
   href,
-  libraryContentId,
   fluid,
   dim,
   badge,
-  action,
   cornerAction,
   children,
 }: {
@@ -235,24 +213,15 @@ function ExternalTitleCard({
   year?: number;
   posterPath?: string;
   href: string;
-  /** Adds a Library chip linking to the title's library item. */
-  libraryContentId?: string;
   fluid?: boolean;
   dim?: boolean;
   badge?: ReactNode;
-  /** The hover action in the card's centre slot. */
-  action?: ReactNode;
   /** A hover action in the poster's bottom-right corner, where library cards keep their menu. */
   cornerAction?: ReactNode;
-  /** Request details below the caption. Shown whatever the caption setting; pass null for none. */
+  /** Request details below the caption; pass null for none. */
   children?: ReactNode;
 }) {
   const { cardPresentation } = useUICustomization();
-  const showCaption = cardPresentation.caption !== "artwork";
-  // Unlike a library card, a TMDB title always names its type and year under
-  // a caption: a movie and a series can share a title, and the viewer is
-  // choosing which one to request.
-  const showMetadata = showCaption;
   const meta = [formatMediaType(mediaType), year].filter(Boolean).join(" · ");
   const label = `${title} (${meta})`;
 
@@ -277,39 +246,31 @@ function ExternalTitleCard({
             dim={dim}
           />
         </ViewTransitionLink>
-        {libraryContentId || badge ? (
-          <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex flex-wrap items-center gap-1.5">
-            {libraryContentId ? <LibraryChip contentID={libraryContentId} title={title} /> : null}
+        {badge ? (
+          <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex items-center">
             {badge}
           </div>
         ) : null}
-        {action}
         {cornerAction ? (
           <div className="absolute right-1.5 bottom-1.5 z-20 sm:right-2.5 sm:bottom-2.5">
             {cornerAction}
           </div>
         ) : null}
       </div>
-      {showCaption || children ? (
-        <div className={MEDIA_CARD_CAPTION_CLASS}>
-          {showCaption ? (
-            <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
-              {title}
-            </ViewTransitionLink>
-          ) : null}
-          {showMetadata ? (
-            <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
-              {meta}
-            </ViewTransitionLink>
-          ) : null}
-          {children}
-        </div>
-      ) : null}
+      <div className={MEDIA_CARD_CAPTION_CLASS}>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_TITLE_CLASS}>
+          {title}
+        </ViewTransitionLink>
+        <ViewTransitionLink to={href} className={MEDIA_CARD_META_CLASS}>
+          {meta}
+        </ViewTransitionLink>
+        {children}
+      </div>
     </div>
   );
 }
 
-/** The centred hover Request action on a TMDB title's poster card. */
+/** The centred hover Request action on a watchlist title's poster card. */
 export function RequestAction({
   title,
   pending,
@@ -390,18 +351,5 @@ export function WatchlistAction({
         aria-hidden
       />
     </button>
-  );
-}
-
-function LibraryChip({ contentID, title }: { contentID: string; title: string }) {
-  return (
-    <ViewTransitionLink
-      to={`/item/${encodeURIComponent(contentID)}`}
-      aria-label={`Open ${title} in library`}
-      className="glass-chip text-foreground focus-visible:ring-ring pointer-events-auto inline-flex shrink-0 items-center gap-1 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] leading-none font-semibold tracking-[0.14em] uppercase transition-colors hover:border-white/40 focus-visible:ring-2 focus-visible:outline-none"
-    >
-      <Library className="size-3 shrink-0" strokeWidth={2.4} aria-hidden />
-      Library
-    </ViewTransitionLink>
   );
 }

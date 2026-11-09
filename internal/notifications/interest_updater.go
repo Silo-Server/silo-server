@@ -29,6 +29,12 @@ const (
 	// poisoned item cannot retry every flush forever; the periodic rebuild
 	// task repairs whatever gets dropped.
 	interestMaxFlushAttempts = 5
+	// interestMaxPending bounds the queued item mutations, and
+	// interestMaxQueuedRebuilds the queued profile rebuilds: past either,
+	// a mutation or rebuild is dropped (and logged), and the periodic
+	// rebuild task repairs what it would have done.
+	interestMaxPending        = 50_000
+	interestMaxQueuedRebuilds = 1000
 )
 
 type interestMutation struct {
@@ -62,6 +68,13 @@ type InterestUpdater struct {
 	// homeChanged records each profile's latest Home removal or restore on
 	// this node, kept for progressSessionGap.
 	homeChanged map[profileKey]time.Time
+	// rebuilds are the profiles whose whole interest is to be rebuilt (a
+	// restore or import of their data), once each however often queued;
+	// flush runs one a tick through rebuildProfile.
+	rebuilds       map[profileKey]bool
+	rebuildProfile func(ctx context.Context, userID int, profileID string) error
+	// dropped counts what the bounds above refused since the last flush.
+	dropped int
 }
 
 // profileKey names one profile on one account. A profile id alone is not
@@ -121,9 +134,59 @@ func (u *InterestUpdater) QueueItemMutation(userID int, profileID, itemID string
 	mutation := interestMutation{userID: userID, profileID: profileID, itemID: itemID}
 	u.mu.Lock()
 	if _, queued := u.pending[mutation]; !queued {
-		u.pending[mutation] = 0
+		if len(u.pending) >= interestMaxPending {
+			u.dropped++
+		} else {
+			u.pending[mutation] = 0
+		}
 	}
 	u.mu.Unlock()
+}
+
+// QueueProfileRebuild queues one rebuild of the profile's whole interest,
+// for a change to much of its data at once (a restore or an import),
+// instead of a mutation per item: queued again before it runs, it still
+// runs once.
+func (u *InterestUpdater) QueueProfileRebuild(userID int, profileID string) {
+	if u == nil || userID <= 0 || profileID == "" {
+		return
+	}
+	key := profileKey{userID, profileID}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.rebuilds == nil {
+		u.rebuilds = map[profileKey]bool{}
+	}
+	if !u.rebuilds[key] && len(u.rebuilds) >= interestMaxQueuedRebuilds {
+		u.dropped++
+		return
+	}
+	u.rebuilds[key] = true
+}
+
+// nextRebuild takes one queued profile rebuild.
+func (u *InterestUpdater) nextRebuild() (profileKey, bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for key := range u.rebuilds {
+		delete(u.rebuilds, key)
+		return key, true
+	}
+	return profileKey{}, false
+}
+
+// runRebuild runs one queued profile rebuild, if any.
+func (u *InterestUpdater) runRebuild(ctx context.Context) {
+	if u.rebuildProfile == nil {
+		return
+	}
+	key, ok := u.nextRebuild()
+	if !ok {
+		return
+	}
+	if err := u.rebuildProfile(ctx, key.userID, key.profileID); err != nil && ctx.Err() == nil {
+		u.logger.WarnContext(ctx, "interest rebuild of a profile failed", "profile", key, "error", err)
+	}
 }
 
 // QueueItemMutationAfter queues the mutation once delay has passed. Queuing
@@ -203,8 +266,13 @@ func (u *InterestUpdater) Run(ctx context.Context) {
 }
 
 func (u *InterestUpdater) flush(ctx context.Context) {
+	u.runRebuild(ctx)
 	u.mu.Lock()
 	u.promoteDeferred(time.Now())
+	if u.dropped > 0 {
+		u.logger.WarnContext(ctx, "interest updates dropped over their bound; the periodic rebuild repairs them", "dropped", u.dropped)
+		u.dropped = 0
+	}
 	if len(u.pending) == 0 {
 		u.mu.Unlock()
 		return
@@ -390,9 +458,12 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 	started := make([]string, 0, 16)
 	var completedEpisodes []completedEpisode
 	// Home anchors Next Up on the most recently completed episode, ties going
-	// to the later episode.
+	// to the later episode. A special anchor moves to the most recent regular
+	// one; see below.
 	anchorKey, hasAnchor := 0, false
 	var anchorAt time.Time
+	regularAnchorKey, hasRegularAnchor := 0, false
+	var regularAnchorAt time.Time
 	hasProgression := false
 	lastCompletedKey := 0
 	hasCompleted := false
@@ -423,11 +494,23 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 				if key, ok := episodeKeys[episodeID]; ok {
 					at, _ := time.Parse(time.RFC3339, entry.UpdatedAt)
 					completedEpisodes = append(completedEpisodes, completedEpisode{key: key, at: at})
-					if !hasAnchor || at.After(anchorAt) || (at.Equal(anchorAt) && key > anchorKey) {
+					if !hasAnchor || completedLater(at, key, anchorAt, anchorKey) {
 						anchorKey, anchorAt, hasAnchor = key, at, true
+					}
+					if key >= firstRegularEpisodeKey && (!hasRegularAnchor || completedLater(at, key, regularAnchorAt, regularAnchorKey)) {
+						regularAnchorKey, regularAnchorAt, hasRegularAnchor = key, at, true
 					}
 				}
 			}
+		}
+	}
+	// Specials carry no airing position, so Home doesn't let one anchor a
+	// series that has regular seasons: it resumes after the most recent
+	// regular episode, or at the first one (catalog's nextUpAnchorsCTE).
+	if hasAnchor && anchorKey < firstRegularEpisodeKey && hasRegularEpisodes(episodeKeys) {
+		anchorKey = firstRegularEpisodeKey - 1
+		if hasRegularAnchor {
+			anchorKey = regularAnchorKey
 		}
 	}
 
@@ -536,6 +619,12 @@ func (u *InterestUpdater) RecomputeSeries(ctx context.Context, userID int, profi
 		return err
 	}
 	return u.interests.DeleteStaleForProfileSeries(ctx, userID, profileID, seriesID, libraryIDs)
+}
+
+// completedLater reports whether a completion at (at, key) anchors Next Up
+// over the current one: it is newer, or as new and a later episode.
+func completedLater(at time.Time, key int, currentAt time.Time, currentKey int) bool {
+	return at.After(currentAt) || (at.Equal(currentAt) && key > currentKey)
 }
 
 // loadSeriesStructure returns the series' episode keys (content_id ->

@@ -1,6 +1,12 @@
 package userstore
 
-import "time"
+import (
+	"fmt"
+	"math"
+	"regexp"
+	"strconv"
+	"time"
+)
 
 // Profile represents a user profile.
 type Profile struct {
@@ -40,9 +46,15 @@ type Profile struct {
 	ShowForcedSubtitles        bool
 	LibraryRestrictionsEnabled bool
 	AllowedLibraryIDs          []int
-	MaxPlaybackQuality         string
-	CreatedAt                  string
-	UpdatedAt                  string
+	// AllowedTitleIDs are the movies and series the profile may watch above
+	// its maturity limits (access.MaturityLimits.AllowedTitleIDs): its title
+	// allowances plus the titles of its live-allowed collections, sorted.
+	// Read-only here; only single-profile reads fill it, and the allowance
+	// service writes the rows.
+	AllowedTitleIDs    []string
+	MaxPlaybackQuality string
+	CreatedAt          string
+	UpdatedAt          string
 }
 
 // DeviceSettingEntry is a server-managed setting override scoped to one
@@ -71,9 +83,12 @@ type DeviceEntry struct {
 
 // UpdateProfileInput holds optional fields for updating a profile.
 type UpdateProfileInput struct {
-	Name             *string
-	Avatar           *string
-	PIN              *string
+	Name   *string
+	Avatar *string
+	// PINHash replaces the profile's PIN: a bcrypt hash the caller made
+	// (passwordhash.Generate) before opening any transaction, or "" to remove
+	// the PIN.
+	PINHash          *string
 	IsChild          *bool
 	MaxContentRating *string
 	// MaxAdvisoryAge: nil leaves the limit untouched, 0 clears it, and a
@@ -180,6 +195,36 @@ const (
 	WatchHistorySourceSimkl       WatchHistorySource = "simkl"
 	WatchHistorySourceMDBList     WatchHistorySource = "mdblist"
 )
+
+// pluginWatchSource is the source of plays a watch-sync plugin imported:
+// plugin:<installation id>:<capability id>, the plugin provider key
+// (watchsync.PluginProviderKey). A watch-sync capability id is a lowercase
+// path-safe slug, as the plugin manifest requires.
+var pluginWatchSource = regexp.MustCompile(`^plugin:([1-9][0-9]{0,9}):([a-z0-9]+(?:[._-][a-z0-9]+)*)$`)
+
+// maxPluginCapabilityID bounds a plugin watch source's capability id.
+const maxPluginCapabilityID = 128
+
+// PluginWatchSource is the source of a play a watch-sync plugin capability
+// of an installation imported.
+func PluginWatchSource(installationID int, capabilityID string) WatchHistorySource {
+	return WatchHistorySource(fmt.Sprintf("plugin:%d:%s", installationID, capabilityID))
+}
+
+// ParsePluginWatchSource reads PluginWatchSource; false for anything else,
+// including a zero or overflowing installation id and an overlong or
+// malformed capability id.
+func ParsePluginWatchSource(source string) (installationID int, capabilityID string, ok bool) {
+	m := pluginWatchSource.FindStringSubmatch(source)
+	if m == nil || len(m[2]) > maxPluginCapabilityID {
+		return 0, "", false
+	}
+	id, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || id <= 0 || id > math.MaxInt32 {
+		return 0, "", false
+	}
+	return int(id), m[2], true
+}
 
 // WatchIdentity is the write-once archive payload stored with each history
 // row so that StableIdentityResolver can re-resolve a content ID after a
@@ -365,6 +410,12 @@ type UpdateCollectionSyncStateInput struct {
 	// either way.
 	ScheduleAtStart   *string
 	NextSyncAtAtStart *time.Time
+	// RequireLastSyncAt writes nothing unless the stored last_sync_at still
+	// equals LastSyncAtAtStart (nil for never synced). A failed sync sets
+	// it, so it never overwrites a sync that started later and finished
+	// first.
+	RequireLastSyncAt bool
+	LastSyncAtAtStart *time.Time
 }
 
 type CollectionItemReplacement struct {
@@ -457,6 +508,10 @@ type SeriesPlaybackPreference struct {
 	Resolution string `json:"resolution"`
 	HDR        bool   `json:"hdr"`
 	CodecVideo string `json:"codec_video"`
+	// FileID and EditionKey name the exact version for a row keyed by a
+	// movie's own content ID; series rows leave them empty.
+	FileID     int    `json:"file_id,omitempty"`
+	EditionKey string `json:"edition_key,omitempty"`
 	UpdatedAt  string `json:"updated_at"`
 }
 

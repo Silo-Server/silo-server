@@ -73,6 +73,18 @@ func (a *recipientAccess) canOpen(ctx context.Context, tx pgx.Tx, userID int, pr
 	return allowed, nil
 }
 
+// canOpenInAny reports whether the profile may open contentID through at
+// least one of libraryIDs.
+func (a *recipientAccess) canOpenInAny(ctx context.Context, tx pgx.Tx, userID int, profileID, contentID string, libraryIDs []int) (bool, error) {
+	for _, libraryID := range libraryIDs {
+		allowed, err := a.canOpen(ctx, tx, userID, profileID, contentID, libraryID)
+		if err != nil || allowed {
+			return allowed, err
+		}
+	}
+	return false, nil
+}
+
 // scope resolves the recipient's current scope, or nil when it has none: the
 // profile is gone, or policy revoked it. Any other failure is returned rather
 // than read as "no access", so the caller's transaction rolls back and the

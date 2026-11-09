@@ -1,11 +1,12 @@
 import { useMemo } from "react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useAdminDownloadsStats } from "@/hooks/queries/admin/dashboardInsights";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { BarList, BarListSkeleton } from "../charts";
 import type { BarListItem } from "../charts";
 import { SectionError } from "../feedback";
+import { WidgetHeader } from "../WidgetHeader";
 
 const ROW_LIMIT = 8;
 
@@ -38,15 +39,14 @@ export function DownloadsWidget() {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">Offline downloads</CardTitle>
+      <WidgetHeader title="Offline downloads">
         {stats && hasDownloads ? (
-          <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
+          <span className="text-muted-foreground text-[11px] tabular-nums">
             {stats.downloads_started_24h.toLocaleString()} started ·{" "}
             {stats.downloads_completed_24h.toLocaleString()} finished (24h)
           </span>
         ) : null}
-      </CardHeader>
+      </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
         {query.isLoading ? (
           <BarListSkeleton />

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, createRef, type Ref } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,8 +46,12 @@ vi.mock("@/reader/readest/libs/document", async () => {
 
 vi.mock("foliate-js/view.js", () => ({}));
 
+// @ts-expect-error The vendored JavaScript module does not ship TypeScript declarations.
+import { search as foliateSearch } from "../../vendor/foliate-js/search.js";
+
 import FoliateBookReader, {
   ebookReaderProgressQueryKey,
+  type FoliateBookReaderHandle,
   type ReaderReadyState,
 } from "@/reader/FoliateBookReader";
 
@@ -63,6 +67,7 @@ class FakeFoliateView extends HTMLElement {
   close = vi.fn();
   init = vi.fn(async () => {});
   goToFraction = vi.fn(async () => {});
+  search?: (options: { query: string }) => AsyncGenerator<unknown>;
   open = vi.fn((book: unknown) => {
     this.book = book;
     const behavior = viewOpenBehaviors.shift();
@@ -132,7 +137,13 @@ describe("FoliateBookReader open flow", () => {
   const fileA = makeFile(7, "a.epub");
   const fileB = makeFile(8, "b.epub");
 
-  function ui(file: FileVersion, props: { onReady?: (state: ReaderReadyState) => void } = {}) {
+  function ui(
+    file: FileVersion,
+    props: {
+      onReady?: (state: ReaderReadyState) => void;
+      ref?: Ref<FoliateBookReaderHandle>;
+    } = {},
+  ) {
     return (
       <QueryClientProvider client={queryClient}>
         <FoliateBookReader contentID="book-1" file={file} title="Book" {...props} />
@@ -433,5 +444,33 @@ describe("FoliateBookReader open flow", () => {
       location: "epubcfi(/6/8)",
       progress: 0.5,
     });
+  });
+
+  it("returns foliate's search excerpts as display text", async () => {
+    mocks.loaderOpen.mockResolvedValue({ book: makeBook("A") });
+    const reader = createRef<FoliateBookReaderHandle>();
+    await act(async () => {
+      root.render(ui(fileA, { ref: reader }));
+    });
+    // foliate's own search builds the excerpt, so the reader sees its real shape.
+    const [match] = Array.from(
+      foliateSearch(["The ferry left the harbor before dawn."], "harbor", {}) as Iterable<{
+        excerpt: unknown;
+      }>,
+    );
+    viewAt(0).search = async function* () {
+      yield {
+        index: 0,
+        subitems: [{ cfi: "epubcfi(/6/2!/4/2,/1:19,/1:25)", excerpt: match?.excerpt }],
+      };
+    };
+
+    await expect(reader.current!.search("harbor")).resolves.toEqual([
+      {
+        cfi: "epubcfi(/6/2!/4/2,/1:19,/1:25)",
+        label: "",
+        excerpt: "The ferry left the harbor before dawn.",
+      },
+    ]);
   });
 });

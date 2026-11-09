@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -96,5 +98,55 @@ func TestTranscodeServePlainCardRecoveryFailureStays404(t *testing.T) {
 	}
 	if handler.tm.GetTranscodeSession(live.ID) != nil {
 		t.Fatal("failed recovery left a registered transcode runtime")
+	}
+}
+
+// TestTranscodeManifestStatesItsLength pins that the playlist is served with a
+// Content-Length. A full-length playlist runs to tens of kilobytes, past
+// net/http's write buffer, so without the header it goes out chunked; a player
+// that opens HLS with a ranged byte reader (AetherEngine on Apple platforms)
+// then takes it for a non-seekable stream and fails to recognize it as a
+// playlist.
+func TestTranscodeManifestStatesItsLength(t *testing.T) {
+	sessionMgr := playback.NewSessionManager(0, 0)
+	handler := NewPlaybackHandler(sessionMgr)
+	handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpegSleep(t, "30"), t.TempDir())
+	handler.JWTSecret = "test-secret"
+
+	live, err := sessionMgr.StartSession(1, "profile-1", 42, playback.PlayTranscode, true)
+	if err != nil {
+		t.Fatalf("start live session: %v", err)
+	}
+	card := playback.NewRecipeCard(1, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: live.ID, InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		AudioTrackIndex: -1, SubtitleTrackIndex: -1,
+	})
+	token := handler.signSessionToken(card, false)
+	if token == "" {
+		t.Fatal("sign stream token returned empty")
+	}
+
+	rec := httptest.NewRecorder()
+	handler.HandleGetTranscodeManifest(rec, playbackTestRequest(http.MethodGet,
+		"/api/v1/playback/transcode/"+live.ID+"/master.m3u8?st="+token,
+		nil, map[string]string{"session_id": live.ID}))
+	t.Cleanup(func() {
+		if ts := handler.tm.GetTranscodeSession(live.ID); ts != nil {
+			_ = ts.Close()
+		}
+	})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s, want the manifest", rec.Code, rec.Body.String())
+	}
+	if !strings.HasPrefix(rec.Body.String(), "#EXTM3U") {
+		t.Fatalf("body = %q, want an HLS playlist", rec.Body.String())
+	}
+	if got, want := rec.Header().Get("Content-Length"), strconv.Itoa(rec.Body.Len()); got != want {
+		t.Fatalf("Content-Length = %q, want %q (the body's length)", got, want)
+	}
+	if got := rec.Header().Get("Cache-Control"); !strings.Contains(got, "no-transform") {
+		t.Fatalf("Cache-Control = %q, want no-transform so proxies keep the length", got)
 	}
 }

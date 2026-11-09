@@ -67,18 +67,24 @@ func (f *fakeRequests) Search(_ context.Context, viewer mediarequests.Viewer, qu
 	return &mediarequests.MediaPage{Page: page, TotalPages: 3, TotalResults: 41, Results: []mediarequests.MediaResult{fixtureResult(949)}}, nil
 }
 
-func (f *fakeRequests) Discover(_ context.Context, viewer mediarequests.Viewer, section string, page int) (*mediarequests.DiscoverySection, error) {
-	if err := f.record(viewer, "discover", section, page); err != nil {
+func (f *fakeRequests) DiscoverRow(_ context.Context, viewer mediarequests.Viewer, rowID string, page int) (*mediarequests.DiscoverySection, error) {
+	if err := f.record(viewer, "discover", rowID, page); err != nil {
 		return nil, err
 	}
-	return &mediarequests.DiscoverySection{Key: section, Title: "Trending Movies", Page: page, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}, NextPage: page + 2}, nil
+	return &mediarequests.DiscoverySection{Key: rowID, Title: "Trending Movies", Page: page, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}, NextPage: page + 2}, nil
 }
 
-func (f *fakeRequests) DiscoverAll(_ context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverySection, error) {
+func (f *fakeRequests) DiscoverRows(_ context.Context, viewer mediarequests.Viewer) (*mediarequests.DiscoverLayoutPage, error) {
 	if err := f.record(viewer, "discoverAll"); err != nil {
 		return nil, err
 	}
-	return []mediarequests.DiscoverySection{{Key: "trending_movies", Title: "Trending Movies", Page: 1, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}}}, nil
+	return &mediarequests.DiscoverLayoutPage{
+		Order: []mediarequests.DiscoverRowRef{
+			{Key: "trending_movies", Type: "tmdb_chart", Title: "Trending Movies"},
+			{Key: "studios", Type: "studios", Title: "Studios"},
+		},
+		Sections: []mediarequests.DiscoverySection{{Key: "trending_movies", Title: "Trending Movies", Page: 1, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}}},
+	}, nil
 }
 
 func (f *fakeRequests) GetDetail(_ context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (*mediarequests.MediaDetail, error) {
@@ -545,12 +551,26 @@ func TestDiscover(t *testing.T) {
 			Key     string `json:"key"`
 			Results []any  `json:"results"`
 		} `json:"items"`
-		Page *any `json:"page"`
+		RowOrder []DiscoverRowRef `json:"row_order"`
+		Page     *any             `json:"page"`
 	}
 	decodeBody(t, rec.Body, &sections)
 	if rec.Code != 200 || len(sections.Items) != 1 || sections.Items[0].Key != "trending_movies" || len(sections.Items[0].Results) != 1 || sections.Page != nil {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
+	if len(sections.RowOrder) != 2 || sections.RowOrder[1] != (DiscoverRowRef{Key: "studios", Type: "studios", Title: "Studios"}) {
+		t.Fatalf("row_order = %+v, want the title row then the brand row", sections.RowOrder)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/requests/discover/rows/r_abc?page=2", "", requestOwner)
+	var custom struct {
+		Key  string `json:"key"`
+		Page int    `json:"page"`
+	}
+	decodeBody(t, rec.Body, &custom)
+	if rec.Code != 200 || custom.Key != "r_abc" || custom.Page != 2 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/discover/rows/Not-A-Key", "", requestOwner), TypeValidationFailed)
 
 	rec = do(t, h, http.MethodGet, "/api/v2/requests/discover/popular_series?page=3", "", requestOwner)
 	var section struct {

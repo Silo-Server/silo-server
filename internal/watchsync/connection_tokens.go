@@ -29,6 +29,12 @@ func (r *PostgresRepository) UpdateConnectionTokens(ctx context.Context, expecte
 	if !connectionCredentialsMatch(current, expected) {
 		return Connection{}, ErrStaleConnection
 	}
+	// The error is written only when the caller changed it from the copy it
+	// loaded; otherwise one recorded meanwhile, such as a deferral, stays.
+	lastError := current.LastError
+	if updated.LastError != expected.LastError {
+		lastError = updated.LastError
+	}
 	current = connectionWithTokens(current, storedTokens(updated))
 	accessToken, err := r.cipher.Encrypt(current.AccessToken, TokenAAD("access_token", current.Provider, current.UserID, current.ProfileID))
 	if err != nil {
@@ -49,7 +55,7 @@ func (r *PostgresRepository) UpdateConnectionTokens(ctx context.Context, expecte
 		    updated_at=GREATEST(clock_timestamp(),updated_at+interval '1 microsecond')
 		WHERE id=$1::uuid
 		RETURNING `+connectionColumns,
-		current.ID, accessToken, refreshToken, current.TokenExpiresAt, pluginCredentials, updated.LastError))
+		current.ID, accessToken, refreshToken, current.TokenExpiresAt, pluginCredentials, lastError))
 	if err != nil {
 		return Connection{}, fmt.Errorf("update watch provider tokens: %w", err)
 	}

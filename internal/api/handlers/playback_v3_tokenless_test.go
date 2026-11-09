@@ -399,3 +399,41 @@ func TestProxyURLBuildersUseThePublicURLWhenSet(t *testing.T) {
 		t.Fatalf("manifest URL leaked the backend address")
 	}
 }
+
+// The start's audio refinement judges each track by the plan the start would
+// run, escalation included. Where header-authenticated progressive remuxes
+// have no route, E-AC-3 only looks copied on progressive: on HLS, which
+// decodes AAC alone here, it would be downmixed, while TrueHD keeps 5.1 AAC.
+func TestPlayableStartAudioV3JudgesTheEscalatedRoute(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	file.Container, file.CodecAudio, file.AudioChannels = "mkv", "truehd", 8
+	file.AudioTracks = []models.AudioTrack{
+		{Language: "en", Codec: "truehd", Channels: 8, Layout: "7.1", Default: true},
+		{Language: "en", Codec: "eac3", Channels: 6, Layout: "5.1(side)"},
+	}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"allow_4k_transcode": "true"}}
+	requireWorkerRoutingV3(handler)
+	presetLocalRegistryV3(handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+	}))
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, playback.HWAccelInfo{Transformations: []playback.TransformationV3{{
+			Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3,
+			RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3,
+		}}})
+	}))
+	t.Cleanup(worker.Close)
+	handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: worker.URL}}}
+
+	request := v3HandlerStartRequest()
+	request.QualityPreference = "auto"
+	request.ClientFeatures = append(request.ClientFeatures, playback.FeatureHeaderAuthenticatedMediaV3)
+	request.Capabilities.CodecsAudio = []string{"aac", "eac3"}
+	request.ClientPlaybackContext.Deliveries[playback.DeliveryClassProgressiveV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true}
+	request.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = playback.DeliveryCapabilityV3{Enabled: true, SupportedOnDevice: true, AudioDecodeCodecs: []string{"aac"}}
+	settings := playback.PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}
+	if got := handler.playableStartAudioV3(context.Background(), request, file, file, 0, settings); got != 0 {
+		t.Fatalf("start audio = %d, want the TrueHD default, which keeps 5.1 on the escalated route", got)
+	}
+}

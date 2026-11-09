@@ -216,3 +216,52 @@ func addCompletedHistoryForUserDataTest(t *testing.T, store userstore.UserStore,
 		t.Fatalf("seed completed history: %v", err)
 	}
 }
+
+// A movie's stored version choice is the version user_data reports, even when
+// the progress row was touched later (marking watched or clearing the resume
+// point moves its timestamp but plays no version). Without a stored file the
+// progress row's hint stands.
+func TestApplyVersionChoice(t *testing.T) {
+	fileOf := func(id int) *int { return &id }
+	choice := &userstore.SeriesPlaybackPreference{
+		FileID: 1080, Resolution: "1080p", EditionKey: "theatrical", UpdatedAt: "2026-10-23T00:11:58Z",
+	}
+	tests := []struct {
+		name       string
+		progress   *userstore.WatchProgress
+		choice     *userstore.SeriesPlaybackPreference
+		wantFileID *int
+	}{
+		{name: "no progress row", choice: choice, wantFileID: fileOf(1080)},
+		{
+			name:       "progress row updated after the choice",
+			progress:   &userstore.WatchProgress{LastFileID: fileOf(2160), UpdatedAt: "2026-10-24T00:00:00Z"},
+			choice:     choice,
+			wantFileID: fileOf(1080),
+		},
+		{
+			name:       "choice without a file",
+			progress:   &userstore.WatchProgress{LastFileID: fileOf(2160), UpdatedAt: "2026-10-01T00:00:00Z"},
+			choice:     &userstore.SeriesPlaybackPreference{Resolution: "1080p", UpdatedAt: "2026-10-23T00:11:58Z"},
+			wantFileID: fileOf(2160),
+		},
+		{name: "nothing stored"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := applyVersionChoice(leafUserDataFromProgress(tt.progress), tt.choice)
+			if tt.wantFileID == nil {
+				if got != nil {
+					t.Fatalf("user data = %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil || got.LastFileID == nil || *got.LastFileID != *tt.wantFileID {
+				t.Fatalf("LastFileID = %v, want %d", got, *tt.wantFileID)
+			}
+			if *tt.wantFileID == choice.FileID && (got.LastEditionKey == nil || *got.LastEditionKey != "theatrical") {
+				t.Fatalf("LastEditionKey = %v, want theatrical", got.LastEditionKey)
+			}
+		})
+	}
+}

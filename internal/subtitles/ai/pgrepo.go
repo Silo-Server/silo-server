@@ -138,6 +138,22 @@ func (r *PgJobRepository) GetActiveJobByIdempotencyKey(ctx context.Context, key 
 	return job, nil
 }
 
+func (r *PgJobRepository) GetReusableJobByIdempotencyKey(ctx context.Context, key string) (*Job, error) {
+	job, err := scanJob(r.pool.QueryRow(ctx,
+		`SELECT `+jobColumns+` FROM subtitle_ai_jobs j
+		WHERE j.idempotency_key = $1 AND j.status = 'completed'
+		AND EXISTS (SELECT 1 FROM downloaded_subtitles d
+			WHERE d.id = j.result_subtitle_id AND d.media_file_id = j.media_file_id)
+		ORDER BY j.updated_at DESC LIMIT 1`, key))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get reusable subtitle ai job: %w", err)
+	}
+	return job, nil
+}
+
 func (r *PgJobRepository) ListJobsByMediaFile(ctx context.Context, mediaFileID int) ([]Job, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+jobColumns+` FROM subtitle_ai_jobs

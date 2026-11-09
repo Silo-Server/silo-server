@@ -81,7 +81,7 @@ func absTelemetryServer(t testing.TB, registry *streamtelemetry.Registry, deps D
 	// including the telemetry observer's deferred release, has run.
 	router.Use(server.trackInFlight)
 	router.Use(middleware.Recoverer)
-	router.Use(httpstream.CompressExcept(5, SkipMediaCompression))
+	router.Use(httpstream.CompressExcept(SkipMediaCompression))
 	handler.Mount(router)
 	server.Server = httptest.NewServer(router)
 	t.Cleanup(server.Close)

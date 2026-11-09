@@ -1,9 +1,12 @@
+import { Link } from "react-router";
+
 import type { AdminSession, AdminUser } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminUserProfileActivity } from "@/hooks/queries/admin/userActivity";
 
 import { formatLastSeen } from "../format";
+import { userDetailTabSearch } from "../userDetailTabs";
 import { DetailCard, InitialAvatar, ListRow } from "../ui";
 
 /** The account's profiles and when each was last used. */
@@ -26,6 +29,11 @@ export function ProfilesCard({
           ? undefined
           : `${count} of ${user.effective_policy.max_profiles} allowed`
       }
+      actions={
+        <Button asChild variant="ghost" size="sm">
+          <Link to={userDetailTabSearch("profiles")}>Manage</Link>
+        </Button>
+      }
     >
       {profiles.isError ? (
         <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-4 text-sm sm:px-5">
@@ -46,7 +54,7 @@ export function ProfilesCard({
         profiles.data.map((profile, index) => (
           <ListRow
             key={profile.id}
-            leading={<InitialAvatar name={profile.name} seed={index} />}
+            leading={<InitialAvatar name={profile.name} seed={index} src={profile.avatar_url} />}
             title={profile.name}
             trailing={
               watching.has(profile.id)

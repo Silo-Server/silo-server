@@ -1,6 +1,7 @@
-import { useRef } from "react";
+import { useMemo, useRef } from "react";
 import { Play } from "lucide-react";
 import type { EpisodeListItem } from "@/api/types";
+import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { WatchedCheckIndicator } from "@/components/CardWatchedBadge";
 import { toEpisodeUserState } from "@/components/episodeUserState";
 import MediaItemMenu from "@/components/MediaItemMenu";
@@ -13,12 +14,13 @@ import { usePrefetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDwellPrefetch } from "@/hooks/useDwellPrefetch";
 import { useGridRowCap } from "@/hooks/useGridRowCap";
 import type { CardQuickActionMode } from "@/lib/cardQuickActions";
+import { buildItemHref } from "@/lib/mediaNavigation";
 import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/episodeSpoilers";
 import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/overlays";
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import EpisodeCardCaption from "./EpisodeCardCaption";
-import type { EpisodeNavigationState } from "../itemDetailLayout";
+import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
 
 /**
  * How much of a season stays visible before the section scrolls, so a long one
@@ -33,19 +35,34 @@ const VISIBLE_EPISODE_ROWS = 4;
 
 interface SeasonEpisodeGridProps {
   episodes: EpisodeListItem[];
+  /**
+   * The same episodes with every file playback can use (see
+   * useEpisodePlaybackList). Play and the unreadable badge follow these;
+   * defaults to `episodes`.
+   */
+  playbackEpisodes?: EpisodeListItem[];
   isLoading: boolean;
   episodeLinkState?: EpisodeNavigationState;
+  /** The page's library scope, kept on each episode link. */
+  libraryId?: number;
 }
 
 export default function SeasonEpisodeGrid({
   episodes,
+  playbackEpisodes,
   isLoading,
   episodeLinkState,
+  libraryId,
 }: SeasonEpisodeGridProps) {
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const spoilerPrefs = useEpisodeSpoilerPrefs();
-  const prefetchEpisodeDetail = usePrefetchCatalogItemDetail();
+  const prefetchScopedEpisode = usePrefetchCatalogItemDetail(libraryId);
+  const prefetchEpisode = usePrefetchCatalogItemDetail();
   const setGridRef = useGridRowCap<HTMLDivElement>(VISIBLE_EPISODE_ROWS, episodes.length);
+  const playbackById = useMemo(
+    () => new Map((playbackEpisodes ?? []).map((episode) => [episode.content_id, episode])),
+    [playbackEpisodes],
+  );
 
   if (isLoading) {
     return <EpisodeGridSkeleton />;
@@ -70,11 +87,17 @@ export default function SeasonEpisodeGrid({
         <SeasonEpisodeCard
           key={episode.content_id}
           episode={episode}
+          playbackEpisode={playbackById.get(episode.content_id) ?? episode}
           episodeLinkState={episodeLinkState}
+          libraryId={libraryId}
           overlayPrefs={overlayPrefs}
           quickActionMode={quickActionMode}
           spoilerPrefs={spoilerPrefs}
-          onPrefetch={() => prefetchEpisodeDetail(episode.content_id)}
+          onPrefetch={() =>
+            (episodeLinkLibraryId(episode, libraryId) === undefined
+              ? prefetchEpisode
+              : prefetchScopedEpisode)(episode.content_id)
+          }
         />
       ))}
     </div>
@@ -83,14 +106,18 @@ export default function SeasonEpisodeGrid({
 
 function SeasonEpisodeCard({
   episode,
+  playbackEpisode,
   episodeLinkState,
+  libraryId,
   overlayPrefs,
   quickActionMode,
   spoilerPrefs,
   onPrefetch,
 }: {
   episode: EpisodeListItem;
+  playbackEpisode: EpisodeListItem;
   episodeLinkState?: EpisodeNavigationState;
+  libraryId?: number;
   overlayPrefs: CardOverlayPrefs | null;
   quickActionMode: CardQuickActionMode;
   spoilerPrefs: EpisodeSpoilerPrefs;
@@ -107,15 +134,17 @@ function SeasonEpisodeCard({
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);
   const hideOverview = spoilerPrefs.hideOverviews && unwatched;
+  const episodeHref = buildItemHref({
+    contentId: episode.content_id,
+    libraryId: episodeLinkLibraryId(episode, libraryId),
+  });
+  const unreadable = episodeFilesUnreadable(playbackEpisode);
+  const playable = (playbackEpisode.files ?? []).some((file) => !file.unreadable);
 
   return (
     <div ref={cardRef} className="group/card media-card media-card-longpress" {...prefetchHandlers}>
-      <div className="relative">
-        <ViewTransitionLink
-          to={`/item/${episode.content_id}`}
-          state={episodeLinkState}
-          className="group block"
-        >
+      <div className="group/media relative">
+        <ViewTransitionLink to={episodeHref} state={episodeLinkState} className="group block">
           <div className="media-card-image relative aspect-video">
             {episode.still_url ? (
               <img
@@ -140,6 +169,8 @@ function SeasonEpisodeCard({
                 variant="wide"
               />
             )}
+            {/* Hover dim behind the play button */}
+            {playable && <div className="media-card-hover-dim absolute inset-0" />}
             {hasPartialProgress && (
               <div className="absolute inset-x-2 bottom-1.5 h-[3px] overflow-hidden rounded-full bg-black/40">
                 <div
@@ -161,6 +192,9 @@ function SeasonEpisodeCard({
             )}
           </div>
         </ViewTransitionLink>
+        {playable && (
+          <CardPlayOverlay contentId={episode.content_id} title={episodeTitle} type="episode" />
+        )}
         <MediaItemMenu
           contentId={episode.content_id}
           mediaType="episode"
@@ -175,16 +209,12 @@ function SeasonEpisodeCard({
           itemTitle={episodeTitle}
         />
       </div>
-      <ViewTransitionLink
-        to={`/item/${episode.content_id}`}
-        state={episodeLinkState}
-        className="block"
-      >
+      <ViewTransitionLink to={episodeHref} state={episodeLinkState} className="block">
         <EpisodeCardCaption
           episode={episode}
           hideOverview={hideOverview}
           badges={episode.user_data?.played && <WatchedCheckIndicator />}
-          notice={episodeFilesUnreadable(episode) && <UnreadableFileBadge />}
+          notice={unreadable && <UnreadableFileBadge />}
         />
       </ViewTransitionLink>
     </div>

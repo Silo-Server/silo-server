@@ -14,7 +14,13 @@ import (
 )
 
 const (
-	pluginWatchedCursorKey   = "plugin.remote.watched"
+	// pluginWatchedCursorKey carries a version, raised when an import change
+	// needs rows an earlier version read and dropped: v2 for pending watches
+	// (watch_provider_pending_watches), v3 for finished-series watched state.
+	// Each raise makes every connection read its watched history once more in
+	// full. A node still on an old version writes its old key, which this one
+	// ignores.
+	pluginWatchedCursorKey   = "plugin.remote.watched.v3"
 	pluginProgressCursorKey  = "plugin.remote.progress"
 	pluginFavoritesCursorKey = "plugin.remote.favorites"
 	pluginWatchlistCursorKey = "plugin.remote.watchlist"
@@ -342,6 +348,10 @@ func (p *PluginProvider) listRemoteState(
 	if err != nil {
 		return pluginRemoteTraversal{}, watchSyncUnavailableError()
 	}
+	conn, err = p.latestCredentials(ctx, conn)
+	if err != nil {
+		return pluginRemoteTraversal{}, err
+	}
 	cursor := conn.SyncCursors[cursorKey]
 	pageToken := ""
 	seenPageTokens := make(map[string]struct{})
@@ -407,31 +417,6 @@ func (p *PluginProvider) listRemoteState(
 		pageToken = nextPage
 	}
 	return pluginRemoteTraversal{}, errors.New("watch sync plugin exceeded the remote-state page limit")
-}
-
-func (p *PluginProvider) RemoveHistory(
-	ctx context.Context,
-	_ ServerConfig,
-	conn Connection,
-	plays []LocalPlay,
-) (ExportResult, error) {
-	result := ExportResult{Failed: make(map[string]string)}
-	events := make([]*pluginv1.WatchSyncEvent, 0, len(plays))
-	keys := make([]string, 0, len(plays))
-	for _, play := range plays {
-		event := watchEventFromLocalPlay(play, pluginv1.WatchSyncOrigin_WATCH_SYNC_ORIGIN_MANUAL)
-		event.EventId = "unwatched:" + play.HistoryID
-		event.Operation = pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_MARK_UNWATCHED
-		event.ProviderItemKey = play.ProviderItemKey
-		if !p.supportsMedia(event.GetMedia().GetMediaType()) {
-			result.Failed[play.HistoryID] = unsupportedWatchSyncMediaMessage(event.GetMedia().GetMediaType())
-			continue
-		}
-		events = append(events, event)
-		keys = append(keys, play.HistoryID)
-	}
-	applied, err := p.applyPluginEvents(ctx, conn, events, keys)
-	return mergeExportFailures(applied, result.Failed), err
 }
 
 func (p *PluginProvider) ExportFavorites(ctx context.Context, _ ServerConfig, conn Connection, items []LocalFavorite) (ExportResult, error) {
@@ -620,6 +605,10 @@ func (p *PluginProvider) applyPluginEventsDetailed(
 	if err != nil {
 		return result, statuses, watchSyncUnavailableError()
 	}
+	conn, err = p.latestCredentials(ctx, conn)
+	if err != nil {
+		return result, statuses, err
+	}
 	for offset := 0; offset < len(events); offset += max(1, p.ExportBatchSize()) {
 		end := min(len(events), offset+max(1, p.ExportBatchSize()))
 		authContext, err := p.authenticatedContext(ctx, conn)
@@ -689,15 +678,18 @@ func mergeExportFailures(result ExportResult, failures map[string]string) Export
 	return result
 }
 
+// remoteWatchFromProto converts a plugin's watched row, or reports why the
+// host skips it.
 func remoteWatchFromProto(provider string, state *pluginv1.WatchSyncRemoteState) (RemoteWatch, error) {
 	identity, err := remoteIdentityFromProto(state)
 	if err != nil {
 		return RemoteWatch{}, err
 	}
-	// The plugin contract defines SERIES for list and rating state only. A
-	// series-level watched row would otherwise expand to every local episode.
-	if identity.kind == historyimport.KindSeries {
-		return RemoteWatch{}, errors.New("watch sync plugin returned series-level watched state")
+	// A SERIES row is a finished series: it marks the local episodes that
+	// had aired by last_watched_at (see historyimport.Matcher.MatchLeaves),
+	// so it needs that time.
+	if identity.kind == historyimport.KindSeries && timePointer(state.GetWatched().GetLastWatchedAt()) == nil {
+		return RemoteWatch{}, errors.New("watch sync plugin returned series-level watched state without last_watched_at")
 	}
 	watched := state.GetWatched()
 	if watched.GetPlayCount() < 1 {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -170,6 +171,31 @@ func (h *CollectionHandler) UpdatePersonalCollection(ctx context.Context, cmd Pe
 		}
 		return none, apiError(http.StatusInternalServerError, "internal_error", "Failed to update collection")
 	}
+	// Rows titled with the old name follow the rename, on the profiles that
+	// can see the collection as it now stands, and keep following while an
+	// overlapping rename lands (userstore.FollowCollectionTitle); a failure
+	// leaves them on it. The rename has committed, so a dropped request must
+	// not cut this short; it gets its own deadline instead.
+	if oldName := strings.TrimSpace(existing.Name); req.Name != nil && oldName != "" && strings.TrimSpace(*req.Name) != oldName {
+		var latest *userstore.Collection
+		currentTitle := func(ctx context.Context) (string, error) {
+			c, err := store.GetCollection(ctx, collectionID)
+			if err != nil {
+				return "", err
+			}
+			latest = c
+			return c.Name, nil
+		}
+		retitleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), userstore.RetitleTimeout)
+		err := userstore.FollowCollectionTitle(retitleCtx, existing.Name, currentTitle, func(ctx context.Context, from, to string) error {
+			return store.RenameCollectionRows(ctx, userstore.CollectionKindUser, collectionID, from, to, latest.VisibleTo)
+		})
+		cancel()
+		if err != nil {
+			slog.WarnContext(ctx, "collection rename: retitling rows failed", "component", "api",
+				"collection_id", collectionID, "error", err)
+		}
+	}
 
 	posterSource := pointerStringValue(req.PosterSourceURL)
 	if _, err := h.processCollectionPoster(ctx, store, collectionID, profileID, cmd.PosterFile, posterSource); err != nil {
@@ -265,6 +291,7 @@ func (h *CollectionHandler) DeletePersonalCollection(ctx context.Context, userID
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete collection")
 	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID)
 
 	return nil
 }
@@ -432,9 +459,7 @@ func (h *CollectionHandler) DeletePersonalCollectionImage(ctx context.Context, u
 		return err
 	}
 
-	if err := removeCollectionImageVariants(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID, imageType); err != nil {
-		return apiError(http.StatusInternalServerError, "internal_error", "Failed to delete images")
-	}
+	oldPath := collection.PosterURL
 	empty := ""
 	if err := store.UpdateCollection(ctx, userstore.UpdateCollectionInput{
 		ID:               collectionID,
@@ -447,6 +472,13 @@ func (h *CollectionHandler) DeletePersonalCollectionImage(ctx context.Context, u
 		}
 		return apiError(http.StatusInternalServerError, "internal_error", "Failed to clear poster")
 	}
+	cleanUpReplacedCollectionImage(ctx, h.ArtworkStore, userCollectionImagePrefix, collectionID, imageType, oldPath, func(ctx context.Context) (string, error) {
+		current, err := store.GetCollection(ctx, collectionID)
+		if err != nil {
+			return "", err
+		}
+		return current.PosterURL, nil
+	})
 	// The collection shows its collage again.
 	collection.PosterURL = ""
 	h.refreshCollage(ctx, store, userID, collection)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/metadata"
 )
 
 // A local root holds every blob kind under one namespace since operational
@@ -48,6 +51,9 @@ func assertObjects(t *testing.T, name string, store *memoryStore, present, absen
 func TestLocalToS3MigrateAllSplitsSharedRootByOwner(t *testing.T) {
 	objects := localRootObjects()
 	objects["diagnostics/2/large.tar.gz"] = []byte("a bundle larger than the small-object limit")
+	// Unencrypted local backups and an upload's parts never move.
+	objects["backups/server-1/2026-11-01T040000Z-nightly/db.dump"] = []byte("dump")
+	objects["backups/uploads/u1/00001"] = []byte("part")
 	source := &memoryStore{identity: "local|/srv/silo", objects: objects}
 	target := &memoryStore{identity: "s3|https://s3|public|", objects: map[string][]byte{}}
 	targetPrivate := &memoryStore{identity: "s3|https://s3|private|", objects: map[string][]byte{}}
@@ -59,12 +65,13 @@ func TestLocalToS3MigrateAllSplitsSharedRootByOwner(t *testing.T) {
 	if _, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {}); err != nil {
 		t.Fatal(err)
 	}
+	backups := []string{"backups/server-1/2026-11-01T040000Z-nightly/db.dump", "backups/uploads/u1/00001"}
 	assertObjects(t, "public target", target,
 		[]string{"tmdb/movie/1/poster/a.webp", "branding/logo.webp", "subtitles/7/en.srt"},
-		[]string{"profile-avatars/1/avatar.webp", "diagnostics/1/report.tar.gz", "catalog-seeds/export/seed.json.gz"})
+		append([]string{"profile-avatars/1/avatar.webp", "diagnostics/1/report.tar.gz", "catalog-seeds/export/seed.json.gz"}, backups...))
 	assertObjects(t, "private target", targetPrivate,
 		[]string{"profile-avatars/1/avatar.webp", "diagnostics/1/report.tar.gz", "catalog-seeds/export/seed.json.gz"},
-		[]string{"tmdb/movie/1/poster/a.webp", "branding/logo.webp", "subtitles/7/en.srt"})
+		append([]string{"tmdb/movie/1/poster/a.webp", "branding/logo.webp", "subtitles/7/en.srt"}, backups...))
 	// Small objects go through Put, which records the checksum S3 compares in
 	// Matches; only objects over the limit stream.
 	if target.streams != 0 || targetPrivate.streams != 1 {
@@ -78,9 +85,10 @@ func TestS3ToLocalMigrateAllBringsOperationalDataIntoRoot(t *testing.T) {
 		"subtitles/7/en.srt":         []byte("subtitle"),
 	}}
 	private := &memoryStore{identity: "s3|https://s3|private|", objects: map[string][]byte{
-		"profile-avatars/1/avatar.webp":     []byte("avatar"),
-		"diagnostics/1/report.tar.gz":       []byte("bundle"),
-		"catalog-seeds/export/seed.json.gz": []byte("seed"),
+		"profile-avatars/1/avatar.webp":                           []byte("avatar"),
+		"diagnostics/1/report.tar.gz":                             []byte("bundle"),
+		"catalog-seeds/export/seed.json.gz":                       []byte("seed"),
+		"backups/server-1/2026-11-01T040000Z-nightly/db.dump.age": []byte("encrypted dump"),
 	}}
 	target := &memoryStore{identity: "local|/srv/silo", objects: map[string][]byte{}}
 	service := New(nil, stagedValues(t, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": "/srv/silo"}), nil, source, private)
@@ -92,7 +100,7 @@ func TestS3ToLocalMigrateAllBringsOperationalDataIntoRoot(t *testing.T) {
 	assertObjects(t, "local target", target, []string{
 		"tmdb/movie/1/poster/a.webp", "subtitles/7/en.srt",
 		"profile-avatars/1/avatar.webp", "diagnostics/1/report.tar.gz", "catalog-seeds/export/seed.json.gz",
-	}, nil)
+	}, []string{"backups/server-1/2026-11-01T040000Z-nightly/db.dump.age"})
 }
 
 func TestS3ToLocalPreserveUploadsLeavesArtifactsBehind(t *testing.T) {
@@ -147,6 +155,92 @@ func TestLocalPrivateOnlyTransitionMovesOperationalDataToBucket(t *testing.T) {
 	}
 	if got := settings.values[blobstore.OperationalIdentitySettingKey]; got != targetPrivate.Identity() {
 		t.Fatalf("recorded private identity = %q, want %q", got, targetPrivate.Identity())
+	}
+}
+
+// The active store can keep the identity recorded under another path to its
+// directory. A private-only transition opens the artwork target afresh, by
+// its resolved path; that is still the active location, so the artwork
+// identity and objects stay as they are.
+func TestPrivateOnlyTransitionKeepsAliasedArtworkIdentity(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	if err := os.MkdirAll(filepath.Join(state, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	source := &memoryStore{identity: "local|" + filepath.Join(linked, "artwork"), objects: localRootObjects()}
+	reopened := &memoryStore{identity: "local|" + filepath.Join(state, "artwork"), objects: map[string][]byte{}}
+	targetPrivate := &memoryStore{identity: "s3|https://s3|private|", objects: map[string][]byte{}}
+	settings := stagedValues(t, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(linked, "artwork"), "s3.private_bucket": "private"})
+	service := testService(settings, source)
+	service.openPublic = func(map[string]string) (blobstore.Store, error) { return reopened, nil }
+	service.openPrivate = func(map[string]string) blobstore.Store { return targetPrivate }
+
+	value, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result := value.(Result); result.TargetIdentity != source.Identity() {
+		t.Fatalf("target identity = %q, want the recorded %q", result.TargetIdentity, source.Identity())
+	}
+	if len(reopened.objects) != 0 {
+		t.Fatalf("artwork copied onto its own directory: %v", reopened.objects)
+	}
+	if got := settings.values[blobstore.IdentitySettingKey]; got != "" && got != source.Identity() {
+		t.Fatalf("recorded artwork identity = %q, want it left as %q", got, source.Identity())
+	}
+}
+
+// The active store keeps the identity recorded under a link. If the link is
+// later pointed at another directory, a transition to that directory is a
+// real move: the artwork is still where the store opened it.
+func TestTransitionToRetargetedLinkCopiesArtwork(t *testing.T) {
+	base := t.TempDir()
+	first, second := filepath.Join(base, "first"), filepath.Join(base, "second")
+	for _, dir := range []string{first, second} {
+		if err := os.MkdirAll(filepath.Join(dir, "artwork"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(first, linked); err != nil {
+		t.Fatal(err)
+	}
+	recorded := &memorySettings{values: map[string]string{blobstore.IdentitySettingKey: "local|" + filepath.Join(linked, "artwork")}}
+	stores, _, err := blobstore.Open(t.Context(), blobstore.Options{Backend: blobstore.BackendLocal, LocalPath: filepath.Join(linked, "artwork"), Settings: recorded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stores.Assets.Put(t.Context(), "tmdb/movie/1/poster/a.webp", []byte("artwork")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(second, linked); err != nil {
+		t.Fatal(err)
+	}
+	target, err := blobstore.NewFilesystem(filepath.Join(second, "artwork"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := stagedValues(t, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(second, "artwork")})
+	service := New(nil, settings, nil, stores.Assets, nil)
+	service.reconcile = func(context.Context, blobstore.Store, func(float64, string)) (metadata.ArtworkReconcileStats, error) {
+		return metadata.ArtworkReconcileStats{}, nil
+	}
+	service.openPublic = func(map[string]string) (blobstore.Store, error) { return target, nil }
+	service.openPrivate = func(map[string]string) blobstore.Store { return nil }
+
+	if _, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{Policy: PolicyMigrateAll}, func(adminjob.StorageTransitionProgress) {}); err != nil {
+		t.Fatalf("transition to the directory the link now names failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(second, "artwork", "tmdb", "movie", "1", "poster", "a.webp")); err != nil {
+		t.Fatalf("artwork not copied to the new directory: %v", err)
 	}
 }
 
@@ -552,6 +646,29 @@ func TestStartRejectsTargetEqualToActiveStorage(t *testing.T) {
 				t.Fatalf("Start error = %v, want the unchanged target rejected", err)
 			}
 		})
+	}
+}
+
+// The active store can carry the identity recorded under another path to the
+// same directory. Naming that directory by its current path is still the
+// active location, not a move onto itself.
+func TestStartRejectsActiveDirectoryReachedByAnotherPath(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	if err := os.MkdirAll(filepath.Join(state, "artwork"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(linked, "artwork")}
+	settings := &memorySettings{values: clone(current)}
+	source := &memoryStore{identity: "local|" + filepath.Join(linked, "artwork"), objects: map[string][]byte{}}
+	service := New(nil, settings, memoryJobs{}, source, nil)
+	_, err := startStaged(t, service, settings, PolicyMigrateAll, map[string]string{"artwork.storage_backend": "local", "artwork.local_path": filepath.Join(state, "artwork")})
+	if err == nil || !strings.Contains(err.Error(), "same as active storage") {
+		t.Fatalf("Start error = %v, want the same directory rejected as unchanged", err)
 	}
 }
 

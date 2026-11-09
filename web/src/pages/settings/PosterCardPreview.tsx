@@ -1,6 +1,8 @@
 import { Eye, Heart } from "lucide-react";
+import type { CSSProperties } from "react";
 
 import CardOverlays from "@/components/overlays/CardOverlays";
+import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { RequestDownloadBar } from "@/components/overlays/RequestDownloadBar";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
@@ -10,14 +12,18 @@ import {
   type CardQuickActionMode,
 } from "@/lib/cardQuickActions";
 import {
-  buildDefaultPrefs,
   OVERLAY_PREVIEW_SAMPLES,
   OVERLAY_PREVIEW_VARIANTS,
+  OVERLAY_PREVIEW_WATCH_STATES,
   requestDownloadBarPercent,
   type CardOverlayPrefs,
   type OverlayPreviewVariant,
 } from "@/lib/overlays";
-import type { CardPresentation } from "@/lib/uiCustomization";
+import {
+  carouselCardWidthClasses,
+  carouselCardWidthPx,
+  type CardPresentation,
+} from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 
 /** Made-up titles: the preview must never look like someone's real library. */
@@ -39,19 +45,14 @@ const SAMPLES: Record<OverlayPreviewVariant, { title: string; meta: string; art:
   },
 };
 
+// The gap between sample posters: gap-2.
+const PREVIEW_GAP_PX = 8;
+
+// The lg breakpoint, from which home-row cards take their largest width.
+const LG_VIEWPORT_PX = 1024;
+
 const SHORTCUT_TILE =
   "border-border/20 bg-background/80 flex size-6 items-center justify-center rounded-md border shadow-sm";
-
-/**
- * How wide a sample poster is at each size. Every sample shows at every size,
- * wrapping when the row runs out, so the request sample and the show-only
- * badges can be previewed whatever the size.
- */
-const POSTER_WIDTH: Record<CardPresentation["poster_size"], string> = {
-  compact: "w-[5.25rem]",
-  standard: "w-[6.5rem]",
-  large: "w-32",
-};
 
 interface PosterCardPreviewViewProps {
   presentation: CardPresentation;
@@ -71,7 +72,15 @@ export function PosterCardPreviewView({
   variants,
   revealShortcuts = false,
 }: PosterCardPreviewViewProps) {
-  const width = POSTER_WIDTH[presentation.poster_size];
+  // Sample posters are as wide as the profile's poster cards in a home row
+  // at this window size, so badges show at the size they really draw at;
+  // they scale with the card. Every sample shows at every size, wrapping
+  // when the row runs out.
+  const width = carouselCardWidthClasses(presentation.poster_size);
+  // Beside the controls the panel holds two posters a row. That layout only
+  // applies on wide screens, past lg.
+  const rowWidth =
+    2 * carouselCardWidthPx(presentation.poster_size, LG_VIEWPORT_PX) + PREVIEW_GAP_PX;
   const hasShortcuts = quickActionMode !== "none";
 
   return (
@@ -80,7 +89,10 @@ export function PosterCardPreviewView({
         <span className="text-sm font-semibold">Preview</span>
         <span className="text-muted-foreground text-[13px]">Updates as you change things</span>
       </figcaption>
-      <div className="flex min-h-56 flex-wrap items-start justify-center gap-2">
+      <div
+        className="flex min-h-56 flex-wrap items-start justify-center gap-2 @5xl:w-[var(--preview-row)]"
+        style={{ "--preview-row": `${rowWidth}px` } as CSSProperties}
+      >
         {variants.map((variant) => {
           const sample = SAMPLES[variant];
           const data = OVERLAY_PREVIEW_SAMPLES[variant];
@@ -113,6 +125,7 @@ export function PosterCardPreviewView({
                     hasProgressBar={downloadPercent !== null}
                   />
                 ) : null}
+                <CardWatchStatus userState={OVERLAY_PREVIEW_WATCH_STATES[variant]} />
                 {hasShortcuts ? (
                   <div
                     aria-hidden="true"
@@ -136,14 +149,10 @@ export function PosterCardPreviewView({
                   </div>
                 ) : null}
               </div>
-              {presentation.caption !== "artwork" ? (
-                <div className="mt-1.5 min-w-0">
-                  <p className="truncate text-xs font-medium">{sample.title}</p>
-                  {presentation.caption === "title_metadata" ? (
-                    <p className="text-muted-foreground truncate text-xs">{sample.meta}</p>
-                  ) : null}
-                </div>
-              ) : null}
+              <div className="mt-1.5 min-w-0">
+                <p className="truncate text-xs font-medium">{sample.title}</p>
+                <p className="text-muted-foreground truncate text-xs">{sample.meta}</p>
+              </div>
             </div>
           );
         })}
@@ -163,8 +172,13 @@ export function PosterCardPreviewView({
  */
 export function PosterCardPreview({ revealShortcuts }: { revealShortcuts: boolean }) {
   const { cardPresentation } = useUICustomization();
-  const { prefs, overlaysEnabled, quickActionPreference, quickActionsEnabled, isOverlaySupported } =
-    useOverlayPrefs();
+  const {
+    editablePrefs,
+    overlaysEnabled,
+    quickActionPreference,
+    quickActionsEnabled,
+    isOverlaySupported,
+  } = useOverlayPrefs();
   // The request sample only shows a badge this server lets the profile keep.
   const variants = isOverlaySupported("request_status")
     ? OVERLAY_PREVIEW_VARIANTS
@@ -173,7 +187,7 @@ export function PosterCardPreview({ revealShortcuts }: { revealShortcuts: boolea
   return (
     <PosterCardPreviewView
       presentation={cardPresentation}
-      overlayPrefs={overlaysEnabled ? (prefs ?? buildDefaultPrefs()) : null}
+      overlayPrefs={overlaysEnabled ? editablePrefs : null}
       quickActionMode={quickActionsEnabled ? quickActionPreference : "none"}
       variants={variants}
       revealShortcuts={revealShortcuts}

@@ -188,11 +188,7 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 		decision.RestartOnTimeout = false
 		decision.Reason = segmentReasonRestarting
 	case progress.Running && segNum > progress.ProducedHead:
-		s.mu.Lock()
-		if segNum > s.lastRequestedSegment {
-			s.lastRequestedSegment = segNum
-		}
-		s.mu.Unlock()
+		s.notePlannedSegmentRequest(segNum)
 		decision.Wait = true
 		decision.WaitTimeout = plannedSegmentWait
 		decision.RestartOnTimeout = false
@@ -203,6 +199,17 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 		decision.Reason = "planned_segment_regenerate"
 	}
 	return decision
+}
+
+// notePlannedSegmentRequest records a request for planned segment segNum,
+// which FFmpeg hasn't reached, as the player's position, so the throttler
+// lets FFmpeg run on to it rather than hold the request until it times out.
+func (s *TranscodeSession) notePlannedSegmentRequest(segNum int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if segNum > s.lastRequestedSegment {
+		s.lastRequestedSegment = segNum
+	}
 }
 
 // manifest returns the plan as a complete VOD playlist for the session's

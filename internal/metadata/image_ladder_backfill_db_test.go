@@ -1,8 +1,10 @@
 package metadata
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"testing"
@@ -15,7 +17,7 @@ import (
 
 // TestLadderBackfillCandidatesDB runs the ladder backfill candidate query
 // against the migrated schema. Every cached backdrop surface (the item, its
-// localization, and an extra backdrop) stays a candidate while its manifest
+// localization, an extra backdrop, and a season) stays a candidate while its manifest
 // predates the backdrop's widest rung, and drops out once the manifest lists
 // it.
 func TestLadderBackfillCandidatesDB(t *testing.T) {
@@ -28,7 +30,7 @@ func TestLadderBackfillCandidatesDB(t *testing.T) {
 
 	contentID := fmt.Sprintf("zz-ladder-backfill-%d", time.Now().UnixNano())
 	originals, extraID := seedLadderBackdrops(t, pool, contentID)
-	all := []string{ImageCacheTargetItem, ImageCacheTargetItemBackdrop, ImageCacheTargetItemLocalization}
+	all := []string{ImageCacheTargetItem, ImageCacheTargetItemBackdrop, ImageCacheTargetItemLocalization, ImageCacheTargetSeason}
 
 	if got := ladderBackdropCandidates(t, pool, contentID, extraID); !slices.Equal(got, all) {
 		t.Fatalf("without manifests, candidates = %v, want %v", got, all)
@@ -46,9 +48,101 @@ func TestLadderBackfillCandidatesDB(t *testing.T) {
 	}
 }
 
+// TestLadderBackfillSkipsCandidatesHeldByJobsDB checks which job states keep a
+// ladder candidate out of an EnqueueLadderBackfill batch. A job for the same
+// source that is queued, running, or parked after failing holds the row. No job,
+// a succeeded job, a failed job whose cooldown is over, or a job for an older
+// source or another image type leaves it to be enqueued.
+func TestLadderBackfillSkipsCandidatesHeldByJobsDB(t *testing.T) {
+	pool := imageCacheQueueTestPool(t)
+	ctx := t.Context()
+
+	contentID := fmt.Sprintf("zz-ladder-held-%d", time.Now().UnixNano())
+	const source = "https://image.tmdb.org/t/p/original/poster.jpg"
+	base := "tmdb/movies/" + contentID
+	cleanup := func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM metadata_image_cache_jobs WHERE target_content_id = $1`, contentID)
+		_, _ = pool.Exec(bg, `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		_, _ = pool.Exec(bg, `DELETE FROM artwork_revision_gc_candidates WHERE original_path LIKE $1 || '%'`, base)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+
+	// No manifest lists the poster's new rung, so the poster is a candidate.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO media_items (content_id, type, title, tmdb_id, poster_source_path, poster_path)
+		VALUES ($1, 'movie', 'Ladder held', '1', $2, $3)
+	`, contentID, source, base+"/poster/original.r1.webp"); err != nil {
+		t.Fatalf("seed media item: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		status    string // empty for no job
+		source    string
+		imageType string        // defaults to poster
+		retry     time.Duration // next_attempt_at relative to now
+		held      bool
+	}{
+		{name: "no job"},
+		{name: "queued", status: ImageCacheStatusQueued, source: source, retry: time.Hour, held: true},
+		{name: "running", status: ImageCacheStatusRunning, source: source, held: true},
+		{name: "failed and parked", status: ImageCacheStatusFailed, source: source, retry: 7 * 24 * time.Hour, held: true},
+		{name: "failed with its cooldown over", status: ImageCacheStatusFailed, source: source, retry: -time.Minute},
+		{name: "succeeded", status: ImageCacheStatusSucceeded, source: source},
+		{name: "queued for an older source", status: ImageCacheStatusQueued, source: "https://image.tmdb.org/t/p/original/old.jpg"},
+		{name: "queued for another image type", status: ImageCacheStatusQueued, source: source, imageType: ImageCacheImageLogo},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `DELETE FROM metadata_image_cache_jobs WHERE target_content_id = $1`, contentID); err != nil {
+				t.Fatalf("clear jobs: %v", err)
+			}
+			if tc.status != "" {
+				if _, err := pool.Exec(ctx, `
+					INSERT INTO metadata_image_cache_jobs (
+						target_type, target_content_id, series_id, source_path, provider_id,
+						provider_content_id, content_type, image_type, target_language,
+						status, next_attempt_at, locked_at
+					)
+					VALUES (
+						'item', $1, $1, $2, 'tmdb', '1', 'movie', $5, '',
+						$3::text, NOW() + $4::double precision * interval '1 second',
+						CASE WHEN $3::text = 'running' THEN NOW() END
+					)
+				`, contentID, tc.source, tc.status, tc.retry.Seconds(), cmp.Or(tc.imageType, ImageCacheImagePoster)); err != nil {
+					t.Fatalf("seed job: %v", err)
+				}
+			}
+
+			// Read the statement EnqueueLadderBackfill sends without enqueueing
+			// anything; the limit leaves room for every candidate in a shared
+			// database.
+			var enqueueable int
+			if err := pool.QueryRow(ctx, `
+				SELECT count(*)
+				FROM (`+ladderBackfillBatchSQL()+`) batch
+				WHERE batch.target_type = 'item'
+				  AND batch.image_type = 'poster'
+				  AND batch.target_content_id = $2
+			`, math.MaxInt32, contentID).Scan(&enqueueable); err != nil {
+				t.Fatalf("query ladder backfill batch: %v", err)
+			}
+			want := 1
+			if tc.held {
+				want = 0
+			}
+			if enqueueable != want {
+				t.Fatalf("enqueueable candidates = %d, want %d", enqueueable, want)
+			}
+		})
+	}
+}
+
 // seedLadderBackdrops caches a provider backdrop on the item, its German
-// localization, and one extra backdrop row, returning each surface's original
-// key and the extra backdrop's row ID.
+// localization, one extra backdrop row, and a season, returning each
+// surface's original key and the extra backdrop's row ID.
 func seedLadderBackdrops(t *testing.T, pool *pgxpool.Pool, contentID string) (map[string]string, int64) {
 	t.Helper()
 	ctx := t.Context()
@@ -57,6 +151,7 @@ func seedLadderBackdrops(t *testing.T, pool *pgxpool.Pool, contentID string) (ma
 		ImageCacheTargetItem:             base + "/backdrop/original.r1.webp",
 		ImageCacheTargetItemLocalization: base + "/localizations/de/backdrop/original.r2.webp",
 		ImageCacheTargetItemBackdrop:     base + "/x1/backdrop/original.r3.webp",
+		ImageCacheTargetSeason:           base + "/seasons/1/backdrop/original.r4.webp",
 	}
 	cleanup := func() {
 		bg := context.Background()
@@ -86,6 +181,12 @@ func seedLadderBackdrops(t *testing.T, pool *pgxpool.Pool, contentID string) (ma
 		RETURNING id
 	`, contentID, originals[ImageCacheTargetItemBackdrop]).Scan(&extraID); err != nil {
 		t.Fatalf("seed extra backdrop: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO seasons (content_id, series_id, season_number, backdrop_source_path, backdrop_path)
+		VALUES ($1 || '-s1', $1, 1, 'https://image.tmdb.org/t/p/original/season.jpg', $2)
+	`, contentID, originals[ImageCacheTargetSeason]); err != nil {
+		t.Fatalf("seed season: %v", err)
 	}
 	return originals, extraID
 }

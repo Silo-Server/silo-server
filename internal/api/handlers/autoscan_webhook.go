@@ -105,6 +105,16 @@ func (h *AutoscanHandler) HandleWebhookDelivery(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusAccepted, webhookAccepted{Status: autoscanDeliveryAccepted})
 }
 
+// KnowsWebhookToken reports whether the request's path token belongs to an
+// Autoscan source. The router uses it to admit real deliveries once the
+// per-address autoscan_webhook budget is spent: that budget exists to slow
+// guesses with unknown tokens, and a sender holding a real one shares the
+// address with whatever spent it. A lookup error counts as unknown.
+func (h *AutoscanHandler) KnowsWebhookToken(r *http.Request) bool {
+	_, _, err := h.repo.ResolveWebhookToken(r.Context(), chi.URLParam(r, "token"))
+	return err == nil
+}
+
 // AutoscanDeliveryFailure carries safe delivery failure details to each transport.
 type AutoscanDeliveryFailure struct {
 	Status  int
@@ -215,6 +225,7 @@ func (h *AutoscanHandler) DeliverAutoscanWebhook(w http.ResponseWriter, r *http.
 		"suppressed", result.Suppressed,
 		"unresolved", result.Unresolved,
 		"pending", result.Pending,
+		"awaiting_removal", result.AwaitingRemoval,
 	)
 	return nil
 }

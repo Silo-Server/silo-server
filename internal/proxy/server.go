@@ -3,12 +3,12 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,21 +17,27 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/buildinfo"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/Silo-Server/silo-server/internal/bandwidthprobe"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloads"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -45,8 +51,9 @@ const proxyRangeHeader = "Range"
 
 // Server is the HTTP handler for proxy mode.
 type Server struct {
-	watcher *nodeconfig.Watcher
-	tracker *nodesessions.Tracker
+	probeLimiter *bandwidthprobe.Limiter
+	watcher      *nodeconfig.Watcher
+	tracker      *nodesessions.Tracker
 	// nodeRowID resolves this proxy's stable stream_nodes identity. Production
 	// uses the config watcher; tests replace it to model sibling proxies.
 	nodeRowID            func() (int, bool)
@@ -65,12 +72,15 @@ type Server struct {
 	egress     *egressMeter
 	clientIP   *clientip.Resolver
 	telemetry  *streamtelemetry.Registry
+	// moves follows a store-backed transcode that central moved off a node
+	// this proxy could not reach. Nil leaves such relays failing.
+	moves *transcodeMoveFollower
 	// subCache stores complete embedded subtitle extracts under the transcode dir
 	// so repeat selections skip the whole-file ffmpeg demux.
 	subCache *playback.SubtitleCache
-	// Download limits are node-local once egress is delegated. Rebuild the
-	// manager when hot-reloaded settings change so existing transfers retain
-	// their original limiter while new transfers use the new values.
+	// Download byte budgets are shared with API instances when Redis is
+	// configured. Without it the manager keeps node-local limiters, which
+	// follow hot-reloaded settings through Reload.
 	downloadBandwidthMu sync.Mutex
 	downloadBandwidth   *downloads.BandwidthManager
 	downloadServerBPS   int64
@@ -142,6 +152,7 @@ func NewServer(watcher *nodeconfig.Watcher, tracker *nodesessions.Tracker) *Serv
 		subCache: playback.NewSubtitleCache(func() string {
 			return watcher.Config().Playback.TranscodeDir
 		}),
+		probeLimiter: bandwidthprobe.NewLimiter(),
 	}
 	if watcher != nil {
 		server.nodeRowID = watcher.NodeRowID
@@ -250,6 +261,8 @@ func (s *Server) router() chi.Router {
 		AllowedMethods: []string{"GET", "HEAD", "OPTIONS"},
 		AllowedHeaders: []string{
 			"Accept", "Authorization", "Content-Type", proxyRangeHeader,
+			"X-Silo-Device-Name", "X-Silo-Device-Platform", "X-Silo-Client-Family", "X-Profile-Token",
+			"X-Silo-Device-Id", "X-Silo-Client", "X-Silo-Client-Version", "X-Profile-Id", "X-Silo-Client-Build", "X-Silo-Client-Channel",
 			"If-Match", "If-Modified-Since", "If-None-Match", "If-Range", "If-Unmodified-Since",
 		},
 		// direct_stream_resume_v1 has the client re-request a byte range with
@@ -261,7 +274,7 @@ func (s *Server) router() chi.Router {
 		// different origin than the web app, which is the normal deployment.
 		ExposedHeaders: []string{
 			"Accept-Ranges", "Content-Encoding", "Content-Length", "Content-Range",
-			"ETag", "Last-Modified",
+			"ETag", "Last-Modified", "Retry-After",
 		},
 		MaxAge: 86400,
 	}))
@@ -273,6 +286,7 @@ func (s *Server) router() chi.Router {
 	r.Group(func(r chi.Router) {
 		// Streaming and download bytes count toward the node's measured egress.
 		r.Use(s.meterEgress)
+		r.Get("/stream/bandwidth-probe/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/bandwidth-probe/{token}", s.handleBandwidthProbe))
 		r.Head("/stream/direct/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/direct/{token}", s.handleDirectPlay))
 		r.Get("/stream/direct/{token}", observeProxy(s.telemetry, http.MethodGet, "/stream/direct/{token}", s.handleDirectPlay))
 		r.Head("/stream/remux/{token}", observeProxy(s.telemetry, http.MethodHead, "/stream/remux/{token}", s.handleRemux))
@@ -408,7 +422,7 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 		return playback.HWAccelInfo{}, err
 	}
 	info.Transformations = registry.Advertised()
-	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1}
+	info.TransportFeatures = []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureThemeAudioEgressV1, playback.TransportFeatureBandwidthProbeV1}
 	// Advertised before the hash is taken, because it is part of what the hash
 	// covers: a build that needs longer reaches the sweep rather than sitting
 	// behind an unchanged identity.
@@ -714,7 +728,8 @@ func proxyRemuxPlayMethodV3(method string) bool {
 func proxyTranscodePlayMethodV3(method string) bool {
 	switch method {
 	case "", string(playback.PlayTranscode), streamtoken.PlayMethodToneMapTranscode,
-		streamtoken.PlayMethodAudioDownmixTranscode, streamtoken.PlayMethodCopyFMP4Transcode:
+		streamtoken.PlayMethodAudioDownmixTranscode, streamtoken.PlayMethodCopyFMP4Transcode,
+		streamtoken.PlayMethodSubtitleRenditionsTranscode, streamtoken.PlayMethodSubtitleRenditionsCopyFMP4:
 		return true
 	default:
 		return false
@@ -757,8 +772,8 @@ func (s *Server) serveDirectPlayClaims(w http.ResponseWriter, r *http.Request, c
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "direct_play")
-	s.tracker.Track(r.Context(), info)
-	defer s.tracker.Remove(r.Context(), claims.SessionID)
+	release := s.tracker.Hold(r.Context(), info)
+	defer release(context.WithoutCancel(r.Context()))
 
 	// Serve through the same path the integrated server uses rather than a bare
 	// http.ServeFile: direct_stream_resume_v1 requires the strong ETag that
@@ -790,15 +805,15 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	// the API's reservation before the client starts its GET.
 	if s.tracker != nil && r.Method != http.MethodHead {
 		info := sessionInfo(s.tracker, claims, "download")
-		s.tracker.Track(r.Context(), info)
-		defer s.tracker.Remove(context.WithoutCancel(r.Context()), claims.SessionID)
+		release := s.tracker.Hold(r.Context(), info)
+		defer release(context.WithoutCancel(r.Context()))
 	}
 	if remoteArtifact {
 		s.relayDownloadArtifact(w, r, claims)
 		return
 	}
 
-	f, err := os.Open(claims.MediaPath)
+	f, err := fspath.Open(claims.MediaPath)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -810,7 +825,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename := filepath.Base(claims.MediaPath)
+	filename := fspath.Display(filepath.Base(claims.MediaPath))
 	if disposition := mime.FormatMediaType("attachment", map[string]string{"filename": filename}); disposition != "" {
 		w.Header().Set("Content-Disposition", disposition)
 	}
@@ -893,19 +908,37 @@ func (s *Server) relayDownloadArtifact(w http.ResponseWriter, r *http.Request, c
 	}
 }
 
-func (s *Server) downloadBandwidthManager() *downloads.BandwidthManager {
-	cfg := s.watcher.Config()
-	if cfg == nil {
-		return nil
+// SetDownloadBandwidth wires the shared cluster budget before serving requests.
+func (s *Server) SetDownloadBandwidth(pool *pgxpool.Pool, client *redis.Client) {
+	var serverBPS, userBPS int64
+	if cfg := s.watcher.Config(); cfg != nil {
+		serverBPS, userBPS = cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS
 	}
-	serverBPS := cfg.Download.ServerBandwidthBPS
-	userBPS := cfg.Download.UserBandwidthBPS
 	s.downloadBandwidthMu.Lock()
 	defer s.downloadBandwidthMu.Unlock()
-	if s.downloadBandwidth == nil || serverBPS != s.downloadServerBPS || userBPS != s.downloadUserBPS {
-		s.downloadBandwidth = downloads.NewBandwidthManager(serverBPS, userBPS)
-		s.downloadServerBPS = serverBPS
-		s.downloadUserBPS = userBPS
+	s.downloadBandwidth = downloads.NewBandwidthManager(serverBPS, userBPS)
+	s.downloadServerBPS, s.downloadUserBPS = serverBPS, userBPS
+	s.downloadBandwidth.SetSharedBudget(client, downloads.BandwidthRates(pool))
+}
+
+// downloadBandwidthManager applies hot-reloaded limits to the manager. A
+// standalone manager has no other source for them; a shared one also reads
+// the settings itself, so the reload only refreshes its cached rates sooner.
+func (s *Server) downloadBandwidthManager() *downloads.BandwidthManager {
+	s.downloadBandwidthMu.Lock()
+	defer s.downloadBandwidthMu.Unlock()
+	cfg := s.watcher.Config()
+	if s.downloadBandwidth == nil {
+		if cfg == nil {
+			return nil
+		}
+		s.downloadBandwidth = downloads.NewBandwidthManager(cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS)
+		s.downloadServerBPS, s.downloadUserBPS = cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS
+		return s.downloadBandwidth
+	}
+	if cfg != nil && (cfg.Download.ServerBandwidthBPS != s.downloadServerBPS || cfg.Download.UserBandwidthBPS != s.downloadUserBPS) {
+		s.downloadServerBPS, s.downloadUserBPS = cfg.Download.ServerBandwidthBPS, cfg.Download.UserBandwidthBPS
+		s.downloadBandwidth.Reload(s.downloadServerBPS, s.downloadUserBPS)
 	}
 	return s.downloadBandwidth
 }
@@ -957,8 +990,8 @@ func (s *Server) relayProgressiveRemux(w http.ResponseWriter, r *http.Request, c
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	info := sessionInfo(s.tracker, claims, "remux")
-	s.tracker.Track(r.Context(), info)
-	defer s.tracker.Remove(r.Context(), claims.SessionID)
+	release := s.tracker.Hold(r.Context(), info)
+	defer release(context.WithoutCancel(r.Context()))
 	s.proxyToTranscodeNode(w, r, claims, "/remux/"+transcodeTransportIDFromClaims(claims), forwardToken)
 }
 
@@ -980,11 +1013,10 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 	attachStream(r.Context(), claims)
 	noteDelivery(r, claims)
 	// A HEAD probe returns before the remux starts, so it is not an active
-	// stream: counting it would consume capacity, and its Remove would drop
-	// the entry of a GET already playing the same session.
+	// stream and must not count against this proxy's capacity.
 	if r.Method != http.MethodHead {
-		s.tracker.Track(r.Context(), sessionInfo(s.tracker, claims, "remux"))
-		defer s.tracker.Remove(r.Context(), claims.SessionID)
+		release := s.tracker.Hold(r.Context(), sessionInfo(s.tracker, claims, "remux"))
+		defer release(context.WithoutCancel(r.Context()))
 	}
 
 	seekSeconds := 0.0
@@ -1005,6 +1037,7 @@ func (s *Server) serveRemuxClaims(w http.ResponseWriter, r *http.Request, claims
 		SourceAudioChannels:       claims.SourceAudioChannels,
 		TargetAudioChannels:       claims.TargetAudioChannels,
 		TargetAudioBitrateKbps:    claims.TargetAudioBitrateKbps,
+		CopyAudioCodec:            claims.CopyAudioCodec,
 	})
 }
 
@@ -1105,6 +1138,11 @@ func (s *Server) handleSubtitle(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
+		if response.Status() == 0 && errors.Is(err, playback.ErrSubtitleReadsBusy) {
+			w.Header().Set("Retry-After", strconv.Itoa(playback.SubtitleReadsRetryAfter))
+			http.Error(w, "server busy", http.StatusServiceUnavailable)
+			return
+		}
 		if response.Status() == 0 {
 			http.Error(w, "subtitle extraction failed", http.StatusInternalServerError)
 			return
@@ -1141,6 +1179,8 @@ func (s *Server) handleSubtitleFonts(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+var errBuildNodeRequest = errors.New("build transcode node request")
+
 // proxyToTranscodeNode forwards the request to the transcode node specified in
 // the claims. forwardToken is the stream token handed to the node out of band
 // (never to the client): the client's own token on a token route, a
@@ -1152,38 +1192,68 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 
-	targetURL := claims.TranscodeNode + path
 	isSegmentRoute := strings.Contains(path, "/segment/")
 	_, segmentParseErr := playback.ParseSegmentNumber(filepath.Base(path))
 	isMediaSegment := segmentParseErr == nil
-	if rawQuery := r.URL.RawQuery; rawQuery != "" {
-		targetURL = fmt.Sprintf("%s?%s", targetURL, rawQuery)
+	relay := func(nodeURL string) (*http.Response, string, error) {
+		targetURL := nodeURL + path
+		if rawQuery := r.URL.RawQuery; rawQuery != "" {
+			targetURL = fmt.Sprintf("%s?%s", targetURL, rawQuery)
+		}
+		req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, nil)
+		if err != nil {
+			return nil, targetURL, fmt.Errorf("%w: %w", errBuildNodeRequest, err)
+		}
+		if err := nodeauth.Sign(req, nodeURL, cfg.Auth.JWTSecret); err != nil {
+			return nil, targetURL, fmt.Errorf("%w: %w", errBuildNodeRequest, err)
+		}
+		if isSegmentRoute {
+			transcodeproxy.PrepareRequest(req, r)
+		}
+		// Forward the verified stream token so the transcode node can self-reconstruct
+		// a lost session after its OWN restart: the token carries the full byte-affecting
+		// recipe, so the node can re-spawn ffmpeg seeked to the requested segment instead
+		// of 404ing (the integrated server already does this from the same token). The
+		// node re-verifies the token independently before trusting it.
+		if forwardToken != "" {
+			req.Header.Set("X-Silo-Stream-Token", forwardToken)
+		}
+		resp, err := transcodeproxy.DoNode(s.httpClient, req, nodeURL, "stream")
+		return resp, targetURL, err
 	}
 
-	req, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, nil)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
+	// An HLS transcode rebuilt from the shared recipe store follows its record
+	// when central moved it off the token's node.
+	transportID := transcodeTransportIDFromClaims(claims)
+	followMoves := s.moves != nil && strings.HasPrefix(path, "/transcode/") && transcodeRecipeInStore(claims)
+	nodeURL := claims.TranscodeNode
+	if followMoves {
+		nodeURL = s.moves.current(r.Context(), transportID, claims.TranscodeNode)
 	}
-	if err := nodeauth.Sign(req, claims.TranscodeNode, cfg.Auth.JWTSecret); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	if isSegmentRoute {
-		transcodeproxy.PrepareRequest(req, r)
-	}
-	// Forward the verified stream token so the transcode node can self-reconstruct
-	// a lost session after its OWN restart: the token carries the full byte-affecting
-	// recipe, so the node can re-spawn ffmpeg seeked to the requested segment instead
-	// of 404ing (the integrated server already does this from the same token). The
-	// node re-verifies the token independently before trusting it.
-	if forwardToken != "" {
-		req.Header.Set("X-Silo-Stream-Token", forwardToken)
-	}
-
-	resp, err := transcodeproxy.DoNode(s.httpClient, req, claims.TranscodeNode, "stream")
-	if err != nil {
-		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", err, "url", targetURL, "playback_session_id", claims.SessionID)
+	var resp *http.Response
+	var failedNodes []string
+	for hop := 0; ; hop++ {
+		var targetURL string
+		var err error
+		resp, targetURL, err = relay(nodeURL)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, errBuildNodeRequest) {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if followMoves && hop < maxTranscodeMoveHops && r.Context().Err() == nil && nodepool.IsConnectFailure(err) {
+			slog.WarnContext(r.Context(), "transcode node unreachable; following the transport to its new node", "component", "proxy",
+				"node", logredact.SanitizeURL(nodeURL), "error", logredact.SanitizeText(err.Error()), "playback_session_id", claims.SessionID)
+			if next, ok := s.moves.follow(r.Context(), transportID, claims.TranscodeNode, nodeURL, failedNodes); ok {
+				failedNodes = append(failedNodes, nodeURL)
+				nodeURL = next
+				continue
+			}
+		}
+		// The forwarded query can carry the player's account token.
+		slog.ErrorContext(r.Context(), "proxy to transcode node", "component", "proxy", "error", logredact.SanitizeURLError(err), "url", logredact.SanitizeURL(targetURL), "playback_session_id", claims.SessionID)
 		http.Error(w, "transcode node unavailable", http.StatusBadGateway)
 		return
 	}
@@ -1194,11 +1264,18 @@ func (s *Server) proxyToTranscodeNode(w http.ResponseWriter, r *http.Request, cl
 	sw := httpstream.NewRollingDeadlineWriter(w)
 	sw.WriteHeader(resp.StatusCode)
 	if _, copyErr := io.Copy(sw, resp.Body); copyErr != nil {
+		if r.Context().Err() == nil && errors.Is(copyErr, nodepool.ErrNodeNotAnswering) {
+			slog.WarnContext(r.Context(), "transcode node stopped answering during relay body read", "component", "proxy", "error", logredact.SanitizeText(copyErr.Error()), "node", logredact.SanitizeURL(nodeURL), "playback_session_id", claims.SessionID)
+		}
+		if r.Context().Err() == nil {
+			// A clean end would let a chunked client accept the short body as complete.
+			panic(http.ErrAbortHandler)
+		}
 		return
 	}
 	if isMediaSegment && generation != "" && r.Method == http.MethodGet &&
 		sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, claims.TranscodeNode, path, cfg.Auth.JWTSecret, generation); ackErr != nil {
+		if ackErr := transcodeproxy.Acknowledge(r.Context(), s.httpClient, nodeURL, path, cfg.Auth.JWTSecret, generation); ackErr != nil {
 			slog.WarnContext(r.Context(), "acknowledge transcode segment completion", "component", "proxy", "error", ackErr, "playback_session_id", claims.SessionID)
 		}
 	}

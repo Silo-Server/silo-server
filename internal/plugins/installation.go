@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +15,12 @@ import (
 
 var ErrInstallationNotFound = errors.New("plugin installation not found")
 var ErrArchiveNotFound = errors.New("plugin archive not found")
+
+// ErrArchiveUnreadable marks a stored plugin archive that won't open or
+// extract, or doesn't match the installation row it was read for. That plugin
+// can't load from it; other plugins are unaffected.
+var ErrArchiveUnreadable = errors.New("stored plugin archive is unreadable")
+
 var ErrInstallationDisabled = errors.New("plugin installation is disabled")
 
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate
@@ -97,11 +101,30 @@ type UpdateInstallationInput struct {
 }
 
 type InstallationStore struct {
-	pool *pgxpool.Pool
+	pool installationDB
+}
+
+// installationDB is a pool or a caller's transaction: Begin on a
+// transaction opens a savepoint, so the store's own multi-statement writes
+// stay atomic inside it.
+type installationDB interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 func NewInstallationStore(pool *pgxpool.Pool) *InstallationStore {
+	if pool == nil {
+		return &InstallationStore{}
+	}
 	return &InstallationStore{pool: pool}
+}
+
+// WithTx returns a store whose reads and writes run in tx, so an
+// installation commits or rolls back with the caller's other writes.
+func (s *InstallationStore) WithTx(tx pgx.Tx) *InstallationStore {
+	return &InstallationStore{pool: tx}
 }
 
 const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation`
@@ -424,6 +447,25 @@ func (s *InstallationStore) ListCapabilities(ctx context.Context, installationID
 	return scanCapabilities(rows)
 }
 
+// ListCapabilitiesOfType lists one capability type across every installation
+// that is not builtin, enabled or not. q may be a transaction, so a caller that
+// holds one needs no second pool connection.
+func ListCapabilitiesOfType(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, capabilityType string,
+) ([]*Capability, error) {
+	rows, err := q.Query(ctx, `SELECT c.plugin_installation_id, c.capability_type, c.capability_id, c.metadata, c.created_at, c.updated_at
+		FROM plugin_capabilities c
+		JOIN plugin_installations i ON i.id = c.plugin_installation_id
+		WHERE c.capability_type = $1 AND i.kind <> $2
+		ORDER BY c.plugin_installation_id ASC, c.capability_id ASC`, capabilityType, KindBuiltin)
+	if err != nil {
+		return nil, fmt.Errorf("listing plugin capabilities of type %s: %w", capabilityType, err)
+	}
+	defer rows.Close()
+	return scanCapabilities(rows)
+}
+
 func (s *InstallationStore) SaveArchive(
 	ctx context.Context,
 	installationID int,
@@ -486,8 +528,7 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 		return ErrInstallationNotFound
 	}
 
-	installDir := filepath.Dir(installation.InstallPath)
-	if err := os.RemoveAll(installDir); err != nil {
+	if err := removeInstallationFiles(ctx, installation); err != nil {
 		return fmt.Errorf("removing plugin installation files: %w", err)
 	}
 

@@ -98,10 +98,51 @@ func TestSelectAudioTrack(t *testing.T) {
 	}
 }
 
+func TestPreferUnconvertedAudioTrackV3(t *testing.T) {
+	trueHD := models.AudioTrack{Language: "en", Codec: "truehd", Profile: "Dolby TrueHD + Dolby Atmos", Channels: 8, Layout: "7.1", Default: true}
+	atmos := models.AudioTrack{Language: "en", Codec: "eac3", Profile: "Dolby Digital Plus + Dolby Atmos", Channels: 6, Layout: "5.1(side)"}
+	ac3 := models.AudioTrack{Language: "en", Codec: "ac3", Channels: 6, Layout: "5.1(side)"}
+	stereo := models.AudioTrack{Language: "en", Codec: "aac", Channels: 2, Layout: "stereo"}
+	commentary := models.AudioTrack{Language: "en", Codec: "ac3", Channels: 6, Layout: "5.1", Title: "Director's Commentary"}
+	french := models.AudioTrack{Language: "fr", Codec: "eac3", Channels: 6, Layout: "5.1(side)"}
+	copied := func(channels int) playback.StartAudioOutcomeV3 {
+		return playback.StartAudioOutcomeV3{Playable: true, Channels: channels}
+	}
+	converted := func(channels int) playback.StartAudioOutcomeV3 {
+		return playback.StartAudioOutcomeV3{Playable: true, Converted: true, Channels: channels}
+	}
+
+	tests := []struct {
+		name     string
+		tracks   []models.AudioTrack
+		outcomes []playback.StartAudioOutcomeV3
+		want     int
+	}{
+		{name: "an unconverted track replaces a converted default", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 1},
+		{name: "a default that plays as it is stays", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{copied(8), copied(6)}, want: 0},
+		{name: "a track that plans replaces one that does not", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{{}, copied(6)}, want: 1},
+		{name: "most channels, then Atmos, then codec", tracks: []models.AudioTrack{trueHD, stereo, ac3, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(2), copied(6), copied(6)}, want: 3},
+		{name: "a track with fewer channels never replaces a conversion", tracks: []models.AudioTrack{trueHD, stereo}, outcomes: []playback.StartAudioOutcomeV3{converted(6), copied(2)}, want: 0},
+		{name: "a track that is converted too never replaces the default", tracks: []models.AudioTrack{trueHD, atmos}, outcomes: []playback.StartAudioOutcomeV3{converted(6), converted(2)}, want: 0},
+		{name: "commentary is never substituted in", tracks: []models.AudioTrack{trueHD, commentary}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 0},
+		{name: "another language is never substituted in", tracks: []models.AudioTrack{trueHD, french}, outcomes: []playback.StartAudioOutcomeV3{converted(2), copied(6)}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			file := &models.MediaFile{Container: "mkv", CodecAudio: tt.tracks[0].Codec, AudioTracks: tt.tracks}
+			outcome := func(index int) playback.StartAudioOutcomeV3 { return tt.outcomes[index] }
+			if got := playback.PreferUnconvertedAudioTrackV3(file, 0, outcome); got != tt.want {
+				t.Fatalf("PreferUnconvertedAudioTrackV3 = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchAudioTrackAcrossVersions(t *testing.T) {
 	for _, tt := range []struct {
 		name                 string
 		requested, effective []models.AudioTrack
+		index, want          int
 	}{
 		{"remaps a reordered language", []models.AudioTrack{
 			{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
@@ -109,17 +150,52 @@ func TestMatchAudioTrackAcrossVersions(t *testing.T) {
 		}, []models.AudioTrack{
 			{Language: "en", Codec: "eac3", Channels: 6, Title: "English 5.1"},
 			{Language: "ja", Codec: "aac", Channels: 2, Title: "Japanese"},
-		}},
+		}, 1, 0},
 		{"falls back to the language across codecs", []models.AudioTrack{
 			{Language: "ja", Codec: "aac", Channels: 2},
 			{Language: "en", Codec: "truehd", Channels: 8},
 		}, []models.AudioTrack{
 			{Language: "en", Codec: "eac3", Channels: 6},
 			{Language: "es", Codec: "aac", Channels: 2, Default: true},
-		}},
+		}, 1, 0},
+		{"keeps the language when the codec changes and the order differs", []models.AudioTrack{
+			{Language: "en", Codec: "ac3", Channels: 6, Default: true},
+			{Language: "ja", Codec: "ac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "ja", Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
+		{"keeps the language when only the channels change", []models.AudioTrack{
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+			{Language: "ja", Codec: "aac", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "ja", Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
+		{"prefers the exact regional tag", []models.AudioTrack{
+			{Language: "en-GB", Codec: "eac3", Channels: 6},
+			{Language: "en-US", Codec: "eac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Language: "en-GB", Codec: "aac", Channels: 2},
+			{Language: "en-US", Codec: "aac", Channels: 2},
+		}, 1, 1},
+		{"keeps main audio over commentary in the same language", []models.AudioTrack{
+			{Language: "en", Codec: "truehd", Channels: 8, Title: "Main"},
+			{Language: "en", Codec: "ac3", Channels: 2, Title: "Director's Commentary"},
+		}, []models.AudioTrack{
+			{Language: "en", Codec: "ac3", Channels: 2, Title: "Director's Commentary"},
+			{Language: "en", Codec: "eac3", Channels: 6, Title: "Main"},
+		}, 0, 1},
+		{"matches an untagged track among untagged tracks", []models.AudioTrack{
+			{Language: "en", Codec: "aac", Channels: 2},
+			{Codec: "ac3", Channels: 6},
+		}, []models.AudioTrack{
+			{Codec: "aac", Channels: 2},
+			{Language: "en", Codec: "aac", Channels: 2, Default: true},
+		}, 1, 0},
 	} {
-		if got := playback.MatchAudioTrackAcrossVersions(tt.requested, tt.effective, 1); got != 0 {
-			t.Fatalf("%s: MatchAudioTrackAcrossVersions() = %d, want English track 0", tt.name, got)
+		if got := playback.MatchAudioTrackAcrossVersions(tt.requested, tt.effective, tt.index); got != tt.want {
+			t.Errorf("%s: MatchAudioTrackAcrossVersions() = %d, want %d", tt.name, got, tt.want)
 		}
 	}
 }

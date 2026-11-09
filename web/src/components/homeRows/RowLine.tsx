@@ -1,4 +1,4 @@
-import { Star } from "lucide-react";
+import { Star, type LucideIcon } from "lucide-react";
 import { ListRow, MetaDot, type ListRowProps } from "@/components/calm/ListRow";
 import { PosterPeek } from "@/components/calm/PosterPeek";
 import type { PeekRequest } from "@/components/calm/usePeekLimiter";
@@ -20,9 +20,17 @@ export interface RowLineProps extends Pick<
   surface: Surface;
   pageLabel: string;
   description: DescriptionPart[];
+  /** The row's icon; its kind's group icon when absent. */
+  icon?: LucideIcon;
   /** Where the row's poster peek comes from; null keeps its icon. */
   peek: PeekRequest | null;
   switchDisabled?: boolean;
+  /**
+   * The row is the page's hero banner (its first shown hero) and an admin kept
+   * it off the apps. A later hero reaches the apps as a regular row, so only
+   * the banner is tagged web only.
+   */
+  webOnlyBanner?: boolean;
   onShownChange: (shown: boolean) => void;
 }
 
@@ -52,8 +60,10 @@ export function RowLine({
   surface,
   pageLabel,
   description,
+  icon,
   peek,
   switchDisabled,
+  webOnlyBanner = false,
   onShownChange,
   ...rest
 }: RowLineProps) {
@@ -64,13 +74,13 @@ export function RowLine({
       title={row.title}
       collapsed={!row.shown}
       collapsedText={collapsedRowText(surface, pageLabel)}
-      art={<PosterPeek icon={GROUP_ICONS[rowKindGroup(row.sectionType)]} request={peek} />}
+      art={<PosterPeek icon={icon ?? GROUP_ICONS[rowKindGroup(row.sectionType)]} request={peek} />}
       tags={
         <>
           {row.hero ? (
             <span className="bg-warning/15 text-warning ring-warning/30 inline-flex h-[22px] shrink-0 items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset max-sm:hidden">
               <Star className="size-3" aria-hidden />
-              Hero banner
+              {webOnlyBanner ? "Hero banner · Web only" : "Hero banner"}
             </span>
           ) : null}
           {row.own ? (
@@ -86,13 +96,18 @@ export function RowLine({
             // Phones have no room for the tag next to the name.
             <span className="text-warning font-semibold sm:hidden">
               <Star className="mr-1 inline size-3 align-[-1px]" aria-hidden />
-              Hero banner
+              {/* The short label fits the phone line, which the description shares. */}
+              {webOnlyBanner ? "Web-only hero" : "Hero banner"}
               <MetaDot />
             </span>
           ) : null}
           <Description parts={description} />
-          <MetaDot />
-          {titleCount(row.itemLimit)}
+          {row.itemLimit > 0 ? (
+            <>
+              <MetaDot />
+              {titleCount(row.itemLimit)}
+            </>
+          ) : null}
         </>
       }
       shown={{

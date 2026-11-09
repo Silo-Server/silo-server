@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
 
@@ -185,6 +186,8 @@ type DownloadRequest struct {
 	ReleaseName     string
 	Score           float64
 	HearingImpaired bool
+	// Target is the media file's episode, resolved by the server.
+	Target DownloadTarget
 }
 
 // StoreSubtitleRequest contains metadata and content for persisting a subtitle.
@@ -223,7 +226,7 @@ func (m *Manager) Download(ctx context.Context, req DownloadRequest) (*Downloade
 		return nil, fmt.Errorf("%w: %s", ErrUnknownProvider, req.ProviderName)
 	}
 
-	data, format, err := prov.Download(ctx, req.SubtitleID)
+	data, format, err := prov.Download(ctx, req.SubtitleID, req.Target)
 	if err != nil {
 		return nil, fmt.Errorf("download from %s: %w", req.ProviderName, err)
 	}
@@ -259,8 +262,16 @@ func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSub
 	if err != nil {
 		return nil, err
 	}
+	// Subtitles are served as UTF-8, so UTF-16 uploads are stored converted.
+	data := decodeUTF16WithBOM(req.Data)
+	if len(data) > MaxUploadSize {
+		return nil, fmt.Errorf("subtitle file exceeds maximum size of %d bytes", MaxUploadSize)
+	}
+	if err := ValidateSubtitleContent(format, data); err != nil {
+		return nil, err
+	}
 
-	detected, err := ResolveUploadLanguage(req.Filename, format, req.Data, req.Language, req.PreferUserLanguage)
+	detected, err := ResolveUploadLanguage(req.Filename, format, data, req.Language, req.PreferUserLanguage)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +290,7 @@ func (m *Manager) Upload(ctx context.Context, req UploadRequest) (*DownloadedSub
 		ReleaseName:     releaseName,
 		Score:           0,
 		HearingImpaired: req.HearingImpaired,
-		Data:            req.Data,
+		Data:            data,
 	})
 }
 
@@ -320,6 +331,9 @@ func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (
 		return nil, fmt.Errorf("check duplicate: %w", err)
 	}
 	if existing != nil {
+		if err := m.restoreMissingObject(ctx, existing, req.Data); err != nil {
+			return nil, err
+		}
 		return existing, nil
 	}
 	// Legacy keys retain their old short digest. Verify actual bytes before
@@ -360,6 +374,23 @@ func (m *Manager) StoreSubtitle(ctx context.Context, req StoreSubtitleRequest) (
 		return nil, fmt.Errorf("insert subtitle record: %w", err)
 	}
 	return sub, nil
+}
+
+// restoreMissingObject writes data back under a stored subtitle whose object
+// is gone, as after a restore that left provider downloads out of the
+// backup, so storing the same subtitle again repairs it instead of
+// returning a row with no content. The row's content hash matched data, so
+// the bytes are the row's own. Any other read result leaves the object
+// alone.
+func (m *Manager) restoreMissingObject(ctx context.Context, sub *DownloadedSubtitle, data []byte) error {
+	if _, err := m.blobs.Get(ctx, sub.S3Key); !errors.Is(err, blobstore.ErrNotFound) {
+		return nil
+	}
+	if err := m.blobs.Put(ctx, sub.S3Key, data); err != nil {
+		return fmt.Errorf("restore missing subtitle object: %w", err)
+	}
+	slog.InfoContext(ctx, "restored a missing subtitle object", "component", "subtitles", "subtitle_id", sub.ID, "object_key", sub.S3Key)
+	return nil
 }
 
 // UpdateDownloadedSubtitle changes metadata without moving immutable content.

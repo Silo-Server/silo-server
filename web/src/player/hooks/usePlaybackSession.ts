@@ -1,7 +1,10 @@
+import type { BufferingMode, BufferingReplan } from "../buffering-quality";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { startPlaybackV2 } from "../start-v2";
+import { settleTrackPreferenceWrites } from "../utils/trackPreferenceWrites";
+import { playbackStartEnded } from "../bandwidth-probe";
 import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
 import {
   CONNECTION_LOST_ERROR,
@@ -22,7 +25,7 @@ import {
   buildClientPlaybackContextV3,
   detectBandwidthEstimateKbpsV3,
 } from "../client-context-v3";
-import { buildRouteEventV3 } from "../route-events-v3";
+import { buildRouteEventV3, type RouteEventInput } from "../route-events-v3";
 import { reportSessionRouteEventV2 } from "../route-events-v2";
 import { replanV2 } from "../lifecycle-v2";
 import { takePlaybackIntent } from "../first-frame";
@@ -175,7 +178,21 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
   /** What the media element itself plays from an untouched original. */
   nativeOriginalSupport: NativeOriginalSupport;
   /** Starts a fresh session against another file (edition/version switch). */
-  switchVersion: (fileId: number, currentPosition: number) => void;
+  /**
+   * Switches to another version of the title. `onAdopt` gets the adopted
+   * plan's revision before the new plan renders, or no revision when the
+   * switch does not adopt one.
+   */
+  switchVersion: (
+    fileId: number,
+    currentPosition: number,
+    onAdopt?: (planRevision?: number) => void,
+  ) => void;
+  /**
+   * Whether the file playing is one the viewer chose, before Play or with
+   * `switchVersion`. The next part of a multi-part file keeps the choice.
+   */
+  versionPinned: () => boolean;
   /** `track_change` replan selecting another audio track by combined index. */
   switchAudioTrack: (index: number, currentPosition: number) => void;
   /**
@@ -186,7 +203,23 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
    */
   changeSubtitleTrack: (combinedIndex: number | null, currentPosition: number) => void;
   /** `quality_change` replan for a label taken from `plan.available_qualities`. */
-  changeQuality: (label: string, currentPosition: number) => void;
+  changeQuality: (
+    label: string,
+    currentPosition: number,
+    buffering?: BufferingReplan,
+    /**
+     * Gets the adopted plan's revision before the session's state names that
+     * plan, or no revision when the replan is refused; `sent` is false when it
+     * was refused before it was sent.
+     */
+    onAdopt?: (planRevision?: number, sent?: boolean) => void,
+  ) => void;
+  /**
+   * The step-down estimate of the latest Auto lowering, or undefined. The
+   * session's own later Auto replans repeat it without a source, so the plan
+   * stays lowered; a new start drops it.
+   */
+  setKeptEstimate: (kbps: number | undefined) => void;
   /** `failure_recovery` replan after the client could not play the plan. */
   recoverFromFailure: (failure: FailureV3, currentPosition: number) => void;
   /**
@@ -226,7 +259,11 @@ export interface UsePlaybackSessionResult extends PlaybackSessionState {
     extra?: {
       failureClassification?: string;
       fallbackReason?: string;
+      /** For `plan_summary`: the adoption it summarizes. */
+      adoptionId?: string;
       diagnostics?: Record<string, string | number | boolean | undefined | null>;
+      /** The page is closing; the request must outlive it. */
+      keepalive?: boolean;
     },
   ) => void;
 }
@@ -351,6 +388,15 @@ function describePlaybackSessionError(
     return transportError;
   }
 
+  // A request that timed out or could not connect: the browser's own wording
+  // ("signal timed out", "Failed to fetch") means nothing to the viewer.
+  if (isTransientPlayerRequestError(error)) {
+    return {
+      title: "Playback unavailable",
+      message: "Silo couldn't reach the server. Check your connection, then try again.",
+    };
+  }
+
   if (error instanceof Error && error.message.trim().length > 0) {
     return {
       title: "Playback unavailable",
@@ -388,6 +434,10 @@ export function usePlaybackSession(
   initialSubtitleTrackIndexByFileId?: Record<number, number>,
   initialBitmapSubtitleTrackIndexByFileId?: Record<number, number>,
   allowAlternateVersions = true,
+  /** Effective profile mode, seeded by the host without waiting for settings. */
+  bufferingMode: BufferingMode = "always",
+  /** The viewer chose `fileId`; see `versionPinnedRef`. */
+  versionPicked = false,
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
   const probe = useCodecDetection();
@@ -442,6 +492,30 @@ export function usePlaybackSession(
 
   const sessionIdRef = useRef<string | null>(null);
   const planRef = useRef<PlanV3 | null>(null);
+  // What a `plan_summary` reports against, by adoption: the plan may have been
+  // replaced, and its session ended, by the time the summary is sent.
+  const summaryIdentitiesRef = useRef(
+    new Map<
+      string,
+      {
+        route: Pick<
+          RouteEventInput,
+          "playbackAttemptId" | "sessionId" | "planId" | "planAttemptId" | "planAttemptKey"
+        >;
+        /** The estimate the plan was requested with. */
+        bandwidthEstimateKbps: number | null | undefined;
+      }
+    >(),
+  );
+  // The adoptions already summarized, so a second report of one is dropped.
+  const summarizedAdoptionsRef = useRef(new Set<string>());
+  // The estimate on the start or replan in flight; requests are serialized,
+  // so the next adoption answers it.
+  const requestedEstimateRef = useRef<number | null | undefined>(undefined);
+  const keptEstimateRef = useRef<number | undefined>(undefined);
+  const setKeptEstimate = useCallback((kbps: number | undefined) => {
+    keptEstimateRef.current = kbps;
+  }, []);
   const planRevisionRef = useRef(0);
   const serverFeaturesRef = useRef<string[]>([]);
   const stateRef = useRef(state);
@@ -469,6 +543,10 @@ export function usePlaybackSession(
   const planAutoPlayRef = useRef(true);
   const planTransportShownRef = useRef(false);
   const switchingRef = useRef(false);
+  // Whether the file playing is one the viewer chose, before Play or with a
+  // version switch. Its starts send `allow_alternate_versions: false`, so Auto
+  // under a budget cannot swap in a lower-bitrate sibling.
+  const versionPinnedRef = useRef(false);
   const loadSequenceRef = useRef(0);
 
   // v3 identity. `playback_attempt_id` spans one whole attempt chain (a start
@@ -505,18 +583,24 @@ export function usePlaybackSession(
   // decide against, so only it is waited on.
   const adoptionsInFlightRef = useRef(new Map<number, number>());
   const adoptionWaitersRef = useRef<Array<{ loadSequence: number; resolve: () => void }>>([]);
+  /** A Restore's `learned_limit: "clear"` that has not gone out yet. */
+  const clearOwedRef = useRef(false);
   const pendingReplanRef = useRef<{
     options: ReplanOptions;
     loadSequence: number;
     retireSessionOnRefusal: boolean;
     resolve: (adopted: boolean) => void;
     planId: string;
+    /** The file the queued request's track ordinals index into. */
+    mediaFileId: number;
+    onAdopt?: (planRevision: number) => void;
   } | null>(null);
   const issueReplanRef = useRef<
     (
       options: ReplanOptions,
       retireSessionOnRefusal?: boolean,
       reconnect?: boolean,
+      onAdopt?: (planRevision: number) => void,
     ) => Promise<boolean>
   >(async () => false);
   const qualityRef = useRef(normalizeQualityPreferenceV3(qualityPreference));
@@ -612,21 +696,54 @@ export function usePlaybackSession(
       extra?: {
         failureClassification?: string;
         fallbackReason?: string;
+        /** For `plan_summary`: the adoption it summarizes. */
+        adoptionId?: string;
         diagnostics?: Record<string, string | number | boolean | undefined | null>;
+        /** The page is closing; the request must outlive it. */
+        keepalive?: boolean;
       },
     ) => {
+      const { keepalive, ...fields } = extra ?? {};
       const attemptId = playbackAttemptIdRef.current;
       if (!attemptId) return;
-      const plan = planRef.current;
-      const input = {
-        event,
-        playbackAttemptId: attemptId,
-        ...routeEventPlanIdentityV3(plan, sessionIdRef.current, planAttemptIdRef.current),
-        ...extra,
-      };
-      const sessionId = sessionIdRef.current;
+      let input: RouteEventInput;
+      if (event === "plan_summary") {
+        if (!serverFeaturesRef.current.includes("playback_plan_summary_v1")) return;
+        // Each adoption is summarized once, against its own plan and session.
+        // A plan the page adopted again after the back-forward cache
+        // ("<revision>.<n>") is summarized against the plan it adopted again.
+        const adoptionId = extra?.adoptionId;
+        if (!adoptionId || summarizedAdoptionsRef.current.has(adoptionId)) return;
+        const identity = summaryIdentitiesRef.current.get(adoptionId.split(".")[0]!);
+        if (!identity) return;
+        summarizedAdoptionsRef.current.add(adoptionId);
+        if (summarizedAdoptionsRef.current.size > 100) {
+          const oldest = summarizedAdoptionsRef.current.values().next().value;
+          if (oldest) summarizedAdoptionsRef.current.delete(oldest);
+        }
+        input = {
+          event,
+          ...identity.route,
+          diagnostics: {
+            ...extra.diagnostics,
+            bandwidth_estimate_kbps: identity.bandwidthEstimateKbps,
+          },
+        };
+      } else {
+        input = {
+          event,
+          playbackAttemptId: attemptId,
+          ...routeEventPlanIdentityV3(
+            planRef.current,
+            sessionIdRef.current,
+            planAttemptIdRef.current,
+          ),
+          ...fields,
+        };
+      }
+      const sessionId = input.sessionId;
       if (sessionId && hasSequencedProgress(sessionId)) {
-        void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input));
+        void reportSessionRouteEventV2(config, sessionId, buildRouteEventV3(input), { keepalive });
       }
       // A terminal start never produced a session; there is nothing to report it against.
     },
@@ -641,6 +758,7 @@ export function usePlaybackSession(
     (
       decision: DecisionResponseV3,
       initialSubtitleFailure?: PlaybackSessionErrorState | null,
+      onAdopt?: (planRevision: number) => void,
     ): boolean => {
       serverFeaturesRef.current = decision.server_features;
       const plan = decision.playback_plan;
@@ -678,6 +796,22 @@ export function usePlaybackSession(
       sessionEndedRef.current = false;
       sessionIdRef.current = sessionId ?? null;
       planRevisionRef.current += 1;
+      summaryIdentitiesRef.current.set(String(planRevisionRef.current), {
+        route: {
+          playbackAttemptId: playbackAttemptIdRef.current ?? "",
+          sessionId: sessionId ?? null,
+          planId: plan.plan_id,
+          planAttemptId: planAttemptIdRef.current,
+          planAttemptKey: plan.plan_attempt_key,
+        },
+        bandwidthEstimateKbps: requestedEstimateRef.current,
+      });
+      // An identity outlives its summary, since a plan adopted again after the
+      // back-forward cache reports against it; only the newest are kept.
+      if (summaryIdentitiesRef.current.size > 100) {
+        const oldest = summaryIdentitiesRef.current.keys().next().value;
+        if (oldest) summaryIdentitiesRef.current.delete(oldest);
+      }
       hasAdoptedPlanRef.current = true;
       if (
         Number.isFinite(plan.timeline.source_start_seconds) &&
@@ -690,6 +824,9 @@ export function usePlaybackSession(
         awaitingInitialPlayerPositionRef.current = plan.timeline.source_start_seconds > 0;
       }
 
+      // Told before the state update, so the caller hears of the adoption
+      // before anything can render the new plan.
+      onAdopt?.(planRevisionRef.current);
       setState((current) => ({
         ...planToSessionState(
           plan,
@@ -724,23 +861,33 @@ export function usePlaybackSession(
       subtitleTrackIndex: number | undefined,
       audioTrackIndex: number | null | undefined = explicitAudioTrackIndex,
     ): Promise<DecisionResponseV3> => {
+      const bandwidthEstimateKbps = detectBandwidthEstimateKbpsV3();
+      requestedEstimateRef.current = bandwidthEstimateKbps;
+      // An owed Restore's `clear` goes out once, on this start.
+      const clearOwed = clearOwedRef.current;
+      clearOwedRef.current = false;
       const body = buildStartRequestV3({
         extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
         fileId: targetFileId,
         profileId: config.getProfileId() ?? "",
         playbackAttemptId,
         qualityPreference: qualityRef.current,
-        allowAlternateVersions,
+        allowAlternateVersions: allowAlternateVersions && !versionPinnedRef.current,
         position,
         forceStartPosition,
         explicitAudioTrackIndex: audioTrackIndex,
         subtitleTrackIndex,
-        bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+        bandwidthEstimateKbps,
+        bandwidthEstimateSource: bandwidthEstimateKbps === undefined ? undefined : "probe",
         bandwidthCapKbps: maxBitrateKbps,
+        learnedLimit: clearOwed ? "clear" : bufferingMode === "never" ? "ignore" : undefined,
         clientCapabilities,
         clientPlaybackContext,
       });
 
+      // The server resolves this start's tracks from the saved series
+      // choices, so a pick or an Auto made just before Play has to land first.
+      await settleTrackPreferenceWrites();
       return await startPlaybackV2(config, body);
     },
     [
@@ -750,6 +897,7 @@ export function usePlaybackSession(
       config,
       explicitAudioTrackIndex,
       maxBitrateKbps,
+      bufferingMode,
     ],
   );
 
@@ -821,6 +969,7 @@ export function usePlaybackSession(
       intentAt,
       reconnect = false,
       tracks,
+      onAdopt,
     }: {
       preferredFileId?: number;
       position: number;
@@ -832,6 +981,8 @@ export function usePlaybackSession(
       intentAt: number | null;
       /** The start is a reconnect attempt, which must not cancel itself. */
       reconnect?: boolean;
+      /** Told the adopted plan's revision before the new plan renders. */
+      onAdopt?: (planRevision: number) => void;
       /**
        * Track selection to start with instead of the initial request's, so a
        * restarted session keeps what the viewer picked during playback. An
@@ -988,8 +1139,10 @@ export function usePlaybackSession(
           return { kind: "superseded" };
         }
 
-        const adopted = adoptDecision(decisionToAdopt, initialSubtitleFailure);
+        const adopted = adoptDecision(decisionToAdopt, initialSubtitleFailure, onAdopt);
         if (adopted) {
+          // The kept estimate belonged to the attempt this start replaced.
+          keptEstimateRef.current = undefined;
           // A start opens a new attempt. Its first frame is still to come:
           // whatever the player shows until the new transport loads belongs to
           // the attempt it replaced.
@@ -1063,6 +1216,7 @@ export function usePlaybackSession(
     }
     activeRequestKeyRef.current = requestKey;
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
+    versionPinnedRef.current = versionPicked;
     qualityRef.current = normalizeQualityPreferenceV3(qualityPreference);
     playbackPositionRef.current = initialPosition;
     const intentAt = takePlaybackIntent(requestKey);
@@ -1094,6 +1248,7 @@ export function usePlaybackSession(
     loadSession,
     qualityPreference,
     requestKey,
+    versionPicked,
   ]);
 
   // Clean up session on unmount.
@@ -1105,6 +1260,8 @@ export function usePlaybackSession(
       loadSequenceRef.current += 1;
       // A viewer who leaves while the player reconnects stops the retries.
       endReconnect(false);
+      // A start this player left still loading no longer holds off speed tests.
+      playbackStartEnded();
       const sid = sessionIdRef.current;
       if (!sid) return;
       // sendBeacon doesn't support DELETE, so the stop uses fetch keepalive.
@@ -1130,12 +1287,21 @@ export function usePlaybackSession(
       options: ReplanOptions,
       retireSessionOnRefusal = false,
       reconnect = false,
+      onAdopt?: (planRevision: number) => void,
     ): Promise<boolean> {
       const plan = planRef.current;
       const sessionId = sessionIdRef.current;
       const playbackAttemptId = playbackAttemptIdRef.current;
-      if (!plan || !sessionId || !playbackAttemptId) return false;
+      if (!plan || !sessionId || !playbackAttemptId) {
+        // A Restore with no plan to replan, as after a start that adopted
+        // none, owes its `clear` to the next start.
+        if (options.learnedLimit === "clear") clearOwedRef.current = true;
+        return false;
+      }
       if (replanInFlightRef.current) {
+        // Whatever happens to a Restore here, its `clear` is owed to the next
+        // request that goes out.
+        if (options.learnedLimit === "clear") clearOwedRef.current = true;
         const isPendingFailureRecovery =
           options.operation === "failure_recovery" || options.operation === "seek_failure_recovery";
         const isPendingOutputChange = options.operation === "output_change";
@@ -1181,6 +1347,8 @@ export function usePlaybackSession(
               retireSessionOnRefusal,
               resolve,
               planId: plan.plan_id,
+              mediaFileId: plan.effective_media_file_id,
+              onAdopt,
             };
           });
         }
@@ -1209,6 +1377,26 @@ export function usePlaybackSession(
         : [];
       const attemptCount = isFailureRecovery ? attemptCountRef.current : 1;
 
+      // A lowering or Restore names its own estimate. The client's other Auto
+      // replans repeat the kept step-down estimate, without a source because
+      // it is not a new observation. The speed-test reading is for starts
+      // only: a replan never sends it, so it cannot raise or hold quality
+      // mid-title.
+      const kept =
+        options.bandwidthEstimateKbps === undefined && qualityRef.current === "auto"
+          ? keptEstimateRef.current
+          : undefined;
+      const bandwidthEstimateKbps =
+        options.bandwidthEstimateKbps !== undefined ? options.bandwidthEstimateKbps : kept;
+      const bandwidthEstimateSource =
+        options.bandwidthEstimateKbps !== undefined ? options.bandwidthEstimateSource : undefined;
+      requestedEstimateRef.current = bandwidthEstimateKbps;
+      // A Restore that could not go at once rides its `clear` on the request
+      // that replaced it.
+      const learnedLimit =
+        options.learnedLimit ??
+        (clearOwedRef.current ? "clear" : bufferingMode === "never" ? "ignore" : undefined);
+      clearOwedRef.current = false;
       const body = buildReplanRequestV3({
         ...options,
         extraClientFeatures: VIDEO_CLIENT_FEATURES_V3,
@@ -1219,8 +1407,10 @@ export function usePlaybackSession(
         qualityPreference: qualityRef.current,
         attemptedPlanKeys,
         attemptCount,
-        bandwidthEstimateKbps: detectBandwidthEstimateKbpsV3(),
+        bandwidthEstimateKbps,
+        bandwidthEstimateSource,
         bandwidthCapKbps: maxBitrateKbps,
+        learnedLimit,
         clientCapabilities,
         clientPlaybackContext,
       });
@@ -1242,7 +1432,7 @@ export function usePlaybackSession(
       }));
 
       try {
-        const decision = await replanV2(config, sessionId, body);
+        const decision = await replanV2(config, sessionId, body, serverFeaturesRef.current);
 
         // A version switch or a fresh start that landed while this was in
         // flight owns the session now; this plan is already superseded.
@@ -1264,6 +1454,7 @@ export function usePlaybackSession(
         const adopted = adoptDecision(
           decision,
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
+          onAdopt,
         );
         if (!adopted && retireSessionOnRefusal) {
           const pending = pendingReplanRef.current;
@@ -1338,12 +1529,29 @@ export function usePlaybackSession(
             pendingReplan.options.operation !== "seek_failure_recovery"
               ? true
               : pendingReplan.planId === planRef.current?.plan_id;
-          if (recoveryAppliesToCurrentPlan) {
+          // An audio or subtitle pick names its track by its index in the file
+          // it was made on. Once a replan has moved to another file (a quality
+          // change to another version), that index means some other track
+          // there, so the pick is dropped rather than replayed; the saved
+          // series choice still applies from the next start. Subtitles off
+          // (null) names no track and still applies.
+          const namesTrack =
+            pendingReplan.options.audio !== undefined ||
+            (pendingReplan.options.subtitle !== undefined &&
+              pendingReplan.options.subtitle !== null);
+          const trackPickAppliesToCurrentFile =
+            !namesTrack || pendingReplan.mediaFileId === planRef.current?.effective_media_file_id;
+          if (recoveryAppliesToCurrentPlan && trackPickAppliesToCurrentFile) {
             // A capability change can queue behind a replan created by an older
             // render. Dispatch through the latest callback so its request carries
             // the current output evidence rather than the closed-over snapshot.
             void issueReplanRef
-              .current(pendingReplan.options, pendingReplan.retireSessionOnRefusal)
+              .current(
+                pendingReplan.options,
+                pendingReplan.retireSessionOnRefusal,
+                false,
+                pendingReplan.onAdopt,
+              )
               .then(pendingReplan.resolve);
           } else {
             pendingReplan.resolve(false);
@@ -1364,6 +1572,7 @@ export function usePlaybackSession(
       config,
       endAdoption,
       maxBitrateKbps,
+      bufferingMode,
       retireActiveSession,
     ],
   );
@@ -1450,24 +1659,70 @@ export function usePlaybackSession(
   );
 
   const changeQuality = useCallback(
-    (label: string, currentPosition: number) => {
+    (
+      label: string,
+      currentPosition: number,
+      buffering?: BufferingReplan,
+      onAdopt?: (planRevision?: number, sent?: boolean) => void,
+    ) => {
+      // A lowering waits for nothing: refused while another replan is in
+      // flight, it is not sent, and the controller rearms. A Restore waits
+      // behind it instead (see `replan`), or behind a start in flight.
+      if (
+        buffering &&
+        buffering.learned_limit !== "clear" &&
+        (replanInFlightRef.current || !planRef.current || !sessionIdRef.current)
+      ) {
+        onAdopt?.(undefined, false);
+        return;
+      }
       const normalized = normalizeQualityPreferenceV3(label);
       const previousPreference = qualityRef.current;
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
-      void replan({ operation: "quality_change", positionSeconds: currentPosition }).then(
-        (adopted) => {
-          if (adopted || qualityRef.current !== normalized) return;
+      // The replan tells onAdopt as it adopts, before the new plan renders; a
+      // refusal is told here.
+      const send = () =>
+        void replan(
+          {
+            operation: "quality_change",
+            positionSeconds: currentPosition,
+            ...(buffering
+              ? {
+                  bandwidthEstimateKbps: buffering.bandwidth_estimate_kbps ?? null,
+                  bandwidthEstimateSource: buffering.bandwidth_estimate_source,
+                  observedThroughputKbps: buffering.observed_throughput_kbps,
+                  learnedLimit: buffering.learned_limit,
+                }
+              : {}),
+          },
+          false,
+          false,
+          onAdopt,
+        ).then((adopted) => {
+          if (adopted) return;
+          onAdopt?.(undefined);
+          if (qualityRef.current !== normalized) return;
           qualityRef.current = previousPreference;
           setState((current) =>
             current.qualityPreference === normalized
               ? { ...current, qualityPreference: previousPreference }
               : current,
           );
-        },
-      );
+        });
+      // A Restore sent during a start would replan the plan that start
+      // replaces, so it goes out against the plan the start leaves.
+      const sendAfterStarts = () => {
+        const settling =
+          buffering?.learned_limit === "clear" && !replanInFlightRef.current
+            ? awaitAdoptionSettled()
+            : null;
+        if (settling) void settling.then(sendAfterStarts);
+        else send();
+      };
+      sendAfterStarts();
     },
-    [replan],
+    [awaitAdoptionSettled, replan],
   );
 
   const recoverFromFailure = useCallback(
@@ -1786,11 +2041,18 @@ export function usePlaybackSession(
   }, [reportEvent]);
 
   const switchVersion = useCallback(
-    (newFileId: number, currentPosition: number) => {
-      if (!allowAlternateVersions) return;
-      if (switchingRef.current) return;
-      if (newFileId === stateRef.current.mediaFileId) return;
+    (newFileId: number, currentPosition: number, onAdopt?: (planRevision?: number) => void) => {
+      if (
+        !allowAlternateVersions ||
+        switchingRef.current ||
+        newFileId === stateRef.current.mediaFileId
+      ) {
+        onAdopt?.(undefined);
+        return;
+      }
       switchingRef.current = true;
+      versionPinnedRef.current = true;
+      let adopted = false;
       // The viewer picked the version in the player: the new attempt's first
       // frame is timed from here.
       const intentAt = performance.now();
@@ -1808,23 +2070,31 @@ export function usePlaybackSession(
             replacementErrorMessage: "Failed to switch playback version",
             initialErrorMessage: "Failed to switch version",
             intentAt,
+            onAdopt: (revision) => {
+              adopted = true;
+              onAdopt?.(revision);
+            },
           });
         } finally {
           switchingRef.current = false;
+          if (!adopted) onAdopt?.(undefined);
         }
       })();
     },
     [allowAlternateVersions, loadSession],
   );
+  const versionPinned = useCallback(() => versionPinnedRef.current, []);
 
   return {
     ...state,
     browserEngine: browserEngine.capabilities,
     nativeOriginalSupport,
     switchVersion,
+    versionPinned,
     switchAudioTrack,
     changeSubtitleTrack,
     changeQuality,
+    setKeptEstimate,
     recoverFromFailure,
     recoverConnection,
     retryConnection,

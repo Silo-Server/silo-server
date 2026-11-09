@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import {
@@ -7,11 +7,11 @@ import {
   groupAppNavLinks,
   isSidebarExpanded,
   isSidebarRailCollapsed,
-  libraryRowShift,
   sidebarSurfaceStyle,
   type AppNavLink,
 } from "@/components/AppSidebar.logic";
 import { SiloBrand } from "@/components/SiloBrand";
+import { findLibraryType } from "@/components/admin/libraries/libraryTypes";
 import { useAuth } from "@/hooks/useAuth";
 import { useSidebarEntrance, type SidebarSwap } from "@/hooks/useSidebarSwap";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
@@ -46,8 +46,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Film,
-  Tv,
   Library,
   Search,
   Heart,
@@ -67,25 +65,17 @@ import {
   PinOff,
   LayoutGrid,
   Puzzle,
-  BookHeadphones,
   Send,
   Bell,
 } from "lucide-react";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { menuItemKey } from "@/lib/uiCustomization";
 
+// Same icons the admin library-type picker shows; Library only for a type the
+// picker does not know.
 function getLibraryIcon(type: string) {
-  switch (type) {
-    case "movies":
-      return <Film className="h-[18px] w-[18px]" />;
-    case "series":
-      return <Tv className="h-[18px] w-[18px]" />;
-    case "audiobook":
-    case "audiobooks":
-      return <BookHeadphones className="h-[18px] w-[18px]" />;
-    default:
-      return <Library className="h-[18px] w-[18px]" />;
-  }
+  const Icon = findLibraryType(type)?.icon ?? Library;
+  return <Icon className="h-[18px] w-[18px]" />;
 }
 
 function getLibraryIdFromPathname(pathname: string): number | null {
@@ -643,7 +633,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
 
                     return (
                       <li key={lib.id}>
-                        {/* Library row: chevron (if pins) + icon + name link */}
+                        {/* Library row: icon + name link + chevron (if pins) */}
                         <div
                           className={`relative flex items-center rounded-lg text-[0.8125rem] font-medium transition-colors duration-150 ${
                             active
@@ -657,52 +647,44 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
                               style={{ background: "var(--primary)" }}
                             />
                           )}
-                          {/* The chevron slot is reserved in both states so the
-                            row never reflows; on the rail the whole row slides
-                            left by the slot width instead, which lines the
-                            library icons up with the rest of the column. */}
-                          <div
-                            className="sidebar-row-shift flex flex-1 items-center"
-                            style={
-                              { "--sidebar-row-shift": libraryRowShift(hasPins) } as CSSProperties
-                            }
+                          {/* The chevron sits after the name so every library
+                            icon stays in the same column as the other nav
+                            icons, with or without pins and on the rail. */}
+                          <ViewTransitionLink
+                            to={href}
+                            onClick={onNavigate}
+                            className="flex min-w-0 flex-1 items-center gap-2.5 py-2.5 pl-3"
+                            aria-current={active ? "page" : undefined}
                           >
-                            {hasPins ? (
-                              <button
-                                type="button"
-                                onClick={() => toggleLibraryExpand(lib.id)}
-                                disabled={!showLabels}
-                                aria-hidden={!showLabels}
-                                tabIndex={showLabels ? 0 : -1}
-                                className={`sidebar-fade flex h-full items-center py-3 pr-1 pl-3 ${
-                                  showLabels ? "opacity-100" : "pointer-events-none opacity-0"
-                                }`}
-                                aria-label={
-                                  isExpanded ? `Collapse ${lib.name}` : `Expand ${lib.name}`
-                                }
-                                aria-expanded={isExpanded}
-                              >
-                                {isExpanded ? (
-                                  <ChevronDown className="h-3.5 w-3.5 opacity-60" />
-                                ) : (
-                                  <ChevronRight className="h-3.5 w-3.5 opacity-60" />
-                                )}
-                              </button>
-                            ) : (
-                              <span className="w-3 shrink-0 pl-3" />
-                            )}
-                            <ViewTransitionLink
-                              to={href}
-                              onClick={onNavigate}
-                              className="flex flex-1 items-center gap-2.5 py-2.5 pr-3"
-                              aria-current={active ? "page" : undefined}
+                            <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
+                              {getLibraryIcon(lib.type)}
+                            </span>
+                            <SidebarLabel show={showLabels}>{lib.name}</SidebarLabel>
+                          </ViewTransitionLink>
+                          {hasPins ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleLibraryExpand(lib.id)}
+                              disabled={!showLabels}
+                              aria-hidden={!showLabels}
+                              tabIndex={showLabels ? 0 : -1}
+                              className={`sidebar-fade flex items-center self-stretch px-3 ${
+                                showLabels ? "opacity-100" : "pointer-events-none opacity-0"
+                              }`}
+                              aria-label={
+                                isExpanded ? `Collapse ${lib.name}` : `Expand ${lib.name}`
+                              }
+                              aria-expanded={isExpanded}
                             >
-                              <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
-                                {getLibraryIcon(lib.type)}
-                              </span>
-                              <SidebarLabel show={showLabels}>{lib.name}</SidebarLabel>
-                            </ViewTransitionLink>
-                          </div>
+                              {isExpanded ? (
+                                <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                              ) : (
+                                <ChevronRight className="h-3.5 w-3.5 opacity-60" />
+                              )}
+                            </button>
+                          ) : (
+                            <span className="w-3 shrink-0" />
+                          )}
                         </div>
 
                         {/* Pinned items under this library — hidden when collapsed */}

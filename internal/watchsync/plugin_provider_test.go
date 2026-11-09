@@ -112,12 +112,28 @@ type fakePluginCredentialRepository struct {
 	err   error
 }
 
-func (r *fakePluginCredentialRepository) UpsertConnection(_ context.Context, conn Connection) (Connection, error) {
+func (r *fakePluginCredentialRepository) GetConnectionByID(_ context.Context, id string) (Connection, bool, error) {
+	if r.err != nil {
+		return Connection{}, false, r.err
+	}
+	if r.saved.ID != id {
+		return Connection{}, false, nil
+	}
+	return r.saved, true, nil
+}
+
+func (r *fakePluginCredentialRepository) UpdateConnectionTokens(_ context.Context, expected, updated Connection) (Connection, error) {
 	if r.err != nil {
 		return Connection{}, r.err
 	}
-	r.saved = conn
-	return conn, nil
+	if r.saved.ID != expected.ID {
+		return Connection{}, ErrConnectionNotFound
+	}
+	if !connectionCredentialsMatch(r.saved, expected) {
+		return Connection{}, ErrStaleConnection
+	}
+	r.saved = updated
+	return updated, nil
 }
 
 func testPluginProvider(t *testing.T, client WatchSyncPluginClient) *PluginProvider {
@@ -934,7 +950,11 @@ func TestPluginProviderPaginatesRemoteStateAndPersistsRotatedCredentials(t *test
 		},
 		{Items: []*pluginv1.WatchSyncRemoteState{remote("two", "tt2")}, NextCursor: "cursor-2", CompleteSnapshot: true},
 	}}
-	repository := &fakePluginCredentialRepository{}
+	conn := Connection{
+		ID: "connection", Provider: testPluginProviderKey, UserID: 1, ProfileID: "profile",
+		AccessToken: "old", SyncCursors: map[string]string{pluginWatchedCursorKey: testCursorOne},
+	}
+	repository := &fakePluginCredentialRepository{saved: conn}
 	provider, err := NewPluginProvider(PluginProviderOptions{
 		InstallationID: 4, ProviderKey: testPluginProviderKey, CapabilityID: testPluginCapabilityID,
 		Descriptor: &pluginv1.WatchSyncProviderDescriptor{
@@ -947,10 +967,7 @@ func TestPluginProviderPaginatesRemoteStateAndPersistsRotatedCredentials(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := provider.FetchWatchedBatch(context.Background(), ServerConfig{}, Connection{
-		ID: "connection", Provider: testPluginProviderKey, UserID: 1, ProfileID: "profile",
-		AccessToken: "old", SyncCursors: map[string]string{pluginWatchedCursorKey: testCursorOne},
-	})
+	batch, err := provider.FetchWatchedBatch(context.Background(), ServerConfig{}, conn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1250,7 +1267,13 @@ func TestPluginProviderMapsSeriesMediaBothWays(t *testing.T) {
 
 	client := &fakeWatchSyncPluginClient{listResponses: []*pluginv1.WatchSyncListRemoteStateResponse{
 		{CompleteSnapshot: true, Items: []*pluginv1.WatchSyncRemoteState{{ProviderItemKey: "s1", Media: media, Favorite: &pluginv1.WatchSyncRemoteListState{}}}},
-		{Items: []*pluginv1.WatchSyncRemoteState{{ProviderItemKey: "s1", Media: media, Watched: &pluginv1.WatchSyncRemoteWatchedState{PlayCount: 1}}}},
+		{Items: []*pluginv1.WatchSyncRemoteState{
+			{ProviderItemKey: "s1", Media: media, Watched: &pluginv1.WatchSyncRemoteWatchedState{
+				PlayCount: 1, LastWatchedAt: timestamppb.New(time.Date(2021, 9, 19, 5, 17, 0, 0, time.UTC)),
+			}},
+			// A finished series needs its time; without one it is skipped.
+			{ProviderItemKey: "s2", Media: media, Watched: &pluginv1.WatchSyncRemoteWatchedState{PlayCount: 1}},
+		}},
 	}}
 	provider := testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
 		AuthMethods:     []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
@@ -1265,13 +1288,15 @@ func TestPluginProviderMapsSeriesMediaBothWays(t *testing.T) {
 		favorites.Rows[0].TVDBID != "77" || favorites.Rows[0].SeriesIMDbID != "" {
 		t.Fatalf("favorites = %#v", favorites)
 	}
-	// SERIES is not defined for watched state; a series-level row would
-	// otherwise mark every local episode watched.
+	// A SERIES watched row is a finished series, which ImportWatched expands
+	// to the episodes that had aired by its time.
 	watched, err := provider.FetchWatchedBatch(context.Background(), ServerConfig{}, Connection{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(watched.Rows) != 0 || len(watched.Warnings) != 1 || !strings.Contains(watched.Warnings[0], "series-level watched") {
+	if len(watched.Rows) != 1 || len(watched.Warnings) != 1 || !strings.Contains(watched.Warnings[0], "without last_watched_at") ||
+		watched.Rows[0].Kind != historyimport.KindSeries ||
+		watched.Rows[0].TVDBID != "77" || watched.Rows[0].LastWatchedAt == nil {
 		t.Fatalf("watched = %#v", watched)
 	}
 }
@@ -1762,5 +1787,36 @@ func TestPluginProviderRedactsEverySecretFromPageWarnings(t *testing.T) {
 	}
 	if !slices.Equal(batch.Warnings, []string{"client [REDACTED] and attribute [REDACTED]"}) {
 		t.Fatalf("warnings = %q, want both secrets redacted", batch.Warnings)
+	}
+}
+
+// The first-party plugins under the former built-in keys keep the pause that
+// saves progress when a session ends; any other plugin receives a stop.
+func TestStopsEndedSessionsExemptsFirstPartyPlugins(t *testing.T) {
+	for _, tt := range []struct {
+		key  string
+		want bool
+	}{
+		{simklProviderKey, false},
+		{mdblistProviderKey, false},
+		{testPluginProviderKey, true},
+	} {
+		provider, err := NewPluginProvider(PluginProviderOptions{
+			InstallationID: 4,
+			ProviderKey:    tt.key,
+			CapabilityID:   testPluginCapabilityID,
+			Descriptor: &pluginv1.WatchSyncProviderDescriptor{
+				AuthMethods: []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
+			},
+			ResolveClient: func(context.Context, int, string) (WatchSyncPluginClient, error) {
+				return &fakeWatchSyncPluginClient{}, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stopsEndedSessions(provider); got != tt.want {
+			t.Errorf("stopsEndedSessions(%s) = %v, want %v", tt.key, got, tt.want)
+		}
 	}
 }

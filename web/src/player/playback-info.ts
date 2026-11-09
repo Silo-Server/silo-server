@@ -193,7 +193,16 @@ export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
     return [];
   }
 
-  return [{ id: "auto", label: "Auto", sublabel: "", resolution: "", bitrateKbps: 0 }, ...rungs];
+  return [
+    {
+      id: "auto",
+      label: plan.bandwidth_limit ? "Auto · limited after buffering" : "Auto",
+      sublabel: "",
+      resolution: "",
+      bitrateKbps: 0,
+    },
+    ...rungs,
+  ];
 }
 
 /**

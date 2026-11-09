@@ -32,6 +32,18 @@ it.each([
     "https://silo.example.test/base/api/v2/playback/transcode/session/master.m3u8?st=opaque&token=access",
   ],
   ["/api/v1", "/stream/session", "/api/v2/stream/session?token=access"],
+  // Absolute URLs name a proxy node that authorizes from the signed token in
+  // the URL; the login token must never be sent there.
+  [
+    "/api/v1",
+    "https://proxy.example.test/stream/transcode/opaque/master.m3u8",
+    "https://proxy.example.test/stream/transcode/opaque/master.m3u8",
+  ],
+  [
+    "https://silo.example.test/base/api/v1",
+    "http://node.example.test:8097/stream/remux/opaque",
+    "http://node.example.test:8097/stream/remux/opaque",
+  ],
 ])("resolves server media paths from configured API base %s", (base, path, expected) => {
   expect(buildPlayerStreamUrl(base, path, "access")).toBe(expected);
 });

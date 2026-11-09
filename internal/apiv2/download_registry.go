@@ -9,6 +9,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/downloads"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 type DownloadRegistryService interface {
@@ -56,7 +57,7 @@ type DownloadRegistryInput struct {
 }
 type DownloadStatusBody struct {
 	Status    string  `json:"status" enum:"downloading,completed"`
-	UpdatedAt Instant `json:"updated_at" doc:"Time of the local status event; retain on retry. Future times are rejected."`
+	UpdatedAt Instant `json:"updated_at" doc:"Time of the local status event; retain on retry. Times more than two minutes ahead of the server clock are rejected."`
 	Revision  int     `json:"revision" minimum:"1" doc:"Registry revision whose bytes this event describes; retain on retry."`
 }
 type DownloadStatusInput struct {
@@ -94,6 +95,9 @@ type DownloadCapability struct {
 	// monitors store a quality and register episodes in it.
 	BulkQuality    bool `json:"bulk_quality"`
 	MonitorQuality bool `json:"monitor_quality"`
+	// BatchVersion: a season or series page accepts media_file_id as a
+	// version template; each episode gets its version closest to that file.
+	BatchVersion bool `json:"batch_version"`
 	// PreparationProgress: listed preparing entries carry `preparation`.
 	PreparationProgress bool `json:"preparation_progress"`
 	// DirectDownloadLinks: POST /direct-download/links mints the
@@ -198,6 +202,8 @@ func downloadProblem(err error) *Problem {
 		return NewProblem(TypePermissionDenied, "Downloads are not allowed.")
 	case errors.Is(err, downloads.ErrManifestUnavailable), errors.Is(err, downloads.ErrSubscriptionsUnavailable):
 		return NewProblem(TypeDependencyUnavailable, "Offline assets are not configured.")
+	case errors.Is(err, playback.ErrSubtitleReadsBusy):
+		return NewProblem(TypeDependencyUnavailable, "The server is busy; try again in a moment.").WithRetryAfter(playback.SubtitleReadsRetryAfter)
 	case errors.Is(err, downloads.ErrInvalidSubtitleRef):
 		return NewProblem(TypeMalformedRequest, "Invalid subtitle reference.")
 	case errors.Is(err, downloads.ErrStatusConflict):
@@ -294,6 +300,7 @@ func (reg *Registry) getDownloadCapability(ctx context.Context, _ *CapabilityInp
 		out.BoundedCreation = reg.deps.DownloadCreation != nil
 		out.BoundedSubscriptionSync = reg.deps.DownloadSubscriptionSync != nil
 		out.BulkQuality = out.BoundedCreation
+		out.BatchVersion = out.BoundedCreation
 		out.MonitorQuality = out.SubscriptionMutations
 		out.PreparationProgress = true
 		if reg.deps.DownloadProxyDelivery != nil {

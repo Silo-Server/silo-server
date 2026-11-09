@@ -57,6 +57,9 @@ type LibraryCollectionHandler struct {
 	JobRepo               *adminjob.Repository
 	EventsHub             *evt.Hub
 	SortPreferenceCleaner *userstore.CollectionSortPreferenceCleaner
+	// CollectionRowRenamer carries a rename into the rows profiles built for
+	// the collection on their own pages.
+	CollectionRowRenamer *userstore.CollectionRowRenamer
 	// CollectionOwners resolves the owner's access for another profile's
 	// shared collection opted into the library tab.
 	CollectionOwners catalog.PersonalCollectionAccess
@@ -67,6 +70,10 @@ type LibraryCollectionHandler struct {
 	// read those posters from ArtworkStore. Nil when storage serves its own
 	// URLs.
 	ArtworkSigner *artworkurl.Signer
+	// PersonalMemberCounts counts the members a viewer sees in the
+	// hand-picked and imported personal collections opted into a library
+	// tab and remembers the counts between reads; nil counts on every read.
+	PersonalMemberCounts *catalog.PersonalCollectionMemberCounts
 }
 
 var errLibraryCollectionInUse = catalog.ErrLibraryCollectionInUse
@@ -991,14 +998,7 @@ func (h *LibraryCollectionHandler) cleanupDeletedCollection(ctx context.Context,
 	if h.SortPreferenceCleaner != nil {
 		h.SortPreferenceCleaner.DeleteForCollection(ctx, userstore.CollectionKindLibrary, collectionID)
 	}
-	store := h.ArtworkStore
-	if store == nil {
-		return
-	}
-	prefix := fmt.Sprintf("collection-images/%s/", collectionID)
-	if _, err := store.DeletePrefix(ctx, prefix); err != nil {
-		slog.WarnContext(ctx, "collection delete: removing artwork failed", "component", "api", "collection_id", collectionID, "error", err)
-	}
+	removeDeletedCollectionArtwork(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID)
 }
 
 type adminReorderCollectionsRequest struct {
@@ -1955,6 +1955,11 @@ func (h *LibraryCollectionHandler) upsertTemplateBundleFeaturedSection(
 	if err == nil {
 		existing.SectionType = sections.SectionCollection
 		existing.Title = ref.Template.Title
+		// A row that becomes the hero starts on every client, as an admin
+		// update does: web_only an older node left on the demoted row stays off.
+		if !existing.Featured {
+			existing.WebOnly = false
+		}
 		existing.Featured = true
 		existing.ItemLimit = templateBundleFeaturedSectionItemLimit
 		existing.Config = config
@@ -2020,13 +2025,31 @@ func (h *LibraryCollectionHandler) createCollectionFromTemplate(
 	libraryID int,
 	managementKey string,
 ) (*models.LibraryCollection, error) {
+	input, err := templateCollectionInput(bundleID, tmpl, libraryID, managementKey)
+	if err != nil {
+		return nil, err
+	}
+	return h.createImportedCollection(ctx, input, tmpl.PosterPath, tmpl.PosterPath != "")
+}
+
+// templateCollectionInput builds the collection a bundle apply creates from
+// tmpl for a library: the one definition of a template collection's
+// defaults, which a restore uses too.
+//
+//nolint:funlen // one request per template source, moved from createCollectionFromTemplate
+func templateCollectionInput(
+	bundleID string,
+	tmpl templates.Template,
+	libraryID int,
+	managementKey string,
+) (catalog.CreateLibraryCollectionInput, error) {
 	limit := templateLimitPtr(tmpl)
 	switch tmpl.Source {
 	case templates.SourceTMDB:
 		if tmpl.TMDB == nil {
-			return nil, fmt.Errorf("template %q is missing TMDB config", tmpl.ID)
+			return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("template %q is missing TMDB config", tmpl.ID)
 		}
-		return h.createTMDBCollection(ctx, importTMDBRequest{
+		return tmdbCollectionInput(importTMDBRequest{
 			LibraryID:          libraryID,
 			Title:              tmpl.Title,
 			Description:        tmpl.Description,
@@ -2045,9 +2068,9 @@ func (h *LibraryCollectionHandler) createCollectionFromTemplate(
 		})
 	case templates.SourceMDBList:
 		if tmpl.MDBList == nil || strings.TrimSpace(tmpl.MDBList.URL) == "" {
-			return nil, fmt.Errorf("template %q is missing MDBList URL", tmpl.ID)
+			return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("template %q is missing MDBList URL", tmpl.ID)
 		}
-		return h.createMDBListCollection(ctx, importMDBListRequest{
+		return mdbListCollectionInput(importMDBListRequest{
 			LibraryID:          libraryID,
 			Title:              tmpl.Title,
 			Description:        tmpl.Description,
@@ -2064,9 +2087,9 @@ func (h *LibraryCollectionHandler) createCollectionFromTemplate(
 		})
 	case templates.SourceTMDBList:
 		if tmpl.TMDBList == nil || strings.TrimSpace(tmpl.TMDBList.URL) == "" {
-			return nil, fmt.Errorf("template %q is missing TMDB list URL", tmpl.ID)
+			return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("template %q is missing TMDB list URL", tmpl.ID)
 		}
-		return h.createTMDBListCollection(ctx, importTMDBListRequest{
+		return tmdbListCollectionInput(importTMDBListRequest{
 			LibraryID:          libraryID,
 			Title:              tmpl.Title,
 			Description:        tmpl.Description,
@@ -2083,9 +2106,9 @@ func (h *LibraryCollectionHandler) createCollectionFromTemplate(
 		})
 	case templates.SourceTMDBCollection:
 		if tmpl.TMDBCollection == nil {
-			return nil, fmt.Errorf("template %q is missing TMDBCollection config", tmpl.ID)
+			return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("template %q is missing TMDBCollection config", tmpl.ID)
 		}
-		return h.createTMDBFranchiseCollection(ctx, importTMDBFranchiseRequest{
+		return tmdbFranchiseCollectionInput(importTMDBFranchiseRequest{
 			LibraryID:          libraryID,
 			Title:              tmpl.Title,
 			Description:        tmpl.Description,
@@ -2102,9 +2125,9 @@ func (h *LibraryCollectionHandler) createCollectionFromTemplate(
 		})
 	case templates.SourceTMDBDiscover:
 		if tmpl.TMDBDiscover == nil {
-			return nil, fmt.Errorf("template %q is missing TMDBDiscover config", tmpl.ID)
+			return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("template %q is missing TMDBDiscover config", tmpl.ID)
 		}
-		return h.createTMDBDiscoverCollection(ctx, importTMDBDiscoverRequest{
+		return tmdbDiscoverCollectionInput(importTMDBDiscoverRequest{
 			LibraryID:   libraryID,
 			Title:       tmpl.Title,
 			Description: tmpl.Description,
@@ -2134,39 +2157,68 @@ func (h *LibraryCollectionHandler) createCollectionFromTemplate(
 			PosterFromTemplate: tmpl.PosterPath != "",
 		})
 	default:
-		return nil, fmt.Errorf("template source %q is not supported by bundles", tmpl.Source)
+		return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("template source %q is not supported by bundles", tmpl.Source)
 	}
+}
+
+// createImportedCollection creates an imported collection and stores the
+// bundled template poster it names.
+func (h *LibraryCollectionHandler) createImportedCollection(ctx context.Context, input catalog.CreateLibraryCollectionInput, posterURL string, posterFromTemplate bool) (*models.LibraryCollection, error) {
+	collection, err := h.repo.Create(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("creating collection: %w", err)
+	}
+	if stored, path, thumbhash, err := h.storeBundledTemplatePoster(ctx, collection.ID, posterURL, posterFromTemplate); err != nil {
+		return nil, err
+	} else if stored {
+		collection.PosterURL = path
+		collection.PosterThumbhash = thumbhash
+		collection.PosterAutoGenerated = false
+		if posterFromTemplate {
+			collection.PosterFromTemplate = true
+		}
+	}
+	return collection, nil
 }
 
 func (h *LibraryCollectionHandler) createMDBListCollection(
 	ctx context.Context,
 	req importMDBListRequest,
 ) (*models.LibraryCollection, error) {
+	input, err := mdbListCollectionInput(req)
+	if err != nil {
+		return nil, err
+	}
+	return h.createImportedCollection(ctx, input, req.PosterURL, req.PosterFromTemplate)
+}
+
+// mdbListCollectionInput validates req and builds the collection it creates.
+func mdbListCollectionInput(req importMDBListRequest) (catalog.CreateLibraryCollectionInput, error) {
 	var syncSchedule *string
 	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
 		if err := catalog.ParseCronExpression(s); err != nil {
-			return nil, requestValidationError{err: err}
+			return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 		}
 		syncSchedule = &s
 	}
 
 	normalizedURL, err := usercollections.CanonicalMDBListURL(req.URL)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
 	sourceConfig, err := buildMDBListSourceConfig(normalizedURL, req.Limit)
 	if err != nil {
-		return nil, fmt.Errorf("building MDBList source config: %w", err)
+		return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("building MDBList source config: %w", err)
 	}
 	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
 	sortConfig, err := NormalizeCollectionSortConfig(req.SortConfig, false)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
-	collection, err := h.repo.Create(ctx, catalog.CreateLibraryCollectionInput{
+	return catalog.CreateLibraryCollectionInput{
 		LibraryID:          req.LibraryID,
 		LibraryIDs:         req.LibraryIDs,
 		Slug:               slugifyCollectionName(req.Title),
@@ -2185,53 +2237,48 @@ func (h *LibraryCollectionHandler) createMDBListCollection(
 		ManagementSource:   managementSource,
 		ManagementKey:      managementKey,
 		SyncSchedule:       syncSchedule,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating collection: %w", err)
-	}
-	if stored, path, thumbhash, err := h.storeBundledTemplatePoster(ctx, collection.ID, req.PosterURL, req.PosterFromTemplate); err != nil {
-		return nil, err
-	} else if stored {
-		collection.PosterURL = path
-		collection.PosterThumbhash = thumbhash
-		collection.PosterAutoGenerated = false
-		if req.PosterFromTemplate {
-			collection.PosterFromTemplate = true
-		}
-	}
-	return collection, nil
+	}, nil
 }
 
 func (h *LibraryCollectionHandler) createTMDBCollection(
 	ctx context.Context,
 	req importTMDBRequest,
 ) (*models.LibraryCollection, error) {
+	input, err := tmdbCollectionInput(req)
+	if err != nil {
+		return nil, err
+	}
+	return h.createImportedCollection(ctx, input, req.PosterURL, req.PosterFromTemplate)
+}
+
+// tmdbCollectionInput validates req and builds the collection it creates.
+func tmdbCollectionInput(req importTMDBRequest) (catalog.CreateLibraryCollectionInput, error) {
 	preset, mediaType, timeWindow, err := normalizeTMDBPresetRequest(req.Preset, req.MediaType, req.TimeWindow)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
 
 	var syncSchedule *string
 	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
 		if err := catalog.ParseCronExpression(s); err != nil {
-			return nil, requestValidationError{err: err}
+			return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 		}
 		syncSchedule = &s
 	}
 
 	sourceConfig, err := buildTMDBSourceConfig(preset, mediaType, timeWindow, req.Limit)
 	if err != nil {
-		return nil, fmt.Errorf("building TMDB source config: %w", err)
+		return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("building TMDB source config: %w", err)
 	}
 	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
 	tmdbSortConfig, err := NormalizeCollectionSortConfig(req.SortConfig, false)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
-	collection, err := h.repo.Create(ctx, catalog.CreateLibraryCollectionInput{
+	return catalog.CreateLibraryCollectionInput{
 		LibraryID:          req.LibraryID,
 		LibraryIDs:         req.LibraryIDs,
 		Slug:               slugifyCollectionName(req.Title),
@@ -2250,21 +2297,7 @@ func (h *LibraryCollectionHandler) createTMDBCollection(
 		ManagementSource:   managementSource,
 		ManagementKey:      managementKey,
 		SyncSchedule:       syncSchedule,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating collection: %w", err)
-	}
-	if stored, path, thumbhash, err := h.storeBundledTemplatePoster(ctx, collection.ID, req.PosterURL, req.PosterFromTemplate); err != nil {
-		return nil, err
-	} else if stored {
-		collection.PosterURL = path
-		collection.PosterThumbhash = thumbhash
-		collection.PosterAutoGenerated = false
-		if req.PosterFromTemplate {
-			collection.PosterFromTemplate = true
-		}
-	}
-	return collection, nil
+	}, nil
 }
 
 // createTMDBListCollection persists a library collection that follows a
@@ -2273,32 +2306,41 @@ func (h *LibraryCollectionHandler) createTMDBListCollection(
 	ctx context.Context,
 	req importTMDBListRequest,
 ) (*models.LibraryCollection, error) {
+	input, err := tmdbListCollectionInput(req)
+	if err != nil {
+		return nil, err
+	}
+	return h.createImportedCollection(ctx, input, req.PosterURL, req.PosterFromTemplate)
+}
+
+// tmdbListCollectionInput validates req and builds the collection it creates.
+func tmdbListCollectionInput(req importTMDBListRequest) (catalog.CreateLibraryCollectionInput, error) {
 	listURL, err := collectionutil.CanonicalTMDBListURL(req.URL)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
 
 	var syncSchedule *string
 	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
 		if err := catalog.ParseCronExpression(s); err != nil {
-			return nil, requestValidationError{err: err}
+			return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 		}
 		syncSchedule = &s
 	}
 
 	sourceConfig, err := buildTMDBListSourceConfig(listURL, req.Limit)
 	if err != nil {
-		return nil, fmt.Errorf("building TMDB list source config: %w", err)
+		return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("building TMDB list source config: %w", err)
 	}
 	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
 	sortConfig, err := NormalizeCollectionSortConfig(req.SortConfig, false)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
-	collection, err := h.repo.Create(ctx, catalog.CreateLibraryCollectionInput{
+	return catalog.CreateLibraryCollectionInput{
 		LibraryID:          req.LibraryID,
 		LibraryIDs:         req.LibraryIDs,
 		Slug:               slugifyCollectionName(req.Title),
@@ -2317,21 +2359,7 @@ func (h *LibraryCollectionHandler) createTMDBListCollection(
 		ManagementSource:   managementSource,
 		ManagementKey:      managementKey,
 		SyncSchedule:       syncSchedule,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating collection: %w", err)
-	}
-	if stored, path, thumbhash, err := h.storeBundledTemplatePoster(ctx, collection.ID, req.PosterURL, req.PosterFromTemplate); err != nil {
-		return nil, err
-	} else if stored {
-		collection.PosterURL = path
-		collection.PosterThumbhash = thumbhash
-		collection.PosterAutoGenerated = false
-		if req.PosterFromTemplate {
-			collection.PosterFromTemplate = true
-		}
-	}
-	return collection, nil
+	}, nil
 }
 
 // createTMDBFranchiseCollection persists a TMDB-franchise-backed library
@@ -2348,27 +2376,36 @@ func (h *LibraryCollectionHandler) createTMDBFranchiseCollection(
 	ctx context.Context,
 	req importTMDBFranchiseRequest,
 ) (*models.LibraryCollection, error) {
+	input, err := tmdbFranchiseCollectionInput(req)
+	if err != nil {
+		return nil, err
+	}
+	return h.createImportedCollection(ctx, input, req.PosterURL, req.PosterFromTemplate)
+}
+
+// tmdbFranchiseCollectionInput validates req and builds the collection it creates.
+func tmdbFranchiseCollectionInput(req importTMDBFranchiseRequest) (catalog.CreateLibraryCollectionInput, error) {
 	if req.CollectionID < 0 {
-		return nil, requestValidationError{err: fmt.Errorf("collection_id must be >= 0")}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: errors.New("collection_id must be >= 0")}
 	}
 
 	var syncSchedule *string
 	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
 		if err := catalog.ParseCronExpression(s); err != nil {
-			return nil, requestValidationError{err: err}
+			return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 		}
 		syncSchedule = &s
 	}
 
 	sourceConfig, err := buildTMDBCollectionSourceConfig(req.CollectionID, req.Limit)
 	if err != nil {
-		return nil, fmt.Errorf("building TMDB franchise source config: %w", err)
+		return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("building TMDB franchise source config: %w", err)
 	}
 	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
-	collection, err := h.repo.Create(ctx, catalog.CreateLibraryCollectionInput{
+	return catalog.CreateLibraryCollectionInput{
 		LibraryID:          req.LibraryID,
 		LibraryIDs:         req.LibraryIDs,
 		Slug:               slugifyCollectionName(req.Title),
@@ -2386,21 +2423,7 @@ func (h *LibraryCollectionHandler) createTMDBFranchiseCollection(
 		ManagementSource:   managementSource,
 		ManagementKey:      managementKey,
 		SyncSchedule:       syncSchedule,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating collection: %w", err)
-	}
-	if stored, path, thumbhash, err := h.storeBundledTemplatePoster(ctx, collection.ID, req.PosterURL, req.PosterFromTemplate); err != nil {
-		return nil, err
-	} else if stored {
-		collection.PosterURL = path
-		collection.PosterThumbhash = thumbhash
-		collection.PosterAutoGenerated = false
-		if req.PosterFromTemplate {
-			collection.PosterFromTemplate = true
-		}
-	}
-	return collection, nil
+	}, nil
 }
 
 // createTMDBDiscoverCollection persists a TMDB-discover-backed library
@@ -2411,27 +2434,36 @@ func (h *LibraryCollectionHandler) createTMDBDiscoverCollection(
 	ctx context.Context,
 	req importTMDBDiscoverRequest,
 ) (*models.LibraryCollection, error) {
+	input, err := tmdbDiscoverCollectionInput(req)
+	if err != nil {
+		return nil, err
+	}
+	return h.createImportedCollection(ctx, input, req.PosterURL, req.PosterFromTemplate)
+}
+
+// tmdbDiscoverCollectionInput validates req and builds the collection it creates.
+func tmdbDiscoverCollectionInput(req importTMDBDiscoverRequest) (catalog.CreateLibraryCollectionInput, error) {
 	if err := validateTMDBDiscoverRequest(req); err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
 
 	var syncSchedule *string
 	if s := strings.TrimSpace(req.SyncSchedule); s != "" {
 		if err := catalog.ParseCronExpression(s); err != nil {
-			return nil, requestValidationError{err: err}
+			return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 		}
 		syncSchedule = &s
 	}
 
 	sourceConfig, err := buildTMDBDiscoverSourceConfig(req.MediaType, req.Spec, req.Limit)
 	if err != nil {
-		return nil, fmt.Errorf("building TMDB discover source config: %w", err)
+		return catalog.CreateLibraryCollectionInput{}, fmt.Errorf("building TMDB discover source config: %w", err)
 	}
 	managementMode, managementSource, managementKey, err := normalizeCollectionManagementFields(req.ManagementMode, req.ManagementSource, req.ManagementKey)
 	if err != nil {
-		return nil, requestValidationError{err: err}
+		return catalog.CreateLibraryCollectionInput{}, requestValidationError{err: err}
 	}
-	collection, err := h.repo.Create(ctx, catalog.CreateLibraryCollectionInput{
+	return catalog.CreateLibraryCollectionInput{
 		LibraryID:          req.LibraryID,
 		LibraryIDs:         req.LibraryIDs,
 		Slug:               slugifyCollectionName(req.Title),
@@ -2449,21 +2481,7 @@ func (h *LibraryCollectionHandler) createTMDBDiscoverCollection(
 		ManagementSource:   managementSource,
 		ManagementKey:      managementKey,
 		SyncSchedule:       syncSchedule,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("creating collection: %w", err)
-	}
-	if stored, path, thumbhash, err := h.storeBundledTemplatePoster(ctx, collection.ID, req.PosterURL, req.PosterFromTemplate); err != nil {
-		return nil, err
-	} else if stored {
-		collection.PosterURL = path
-		collection.PosterThumbhash = thumbhash
-		collection.PosterAutoGenerated = false
-		if req.PosterFromTemplate {
-			collection.PosterFromTemplate = true
-		}
-	}
-	return collection, nil
+	}, nil
 }
 
 // validateTMDBDiscoverRequest performs basic sanity checks on the request
@@ -2682,6 +2700,9 @@ func (h *LibraryCollectionHandler) itemListResponseOf(ctx context.Context, item 
 		AdvisorySource:    item.AdvisorySource,
 		Status:            item.Status,
 		RatingIMDB:        item.RatingIMDB,
+		ImdbID:            item.ImdbID,
+		TmdbID:            item.TmdbID,
+		TvdbID:            item.TvdbID,
 		Overview:          item.Overview,
 		PosterThumbhash:   item.PosterThumbhash,
 		BackdropThumbhash: item.BackdropThumbhash,
@@ -2719,11 +2740,8 @@ func (h *LibraryCollectionHandler) presignGPURLCtx(ctx context.Context, path str
 	if path == "" {
 		return ""
 	}
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path
-	}
-	if strings.HasPrefix(path, "/") {
-		return path
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") || strings.HasPrefix(path, "/") {
+		return catalog.ImageURLOrEmpty(path)
 	}
 	if h.ArtworkResolver == nil {
 		return ""
@@ -3163,10 +3181,6 @@ func (h *LibraryCollectionHandler) processCollectionImage(
 	return uploadCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType, fileData)
 }
 
-func (h *LibraryCollectionHandler) deleteCollectionImages(ctx context.Context, collectionID, imageType string) error {
-	return removeCollectionImageVariants(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType)
-}
-
 // adminCollectionImagePath returns the stored path of one admin collection
 // image.
 func (h *LibraryCollectionHandler) adminCollectionImagePath(ctx context.Context, collectionID, imageType string) (string, error) {
@@ -3181,7 +3195,7 @@ func (h *LibraryCollectionHandler) adminCollectionImagePath(ctx context.Context,
 }
 
 // cleanUpReplacedCollectionImage removes the revision that a committed
-// replacement of an admin collection image superseded.
+// replacement or clear of an admin collection image superseded.
 func (h *LibraryCollectionHandler) cleanUpReplacedCollectionImage(ctx context.Context, collectionID, imageType, oldPath string) {
 	cleanUpReplacedCollectionImage(ctx, h.ArtworkStore, adminCollectionImagePrefix, collectionID, imageType, oldPath, func(ctx context.Context) (string, error) {
 		return h.adminCollectionImagePath(ctx, collectionID, imageType)

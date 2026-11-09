@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // mangaSeriesWhitespace collapses any run of whitespace to a single space so a
@@ -79,7 +81,7 @@ func mangaSeriesFromPath(filePath string) string {
 	for dir != "" && dir != "." && dir != string(filepath.Separator) {
 		base := filepath.Base(dir)
 		if !mangaVolumeFolder.MatchString(strings.TrimSpace(base)) {
-			return cleanMangaSeriesName(base)
+			return cleanMangaSeriesName(fspath.Display(base))
 		}
 		dir = filepath.Dir(dir)
 	}

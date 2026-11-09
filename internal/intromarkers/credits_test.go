@@ -34,10 +34,10 @@ func TestTailWindow(t *testing.T) {
 		t.Fatal("a file without a duration has an empty tail window")
 	}
 	// Movies get a longer, proportionally smaller tail.
-	if got := creditsLimitsFor(true).windowStart(7200); got != 6300 {
+	if got := creditsLimitsFor(true).WindowStart(7200); got != 6300 {
 		t.Fatalf("movie window start = %.0f, want 6300", got)
 	}
-	if got := creditsLimitsFor(true).windowStart(2400); got != 1800 {
+	if got := creditsLimitsFor(true).WindowStart(2400); got != 1800 {
 		t.Fatalf("short movie window start = %.0f, want 1800", got)
 	}
 }

@@ -26,6 +26,11 @@ export type CollectionValueFacet = "genre" | "studio" | "network" | "country" | 
 /** Which of a title's languages a language rule compares. */
 export type CollectionLanguageSource = "original" | "audio" | "subtitle";
 
+export interface QueryRuleCapabilities {
+  extendedRules?: boolean;
+  showTitleRules?: boolean;
+}
+
 export interface CollectionFieldOption {
   value: string;
   label: string;
@@ -66,6 +71,8 @@ export interface CollectionFieldOption {
   ratingSource?: string;
   /** Describes a show's episodes, so it is offered only where shows can match. */
   showsOnly?: boolean;
+  /** Describes an episode’s parent show. */
+  episodesOnly?: boolean;
   /** Taken only by a server that advertises `extended_query_rules`. */
   extended?: boolean;
   /** Episodes carry no value for it, so it is not offered where only episodes match. */
@@ -222,6 +229,15 @@ export const COLLECTION_FIELD_OPTIONS: CollectionFieldOption[] = [
     inputType: "text",
     valueType: "string",
     extended: true,
+  },
+  {
+    value: "show_title",
+    label: "Show title",
+    group: "title",
+    operators: TEXT_OPERATORS,
+    inputType: "text",
+    valueType: "string",
+    episodesOnly: true,
   },
   facetField(
     "genre",
@@ -403,7 +419,7 @@ export function getDefaultRuleValue(field: string, op: string): FilterRule["valu
 export function availableCollectionFields(
   allowPersonalized: boolean,
   shownRatingSources?: ReadonlySet<string>,
-  extendedRules = true,
+  { extendedRules = true, showTitleRules = false }: QueryRuleCapabilities = {},
 ): CollectionFieldOption[] {
   const fields = COLLECTION_FIELD_OPTIONS.filter(
     (option) =>
@@ -411,7 +427,8 @@ export function availableCollectionFields(
       (!option.ratingSource ||
         !shownRatingSources ||
         shownRatingSources.has(option.ratingSource)) &&
-      (extendedRules || !option.extended),
+      (extendedRules || !option.extended) &&
+      (showTitleRules || !option.episodesOnly),
   );
   if (extendedRules) return fields;
   return fields.map((option) => ({

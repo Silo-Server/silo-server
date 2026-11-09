@@ -61,11 +61,28 @@ func TestGetWatchlistEntry(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist/series:z", "", viewerHeaders()), TypeNotFound)
 }
 
+// The watchlist twin of TestGetFavoriteMembership.
+func TestGetWatchlistMembership(t *testing.T) {
+	lists := &fakePersonalLists{watchlist: watchlistRows(), missing: map[string]bool{"series:hidden": true}}
+	h := newTestHandler(t, favoritesDeps(lists))
+	for _, tc := range []struct{ id, want string }{
+		{"series:c", `{"item_id":"series:c","is_member":true,"added_at":"2026-01-02T03:04:05.000Z"}`},
+		{"series:nope", `{"item_id":"series:nope","is_member":false}`},
+		{"series:z", `{"item_id":"series:z","is_member":false}`},
+	} {
+		rec := do(t, h, http.MethodGet, "/api/v2/watchlist/"+tc.id+"/membership", "", viewerHeaders())
+		if rec.Code != 200 || rec.Body.String() != tc.want+"\n" {
+			t.Fatalf("%s: %d %s", tc.id, rec.Code, rec.Body.String())
+		}
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/watchlist/series:hidden/membership", "", viewerHeaders()), TypeNotFound)
+}
+
 func TestWatchlistDenied(t *testing.T) {
 	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{err: errStore}))
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v2/watchlist"}, {http.MethodGet, "/api/v2/watchlist/series:c"},
-		{http.MethodPut, "/api/v2/watchlist/series:c"}, {http.MethodDelete, "/api/v2/watchlist/series:c"},
+		{http.MethodGet, "/api/v2/watchlist/series:c/membership"}, {http.MethodPut, "/api/v2/watchlist/series:c"}, {http.MethodDelete, "/api/v2/watchlist/series:c"},
 	} {
 		requireProblem(t, do(t, h, tc.method, tc.path, "", nil), TypeAuthenticationRequired)
 		p := requireProblem(t, do(t, h, tc.method, tc.path, "", bearer(memberToken)), TypeValidationFailed)

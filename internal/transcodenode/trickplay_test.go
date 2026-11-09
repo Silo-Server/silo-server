@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -51,6 +53,28 @@ func sheetsRequestJSON(t *testing.T, input string) string {
 	return string(data)
 }
 
+// TestTrickplayExtractReportsUnreadableInput checks that a file this node's
+// ffmpeg cannot open answers input_unreadable, so the API server does not
+// count it against the file.
+func TestTrickplayExtractReportsUnreadableInput(t *testing.T) {
+	// ffmpeg stands in as a script that fails to open its input, so the
+	// test needs no ffmpeg on the host.
+	ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+	script := "#!/bin/sh\necho '/media/movie.mkv: Permission denied' >&2\nexit 1\n"
+	if err := os.WriteFile(ffmpeg, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	server := newTrickplayTestServer(t, ffmpeg)
+	rec := postTrickplay(t, server, sheetsRequestJSON(t, "/media/movie.mkv"))
+	var failure trickplay.ExtractError
+	if err := json.Unmarshal(rec.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusUnprocessableEntity || failure.Reason != trickplay.InputUnreadableReason || failure.Permanent {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestTrickplayExtractRefuses(t *testing.T) {
 	server := newTrickplayTestServer(t, "ffmpeg")
 	valid := sheetsRequestJSON(t, "/media/movie.mkv")
@@ -66,11 +90,22 @@ func TestTrickplayExtractRefuses(t *testing.T) {
 	if rec := postTrickplay(t, server, stats); rec.Code != http.StatusBadRequest || decode(rec).Reason != "invalid_request" {
 		t.Fatalf("stats request: %d %s", rec.Code, rec.Body.String())
 	}
-	server.trickplay.busy.Lock()
+	// The node admits playback.trickplay_node_capacity runs at once and
+	// refuses the next as busy.
+	server.watcher.Config().Playback.TrickplayNodeCapacity = 2
+	server.trickplay.running = 2
 	if rec := postTrickplay(t, server, valid); rec.Code != http.StatusServiceUnavailable || decode(rec).Reason != trickplay.NodeBusyReason {
-		t.Fatalf("busy: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("at capacity: %d %s", rec.Code, rec.Body.String())
 	}
-	server.trickplay.busy.Unlock()
+	server.trickplay.running = 1
+	// An admitted run fails here (no real ffmpeg or input) but never answers 503.
+	if rec := postTrickplay(t, server, valid); rec.Code == http.StatusServiceUnavailable {
+		t.Fatalf("second run refused under a capacity of 2: %d %s", rec.Code, rec.Body.String())
+	}
+	if server.trickplay.running != 1 {
+		t.Fatalf("running = %d after the run, want its slot back", server.trickplay.running)
+	}
+	server.trickplay.running = 0
 	server.inputPaths = denyInputPaths{}
 	if rec := postTrickplay(t, server, valid); rec.Code == http.StatusOK || rec.Code == http.StatusUnprocessableEntity {
 		t.Fatalf("unapproved path: %d", rec.Code)

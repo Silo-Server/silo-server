@@ -5,6 +5,7 @@ import {
   buildHWDeviceRows,
   imageExecutionOptions,
   describeDetection,
+  hardwareVerified,
   hasHardwareToneMapCapability,
   hasUsableTranscodeNode,
   nodeInventoriesDiverge,
@@ -198,8 +199,9 @@ describe("describeDetection", () => {
         render_devices: ["/dev/dri/renderD128"],
         intel_detected: true,
         source: "transcode_node",
+        detected_backends: [{ backend: "vaapi", verified: true, device: "/dev/dri/renderD129" }],
       }),
-    ).toBe("Detected VA-API on /dev/dri/renderD128 (transcode node)");
+    ).toBe("Detected VA-API on /dev/dri/renderD129 (transcode node)");
     expect(
       describeDetection({
         resolved: "none",
@@ -208,6 +210,42 @@ describe("describeDetection", () => {
         source: "local",
       }),
     ).toBe("No supported graphics hardware found");
+  });
+
+  // The server echoes an explicitly configured backend as resolved even when
+  // nothing verified it, e.g. VideoToolbox chosen for Silo in Docker on a Mac.
+  it.each([
+    [
+      "an unprobed VideoToolbox",
+      { resolved: "videotoolbox" },
+      "VideoToolbox (macOS) needs Silo running natively on macOS, not in Docker",
+    ],
+    ["an unprobed backend", { resolved: "nvenc" }, "NVIDIA NVENC not found on this server"],
+    [
+      "a failed probe",
+      {
+        resolved: "qsv",
+        detected_backends: [{ backend: "qsv", verified: false, reason: "init failed" }],
+      },
+      "Intel Quick Sync (QSV) failed its hardware check",
+    ],
+    [
+      "a skipped probe",
+      {
+        resolved: "vaapi",
+        detected_backends: [{ backend: "vaapi", verified: false, skipped: true }],
+      },
+      "VA-API devices aren't accessible to this server",
+    ],
+  ])("warns instead of claiming detection for %s", (_, fields, text) => {
+    const detection = {
+      render_devices: [],
+      intel_detected: false,
+      source: "local" as const,
+      ...fields,
+    };
+    expect(describeDetection(detection)).toBe(text);
+    expect(hardwareVerified(detection)).toBe(false);
   });
 });
 

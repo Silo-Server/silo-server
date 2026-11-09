@@ -6,6 +6,7 @@ import { useAdminUserCapabilities, useAdminUserSettingCounts } from "@/hooks/que
 import {
   useAdminUserDownloadSummary,
   useAdminUserLiveSessions,
+  useAdminUserProfileActivity,
 } from "@/hooks/queries/admin/userActivity";
 import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ export function UserDetailTabBar({ user, active }: { user: AdminUser; active: Us
   const live = useAdminUserLiveSessions(user.id);
   const downloads = useAdminUserDownloadSummary(user.id, accountDownloads);
   const settingCounts = useAdminUserSettingCounts(user.id);
+  const profiles = useAdminUserProfileActivity(user.id);
   // The group name only labels sources, which a count doesn't need.
   const { terms: requestTerms } = useAccountRequestTerms(user, undefined);
   const custom = countCustomPolicyRows(user) + countCustomRequestTerms(requestTerms);
@@ -45,6 +47,11 @@ export function UserDetailTabBar({ user, active }: { user: AdminUser; active: Us
 
   const tabs: Array<{ value: UserDetailTab; label: string; extra?: ReactNode }> = [
     { value: "overview", label: "Overview" },
+    {
+      value: "profiles",
+      label: "Profiles",
+      extra: profiles.data ? <Count>{profiles.data.length}</Count> : null,
+    },
     {
       value: "access",
       label: "Access & limits",

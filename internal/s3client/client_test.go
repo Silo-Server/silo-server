@@ -700,3 +700,120 @@ func TestObjectMatchesStatusMapping(t *testing.T) {
 		})
 	}
 }
+
+// r2RateLimitCode is the error code Cloudflare R2 sends with HTTP 429.
+const r2RateLimitCode = "TooManyRequests"
+
+// throttlingBackend answers the first throttled requests of each method with
+// a provider rate-limit response, Cloudflare R2's 429 unless set otherwise,
+// and every later request with success.
+type throttlingBackend struct {
+	mu        sync.Mutex
+	status    int
+	code      string
+	throttled map[string]int
+	calls     map[string]int
+}
+
+func newThrottlingBackend(throttled map[string]int) *throttlingBackend {
+	return &throttlingBackend{status: http.StatusTooManyRequests, code: r2RateLimitCode, throttled: throttled, calls: map[string]int{}}
+}
+
+func (b *throttlingBackend) Do(r *http.Request) (*http.Response, error) {
+	if r.Body != nil {
+		_, _ = io.Copy(io.Discard, r.Body)
+		_ = r.Body.Close()
+	}
+	b.mu.Lock()
+	b.calls[r.Method]++
+	throttle := b.throttled[r.Method] > 0
+	if throttle {
+		b.throttled[r.Method]--
+	}
+	b.mu.Unlock()
+	if !throttle {
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Length": {"2"}}, Body: io.NopCloser(strings.NewReader("ok")), ContentLength: 2, Request: r}, nil
+	}
+	body := `<?xml version="1.0" encoding="UTF-8"?><Error><Code>` + b.code + `</Code><Message>Please reduce your request rate</Message></Error>`
+	if r.Method == http.MethodHead {
+		// HEAD responses carry no body, so only the status identifies the throttle.
+		body = ""
+	}
+	return &http.Response{StatusCode: b.status, Header: http.Header{"Content-Type": {"application/xml"}}, Body: io.NopCloser(strings.NewReader(body)), ContentLength: int64(len(body)), Request: r}, nil
+}
+
+func (b *throttlingBackend) Calls(method string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls[method]
+}
+
+func TestClientRetriesProviderRateLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		code   string
+	}{
+		{"cloudflare r2", http.StatusTooManyRequests, r2RateLimitCode},
+		{"aws s3", http.StatusServiceUnavailable, "SlowDown"},
+		{"minio write quorum", http.StatusServiceUnavailable, "SlowDownWrite"},
+		{"minio read quorum", http.StatusServiceUnavailable, "SlowDownRead"},
+		{"minio busy", http.StatusServiceUnavailable, "ServerBusy"},
+		{"wasabi", http.StatusForbidden, "RequestRateLimitExceeded"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				backend := newThrottlingBackend(map[string]int{http.MethodPut: 2})
+				backend.status, backend.code = tc.status, tc.code
+				client := newMutationFenceTestClient(backend.Do)
+				if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); err != nil {
+					t.Fatalf("PutObject() after a short rate limit = %v, want success", err)
+				}
+				if got := backend.Calls(http.MethodPut); got != 3 {
+					t.Fatalf("PUT attempts = %d, want 2 throttled and 1 successful", got)
+				}
+				backend.mu.Lock()
+				backend.throttled[http.MethodPut] = retryMaxAttempts
+				backend.mu.Unlock()
+				if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); !errors.Is(err, ErrThrottled) {
+					t.Fatalf("PutObject() during a lasting rate limit = %v, want ErrThrottled", err)
+				}
+			})
+		})
+	}
+}
+
+func TestClientKeepsBackingOffAfterALongThrottle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// The SDK's default quota of 500 tokens covers 50 calls that each spend
+		// two 5-token retries, so 60 such calls would empty it.
+		const exhausted = 60
+		backend := newThrottlingBackend(map[string]int{http.MethodPut: exhausted*retryMaxAttempts + 1})
+		client := newMutationFenceTestClient(backend.Do)
+		for range exhausted {
+			if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); err == nil {
+				t.Fatal("PutObject() succeeded while every attempt was throttled")
+			}
+		}
+		before := backend.Calls(http.MethodPut)
+		if err := client.PutObject(t.Context(), client.Bucket(), "tmdb/poster.webp", []byte("poster")); err != nil {
+			t.Fatalf("PutObject() after a long throttle = %v, want a retry once it clears", err)
+		}
+		if got := backend.Calls(http.MethodPut) - before; got != 2 {
+			t.Fatalf("PUT attempts for the last call = %d, want 1 throttled and 1 successful", got)
+		}
+	})
+}
+
+func TestClientRetriesBodilessRateLimitOnHead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		backend := newThrottlingBackend(map[string]int{http.MethodHead: 2})
+		client := newMutationFenceTestClient(backend.Do)
+		if _, err := client.HeadObject(t.Context(), client.Bucket(), "tmdb/poster.webp"); err != nil {
+			t.Fatalf("HeadObject() after a bodiless 429 = %v, want success", err)
+		}
+		if got := backend.Calls(http.MethodHead); got != 3 {
+			t.Fatalf("HEAD attempts = %d, want 2 throttled and 1 successful", got)
+		}
+	})
+}

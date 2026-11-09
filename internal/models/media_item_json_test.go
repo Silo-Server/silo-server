@@ -7,14 +7,15 @@ import (
 )
 
 // Some frozen v1 responses serialize MediaItem directly, such as the admin
-// section preview. Transient provenance must not reach them.
+// section preview. Transient provenance and parent artwork must not reach them.
 func TestMediaItemJSONOmitsTransientEpisodeStillProvenance(t *testing.T) {
 	still := true
-	wire, err := json.Marshal(MediaItem{ContentID: "episode-1", PosterIsEpisodeStill: &still, BackdropIsEpisodeStill: &still})
+	wire, err := json.Marshal(MediaItem{ContentID: "episode-1", PosterIsEpisodeStill: &still, BackdropIsEpisodeStill: &still,
+		ParentArtwork: &EpisodeParentArtwork{SeriesBackdropPath: "series/backdrop"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(wire), "IsEpisodeStill") || strings.Contains(string(wire), "is_episode_still") {
+	if strings.Contains(string(wire), "IsEpisodeStill") || strings.Contains(string(wire), "is_episode_still") || strings.Contains(string(wire), "series/backdrop") {
 		t.Fatalf("MediaItem JSON carries provenance: %s", wire)
 	}
 }

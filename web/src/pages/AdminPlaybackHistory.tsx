@@ -269,6 +269,7 @@ export default function AdminPlaybackHistory() {
                   </TableHeader>
                   <TableBody>
                     {paginatedRows.map((row) => {
+                      const watch = watchTime(row);
                       const { title, detail } = historyRowTitle(row);
                       const titleBlock = (
                         <>
@@ -324,7 +325,16 @@ export default function AdminPlaybackHistory() {
                           </TableCell>
                           <TableCell>
                             <div className="space-y-1">
-                              <div>{formatDuration(row.watched_seconds)}</div>
+                              <div
+                                title={
+                                  watch.estimated
+                                    ? "Estimated: recorded before watch time was measured"
+                                    : undefined
+                                }
+                              >
+                                {watch.estimated ? "≈ " : ""}
+                                {formatDuration(watch.seconds)}
+                              </div>
                               <div className="text-muted-foreground text-xs">
                                 of {formatDuration(row.duration_seconds)}
                               </div>
@@ -450,6 +460,17 @@ function InfoCard({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-2xl font-extrabold tracking-tight">{value}</div>
     </div>
   );
+}
+
+// Measured watch time, or for a play recorded before it was measured the
+// server's estimate: the end position capped at the session's length.
+function watchTime(row: AdminPlaybackHistoryItem) {
+  if (row.played_seconds !== null) return { seconds: row.played_seconds, estimated: false };
+  const elapsed = (Date.parse(row.ended_at) - Date.parse(row.started_at)) / 1000;
+  const capped = Number.isFinite(elapsed)
+    ? Math.min(row.watched_seconds, Math.max(elapsed, 0))
+    : row.watched_seconds;
+  return { seconds: Math.max(capped, 0), estimated: true };
 }
 
 function formatDuration(seconds: number | null) {

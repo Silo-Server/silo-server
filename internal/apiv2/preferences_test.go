@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"regexp"
+	"strings"
 	"testing"
 
+	contracts "github.com/Silo-Server/silo-server/contracts/api/v2"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
+	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -373,5 +377,70 @@ func TestGetPreferencesAcceptsMissingLegacyTimestamp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The language tag patterns are hand-copied into many struct tags; they must
+// agree with lang.CanonicalTag, which the handlers use. A request pattern
+// admits every value the handler accepts, and a response pattern admits what
+// the handler stores.
+func TestLanguagePatternsAgreeWithCanonicalTag(t *testing.T) {
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Pattern string `json:"pattern"`
+					Items   *struct {
+						Pattern string `json:"pattern"`
+					} `json:"items"`
+				} `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(contracts.OpenAPI, &doc); err != nil {
+		t.Fatal(err)
+	}
+	// Every language or country pattern is one of these, so a copy that drifts
+	// fails here rather than refusing a value the handler accepts.
+	known := map[string]bool{
+		`^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)$`:                                                true,
+		`^(?:[a-z]{2,3}(?:-[0-9A-Za-z]{1,8})*|x(?:-[0-9A-Za-z]{1,8})+)?$`:                                               true,
+		`^[\s\v\x85\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)[\s\v\x85\p{Z}]*$`:  true,
+		`^[\s\v\x85\p{Z}]*(?:[A-Za-z]{2,3}(?:[-_][0-9A-Za-z]{1,8})*|[XxIi](?:[-_][0-9A-Za-z]{1,8})+)?[\s\v\x85\p{Z}]*$`: true,
+		`^(?:[a-z]{2})?$`: true, `^[a-z]{2,3}$`: true, `^[A-Z]{2}$`: true,
+	}
+	for name, schema := range doc.Components.Schemas {
+		for member, property := range schema.Properties {
+			p := property.Pattern
+			if property.Items != nil {
+				p = property.Items.Pattern
+			}
+			if p != "" && (strings.Contains(member, "language") || strings.Contains(member, "countr")) && !known[p] {
+				t.Errorf("%s.%s: unknown language pattern %q", name, member, p)
+			}
+		}
+	}
+	pattern := func(schema, member string) *regexp.Regexp {
+		p := doc.Components.Schemas[schema].Properties[member].Pattern
+		if p == "" {
+			t.Fatalf("%s.%s declares no pattern", schema, member)
+		}
+		return regexp.MustCompile(p)
+	}
+	request, response := pattern("ProfileUpdate", "language"), pattern("Profile", "language")
+	for _, value := range []string{"en", "eng", "EN", " en ", "pt-BR", "pt_br", "zh-Hant-TW", "es-419", "fil", "und",
+		"x-silo-original", "i-klingon", "sgn-BE-FR", "ar-EG-u-nu-latn", "", "English", "original", "00", "x",
+		// strings.TrimSpace trims Unicode spaces, not only ASCII ones.
+		"\u00a0en\u00a0", "\ven", "\u2003en\u3000", "\u0085", "\u00a0"} {
+		canonical := lang.CanonicalTag(value)
+		if strings.TrimSpace(value) != "" && canonical == "" {
+			continue // the handler refuses it; the pattern may too
+		}
+		if !request.MatchString(value) {
+			t.Errorf("request pattern refuses %q, which the handler accepts", value)
+		}
+		if !response.MatchString(canonical) {
+			t.Errorf("response pattern refuses %q, the canonical form of %q", canonical, value)
+		}
 	}
 }

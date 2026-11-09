@@ -70,6 +70,7 @@ vi.mock("@/hooks/queries/admin/users", () => ({
   useUpdateAdminUserDeviceSetting: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteAdminUserDeviceSetting: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteAllAdminUserDeviceSettingsForDevice: () => ({ mutate: vi.fn(), isPending: false }),
+  useResetAdminDeviceLearnedLimit: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 import AdminDevices from "./AdminDevices";

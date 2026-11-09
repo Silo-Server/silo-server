@@ -62,8 +62,8 @@ type DirectDownloadLinkBody struct {
 }
 type DirectDownloadLinkInput struct{ Body DirectDownloadLinkBody }
 type DirectDownloadLink struct {
-	URL       string  `json:"url" doc:"Server-relative GET/HEAD URL for /api/v2/direct-download that carries the link token as dl. Treat it as a secret until it expires."`
-	ProxyURL  string  `json:"proxy_url" doc:"The same link for /api/v2/direct-download-proxy; use it only when the download capability reports proxy_delivery."`
+	URL       string  `json:"url" format:"uri-reference" doc:"Server-relative GET/HEAD URL for /api/v2/direct-download that carries the link token as dl. Treat it as a secret until it expires."`
+	ProxyURL  string  `json:"proxy_url" format:"uri-reference" doc:"The same link for /api/v2/direct-download-proxy; use it only when the download capability reports proxy_delivery."`
 	ExpiresAt Instant `json:"expires_at" doc:"Latest time a request with this link is accepted. A transfer that started in time may run past it."`
 }
 type DirectDownloadLinkOutput struct{ Body DirectDownloadLink }

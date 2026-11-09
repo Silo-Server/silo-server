@@ -693,6 +693,11 @@ func TestCleanEbookSearchTitle(t *testing.T) {
 		// word mid-parenthetical is a title.
 		{"Rules (First Edition Club)", "", "Rules (First Edition Club)"},
 		{"Exit Strategy_ Murderbot Di - Martha Wells (Book 4)", "Martha Wells", "Exit Strategy Murderbot Di"},
+		// Book metadata is untrusted and peeling costs grow superlinearly, so an
+		// oversized title is cut to maxEbookSearchTitleBytes, on a rune
+		// boundary, before cleaning.
+		{"Dune" + strings.Repeat(" (1)", 300) + " (Illustrated)", "", "Dune"},
+		{strings.Repeat("日", 400), "", strings.Repeat("日", 341)},
 	}
 	for _, tc := range cases {
 		if got := cleanEbookSearchTitle(tc.title, tc.author); got != tc.want {

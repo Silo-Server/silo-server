@@ -314,11 +314,47 @@ func TestGetFavorite(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites/movie:z", "", viewerHeaders()), TypeNotFound)
 }
 
+// The membership read answers 200 for every item the viewer may see, so a
+// client checking an item that is not a favorite does not log a 404 (issue
+// #952: proxies such as CrowdSec count those as probing). An item the viewer
+// may not see stays 404.
+func TestGetFavoriteMembership(t *testing.T) {
+	lists := &fakePersonalLists{favorites: favoriteRows(), missing: map[string]bool{"movie:hidden": true}}
+	h := newTestHandler(t, favoritesDeps(lists))
+	for _, tc := range []struct{ id, want string }{
+		{"movie:c", `{"item_id":"movie:c","is_member":true,"added_at":"2026-01-02T03:04:05.000Z"}`},
+		{"movie:nope", `{"item_id":"movie:nope","is_member":false}`},
+		// Another profile's favorite is not this profile's.
+		{"movie:z", `{"item_id":"movie:z","is_member":false}`},
+	} {
+		rec := do(t, h, http.MethodGet, "/api/v2/favorites/"+tc.id+"/membership", "", viewerHeaders())
+		if rec.Code != 200 || rec.Body.String() != tc.want+"\n" {
+			t.Fatalf("%s: %d %s", tc.id, rec.Code, rec.Body.String())
+		}
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/favorites/movie:hidden/membership", "", viewerHeaders()), TypeNotFound)
+}
+
+func TestPersonalListCapability(t *testing.T) {
+	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{}))
+	rec := do(t, h, http.MethodGet, "/api/v2/capabilities/personal-lists", "", viewerHeaders())
+	if rec.Code != 200 || rec.Header().Get("ETag") == "" || !strings.Contains(rec.Body.String(), `"state":"available"`) ||
+		!strings.Contains(rec.Body.String(), `"allowed":true`) || !strings.Contains(rec.Body.String(), `"membership_supported":true`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	deps := pilotDeps(nil, nil)
+	deps.PersonalLists = nil
+	rec = do(t, newTestHandler(t, deps), http.MethodGet, "/api/v2/capabilities/personal-lists", "", viewerHeaders())
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"state":"not_configured"`) || !strings.Contains(rec.Body.String(), `"allowed":false`) {
+		t.Fatalf("unwired: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestFavoritesDenied(t *testing.T) {
 	h := newTestHandler(t, favoritesDeps(&fakePersonalLists{err: errStore}))
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v2/favorites"}, {http.MethodGet, "/api/v2/favorites/movie:c"},
-		{http.MethodPut, "/api/v2/favorites/movie:c"}, {http.MethodDelete, "/api/v2/favorites/movie:c"},
+		{http.MethodGet, "/api/v2/favorites/movie:c/membership"}, {http.MethodPut, "/api/v2/favorites/movie:c"}, {http.MethodDelete, "/api/v2/favorites/movie:c"},
 	} {
 		requireProblem(t, do(t, h, tc.method, tc.path, "", nil), TypeAuthenticationRequired)
 		p := requireProblem(t, do(t, h, tc.method, tc.path, "", bearer(memberToken)), TypeValidationFailed)

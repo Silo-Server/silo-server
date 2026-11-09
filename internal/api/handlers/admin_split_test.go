@@ -2,9 +2,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -128,5 +132,42 @@ func TestDeriveEpisodePairs(t *testing.T) {
 	movie := &models.MediaItem{ContentID: "movie-tmdb-1", Type: "movie"}
 	if got := deriveEpisodePairs(movie, moved, "movie-tmdb-2"); got != nil {
 		t.Fatalf("movie pairs = %v, want nil", got)
+	}
+}
+
+// TestSplitResponseHistoryFollowsActingAdmin: the v1 split response names
+// other accounts' ambiguous history rows only to the acting admin. A delegated
+// curator, a child profile on the admin's account, and an undecidable caller
+// keep the counts but not the samples.
+func TestSplitResponseHistoryFollowsActingAdmin(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		role   string
+		acting bool
+		err    error
+		want   bool
+	}{
+		{name: "acting admin", role: models.RoleAdmin, acting: true, want: true},
+		{name: "metadata curator", role: models.RoleUser},
+		{name: "child profile on the admin account", role: models.RoleAdmin},
+		{name: "decision unavailable", role: models.RoleAdmin, acting: true, err: errors.New("profile store down")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := apimw.SetClaims(t.Context(), &auth.Claims{UserID: 1, Role: tc.role})
+			ctx = apimw.SetActingAdminDecider(ctx, func(context.Context, apimw.ActingAdminRequest) (bool, error) {
+				return tc.acting, tc.err
+			})
+			report := &reattribute.Report{
+				HistoryAmbiguous: 1,
+				AmbiguousHistory: []reattribute.AmbiguousHistoryRow{{UserID: 2, ProfileID: "p2", WatchedAt: "2026-01-01"}},
+			}
+			got := withoutForeignHistory(ctx, AdminSplitResult{Reattribution: report})
+			if gotSamples := len(got.Reattribution.AmbiguousHistory) > 0; gotSamples != tc.want {
+				t.Fatalf("ambiguous_history present = %v, want %v", gotSamples, tc.want)
+			}
+			if got.Reattribution.HistoryAmbiguous != 1 {
+				t.Fatalf("history_ambiguous = %d, want 1", got.Reattribution.HistoryAmbiguous)
+			}
+		})
 	}
 }

@@ -47,6 +47,11 @@ const (
 type Change struct {
 	SourcePath string      `json:"source_path"`
 	Scope      ChangeScope `json:"scope"`
+	// Removed marks a path the source reports it is deleting, such as a
+	// series or movie folder Sonarr/Radarr deleted with its files. Webhook
+	// ingestion waits for the path to disappear before scanning it. Only the
+	// host's own webhook parser sets it.
+	Removed bool `json:"removed,omitempty"`
 }
 
 // DeliveryMode selects how a source's changes reach the host: the host polls

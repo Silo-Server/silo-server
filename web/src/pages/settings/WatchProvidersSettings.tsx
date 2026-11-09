@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import {
   useConnectWatchProviderAPIKey,
@@ -509,7 +510,7 @@ function WatchProviderCard({
   const handleCopyCode = async () => {
     if (!authSession) return;
     try {
-      await navigator.clipboard.writeText(authSession.user_code);
+      await copyTextToClipboard(authSession.user_code);
       setCodeCopied(true);
       toast.success(`${displayName} code copied`);
     } catch {
@@ -775,18 +776,6 @@ function WatchProviderCard({
                     updateConnection.mutate({ export_watched_enabled: checked })
                   }
                 />
-                {connection.capabilities.export_unwatched ? (
-                  <ToggleRow
-                    id={`watch-provider-${providerKey}-export-unwatched`}
-                    label="Send unwatched changes"
-                    description="When you mark something unwatched, remove matching history from this provider."
-                    checked={connection.export_unwatched_enabled}
-                    disabled={isBusy}
-                    onChange={(checked) =>
-                      updateConnection.mutate({ export_unwatched_enabled: checked })
-                    }
-                  />
-                ) : null}
                 {connection.capabilities.import_favorites ||
                 connection.capabilities.export_favorites ? (
                   <ToggleRow

@@ -113,7 +113,7 @@ func (h *CollectionHandler) PersonalCollectionItemsPage(ctx context.Context, use
 	for _, i := range page.Items {
 		ids = append(ids, i.MediaItemID)
 	}
-	visible, err := catalog.NewItemRepository(h.Executor.Pool).GetByIDsWithAccess(ctx, ids, access)
+	visible, err := catalog.NewItemRepository(h.Executor.Pool).GetListedByIDsWithAccess(ctx, ids, access)
 	if err != nil {
 		return out, collectionPageError(err)
 	}
@@ -207,7 +207,7 @@ func (h *LibraryCollectionHandler) LibraryCollectionItemsPage(ctx context.Contex
 	for _, i := range page.Items {
 		ids = append(ids, i.MediaItemID)
 	}
-	items, err := h.itemRepo.GetByIDsWithAccess(ctx, ids, access)
+	items, err := h.itemRepo.GetListedByIDsWithAccess(ctx, ids, access)
 	if err != nil {
 		return out, collectionPageError(err)
 	}

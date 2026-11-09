@@ -248,7 +248,6 @@ export default function SubtitleSearchDialog({
                 upload={handleUpload}
                 detectLanguage={handleDetectLanguage}
                 onSuccess={handleUploadSuccess}
-                onError={setSearchError}
                 defaultLanguage={selectedLanguage}
               />
             )}

@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 )
@@ -29,7 +31,7 @@ func (f *fakeEventsSocket) Mint(_ context.Context, identity evt.SocketIdentity) 
 func (*fakeEventsSocket) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	http.Error(w, "invalid realtime credential", http.StatusUnauthorized)
 }
-func TestEventsSocketTicketDelegatesOnlyLoginAuthority(t *testing.T) {
+func TestEventsSocketTicketDelegatesLoginOrMonitorKey(t *testing.T) {
 	deps := pilotDeps(nil, nil)
 	fake := new(fakeEventsSocket)
 	deps.EventsSocket = fake
@@ -54,6 +56,47 @@ func TestEventsSocketTicketDelegatesOnlyLoginAuthority(t *testing.T) {
 	if rec.Code != 403 || fake.calls != before {
 		t.Fatal("unbounded credential delegated")
 	}
+
+	// An admin:monitor:read key delegates itself, with no session or
+	// profile, for the key socket lifetime. Other keys cannot mint.
+	keys := fakeAPIKeys{keys: map[string]*models.APIKey{
+		"sa_monitor":  {ID: 5, UserID: 2, Scopes: []string{auth.ScopeAdminMonitorRead}},
+		"sa_unscoped": {ID: 6, UserID: 2},
+		"sa_summary":  {ID: 7, UserID: 2, Scopes: []string{auth.ScopeAdminSessionsSummaryRead}},
+		"sa_member":   {ID: 8, UserID: 1, Scopes: []string{auth.ScopeAdminMonitorRead}},
+	}}
+	deps.EventsCapability = handlers.NewEventsHandler(evt.NewHub("key-capability", nil), nil, nil, nil, nil, nil, nil)
+	deps.Auth = apimw.NewAuthMiddleware(fakeTokens{}, fakeSessions{}, keys, fakeUsers{users: map[int]*models.User{1: {ID: 1, Role: "user", Enabled: true}, 2: {ID: 2, Role: "admin", Enabled: true}}})
+	h = NewHandler(deps)
+	rec = do(t, h, http.MethodPost, path, "", bearer("sa_monitor"))
+	if rec.Code != 200 || fake.identity.APIKeyID != 5 || fake.identity.UserID != 2 || fake.identity.SessionID != "" || fake.identity.ProfileID != "" || !strings.Contains(rec.Body.String(), `"max_connection_seconds":14400`) {
+		t.Fatalf("key delegation: %d %s %+v", rec.Code, rec.Body.String(), fake.identity)
+	}
+	before = fake.calls
+	for _, refused := range []map[string]string{bearer("sa_unscoped"), bearer("sa_summary")} {
+		requireProblem(t, do(t, h, http.MethodPost, path, "", refused), TypePermissionDenied)
+	}
+	rec = do(t, h, http.MethodPost, path, "", with(bearer("sa_member"), "X-Profile-Id", "p-owner"))
+	if rec.Code != 403 || !strings.Contains(rec.Body.String(), "without a profile") {
+		t.Fatalf("key with a profile: %d %s", rec.Code, rec.Body.String())
+	}
+	if fake.calls != before {
+		t.Fatal("refused key minted")
+	}
+	allowed := func(headers map[string]string) bool {
+		t.Helper()
+		var body struct {
+			Allowed *bool `json:"allowed"`
+		}
+		rec := do(t, h, http.MethodGet, Prefix+"/events/capabilities", "", headers)
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || rec.Code != 200 || body.Allowed == nil {
+			t.Fatalf("capability: %d %s", rec.Code, rec.Body.String())
+		}
+		return *body.Allowed
+	}
+	if !allowed(bearer("sa_monitor")) || allowed(with(bearer("sa_monitor"), "X-Profile-Id", "p-owner")) || allowed(bearer("sa_member")) || allowed(bearer("sa_unscoped")) {
+		t.Fatal("capability allowed does not follow the key")
+	}
 }
 
 func eventsSocketFixtureCases() []fixtureCase {
@@ -62,7 +105,7 @@ func eventsSocketFixtureCases() []fixtureCase {
 
 func TestEventsSocketUpgradeThroughV2Router(t *testing.T) {
 	deps := pilotDeps(nil, nil)
-	store := evt.NewSocketTicketStore(nil)
+	store := evt.NewSocketTicketStore(nil, evt.SocketAudienceEvents)
 	socket := &handlers.EventsSocketV2{Events: handlers.NewEventsHandler(evt.NewHub("v2-router-fixture", nil), nil, nil, nil, nil, nil, nil), Tickets: store, Validate: func(ctx context.Context, proof evt.SocketIdentity) (context.Context, *auth.Claims, error) {
 		return ctx, &auth.Claims{UserID: proof.UserID, Role: "user", SessionID: proof.SessionID}, nil
 	}}

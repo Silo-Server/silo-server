@@ -38,6 +38,7 @@ function makeRow(overrides: Partial<AdminPlaybackHistoryItem> = {}): AdminPlayba
     watched_seconds: 3600,
     duration_seconds: 3600,
     completed: true,
+    played_seconds: null,
     series_title: "",
     season_number: null,
     episode_number: null,

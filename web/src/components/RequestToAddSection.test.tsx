@@ -9,7 +9,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 const mocks = vi.hoisted(() => ({
   useCanRequest: vi.fn(),
   useRequestSearch: vi.fn(),
-  useCreateMediaRequest: vi.fn(),
 }));
 
 vi.mock("@/hooks/useCanRequest", () => ({
@@ -18,7 +17,6 @@ vi.mock("@/hooks/useCanRequest", () => ({
 
 vi.mock("@/hooks/queries/useRequests", () => ({
   useRequestSearch: (...args: unknown[]) => mocks.useRequestSearch(...args),
-  useCreateMediaRequest: () => mocks.useCreateMediaRequest(),
 }));
 
 vi.mock("@/hooks/useWatchlistTitleToggle", () => ({
@@ -264,19 +262,6 @@ describe("RequestToAddSection (dialog variant in a host combobox)", () => {
 });
 
 describe("RequestToAddSection (grid variant)", () => {
-  // Never settles, so a card stays on "Sending" for the assertion.
-  const mutateAsync = vi.fn(() => new Promise(() => {}));
-
-  beforeEach(() => {
-    mocks.useCreateMediaRequest.mockReset();
-    mutateAsync.mockClear();
-    mocks.useCreateMediaRequest.mockReturnValue({
-      mutateAsync,
-      isPending: false,
-      variables: undefined,
-    });
-  });
-
   function pages(totalPages: number) {
     mocks.useRequestSearch.mockImplementation((_type: string, query: string, page: number) => ({
       data: {
@@ -422,17 +407,5 @@ describe("RequestToAddSection (grid variant)", () => {
     expect(screen.getByRole("navigation", { name: "Request to add pages" })).toHaveTextContent(
       "Page 1 of 500",
     );
-  });
-
-  it("requests a card's title from its hover action", () => {
-    pages(1);
-    renderInRouter(<PagedGrid query="dune" libraryHadHits />);
-
-    fireEvent.click(screen.getByRole("button", { name: /^Request dune 1a/ }));
-
-    expect(mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({ media_type: "movie", tmdb_id: 11, title: "dune 1a" }),
-    );
-    expect(screen.getByRole("button", { name: /^Sending request for dune 1a/ })).toBeDisabled();
   });
 });

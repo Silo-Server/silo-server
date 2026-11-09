@@ -51,6 +51,36 @@ type fakeFFmpegBinary struct {
 	logPath string
 }
 
+func TestNVIDIADeviceCandidatesRequireSuccessfulNVENCProbe(t *testing.T) {
+	for _, device := range []string{"dxg", "nvidiactl", "nvidia0"} {
+		for _, succeeds := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/smoke_success=%t", device, succeeds), func(t *testing.T) {
+				env := setupHWAccelTest(t)
+				env.addNVIDIADevice(t, device)
+				probe := successfulNVENCProbe()
+				probe.smokeOK = succeeds
+				ffmpeg := writeFakeFFmpeg(t, probe)
+
+				info := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "")
+				backend := detectedBackendEntry(t, info, transcodeHWNVENC)
+				if backend.Verified != succeeds {
+					t.Fatalf("NVENC verified = %t, want %t: %+v", backend.Verified, succeeds, backend)
+				}
+				want := HWAccelNone
+				if succeeds {
+					want = transcodeHWNVENC
+				}
+				if info.Resolved != want {
+					t.Fatalf("resolved = %q, want %q", info.Resolved, want)
+				}
+				if log := fakeFFmpegLog(t, ffmpeg); !strings.Contains(log, "h264_nvenc") {
+					t.Fatalf("NVENC smoke encode missing from probe log: %s", log)
+				}
+			})
+		}
+	}
+}
+
 func TestResolveHWAccelWithFFmpegAutoPrefersNVENCOverIntel(t *testing.T) {
 	env := setupHWAccelTest(t)
 	env.addRenderDevice(t, "renderD128", "0x8086")
@@ -699,6 +729,7 @@ func setupHWAccelTest(t *testing.T) *hwAccelTestEnv {
 	oldDRIDir := defaultDRIDir
 	oldNVIDIAControlDevice := defaultNVIDIAControlDevice
 	oldNVIDIADeviceGlob := defaultNVIDIADeviceGlob
+	oldDXGDevice := defaultDXGDevice
 	oldSysClassDRMDir := sysClassDRMDir
 	oldGOOS := currentGOOS
 	oldProbeTimeout := hwProbeCommandTimeout
@@ -714,6 +745,7 @@ func setupHWAccelTest(t *testing.T) *hwAccelTestEnv {
 	defaultDRIDir = env.driDir
 	defaultNVIDIAControlDevice = filepath.Join(env.devDir, "nvidiactl")
 	defaultNVIDIADeviceGlob = filepath.Join(env.devDir, "nvidia[0-9]*")
+	defaultDXGDevice = filepath.Join(env.devDir, "dxg")
 	sysClassDRMDir = env.sysDir
 	currentGOOS = "linux"
 	hwProbeCommandTimeout = 200 * time.Millisecond
@@ -729,6 +761,7 @@ func setupHWAccelTest(t *testing.T) *hwAccelTestEnv {
 		defaultDRIDir = oldDRIDir
 		defaultNVIDIAControlDevice = oldNVIDIAControlDevice
 		defaultNVIDIADeviceGlob = oldNVIDIADeviceGlob
+		defaultDXGDevice = oldDXGDevice
 		sysClassDRMDir = oldSysClassDRMDir
 		currentGOOS = oldGOOS
 		hwProbeCommandTimeout = oldProbeTimeout
@@ -966,18 +999,38 @@ func TestCachedVideoToolboxProbeKeepsRelativeAndPathSpellingsDistinct(t *testing
 
 func TestStartupRetryHWAccel(t *testing.T) {
 	// Explicit values bypass ffmpeg probing, keeping this host-independent.
-	if got := StartupRetryHWAccel(TranscodeOpts{HWAccel: "videotoolbox", FFmpegPath: "/does/not/exist"}); got != "none" {
-		t.Fatalf("videotoolbox retry accel = %q, want none (no alternate device to move to)", got)
+	env := setupHWAccelTest(t)
+	tests := []struct {
+		name         string
+		opts         TranscodeOpts
+		renderDevice bool
+		want         string
+	}{
+		{name: "videotoolbox has no alternate device", opts: TranscodeOpts{HWAccel: "videotoolbox"}, want: "none"},
+		{name: "qsv without a render device", opts: TranscodeOpts{HWAccel: "qsv"}, want: "none"},
+		{name: "vaapi without a render device", opts: TranscodeOpts{HWAccel: "vaapi"}, want: "none"},
+		{name: "qsv with a detected render device", opts: TranscodeOpts{HWAccel: "qsv"}, renderDevice: true, want: "qsv"},
+		{name: "vaapi with a detected render device", opts: TranscodeOpts{HWAccel: "vaapi"}, renderDevice: true, want: "vaapi"},
+		{name: "qsv with a configured device", opts: TranscodeOpts{HWAccel: "qsv", HWDevice: "/dev/dri/renderD129"}, want: "qsv"},
+		{name: "nvenc", opts: TranscodeOpts{HWAccel: "nvenc"}, want: "nvenc"},
+		{name: "software", opts: TranscodeOpts{HWAccel: "none"}, want: "none"},
+		{name: "videotoolbox hardware tone-map", opts: TranscodeOpts{HWAccel: "videotoolbox", ToneMapMode: tonemap.ModeHardware}, want: "videotoolbox"},
+		{name: "qsv hardware tone-map without a render device", opts: TranscodeOpts{HWAccel: "qsv", ToneMapMode: tonemap.ModeHardware}, want: "qsv"},
 	}
-	for _, accel := range []string{"qsv", "vaapi", "nvenc", "none"} {
-		if got := StartupRetryHWAccel(TranscodeOpts{HWAccel: accel, FFmpegPath: "/does/not/exist"}); got != accel {
-			t.Fatalf("%s retry accel = %q, want unchanged", accel, got)
-		}
-	}
-	if got := StartupRetryHWAccel(TranscodeOpts{
-		HWAccel: "videotoolbox", FFmpegPath: "/does/not/exist", ToneMapMode: tonemap.ModeHardware,
-	}); got != "videotoolbox" {
-		t.Fatalf("hardware tone-map retry accel = %q, want unchanged frozen executor", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_ = os.RemoveAll(env.driDir)
+			if err := os.MkdirAll(env.driDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.renderDevice {
+				env.addRenderDevice(t, "renderD128", "0x8086")
+			}
+			tt.opts.FFmpegPath = "/does/not/exist"
+			if got := StartupRetryHWAccel(tt.opts); got != tt.want {
+				t.Fatalf("StartupRetryHWAccel() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

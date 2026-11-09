@@ -228,6 +228,13 @@ type playbackInfoResponseDTO struct {
 // media sources, when nothing the request could use is playable.
 const playbackErrorNoCompatibleStream = "NoCompatibleStream"
 
+// Jellyfin MediaStreamProtocol values for MediaSourceInfo.TranscodingSubProtocol.
+// Jellyfin's default is http; Kotlin SDK clients require the field.
+const (
+	compatStreamProtocolHTTP = "http"
+	compatStreamProtocolHLS  = "hls"
+)
+
 type mediaSourceDTO struct {
 	SiloSeekReanchor                    bool              `json:"SiloSeekReanchor,omitzero"`
 	Protocol                            string            `json:"Protocol,omitempty"`

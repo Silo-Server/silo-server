@@ -49,6 +49,8 @@ export const itemKeys = {
   details: () => ["items", "detail"] as const,
   detail: (id: string, libraryId?: number) =>
     ["items", "detail", id, libraryId ?? "default"] as const,
+  matchHints: (id: string, libraryId?: number) =>
+    ["items", "matchHints", id, libraryId ?? "default"] as const,
   watchDetail: (id: string, fileId?: number, libraryId?: number) =>
     ["items", "watchDetail", id, fileId ?? "default", libraryId ?? "default"] as const,
   watchTrickplay: (id: string, fileId: number) => ["items", "watchTrickplay", id, fileId] as const,
@@ -410,6 +412,7 @@ export const adminKeys = {
   sessions: () => ["admin", "sessions"] as const,
   downloadPreparations: () => ["admin", "downloadPreparations"] as const,
   downloadStorage: () => ["admin", "downloadStorage"] as const,
+  backups: () => ["admin", "backups"] as const,
   serverSettings: () => ["admin", "serverSettings"] as const,
   serverStatus: () => ["admin", "serverStatus"] as const,
   dashboardLayout: () => ["admin", "dashboard", "layout"] as const,
@@ -424,6 +427,10 @@ export const adminKeys = {
   topActivity: (days: number) => ["admin", "dashboard", "top-activity", days] as const,
   downloadsStatsRoot: () => ["admin", "dashboard", "downloads-stats"] as const,
   downloadsStats: (limit: number) => ["admin", "dashboard", "downloads-stats", limit] as const,
+  apiClientsRoot: () => ["admin", "dashboard", "api-clients"] as const,
+  apiClients: (hours: number) => ["admin", "dashboard", "api-clients", hours] as const,
+  apiClientEndpoints: (sessionId: string, hours: number) =>
+    ["admin", "dashboard", "api-clients", "endpoints", sessionId, hours] as const,
   restartKeys: () => ["admin", "restartKeys"] as const,
   catalogSearchStatus: () => ["admin", "catalogSearchStatus"] as const,
   jellyfinCompatStatus: () => ["admin", "jellyfinCompatStatus"] as const,
@@ -458,6 +465,12 @@ export const adminKeys = {
   requestRouteTitles: (mediaType: string, q: string) =>
     ["admin", "requestRouteTitles", mediaType, q] as const,
   requestIntegrationOptionsRoot: () => ["admin", "requestIntegrationOptions"] as const,
+  // The Discover layout sits outside requestsRoot: a request or settings write
+  // changes nothing it holds.
+  requestDiscoverLayout: () => ["admin", "requestDiscover", "layout"] as const,
+  requestDiscoverPreview: (row: unknown) => ["admin", "requestDiscover", "preview", row] as const,
+  requestWatchProviders: (mediaType: string, region: string) =>
+    ["admin", "requestDiscover", "watchProviders", mediaType, region] as const,
   requestIntegrationOptions: (integrationId: string) =>
     ["admin", "requestIntegrationOptions", integrationId] as const,
   requestUserLimit: (userId: number) => ["admin", "requests", "users", userId, "limit"] as const,

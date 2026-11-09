@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -249,6 +251,47 @@ func TestReconcileArtworkCacheRejectsOldProcessAfterTransitionReceiptClears(t *t
 	}
 	if runner.runs != 1 {
 		t.Fatalf("current process runs = %d, want 1", runner.runs)
+	}
+}
+
+func TestReconcileArtworkCacheComparesSettingsWithTheOpenedDirectory(t *testing.T) {
+	base := t.TempDir()
+	state := filepath.Join(base, "config", "silo")
+	other := filepath.Join(base, "other")
+	for _, dir := range []string{filepath.Join(state, "artwork"), filepath.Join(other, "artwork")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	linked := filepath.Join(base, "var-lib-silo")
+	if err := os.Symlink(state, linked); err != nil {
+		t.Fatal(err)
+	}
+	recorded := blobstore.BackendLocal + "|" + filepath.Join(linked, "artwork")
+	opened, err := blobstore.LocalIdentity(filepath.Join(state, "artwork"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The link moved after the store opened: settings now name the directory
+	// it leads to, while the runner's store still reads the one it opened.
+	if err := os.Remove(linked); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, linked); err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeSettingsStore{values: map[string]string{
+		ArtworkStorageIdentityKey: recorded,
+		"artwork.storage_backend": blobstore.BackendLocal,
+		"artwork.local_path":      filepath.Join(other, "artwork"),
+	}}
+	runner := &fakeReconcileRunner{}
+	err = NewReconcileArtworkCacheTask(runner, store, nil, recorded).WithLocation(opened).Execute(t.Context(), &fakeProgress{})
+	if !errors.Is(err, ErrArtworkReconcileStaleStore) {
+		t.Fatalf("reconcile after the link moved = %v, want stale store", err)
+	}
+	if runner.runs != 0 {
+		t.Fatalf("runner ran %d times against the directory the store opened", runner.runs)
 	}
 }
 

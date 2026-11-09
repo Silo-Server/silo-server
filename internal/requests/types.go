@@ -596,7 +596,12 @@ type Integration struct {
 	// blank base_url on purpose, rather than leaving it out. Only then does
 	// LoadIntegrationOptions test a router that needs no URL without one;
 	// an omitted URL means the saved one.
-	BaseURLCleared      bool           `json:"-"`
+	BaseURLCleared bool `json:"-"`
+	// TestConnection asks LoadIntegrationOptions to run the router's
+	// connection test before loading options, so a router that answers an
+	// empty option list for a server it cannot reach is not reported as
+	// connected. The v2 options probe sets it; the frozen v1 route does not.
+	TestConnection      bool           `json:"-"`
 	APIKeyRef           string         `json:"api_key_ref,omitempty"`
 	LastCheckAt         *time.Time     `json:"last_check_at,omitempty"`
 	LastCheckStatus     string         `json:"last_check_status,omitempty"`

@@ -28,7 +28,7 @@ export function RestartServerButton({
       toast.success(
         result.status === "already_requested"
           ? "Server restart is already in progress."
-          : "Server is restarting...",
+          : "Silo is shutting down to restart.",
       );
     } catch {
       toast.error("Could not confirm the restart. Check server status or restart manually.");
@@ -51,7 +51,7 @@ export function RestartServerButton({
         open={showConfirm}
         onOpenChange={setShowConfirm}
         title="Restart server?"
-        description="The server will restart to apply configuration changes. Active streams will be interrupted."
+        description="Silo will shut down. It comes back on its own only if a service manager such as Docker or systemd restarts it; otherwise, start it again yourself. Active streams will be interrupted."
         confirmLabel="Restart"
         variant="destructive"
         onConfirm={handleRestart}

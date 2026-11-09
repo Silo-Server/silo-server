@@ -16,11 +16,17 @@ func TestFetchAllWithRunnerPreservesOrderAndFallsBackOnErrors(t *testing.T) {
 		{ID: "a", SectionType: SectionRecentlyAdded},
 		{ID: "b", SectionType: SectionRandom},
 		{ID: "c", SectionType: SectionRecentlyReleased},
+		{ID: "d", SectionType: SectionCriticallyAcclaimed},
 	}
 
+	// Section d's fetch panics on its own goroutine, out of reach of the
+	// request's recovery; it falls back like b's failed fetch.
 	results := fetchAllWithRunner(context.Background(), resolved, 2, func(_ context.Context, sec ResolvedSection) (SectionWithItems, error) {
-		if sec.ID == "b" {
+		switch sec.ID {
+		case "b":
 			return SectionWithItems{}, errors.New("boom")
+		case "d":
+			panic("fetch bug")
 		}
 		return SectionWithItems{
 			ResolvedSection: sec,
@@ -33,15 +39,16 @@ func TestFetchAllWithRunnerPreservesOrderAndFallsBackOnErrors(t *testing.T) {
 		t.Fatalf("results length = %d, want %d", len(results), len(resolved))
 	}
 	for i, result := range results {
-		if result.ID != resolved[i].ID {
-			t.Fatalf("result[%d].ID = %q, want %q", i, result.ID, resolved[i].ID)
+		if result.ID != resolved[i].ID || result.SectionType != resolved[i].SectionType {
+			t.Fatalf("result[%d] = %q %q, want %q %q", i, result.ID, result.SectionType, resolved[i].ID, resolved[i].SectionType)
 		}
-	}
-	if len(results[1].Items) != 0 {
-		t.Fatalf("error fallback item count = %d, want 0", len(results[1].Items))
-	}
-	if results[1].SectionType != SectionRandom {
-		t.Fatalf("error fallback section type = %q, want %q", results[1].SectionType, SectionRandom)
+		wantItems := 1
+		if result.ID == "b" || result.ID == "d" {
+			wantItems = 0
+		}
+		if len(result.Items) != wantItems {
+			t.Fatalf("result[%d] item count = %d, want %d", i, len(result.Items), wantItems)
+		}
 	}
 }
 

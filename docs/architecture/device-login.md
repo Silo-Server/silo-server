@@ -7,7 +7,8 @@ Silo phone app. The device never handles a password. The state machine lives in
 `internal/apiv2/device_login.go` and, frozen, in `internal/api/handlers/auth_device.go`.
 The operation contract is in [auth-api.md](../auth-api.md#device-sign-in).
 Jellyfin apps reach the same requests through Quick Connect; see
-[Jellyfin Quick Connect](#jellyfin-quick-connect).
+[Jellyfin Quick Connect](#jellyfin-quick-connect). A device can tie its
+requests to a secret it keeps; see [Session binding](#session-binding).
 
 ## Codes
 
@@ -90,6 +91,14 @@ people who can approve decide. A device approved from a session opened through a
 external sign-in provider inherits that session's provider chain
 ([external-sign-in.md](external-sign-in.md#provider-re-check)).
 
+The first approval holds. Approving a request another account (or, for
+approve-handoff, another profile) already approved is refused with 409 (v2
+`conflict`, v1 `approval_conflict`), and so is another account's deny: anyone
+holding the code could otherwise cancel a sign-in someone else approved. Deny
+from the approving account, from any of its profiles, withdraws its approval
+before the device collects it. An approval whose approving account or profile
+was deleted can no longer be collected, and any account may deny it.
+
 Approval locks the account and checks that the submitting login session is
 still active before updating the device request. Collection and credential
 revocation also lock the account before the device request. A request that
@@ -97,6 +106,63 @@ authenticated before its session was revoked cannot approve afterwards.
 Provider refusal withdraws approvals made through that identity, including
 those from a break-glass account; its approvals made through local login stay
 independent of the provider.
+
+## Session binding
+
+A phone setting up a TV over the LAN can sign it in to several accounts and
+servers in one session. The person compares the TV's code once, for the first
+request; the phone approves the later requests without a comparison. Without
+more, an attacker on the LAN path could swap one of those later requests for
+its own, and the phone would approve it with the person's account. Session
+binding lets the phone tell the TV's requests from anyone else's:
+
+1. For one setup session the TV draws a 32-byte random secret and keeps it. It
+   sends it only over HTTPS to the server.
+2. Every v2 `startDeviceLogin` in that session, on every server, sends
+   `binding`: base64url without padding of SHA-256 of the secret, 43
+   characters of `[A-Za-z0-9_-]`. Anything else, including an empty string,
+   is 422 `validation_failed` at `body.binding`. Without `binding` the request
+   is unbound, as before.
+3. `getDeviceLogin` returns the request's `binding` (absent when unbound). The
+   phone trusts the binding of the request whose code the person compared. It
+   approves a later request with the same binding without a comparison, asks
+   for a comparison when a later request has none, and refuses one with
+   another binding.
+4. Every `pollDeviceLogin` of a bound request must send `binding_secret`, the
+   secret as unpadded base64url. The server compares base64url(SHA-256(secret))
+   with the stored binding in constant time. A poll without it, or with
+   another secret, is 403 `device_binding_mismatch` whatever the request's
+   state, and changes nothing: the request is neither consumed nor marked, and
+   the TV holding the secret can still collect it. `binding_secret` is ignored
+   for an unbound request. A `binding_secret` longer than 64 characters is
+   422 `validation_failed` at `body.binding_secret` before it is hashed.
+
+The binding is public, since anyone holding the code can read it, but it is
+only a hash. An attacker that copies it into its own request gets a request
+the phone approves without asking, yet it cannot poll that request to tokens
+without the secret. The worst it can do is make one sign-in fail.
+
+The binding is stored as `binding_hash` on `device_login_requests` and never
+changes after start. Approve, approve-handoff, deny and cancel ignore it.
+`GET /api/v2/auth/device/capability` reports `session_binding: true`; a TV
+sends `binding` and `binding_secret` only to a server that reports it. The
+phone needs no flag: it acts on what the lookup returns.
+
+A TV uses one secret for every server in a pairing session, so each of those
+servers learns it from the TV's polls. A hostile server among the person's
+chosen targets, working with an attacker on the network path, could therefore
+start a bound request on another chosen server that the phone approves
+without a comparison. The project accepts that residual risk; see the client
+design for the alternatives.
+
+**Rolling deploys.** A node from an older release ignores `binding` on start
+and does not check `binding_secret` on poll. It cannot collect a bound request
+all the same: the schema refuses to mark a bound request consumed unless
+`binding_checked` is set, and only this release sets it, after checking the
+secret. An older node's collection of a bound request fails as a server error
+and rolls back the session it inserted, so the request stays approved for the
+TV to collect through an updated node. Rolling the migration back refuses
+every live bound request before it drops the columns.
 
 ## Remote-playback handoff
 
@@ -107,6 +173,9 @@ phone's verified profile. Collecting it gives the TV a temporary login session
 of that one profile. The poll answer is unchanged: `tokens` (access and
 refresh), `profile_id`, `profile_token`, `temporary: true` and
 `session_expires_at`. The Apple and Android TV apps require the refresh token.
+The web approval page (`/activate`) never approves a handoff: it shows the
+request as playback sent from a Silo app, offers only deny, and follows a
+pending one until the app decides it.
 
 The session row (`auth_sessions`) records what the session is, and every node
 enforces it from the row rather than from the tokens, so a token issued before
@@ -236,7 +305,11 @@ Every Silo server is independent; there is no Silo-run service between them.
 - A canceled request reads as `denied` in v1 lookups and polls, and a
   decision on one answers v1's `denied` conflict code.
 - Responses never carry `opened`, `expires_at` on polls, `requested_at`,
-  `server_id` or `server_name`.
+  `server_id`, `server_name` or `binding`.
+- Start and poll take no `binding` or `binding_secret`. A request started
+  with a binding through v2 therefore cannot be collected through the v1
+  poll, which answers it 403 `device_binding_mismatch`; v1 never creates
+  such a request.
 - Approve, approve-handoff and deny spend the `device_lookup` budget, as on v2.
 - Approve, approve-handoff and deny refuse API keys and impersonation
   sessions (see Who decides). v1 applies the rule too because it closes a

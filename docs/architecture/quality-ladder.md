@@ -58,9 +58,11 @@ ladder and Jellyfin's `ResolutionNormalizer`.
   [docs/downloads-api.md](../downloads-api.md).
 - Automatic streaming quality: `playback.ResolveQualityPolicyV3` for `auto` and
   the plain resolution labels; see [playback-protocol-v3.md](playback-protocol-v3.md).
-  A bandwidth cap is a viewer's ceiling, not a link budget: it picks the tallest
-  class whose encode bitrate fits within it (`capLadderClassV3`), not a class by
-  floor. Explicit menu rungs (`ladderRungsV3`) are user choices and keep their
-  own table.
+  A bandwidth cap is a viewer's ceiling, not a link budget: under `auto` it
+  picks the tallest class whose encode bitrate fits within it
+  (`capLadderClassV3`), not a class by floor. A plain resolution label under a
+  cap keeps its class while the cap reaches that resolution's lowest menu rung
+  (`capRungClassV3`). Explicit menu rungs (`ladderRungsV3`) are user choices
+  and keep their own table.
 - jellycompat: `compatTargetResolutionForBitrate` turns a Jellyfin client's
   maximum streaming bitrate into the encoder height.

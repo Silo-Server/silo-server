@@ -34,8 +34,9 @@ import {
   Scissors,
   RotateCcw,
   Shuffle,
+  ShieldCheck,
   Tags,
-  TimerReset,
+  Eye,
   ThumbsDown,
   UsersRound,
   Hand,
@@ -216,8 +217,8 @@ export interface ActionBarProps {
   playLabel?: string;
   playProgress?: number;
   restartHref?: string;
-  /** Clears the resume position without marking the item watched. */
-  onResetProgress?: () => void;
+  /** Mark Unwatched in the More menu for a partly watched movie or episode. */
+  onMarkUnwatched?: () => void;
   resumePositionSeconds?: number;
   resumeDurationSeconds?: number;
   resumeResolution?: string;
@@ -235,6 +236,10 @@ export interface ActionBarProps {
   /** Marks or clears Not interested; movies and series only. */
   onToggleNotInterested?: () => void;
   notInterested?: boolean;
+  /** Opens "Allow for…" for the household's limited profiles; primary profile only. */
+  onAllowForProfiles?: () => void;
+  /** The menu label for onAllowForProfiles, e.g. "Allowed for Emma". */
+  allowForLabel?: string;
   onRefresh?: (mode: RefreshItemMetadataMode) => void;
   isRefreshing?: boolean;
   /** Re-detects local markers; without redetectKind the admin picks intro, credits, or both. */
@@ -258,6 +263,8 @@ export interface ActionBarProps {
   versions?: FileVersion[];
   playbackVariants?: PlaybackVariant[];
   selectedVersion?: FileVersion | null;
+  /** The viewer chose selectedVersion rather than playing the default version. */
+  versionPicked?: boolean;
   onSelectVersion?: (version: FileVersion) => void;
   onDownload?: () => void;
   onSearchSubtitles?: () => void;
@@ -281,7 +288,6 @@ export interface ActionBarProps {
   preferredSubtitleTrackSignature?: PlayerSubtitleTrackSignature | null;
   subtitleMode?: SubtitleMode;
   showForcedSubtitles?: boolean;
-  profileLanguage?: string | null;
 }
 
 export default function ActionBar({
@@ -297,7 +303,7 @@ export default function ActionBar({
   playLabel = "Play",
   playProgress,
   restartHref,
-  onResetProgress,
+  onMarkUnwatched,
   resumePositionSeconds,
   resumeDurationSeconds,
   watchedLabel,
@@ -310,6 +316,8 @@ export default function ActionBar({
   inWatchlist = false,
   onToggleNotInterested,
   notInterested = false,
+  onAllowForProfiles,
+  allowForLabel = "Allow for…",
   onRefresh,
   isRefreshing = false,
   onRedetectMarkers,
@@ -326,6 +334,7 @@ export default function ActionBar({
   versions,
   playbackVariants,
   selectedVersion,
+  versionPicked = false,
   onSelectVersion,
   onDownload,
   onSearchSubtitles,
@@ -346,7 +355,6 @@ export default function ActionBar({
   preferredSubtitleTrackSignature,
   subtitleMode,
   showForcedSubtitles,
-  profileLanguage,
 }: ActionBarProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -421,8 +429,15 @@ export default function ActionBar({
       prePlaySubtitleMode,
       prePlaySubtitleSelection:
         prePlaySubtitleMode === "explicit" ? explicitSubtitleSelection : null,
+      versionPicked,
     }),
-    [audioSelectionMode, explicitAudioTrackIndex, explicitSubtitleSelection, prePlaySubtitleMode],
+    [
+      audioSelectionMode,
+      explicitAudioTrackIndex,
+      explicitSubtitleSelection,
+      prePlaySubtitleMode,
+      versionPicked,
+    ],
   );
   const startPlaybackFromHref = useCallback(
     (href: string, restartOverride?: boolean) => {
@@ -711,10 +726,14 @@ export default function ActionBar({
         Play from Beginning
       </DetailOverflowMenuItem>
     ),
-    onResetProgress && (
-      <DetailOverflowMenuItem key="reset" closeMenu={closeOverflowMenu} onAction={onResetProgress}>
-        <TimerReset className="size-4" />
-        Reset Progress
+    onMarkUnwatched && (
+      <DetailOverflowMenuItem
+        key="markUnwatched"
+        closeMenu={closeOverflowMenu}
+        onAction={onMarkUnwatched}
+      >
+        <Eye className="size-4" />
+        Mark Unwatched
       </DetailOverflowMenuItem>
     ),
   ];
@@ -763,6 +782,16 @@ export default function ActionBar({
       >
         <ThumbsDown className={cn("size-4", notInterested && "fill-current")} />
         {notInterested ? "Show in Recommendations" : "Not Interested"}
+      </DetailOverflowMenuItem>
+    ),
+    onAllowForProfiles && (
+      <DetailOverflowMenuItem
+        key="allow-for-profiles"
+        closeMenu={closeOverflowMenu}
+        onAction={onAllowForProfiles}
+      >
+        <ShieldCheck className="size-4" />
+        {allowForLabel}
       </DetailOverflowMenuItem>
     ),
   ];
@@ -1280,7 +1309,6 @@ export default function ActionBar({
               preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
               subtitleMode={subtitleMode}
               showForcedSubtitles={showForcedSubtitles}
-              profileLanguage={profileLanguage}
               activeAudioTrackIndex={
                 audioSelectionMode === "explicit" ? explicitAudioTrackIndex : null
               }

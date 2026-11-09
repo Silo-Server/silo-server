@@ -91,7 +91,7 @@ func TestResolvedListCacheInvalidationReleasesSupersededEntries(t *testing.T) {
 
 	// The new generation caches normally and is itself released by the next bump.
 	newKey := resolvedListCacheKey(recent, nil, []int{1}, catalog.AccessFilter{})
-	resolvedListSet(newKey, mediaItems("refreshed"), 1, clock)
+	resolvedListSet(newKey, mediaItems("refreshed"), 1, clock, resolvedListEvictionEpoch.Load())
 	clock = clock.Add(resolvedListInvalidationInterval)
 	InvalidateResolvedListCache()
 	if _, ok := resolvedListGet(newKey); ok {
@@ -884,7 +884,7 @@ func TestResolvedListCacheScanRefreshServesBoundedMembership(t *testing.T) {
 	resolvedListNow = func() time.Time { return now }
 	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
 	oldKey := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
-	resolvedListSet(oldKey, mediaItems("old"), 1, now)
+	resolvedListSet(oldKey, mediaItems("old"), 1, now, resolvedListEvictionEpoch.Load())
 	InvalidateResolvedListCache()
 	// No readers during this interval: a scan must not make an idle scope cold.
 	now = now.Add(2 * time.Minute)
@@ -943,7 +943,7 @@ func TestResolvedListCacheScanGraceExpiresAfterFailedRefresh(t *testing.T) {
 	resolvedListNow = func() time.Time { return now }
 	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
 	key := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
-	resolvedListSet(key, mediaItems("old"), 1, now)
+	resolvedListSet(key, mediaItems("old"), 1, now, resolvedListEvictionEpoch.Load())
 	InvalidateResolvedListCache()
 	key = resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
 	_, _, err := getOrRefresh(t.Context(), key, now, func(context.Context) ([]*models.MediaItem, int, error) {
@@ -974,12 +974,12 @@ func TestResolvedListCacheScanPreservesConcurrentNewGenerationLoad(t *testing.T)
 	now := time.Now()
 	sec := ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}
 	oldKey := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
-	resolvedListSet(oldKey, mediaItems("old"), 1, now)
+	resolvedListSet(oldKey, mediaItems("old"), 1, now, resolvedListEvictionEpoch.Load())
 	// Reproduce a reader finishing after namespace publication but before the
 	// invalidator has acquired the cache lock to carry fallback entries.
 	generation := resolvedListGeneration.Add(1)
 	current := resolvedListCacheKey(sec, nil, []int{7}, catalog.AccessFilter{})
-	resolvedListSet(current, mediaItems("fresh"), 1, now)
+	resolvedListSet(current, mediaItems("fresh"), 1, now, resolvedListEvictionEpoch.Load())
 	resolvedListInvalidationMu.Lock()
 	dropSupersededResolvedListEntries(generation)
 	resolvedListInvalidationMu.Unlock()
@@ -989,5 +989,133 @@ func TestResolvedListCacheScanPreservesConcurrentNewGenerationLoad(t *testing.T)
 	}
 	if !entry.expiresAt.Equal(now.Add(resolvedListTTL)) {
 		t.Fatal("invalidation shortened a fresh entry's lifetime")
+	}
+}
+
+// TestEvictResolvedListItemsRebuildsOnlyListsWithTheItem covers an admin edit:
+// every cached list holding the edited item, with or without a scan generation,
+// rebuilds on its next read, and lists without it keep serving from the cache.
+func TestEvictResolvedListItemsRebuildsOnlyListsWithTheItem(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+
+	now := time.Unix(1_700_000_000, 0)
+	added := resolvedListCacheKey(ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}, nil, []int{1}, catalog.AccessFilter{})
+	released := resolvedListCacheKey(ResolvedSection{SectionType: SectionRecentlyReleased, ItemLimit: 20}, nil, []int{1}, catalog.AccessFilter{})
+	other := resolvedListCacheKey(ResolvedSection{SectionType: SectionRecentlyReleased, ItemLimit: 20}, nil, []int{2}, catalog.AccessFilter{})
+	episodes := resolvedListCacheKey(ResolvedSection{SectionType: SectionRecentlyAdded, ItemLimit: 20}, nil, []int{2}, catalog.AccessFilter{})
+	for key, ids := range map[string][]string{
+		added:    {"edited", "a"},
+		released: {"b", "edited"},
+		// An episode card shows its series' artwork.
+		episodes: {"episode-tvdb-296762-1-5"},
+		other:    {"c", "episode-tvdb-81189-1-1"},
+	} {
+		if _, _, err := getOrRefresh(context.Background(), key, now, staticLoader(mediaItems(ids...), nil)); err != nil {
+			t.Fatalf("prime %q: %v", key, err)
+		}
+	}
+
+	EvictResolvedListItems("edited", "series-tvdb-296762")
+
+	var rebuilds int64
+	for _, key := range []string{added, released, episodes} {
+		items, _, err := getOrRefresh(context.Background(), key, now.Add(time.Minute), staticLoader(mediaItems("rebuilt"), &rebuilds))
+		if err != nil || len(items) != 1 || items[0].ContentID != "rebuilt" {
+			t.Fatalf("list with the edited item served %v, err %v; want a rebuild", itemIDs(items), err)
+		}
+	}
+	if rebuilds != 3 {
+		t.Fatalf("rebuilds = %d, want 3", rebuilds)
+	}
+	items, _, err := getOrRefresh(context.Background(), other, now.Add(time.Minute), func(context.Context) ([]*models.MediaItem, int, error) {
+		t.Fatal("list without the edited item was rebuilt")
+		return nil, 0, nil
+	})
+	if err != nil || len(items) != 2 || items[0].ContentID != "c" {
+		t.Fatalf("unrelated list = %v, err %v", itemIDs(items), err)
+	}
+}
+
+// TestEvictResolvedListItemsDropsLoadStartedBeforeTheEdit covers a background
+// refresh that read the item before the edit and finishes after the eviction:
+// its result must not be installed, or the old title would come back.
+func TestEvictResolvedListItemsDropsLoadStartedBeforeTheEdit(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+
+	base := time.Unix(1_700_000_000, 0)
+	key := resolvedListCacheKey(ResolvedSection{SectionType: SectionRecentlyReleased, ItemLimit: 20}, nil, []int{1}, catalog.AccessFilter{})
+	if _, _, err := getOrRefresh(context.Background(), key, base, staticLoader(mediaItems("edited"), nil)); err != nil {
+		t.Fatalf("prime: %v", err)
+	}
+
+	refreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	staleRefresh := func(context.Context) ([]*models.MediaItem, int, error) {
+		close(refreshStarted)
+		<-releaseRefresh
+		return mediaItems("edited", "read-before-edit"), 2, nil
+	}
+	// Past refreshAfter: serves the cached list and starts a background load.
+	if _, _, err := getOrRefresh(context.Background(), key, base.Add(6*time.Minute), staleRefresh); err != nil {
+		t.Fatalf("start refresh: %v", err)
+	}
+	<-refreshStarted
+	EvictResolvedListItems("edited")
+	close(releaseRefresh)
+
+	if !waitFor(2*time.Second, func() bool {
+		resolvedListRefreshMu.Lock()
+		defer resolvedListRefreshMu.Unlock()
+		_, inflight := resolvedListRefreshing[key]
+		return !inflight
+	}) {
+		t.Fatal("background refresh did not finish")
+	}
+	if entry, ok := resolvedListGet(key); ok {
+		t.Fatalf("refresh started before the eviction installed %v", itemIDs(entry.items))
+	}
+}
+
+// A request that arrives after an admin edit can join a cold rebuild that
+// started before it. It must not be handed that rebuild's pre-edit list.
+func TestEvictResolvedListItemsRetriesCallerThatJoinedAnOlderRebuild(t *testing.T) {
+	resetResolvedListCacheForTest()
+	defer resetResolvedListCacheForTest()
+
+	now := time.Unix(1_700_000_000, 0)
+	key := resolvedListCacheKey(ResolvedSection{SectionType: SectionRecentlyReleased, ItemLimit: 20}, nil, []int{1}, catalog.AccessFilter{})
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	staleDone := make(chan []string, 1)
+	go func() {
+		items, _, _ := getOrRefresh(context.Background(), key, now, func(context.Context) ([]*models.MediaItem, int, error) {
+			close(started)
+			<-release
+			return mediaItems("read-before-edit"), 1, nil
+		})
+		staleDone <- itemIDs(items)
+	}()
+	<-started
+	EvictResolvedListItems("edited")
+
+	freshDone := make(chan []string, 1)
+	go func() {
+		items, _, _ := getOrRefresh(context.Background(), key, now, staticLoader(mediaItems("fresh"), nil))
+		freshDone <- itemIDs(items)
+	}()
+	// Give the second caller time to join the in-flight rebuild. If it hasn't
+	// joined yet it starts its own rebuild, which also yields "fresh", so the
+	// pause can't make this test fail spuriously.
+	time.Sleep(20 * time.Millisecond) //nolint:forbidigo // singleflight exposes no signal for a caller joining a flight.
+	close(release)
+
+	if got := <-freshDone; len(got) != 1 || got[0] != "fresh" {
+		t.Fatalf("caller after the eviction got %v, want a rebuild after the edit", got)
+	}
+	if got := <-staleDone; len(got) != 1 || got[0] != "read-before-edit" {
+		t.Fatalf("caller before the eviction got %v", got)
 	}
 }

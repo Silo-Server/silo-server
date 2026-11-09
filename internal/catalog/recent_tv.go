@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -586,6 +585,20 @@ func (r *RecentTVRepository) ListNewest(ctx context.Context, q RecentTVQuery) ([
 	return targets, hasMore, err
 }
 
+// recentTVPreallocMax caps the targets slice preallocated from a request's
+// limit; a longer result grows as its rows arrive.
+const recentTVPreallocMax = 256
+
+// newRecentTVTargets returns an empty targets slice with room for capacity
+// rows, never preallocating more than recentTVPreallocMax. Each make sits
+// under its own bound so static analysis sees the limit on the allocation.
+func newRecentTVTargets(capacity int) []RecentTVTarget {
+	if capacity >= 0 && capacity <= recentTVPreallocMax {
+		return make([]RecentTVTarget, 0, capacity)
+	}
+	return make([]RecentTVTarget, 0, recentTVPreallocMax)
+}
+
 const (
 	recentTVNewestWindowGrowth = 4
 	recentTVNewestMaxWindow    = 8192
@@ -594,26 +607,15 @@ const (
 // listNewestBounded runs the bounded windows of ListNewest. found reports
 // that a window produced more than q.Limit targets (targets holds q.Limit+1);
 // otherwise the caller must fall back to the full query.
+//
+// Both statements run with JIT off: the planner prices the per-show lateral
+// lookups far above their real cost, which can cross jit_above_cost; compiling
+// then costs several times more than executing the few-millisecond query.
 func (r *RecentTVRepository) listNewestBounded(ctx context.Context, q RecentTVQuery) (targets []RecentTVTarget, found bool, err error) {
-	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return nil, false, fmt.Errorf("beginning recently-added TV tx: %w", err)
-	}
-	defer func() {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = tx.Rollback(rollbackCtx)
-	}()
-	// The planner prices the per-show lateral lookups far above their real
-	// cost, which can cross jit_above_cost; compiling then costs several times
-	// more than executing the few-millisecond query.
-	if _, err := tx.Exec(ctx, "SET LOCAL jit = off"); err != nil {
-		return nil, false, fmt.Errorf("disabling JIT for recently-added TV: %w", err)
-	}
-
 	for window := (q.Limit + 1) * recentTVNewestWindowGrowth; window <= recentTVNewestMaxWindow; window *= recentTVNewestWindowGrowth {
 		var cutoff time.Time
-		err := tx.QueryRow(ctx, `
+		haveCutoff := false
+		err := queryWithoutJIT(ctx, r.pool, `
 			SELECT recent.first_seen_at
 			FROM unnest($1::int[]) AS folder(id)
 			CROSS JOIN LATERAL (
@@ -626,22 +628,25 @@ func (r *RecentTVRepository) listNewestBounded(ctx context.Context, q RecentTVQu
 			ORDER BY recent.first_seen_at DESC
 			OFFSET $2 - 1
 			LIMIT 1
-		`, q.LibraryIDs, window).Scan(&cutoff)
-		if errors.Is(err, pgx.ErrNoRows) {
+		`, []any{q.LibraryIDs, window}, func(rows pgx.Rows) error {
+			haveCutoff = true
+			return rows.Scan(&cutoff)
+		})
+		if err != nil {
+			return nil, false, fmt.Errorf("finding recently-added TV cutoff: %w", err)
+		}
+		if !haveCutoff {
 			// Fewer arrivals than the window: grouping everything is the
 			// full query's job.
 			return nil, false, nil
 		}
-		if err != nil {
-			return nil, false, fmt.Errorf("finding recently-added TV cutoff: %w", err)
-		}
 		sqlText, args := buildRecentTVNewestQuery(q, cutoff)
-		targets, _, err := queryRecentTVTargets(ctx, tx, sqlText, args, false, q.Limit+1)
-		if err != nil {
-			return nil, false, err
+		page := recentTVTargetRows{targets: newRecentTVTargets(q.Limit + 1)}
+		if err := queryWithoutJIT(ctx, r.pool, sqlText, args, page.scan); err != nil {
+			return nil, false, fmt.Errorf("listing recently-added TV events: %w", err)
 		}
-		if len(targets) > q.Limit {
-			return targets, true, nil
+		if len(page.targets) > q.Limit {
+			return page.targets, true, nil
 		}
 	}
 	return nil, false, nil
@@ -783,45 +788,55 @@ func buildRecentTVConditions(q RecentTVQuery) recentTVConditions {
 }
 
 // queryRecentTVTargets runs one rendered recently-added TV query and scans its
-// result projection (see buildRecentTVResultQuery).
-func queryRecentTVTargets(ctx context.Context, db recentTVQuerier, sqlText string, args []any, withTotal bool, capacity int) ([]RecentTVTarget, int, error) {
-	rows, err := db.Query(ctx, sqlText, args...)
+// result projection.
+func queryRecentTVTargets(ctx context.Context, pool *pgxpool.Pool, sqlText string, args []any, withTotal bool, capacity int) ([]RecentTVTarget, int, error) {
+	rows, err := pool.Query(ctx, sqlText, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing recently-added TV events: %w", err)
 	}
 	defer rows.Close()
 
-	targets := make([]RecentTVTarget, 0, capacity)
-	total := 0
+	page := recentTVTargetRows{withTotal: withTotal, targets: newRecentTVTargets(capacity)}
 	for rows.Next() {
-		var contentID, targetType, playContentID, eventID *string
-		var addedAt *time.Time
-		scanArgs := []any{&contentID, &targetType, &addedAt, &playContentID, &eventID}
-		if withTotal {
-			scanArgs = append(scanArgs, &total)
-		}
-		if err := rows.Scan(scanArgs...); err != nil {
-			return nil, 0, fmt.Errorf("scanning recently-added TV event: %w", err)
-		}
-		if contentID != nil && targetType != nil && addedAt != nil {
-			target := RecentTVTarget{ContentID: *contentID, Type: *targetType, AddedAt: *addedAt}
-			if eventID != nil {
-				target.EventID = *eventID
-			}
-			if playContentID != nil {
-				target.PlayContentID = *playContentID
-			}
-			targets = append(targets, target)
+		if err := page.scan(rows); err != nil {
+			return nil, 0, err
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("iterating recently-added TV events: %w", err)
 	}
-	return targets, total, nil
+	return page.targets, page.total, nil
 }
 
-type recentTVQuerier interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+// recentTVTargetRows collects the rows of a rendered recently-added TV query's
+// result projection (see buildRecentTVResultQuery).
+type recentTVTargetRows struct {
+	withTotal bool
+	targets   []RecentTVTarget
+	total     int
+}
+
+func (p *recentTVTargetRows) scan(rows pgx.Rows) error {
+	var contentID, targetType, playContentID, eventID *string
+	var addedAt *time.Time
+	scanArgs := []any{&contentID, &targetType, &addedAt, &playContentID, &eventID}
+	if p.withTotal {
+		scanArgs = append(scanArgs, &p.total)
+	}
+	if err := rows.Scan(scanArgs...); err != nil {
+		return fmt.Errorf("scanning recently-added TV event: %w", err)
+	}
+	if contentID != nil && targetType != nil && addedAt != nil {
+		target := RecentTVTarget{ContentID: *contentID, Type: *targetType, AddedAt: *addedAt}
+		if eventID != nil {
+			target.EventID = *eventID
+		}
+		if playContentID != nil {
+			target.PlayContentID = *playContentID
+		}
+		p.targets = append(p.targets, target)
+	}
+	return nil
 }
 
 // recentTVKeysQuery parameterizes buildRecentTVNoPrefixQuery.

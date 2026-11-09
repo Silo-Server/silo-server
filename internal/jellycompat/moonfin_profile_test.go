@@ -39,7 +39,7 @@ func moonfinH264Version() catalog.FileVersion {
 // 1080p H.264 file Moonfin direct plays on Jellyfin direct plays here too.
 func TestMoonfinIOSProfileDirectPlaysH264WithUnreportedRefFrames(t *testing.T) {
 	h := &PlaybackHandler{codec: NewResourceIDCodec()}
-	req := playbackInfoRequest{AudioStreamIndex: compatIntValuePtr(1), MaxStreamingBitrate: 120_000_000}
+	req := playbackInfoRequest{AudioStreamIndex: compatIntValueOf(1), MaxStreamingBitrate: 120_000_000}
 	source := h.buildPlaybackSource("item", "play", moonfinH264Version(), moonfinIOSProfile(t), req, true)
 	if !source.SupportsDirectPlay {
 		t.Errorf("SupportsDirectPlay = false for a file Moonfin direct plays on Jellyfin")

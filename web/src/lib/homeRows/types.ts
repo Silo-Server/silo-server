@@ -31,8 +31,14 @@ export interface HomeRow {
   title: string;
   sectionType: string;
   config: Record<string, unknown>;
+  /** 0 for a row that holds no titles, such as Discover's studio cards. */
   itemLimit: number;
   hero: boolean;
+  /**
+   * Admin: the hero banner is kept off the apps, so only the web shows the
+   * row. Absent when the server doesn't answer it.
+   */
+  webOnly?: boolean;
   /** Admin: the row is enabled. Profile: the row is not hidden. */
   shown: boolean;
   /** A row the profile added itself ("Yours"). Always false on the admin surface. */
@@ -63,6 +69,8 @@ export interface HomeRowsCapabilities {
   draftPreview: boolean;
   /** A row may be added to several library pages at once (library pages only). */
   libraryCopies: boolean;
+  /** A hero row may be kept off the apps (admin, on a server that supports it). */
+  webOnlyHero?: boolean;
 }
 
 /** The collections a collection row may show on this surface. */
@@ -78,7 +86,12 @@ export interface RowCollections {
 
 export type HomeRowsConflict = null | { scope: "page" | "row"; rowId?: string };
 
-export interface HomeRowsAdapter {
+/**
+ * What the rows page shell (HomeRowsPage) reads: the rows of one page, and the
+ * writes the list makes itself. Requests > Discover Page lays out its rows
+ * through this alone.
+ */
+export interface HomeRowsListAdapter {
   surface: Surface;
   page: PageRef;
   pages: HomeRowsPageOption[];
@@ -105,6 +118,11 @@ export interface HomeRowsAdapter {
   /** `movedId` names the one row the user moved, when it was a single move. */
   reorder(orderedIds: string[], orderToken?: unknown, movedId?: string): Promise<void>;
   setShown(id: string, shown: boolean): Promise<void>;
+  /** Where a shown row's poster peek comes from; null (or absent) keeps the row's icon. */
+  peek?(row: HomeRow): PeekRequest | null;
+}
+
+export interface HomeRowsAdapter extends HomeRowsListAdapter {
   setHero(id: string, hero: boolean): Promise<void>;
   capabilities: HomeRowsCapabilities;
   /** Adds a row at the bottom of the page. Rejects when the server refuses it. */
@@ -115,8 +133,6 @@ export interface HomeRowsAdapter {
   reloadEdit(session: EditSession): Promise<EditSession>;
   /** Saves over the session's version; rejects with RowChangedError when it moved on. */
   save(session: EditSession, draft: RowDraft): Promise<void>;
-  /** Where a shown row's poster peek comes from; null (or absent) keeps the row's icon. */
-  peek?(row: HomeRow): PeekRequest | null;
   /** What the collection picker offers; without it the picker has nothing to offer. */
   collections?: RowCollections;
 }
