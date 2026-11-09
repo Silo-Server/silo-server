@@ -1046,8 +1046,8 @@ Before this, reads narrowed the rules to the collection's `library_ids`, and rul
 took them. A migration wrote that effective list into each existing collection's rules, so none of
 them changed titles, and restoring a backup made before this change (restore set version 4 or older)
 does the same for the collections it creates. Rules naming only libraries outside the collection's
-matched nothing before; they now draw from the libraries they name, which is what the admin preview
-already showed.
+own libraries matched nothing before; they now draw from the libraries they name, which is what the
+admin preview already showed.
 
 ## Admin template list
 
