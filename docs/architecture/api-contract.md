@@ -1642,8 +1642,9 @@ and the client reads it from `getHomeSectionItems`. `included_sections` is `[]` 
 `listHomeSections` and `listLibrarySections` answer only rows that have items for the viewer: a row
 whose titles all sit outside the viewer's library access or rating limits, an off-season seasonal
 row, a row whose fetch failed, and a row whose recipe avoids duplicates and whose items all appeared
-in earlier rows are left out, so every client gets the same rows. The layout still lists every
-resolved row, because it is built before any row is fetched. `getHomeSectionItems` answers an
+in earlier rows are left out, so no client has to hide an empty row itself. The rule applies to the
+rows each request resolves, so a web-only hero row or a different `item_limit` can still change
+which rows a client gets. The layout still lists every resolved row, because it is built before any row is fetched. `getHomeSectionItems` answers an
 empty row asked for by ID, and answers a row the duplicate filter emptied with its items, because
 the cross-row filter runs only on the aggregate reads. The frozen v1 aggregate reads keep
 answering empty rows other than an off-season seasonal row and one emptied by hiding watched titles.
