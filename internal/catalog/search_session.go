@@ -61,29 +61,29 @@ type searchRankingSession struct {
 	ExpiresAt      time.Time `json:"expires_at"`
 }
 
-type searchSessionStore struct {
+// searchSessionStore keeps immutable ranking sessions for an account. Expiry
+// or eviction invalidates a cursor; it never changes a stored ranking.
+type searchSessionStore interface {
+	put(ctx context.Context, userID int, session searchRankingSession) (string, error)
+	get(ctx context.Context, userID int, id string) (*searchRankingSession, error)
+}
+
+const searchSessionIDBytes = 24
+
+func newSearchSessionID() string {
+	value := make([]byte, searchSessionIDBytes)
+	_, _ = rand.Read(value)
+	return hex.EncodeToString(value)
+}
+
+func validSearchSessionID(id string) bool {
+	raw, err := hex.DecodeString(id)
+	return err == nil && len(raw) == searchSessionIDBytes
+}
+
+// redisSearchSessionStore shares sessions across API nodes.
+type redisSearchSessionStore struct {
 	client redis.UniversalClient
-	mu     sync.Mutex
-	memory map[int]map[string]searchRankingSession
-	// lastSweep is when putMemory last pruned every account.
-	lastSweep time.Time
-	// now overrides the in-memory store's clock in tests.
-	now func() time.Time
-}
-
-func (s *searchSessionStore) clock() time.Time {
-	if s.now != nil {
-		return s.now()
-	}
-	return time.Now()
-}
-
-func pruneExpiredSearchSessions(sessions map[string]searchRankingSession, now time.Time) {
-	for sessionID, candidate := range sessions {
-		if !candidate.ExpiresAt.After(now) {
-			delete(sessions, sessionID)
-		}
-	}
 }
 
 func searchSessionPrefix(userID int) string {
@@ -91,21 +91,15 @@ func searchSessionPrefix(userID int) string {
 	return "catalog:search:{" + strconv.Itoa(userID) + "}:"
 }
 
-func (s *searchSessionStore) put(ctx context.Context, userID int, session searchRankingSession) (string, error) {
-	if s == nil {
-		return "", ErrSearchContinuationUnavailable
-	}
-	id := hex.EncodeToString(randomSearchSessionID())
-	if s.client == nil {
-		return s.putMemory(userID, id, session), nil
-	}
+func (s *redisSearchSessionStore) put(ctx context.Context, userID int, session searchRankingSession) (string, error) {
+	id := newSearchSessionID()
 	encoded, err := json.Marshal(session)
 	if err != nil {
 		return "", err
 	}
 	prefix := searchSessionPrefix(userID)
 	// Create the immutable value and trim the account's retained sessions in
-	// one operation. Expiry/eviction invalidates cursors; it never changes ranks.
+	// one operation.
 	const script = `
 redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
 redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[3])
@@ -125,7 +119,55 @@ return 1`
 	return id, nil
 }
 
-func (s *searchSessionStore) putMemory(userID int, id string, session searchRankingSession) string {
+func (s *redisSearchSessionStore) get(ctx context.Context, userID int, id string) (*searchRankingSession, error) {
+	if !validSearchSessionID(id) {
+		return nil, ErrCatalogCursorChanged
+	}
+	encoded, err := s.client.Get(ctx, searchSessionPrefix(userID)+id).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, ErrCatalogCursorChanged
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrSearchContinuationUnavailable, err)
+	}
+	var session searchRankingSession
+	if err := json.Unmarshal(encoded, &session); err != nil {
+		return nil, ErrCatalogCursorChanged
+	}
+	if !session.ExpiresAt.After(time.Now()) {
+		return nil, ErrCatalogCursorChanged
+	}
+	return &session, nil
+}
+
+// memorySearchSessionStore serves a single API process when no Redis client is
+// configured.
+type memorySearchSessionStore struct {
+	mu     sync.Mutex
+	memory map[int]map[string]searchRankingSession
+	// lastSweep is when put last pruned every account.
+	lastSweep time.Time
+	// now overrides the store's clock in tests.
+	now func() time.Time
+}
+
+func (s *memorySearchSessionStore) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+func pruneExpiredSearchSessions(sessions map[string]searchRankingSession, now time.Time) {
+	for sessionID, candidate := range sessions {
+		if !candidate.ExpiresAt.After(now) {
+			delete(sessions, sessionID)
+		}
+	}
+}
+
+func (s *memorySearchSessionStore) put(_ context.Context, userID int, session searchRankingSession) (string, error) {
+	id := newSearchSessionID()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.memory == nil {
@@ -160,51 +202,25 @@ func (s *searchSessionStore) putMemory(userID int, id string, session searchRank
 	}
 	session.IDs = append([]string(nil), session.IDs...)
 	sessions[id] = session
-	return id
+	return id, nil
 }
 
-func randomSearchSessionID() []byte {
-	value := make([]byte, 24)
-	_, _ = rand.Read(value)
-	return value
-}
-
-func (s *searchSessionStore) get(ctx context.Context, userID int, id string) (*searchRankingSession, error) {
-	if s == nil {
-		return nil, ErrSearchContinuationUnavailable
-	}
-	if raw, err := hex.DecodeString(id); err != nil || len(raw) != 24 {
+func (s *memorySearchSessionStore) get(_ context.Context, userID int, id string) (*searchRankingSession, error) {
+	if !validSearchSessionID(id) {
 		return nil, ErrCatalogCursorChanged
 	}
-	if s.client == nil {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		sessions := s.memory[userID]
-		session, ok := sessions[id]
-		if !ok || !session.ExpiresAt.After(s.clock()) {
-			delete(sessions, id)
-			if len(sessions) == 0 {
-				delete(s.memory, userID)
-			}
-			return nil, ErrCatalogCursorChanged
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sessions := s.memory[userID]
+	session, ok := sessions[id]
+	if !ok || !session.ExpiresAt.After(s.clock()) {
+		delete(sessions, id)
+		if len(sessions) == 0 {
+			delete(s.memory, userID)
 		}
-		session.IDs = append([]string(nil), session.IDs...)
-		return &session, nil
-	}
-	encoded, err := s.client.Get(ctx, searchSessionPrefix(userID)+id).Bytes()
-	if errors.Is(err, redis.Nil) {
 		return nil, ErrCatalogCursorChanged
 	}
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSearchContinuationUnavailable, err)
-	}
-	var session searchRankingSession
-	if err := json.Unmarshal(encoded, &session); err != nil {
-		return nil, ErrCatalogCursorChanged
-	}
-	if !session.ExpiresAt.After(time.Now()) {
-		return nil, ErrCatalogCursorChanged
-	}
+	session.IDs = append([]string(nil), session.IDs...)
 	return &session, nil
 }
 

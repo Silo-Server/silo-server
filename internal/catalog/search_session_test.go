@@ -9,7 +9,7 @@ import (
 
 func TestInMemorySearchSessionStoreExpiresIsolatesAndEvicts(t *testing.T) {
 	clock := time.Now()
-	store := &searchSessionStore{now: func() time.Time { return clock }}
+	store := &memorySearchSessionStore{now: func() time.Time { return clock }}
 	expiresAt := clock.Add(time.Hour)
 	ids := make([]string, 0, searchSessionsPerAccount+1)
 	for i := range searchSessionsPerAccount + 1 {
