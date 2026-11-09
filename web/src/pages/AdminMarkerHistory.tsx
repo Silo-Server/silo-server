@@ -24,7 +24,7 @@ import {
 import { useAllMarkerEditHistory } from "@/hooks/queries/admin/markers";
 import { MARKER_LABEL_KEYS, formatClock } from "@/lib/markers";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
-import { useT, type Translate } from "@/i18n";
+import { numberText, type Translate, useT } from "@/i18n";
 
 const LIMIT_OPTIONS = ["25", "50", "100"] as const;
 
@@ -192,7 +192,7 @@ function MarkerHistorySkeleton() {
 function formatHistoryRange(t: Translate, marker: MarkerSegment | null): string {
   if (!marker || marker.start == null || marker.end == null)
     return t("web.admin.markers.history.rangeNone");
-  return `${formatClock(marker.start)}-${formatClock(marker.end)}`;
+  return numberText(`${formatClock(marker.start)}-${formatClock(marker.end)}`);
 }
 
 function formatHistoryDate(value: string): string {

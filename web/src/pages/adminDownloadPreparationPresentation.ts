@@ -6,7 +6,7 @@ import type {
 } from "@/api/v2/adminDownloadPreparations";
 import { formatChannels, formatCodecLabel, formatFileSize } from "@/lib/mediaFormat";
 import { formatLocale } from "@/lib/appLocale";
-import { t, type MessageKey } from "@/i18n";
+import { type MessageKey, numberText, t } from "@/i18n";
 import { formatDecimal } from "@/lib/numberFormat";
 
 const K = "web.admin.downloads.preparation";
@@ -258,8 +258,8 @@ export function formatClock(seconds: number): string {
   const h = Math.floor(safe / 3600);
   const m = Math.floor((safe % 3600) / 60);
   const s = safe % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
+  if (h > 0) return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 export function secondsSince(iso: string | undefined, now = Date.now()): number | null {

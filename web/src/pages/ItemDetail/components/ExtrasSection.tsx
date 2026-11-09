@@ -6,7 +6,7 @@ import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { extraKindGroupLabel } from "@/lib/extraKinds";
 import { formatClock } from "@/lib/markers";
 import { decodeThumbhash } from "@/lib/thumbhash";
-import { useAppLanguage, useT } from "@/i18n";
+import { numberText, useAppLanguage, useT } from "@/i18n";
 
 interface ExtrasSectionProps {
   extras: ItemExtra[];
@@ -121,7 +121,7 @@ function ExtraCard({ extra, onPlay }: { extra: ItemExtra; onPlay: () => void }) 
         <span className="text-foreground block truncate text-[0.8125rem] font-medium">{title}</span>
         {extra.duration_seconds != null && extra.duration_seconds > 0 && (
           <span className="text-muted-foreground block text-[0.6875rem] tabular-nums">
-            {formatClock(extra.duration_seconds)}
+            {numberText(formatClock(extra.duration_seconds))}
           </span>
         )}
       </div>

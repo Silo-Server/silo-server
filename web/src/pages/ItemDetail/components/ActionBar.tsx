@@ -44,7 +44,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useT, type Translate } from "@/i18n";
+import { numberText, type Translate, useT } from "@/i18n";
 import AddToCollectionDialog from "@/components/AddToCollectionDialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -1372,10 +1372,12 @@ function formatPlaybackTime(totalSeconds: number): string {
   const remainingSeconds = seconds % 60;
 
   if (hours > 0) {
-    return `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+    return numberText(
+      `${hours}:${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`,
+    );
   }
 
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  return numberText(`${minutes}:${String(remainingSeconds).padStart(2, "0")}`);
 }
 
 function buildPlayChoiceDescription(

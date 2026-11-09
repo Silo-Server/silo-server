@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Play, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import type { WatchTogetherRoomSnapshot, WatchTogetherSuggestion } from "@/lib/watchTogether";
 import { StagedHero } from "./StagedHero";
 import { SuggestionList } from "./SuggestionList";
@@ -13,7 +13,7 @@ function formatClock(totalSeconds: number) {
   const sec = s % 60;
   const mm = String(m).padStart(2, "0");
   const ss = String(sec).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  return numberText(h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`);
 }
 
 /** Live position from the room anchor, advanced locally while playing. */

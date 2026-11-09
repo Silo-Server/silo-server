@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Moon } from "lucide-react";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 
 export type SleepSetting =
   | { kind: "off" }
@@ -19,7 +19,7 @@ function formatCountdown(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   const m = Math.floor(total / 60);
   const s = total % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 export function SleepTimerMenu({ setting, remainingMs, onChange }: SleepTimerMenuProps) {

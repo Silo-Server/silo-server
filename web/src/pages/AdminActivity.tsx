@@ -63,7 +63,7 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
-import { englishText, useT, type TextValues, type Translate } from "@/i18n";
+import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
@@ -1510,8 +1510,8 @@ function getElapsed(dateStr: string): string {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
+  if (h > 0) return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 function formatPlaybackPosition(session: AdminSession): string {
@@ -1528,9 +1528,9 @@ function formatClockTime(seconds: number): string {
   const m = Math.floor((safeSeconds % 3600) / 60);
   const s = safeSeconds % 60;
   if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
   }
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 function stringAttr(entry: OperationalLogEntry, key: string) {
