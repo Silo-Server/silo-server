@@ -334,7 +334,10 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
                 value={(session.position_seconds / duration) * 100}
                 aria-label="Playback position"
                 aria-valuetext={position}
-                className={cn("h-1 flex-1 rounded-full", session.is_paused && "opacity-45")}
+                className={cn(
+                  "bg-foreground/10 h-1 flex-1 rounded-full",
+                  session.is_paused && "opacity-45",
+                )}
               />
             ) : null}
             <span className="text-muted-foreground ml-auto shrink-0 text-[10px] tabular-nums">
