@@ -29,7 +29,7 @@ function saveErrorMessage(error: unknown): string {
   let reason: string | undefined;
   if (error instanceof V2ProblemError) {
     const field = error.problem.errors?.[0];
-    reason = field ? problemFieldDetail(field) : error.problem.detail;
+    reason = field ? problemFieldDetail(field) : error.message;
   } else if (error instanceof Error) {
     reason = error.message;
   }
