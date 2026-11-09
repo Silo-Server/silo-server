@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// NotifiedSeries is one series a profile has a reason to hear about, or
+// NotifiedSeries is one series a profile waits on a next episode of, or
 // muted: the interest rows of every library the series is in, merged, with the
 // profile's preferences applied.
 type NotifiedSeries struct {
@@ -20,9 +20,10 @@ type NotifiedSeries struct {
 	// Active are the Reasons the profile's preferences let notify. A series
 	// with none notifies nobody until a preference changes.
 	Active ReasonFlags
-	// NextExpectedEpisodeKey is the episode an active Next Up reason waits
-	// for; nil without one.
-	NextExpectedEpisodeKey *int
+	// LastCompletedEpisodeKey is the episode an active Next Up reason waits
+	// after: the one the profile finished most recently. Nil without an
+	// active Next Up reason.
+	LastCompletedEpisodeKey *int
 	// Muted is set when the profile muted the series: it notifies nobody
 	// whatever its Active reasons, which still say what would notify once
 	// the profile unmutes.
@@ -70,17 +71,12 @@ func (s *System) ListNotifiedSeries(ctx context.Context, userID int, profileID s
 		series := NotifiedSeries{
 			SeriesID:         row.SeriesID,
 			SeriesSortFields: row.SeriesSortFields,
-			Reasons: ReasonFlags{
-				Favorite:         row.Favorite,
-				Watchlist:        row.Watchlist,
-				ContinueWatching: row.ContinueWatching,
-				NextUp:           row.NextUpCandidate,
-			},
-			Active: active,
-			Muted:  row.Muted,
+			Reasons:          ReasonFlags{NextUp: row.NextUpCandidate},
+			Active:           active,
+			Muted:            row.Muted,
 		}
 		if active.NextUp {
-			series.NextExpectedEpisodeKey = row.NextExpectedEpisodeKey
+			series.LastCompletedEpisodeKey = row.LastCompletedEpisodeKey
 		}
 		out = append(out, series)
 	}
@@ -97,10 +93,10 @@ type mergedInterest struct {
 	Muted bool
 }
 
-// listMergedForProfile loads the profile's active interest rows, one per
+// listMergedForProfile loads the profile's Next Up interest rows, one per
 // series, and its muted series: a series in several libraries has a row in
-// each, and any row's reason counts. Next Up waits for the earliest expected
-// episode among the rows that carry it. A muted series with no reason has a
+// each, and any row's reason counts. Every row of a series carries the same
+// anchor, since the profile's watch state is per series. A muted series with no reason has a
 // row with none. Series the catalog no longer has are skipped. Rows are read
 // for the profile on userID's account only, since profile IDs such as the
 // legacy "default" repeat across accounts.
@@ -108,20 +104,17 @@ func (r *InterestRepository) listMergedForProfile(ctx context.Context, userID in
 	rows, err := r.pool.Query(ctx, `
 		WITH interest AS (
 			SELECT series_id,
-			       bool_or(favorite) AS favorite, bool_or(watchlist) AS watchlist,
-			       bool_or(continue_watching) AS continue_watching,
 			       bool_or(next_up_candidate) AS next_up_candidate,
+			       min(last_completed_episode_key) FILTER (WHERE next_up_candidate) AS last_completed_episode_key,
 			       min(next_expected_episode_key) FILTER (WHERE next_up_candidate) AS next_expected_episode_key
 			FROM profile_series_interest
-			WHERE user_id = $2 AND profile_id = $1
-			  AND (favorite OR watchlist OR continue_watching OR next_up_candidate)
+			WHERE user_id = $2 AND profile_id = $1 AND next_up_candidate
 			GROUP BY series_id
 		), muted AS (
 			SELECT series_id FROM profile_series_notification_mutes WHERE user_id = $2 AND profile_id = $1
 		)
 		SELECT mi.content_id,
-		       COALESCE(i.favorite, false), COALESCE(i.watchlist, false),
-		       COALESCE(i.continue_watching, false), COALESCE(i.next_up_candidate, false),
+		       COALESCE(i.next_up_candidate, false), i.last_completed_episode_key,
 		       i.next_expected_episode_key, m.series_id IS NOT NULL,
 		       lower(COALESCE(NULLIF(mi.sort_title, ''), mi.title)), mi.title,
 		       COALESCE(mi.year, 0), mi.created_at, mi.latest_episode_added_at
@@ -136,8 +129,8 @@ func (r *InterestRepository) listMergedForProfile(ctx context.Context, userID in
 	out := make([]mergedInterest, 0, 32)
 	for rows.Next() {
 		row := mergedInterest{SeriesInterest: SeriesInterest{UserID: userID, ProfileID: profileID}}
-		if err := rows.Scan(&row.SeriesID, &row.Favorite, &row.Watchlist,
-			&row.ContinueWatching, &row.NextUpCandidate, &row.NextExpectedEpisodeKey, &row.Muted,
+		if err := rows.Scan(&row.SeriesID, &row.NextUpCandidate, &row.LastCompletedEpisodeKey,
+			&row.NextExpectedEpisodeKey, &row.Muted,
 			&row.SortKey, &row.Title, &row.Year, &row.AddedAt, &row.LatestEpisodeAddedAt); err != nil {
 			return nil, fmt.Errorf("scan profile series interest: %w", err)
 		}

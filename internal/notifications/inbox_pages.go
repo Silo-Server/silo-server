@@ -59,15 +59,12 @@ func (r *DeliveryRepository) MarkReadThrough(ctx context.Context, userID int, pr
 
 // PreferencePatch preserves omitted fields without a read/whole-row-write race.
 type PreferencePatch struct {
-	Enabled                *bool
-	NotifyFavorites        *bool
-	NotifyWatchlist        *bool
-	NotifyContinueWatching *bool
-	NotifyNextUp           *bool
+	Enabled      *bool
+	NotifyNextUp *bool
 }
 
 func (r *PreferencesRepository) Patch(ctx context.Context, userID int, profileID string, p PreferencePatch) (Preferences, error) {
 	prefs := DefaultPreferences(userID, profileID)
-	err := r.pool.QueryRow(ctx, `INSERT INTO notification_preferences(user_id,profile_id,enabled,notify_favorites,notify_watchlist,notify_continue_watching,notify_next_up,updated_at) VALUES($1,$2,COALESCE($3,true),COALESCE($4,true),COALESCE($5,true),COALESCE($6,true),COALESCE($7,true),now()) ON CONFLICT(user_id,profile_id) DO UPDATE SET enabled=COALESCE($3,notification_preferences.enabled),notify_favorites=COALESCE($4,notification_preferences.notify_favorites),notify_watchlist=COALESCE($5,notification_preferences.notify_watchlist),notify_continue_watching=COALESCE($6,notification_preferences.notify_continue_watching),notify_next_up=COALESCE($7,notification_preferences.notify_next_up),updated_at=now() RETURNING enabled,notify_favorites,notify_watchlist,notify_continue_watching,notify_next_up,updated_at`, userID, profileID, p.Enabled, p.NotifyFavorites, p.NotifyWatchlist, p.NotifyContinueWatching, p.NotifyNextUp).Scan(&prefs.Enabled, &prefs.NotifyFavorites, &prefs.NotifyWatchlist, &prefs.NotifyContinueWatching, &prefs.NotifyNextUp, &prefs.UpdatedAt)
+	err := r.pool.QueryRow(ctx, `INSERT INTO notification_preferences(user_id,profile_id,enabled,notify_next_up,updated_at) VALUES($1,$2,COALESCE($3,true),COALESCE($4,true),now()) ON CONFLICT(user_id,profile_id) DO UPDATE SET enabled=COALESCE($3,notification_preferences.enabled),notify_next_up=COALESCE($4,notification_preferences.notify_next_up),updated_at=now() RETURNING enabled,notify_next_up,updated_at`, userID, profileID, p.Enabled, p.NotifyNextUp).Scan(&prefs.Enabled, &prefs.NotifyNextUp, &prefs.UpdatedAt)
 	return prefs, err
 }

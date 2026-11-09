@@ -47,6 +47,11 @@ type FanoutWorker struct {
 	rateLimiter *profileRateLimiter
 	webPush     *WebPushRepository
 	pushDevices *PushDeviceRepository
+
+	// Watchlist arrivals (SetWatchlistArrivals): who waits for an arriving
+	// title, and whether a request of it tells them instead.
+	watchlist watchlistWaiters
+	requests  requestWaiters
 }
 
 // SetWebhookOutbox wires durable webhook attempt enqueueing into the fanout
@@ -147,11 +152,10 @@ func (w *FanoutWorker) Run(ctx context.Context) {
 // claim, delivery inserts, cursor updates, and processed marks share one
 // transaction so an event is never marked processed without durable
 // deliveries; reprocessing after a crash is harmless because delivery inserts
-// dedupe. Returns the number of events handled (fanned out + suppressed).
+// dedupe. Returns the number of events handled.
 func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr error) {
 	started := time.Now()
 	settle := w.settings.SettleDelay(ctx)
-	maxBurst := w.settings.MaxSeriesBurst(ctx)
 
 	tx, err := w.pool.Begin(ctx)
 	if err != nil {
@@ -185,6 +189,13 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 	// should not receive a backlog of long-stale "new episode" notifications
 	// when the worker comes back.
 	staleCutoff := time.Now().Add(-w.settings.MaxEventAge(ctx))
+	// A fresh movie can still tell the profiles whose watchlist waits for it.
+	arrivalEvents := make([]ReleaseEvent, 0, len(others))
+	for _, event := range others {
+		if !event.CreatedAt.Before(staleCutoff) {
+			arrivalEvents = append(arrivalEvents, event)
+		}
+	}
 	fresh := make([]ReleaseEvent, 0, len(events))
 	stale := make([]ReleaseEvent, 0)
 	for _, event := range events {
@@ -201,13 +212,8 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		}
 	}
 
-	fanout, suppressed := ApplyBurstCap(fresh, maxBurst)
-	if len(suppressed) > 0 {
-		reason := SuppressedReasonSeriesBurst
-		if err := w.releases.MarkProcessed(ctx, tx, eventIDs(suppressed), &reason); err != nil {
-			return 0, err
-		}
-	}
+	fanout := fresh
+	SortFanoutEvents(fanout)
 
 	// Capture the entire batch before acquiring inbox locks. Locking one event
 	// at a time could acquire the same profiles in opposite transaction order.
@@ -267,6 +273,15 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		}
 		candidatesByEvent[event.ID] = captured
 	}
+	// A series arriving with its first episodes, or a movie, tells the
+	// profiles whose watchlist waits for it.
+	arrivals, err := w.captureWatchlistArrivals(ctx, tx, recipients, append(arrivalEvents, fanout...), staleCutoff)
+	if err != nil {
+		return 0, err
+	}
+	for _, arrival := range arrivals {
+		profiles[arrival.waiter.ProfileID] = struct{}{}
+	}
 	if err := w.deliveries.LockInboxProfiles(ctx, tx, slices.Sorted(maps.Keys(profiles))); err != nil {
 		return 0, err
 	}
@@ -283,6 +298,10 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 		totalInserted += len(rows)
 		dispatchRows = append(dispatchRows, rows...)
 	}
+	arrivalIDs, err := w.deliverWatchlistArrivals(ctx, tx, arrivals)
+	if err != nil {
+		return 0, fmt.Errorf("deliver watchlist arrivals: %w", err)
+	}
 	if err := w.releases.MarkProcessed(ctx, tx, eventIDs(fanout), nil); err != nil {
 		return 0, err
 	}
@@ -298,15 +317,16 @@ func (w *FanoutWorker) processBatch(ctx context.Context) (processed int, runErr 
 				"delivery_id", row.ID, "profile_id", row.ProfileID, "error", err)
 		}
 	}
+	w.dispatchInserted(ctx, arrivalIDs)
 
 	w.logger.InfoContext(ctx, "fanout batch processed",
 		"claimed", len(claimed),
 		"non_episode", len(others),
 		"fanned_out", len(fanout),
-		"suppressed", len(suppressed),
 		"stale", len(stale),
 		"recipient_count", totalRecipients,
 		"inserted_count", totalInserted,
+		"watchlist_arrivals", len(arrivalIDs),
 		"deduped_count", totalRecipients-totalInserted,
 		"duration_ms", time.Since(started).Milliseconds(),
 	)
@@ -374,7 +394,10 @@ func (w *FanoutWorker) fanOutEvent(ctx context.Context, tx pgx.Tx, event Release
 	// Durable dispatch outbox: enqueue per-target attempt rows in the same
 	// transaction so a crash after commit delays webhooks instead of silently
 	// dropping them. Push channels (specs 02-03) plug in here the same way.
-	if err := w.enqueueWebhookOutbox(ctx, tx, inserted, pending); err != nil {
+	if err := w.enqueueWebhookAttempts(ctx, tx, inserted, func(row InsertedDelivery, hook Webhook) bool {
+		entry, ok := pending[row.key()]
+		return ok && hook.MatchesReasons(entry.flags)
+	}); err != nil {
 		return nil, 0, err
 	}
 	if err := w.enqueueWebPushOutbox(ctx, tx, inserted); err != nil {
@@ -492,11 +515,12 @@ func (w *FanoutWorker) enqueueWebPushOutbox(ctx context.Context, tx pgx.Tx, inse
 	return w.webPush.EnqueueAttempts(ctx, tx, attempts)
 }
 
-// enqueueWebhookOutbox inserts `pending` webhook attempt rows for each newly
-// inserted delivery, inside the fanout transaction. Two filters apply:
-// per-webhook reason flags, and the per-profile delivery rate limit
-// (over-limit notifications stay in the inbox; webhooks just don't fire).
-func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, pending map[profileKey]pendingDelivery) error {
+// enqueueWebhookAttempts inserts `pending` webhook attempt rows for each newly
+// inserted delivery, inside the fanout transaction. Two filters apply: wants,
+// the per-webhook switch for the delivery, and the per-profile delivery rate
+// limit (over-limit notifications stay in the inbox; webhooks just don't
+// fire).
+func (w *FanoutWorker) enqueueWebhookAttempts(ctx context.Context, tx pgx.Tx, inserted []InsertedDelivery, wants func(InsertedDelivery, Webhook) bool) error {
 	if w.webhooks == nil || len(inserted) == 0 || !w.settings.WebhooksEnabled(ctx) {
 		return nil
 	}
@@ -510,12 +534,8 @@ func (w *FanoutWorker) enqueueWebhookOutbox(ctx context.Context, tx pgx.Tx, inse
 	rateLimited := 0
 	for _, row := range inserted {
 		key := row.key()
-		entry, ok := pending[key]
-		if !ok {
-			continue
-		}
 		for _, hook := range hooksByProfile[key] {
-			if !hook.MatchesReasons(entry.flags) {
+			if !wants(row, hook) {
 				continue
 			}
 			if w.rateLimiter != nil && !w.rateLimiter.Allow(key, rateLimit) {

@@ -35,18 +35,19 @@ type fakeNotificationInbox struct {
 }
 
 // fixtureNotifiedSeries is a profile's notified-series list in service
-// order: Next Up alone, two active reasons, a series the viewer may not see,
-// a watchlist series the preferences silence, and a muted favorite.
+// order: two series waiting on a next episode, a series the viewer may not
+// see, one the preferences silence, and a muted one.
 func fixtureNotifiedSeries() []notifications.NotifiedSeries {
-	nextUp := notifications.EpisodeKey(2, 9)
 	day := func(n int) time.Time { return fixedTime().Add(time.Duration(n) * 24 * time.Hour) }
 	latest := func(n int) *time.Time { t := day(n); return &t }
+	after := func(season, episode int) *int { k := notifications.EpisodeKey(season, episode); return &k }
+	nextUp := notifications.ReasonFlags{NextUp: true}
 	return []notifications.NotifiedSeries{
-		{SeriesID: "series:andor", SeriesSortFields: notifications.SeriesSortFields{SortKey: "andor", Title: "Andor", Year: 2022, AddedAt: day(0), LatestEpisodeAddedAt: latest(3)}, Reasons: notifications.ReasonFlags{NextUp: true}, Active: notifications.ReasonFlags{NextUp: true}, NextExpectedEpisodeKey: &nextUp},
-		{SeriesID: "series:bear", SeriesSortFields: notifications.SeriesSortFields{SortKey: "bear", Title: "The Bear", Year: 2024, AddedAt: day(1), LatestEpisodeAddedAt: latest(5)}, Reasons: notifications.ReasonFlags{Favorite: true, ContinueWatching: true}, Active: notifications.ReasonFlags{Favorite: true, ContinueWatching: true}},
-		{SeriesID: "series:hidden", SeriesSortFields: notifications.SeriesSortFields{SortKey: "hidden", Title: "Hidden", AddedAt: day(2)}, Reasons: notifications.ReasonFlags{Favorite: true}, Active: notifications.ReasonFlags{Favorite: true}},
-		{SeriesID: "series:slow-horses", SeriesSortFields: notifications.SeriesSortFields{SortKey: "slow horses", Title: "Slow Horses", Year: 2023, AddedAt: day(3), LatestEpisodeAddedAt: latest(1)}, Reasons: notifications.ReasonFlags{Watchlist: true}},
-		{SeriesID: "series:wire", SeriesSortFields: notifications.SeriesSortFields{SortKey: "wire", Title: "The Wire", Year: 2002, AddedAt: day(4), LatestEpisodeAddedAt: latest(2)}, Reasons: notifications.ReasonFlags{Favorite: true}, Active: notifications.ReasonFlags{Favorite: true}, Muted: true},
+		{SeriesID: "series:andor", SeriesSortFields: notifications.SeriesSortFields{SortKey: "andor", Title: "Andor", Year: 2022, AddedAt: day(0), LatestEpisodeAddedAt: latest(3)}, Reasons: nextUp, Active: nextUp, LastCompletedEpisodeKey: after(2, 8)},
+		{SeriesID: "series:bear", SeriesSortFields: notifications.SeriesSortFields{SortKey: "bear", Title: "The Bear", Year: 2024, AddedAt: day(1), LatestEpisodeAddedAt: latest(5)}, Reasons: nextUp, Active: nextUp, LastCompletedEpisodeKey: after(3, 10)},
+		{SeriesID: "series:hidden", SeriesSortFields: notifications.SeriesSortFields{SortKey: "hidden", Title: "Hidden", AddedAt: day(2)}, Reasons: nextUp, Active: nextUp},
+		{SeriesID: "series:slow-horses", SeriesSortFields: notifications.SeriesSortFields{SortKey: "slow horses", Title: "Slow Horses", Year: 2023, AddedAt: day(3), LatestEpisodeAddedAt: latest(1)}, Reasons: nextUp},
+		{SeriesID: "series:wire", SeriesSortFields: notifications.SeriesSortFields{SortKey: "wire", Title: "The Wire", Year: 2002, AddedAt: day(4), LatestEpisodeAddedAt: latest(2)}, Reasons: nextUp, Active: nextUp, Muted: true},
 	}
 }
 
@@ -186,7 +187,7 @@ func TestNotificationInboxScopedCursorAndReadCutoff(t *testing.T) {
 	requireProblem(t, do(t, h, http.MethodPost, path+"/read-all", string(body), actingRequestAdmin), TypeInvalidCursor)
 	requireProblem(t, do(t, h, http.MethodPut, path+"/preferences", `{"enabled":null}`, profileOwner()), TypeValidationFailed)
 	saved = do(t, h, http.MethodPut, path+"/preferences", `{"enabled":false}`, profileOwner())
-	if saved.Code != 200 || f.patch.Enabled == nil || *f.patch.Enabled || f.patch.NotifyFavorites != nil {
+	if saved.Code != 200 || f.patch.Enabled == nil || *f.patch.Enabled || f.patch.NotifyNextUp != nil {
 		t.Fatal(saved.Code, saved.Body.String(), f.patch)
 	}
 }
