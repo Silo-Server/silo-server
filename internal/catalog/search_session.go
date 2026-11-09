@@ -18,6 +18,11 @@ import (
 const searchSessionTTL = 15 * time.Minute
 const searchSessionsPerAccount = 16
 
+// searchSessionSweepInterval throttles the in-memory store's cross-account
+// expiry sweep. Writes always prune their own account, so the per-account
+// bound never waits on the sweep; the sweep only reclaims idle accounts.
+const searchSessionSweepInterval = time.Minute
+
 var ErrSearchContinuationUnavailable = errors.New("search continuation storage is unavailable")
 var ErrSearchWindowUnsupported = errors.New("search index result window is unsupported")
 
@@ -60,6 +65,25 @@ type searchSessionStore struct {
 	client redis.UniversalClient
 	mu     sync.Mutex
 	memory map[int]map[string]searchRankingSession
+	// lastSweep is when putMemory last pruned every account.
+	lastSweep time.Time
+	// now overrides the in-memory store's clock in tests.
+	now func() time.Time
+}
+
+func (s *searchSessionStore) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+func pruneExpiredSearchSessions(sessions map[string]searchRankingSession, now time.Time) {
+	for sessionID, candidate := range sessions {
+		if !candidate.ExpiresAt.After(now) {
+			delete(sessions, sessionID)
+		}
+	}
 }
 
 func searchSessionPrefix(userID int) string {
@@ -107,21 +131,22 @@ func (s *searchSessionStore) putMemory(userID int, id string, session searchRank
 	if s.memory == nil {
 		s.memory = make(map[int]map[string]searchRankingSession)
 	}
-	now := time.Now()
-	for accountID, sessions := range s.memory {
-		for sessionID, candidate := range sessions {
-			if !candidate.ExpiresAt.After(now) {
-				delete(sessions, sessionID)
+	now := s.clock()
+	if now.Sub(s.lastSweep) >= searchSessionSweepInterval {
+		s.lastSweep = now
+		for accountID, sessions := range s.memory {
+			pruneExpiredSearchSessions(sessions, now)
+			if len(sessions) == 0 {
+				delete(s.memory, accountID)
 			}
-		}
-		if len(sessions) == 0 {
-			delete(s.memory, accountID)
 		}
 	}
 	sessions := s.memory[userID]
 	if sessions == nil {
 		sessions = make(map[string]searchRankingSession)
 		s.memory[userID] = sessions
+	} else {
+		pruneExpiredSearchSessions(sessions, now)
 	}
 	if len(sessions) >= searchSessionsPerAccount {
 		oldestID := ""
@@ -156,7 +181,7 @@ func (s *searchSessionStore) get(ctx context.Context, userID int, id string) (*s
 		defer s.mu.Unlock()
 		sessions := s.memory[userID]
 		session, ok := sessions[id]
-		if !ok || !session.ExpiresAt.After(time.Now()) {
+		if !ok || !session.ExpiresAt.After(s.clock()) {
 			delete(sessions, id)
 			if len(sessions) == 0 {
 				delete(s.memory, userID)
