@@ -226,7 +226,7 @@ export default function ItemDetail() {
         />
       );
     case "season":
-      return <SeasonContent item={item as ItemDetail & { type: "season" }} />;
+      return <SeasonContent item={item as ItemDetail & { type: "season" }} libraryId={libraryId} />;
     case "episode":
       return (
         <EpisodeContent item={item as ItemDetail & { type: "episode" }} libraryId={libraryId} />

@@ -18,6 +18,7 @@ import {
   describeReprobeOutcome,
   describeResourceSample,
   describeSharedGPU,
+  describeSystemStats,
   filterNodesByGroup,
   nodeHWDevicePaths,
   nodeHasHWDeviceInventory,
@@ -984,7 +985,6 @@ describe("resource attribution", () => {
           sample_interval_seconds: 5,
           cpu: { available: false },
           memory: { available: false },
-          network: { available: false },
           process: {},
         },
       },
@@ -995,10 +995,12 @@ describe("resource attribution", () => {
       stale: true,
       cpu: { muted: true },
       memory: { muted: true },
-      network: { muted: true },
       processMemory: { muted: true },
       heapMemory: { muted: true },
     });
+    expect(describeSystemStats(FULL_SAMPLE, { network: { available: false } }).network.muted).toBe(
+      true,
+    );
   });
 
   it("detects a stopped worker sampler without treating normal health polling as stale", () => {

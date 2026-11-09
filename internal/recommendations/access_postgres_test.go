@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -225,7 +226,7 @@ func TestProfileAccessFilterMatchesTheResolverPostgres(t *testing.T) {
 	if !slices.Equal(filter.AllowedLibraryIDs, []int{f.kidsLib}) || !slices.Equal(filter.AllowedLibraryIDs, scope.AllowedLibraryIDs) {
 		t.Fatalf("build filter libraries = %v, scope = %v; want the group's [%d]", filter.AllowedLibraryIDs, scope.AllowedLibraryIDs, f.kidsLib)
 	}
-	if filter.MaturityLimits != scope.MaturityLimits || filter.MaxContentRating != "PG" {
+	if !reflect.DeepEqual(filter.MaturityLimits, scope.MaturityLimits) || filter.MaxContentRating != "PG" {
 		t.Fatalf("build filter maturity = %+v, scope = %+v", filter.MaturityLimits, scope.MaturityLimits)
 	}
 }

@@ -103,6 +103,9 @@ func (h *PlaybackHandler) applyCompatDVStrip(
 	stripped.ETag = source.ETag
 	stripped.SupportsDirectPlay = false
 	stripped.SupportsDirectStream = false
+	// A progressive remux would serve the original Dolby Vision file, so only
+	// the original's own eligibility counts.
+	stripped.progressiveRemuxFallback = source.progressiveRemuxFallback
 	stripped.DOVIVariant = false
 	stripped.DVStripToHDR10 = true
 	return stripped

@@ -1,4 +1,4 @@
-import type { StreamNode } from "@/api/types";
+import type { NodeDetectedBackend, StreamNode } from "@/api/types";
 import type { HWAccelInfo } from "@/hooks/queries/admin/system";
 
 // Helpers for the playback.hw_device GPU picker. The setting stores a
@@ -78,6 +78,25 @@ export function nodeInventoriesDiverge(detection: HWAccelInfo | undefined): bool
 // only when the node pool can actually serve them.
 
 export const IMAGE_EXECUTION_DEFAULT = "local";
+
+export const TRICKPLAY_NODE_CAPACITY_KEY = "playback.trickplay_node_capacity";
+
+/**
+ * Whether a Preview images advanced key is on screen. A node's seek preview
+ * capacity matters only once previews may run on one; an unsaved edit keeps it
+ * shown so a hidden field never holds back the save.
+ */
+export function showsPreviewKey(
+  key: string,
+  execution: string,
+  isDirty: (key: string) => boolean,
+): boolean {
+  return (
+    key !== TRICKPLAY_NODE_CAPACITY_KEY ||
+    execution !== IMAGE_EXECUTION_DEFAULT ||
+    isDirty(TRICKPLAY_NODE_CAPACITY_KEY)
+  );
+}
 
 const NODE_BACKED_IMAGE_MODES = ["prefer_transcode_nodes", "transcode_nodes_only"];
 
@@ -203,16 +222,47 @@ export function formatResolved(resolved: string): string {
 }
 
 /**
+ * The probe entry for the backend detection resolved to, if one ran. The
+ * server reports an explicitly configured backend as resolved even when it was
+ * never verified (VideoToolbox in a Linux container, NVENC with no NVIDIA
+ * device), so `resolved` alone proves nothing.
+ */
+function resolvedProbe(detection: HWAccelInfo): NodeDetectedBackend | undefined {
+  return detection.detected_backends?.find(
+    (entry) => entry.backend.trim().toLowerCase() === detection.resolved,
+  );
+}
+
+/** Whether detection verified working hardware for the backend it resolved to. */
+export function hardwareVerified(detection: HWAccelInfo | undefined): detection is HWAccelInfo {
+  return Boolean(detection && detection.resolved !== "none" && resolvedProbe(detection)?.verified);
+}
+
+/**
  * One-line detection result, e.g. "Detected VA-API on renderD128". Returns
  * undefined while nothing has been probed yet so the caller can show its own
- * "detecting" state instead of an empty phrase.
+ * "detecting" state instead of an empty phrase. Pair it with hardwareVerified
+ * for the tone: every result other than "Detected …" is a warning.
  */
 export function describeDetection(detection: HWAccelInfo | undefined): string | undefined {
   if (!detection) return undefined;
   if (detection.resolved === "none") return "No supported graphics hardware found";
-  const device = detection.render_devices?.[0];
+  const label = formatResolved(detection.resolved);
   const onNode = detection.source === "transcode_node" ? " (transcode node)" : "";
-  return `Detected ${formatResolved(detection.resolved)}${device ? ` on ${device}` : ""}${onNode}`;
+  const probe = resolvedProbe(detection);
+  if (probe?.verified) {
+    const device = probe.device || detection.render_devices?.[0];
+    return `Detected ${label}${device ? ` on ${device}` : ""}${onNode}`;
+  }
+  // Skipped: none of the configured devices is accessible, so nothing ran.
+  if (probe?.skipped) return `${label} devices aren't accessible to this server${onNode}`;
+  if (probe) return `${label} failed its hardware check${onNode}`;
+  // macOS always reports a VideoToolbox probe, so no entry means the server
+  // is not running natively on a Mac (Docker on macOS runs a Linux VM).
+  if (detection.resolved === "videotoolbox") {
+    return `${label} needs Silo running natively on macOS, not in Docker${onNode}`;
+  }
+  return `${label} not found on this server${onNode}`;
 }
 
 /**

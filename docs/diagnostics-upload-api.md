@@ -16,6 +16,11 @@ string; cache the document privately with its ETag and revalidate with
 is configured; zero means unsupported. Clients must use the capability from the
 same API namespace as their upload transport.
 
+`accepted_crash_sources` lists the `crash.source` values the manifest validator
+accepts. Servers that predate the field accept only `ueh`, `exit_info`,
+`metrickit` and `exit_sentinel`, and reject any other source as an invalid
+manifest, so clients must not send them a report with a source they did not list.
+
 `POST /api/v2/diagnostics/reports` requires the same account access token and is
 refused in demo mode. Send `multipart/form-data` with exactly two file parts in
 this order:

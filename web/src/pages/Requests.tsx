@@ -4,6 +4,7 @@ import { Film, Info, Library, RefreshCw, Tv } from "lucide-react";
 import BrandCarousel from "@/components/BrandCarousel";
 import { CancelRequestDialog } from "@/components/CancelRequestDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import LibraryItemLink from "@/components/LibraryItemLink";
 import MediaCarousel from "@/components/MediaCarousel";
 import { RequestDownloadProgress } from "@/components/RequestDownloadProgress";
 import RequestPosterCard from "@/components/RequestPosterCard";
@@ -511,13 +512,13 @@ function RequestRow({
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {request.library_content_id ? (
               <Button asChild variant="outline" size="sm">
-                <ViewTransitionLink
-                  to={`/item/${encodeURIComponent(request.library_content_id)}`}
+                <LibraryItemLink
+                  contentId={request.library_content_id}
                   aria-label={`Open ${request.title} in library`}
                 >
                   <Library className="h-3.5 w-3.5" aria-hidden />
                   Open in library
-                </ViewTransitionLink>
+                </LibraryItemLink>
               </Button>
             ) : null}
             {onCancel ? (

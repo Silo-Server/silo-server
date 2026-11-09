@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,10 @@ const (
 	// at most; the rest only widens the library match.
 	seasonalListMaxEntries   = 2000
 	seasonalListRefreshLease = 5 * time.Minute
+	// seasonalListsPerRun bounds the lists one scheduled run fetches,
+	// however many seasonal sections and themes the server's pages hold:
+	// a household's rows name a few dozen.
+	seasonalListsPerRun = 200
 )
 
 // List entry media types, as MDBList names them.
@@ -187,6 +192,8 @@ type SeasonalListRefresher struct {
 	Fetch  func(ctx context.Context, listURL string) ([]seasonalListEntry, error)
 	Clock  recipes.Clock
 	logger *slog.Logger
+	// nextList is where the next run past seasonalListsPerRun starts.
+	nextList atomic.Int64
 }
 
 // NewSeasonalListRefresher creates a refresher backed by MDBList.
@@ -228,6 +235,18 @@ func (r *SeasonalListRefresher) RunOnce(ctx context.Context) (json.RawMessage, e
 	configs, listErr := r.Sections.ListSeasonalConfigs(ctx)
 	urls := seasonalListURLs(configs, r.now())
 	result := SeasonalListRefreshResult{Lists: len(urls)}
+	if len(urls) > seasonalListsPerRun {
+		// Each run takes the next lists in turn, so every list is fetched
+		// in a few runs rather than only the first ones every run.
+		r.log().WarnContext(ctx, "seasonal list refresh: more lists than one run fetches; the rest wait for the next runs",
+			"lists", len(urls), "per_run", seasonalListsPerRun)
+		start := r.nextList.Add(seasonalListsPerRun) - seasonalListsPerRun
+		rotated := make([]string, 0, seasonalListsPerRun)
+		for i := range seasonalListsPerRun {
+			rotated = append(rotated, urls[(int(start)+i)%len(urls)])
+		}
+		urls = rotated
+	}
 	for _, listURL := range urls {
 		switch r.refreshIfStale(ctx, listURL) {
 		case seasonalListRefreshed:
