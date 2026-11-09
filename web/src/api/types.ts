@@ -2818,7 +2818,9 @@ export interface AdminSession {
   source_video_codec?: string;
   source_video_resolution?: string;
   source_video_height?: number;
-  /** Media seconds the stream has been sent through, from the range holding the
+  /** Media seconds the stream has been sent through. Direct Play: the end of the
+   * file range most recently sent, a byte-to-time estimate that can lead or
+   * trail the position. HLS: the end of the fetched segment run holding the
    * position. Absent when the serving node does not observe it. */
   delivered_through_seconds?: number | null;
   /** Media seconds the transcode has produced through. Absent when unknown. */
