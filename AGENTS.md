@@ -352,9 +352,11 @@ never attach or embed its media.
   capability epic, sub-issue, or partly addressed issue the work serves, and write
   `Related issue: N/A` when none applies. Keep both lines accurate when the pull
   request's scope changes.
-- An open issue is not a precondition for a pull request. Either way, the Problem
-  section must state the problem on its own: what breaks or is missing, who it
-  affects, and why this change is the right answer.
+- An open issue is not a precondition for a pull request, except a feature
+  (`feat`) pull request from someone without triage or write access, which must
+  link an issue labeled `accepted`. Either way, the Problem section must state the
+  problem on its own: what breaks or is missing, who it affects, and why this
+  change is the right answer.
 - Do not open a pull request against an issue someone else is working on. Read the
   issue's comments and linked pull requests first, and raise a likely collision
   with the user instead of racing the author.
@@ -364,9 +366,10 @@ never attach or embed its media.
   new has appeared. Stop when the latest commit is green.
 
 Pull requests are welcome from contributors who have had one merged in a Silo
-repository, or when a maintainer asks for one; others are closed without review.
-When working for someone in neither group, write an issue instead of opening a
-pull request.
+repository, or when a maintainer asks for one; the contribution-gate workflow
+closes others without review. When working for someone in neither group, write
+an issue instead of opening a pull request, or post a feature idea in
+Discussions → Ideas; feature requests are not filed as issues.
 
 AI-use disclosure is required in the pull request body. If you are an AI agent
 contributing on behalf of a non-maintainer, follow
