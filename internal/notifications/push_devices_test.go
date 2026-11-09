@@ -5,11 +5,16 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -271,6 +276,7 @@ func newPushDeviceTestRepo(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) 
 			last_success_at timestamptz,
 			last_failure_at timestamptz,
 			last_failure_code text,
+			login_session_id text,
 			created_at timestamptz NOT NULL DEFAULT now(),
 			updated_at timestamptz NOT NULL DEFAULT now(),
 			CONSTRAINT push_devices_profile_device_platform_key UNIQUE (profile_id, device_id, platform),
@@ -432,7 +438,7 @@ func TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB(t *testing.T
 	if _, err = repo.RetireApplePush(ctx, retire); !errors.Is(err, ErrPushGenerationConflict) {
 		t.Fatalf("late retirement=%v", err)
 	}
-	if current, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
+	if current, _, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
 		t.Fatalf("late retirement touched the new registration: %+v err=%v", current, e)
 	}
 }
@@ -474,7 +480,7 @@ func TestApplePushInstallationResetDB(t *testing.T) {
 	if _, err = reset(foreign.UserID, foreign.InstallationKey); !errors.Is(err, ErrPushInstallationProof) {
 		t.Fatalf("another account's reset=%v", err)
 	}
-	if current, e := repo.getPushDeviceByID(ctx, first.RegistrationID); e != nil || !current.Enabled {
+	if current, _, e := repo.getPushDeviceByID(ctx, first.RegistrationID); e != nil || !current.Enabled {
 		t.Fatalf("refused reset touched the registration: %+v err=%v", current, e)
 	}
 	if done, e := reset(owner.UserID, reinstalled.InstallationKey); e != nil || !done {
@@ -507,7 +513,7 @@ func TestApplePushInstallationResetDB(t *testing.T) {
 	if done, e := reset(owner.UserID, reinstalled.InstallationKey); e != nil || done {
 		t.Fatalf("replayed reset=%v err=%v", done, e)
 	}
-	if current, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
+	if current, _, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
 		t.Fatalf("replayed reset touched the new registration: %+v err=%v", current, e)
 	}
 	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
@@ -599,7 +605,400 @@ func TestRetireAndroidPushStopsDeliveryAndOrdersAgainstRegistrationDB(t *testing
 	if _, err = repo.RetireAndroidPush(ctx, retire); !errors.Is(err, ErrPushGenerationConflict) {
 		t.Fatalf("late retirement=%v", err)
 	}
-	if current, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
+	if current, _, e := repo.getPushDeviceByID(ctx, again.RegistrationID); e != nil || !current.Enabled {
 		t.Fatalf("late retirement touched the new registration: %+v err=%v", current, e)
+	}
+}
+
+// loginSessionPushDB returns a repository on a schema with its own copies of
+// the push and login session tables, holding one session in each state a
+// registration can find its login in.
+func loginSessionPushDB(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) {
+	t.Helper()
+	repo, pool := noLoginsPushDB(t)
+	if _, err := pool.Exec(t.Context(), `
+		INSERT INTO auth_sessions (id, user_id, expires_at, revoked_at) VALUES
+			('live', 7, now() + interval '1 hour', NULL),
+			('revoked', 7, now() + interval '1 hour', now()),
+			('expired', 7, now() - interval '1 hour', NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	return repo, pool
+}
+
+// noLoginsPushDB returns a repository on a schema with its own empty copies of
+// the push, login session and API key tables.
+func noLoginsPushDB(t *testing.T) (*PushDeviceRepository, *pgxpool.Pool) {
+	t.Helper()
+	pool := schemaDB(t, "push_login_session_")
+	if _, err := pool.Exec(t.Context(), `
+		CREATE TABLE auth_sessions (LIKE public.auth_sessions INCLUDING ALL);
+		CREATE TABLE api_keys (LIKE public.api_keys INCLUDING ALL);
+		CREATE TABLE push_devices (LIKE public.push_devices INCLUDING ALL);
+		CREATE TABLE push_delivery_attempts (LIKE public.push_delivery_attempts INCLUDING ALL);
+		ALTER TABLE push_delivery_attempts ADD FOREIGN KEY (push_device_id) REFERENCES push_devices(id) ON DELETE CASCADE;
+		CREATE TABLE apple_push_installations (LIKE public.apple_push_installations INCLUDING ALL);
+		CREATE TABLE android_push_installations (LIKE public.android_push_installations INCLUDING ALL)`); err != nil {
+		t.Fatal(err)
+	}
+	return NewPushDeviceRepository(pool), pool
+}
+
+// sessionDevice is one ordered registration made by registerForSession.
+type sessionDevice struct{ id, platform, serverDeviceID string }
+
+// registerForSession registers one ordered device per platform, named after
+// the login session that registers it: Apple first, then Android.
+func registerForSession(t *testing.T, repo *PushDeviceRepository, session string) (apple, android sessionDevice) {
+	t.Helper()
+	ctx, cipher := t.Context(), testPushCipher(t)
+	key := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	input := validApplePushInput()
+	input.DeviceID, input.LoginSessionID = "apple-"+session, session
+	appleReceipt, err := repo.ApplyApplePush(ctx, ApplePushCommand{UserID: 7, ProfileID: "default", InstallationKey: key, Generation: 1, ApplePushRegistrationInput: input}, cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	androidReceipt, err := repo.ApplyAndroidPush(ctx, AndroidPushCommand{UserID: 7, ProfileID: "default", DeviceID: "android-" + session, InstallationKey: key, Generation: 1,
+		Token: strings.Repeat("a", 64), PushMode: PushModePrivatePush, LoginSessionID: session}, cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sessionDevice{input.DeviceID, PushPlatformApple, appleReceipt.ServerDeviceID},
+		sessionDevice{"android-" + session, PushPlatformAndroid, androidReceipt.ServerDeviceID}
+}
+
+// Push follows the login that registered the device, whichever way that login
+// ended: fan-out and test sends refuse the device and retention removes its
+// token. A registration with no known session keeps delivering, and a session a
+// restored backup no longer holds counts as ended.
+func TestPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	ctx := t.Context()
+	wantDelivered := map[string]bool{"live": true, "": true, "revoked": false, "expired": false, "deleted": false}
+	devices := map[sessionDevice]string{}
+	for session := range wantDelivered {
+		apple, android := registerForSession(t, repo, session)
+		devices[apple], devices[android] = session, session
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := repo.ListEnabledPushByProfiles(ctx, tx, []profileKey{{7, "default"}}, []string{PushPlatformApple, PushPlatformAndroid})
+	_ = tx.Rollback(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	picked := map[string]bool{}
+	for _, device := range listed[profileKey{7, "default"}] {
+		picked[device.DeviceID] = true
+	}
+	for device, session := range devices {
+		want := wantDelivered[session]
+		if picked[device.id] != want {
+			t.Errorf("fan-out picked %s (session %q) = %v, want %v", device.id, session, picked[device.id], want)
+		}
+		_, _, err := repo.EnqueueTestAttempt(ctx, device.platform, 7, "default", device.serverDeviceID)
+		if delivered := !errors.Is(err, ErrPushDeliveryNotFound); delivered != want {
+			t.Errorf("test send to %s (session %q): err=%v, want delivered=%v", device.id, session, err, want)
+		}
+	}
+
+	if _, err := repo.DeleteEndedLoginRegistrations(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := pool.Query(ctx, `SELECT device_id FROM push_devices`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for device, session := range devices {
+		if got := slices.Contains(kept, device.id); got != wantDelivered[session] {
+			t.Errorf("retention kept %s (session %q) = %v, want %v", device.id, session, got, wantDelivered[session])
+		}
+	}
+}
+
+// A push queued while the login was live must not leave once it has ended: the
+// retry schedule can hold an attempt for half an hour after the revoke.
+func TestQueuedPushStopsWhenTheRegisteringLoginEndsDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	ctx := t.Context()
+	var relayed atomic.Int32
+	relay := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		relayed.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"request_id":"r","status":"accepted"}`))
+	}))
+	t.Cleanup(relay.Close)
+	sender := newRelayTestSender(relay)
+	sender.devices, sender.cipher = repo, testPushCipher(t)
+	sender.settings = NewSettings(mapSettingReader{
+		SettingPushRelayURL: relay.URL, SettingPushRelayAPIKey: "relay-key", SettingAndroidPushDeliveryEnabled: "true",
+	})
+
+	_, device := registerForSession(t, repo, "live")
+	queue := func() PushDeliveryAttempt {
+		t.Helper()
+		attempt, _, err := repo.EnqueueTestAttempt(ctx, device.platform, 7, "default", device.serverDeviceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *attempt
+	}
+	queued := queue()
+
+	if got := sender.processAttempt(ctx, queue()); got == nil || got.Outcome != PushOutcomeDelivered || relayed.Load() != 1 {
+		t.Fatalf("attempt with a live login = %+v after %d relay calls, want delivered after 1", got, relayed.Load())
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE auth_sessions SET revoked_at = now() WHERE id = 'live'`); err != nil {
+		t.Fatal(err)
+	}
+	got := sender.processAttempt(ctx, queued)
+	if got == nil || got.Outcome != PushOutcomeFailed || got.NextRetryAt != nil || got.UpstreamReason == nil || *got.UpstreamReason != "login_session_ended" {
+		t.Fatalf("attempt after the revoke = %+v, want failed for good", got)
+	}
+	if relayed.Load() != 1 {
+		t.Fatalf("relay calls after the revoke = %d, want 1", relayed.Load())
+	}
+}
+
+// An Apple registration from before the column learns its login when the app
+// renews its display token, which replays the accepted generation.
+func TestAppleRenewalRecordsTheLoginOfAnOlderRegistrationDB(t *testing.T) {
+	repo, pool := loginSessionPushDB(t)
+	ctx, cipher := t.Context(), testPushCipher(t)
+	key := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	cmd := ApplePushCommand{UserID: 7, ProfileID: "default", InstallationKey: key, Generation: 1, ApplePushRegistrationInput: validApplePushInput()}
+	if _, err := repo.ApplyApplePush(ctx, cmd, cipher); err != nil {
+		t.Fatal(err)
+	}
+	cmd.LoginSessionID = "revoked"
+	if _, err := repo.ApplyApplePush(ctx, cmd, cipher); err != nil {
+		t.Fatal(err)
+	}
+	var stored *string
+	if err := pool.QueryRow(ctx, `SELECT login_session_id FROM push_devices WHERE device_id = $1`, cmd.DeviceID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || *stored != "revoked" {
+		t.Fatalf("login_session_id = %v, want revoked", stored)
+	}
+}
+
+// unboundLoginSession is a login session in a TestSweepOfUnboundRegistrationsDB
+// case. The registration under test was last written 10 hours ago.
+type unboundLoginSession struct {
+	user       int
+	device     string // auth_sessions.device_id; empty is NULL.
+	startedAgo int    // hours
+	state      string // "live", "revoked" or "expired" (1 hour ago), or "revoked long ago" (12 hours ago).
+}
+
+// A registration from before login_session_id has no recorded login, and a phone
+// that is already signed out can never supply one. The sweep removes such a
+// registration only when the evidence says the device has no live login: a wrong
+// match silently stops push on a working phone, so ambiguous device evidence keeps
+// delivering. An account with no live session counts as signed out.
+func TestSweepOfUnboundRegistrationsDB(t *testing.T) {
+	const account, otherAccount, device = 7, 8, "phone"
+	for _, tc := range []struct {
+		name     string
+		platform string
+		sessions []unboundLoginSession
+		apiKey   bool
+		boundTo  string
+		want     string // "stops" or "delivers"
+	}{
+		{name: "android, the account's only login was revoked", platform: PushPlatformAndroid,
+			sessions: []unboundLoginSession{{account, "login-uuid", 20, "revoked"}}, want: "stops"},
+		{name: "android, the account's only login expired", platform: PushPlatformAndroid,
+			sessions: []unboundLoginSession{{account, "", 20, "expired"}}, want: "stops"},
+		{name: "android, the account still has a login elsewhere", platform: PushPlatformAndroid,
+			sessions: []unboundLoginSession{{account, "login-uuid", 20, "revoked"}, {account, "browser-uuid", 2, "live"}}, want: "delivers"},
+		{name: "apple, the account has no live login and its session predates device ids", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, "", 20, "revoked"}}, want: "stops"},
+		// No session row means no login: a full restore leaves auth_sessions empty,
+		// and every client signs in again afterwards.
+		{name: "android, no sessions at all, as after a restore", platform: PushPlatformAndroid, want: "stops"},
+		{name: "apple, no sessions at all, as after a restore", platform: PushPlatformApple, want: "stops"},
+		{name: "android, only another account is signed in", platform: PushPlatformAndroid,
+			sessions: []unboundLoginSession{{otherAccount, "other-uuid", 2, "live"}}, want: "stops"},
+		{name: "android, the account's only login began after the registration was written", platform: PushPlatformAndroid,
+			sessions: []unboundLoginSession{{account, "browser-uuid", 3, "revoked"}}, want: "stops"},
+		// An API key registers with no session and outlives every login.
+		{name: "android, the account holds an API key", platform: PushPlatformAndroid, apiKey: true,
+			sessions: []unboundLoginSession{{account, "login-uuid", 20, "revoked"}}, want: "delivers"},
+		{name: "apple, the account holds an API key", platform: PushPlatformApple, apiKey: true,
+			sessions: []unboundLoginSession{{account, device, 20, "revoked"}}, want: "delivers"},
+		// The device is signed in to another account on this server: its row here
+		// is the other account's to replace, not this sweep's to remove.
+		{name: "apple, the device has a live login on another account", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, device, 20, "revoked"}, {otherAccount, device, 2, "live"}}, want: "delivers"},
+		// An Apple login names the push device, so the device's own login can have
+		// ended while the account stays signed in elsewhere.
+		{name: "apple, this device's login was revoked, the account lives on elsewhere", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, device, 20, "revoked"}, {account, "ipad", 2, "live"}}, want: "stops"},
+		{name: "apple, this device's login expired, the account lives on elsewhere", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, device, 20, "expired"}, {account, "ipad", 2, "live"}}, want: "stops"},
+		{name: "apple, this device has a live login too", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, device, 20, "revoked"}, {account, device, 2, "live"}}, want: "delivers"},
+		{name: "apple, a live login names no device, so it may be this one", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, device, 20, "revoked"}, {account, "", 30, "live"}}, want: "delivers"},
+		{name: "apple, the registration was written after this device's login ended", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, device, 20, "revoked long ago"}, {account, "ipad", 2, "live"}}, want: "delivers"},
+		{name: "apple, this device's login began after the registration was written", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, device, 3, "revoked"}, {account, "ipad", 2, "live"}}, want: "delivers"},
+		{name: "apple, only another device's login ended", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{account, "ipad", 20, "revoked"}, {account, "mac", 2, "live"}}, want: "delivers"},
+		{name: "apple, the ended login on this device was another account's", platform: PushPlatformApple,
+			sessions: []unboundLoginSession{{otherAccount, device, 20, "revoked"}, {account, "ipad", 2, "live"}}, want: "delivers"},
+		// An Android login never names the push device, so the same evidence on an
+		// Android registration is a coincidence.
+		{name: "android, a login with a matching id ended, the account lives on elsewhere", platform: PushPlatformAndroid,
+			sessions: []unboundLoginSession{{account, device, 20, "revoked"}, {account, "browser-uuid", 2, "live"}}, want: "delivers"},
+		// A recorded login is the send-time check's to judge.
+		{name: "a registration bound to a live login", platform: PushPlatformApple, boundTo: "s1",
+			sessions: []unboundLoginSession{{account, device, 20, "revoked"}, {account, "ipad", 2, "live"}}, want: "delivers"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, pool := unboundRegistrationDB(t, tc.platform, account, device)
+			for i, s := range tc.sessions {
+				insertUnboundLoginSession(t, pool, fmt.Sprintf("s%d", i), s)
+			}
+			if tc.apiKey {
+				if _, err := pool.Exec(t.Context(), `INSERT INTO api_keys (user_id, label, key_hash, revision)
+					VALUES ($1, 'integration', encode(sha256('k'), 'hex'), 1)`, account); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.boundTo != "" {
+				if _, err := pool.Exec(t.Context(), `UPDATE push_devices SET login_session_id = $1`, tc.boundTo); err != nil {
+					t.Fatal(err)
+				}
+			}
+			swept, err := repo.DeleteRegistrationsWithNoLogin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := map[int64]string{1: "stops", 0: "delivers"}[swept]; got != tc.want {
+				t.Fatalf("registration %s, want it to %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// unboundRegistrationDB returns a schema holding one registration with no
+// recorded login, last written 10 hours ago.
+func unboundRegistrationDB(t *testing.T, platform string, account int, device string) (*PushDeviceRepository, *pgxpool.Pool) {
+	t.Helper()
+	repo, pool := noLoginsPushDB(t)
+	if _, err := registerLegacyMobile(t, repo, platform, account, "default", device, PushModePrivatePush); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE push_devices SET last_seen_at = now() - interval '10 hours'`); err != nil {
+		t.Fatal(err)
+	}
+	return repo, pool
+}
+
+func insertUnboundLoginSession(t *testing.T, pool *pgxpool.Pool, id string, s unboundLoginSession) {
+	t.Helper()
+	expires, revoked := "now() + interval '1 day'", "NULL"
+	switch s.state {
+	case "revoked":
+		revoked = "now() - interval '1 hour'"
+	case "revoked long ago":
+		revoked = "now() - interval '12 hours'"
+	case "expired":
+		expires = "now() - interval '1 hour'"
+	}
+	if _, err := pool.Exec(t.Context(), fmt.Sprintf(`INSERT INTO auth_sessions (id, user_id, device_id, created_at, expires_at, revoked_at)
+		VALUES ($1, $2, NULLIF($3, ''), now() - make_interval(hours => $4), %s, %s)`, expires, revoked), id, s.user, s.device, s.startedAgo); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A sweep removes only the registration, so a phone that signs in again comes
+// back however it registers. Clients take a new generation with the same key at
+// a new sign-in, and the ordering record stays through the sweep.
+func TestSweptPhoneRegistersAgainAtSignInDB(t *testing.T) {
+	const account, otherAccount, device = 7, 8, "phone"
+	key := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	for _, tc := range []struct {
+		name          string
+		ordered       bool // the phone uses the ordered protocol, not the older route
+		loseOrdering  bool // the ordering record is gone by the sign-in
+		returningUser int
+	}{
+		{name: "ordered", ordered: true, returningUser: account},
+		{name: "ordering record gone", ordered: true, loseOrdering: true, returningUser: account},
+		{name: "another account", ordered: true, returningUser: otherAccount},
+		{name: "older client", returningUser: account},
+		{name: "older client on another account", returningUser: otherAccount},
+	} {
+		for _, platform := range []string{PushPlatformAndroid, PushPlatformApple} {
+			t.Run(platform+", "+tc.name, func(t *testing.T) {
+				repo, pool := noLoginsPushDB(t)
+				ctx, cipher := t.Context(), testPushCipher(t)
+				register := func(user, generation int, session string) {
+					t.Helper()
+					var err error
+					switch {
+					case !tc.ordered:
+						_, err = registerLegacyMobile(t, repo, platform, user, "default", device, PushModePrivatePush)
+					case platform == PushPlatformApple:
+						input := validApplePushInput()
+						input.DeviceID, input.LoginSessionID = device, session
+						_, err = repo.ApplyApplePush(ctx, ApplePushCommand{UserID: user, ProfileID: "default", InstallationKey: key, Generation: int64(generation), ApplePushRegistrationInput: input}, cipher)
+					default:
+						_, err = repo.ApplyAndroidPush(ctx, AndroidPushCommand{UserID: user, ProfileID: "default", DeviceID: device, InstallationKey: key, Generation: int64(generation),
+							Token: strings.Repeat("a", 64), PushMode: PushModePrivatePush, LoginSessionID: session}, cipher)
+					}
+					if err != nil {
+						t.Fatalf("register account %d: %v", user, err)
+					}
+				}
+
+				register(account, 1, "")
+				insertUnboundLoginSession(t, pool, "ended", unboundLoginSession{account, "login-id", 20, "revoked"})
+				if _, err := pool.Exec(ctx, `UPDATE push_devices SET last_seen_at = now() - interval '10 hours'`); err != nil {
+					t.Fatal(err)
+				}
+				if swept, err := repo.DeleteRegistrationsWithNoLogin(ctx); err != nil || swept != 1 {
+					t.Fatalf("swept = %d, err = %v, want 1", swept, err)
+				}
+				if tc.loseOrdering {
+					if _, err := pool.Exec(ctx, `TRUNCATE apple_push_installations, android_push_installations`); err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				insertUnboundLoginSession(t, pool, "again", unboundLoginSession{tc.returningUser, "login-id", 0, "live"})
+				register(tc.returningUser, 2, "again")
+
+				tx, err := pool.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				listed, err := repo.ListEnabledPushByProfiles(ctx, tx, []profileKey{{tc.returningUser, "default"}}, []string{platform})
+				_ = tx.Rollback(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := listed[profileKey{tc.returningUser, "default"}]; len(got) != 1 || got[0].DeviceID != device {
+					t.Fatalf("fan-out after the sign-in = %+v, want the phone", got)
+				}
+				if swept, err := repo.DeleteRegistrationsWithNoLogin(ctx); err != nil || swept != 0 {
+					t.Fatalf("second sweep removed %d, err = %v", swept, err)
+				}
+			})
+		}
 	}
 }

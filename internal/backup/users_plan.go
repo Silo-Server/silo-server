@@ -491,11 +491,11 @@ func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error
 			if !ok {
 				continue
 			}
-			count, err := e.count(t, raw)
+			sum, err := e.summary(t, raw)
 			if err != nil {
 				return err
 			}
-			pp.preview.DataTypes = append(pp.preview.DataTypes, PreviewDataType{ID: t.ID(), Count: count})
+			pp.preview.DataTypes = append(pp.preview.DataTypes, PreviewDataType{ID: t.ID(), Count: sum.Count})
 		}
 		match, localID, reason, message, err := u.matchProfile(ctx, plan, e)
 		if err != nil {

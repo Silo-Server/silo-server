@@ -325,12 +325,15 @@ type itemListResponse struct {
 	Studios       []string `json:"studios,omitempty"`
 	Networks      []string `json:"networks,omitempty"`
 	ContentRating string   `json:"content_rating,omitempty"`
-	// AdvisoryAge, AdvisorySource, and LogoURL carry the item's advisory and
-	// logo to the v2 card renderer. json:"-" because /api/v1 is frozen: the
-	// fields exist on the Go struct only, and apiv2 emits them under its own
-	// names.
+	// AdvisoryAge, AdvisorySource, the external IDs, and LogoURL carry the
+	// item's advisory, identity, and logo to the v2 card renderer. json:"-"
+	// because /api/v1 is frozen: the fields exist on the Go struct only, and
+	// apiv2 emits them under its own names.
 	AdvisoryAge            *int     `json:"-"`
 	AdvisorySource         string   `json:"-"`
+	ImdbID                 string   `json:"-"`
+	TmdbID                 string   `json:"-"`
+	TvdbID                 string   `json:"-"`
 	Status                 string   `json:"status"`
 	ShowStatus             string   `json:"show_status,omitempty"`
 	RatingIMDB             *float64 `json:"rating_imdb,omitempty"`
@@ -1026,6 +1029,9 @@ func itemListResponseShell(item *models.MediaItem, overlaySummary *models.Overla
 		RatingTMDB:        item.RatingTMDB,
 		RatingRTCritic:    item.RatingRTCritic,
 		RatingRTAudience:  item.RatingRTAudience,
+		ImdbID:            item.ImdbID,
+		TmdbID:            item.TmdbID,
+		TvdbID:            item.TvdbID,
 		OriginalLanguage:  item.OriginalLanguage,
 		Overview:          item.Overview,
 		PosterThumbhash:   item.PosterThumbhash,

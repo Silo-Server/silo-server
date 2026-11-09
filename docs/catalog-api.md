@@ -442,6 +442,23 @@ same rules as a title page, so a stored 0 (unrated) or a value off the 0-10
 scale is left out, and an episode with no rating omits the field. `/api/v1`
 episode listings do not carry ratings.
 
+## External IDs on cards
+
+Movie and series cards carry `imdb_id`, `tmdb_id`, and `tvdb_id`, the same IDs
+the item's detail document shows, in these listings:
+
+- catalog browse and search (`listCatalogItems`)
+- library and personal collection items
+- favorites and the watchlist
+- watch history
+
+Each member is omitted when the item has no ID from that provider, so a movie
+usually has no `tvdb_id`. Home and library section cards, and episode cards in
+any listing, leave all three out even when the item has them. A client that
+matches titles across servers can read the IDs from a page of cards instead of
+fetching each item's detail, but must fall back to the detail document for a
+card that omits them. `/api/v1` listings do not carry the fields.
+
 ## Section quality badges
 
 Home and library section cards derive `overlay_summary` from the best accessible,

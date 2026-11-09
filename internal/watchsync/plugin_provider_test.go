@@ -1267,7 +1267,13 @@ func TestPluginProviderMapsSeriesMediaBothWays(t *testing.T) {
 
 	client := &fakeWatchSyncPluginClient{listResponses: []*pluginv1.WatchSyncListRemoteStateResponse{
 		{CompleteSnapshot: true, Items: []*pluginv1.WatchSyncRemoteState{{ProviderItemKey: "s1", Media: media, Favorite: &pluginv1.WatchSyncRemoteListState{}}}},
-		{Items: []*pluginv1.WatchSyncRemoteState{{ProviderItemKey: "s1", Media: media, Watched: &pluginv1.WatchSyncRemoteWatchedState{PlayCount: 1}}}},
+		{Items: []*pluginv1.WatchSyncRemoteState{
+			{ProviderItemKey: "s1", Media: media, Watched: &pluginv1.WatchSyncRemoteWatchedState{
+				PlayCount: 1, LastWatchedAt: timestamppb.New(time.Date(2021, 9, 19, 5, 17, 0, 0, time.UTC)),
+			}},
+			// A finished series needs its time; without one it is skipped.
+			{ProviderItemKey: "s2", Media: media, Watched: &pluginv1.WatchSyncRemoteWatchedState{PlayCount: 1}},
+		}},
 	}}
 	provider := testPluginProviderWithDescriptor(t, client, &pluginv1.WatchSyncProviderDescriptor{
 		AuthMethods:     []pluginv1.WatchSyncAuthMethod{pluginv1.WatchSyncAuthMethod_WATCH_SYNC_AUTH_METHOD_API_KEY},
@@ -1282,13 +1288,15 @@ func TestPluginProviderMapsSeriesMediaBothWays(t *testing.T) {
 		favorites.Rows[0].TVDBID != "77" || favorites.Rows[0].SeriesIMDbID != "" {
 		t.Fatalf("favorites = %#v", favorites)
 	}
-	// SERIES is not defined for watched state; a series-level row would
-	// otherwise mark every local episode watched.
+	// A SERIES watched row is a finished series, which ImportWatched expands
+	// to the episodes that had aired by its time.
 	watched, err := provider.FetchWatchedBatch(context.Background(), ServerConfig{}, Connection{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(watched.Rows) != 0 || len(watched.Warnings) != 1 || !strings.Contains(watched.Warnings[0], "series-level watched") {
+	if len(watched.Rows) != 1 || len(watched.Warnings) != 1 || !strings.Contains(watched.Warnings[0], "without last_watched_at") ||
+		watched.Rows[0].Kind != historyimport.KindSeries ||
+		watched.Rows[0].TVDBID != "77" || watched.Rows[0].LastWatchedAt == nil {
 		t.Fatalf("watched = %#v", watched)
 	}
 }

@@ -1698,6 +1698,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 				watchtogether.NewProfileNameResolver(deps.UserStoreProvider),
 			)
 			watchTogetherService.SetPlaybackAttemptStore(playbackHandler.PlanStoreV3)
+			if settingValuesHandler != nil {
+				watchTogetherService.SetGuestControlPreferences(settingValuesHandler.WatchPartyGuestControlPreferences())
+			}
 			if err := watchTogetherService.SetClusterEventBus(deps.EventBus); err != nil {
 				slog.Warn("watch together cluster synchronization unavailable", "error", err)
 			}
@@ -2194,8 +2197,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 		libraryCollectionRepo := catalog.NewLibraryCollectionRepository(deps.DB)
 		var collectionSortCleaner *userstore.CollectionSortPreferenceCleaner
+		var collectionRowRenamer *userstore.CollectionRowRenamer
 		if userRepo != nil && deps.UserStoreProvider != nil {
 			collectionSortCleaner = userstore.NewCollectionSortPreferenceCleaner(userRepo, deps.UserStoreProvider)
+			collectionRowRenamer = userstore.NewCollectionRowRenamer(userRepo, deps.UserStoreProvider)
 		}
 		if collectionHandler != nil {
 			collectionHandler.LibraryCollections = libraryCollectionRepo
@@ -2261,6 +2266,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		libraryCollectionHandler.PersonalMemberCounts = personalMemberCounts
 		libraryCollectionHandler.EventsHub = deps.EventsHub
 		libraryCollectionHandler.SortPreferenceCleaner = collectionSortCleaner
+		libraryCollectionHandler.CollectionRowRenamer = collectionRowRenamer
 		if deps.FolderRepo != nil {
 			libraryCollectionHandler.FolderRepo = deps.FolderRepo
 		} else {

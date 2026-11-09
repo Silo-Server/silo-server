@@ -35,6 +35,7 @@ type UserRef struct {
 	Account AccountEntry
 	file    string
 	sha256  string
+	size    int64
 }
 
 // tempStorageError is a failure of the temporary directory a read writes

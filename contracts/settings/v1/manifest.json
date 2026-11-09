@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 26,
+  "revision": 27,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -1633,6 +1633,26 @@
       "recommended_control": "switch",
       "admin_default": true,
       "notes": "The profile scope deliberately resolves before profile_device: a profile value is the profile's \"apply to all devices\" choice and wins on every device, while with no profile value each device follows its own profile_device value. Clients show a second \"Apply to all devices\" switch whose state is the effective source being profile. Turning it on writes the current value at profile scope; while on, the main switch writes profile scope. Turning it off writes the current value at profile_device for the device doing it and then clears the profile value, so that device keeps its look and every other device returns to its own value or the default. Device values written earlier are kept while the profile value is set and apply again once it is cleared. Covers every surface that names a title with its logo (detail heroes, TV marquees); a client that turns it off also has no reason to prefetch logos. The administrator can replace the default for the whole server; a profile or device with no stored value inherits it with source \"default\", and clearing both the profile value and this device's value returns a device to it."
+    },
+    {
+      "key": "watch_party.guest_control_policy",
+      "introduced_in": 27,
+      "persistence": "remote",
+      "allowed_scopes": ["profile"],
+      "resolution_order": ["profile", "default"],
+      "value_schema": {
+        "type": "enum",
+        "values": [
+          { "value": "host_only", "label": "Host only" },
+          { "value": "guest_play_pause", "label": "Host and guests" }
+        ]
+      },
+      "default_value": "host_only",
+      "category": "watch_party",
+      "label": "Watch Party playback controls",
+      "description": "Who can play and pause in Watch Parties you host. Changing it in a party saves it for your next one.",
+      "recommended_control": "select",
+      "notes": "The server reads it when the profile creates a Watch Party room and starts the room with this guest_control_policy instead of always host_only. The server also writes it at profile scope whenever the host changes a room's policy (updateWatchTogetherRoomPolicy), so the choice made in any client's party options carries to the next party on every client without each client storing or sending it. Profile scope because each household member hosts with their own choice. The enum members are the room's guest_control_policy values."
     }
   ]
 }

@@ -133,8 +133,9 @@ func (r *PushDeviceRepository) ApplyApplePushAndFinalize(ctx context.Context, cm
 		}
 		if cmd.Generation == generation {
 			// Read the current row under lock. Provider failure or profile cleanup
-			// can disable/delete it; replay must preserve either outcome.
-			err = tx.QueryRow(ctx, `SELECT enabled FROM push_devices WHERE id=$1 AND user_id=$2 AND profile_id=$3 AND device_id=$4 AND platform=$5 FOR UPDATE`, result.RegistrationID, cmd.UserID, cmd.ProfileID, cmd.DeviceID, PushPlatformApple).Scan(&result.Enabled)
+			// can disable/delete it; replay must preserve either outcome. A row from
+			// before login_session_id learns its login here, on display token renewal.
+			err = tx.QueryRow(ctx, `UPDATE push_devices SET login_session_id=COALESCE(login_session_id,NULLIF($6,'')) WHERE id=$1 AND user_id=$2 AND profile_id=$3 AND device_id=$4 AND platform=$5 RETURNING enabled`, result.RegistrationID, cmd.UserID, cmd.ProfileID, cmd.DeviceID, PushPlatformApple, cmd.LoginSessionID).Scan(&result.Enabled)
 			if errors.Is(err, pgx.ErrNoRows) {
 				result.Removed = true
 			} else if err != nil {

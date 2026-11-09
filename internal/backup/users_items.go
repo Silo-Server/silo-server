@@ -46,11 +46,12 @@ func newItemResolver(ctx context.Context, q queryer, refs []ItemRef, extra []str
 	if len(ids) == 0 {
 		return r, nil
 	}
+	// One index lookup per id in each table: written as EXISTS per id with
+	// OR, Postgres hashes every key of a large table for each account.
 	found, err := collectStringsArgs(ctx, q, `
-		SELECT id FROM unnest($1::text[]) AS id
-		WHERE EXISTS (SELECT 1 FROM media_items WHERE content_id = id)
-		   OR EXISTS (SELECT 1 FROM episodes WHERE content_id = id)
-		   OR EXISTS (SELECT 1 FROM seasons WHERE content_id = id)`, slices.Collect(maps.Keys(ids)))
+		SELECT content_id FROM media_items WHERE content_id = ANY($1::text[])
+		UNION ALL SELECT content_id FROM episodes WHERE content_id = ANY($1::text[])
+		UNION ALL SELECT content_id FROM seasons WHERE content_id = ANY($1::text[])`, slices.Collect(maps.Keys(ids)))
 	if err != nil {
 		return nil, fmt.Errorf("finding items: %w", err)
 	}

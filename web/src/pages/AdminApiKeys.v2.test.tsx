@@ -61,7 +61,10 @@ function baseline(op: string, options: unknown) {
     return reply(options, {
       available: true,
       guarded_configuration: true,
-      scopes: [],
+      scopes: [
+        { name: "admin:monitor:read", description: "Monitor the server read-only." },
+        { name: "libraries:read", description: "Discover libraries." },
+      ],
       rate_tiers: ["standard", "elevated"],
     });
   if (op === "GET /api/v2/admin/api-keys")
@@ -81,8 +84,14 @@ function mount() {
   const view = render(tree());
   return { client, ...view, refresh: () => view.rerender(tree()) };
 }
+class MockResizeObserver implements ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
 beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  vi.stubGlobal("ResizeObserver", MockResizeObserver);
   state.profile = "owner";
   state.viewer = 2;
   state.users = [{ id: 2, username: "Admin", is_owner: false }];
@@ -93,6 +102,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 it("clears creation-only secret and mutation data on close", async () => {
@@ -275,4 +285,26 @@ it("keeps the new key on screen when the copy fails", async () => {
   );
   expect(state.toastSuccess).not.toHaveBeenCalled();
   expect(screen.getByText(CREATED_KEY)).toBeInTheDocument();
+});
+
+it("sends only the chosen scopes and never an empty scoped key", async () => {
+  vi.mocked(v2).mockImplementation((op, options) =>
+    op === "POST /api/v2/admin/api-keys"
+      ? reply(options, { ...row, key: CREATED_KEY }, { Location: "/api/v2/admin/api-keys/7" })
+      : baseline(op, options),
+  );
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: /Create Key/ }));
+  await userEvent.type(screen.getByLabelText("Label"), "Monitor");
+  await userEvent.click(screen.getByRole("radio", { name: /Selected scopes/ }));
+  // An empty scope list is a full-access key on the server.
+  expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+  await userEvent.click(screen.getByRole("checkbox", { name: "admin:monitor:read" }));
+  await userEvent.click(screen.getByRole("button", { name: "Create" }));
+  await screen.findByText(CREATED_KEY);
+  const posts = vi.mocked(v2).mock.calls.filter(([op]) => op === "POST /api/v2/admin/api-keys");
+  expect(posts).toHaveLength(1);
+  expect(posts[0]![1]).toMatchObject({
+    body: { label: "Monitor", scopes: ["admin:monitor:read"] },
+  });
 });
