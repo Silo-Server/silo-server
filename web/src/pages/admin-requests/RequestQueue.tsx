@@ -338,7 +338,7 @@ function accountFallback(t: Translate, id: number) {
 function reasonDialogText(t: Translate, prompt: ReasonPrompt | null) {
   if (prompt?.action === "bulk-decline") {
     const n = prompt.requests.length;
-    const values = { count: n, count_text: String(n) };
+    const values = { count: n, count_text: n };
     return {
       title: t("web.admin.requests.reasonDialog.bulkDecline.title", values),
       description: t("web.admin.requests.reasonDialog.bulkDecline.description", values),
@@ -569,7 +569,7 @@ function BulkBar({
 }) {
   const t = useT();
   const count = selectedRows.length;
-  const countValues = { count, count_text: String(count) };
+  const countValues = { count, count_text: count };
   const someSelected = count > 0 && !allSelected;
   return (
     <div className="space-y-2">

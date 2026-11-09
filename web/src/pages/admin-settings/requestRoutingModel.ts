@@ -9,7 +9,7 @@ import type {
   RequestRoutePreviewRule,
 } from "@/api/v2/adminRequests";
 import { evaluateShowWhen } from "@/components/admin/plugins/schemaFormUtils";
-import { t, type MessageKey, type TextValues } from "@/i18n";
+import { numberText, t, type MessageKey, type TextValues } from "@/i18n";
 import { routingCountryName, routingLanguageName } from "@/lib/requestRoutingOptions";
 import { tmdbGenreName } from "@/lib/tmdbGenres";
 
@@ -323,11 +323,11 @@ function notOneOf(values: readonly string[]): string {
 function yearRangeLabel(from?: number, to?: number, tx: Text = t): string {
   if (from && to) {
     return from === to
-      ? String(from)
-      : tx("web.admin.settings.requests.model.years.range", { from: String(from), to: String(to) });
+      ? numberText(from)
+      : tx("web.admin.settings.requests.model.years.range", { from, to });
   }
-  if (from) return tx("web.admin.settings.requests.model.years.from", { from: String(from) });
-  if (to) return tx("web.admin.settings.requests.model.years.to", { to: String(to) });
+  if (from) return tx("web.admin.settings.requests.model.years.from", { from });
+  if (to) return tx("web.admin.settings.requests.model.years.to", { to });
   return "";
 }
 

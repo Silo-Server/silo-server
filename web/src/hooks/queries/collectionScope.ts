@@ -206,7 +206,7 @@ export function useScopeSync<Raw extends WireCollection>(scope: CollectionScope<
     onSuccess: (result, id) => {
       const matched = {
         count: result.itemsMatched,
-        count_text: String(result.itemsMatched),
+        count_text: result.itemsMatched,
       };
       toast.success(
         result.status === "warning"

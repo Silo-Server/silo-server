@@ -37,7 +37,7 @@ import {
 import { useCanRequest } from "@/hooks/useCanRequest";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import { requestSearchTypeForScope } from "@/lib/mediaRequests";
 import SearchBar from "@/components/SearchBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -464,7 +464,7 @@ function CatalogResults({
               {showExactResultCount ? (
                 <div className="text-end tabular-nums" role="status" aria-live="polite">
                   <span className="hidden text-3xl font-extralight tracking-tight sm:inline">
-                    {totalItems}
+                    {numberText(totalItems)}
                   </span>
                   <span className="text-muted-foreground ms-1.5 hidden text-xs font-medium tracking-widest uppercase sm:inline">
                     {resultNoun}

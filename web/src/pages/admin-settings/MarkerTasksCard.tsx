@@ -26,7 +26,7 @@ function formatTaskResult(t: Translate, task: TaskInfo | undefined) {
     const invalid = numberFromResultData(data, "invalid");
     const failed = numberFromResultData(data, "failed");
     const retryAfter = numberFromResultData(data, "retry_after_seconds");
-    const count = (n: number) => ({ count: n, count_text: String(n) });
+    const count = (n: number) => ({ count: n, count_text: n });
     const parts = [
       submitted != null ? t("web.admin.settings.markers.tasks.submitted", count(submitted)) : null,
       skipped != null ? t("web.admin.settings.markers.tasks.skipped", count(skipped)) : null,

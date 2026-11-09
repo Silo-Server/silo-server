@@ -464,7 +464,7 @@ export function deleteCollectionsTitle(
   kind: CollectionKind | null,
   where: string | null,
 ): string {
-  const values = { kind: kind ?? "mixed", count, count_text: String(count) };
+  const values = { kind: kind ?? "mixed", count, count_text: count };
   return where
     ? t("web.collections.copy.deleteCollectionsTitleIn", { ...values, where })
     : t("web.collections.copy.deleteCollectionsTitle", values);

@@ -69,7 +69,7 @@ export function remakeDescription(
   widthChanged: boolean,
   previews: number | null,
 ): string {
-  const count = previews === null ? undefined : { count: previews, count_text: String(previews) };
+  const count = previews === null ? undefined : { count: previews, count_text: previews };
   if (!widthChanged) {
     return count
       ? t("web.admin.settings.playback.remake.intervalCount", count)

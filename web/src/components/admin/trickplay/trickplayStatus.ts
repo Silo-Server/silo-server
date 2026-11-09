@@ -19,7 +19,7 @@ export function libraryTrickplayLabel(library: AdminTrickplayLibrary): string {
 }
 
 function countValues(count: number) {
-  return { count, count_text: String(count) };
+  return { count, count_text: count };
 }
 
 /** The badge's tooltip: every count, then the storage the sheets take. */

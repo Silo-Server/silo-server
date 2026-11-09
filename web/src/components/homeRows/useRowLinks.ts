@@ -141,7 +141,7 @@ export function useRowLinks({
           const position = at === -1 ? total : at + 1;
           const added: AddedRowState = { addedRow: { id, surface, page, position } };
           navigate(returnTo, { replace: true, state: { ...carried, ...added } });
-          const place = { position: String(position), total: String(total) };
+          const place = { position, total };
           const message =
             page.kind === "home"
               ? t("web.home.rows.links.addedHome", place)

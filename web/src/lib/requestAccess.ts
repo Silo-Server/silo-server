@@ -196,7 +196,7 @@ function formatQuotaFrom(quota: RequestQuota, source?: string): string {
       ? t("web.admin.common.requestAccess.noNewRequestsFrom", { per_window, source })
       : t("web.admin.common.requestAccess.noNewRequests", { per_window });
   }
-  const count = { count: quota.max, count_text: String(quota.max), per_window };
+  const count = { count: quota.max, count_text: quota.max, per_window };
   return source
     ? t("web.admin.common.requestAccess.quotaFrom", { ...count, source })
     : t("web.admin.common.requestAccess.quota", count);

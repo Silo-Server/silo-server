@@ -36,7 +36,7 @@ function statusVariant(status: string) {
 }
 
 function countValues(count: number) {
-  return { count, count_text: String(count) };
+  return { count, count_text: count };
 }
 
 function jobDescription(job: AdminJob, t: Translate) {

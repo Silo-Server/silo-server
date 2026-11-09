@@ -329,7 +329,7 @@ export function upcomingRequestSeasons(seasons: RequestMediaSeason[], now = new 
 /** "2022 · 9 episodes", or "Not announced" before TMDB dates or fills the season. */
 export function formatRequestSeasonMeta(season: RequestMediaSeason): string {
   const parts: string[] = [];
-  if (season.air_date) parts.push(season.air_date.slice(0, 4));
+  if (season.air_date) parts.push(numberText(season.air_date.slice(0, 4)));
   if (season.episode_count > 0) {
     parts.push(
       t("web.requests.status.seasonEpisodes", {

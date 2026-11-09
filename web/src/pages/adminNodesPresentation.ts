@@ -1003,7 +1003,7 @@ function describeCPU(system: HostSystemStats): ResourceMetric {
   }
 
   const percent = clampPercent(cpu);
-  const coreValues = cores != null ? { count: cores, count_text: String(cores) } : null;
+  const coreValues = cores != null ? { count: cores, count_text: cores } : null;
   const detail = [
     coreValues && coreValues.count > 0 ? t("web.admin.nodes.cpu.cores", coreValues) : null,
     load1 != null ? t("web.admin.nodes.cpu.load", { load: formatDecimal(load1, 2) }) : null,

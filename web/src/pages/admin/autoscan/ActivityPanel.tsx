@@ -662,7 +662,7 @@ function eventDetailsSummary(t: Translate, event: AutoscanEvent): string {
 
 /** Plural values for a count printed without digit grouping. */
 function rawCountValues(count: number) {
-  return { count, count_text: String(count) };
+  return { count, count_text: count };
 }
 
 function PollMetricStrip({ event }: { event: AutoscanEvent }) {

@@ -58,7 +58,7 @@ export function TablePagination({
   const num = (chunks: ReactNode) => (
     <span className="text-foreground font-medium tabular-nums">{chunks}</span>
   );
-  const range = { from: String(from), to: String(to), total: String(total), num };
+  const range = { from, to, total, num };
   const summaryText = t(summaryKey, { ...range, count: total });
 
   const goTo = (next: number) => {

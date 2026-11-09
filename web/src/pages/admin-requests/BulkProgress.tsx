@@ -17,7 +17,7 @@ export function BulkProgress({
   const { action, total, done, failures } = progress;
   const approving = action === "approve";
   if (running) {
-    const values = { count: total, count_text: String(total), done: String(done) };
+    const values = { count: total, count_text: total, done };
     return (
       <div role="status" className="border-border bg-card space-y-2 rounded-lg border p-3 text-sm">
         <p>
@@ -39,9 +39,9 @@ export function BulkProgress({
   if (failures.length === 0) return null;
   const resultValues = {
     count: failures.length,
-    count_text: String(failures.length),
-    succeeded: String(total - failures.length),
-    total: String(total),
+    count_text: failures.length,
+    succeeded: total - failures.length,
+    total,
   };
   return (
     <div

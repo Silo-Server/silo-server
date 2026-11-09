@@ -54,7 +54,7 @@ export function describeTrigger(t: TriggerConfig, style: "long" | "short" = "lon
                 : "web.admin.tasks.triggerText.everyMilliseconds",
               ms,
             ];
-      return appT(key, { count, count_text: String(count) });
+      return appT(key, { count, count_text: count });
     }
     case "daily":
       return appT("web.admin.tasks.triggerText.daily", { time: t.time_of_day ?? "00:00" });
