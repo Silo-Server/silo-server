@@ -5118,12 +5118,12 @@ export function VideoPlayer({
       ref={containerRef}
       className={
         displayMode === "postroll"
-          ? `player-container fixed top-6 left-6 z-[60] aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 transition-opacity duration-700 ${hasEnded ? "pointer-events-none opacity-0" : "cursor-pointer"}`
+          ? `player-container fixed top-6 left-6 z-[60] aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 transition-opacity duration-700 select-none ${hasEnded ? "pointer-events-none opacity-0" : "cursor-pointer"}`
           : isDetached
             ? "pointer-events-none fixed top-0 left-0 z-[-1] h-px w-px overflow-hidden opacity-0"
             : controlsVisible
-              ? "player-container fixed inset-0 z-50 bg-black"
-              : "player-container fixed inset-0 z-50 cursor-none bg-black"
+              ? "player-container fixed inset-0 z-50 bg-black select-none"
+              : "player-container fixed inset-0 z-50 cursor-none bg-black select-none"
       }
       style={displayMode === "postroll" ? { width: miniPlayerWidth } : undefined}
       onClick={isPostrollVisible ? handleMiniPlayerClick : undefined}
@@ -5401,7 +5401,7 @@ export function VideoPlayer({
       {!isDetached && error && connectionStatus === "connected" && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/80">
           <div className="text-center">
-            <div className="mb-4 text-sm text-white/60">{error}</div>
+            <div className="mb-4 text-sm text-white/60 select-text">{error}</div>
             <button
               onClick={() => {
                 void handleExit();

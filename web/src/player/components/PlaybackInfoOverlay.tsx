@@ -69,7 +69,7 @@ export function PlaybackInfoOverlay({
   );
 
   return (
-    <div className="absolute top-12 left-4 z-50 max-h-[calc(100%-6rem)] w-80 overflow-y-auto rounded-lg bg-black/85 text-sm text-white shadow-lg backdrop-blur-sm">
+    <div className="absolute top-12 left-4 z-50 max-h-[calc(100%-6rem)] w-80 overflow-y-auto rounded-lg bg-black/85 text-sm text-white shadow-lg backdrop-blur-sm select-text">
       <div className="flex items-center justify-between px-4 pt-3 pb-2">
         <span className="font-medium text-white/90">Playback Info</span>
         <button
