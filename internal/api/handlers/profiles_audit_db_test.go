@@ -146,12 +146,22 @@ func checkProfileUpdateAudit(t *testing.T, d profileAuditDB, parentID, childID, 
 	}
 	changed[0].AssertNoSecrets(t, pin, nextPIN, d.pinHash(childID))
 
+	// Blocking the profile from requests alone is an access change.
+	if err := update(ProfileUpdateRequest{RequestsBlocked: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	blocked := updates()
+	if len(blocked) != 2 || len(blocked[1].Changes) != 1 || audittest.Value(blocked[1].Change(t, "requests_blocked").Before) != "false" ||
+		audittest.Value(blocked[1].Change(t, "requests_blocked").After) != "true" {
+		t.Fatalf("requests block: %+v", blocked)
+	}
+
 	if err := update(ProfileUpdateRequest{PIN: new(""), Name: new("Kiddo"), IsChild: new(false)}); err != nil {
 		t.Fatal(err)
 	}
 	cleared := updates()
-	if len(cleared) != 2 || audittest.Value(cleared[1].Change(t, "pin").After) != "false" ||
-		audittest.Value(cleared[1].Change(t, "name").Before) != `"Kid"` || audittest.Value(cleared[1].Change(t, "is_child").After) != "false" {
+	if len(cleared) != 3 || audittest.Value(cleared[2].Change(t, "pin").After) != "false" ||
+		audittest.Value(cleared[2].Change(t, "name").Before) != `"Kid"` || audittest.Value(cleared[2].Change(t, "is_child").After) != "false" {
 		t.Fatalf("clear PIN and rename: %+v", cleared)
 	}
 }

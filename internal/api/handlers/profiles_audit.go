@@ -32,9 +32,9 @@ func profileAuditValues(p *userstore.Profile) map[string]any {
 	return map[string]any{
 		auditFieldProfileName: strings.TrimSpace(p.Name), "is_child": p.IsChild, "is_primary": p.IsPrimary,
 		"max_content_rating": p.MaxContentRating, "max_advisory_age": p.MaxAdvisoryAge,
-		"require_advisory_age": p.RequireAdvisoryAge, "library_restrictions_enabled": p.LibraryRestrictionsEnabled,
-		"allowed_library_ids": libraries, "max_playback_quality": p.MaxPlaybackQuality,
-		auditFieldPIN: p.PINHash != "",
+		"require_advisory_age": p.RequireAdvisoryAge, "requests_blocked": p.RequestsBlocked,
+		"library_restrictions_enabled": p.LibraryRestrictionsEnabled, "allowed_library_ids": libraries,
+		"max_playback_quality": p.MaxPlaybackQuality, auditFieldPIN: p.PINHash != "",
 	}
 }
 
