@@ -104,9 +104,13 @@ const LIBRARY_PARAM = "library";
 
 export default function Collections() {
   useDocumentTitle("Collections");
-  const { data, isLoading } = useCollections();
+  const { data, isLoading, isSuccess: personalLoaded } = useCollections();
   const { data: capabilities } = useCollectionCapabilities();
-  const { data: profiles = [], isLoading: profilesLoading } = useProfiles();
+  const {
+    data: profiles = [],
+    isLoading: profilesLoading,
+    isSuccess: profilesLoaded,
+  } = useProfiles();
   const { profile } = useCurrentProfile();
   const server = useServerCollections();
   const libraries = server.data ?? [];
@@ -153,6 +157,19 @@ export default function Collections() {
     WALL_LABEL[show] ?? (picked ? `${picked.library_name} collections` : "All collections");
   const personalLoading = (showMine || show === "shared") && isLoading;
   const serverLoading = showServer && server.isLoading;
+  // A view with nothing in it says so rather than leaving the wall blank, but
+  // only once what it shows has loaded: a slow or failed request isn't "none".
+  let emptyMessage: string | undefined;
+  if (show === "mine" && personalLoaded && own.length === 0)
+    emptyMessage = "You haven't made any collections yet.";
+  else if (
+    show === "all" &&
+    personalLoaded &&
+    profilesLoaded &&
+    server.isSuccess &&
+    own.length + sharedCards.length + libraries.length === 0
+  )
+    emptyMessage = "There are no collections yet.";
 
   function changeShow(next: string) {
     setSearchParams(
@@ -217,6 +234,7 @@ export default function Collections() {
         {sharedCards.length > 0 || libraries.length > 0 ? (
           <PillSwitcher label="Show" options={filterOptions} value={show} onChange={changeShow} />
         ) : null}
+        {emptyMessage ? <p className="text-muted-foreground text-[13px]">{emptyMessage}</p> : null}
         {/* The personal cards' place while they load; the server's don't wait for them. */}
         {personalLoading ? <PosterGridSkeleton /> : null}
         <Wall
@@ -431,11 +449,7 @@ function YourCollections({
         }}
       />
       {allowFor.dialog}
-      {collections.length === 0 ? (
-        <li>
-          <NewCollectionCard />
-        </li>
-      ) : (
+      {collections.length === 0 ? null : (
         <SortableCollectionGrid
           collections={collections}
           disabled={!canReorder}
@@ -494,21 +508,6 @@ function YourCollections({
         </SortableCollectionGrid>
       )}
     </>
-  );
-}
-
-/** The empty Your collections: one dashed card, because nobody sees anything here yet. */
-function NewCollectionCard() {
-  const [, setPickerOpen] = useDialogSearchParam(NEW_COLLECTION_DIALOG);
-  return (
-    <button
-      type="button"
-      onClick={() => setPickerOpen(true)}
-      className="border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 focus-visible:ring-ring/50 flex aspect-[2/3] flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center text-[13px] font-medium transition-colors outline-none focus-visible:ring-[3px]"
-    >
-      <Plus aria-hidden className="size-5" />
-      New collection
-    </button>
   );
 }
 
