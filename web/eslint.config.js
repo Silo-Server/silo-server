@@ -148,7 +148,7 @@ export default tseslint.config(
         ...CONTRACT_SYNTAX,
         {
           selector:
-            "CallExpression[callee.object.name='toast'][arguments.0.type=/^(Literal|TemplateLiteral)$/]",
+            "CallExpression:matches([callee.name='toast'], [callee.object.name='toast'])[arguments.0.type=/^(Literal|TemplateLiteral)$/]",
           message: "Toast text comes from the message catalog: toast.success(t(...)).",
         },
       ],
