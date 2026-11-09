@@ -842,6 +842,9 @@ export interface BrowseItem {
   play_content_id?: string;
   type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
   title: string;
+  /** On a Continue Watching or Next Up row's card: in_progress or next_up. */
+  item_source?: string;
+  progress_updated_at?: string;
   series_id?: string;
   series_title?: string;
   season_number?: number | null;
