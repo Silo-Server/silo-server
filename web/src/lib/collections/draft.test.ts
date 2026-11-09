@@ -127,14 +127,26 @@ describe("smart rules and their libraries", () => {
     },
   };
 
-  it("counts a library change once, as Libraries, not as Rules too", () => {
+  it("personal: counts a library change once, as Libraries, not as Rules too", () => {
+    const personal: CollectionDraft = {
+      ...smart,
+      server: undefined,
+      personal: { shared: false, inLibraryTabs: false },
+    };
     expect(
-      changedFields(smart, {
-        ...smart,
+      changedFields(personal, {
+        ...personal,
         libraryIds: [1],
-        rules: { ...smart.rules!, library_ids: [1] },
+        rules: { ...personal.rules!, library_ids: [1] },
       }),
     ).toEqual(["libraryIds"]);
+  });
+
+  it("server: the rules' libraries are Rules, apart from where it shows", () => {
+    expect(changedFields(smart, { ...smart, rules: { ...smart.rules!, library_ids: [] } })).toEqual(
+      ["rules"],
+    );
+    expect(changedFields(smart, { ...smart, libraryIds: [3] })).toEqual(["libraryIds"]);
   });
 
   it("still sees a rule change", () => {

@@ -17,17 +17,10 @@ const GHOSTS = 8;
 
 /**
  * "● Live preview · 40 titles match · showing 24": the first titles the
- * Smart rules match across every chosen library, as posters. With nothing to
+ * Smart rules match, from the libraries they name, as posters. With nothing to
  * match it shows ghost posters and says saving still works.
  */
-export function CollectionPreviewPane({
-  preview,
-  note,
-}: {
-  preview: ScopePreview;
-  /** A muted line beside the count, such as where the matches come from. */
-  note?: string;
-}) {
+export function CollectionPreviewPane({ preview }: { preview: ScopePreview }) {
   const id = useId();
   const ready = preview.status === "ready" ? preview : null;
   const busy = preview.status === "loading" || Boolean(ready?.refreshing);
@@ -68,14 +61,6 @@ export function CollectionPreviewPane({
             </>
           ) : null}
         </p>
-        {note ? (
-          <>
-            <span aria-hidden className="text-muted-foreground">
-              ·
-            </span>
-            <span className="text-muted-foreground">{note}</span>
-          </>
-        ) : null}
       </div>
 
       <PreviewBody preview={preview} />

@@ -46,13 +46,17 @@ const FIELDS: Record<DraftField, FieldAccess> = {
     get: (d) => [...d.libraryIds].sort((a, b) => a - b),
     set: (d, v) => ({ ...d, libraryIds: [...(v as number[])] }),
   },
-  // The rules' libraries are the draft's `libraryIds`; they count once, as Libraries.
+  // A personal collection's rules match the draft's `libraryIds`, so they count once, as
+  // Libraries. A server collection's rules carry their own libraries: `libraryIds` is only
+  // where it shows.
   rules: {
-    get: (d) => d.rules && { ...d.rules, library_ids: undefined },
+    get: (d) => d.rules && (d.server ? d.rules : { ...d.rules, library_ids: undefined }),
     set: (d, v) => ({
       ...d,
       rules: v
-        ? { ...(v as NonNullable<CollectionDraft["rules"]>), library_ids: d.libraryIds }
+        ? d.server
+          ? (v as NonNullable<CollectionDraft["rules"]>)
+          : { ...(v as NonNullable<CollectionDraft["rules"]>), library_ids: d.libraryIds }
         : undefined,
     }),
   },
@@ -101,9 +105,13 @@ const FIELDS: Record<DraftField, FieldAccess> = {
 
 const FIELD_ORDER = Object.keys(FIELDS) as DraftField[];
 
-/** The rules a Smart draft matches, across the libraries the draft names. */
+/**
+ * The rules a Smart draft matches. A server collection's rules name their own
+ * libraries (none: every library); a personal one's are the draft's libraries.
+ */
 export function draftRules(draft: CollectionDraft): QueryDefinition {
-  return { ...normalizeQueryDefinition(draft.rules), library_ids: draft.libraryIds };
+  const rules = normalizeQueryDefinition(draft.rules);
+  return draft.server ? rules : { ...rules, library_ids: draft.libraryIds };
 }
 
 /**

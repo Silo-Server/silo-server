@@ -14,20 +14,20 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestResolveLibraryCollectionMembershipNarrowsToCollectionLibraries(t *testing.T) {
+func TestResolveLibraryCollectionMembershipDrawsFromItsRules(t *testing.T) {
+	// The libraries a collection shows in never narrow its rules: those only
+	// decide which Collections tabs list it.
 	cases := []struct {
 		name       string
 		saved      []int
 		collection models.LibraryCollection
 		want       []int
-		wantOK     bool
 	}{
-		{name: "no collection libraries keeps the saved scope", saved: []int{1}, want: []int{1}, wantOK: true},
-		{name: "no saved scope takes the collection's libraries", collection: models.LibraryCollection{LibraryIDs: []int{2, 3}}, want: []int{2, 3}, wantOK: true},
-		{name: "single library collection narrows the saved scope", saved: []int{1, 2}, collection: models.LibraryCollection{LibraryID: 2}, want: []int{2}, wantOK: true},
-		{name: "overlap keeps the shared libraries", saved: []int{1, 2}, collection: models.LibraryCollection{LibraryIDs: []int{2, 3}}, want: []int{2}, wantOK: true},
-		{name: "no overlap matches nothing", saved: []int{1}, collection: models.LibraryCollection{LibraryIDs: []int{2}}, wantOK: false},
-		{name: "no overlap with a single library matches nothing", saved: []int{1}, collection: models.LibraryCollection{LibraryID: 2}, wantOK: false},
+		{name: "rules name libraries", saved: []int{1}, want: []int{1}},
+		{name: "rules name none: every library", collection: models.LibraryCollection{LibraryIDs: []int{2, 3}}},
+		{name: "a legacy single library leaves the rules alone", saved: []int{1, 2}, collection: models.LibraryCollection{LibraryID: 2}, want: []int{1, 2}},
+		{name: "rules reach past the collection's libraries", saved: []int{1, 2}, collection: models.LibraryCollection{LibraryIDs: []int{2, 3}}, want: []int{1, 2}},
+		{name: "rules miss the collection's libraries", saved: []int{1}, collection: models.LibraryCollection{LibraryIDs: []int{2}}, want: []int{1}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,22 +41,20 @@ func TestResolveLibraryCollectionMembershipNarrowsToCollectionLibraries(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !got.Live {
-				t.Fatal("smart collection resolved as stored")
+			if !got.Live || got.OutOfScope {
+				t.Fatalf("membership = %+v, want a live query", got)
 			}
-			if ok := !got.OutOfScope; ok != tc.wantOK {
-				t.Fatalf("in scope = %v, want %v", ok, tc.wantOK)
-			}
-			if tc.wantOK && !slices.Equal(got.Query.LibraryIDs, tc.want) {
+			if !slices.Equal(got.Query.LibraryIDs, tc.want) {
 				t.Fatalf("LibraryIDs = %v, want %v", got.Query.LibraryIDs, tc.want)
 			}
 		})
 	}
 }
 
-// A smart collection whose saved library_ids miss the collection's own
-// libraries must resolve empty on every read path, not widen to every library.
-func TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB(t *testing.T) {
+// A smart collection lists the titles its rules match, from the rules' own
+// libraries, even outside the libraries that show it, on every read path. A
+// viewer still sees only titles in libraries they may open.
+func TestLibraryCollectionDrawsFromItsRulesLibrariesDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -104,23 +102,38 @@ func TestLibraryCollectionWithoutLibraryOverlapResolvesEmptyDB(t *testing.T) {
 	}()
 
 	resolver := NewCatalogResolver(NewBrowseRepository(pool), NewItemRepository(pool))
-	for _, access := range []AccessFilter{{}, {AllowedLibraryIDs: libraries}} {
+	ruleTitle := prefix + "-item-0"
+	for _, tc := range []struct {
+		access AccessFilter
+		want   []string
+	}{
+		{access: AccessFilter{}, want: []string{ruleTitle}},
+		{access: AccessFilter{AllowedLibraryIDs: libraries}, want: []string{ruleTitle}},
+		// Opens the collection through the library that shows it, but may
+		// not see the rules' library.
+		{access: AccessFilter{AllowedLibraryIDs: []int{libraries[1]}}},
+	} {
+		allowed := tc.access.AllowedLibraryIDs
 		for _, cursor := range []bool{false, true} {
 			req := CatalogRequest{Source: CatalogSourceLibraryCollection, CollectionID: c.ID, CursorPaging: cursor, Limit: 50}
-			result, err := resolver.Resolve(ctx, req, access)
+			result, err := resolver.Resolve(ctx, req, tc.access)
 			if err != nil {
-				t.Fatalf("cursor=%v allowed=%v: %v", cursor, access.AllowedLibraryIDs, err)
+				t.Fatalf("cursor=%v allowed=%v: %v", cursor, allowed, err)
 			}
-			if len(result.Items) != 0 || result.Total != 0 {
-				t.Fatalf("cursor=%v allowed=%v: got %d items (total %d), want none", cursor, access.AllowedLibraryIDs, len(result.Items), result.Total)
+			got := make([]string, 0, len(result.Items))
+			for _, item := range result.Items {
+				got = append(got, item.ContentID)
+			}
+			if !slices.Equal(got, tc.want) && !(len(got) == 0 && len(tc.want) == 0) {
+				t.Fatalf("cursor=%v allowed=%v: got %v, want %v", cursor, allowed, got, tc.want)
 			}
 		}
-		ids, err := resolver.loadCollectionSourceIDs(ctx, CatalogRequest{Source: CatalogSourceLibraryCollection, CollectionID: c.ID}, access)
+		ids, err := resolver.loadCollectionSourceIDs(ctx, CatalogRequest{Source: CatalogSourceLibraryCollection, CollectionID: c.ID}, tc.access)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(ids) != 0 {
-			t.Fatalf("allowed=%v: source IDs = %v, want none", access.AllowedLibraryIDs, ids)
+		if !slices.Equal(ids, tc.want) && !(len(ids) == 0 && len(tc.want) == 0) {
+			t.Fatalf("allowed=%v: source IDs = %v, want %v", allowed, ids, tc.want)
 		}
 	}
 }

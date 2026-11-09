@@ -56,8 +56,8 @@ func TestResolveLibraryCollectionMembershipPreparesSmartQuery(t *testing.T) {
 	if !m.Live || m.OutOfScope {
 		t.Fatalf("membership = %+v, want a live query", m)
 	}
-	if !slices.Equal(m.Query.LibraryIDs, []int{2}) {
-		t.Fatalf("library_ids = %v, want the query's libraries the collection is bound to", m.Query.LibraryIDs)
+	if !slices.Equal(m.Query.LibraryIDs, []int{2, 3}) {
+		t.Fatalf("library_ids = %v, want the query's own libraries", m.Query.LibraryIDs)
 	}
 	if m.Query.Limit == nil || *m.Query.Limit != DefaultSmartCollectionItemLimit {
 		t.Fatalf("limit = %v, want the uncapped smart default", m.Query.Limit)
@@ -90,30 +90,39 @@ func TestResolveLibraryCollectionMembershipListsSmartMembersInDefaultSort(t *tes
 	if m.Sort != (QuerySort{Field: "title", Order: "asc"}) {
 		t.Fatalf("sort = %+v, want the sort_config default", m.Sort)
 	}
-	if !slices.Equal(m.Query.LibraryIDs, []int{4}) {
-		t.Fatalf("library_ids = %v, want the legacy single library", m.Query.LibraryIDs)
+	if len(m.Query.LibraryIDs) != 0 {
+		t.Fatalf("library_ids = %v, want every library: the legacy single library only shows it", m.Query.LibraryIDs)
 	}
 }
 
 func TestResolveLibraryCollectionMembershipNarrowsToScope(t *testing.T) {
-	c := &models.LibraryCollection{
+	named := &models.LibraryCollection{
 		CollectionType:  "smart",
-		LibraryIDs:      []int{1, 2},
+		LibraryIDs:      []int{9},
+		QueryDefinition: json.RawMessage(`{"library_ids":[1,2]}`),
+	}
+	every := &models.LibraryCollection{
+		CollectionType:  "smart",
+		LibraryIDs:      []int{9},
 		QueryDefinition: json.RawMessage(`{}`),
 	}
 	for _, tc := range []struct {
 		name       string
+		collection *models.LibraryCollection
 		scope      []int
 		want       []int
 		outOfScope bool
 	}{
-		{name: "no scope", scope: nil, want: []int{1, 2}},
-		{name: "overlapping scope", scope: []int{2, 5}, want: []int{2}},
-		{name: "disjoint scope", scope: []int{5}, outOfScope: true},
-		{name: "empty scope", scope: []int{}, outOfScope: true},
+		{name: "no scope", collection: named, scope: nil, want: []int{1, 2}},
+		{name: "overlapping scope", collection: named, scope: []int{2, 5}, want: []int{2}},
+		{name: "disjoint scope", collection: named, scope: []int{5}, outOfScope: true},
+		{name: "empty scope", collection: named, scope: []int{}, outOfScope: true},
+		{name: "every library, no scope", collection: every, scope: nil},
+		{name: "every library, scoped reader", collection: every, scope: []int{2, 5}, want: []int{2, 5}},
+		{name: "every library, empty scope", collection: every, scope: []int{}, outOfScope: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, err := ResolveLibraryCollectionMembership(c, tc.scope)
+			m, err := ResolveLibraryCollectionMembership(tc.collection, tc.scope)
 			if err != nil {
 				t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 			}
@@ -127,15 +136,16 @@ func TestResolveLibraryCollectionMembershipNarrowsToScope(t *testing.T) {
 	}
 }
 
-func TestResolveLibraryCollectionMembershipHasNoMembersOutsideItsLibraries(t *testing.T) {
-	// The query names only libraries the collection is not bound to. An empty
-	// library list would otherwise run the query over every library.
+func TestResolveLibraryCollectionMembershipHasNoMembersOutsideScope(t *testing.T) {
+	// The query names only a library the reader may not list, though the
+	// collection shows in one they may. An empty library list would otherwise
+	// run the query over every library.
 	c := &models.LibraryCollection{
 		CollectionType:  "smart",
 		LibraryIDs:      []int{1},
 		QueryDefinition: json.RawMessage(`{"library_ids":[2]}`),
 	}
-	m, err := ResolveLibraryCollectionMembership(c, []int{1, 2})
+	m, err := ResolveLibraryCollectionMembership(c, []int{1})
 	if err != nil {
 		t.Fatalf("ResolveLibraryCollectionMembership: %v", err)
 	}

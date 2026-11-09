@@ -10,8 +10,9 @@ import { OrderBlock } from "../fields/OrderBlock";
 
 /**
  * A Smart collection's Contents: the Home rows rule sentence, with the
- * libraries in it (server: at least one; personal: none means all my
- * libraries), then Order. Personalized rules are offered only on a personal
+ * libraries it draws from in it (none: every library, or all my libraries on
+ * a personal collection), then Order. A server collection's rules keep their
+ * own libraries; where it shows is picked in Where it shows. Personalized rules are offered only on a personal
  * collection; rules the builder can't show stay as locked lines until removed.
  */
 export function SmartRulesPanel({
@@ -45,11 +46,14 @@ export function SmartRulesPanel({
         value={rules}
         libraries={libraries}
         allowPersonalized={personal}
-        librariesRequired={!personal}
         allLibrariesLabel={personal ? ALL_MY_LIBRARIES : undefined}
         librariesId={LIBRARIES_LINE_ID}
         onChange={(next) =>
-          onChange((current) => ({ ...current, libraryIds: next.library_ids, rules: next }))
+          onChange((current) =>
+            personal
+              ? { ...current, libraryIds: next.library_ids, rules: next }
+              : { ...current, rules: next },
+          )
         }
       />
       {personal ? (

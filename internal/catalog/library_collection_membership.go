@@ -17,12 +17,12 @@ type LibraryCollectionMembership struct {
 	// collection's stored items.
 	Live bool
 	// Query selects a live collection's members: its rules narrowed to the
-	// collection's libraries and the requested scope, with the smart item
-	// limit applied. Its sort and limit decide which titles are members.
+	// requested scope, with the smart item limit applied. Its sort and limit
+	// decide which titles are members.
 	Query QueryDefinition
 	// OutOfScope reports that a live collection has no members because none of
-	// its libraries is in scope. Query must not run then: its empty LibraryIDs
-	// would mean every library.
+	// the libraries its rules draw from is in scope. Query must not run then:
+	// its empty LibraryIDs would mean every library.
 	OutOfScope bool
 	// Sort is the order the members are listed in when the viewer picks none:
 	// the creator's default from sort_config, otherwise Query's own sort for a
@@ -63,26 +63,16 @@ func ResolveLibraryCollectionMembership(c *models.LibraryCollection, scope []int
 		m.Sort = defaultSort
 	}
 
-	var collectionLibraries []int
-	switch {
-	case len(c.LibraryIDs) > 0:
-		collectionLibraries = c.LibraryIDs
-	case c.LibraryID > 0:
-		collectionLibraries = []int{c.LibraryID}
-	}
-	for _, allowed := range [][]int{collectionLibraries, scope} {
-		if allowed == nil {
-			continue
-		}
+	// The rules' own libraries are where its titles come from, every library
+	// when they name none. The collection's libraries only decide which
+	// Collections tabs show it, so they never narrow the rules.
+	if scope != nil {
 		if len(def.LibraryIDs) == 0 {
-			def.LibraryIDs = slices.Clone(allowed)
+			def.LibraryIDs = slices.Clone(scope)
 		} else {
-			def.LibraryIDs = intersectInts(def.LibraryIDs, allowed)
+			def.LibraryIDs = intersectInts(def.LibraryIDs, scope)
 		}
-		if len(def.LibraryIDs) == 0 {
-			m.OutOfScope = true
-			break
-		}
+		m.OutOfScope = len(def.LibraryIDs) == 0
 	}
 	m.Query = ApplySmartCollectionItemLimit(def)
 	return m, nil

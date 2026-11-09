@@ -39,7 +39,7 @@ import {
   PICK_A_LIBRARY,
   PICK_A_LIST_FIRST,
   PICK_LIBRARIES_FIRST,
-  PREVIEW_EVERY_LIBRARY,
+  PICK_WHERE_IT_SHOWS_FIRST,
   PREVIEW_SHOWS_UNSAVED,
   SAVE_AFTER_CONFLICTS,
   SAVE_FAILED,
@@ -182,9 +182,6 @@ function SmartContents<Raw extends WireCollection>({
   libraries: Array<{ id: number; name: string }>;
   preview: ScopePreview;
 }) {
-  // A server collection with no library yet still previews, across every library, so
-  // the rules can be tried before picking where it shows.
-  const needsLibraries = scope.requireLibraries && draft.libraryIds.length === 0;
   return (
     <>
       <SmartRulesPanel
@@ -193,10 +190,7 @@ function SmartContents<Raw extends WireCollection>({
         onChange={onChange}
         libraries={libraries}
       />
-      <CollectionPreviewPane
-        preview={preview}
-        note={needsLibraries ? PREVIEW_EVERY_LIBRARY : undefined}
-      />
+      <CollectionPreviewPane preview={preview} />
     </>
   );
 }
@@ -566,16 +560,18 @@ export function CollectionEditor<Raw extends WireCollection>({
   // What the save bar adds after the pending fields.
   let afterPending: string | null = kind === "manual" ? TITLES_ALREADY_SAVED : listProblem;
   if (smart) {
-    afterPending = editor.changed.some((field) => PREVIEWED.has(field))
-      ? PREVIEW_SHOWS_UNSAVED
-      : null;
+    // A server collection's libraries are only where it shows, so the preview doesn't follow them.
+    const previewed = (field: DraftField) =>
+      PREVIEWED.has(field) && !(isServer && field === "libraryIds");
+    afterPending = editor.changed.some(previewed) ? PREVIEW_SHOWS_UNSAVED : null;
   }
   if (needsLibraries && !needsList) afterPending = PICK_A_LIBRARY;
   // Before Create: what's still missing, in the order the page asks for it.
   let createHint: string | null = null;
   if (needsList) createHint = PICK_A_LIST_FIRST;
   else if (draft.name.trim() === "") createHint = NAME_IT_THEN_CREATE;
-  else if (needsLibraries) createHint = PICK_LIBRARIES_FIRST;
+  else if (needsLibraries)
+    createHint = smart && isServer ? PICK_WHERE_IT_SHOWS_FIRST : PICK_LIBRARIES_FIRST;
   else if (newList) createHint = SYNCS_ON_CREATE;
   else if (smart && preview.status === "ready") createHint = smartCreateHint(preview.total);
   else if (staged.length > 0) createHint = titlesReadyToAdd(staged.length);
@@ -823,6 +819,15 @@ export function CollectionEditor<Raw extends WireCollection>({
           draft={draft}
           onChange={editor.setDraft}
           libraries={chosenLibraries}
+          libraryPicker={
+            smart && isServer
+              ? {
+                  options: libraryOptions,
+                  value: draft.libraryIds,
+                  onChange: (libraryIds) => editor.setDraft((next) => ({ ...next, libraryIds })),
+                }
+              : undefined
+          }
           otherProfileNames={otherProfileNames}
           savedShared={view?.personal?.shared ?? false}
           rows={rowsThatShowIt}
