@@ -42,10 +42,10 @@ import {
 import { invalidateAdminCollectionQueries } from "@/hooks/queries/collectionSurfaceRefresh";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
-  ARRANGE_HINT,
-  ARRANGE_SUBTITLE,
-  MOVE_FAILED,
-  ORDER_CHANGED,
+  arrangeHint,
+  arrangeSubtitle,
+  moveFailedMessage,
+  orderChanged,
   arrangeHeading,
 } from "@/lib/collections/copy";
 import {
@@ -70,12 +70,10 @@ import { MoveCollectionSheet } from "./MoveCollectionSheet";
 import { DeleteShelfDialog, ShelfNameDialog } from "./ShelfDialogs";
 import { ArrangeCardMenu, ShelfMenu } from "./ShelfMenus";
 import { ViewerPreview } from "./ViewerPreview";
+import { useT } from "@/i18n";
 
 /** Under this width Arrange has no drag: ⋯ opens a sheet that moves the card. */
 const NARROW_QUERY = "(max-width: 1023px)";
-
-const SCREEN_READER_INSTRUCTIONS =
-  "To move a shelf or a collection, focus its handle and press Space or Enter. Use the arrow keys to move it, Space or Enter to drop it, or Escape to cancel. Every collection's ⋯ also has Move to shelf.";
 
 type OrderReads = Awaited<ReturnType<typeof fetchAdminBoardOrderSnapshot>>;
 type OrderRead = Awaited<ReturnType<typeof fetchAdminGroupOrderSnapshot>>;
@@ -167,6 +165,7 @@ export function GroupsBoard({
   onEditCollection,
   onVisibleChange,
 }: GroupsBoardProps) {
+  const t = useT();
   const queryClient = useQueryClient();
   const narrow = useMediaQuery(NARROW_QUERY);
   const { data: capabilities } = useAdminCollectionCapabilities();
@@ -174,7 +173,8 @@ export function GroupsBoard({
 
   const saved = useMemo(
     () => boardShelves(groups, ungrouped, ungroupedSortOrder),
-    [groups, ungrouped, ungroupedSortOrder],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- boardShelves() names the No heading shelf in the current language, so it re-runs when `t` changes.
+    [groups, ungrouped, ungroupedSortOrder, t],
   );
   // A change shows at once: the board draws `shelves` until the change has
   // saved and the shelves were read again (or it failed and went back).
@@ -231,13 +231,13 @@ export function GroupsBoard({
 
   function moveFailed(error: unknown, retry: () => Promise<unknown>) {
     if (error instanceof OrderChanged) {
-      toast.error(ORDER_CHANGED);
+      toast.error(orderChanged());
       void invalidateAdminCollectionQueries(queryClient);
       return;
     }
-    toast.error(MOVE_FAILED, {
+    toast.error(moveFailedMessage(), {
       action: {
-        label: "Try again",
+        label: t("common.tryAgain"),
         onClick: () => void retry().catch((next: unknown) => moveFailed(next, retry)),
       },
     });
@@ -298,7 +298,7 @@ export function GroupsBoard({
     try {
       return await fetchAdminGroupSnapshot(id);
     } catch (error) {
-      toast.error(adminMutationMessage(error, "Couldn't read the shelf"));
+      toast.error(adminMutationMessage(error, t("web.collections.admin.readShelfFailed")));
       throw error;
     }
   }
@@ -357,7 +357,7 @@ export function GroupsBoard({
     const reads = orderReads.data;
     if (!data || !reads) return;
     if (!readsMatch(reads, saved)) {
-      toast.error("Collection order is not ready or changed. Reload before reordering.");
+      toast.error(t("web.collections.admin.orderNotReady"));
       void invalidateAdminCollectionQueries(queryClient);
       void orderReads.refetch();
       return;
@@ -397,9 +397,12 @@ export function GroupsBoard({
       return { title: shown[index]!.title, shelf, index, count: shown.length };
     };
     const name = (id: UniqueIdentifier): string => {
-      if (String(id).startsWith("col:")) return collectionAt(id)?.title ?? "Collection";
+      if (String(id).startsWith("col:"))
+        return collectionAt(id)?.title ?? t("web.collections.dnd.unknownCollection");
       const shelf = shelfById(id);
-      return shelf ? `shelf ${shelf.name}` : "Shelf";
+      return shelf
+        ? t("web.collections.admin.shelfInSentence", { name: shelf.name })
+        : t("web.collections.dnd.unknownShelf");
     };
     /** Where a planned move puts the collection, as viewers will see it. */
     const landing = (id: string, plan: CollectionMove): string => {
@@ -409,17 +412,35 @@ export function GroupsBoard({
       if (!shelf) return "";
       const shown = shownCollections(shelf);
       const index = shown.findIndex((entry) => entry.id === id);
-      return `position ${index + 1} of ${shown.length} on ${shelf.name}`;
+      return t("web.collections.dnd.positionOnShelf", {
+        position: String(index + 1),
+        total: String(shown.length),
+        shelf: shelf.name,
+      });
     };
     const place = (id: UniqueIdentifier): string => {
       const text = String(id);
       if (text.startsWith("col:")) {
         const at = collectionAt(id);
-        return at ? `position ${at.index + 1} of ${at.count} on ${at.shelf.name}` : "";
+        return at
+          ? t("web.collections.dnd.positionOnShelf", {
+              position: String(at.index + 1),
+              total: String(at.count),
+              shelf: at.shelf.name,
+            })
+          : "";
       }
-      if (text.startsWith("body:")) return `the end of ${shelfById(id)?.name ?? "the shelf"}`;
+      if (text.startsWith("body:")) {
+        const shelfName = shelfById(id)?.name;
+        return shelfName
+          ? t("web.collections.dnd.endOf", { shelf: shelfName })
+          : t("web.collections.dnd.endOfShelf");
+      }
       const index = shelves.findIndex((entry) => entry.id === bare(id));
-      return `position ${index + 1} of ${shelves.length}`;
+      return t("web.collections.dnd.position", {
+        position: String(index + 1),
+        total: String(shelves.length),
+      });
     };
     const refused = (active: UniqueIdentifier, over: UniqueIdentifier) => {
       if (!String(active).startsWith("col:")) return false;
@@ -428,9 +449,9 @@ export function GroupsBoard({
     };
     /** What a drop did; a collection drop that plans no move says why. */
     const dropped = (active: Active, over: Over | null): string => {
-      if (!over) return `${name(active.id)} dropped. Nothing moved.`;
+      if (!over) return t("web.collections.dnd.droppedNothingMoved", { name: name(active.id) });
       if (refused(active.id, over.id))
-        return `${name(active.id)} can't go on My collections. Nothing moved.`;
+        return t("web.collections.dnd.refusedNothingMoved", { name: name(active.id) });
       const target = over.data.current as ArrangeDragData | undefined;
       if (String(active.id).startsWith("col:") && target) {
         const { shelfId, overId } = collectionDrop(target);
@@ -439,30 +460,42 @@ export function GroupsBoard({
           const shelf = shelfById(shelfId);
           const by = shelf && sortedBy(shelf.sortMode);
           if (by && shelfOf(shelves, bare(active.id)) === shelf)
-            return `${shelf.name} sorts by ${by}, so the order didn't change.`;
-          return `${name(active.id)} dropped. Nothing moved.`;
+            return t("web.collections.dnd.sortsItself", { shelf: shelf.name, by });
+          return t("web.collections.dnd.droppedNothingMoved", { name: name(active.id) });
         }
         // The pinned band can put it somewhere other than the card it was dropped on.
-        return `${name(active.id)} dropped at ${landing(bare(active.id), plan)}.`;
+        return t("web.collections.dnd.droppedAt", {
+          name: name(active.id),
+          place: landing(bare(active.id), plan),
+        });
       }
-      return `${name(active.id)} dropped at ${place(over.id)}.`;
+      return t("web.collections.dnd.droppedAt", {
+        name: name(active.id),
+        place: place(over.id),
+      });
     };
     return {
       onDragStart: ({ active }) => {
         lastOver.current = active.id;
-        return `Picked up ${name(active.id)}, ${place(active.id)}.`;
+        return t("web.collections.dnd.pickedUp", {
+          name: name(active.id),
+          place: place(active.id),
+        });
       },
       onDragOver: ({ active, over }) => {
         if (!over || over.id === lastOver.current) return undefined;
         lastOver.current = over.id;
         if (refused(active.id, over.id))
-          return `${name(active.id)} can't go on My collections. It holds viewers' own collections.`;
-        return `${name(active.id)} is over ${place(over.id)}.`;
+          return t("web.collections.dnd.refusedOver", { name: name(active.id) });
+        return t("web.collections.dnd.over", {
+          name: name(active.id),
+          place: place(over.id),
+        });
       },
       onDragEnd: ({ active, over }) => dropped(active, over),
-      onDragCancel: ({ active }) => `Moving ${name(active.id)} was canceled.`,
+      onDragCancel: ({ active }) => t("web.collections.dnd.canceled", { name: name(active.id) }),
     };
-  }, [shelves]);
+  }, [shelves, t]);
 
   // --- rendering -------------------------------------------------------------
 
@@ -477,7 +510,7 @@ export function GroupsBoard({
         type="button"
         variant="ghost"
         size="icon"
-        aria-label={`More for ${collection.title}`}
+        aria-label={t("web.collections.admin.moreFor", { name: collection.title })}
         className="text-muted-foreground size-11 rounded-[10px]"
         onClick={() => setMoving(collection)}
       >
@@ -529,11 +562,11 @@ export function GroupsBoard({
             <h2 className="m-0 text-[16px] font-semibold tracking-[-0.015em]">
               {arrangeHeading(libraryName)}
             </h2>
-            <p className="text-muted-foreground m-0 mt-0.5 text-[13px]">{ARRANGE_SUBTITLE}</p>
+            <p className="text-muted-foreground m-0 mt-0.5 text-[13px]">{arrangeSubtitle()}</p>
           </div>
           {canEdit ? (
             <Button variant="outline" size="sm" onClick={() => setNaming({ mode: "create" })}>
-              <Plus aria-hidden /> New shelf
+              <Plus aria-hidden /> {t("web.collections.admin.newShelfButton")}
             </Button>
           ) : null}
         </div>
@@ -543,7 +576,9 @@ export function GroupsBoard({
           collisionDetection={collision}
           accessibility={{
             announcements,
-            screenReaderInstructions: { draggable: SCREEN_READER_INSTRUCTIONS },
+            screenReaderInstructions: {
+              draggable: t("web.collections.dnd.instructions"),
+            },
           }}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
@@ -590,7 +625,7 @@ export function GroupsBoard({
         {narrow ? null : (
           <p className="text-muted-foreground m-0 flex items-start gap-2 px-1 text-[13px] leading-normal">
             <GripVertical aria-hidden className="mt-0.5 size-4 shrink-0" />
-            {ARRANGE_HINT}
+            {arrangeHint()}
           </p>
         )}
       </div>

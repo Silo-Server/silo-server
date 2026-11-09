@@ -7,8 +7,8 @@ import {
 } from "react-intl";
 import type { ReactNode } from "react";
 
-import { languageDirection } from "@/lib/appLocale";
 import type { MessageKey } from "@/locales/keys";
+import { interfaceDirection } from "@/lib/appLocale";
 import { englishMessage, type Messages } from "./catalog";
 
 /** Values for a plain-text message. */
@@ -114,7 +114,7 @@ function isolateValues<V extends RichValues>(
   ast: MessageFormatElement[],
   values: V | undefined,
 ): V | undefined {
-  if (!values || languageDirection(intl.locale) !== "rtl") return values;
+  if (!values || interfaceDirection(intl.locale) !== "rtl") return values;
   const { printed, selectors } = argumentUse(ast);
   const isolated: RichValues = { ...values };
   for (const name of printed) {
@@ -145,6 +145,16 @@ export function formatWith(intl: IntlShape, id: MessageKey, values?: RichValues)
  */
 export function t(id: MessageKey, values?: TextValues): string {
   return formatWith(current, id, values);
+}
+
+const english = createAppIntl("en", {});
+
+/**
+ * A message in English whatever the interface language, for text that is data:
+ * stored, sent to the server, matched or compared (it stays English everywhere).
+ */
+export function englishText(id: MessageKey, values?: TextValues): string {
+  return formatWith(english, id, values);
 }
 
 /**

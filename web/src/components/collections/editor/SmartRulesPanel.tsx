@@ -1,12 +1,13 @@
 import { useId } from "react";
 
 import { RuleBuilder } from "@/components/homeRows/addRow/RuleBuilder";
-import { ALL_MY_LIBRARIES, PERSONAL_RULES_NOTE, RULES_CAPTION } from "@/lib/collections/copy";
+import { allMyLibraries, personalRulesNote, rulesCaption } from "@/lib/collections/copy";
 import { draftRules } from "@/lib/collections/draft";
 import type { CollectionDraft, ScopeKind } from "@/lib/collections/scope";
 
 import { LIBRARIES_LINE_ID } from "../fields/librariesLineFocus";
 import { OrderBlock } from "../fields/OrderBlock";
+import { useT } from "@/i18n";
 
 /**
  * A Smart collection's Contents: the Home rows rule sentence, with the
@@ -26,6 +27,7 @@ export function SmartRulesPanel({
   onChange: (update: (draft: CollectionDraft) => CollectionDraft) => void;
   libraries: Array<{ id: number; name: string }>;
 }) {
+  const t = useT();
   const id = useId();
   const personal = scopeKind === "personal";
   const rules = draftRules(draft);
@@ -37,16 +39,16 @@ export function SmartRulesPanel({
     >
       <div>
         <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
-          Rules
+          {t("web.collections.editor.rulesHeading")}
         </h2>
-        <p className="text-muted-foreground mt-1 text-[13.5px]">{RULES_CAPTION}</p>
+        <p className="text-muted-foreground mt-1 text-[13.5px]">{rulesCaption()}</p>
       </div>
       <RuleBuilder
         context="collection"
         value={rules}
         libraries={libraries}
         allowPersonalized={personal}
-        allLibrariesLabel={personal ? ALL_MY_LIBRARIES : undefined}
+        allLibrariesLabel={personal ? allMyLibraries() : undefined}
         librariesId={LIBRARIES_LINE_ID}
         onChange={(next) =>
           onChange((current) =>
@@ -57,7 +59,7 @@ export function SmartRulesPanel({
         }
       />
       {personal ? (
-        <p className="text-muted-foreground -mt-2 text-[12.5px]">{PERSONAL_RULES_NOTE}</p>
+        <p className="text-muted-foreground -mt-2 text-[12.5px]">{personalRulesNote()}</p>
       ) : null}
       <OrderBlock
         mode="smart"

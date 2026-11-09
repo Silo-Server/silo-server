@@ -3,6 +3,7 @@ import { useId } from "react";
 import type { UserLibrary } from "@/api/types";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/i18n";
 
 /**
  * The profile editor's library access: a library limit for any profile but
@@ -26,12 +27,14 @@ export function ProfileLibraryAccess({
   onRestrictedChange: (restricted: boolean) => void;
   onLibraryChange: (libraryID: number, allowed: boolean) => void;
 }) {
+  const t = useT();
   const restrictLibrariesId = useId();
 
   if (isPrimary) {
     return (
       <div className="border-border space-y-0.5 rounded-md border p-3">
-        <p className="text-sm font-medium">Libraries</p>
+        <p className="text-sm font-medium">{t("web.settings.library.title")}</p>
+        {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up */}
         <p className="text-muted-foreground text-xs">
           The primary profile sees every library the account can access. It can hide libraries in
           Settings → Libraries.
@@ -44,9 +47,9 @@ export function ProfileLibraryAccess({
     <div className="border-border space-y-3 rounded-md border p-3">
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-0.5">
-          <Label htmlFor={restrictLibrariesId}>Restrict libraries</Label>
+          <Label htmlFor={restrictLibrariesId}>{t("web.profiles.editor.restrictLibraries")}</Label>
           <p className="text-muted-foreground text-xs">
-            Limit this profile to a specific set of libraries.
+            {t("web.profiles.editor.restrictLibrariesHint")}
           </p>
         </div>
         <Switch
@@ -60,7 +63,7 @@ export function ProfileLibraryAccess({
         <div className="space-y-2">
           <div className="grid gap-2">
             {libraries.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No libraries available.</p>
+              <p className="text-muted-foreground text-sm">{t("web.profiles.noLibraries")}</p>
             ) : (
               libraries.map((library) => (
                 <div

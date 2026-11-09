@@ -1,3 +1,5 @@
+import { t } from "@/i18n";
+
 type DeviceKind = "desktop" | "phone" | "tv" | "unknown";
 
 function platformLabel(value: string): string {
@@ -35,7 +37,8 @@ function platformKind(platform: string): DeviceKind {
 /**
  * The label and icon kind for a login session. A client that named itself
  * (X-Silo-Device-Name with X-Silo-Device-Platform, or a device-code sign-in)
- * keeps its name; a User-Agent is summarized as "<browser> on <platform>".
+ * keeps its name; a User-Agent is summarized as "<browser> on <platform>", in
+ * English like the device names the server generates.
  */
 export function loginSessionDevice(session: { device_name: string; device_platform?: string }): {
   name: string;
@@ -45,11 +48,11 @@ export function loginSessionDevice(session: { device_name: string; device_platfo
   const reported = session.device_platform?.trim() ?? "";
   if (reported) {
     return {
-      name: raw || "Unknown device",
+      name: raw || t("web.settings.sessions.device.unknown"),
       kind: platformKind(platformLabel(reported) || platformLabel(raw)),
     };
   }
-  if (!raw) return { name: "Unknown device", kind: "unknown" };
+  if (!raw) return { name: t("web.settings.sessions.device.unknown"), kind: "unknown" };
   const platform = platformLabel(raw);
   const app = /\bSilo\b/i.test(raw)
     ? "Silo app"
@@ -79,15 +82,33 @@ export function loginSessionDevice(session: { device_name: string; device_platfo
   };
 }
 
+/** Whether a session was seen in the last two minutes ("Active now"). */
+export function sessionActive(value: string | null, now = Date.now()): boolean {
+  const elapsed = sessionElapsed(value, now);
+  return elapsed !== null && elapsed < 120_000;
+}
+
 export function sessionLastSeen(value: string | null, now = Date.now()): string {
-  if (!value) return "Last seen not recorded yet";
-  const elapsed = Math.max(0, now - Date.parse(value));
-  if (!Number.isFinite(elapsed)) return "Last seen not recorded yet";
-  if (elapsed < 120_000) return "Active now";
+  const elapsed = sessionElapsed(value, now);
+  if (elapsed === null) return t("web.settings.sessions.lastSeen.never");
+  if (sessionActive(value, now)) return t("web.settings.sessions.lastSeen.active");
   const minutes = Math.floor(elapsed / 60_000);
-  return minutes < 60
-    ? `Last seen ${minutes} min ago`
-    : minutes < 1440
-      ? `Last seen ${Math.floor(minutes / 60)} hr ago`
-      : `Last seen ${Math.floor(minutes / 1440)} days ago`;
+  if (minutes < 60)
+    return t("web.settings.sessions.lastSeen.minutes", {
+      count: minutes,
+      count_text: String(minutes),
+    });
+  if (minutes < 1440) {
+    const hours = Math.floor(minutes / 60);
+    return t("web.settings.sessions.lastSeen.hours", { count: hours, count_text: String(hours) });
+  }
+  const days = Math.floor(minutes / 1440);
+  return t("web.settings.sessions.lastSeen.days", { count: days, count_text: String(days) });
+}
+
+/** Milliseconds since the session was last seen, or null when that isn't recorded. */
+function sessionElapsed(value: string | null, now: number): number | null {
+  if (!value) return null;
+  const elapsed = Math.max(0, now - Date.parse(value));
+  return Number.isFinite(elapsed) ? elapsed : null;
 }

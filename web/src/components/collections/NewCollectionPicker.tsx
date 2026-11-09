@@ -8,22 +8,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminCollectionCapabilities } from "@/hooks/queries/admin/collections";
 import { useCollectionCapabilities } from "@/hooks/queries/collections";
 import {
-  ADD_A_STARTER_PACK,
-  KIND_GOOD_FOR,
-  KIND_SENTENCE,
-  NEW_COLLECTION,
-  NEW_COLLECTION_HELP,
-  NEW_COLLECTION_NEXT,
-  STARTER_PACK_PROMPT,
-  SYNCED_CHECK_FAILED,
-  SYNCED_CHECKING,
-  SYNCED_OFF,
+  addAStarterPack,
+  kindGoodFor,
+  kindSentence,
+  newCollection,
+  newCollectionHelp,
+  newCollectionNext,
+  starterPackPrompt,
+  syncedCheckFailed,
+  syncedChecking,
+  syncedOff,
 } from "@/lib/collections/copy";
 import { starterPacksHref } from "@/lib/collections/dialogs";
 import { listReturnState, type ListReturnState } from "@/lib/collections/listReturn";
 import { PERSONAL_SCOPE, SERVER_SCOPE, type ScopeKind } from "@/lib/collections/scope";
-import { COLLECTION_KIND_LABEL, type CollectionKind } from "@/lib/collections/types";
+import { collectionKindLabel, type CollectionKind } from "@/lib/collections/types";
 import { cn } from "@/lib/utils";
+import { useAppLanguage, useT } from "@/i18n";
 
 const TINT: Readonly<Record<CollectionKind, string>> = {
   manual: "#5f74ee",
@@ -53,6 +54,7 @@ function Poster({ index, className }: { index: number; className?: string }) {
 
 /** The decorative picture at the top of each card, after the mockup. */
 function Stage({ kind }: { kind: CollectionKind }) {
+  const t = useT();
   const tile = "bg-white/[0.05] ring-1 ring-inset ring-white/[0.08]";
   let picture: ReactNode;
   if (kind === "manual") {
@@ -78,7 +80,11 @@ function Stage({ kind }: { kind: CollectionKind }) {
     picture = (
       <span className="absolute inset-x-[18px] top-[18px] grid gap-3">
         <span className="flex gap-1.5">
-          {["Genre is Comedy", "Year 1990–1999", "+1 rule"].map((rule, index) => (
+          {[
+            t("web.collections.newPicker.sampleRuleGenre"),
+            t("web.collections.newPicker.sampleRuleYear"),
+            t("web.collections.newPicker.sampleMoreRules"),
+          ].map((rule, index) => (
             <span
               key={rule}
               className={cn(
@@ -106,7 +112,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
       <span className="absolute inset-x-[18px] top-[18px] grid gap-2.5">
         {[
           { mark: "M", color: "#1f6feb", name: "IMDb Top 250 Movies" },
-          { mark: "T", color: "#0d8a6a", name: "Trending this week" },
+          { mark: "T", color: "#0d8a6a", name: t("web.collections.newPicker.sampleTrending") },
         ].map(({ mark, color, name }) => (
           <span
             key={name}
@@ -124,7 +130,7 @@ function Stage({ kind }: { kind: CollectionKind }) {
             {name}
             <span className="text-muted-foreground ml-auto inline-flex items-center gap-1 font-medium">
               <RefreshCw className="size-3" />
-              Daily
+              {t("web.collections.fields.scheduleDaily")}
             </span>
           </span>
         ))}
@@ -146,6 +152,9 @@ function Stage({ kind }: { kind: CollectionKind }) {
   );
 }
 
+/** A separator, the same in every language. */
+const DOT = "·";
+
 const CARD =
   "group border-border/90 bg-surface/60 relative flex flex-col overflow-hidden rounded-[18px] border text-left outline-none";
 
@@ -166,6 +175,7 @@ function CardBody({
   /** Replaces the examples, for a type that can't be made. */
   note?: string;
 }) {
+  const t = useT();
   const Icon = ICON[kind];
   return (
     <span className="grid gap-1.5 px-5 pt-[18px] pb-5 max-lg:pr-11">
@@ -176,15 +186,18 @@ function CardBody({
         >
           <Icon className="size-4" />
         </span>
-        <span id={nameId}>{COLLECTION_KIND_LABEL[kind]}</span>
+        <span id={nameId}>{collectionKindLabel(kind)}</span>
       </span>
       <span id={sentenceId} className="text-foreground/75 text-[13.5px] leading-normal">
-        {KIND_SENTENCE[kind]}
+        {kindSentence(kind)}
       </span>
       <span id={noteId} className="text-muted-foreground mt-1.5 text-[12.5px] leading-normal">
         {note ?? (
           <>
-            <b className="text-foreground/70 font-medium">Good for</b> {KIND_GOOD_FOR[scope][kind]}
+            <b className="text-foreground/70 font-medium">
+              {t("web.collections.newPicker.goodFor")}
+            </b>{" "}
+            {kindGoodFor(scope, kind)}
           </>
         )}
       </span>
@@ -237,6 +250,7 @@ function TypeCard({
 
 /** Synced list when this server can't make one: the card, dimmed, with the reason. */
 function SyncedOffCard({ scope }: { scope: ScopeKind }) {
+  useAppLanguage();
   const id = useId();
   return (
     <div style={{ "--tint": TINT.synced } as CSSProperties} className={cn(CARD, "opacity-60")}>
@@ -247,7 +261,7 @@ function SyncedOffCard({ scope }: { scope: ScopeKind }) {
         nameId={`${id}-name`}
         sentenceId={`${id}-sentence`}
         noteId={`${id}-note`}
-        note={SYNCED_OFF}
+        note={syncedOff()}
       />
     </div>
   );
@@ -271,6 +285,7 @@ export function NewCollectionPicker({
   listHref?: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const isServer = scope === "server";
   const paths = (isServer ? SERVER_SCOPE : PERSONAL_SCOPE).paths;
   const returnTo = listHref ?? paths.list({ libraryId });
@@ -297,7 +312,7 @@ export function NewCollectionPicker({
   } else if (capabilities.isError) {
     synced = (
       <div className={cn(CARD, "items-start justify-center gap-3 p-5")}>
-        <p className="text-muted-foreground text-sm">{SYNCED_CHECK_FAILED}</p>
+        <p className="text-muted-foreground text-sm">{syncedCheckFailed()}</p>
         <Button
           type="button"
           size="sm"
@@ -305,13 +320,13 @@ export function NewCollectionPicker({
           disabled={capabilities.isFetching}
           onClick={() => void capabilities.refetch()}
         >
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
   } else {
     synced = (
-      <div role="status" aria-label={SYNCED_CHECKING} className={cn(CARD, "gap-3 p-5")}>
+      <div role="status" aria-label={syncedChecking()} className={cn(CARD, "gap-3 p-5")}>
         <Skeleton className="h-[128px] rounded-xl max-lg:hidden" />
         <Skeleton className="h-6 w-32" />
         <Skeleton className="h-4 w-full" />
@@ -327,25 +342,30 @@ export function NewCollectionPicker({
       onClose={onClose}
       // No card is highlighted at rest; Tab reaches Manual first.
       onOpenFocus={() => titleRef.current?.focus()}
-      title={NEW_COLLECTION}
+      title={newCollection()}
       titleRef={titleRef}
-      description={NEW_COLLECTION_HELP[scope]}
+      description={newCollectionHelp(scope)}
       footerStart={
         <p className="text-muted-foreground min-w-0 text-[13px]">
-          {NEW_COLLECTION_NEXT}
+          {newCollectionNext()}
           {starterPacks ? (
             <>
               <span aria-hidden className="mx-2">
-                ·
+                {DOT}
               </span>
-              {STARTER_PACK_PROMPT}{" "}
-              <Link
-                to={starterPacks}
-                replace
-                className="text-foreground font-medium underline underline-offset-4"
-              >
-                {ADD_A_STARTER_PACK}
-              </Link>
+              {t("web.collections.newPicker.starterPackLine", {
+                prompt: starterPackPrompt(),
+                action: addAStarterPack(),
+                link: (chunks) => (
+                  <Link
+                    to={starterPacks}
+                    replace
+                    className="text-foreground font-medium underline underline-offset-4"
+                  >
+                    {chunks}
+                  </Link>
+                ),
+              })}
             </>
           ) : null}
         </p>

@@ -56,13 +56,20 @@ function pseudoLanguage(tag: string | null | undefined) {
   return PSEUDO_LANGUAGES.find((locale) => locale.tag.toLowerCase() === lower);
 }
 
+const directions = new Map<string, "ltr" | "rtl">();
+
 /**
- * The text direction of an app language or pseudo-locale tag. It doesn't
- * depend on whether the language's catalog has shipped: a stored `ar` lays
- * out right to left, and isolates its placeholders, before then.
+ * The writing direction of an interface language or pseudo-locale tag, for
+ * `<html dir>` and for isolating message placeholders. It doesn't depend on
+ * whether the language's catalog has shipped.
  */
-export function languageDirection(tag: string): "ltr" | "rtl" {
-  return pseudoLanguage(tag)?.dir ?? (tag === "ar" ? "rtl" : "ltr");
+export function interfaceDirection(tag: string): "ltr" | "rtl" {
+  let dir = directions.get(tag);
+  if (!dir) {
+    dir = pseudoLanguage(tag)?.dir ?? (matchShippedLanguage(tag) === "ar" ? "rtl" : "ltr");
+    directions.set(tag, dir);
+  }
+  return dir;
 }
 
 /**
@@ -179,7 +186,7 @@ export function resolveAppLocale(input: {
     catalog: language,
     formatLocale,
     localizedFormats: language !== "en" && (formatLocale ? true : runtimeLanguage === language),
-    dir: languageDirection(language),
+    dir: interfaceDirection(language),
   };
 }
 

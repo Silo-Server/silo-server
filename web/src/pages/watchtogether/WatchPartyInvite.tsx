@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { buildWatchPartyDeepLink, detectMobilePlatform } from "@/lib/appDeepLink";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useT } from "@/i18n";
 
 /**
  * Landing page for shared Watch Party invitations (`/rooms/join?token=`).
@@ -42,31 +43,32 @@ function hasWatchPartyApp(): boolean {
 }
 
 function AppHandoff({ appLink, hubHref }: { appLink: string; hubHref: string }) {
-  useDocumentTitle("Watch Party invitation");
+  const t = useT();
+  useDocumentTitle(t("web.watchTogether.invite.documentTitle"));
   return (
     <div className="auth-shell">
       <AuthBackground />
       <Card className="auth-card glass panel-border w-full max-w-sm border-0">
         <CardHeader>
           <CardTitle className="text-3xl font-extrabold tracking-[-0.04em]">
-            Join the Watch Party
+            {t("web.watchTogether.invite.title")}
           </CardTitle>
           <CardDescription className="mt-2 text-sm leading-6">
-            Open this invitation in the Silo app, or continue in the browser.
+            {t("web.watchTogether.invite.body")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Button asChild size="lg" className="h-12 w-full text-base font-semibold">
             <a href={appLink}>
-              <Smartphone className="mr-2 h-5 w-5" /> Open in the Silo app
+              <Smartphone className="mr-2 h-5 w-5" /> {t("web.watchTogether.invite.openApp")}
             </a>
           </Button>
           <p className="text-muted-foreground text-center text-xs">
-            Nothing happens? The app isn&apos;t installed. Continue in the browser instead.
+            {t("web.watchTogether.invite.notInstalled")}
           </p>
           <Button asChild variant="outline" className="w-full">
             <Link to={hubHref} replace>
-              Continue in the browser
+              {t("web.watchTogether.invite.continueBrowser")}
             </Link>
           </Button>
         </CardContent>

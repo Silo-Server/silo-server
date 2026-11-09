@@ -1,6 +1,6 @@
 import { queryDefinitionFromSectionConfig, type LibraryCollection } from "@/api/types";
 import { t, type MessageKey } from "@/i18n";
-import { collectionKindOf, type CollectionKind } from "@/lib/collections/types";
+import { collectionKindLabel, collectionKindOf } from "@/lib/collections/types";
 import { rowKindLabel } from "./catalog";
 import type { HomeRow, PageRef, Surface } from "./types";
 
@@ -34,14 +34,8 @@ export interface DescribeContext {
 export function collectionKind(
   collectionType: LibraryCollection["collection_type"] | undefined,
 ): string | undefined {
-  return collectionType ? t(COLLECTION_KIND_LABELS[collectionKindOf(collectionType)]) : undefined;
+  return collectionType ? collectionKindLabel(collectionKindOf(collectionType)) : undefined;
 }
-
-const COLLECTION_KIND_LABELS: Record<CollectionKind, MessageKey> = {
-  manual: "web.home.rows.collectionKinds.manual",
-  smart: "web.home.rows.collectionKinds.smart",
-  synced: "web.home.rows.collectionKinds.synced",
-};
 
 /** The `window` select of the trending messages, by the stored window. */
 const SERVER_WINDOWS: Record<string, string> = {

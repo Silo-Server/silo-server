@@ -3,6 +3,7 @@ import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import { RadioDot } from "@/components/ui/radio-group";
 import { mediaKindLabel, type CollectionTemplate } from "@/lib/collectionTemplates";
+import { useT, type Translate } from "@/i18n";
 
 const SOURCE_TAG: Partial<Record<CollectionTemplate["source"], string>> = {
   mdblist: "MDBList",
@@ -10,17 +11,22 @@ const SOURCE_TAG: Partial<Record<CollectionTemplate["source"], string>> = {
   tmdb_list: "TMDB",
 };
 
-/** "daily", "weekly": how often a template's cron syncs, for its meta line. */
-function scheduleDescription(cron: string): string {
+/** "syncs daily", "syncs weekly": how often a template's cron syncs, for its meta line. */
+function scheduleDescription(t: Translate, cron: string): string {
+  const syncs = (schedule: string) => t("web.collections.templateGallery.syncs", { schedule });
   const [, hour, dom, month, dow, extra] = cron.trim().split(/\s+/);
-  if (!hour || !dom || !month || !dow || extra !== undefined) return "on schedule";
+  if (!hour || !dom || !month || !dow || extra !== undefined) return syncs("other");
   const stepMatch = hour.match(/^\*\/(\d+)$/);
-  if (stepMatch) return `every ${stepMatch[1]} hours`;
-  if (hour === "*") return "hourly";
-  if (dom === "1" && month === "*") return "monthly";
-  if (dom === "*" && month === "*" && dow === "*") return "daily";
-  if (dom === "*" && month === "*") return "weekly";
-  return "on schedule";
+  if (stepMatch)
+    return t("web.collections.templateGallery.syncsEveryHours", {
+      count: Number(stepMatch[1]),
+      hours: stepMatch[1]!,
+    });
+  if (hour === "*") return syncs("hourly");
+  if (dom === "1" && month === "*") return syncs("monthly");
+  if (dom === "*" && month === "*" && dow === "*") return syncs("daily");
+  if (dom === "*" && month === "*") return syncs("weekly");
+  return syncs("other");
 }
 
 /**
@@ -79,12 +85,16 @@ export function PickRow({
 
 /** A ready-made pick: a template that names its list. */
 export function CollectionTemplateCard({ template }: { template: CollectionTemplate }) {
+  const t = useT();
   const meta = [
     mediaKindLabel(template.media_kind),
-    template.default_limit ? `${template.default_limit} titles` : null,
-    template.default_sync_schedule
-      ? `syncs ${scheduleDescription(template.default_sync_schedule)}`
+    template.default_limit
+      ? t("web.collections.metaLine.titleCount", {
+          count: template.default_limit,
+          shown: String(template.default_limit),
+        })
       : null,
+    template.default_sync_schedule ? scheduleDescription(t, template.default_sync_schedule) : null,
   ]
     .filter(Boolean)
     .join(" · ");

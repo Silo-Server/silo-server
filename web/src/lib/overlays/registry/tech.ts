@@ -1,4 +1,5 @@
 import { compactHdrSuffix, prettyResolution } from "@/lib/mediaFormat";
+import { t } from "@/i18n";
 import type { OverlayDef, OverlayIconId } from "../types";
 
 // Tech overlays — derived from the media file (codec, container, resolution,
@@ -32,8 +33,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "resolution",
     category: "tech",
-    label: "Resolution",
-    description: "Video resolution (4K, 1080p, 720p, etc.)",
+    get label() {
+      return t("web.settings.overlays.badge.resolution.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.resolution.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: true,
     iconId: "monitor",
@@ -45,8 +50,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "hdr",
     category: "tech",
-    label: "HDR / Dolby Vision",
-    description: "Dynamic range format (HDR10, DV, HLG)",
+    get label() {
+      return t("web.settings.overlays.badge.hdr.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.hdr.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: true,
     iconCapable: true,
@@ -58,9 +67,15 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "resolution_hdr",
     category: "tech",
-    label: "Resolution + HDR (combined)",
-    description:
-      'Single badge combining resolution and dynamic range (e.g. "4K DV", "4K HDR10+", "1080p HDR")',
+    get label() {
+      return t("web.settings.overlays.badge.resolutionHdr.label");
+    },
+    get shortLabel() {
+      return t("web.settings.overlays.badge.resolutionHdr.shortLabel");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.resolutionHdr.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: false,
     iconCapable: true,
@@ -80,9 +95,15 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "resolution_hdr_audio",
     category: "tech",
-    label: "Resolution + HDR + Audio (combined)",
-    description:
-      'Single badge combining resolution, dynamic range and audio codec (e.g. "4K DV Atmos", "1080p TrueHD")',
+    get label() {
+      return t("web.settings.overlays.badge.resolutionHdrAudio.label");
+    },
+    get shortLabel() {
+      return t("web.settings.overlays.badge.resolutionHdrAudio.shortLabel");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.resolutionHdrAudio.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: false,
     iconCapable: true,
@@ -103,8 +124,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "audio",
     category: "tech",
-    label: "Audio Codec",
-    description: "Audio codec (Atmos, DTS-HD, TrueHD, etc.)",
+    get label() {
+      return t("web.settings.overlays.badge.audio.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.audio.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: true,
     iconCapable: true,
@@ -116,8 +141,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "audio_channels",
     category: "tech",
-    label: "Audio Channels",
-    description: "Channel layout (Stereo, 5.1, 7.1)",
+    get label() {
+      return t("web.settings.overlays.badge.audioChannels.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.audioChannels.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: false,
     iconId: "volume",
@@ -128,8 +157,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "video_codec",
     category: "tech",
-    label: "Video Codec",
-    description: "Video codec (H.264, H.265, AV1)",
+    get label() {
+      return t("web.settings.overlays.badge.videoCodec.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.videoCodec.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: false,
     iconId: "film",
@@ -142,8 +175,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "container",
     category: "tech",
-    label: "Container",
-    description: "File container (MKV, MP4, etc.)",
+    get label() {
+      return t("web.settings.overlays.badge.container.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.container.description");
+    },
     defaultPosition: "bottom-left",
     defaultEnabled: false,
     iconCapable: false,
@@ -153,8 +190,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "aspect_ratio",
     category: "tech",
-    label: "Aspect Ratio",
-    description: "Display aspect ratio (16:9, 2.39:1, etc.)",
+    get label() {
+      return t("web.settings.overlays.badge.aspectRatio.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.aspectRatio.description");
+    },
     defaultPosition: "bottom-right",
     defaultEnabled: false,
     iconId: "layout",
@@ -165,8 +206,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "release_type",
     category: "tech",
-    label: "Release Type",
-    description: "Source format (REMUX, BluRay, WEB-DL, etc.)",
+    get label() {
+      return t("web.settings.overlays.badge.releaseType.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.releaseType.description");
+    },
     defaultPosition: "bottom-left",
     defaultEnabled: true,
     iconCapable: false,
@@ -177,8 +222,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "edition",
     category: "tech",
-    label: "Edition",
-    description: "Edition label from the best available media version",
+    get label() {
+      return t("web.settings.overlays.badge.edition.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.edition.description");
+    },
     defaultPosition: "bottom-left",
     defaultEnabled: false,
     iconCapable: false,
@@ -188,8 +237,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "multi_audio",
     category: "tech",
-    label: "Multi-Audio",
-    description: "Shown when the file has audio in 2+ languages",
+    get label() {
+      return t("web.settings.overlays.badge.multiAudio.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.multiAudio.description");
+    },
     defaultPosition: "bottom-right",
     defaultEnabled: false,
     iconId: "languages",
@@ -199,8 +252,12 @@ export const TECH_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "multi_sub",
     category: "tech",
-    label: "Subtitles Available",
-    description: "Shown when the file has any subtitle track",
+    get label() {
+      return t("web.settings.overlays.badge.multiSub.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.multiSub.description");
+    },
     defaultPosition: "bottom-right",
     defaultEnabled: false,
     iconId: "subtitles",

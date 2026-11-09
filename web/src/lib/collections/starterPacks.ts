@@ -1,5 +1,6 @@
 import type { Library, PageSectionConfig } from "@/api/types";
 import type { components } from "@/api/v2/schema";
+import { t, type MessageKey } from "@/i18n";
 import type {
   ApplyCollectionTemplateBundleFeaturedRequest,
   ApplyCollectionTemplateBundleResponse,
@@ -128,17 +129,17 @@ const EXISTING_REASONS = new Set(["already_exists", "already_exists_delete_faile
 
 // The server's reason codes for a list or hero it couldn't add, in words.
 // Anything else (v2 sends `operation_failed` for raw errors) gets the fallback.
-const FAILURE_REASONS: Record<string, string> = {
-  ineligible_library: "that library can't take this list",
-  collection_not_available: "its list wasn't added to that library",
-  template_not_in_bundle: "that list isn't in this pack",
-  library_not_selected: "that library isn't one you picked",
-  template_not_found: "this server doesn't have that list anymore",
+const FAILURE_REASONS: Record<string, MessageKey> = {
+  ineligible_library: "web.collections.starterPacks.reasonIneligibleLibrary",
+  collection_not_available: "web.collections.starterPacks.reasonCollectionNotAvailable",
+  template_not_in_bundle: "web.collections.starterPacks.reasonTemplateNotInBundle",
+  library_not_selected: "web.collections.starterPacks.reasonLibraryNotSelected",
+  template_not_found: "web.collections.starterPacks.reasonTemplateNotFound",
 };
 
 /** Why a list or hero couldn't be added, as a clause to follow a colon. */
 export function failureReason(code: string | undefined): string {
-  return FAILURE_REASONS[code ?? ""] ?? "something went wrong";
+  return t(FAILURE_REASONS[code ?? ""] ?? "web.collections.starterPacks.reasonUnknown");
 }
 
 /**
@@ -207,14 +208,12 @@ export function packAdded(result: ApplyCollectionTemplateBundleResponse, pack: S
   return rows.every((row) => row.failed.length === 0) && result.featured_failed.length === 0;
 }
 
-export function plural(count: number, word: string) {
-  return `${count} ${word}${count === 1 ? "" : "s"}`;
-}
-
 /** A finished apply's heading, the same in the dialog and the page's job banner. */
 export function packResultHeading(packTitle: string, succeeded: boolean, added: boolean) {
-  if (!succeeded) return `${packTitle} wasn't added`;
-  return added ? `${packTitle} added` : `${packTitle} finished with problems`;
+  if (!succeeded) return t("web.collections.starterPacks.headingNotAdded", { pack: packTitle });
+  return added
+    ? t("web.collections.starterPacks.headingAdded", { pack: packTitle })
+    : t("web.collections.starterPacks.headingProblems", { pack: packTitle });
 }
 
 /** A finished apply in a line, counting only the lists the pack shows. */
@@ -228,10 +227,27 @@ export function packResultSummary(
   const heroes = result.featured.length;
   const heroesFailed = result.featured_failed.length;
   return [
-    added > 0 ? `Added ${plural(added, "list")}.` : "Nothing new was added.",
-    failed > 0 ? `${plural(failed, "list")} couldn't be added.` : "",
-    heroes > 0 ? `Set ${plural(heroes, "hero banner")}.` : "",
-    heroesFailed > 0 ? `${plural(heroesFailed, "hero banner")} couldn't be set.` : "",
+    added > 0
+      ? t("web.collections.starterPacks.summaryAdded", { count: added, count_text: String(added) })
+      : t("web.collections.starterPacks.nothingNewAdded"),
+    failed > 0
+      ? t("web.collections.starterPacks.summaryFailed", {
+          count: failed,
+          count_text: String(failed),
+        })
+      : "",
+    heroes > 0
+      ? t("web.collections.starterPacks.summaryHeroes", {
+          count: heroes,
+          count_text: String(heroes),
+        })
+      : "",
+    heroesFailed > 0
+      ? t("web.collections.starterPacks.summaryHeroesFailed", {
+          count: heroesFailed,
+          count_text: String(heroesFailed),
+        })
+      : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -240,8 +256,11 @@ export function packResultSummary(
 function listCount(kinds: readonly (string | undefined)[]): string {
   if (kinds.length === 0) return "";
   const kind = kinds.every((value) => value === kinds[0]) ? kinds[0] : undefined;
-  const noun = kind === "movie" ? "movie list" : kind === "tv" ? "TV list" : "list";
-  return plural(kinds.length, noun);
+  return t("web.collections.starterPacks.listCount", {
+    kind: kind === "movie" || kind === "tv" ? kind : "any",
+    count: kinds.length,
+    count_text: String(kinds.length),
+  });
 }
 
 // --- Hero banners -----------------------------------------------------------

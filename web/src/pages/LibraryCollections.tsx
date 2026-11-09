@@ -14,6 +14,7 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { ownerName } from "@/lib/collections/personalOwnership";
 import { SERVER_SCOPE } from "@/lib/collections/scope";
 import { cardGridClasses } from "@/lib/uiCustomization";
+import { useAppLanguage } from "@/i18n";
 
 interface LibraryCollectionsProps {
   libraryId: number;
@@ -166,6 +167,7 @@ function GroupSection({
   libraryId: number;
   gridClasses: string;
 }) {
+  useAppLanguage();
   const { data: profiles = [] } = useProfiles();
   const { profile } = useCurrentProfile();
   // Personal collections from another profile on the login carry its name.

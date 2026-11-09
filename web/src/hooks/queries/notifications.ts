@@ -49,6 +49,7 @@ import type {
 } from "@/api/types";
 import { notificationKeys } from "./keys";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 
 const NOTIFICATIONS_PAGE_SIZE = 25;
 
@@ -139,16 +140,20 @@ export function useSetNotificationSeriesMuted() {
     },
     onSuccess: (_data, variables) => {
       if (!variables.muted) return;
-      toast.success(`Muted ${variables.title}`, {
+      toast.success(t("web.notifications.queries.muted", { title: variables.title }), {
         action: {
-          label: "Undo",
+          label: t("web.notifications.queries.undo"),
           onClick: () => mutation.mutate({ ...variables, muted: false }),
         },
       });
     },
     onError: (error, variables) => {
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(variables.muted ? "Failed to mute the series" : "Failed to unmute the series");
+      toast.error(
+        variables.muted
+          ? t("web.notifications.queries.muteFailed")
+          : t("web.notifications.queries.unmuteFailed"),
+      );
     },
   });
   return mutation;
@@ -174,7 +179,7 @@ export function useMarkNotificationRead() {
       applyNotificationRead(queryClient, { profile_id: context.profileId, id });
     },
     onError: () => {
-      toast.error("Failed to mark notification read");
+      toast.error(t("web.notifications.queries.markReadFailed"));
       invalidateInbox(queryClient, notificationScope(context));
     },
   });
@@ -187,7 +192,7 @@ export function useMarkAllNotificationsRead() {
     retry: false,
     onSuccess: () => invalidateInbox(queryClient, notificationScope(context)),
     onError: () => {
-      toast.error("Failed to mark notifications read");
+      toast.error(t("web.notifications.queries.markAllReadFailed"));
       invalidateInbox(queryClient, notificationScope(context));
     },
   });
@@ -217,7 +222,7 @@ export function useUpdateNotificationPreferences() {
           queryKey: notificationInboxKeys.series(status, scope),
         });
     },
-    onError: () => toast.error("Failed to save notification preferences"),
+    onError: () => toast.error(t("web.notifications.queries.savePreferencesFailed")),
   });
 }
 
@@ -248,7 +253,9 @@ export function useUpdateEmailNotificationPreferences() {
     },
     onError: (error) => {
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(error instanceof Error ? error.message : "Failed to save email preferences");
+      toast.error(
+        error instanceof Error ? error.message : t("web.notifications.queries.saveEmailFailed"),
+      );
     },
   });
 }
@@ -289,13 +296,15 @@ export function useRequestEmailNotificationAddress() {
       });
       toast.success(
         receipt.current
-          ? "Verification request queued."
-          : "This verification request is no longer pending.",
+          ? t("web.notifications.queries.verificationQueued")
+          : t("web.notifications.queries.verificationNotPending"),
       );
     },
     onError: (error, intent) => {
       if (!current(intent) || error instanceof StaleApiRequestContextError) return;
-      toast.error(error instanceof Error ? error.message : "Failed to queue verification request");
+      toast.error(
+        error instanceof Error ? error.message : t("web.notifications.queries.verificationFailed"),
+      );
     },
   });
   type Options = NonNullable<Parameters<typeof mutation.mutate>[1]>;
@@ -362,7 +371,9 @@ export function useClearEmailNotificationAddress() {
         return;
       }
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(error instanceof Error ? error.message : "Failed to remove the custom address");
+      toast.error(
+        error instanceof Error ? error.message : t("web.notifications.queries.removeAddressFailed"),
+      );
     },
   });
   // Pending mutations can receive new observer options after a rerender.
@@ -403,7 +414,9 @@ export function useUpdateDiscordNotificationPreferences() {
     },
     onError: (error) => {
       if (error instanceof StaleApiRequestContextError) return;
-      toast.error(error instanceof Error ? error.message : "Failed to save discord preferences");
+      toast.error(
+        error instanceof Error ? error.message : t("web.notifications.queries.saveDiscordFailed"),
+      );
     },
   });
 }
@@ -416,7 +429,7 @@ export function useDiscordLinkInit() {
     retry: false,
     mutationFn: async () => {
       if (!context) throw new StaleApiRequestContextError();
-      if (inFlight.current) throw new Error("Discord linking is already starting.");
+      if (inFlight.current) throw new Error(t("web.notifications.queries.discordLinkInFlight"));
       inFlight.current = true;
       try {
         return await beginNotificationDiscordLink(context);
@@ -431,7 +444,9 @@ export function useDiscordLinkInit() {
       } catch {
         return;
       }
-      toast.error(error instanceof Error ? error.message : "Failed to start Discord link");
+      toast.error(
+        error instanceof Error ? error.message : t("web.notifications.queries.discordLinkFailed"),
+      );
     },
   });
 }
@@ -452,7 +467,7 @@ export function useUnlinkDiscord() {
         queryKey: [...notificationKeys.discordPreferences(), notificationScope(authority)],
         exact: true,
       });
-      toast.success("Discord account unlinked");
+      toast.success(t("web.notifications.queries.discordUnlinked"));
     },
     onError: () => {
       if (!context) return;
@@ -461,7 +476,7 @@ export function useUnlinkDiscord() {
       } catch {
         return;
       }
-      toast.error("Failed to unlink Discord account");
+      toast.error(t("web.notifications.queries.discordUnlinkFailed"));
     },
   });
 }
@@ -597,5 +612,8 @@ export function formatEpisodeCode(
   if (notification.season_number == null || notification.episode_number == null) {
     return null;
   }
-  return `S${notification.season_number}E${notification.episode_number}`;
+  return t("web.notifications.queries.episodeCode", {
+    season: String(notification.season_number),
+    episode: String(notification.episode_number),
+  });
 }

@@ -16,12 +16,15 @@ export interface SettingsSearchGroup<T extends SettingsSearchItem> {
   items: readonly T[];
 }
 
+// Callers pass the labels as shown, in the interface language, so letters and
+// digits of any script count as word characters: a Latin-only class would turn
+// a Cyrillic or CJK label into nothing searchable.
 function normalizeSearchText(value: string) {
   return value
     .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}\p{M}]+/gu, " ")
     .trim();
 }
 

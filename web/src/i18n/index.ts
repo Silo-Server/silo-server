@@ -5,6 +5,7 @@ export { loadTranslations, PSEUDO_LOCALES_ENABLED, type Messages } from "./catal
 export {
   appIntl,
   createAppIntl,
+  englishText,
   serverText,
   setAppIntl,
   subscribeAppIntl,

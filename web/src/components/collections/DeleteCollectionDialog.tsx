@@ -13,11 +13,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
-  CHECKING_ROWS,
-  KEEP_ROWS_HINT,
-  OPEN_ROW,
-  ROWS_FAILED,
-  TITLES_STAY,
+  checkingRows,
+  keepRowsHint,
+  openRow,
+  rowsFailed,
   deleteWithRowsDescription,
   deleteWithRowsLabel,
   serverDeleteDescription,
@@ -25,6 +24,7 @@ import {
 import { openRowPath, type RowsState } from "@/lib/collections/rows";
 
 import { CollectionRowSummary } from "./CollectionRowSummary";
+import { useT } from "@/i18n";
 
 /**
  * Confirms deleting one server collection. With no rows showing it (or when
@@ -56,6 +56,7 @@ export function DeleteCollectionDialog({
   error?: string | null;
   onConfirm: () => void;
 }) {
+  const t = useT();
   const id = useId();
   if (!rows || (rows.status === "ready" && rows.rows.length === 0)) {
     return (
@@ -64,7 +65,7 @@ export function DeleteCollectionDialog({
         onOpenChange={onOpenChange}
         title={title}
         description={serverDeleteDescription(libraryNames)}
-        confirmLabel="Delete"
+        confirmLabel={t("web.collections.deleteDialog.delete")}
         variant="destructive"
         isPending={isPending}
         error={error}
@@ -91,14 +92,14 @@ export function DeleteCollectionDialog({
         </AlertDialogHeader>
         {rows.status === "loading" ? (
           <p role="status" className="text-muted-foreground text-sm">
-            {CHECKING_ROWS}
+            {checkingRows()}
           </p>
         ) : null}
         {rows.status === "error" ? (
           <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
-            <span>{ROWS_FAILED}</span>
+            <span>{rowsFailed()}</span>
             <Button variant="outline" size="sm" onClick={rows.onRetry}>
-              Retry
+              {t("common.retry")}
             </Button>
           </div>
         ) : null}
@@ -110,15 +111,17 @@ export function DeleteCollectionDialog({
                   <CollectionRowSummary row={row} libraryNames={rowLibraryNames} />
                   <Link
                     to={openRowPath(row)}
-                    aria-label={`${OPEN_ROW}: ${row.title}`}
+                    aria-label={t("web.collections.deleteDialog.openRowNamed", {
+                      title: row.title,
+                    })}
                     className="shrink-0 text-[13px] font-medium underline underline-offset-4"
                   >
-                    {OPEN_ROW}
+                    {openRow()}
                   </Link>
                 </li>
               ))}
             </ul>
-            <p className="text-muted-foreground text-sm">{KEEP_ROWS_HINT}</p>
+            <p className="text-muted-foreground text-sm">{keepRowsHint()}</p>
           </>
         ) : null}
         {error ? (
@@ -127,9 +130,11 @@ export function DeleteCollectionDialog({
           </p>
         ) : null}
         <AlertDialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-sm">{TITLES_STAY} This can&apos;t be undone.</p>
+          <p className="text-muted-foreground text-sm">
+            {t("web.collections.deleteDialog.footer")}
+          </p>
           <div className="flex gap-2">
-            <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isPending}>{t("common.cancel")}</AlertDialogCancel>
             <Button
               variant="destructive"
               disabled={isPending || rows.status !== "ready"}
@@ -141,7 +146,9 @@ export function DeleteCollectionDialog({
                   className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
                 />
               ) : null}
-              {rows.status === "ready" ? deleteWithRowsLabel(listed.length) : "Delete"}
+              {rows.status === "ready"
+                ? deleteWithRowsLabel(listed.length)
+                : t("web.collections.deleteDialog.delete")}
             </Button>
           </div>
         </AlertDialogFooter>

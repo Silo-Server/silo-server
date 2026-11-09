@@ -58,6 +58,7 @@ import {
   savedTitle,
   toTMDBChart,
 } from "./discoverLayoutModel";
+import { useAppLanguage } from "@/i18n";
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -80,6 +81,7 @@ function KindPicker({
   narrow: boolean;
   onPick: (row: DiscoverRowBody) => void;
 }) {
+  useAppLanguage();
   const grid = cn("grid gap-2.5", !narrow && "grid-cols-2");
   return (
     <div className="grid content-start gap-6 overflow-y-auto px-5 pt-[18px] pb-6 sm:px-7">
@@ -138,6 +140,7 @@ function SourceControl({
   /** An MDBList pick, which also names the row. */
   onPick: (pick: SyncedPick) => void;
 }) {
+  useAppLanguage();
   const id = useId();
   const [changing, setChanging] = useState(!editing);
   const picker = useRef<HTMLDivElement>(null);
@@ -405,6 +408,7 @@ export function DiscoverRowDialog({
   onSaved: (newId: string | undefined) => void;
   onDelete: (row: DiscoverRow) => void;
 }) {
+  useAppLanguage();
   const editing = editRow !== null;
   const narrow = useMediaQuery("(max-width: 1023px)");
   const [step, setStep] = useState<"pick" | "form">(editing ? "form" : "pick");

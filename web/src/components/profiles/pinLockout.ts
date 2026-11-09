@@ -1,4 +1,5 @@
 import { V2ProblemError } from "@/api/v2/request";
+import { t } from "@/i18n";
 
 /**
  * The message for a PIN check the server refused with 429 because the profile
@@ -11,8 +12,8 @@ export function pinLockoutMessage(error: unknown): string | null {
   }
   const seconds = error.retryAfterSeconds;
   if (seconds === null) {
-    return "Too many incorrect PINs. Try again later.";
+    return t("web.profiles.pin.lockedLater");
   }
   const minutes = Math.max(1, Math.ceil(seconds / 60));
-  return `Too many incorrect PINs. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+  return t("web.profiles.pin.lockedMinutes", { count: minutes, count_text: String(minutes) });
 }
