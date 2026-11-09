@@ -17,7 +17,9 @@ import (
 // empty list now means every library, so they are returned unchanged, as are
 // rules that are not a JSON object. Legacy section-filter rules
 // (filter_type, filter_library_id, filter_library_ids) are read through
-// filter_library_ids, so that key gets the list too.
+// filter_library_ids, so that key gets the list too. Some readers see only
+// library_ids, so legacy rules naming none of the collection's libraries get
+// the libraries they name there.
 //
 // The migration that introduced the rule does the same to stored rows; a
 // restore of an older backup applies it to the collections it creates.
@@ -53,6 +55,11 @@ func PinSmartRulesToCollectionLibraries(raw json.RawMessage, collectionLibraries
 		if id > 0 && (len(named) == 0 || slices.Contains(named, id)) {
 			pinned = append(pinned, id)
 		}
+	}
+	if len(pinned) == 0 && legacy {
+		// Readers that skip the legacy keys see only library_ids, and an empty
+		// list would send them to every library.
+		pinned = slices.Clone(named)
 	}
 	slices.Sort(pinned)
 	pinned = slices.Compact(pinned)

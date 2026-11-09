@@ -21,6 +21,7 @@ func TestPinSmartRulesToCollectionLibraries(t *testing.T) {
 		{name: "not an object stays as it is", rules: `[1]`, libraries: []int{1}, want: `[1]`},
 		{name: "legacy filter with no libraries", rules: `{"filter_type":"movie"}`, libraries: []int{2}, want: `{"filter_library_ids":[2],"filter_type":"movie","library_ids":[2]}`},
 		{name: "legacy filter libraries narrow", rules: `{"filter_library_id":1,"filter_library_ids":[3]}`, libraries: []int{1, 2}, want: `{"filter_library_ids":[1],"library_ids":[1]}`},
+		{name: "legacy filter outside the collection's libraries names its own", rules: `{"filter_type":"movie","filter_library_ids":[5,3]}`, libraries: []int{1}, want: `{"filter_library_ids":[3,5],"filter_type":"movie","library_ids":[3,5]}`},
 		{name: "ids that are not whole numbers read as none", rules: `{"library_ids":[1.5,-1]}`, libraries: []int{4}, want: `{"library_ids":[4]}`},
 	}
 	for _, tc := range cases {
