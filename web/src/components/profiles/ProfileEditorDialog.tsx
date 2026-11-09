@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { Profile, UserLibrary } from "@/api/types";
 import { ImageUploadField } from "@/components/ImageUploadField";
+import { LibraryRestrictionField } from "@/components/profiles/LibraryRestrictionField";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -237,7 +238,6 @@ function ProfileEditorForm({
   const requireAdvisoryAgeId = useId();
   const requireAdvisoryAgeHelpId = useId();
   const playbackQualityId = useId();
-  const restrictLibrariesId = useId();
   const requestsAllowedId = useId();
   const requestsAllowedHelpId = useId();
   const selectedContentRatingValue =
@@ -738,61 +738,18 @@ function ProfileEditorForm({
           </div>
         </div>
 
-        <div className="border-border space-y-3 rounded-md border p-3">
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <Label htmlFor={restrictLibrariesId}>Restrict libraries</Label>
-              <p className="text-muted-foreground text-xs">
-                Limit this profile to a specific set of libraries.
-              </p>
-            </div>
-            <Switch
-              id={restrictLibrariesId}
-              checked={draft.libraryRestrictionsEnabled}
-              onCheckedChange={(checked) => {
-                setLibraryAccessTouched(true);
-                updateDraft("libraryRestrictionsEnabled", checked);
-                setErrors((current) => ({ ...current, libraries: undefined }));
-              }}
-            />
-          </div>
-
-          {draft.libraryRestrictionsEnabled ? (
-            <div className="space-y-2">
-              <div className="grid gap-2">
-                {libraries.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No libraries available.</p>
-                ) : (
-                  libraries.map((library) => {
-                    const checked = draft.allowedLibraryIDs.includes(library.id);
-
-                    return (
-                      <div
-                        key={library.id}
-                        className="border-border flex items-center justify-between rounded-md border px-3 py-2"
-                      >
-                        <div className="space-y-0.5">
-                          <div className="text-sm font-medium">{library.name}</div>
-                          <div className="text-muted-foreground text-xs capitalize">
-                            {library.type}
-                          </div>
-                        </div>
-                        <Switch
-                          checked={checked}
-                          onCheckedChange={(nextChecked) => toggleLibrary(library.id, nextChecked)}
-                        />
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {errors.libraries ? (
-                <p className="text-destructive text-sm">{errors.libraries}</p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        <LibraryRestrictionField
+          libraries={libraries}
+          enabled={draft.libraryRestrictionsEnabled}
+          allowedLibraryIDs={draft.allowedLibraryIDs}
+          error={errors.libraries}
+          onEnabledChange={(checked) => {
+            setLibraryAccessTouched(true);
+            updateDraft("libraryRestrictionsEnabled", checked);
+            setErrors((current) => ({ ...current, libraries: undefined }));
+          }}
+          onLibraryChange={toggleLibrary}
+        />
 
         {requestsAllowedSupported ? (
           <div className="border-border flex items-center justify-between gap-4 rounded-md border px-3 py-2">
