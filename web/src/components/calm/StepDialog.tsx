@@ -24,9 +24,7 @@ export function StepCount({ step, children }: { step: 1 | 2; children: string })
           step === 2 ? "bg-foreground" : "bg-border",
         )}
       />
-      <span className="shrink-0">
-        {t("web.ui.stepDialog.stepCount", { step: step, total: "2" })}
-      </span>
+      <span className="shrink-0">{t("web.ui.stepDialog.stepCount", { step, total: 2 })}</span>
       {/* Phones only fit the step count; screen readers still hear the note. */}
       <span aria-hidden className="max-sm:hidden">
         {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a decorative separator, hidden from assistive tech */}
