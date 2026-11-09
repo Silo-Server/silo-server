@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -263,6 +264,9 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 	if err != nil {
 		return result, err
 	}
+	if err := s.reconcileLocalListTitles(ctx, conn, b); err != nil {
+		return result, err
+	}
 	removalsPending, err := s.listItemsPendingRemoval(ctx, conn, b)
 	if err != nil {
 		return result, err
@@ -302,6 +306,20 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, err
 		}
 		if match == nil {
+			state, kept, added, err := s.importListTitle(ctx, conn, b, row, key, removalsPending)
+			if err != nil {
+				return result, err
+			}
+			if kept {
+				if state != nil {
+					states = append(states, *state)
+					result.Imported++
+				}
+				if added {
+					result.added++
+				}
+				continue
+			}
 			result.Unmatched++
 			if reason != "" {
 				result.Warnings = append(result.Warnings, reason)
@@ -347,6 +365,7 @@ func (s *Service) importList(ctx context.Context, conn Connection, cfg ServerCon
 			return result, err
 		}
 	}
+	s.requestQueuedListTitles(ctx, conn, b)
 	// An incremental response is only a delta; replacing the whole local order
 	// with that subset would discard every item absent from the delta.
 	if !batch.Incremental && b.applyOrder != nil && b.orderEnabled != nil && b.capOrder != nil &&
@@ -459,7 +478,7 @@ func (s *Service) applyRemoteListTombstone(
 	unlisted := make([]string, 0, len(states))
 	for _, state := range states {
 		if b.removalsEnabled(conn) && state.LocalPresent {
-			if err := b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID); err != nil {
+			if err := s.removeLocalListItem(ctx, store, conn, b, state.MediaItemID); err != nil {
 				return nil, err
 			}
 			// Counted once the local list changed, so a failed bookkeeping
@@ -519,18 +538,39 @@ func (p remoteListPresence) listed(kind, key string) bool {
 	return kinds[kind] || kinds[""] || (kind == "" && len(kinds) > 0)
 }
 
+// listedTMDB reports whether the read listed a title of this kind under any
+// of the TMDB IDs.
+func (p remoteListPresence) listedTMDB(kind string, tmdbIDs []int) bool {
+	for _, id := range tmdbIDs {
+		if p.listed(kind, prefixedID("tmdb", strconv.Itoa(id))) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) reconcileMissingRemoteListItems(ctx context.Context, conn Connection, store userstore.UserStore, b listBinding, seenRemote remoteListPresence, result *ImportListResult) error {
 	states, err := s.repo.ListListItemStates(ctx, conn.ID, b.kind)
 	if err != nil {
 		return err
 	}
-	now := s.now()
+	missing := make([]ListItemState, 0, len(states))
 	for _, state := range states {
-		if !state.RemotePresent || state.ProviderItemKey == "" || seenRemote.listed(state.Kind, state.ProviderItemKey) {
+		if state.RemotePresent && state.ProviderItemKey != "" && !seenRemote.listed(state.Kind, state.ProviderItemKey) {
+			missing = append(missing, state)
+		}
+	}
+	heldIDs, err := s.heldTitleTMDBIDs(ctx, conn, b, missing)
+	if err != nil {
+		return err
+	}
+	now := s.now()
+	for _, state := range missing {
+		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && seenRemote.listedTMDB(state.Kind, heldIDs[title]) {
 			continue
 		}
 		if b.removalsEnabled(conn) && state.LocalPresent {
-			if err := b.localRemove(ctx, store, conn.ProfileID, state.MediaItemID); err != nil {
+			if err := s.removeLocalListItem(ctx, store, conn, b, state.MediaItemID); err != nil {
 				return err
 			}
 			result.Removed++
@@ -573,6 +613,13 @@ func (s *Service) exportList(ctx context.Context, conn Connection, cfg ServerCon
 		return result, err
 	}
 	result.Warnings = append(result.Warnings, warnings...)
+	titleItems, titleStates, err := s.localListTitles(ctx, conn, b)
+	if err != nil {
+		return result, err
+	}
+	result.LocalFound += len(titleItems)
+	items = append(items, titleItems...)
+	states = append(states, titleStates...)
 	if err := s.repo.UpsertListItemStates(ctx, states); err != nil {
 		return result, err
 	}
@@ -651,6 +698,9 @@ func (s *Service) exportList(ctx context.Context, conn Connection, cfg ServerCon
 // removePendingListItems pushes pending local removals to the provider (items
 // dropped locally but still present remotely).
 func (s *Service) removePendingListItems(ctx context.Context, conn Connection, cfg ServerConfig, provider Provider, b listBinding) (int, error) {
+	if err := s.reconcileLocalListTitles(ctx, conn, b); err != nil {
+		return 0, err
+	}
 	removed := 0
 	// Removal failures intentionally do not set last_error (which would strand
 	// the row from ListPendingListItemRemovals, since there is no per-run upsert
