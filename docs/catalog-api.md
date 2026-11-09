@@ -75,13 +75,14 @@ server replaced the stored title with one of an item or season (a seasonal row's
 title, an editorial subject). That replacement happens when the row's items are read: the
 `Section` from that read carries the title to show, while the layout entry and the profile's
 section settings keep the stored title and its key, so a client heads a loaded row with the
-fetched `Section`'s title fields. The server records the key with the row it writes, and an
-update that changes a row's title without changing its key clears it, so whether a row keeps
+fetched `Section`'s title fields. For a stored section, the server records the key with the
+row it writes, and an update that changes the row's title without changing its key clears it, so whether a row keeps
 its key never depends on comparing text. A library rename re-keys the generated rows that
 still carry their own key, with the new name in `title_args`; a generated row without a key
 is renamed only while its title still reads as the old library name. Upgrading keyed the existing rows whose title is
 exactly a built-in name, because stored rows don't record who wrote them, so a typed title
-identical to a built-in name shows that name's translation. A profile
+identical to a built-in name shows that name's translation. For a recommendation row, the server derives the key from the row's type and wording when
+it builds the response, so a title in other wording, such as one an older build cached, has none. A profile
 title override equal to the administrator's title keeps the key. A profile settings row
 also carries `default_title_key` and `default_title_args` for its `default_title`, the
 administrator's title a renamed row can go back to, under the same rules. An
