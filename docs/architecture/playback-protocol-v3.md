@@ -114,7 +114,7 @@ the document is always the full one:
 }
 ```
 
-The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `buffering_quality_v1`, `playback_plan_summary_v1`, `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `plan_active_quality_v1`, `hls_remux_subtitle_renditions_v1`, `hls_copy_mpegts_v1`, `hls_variable_substitution_v1`, `codec_channel_ceilings_v1`, `native_embedded_limitations_v1`, and `hls_subtitle_renditions_all_v1`:
+The seventeen feature strings above are the full set this server version advertises on `/api/v1`. `/api/v2` advertises them plus `buffering_quality_v1`, `playback_plan_summary_v1`, `subrip_sidecar_v1`, `marker_thumbnails_v1`, `hls_subtitle_renditions_v1`, `plan_active_quality_v1`, `hls_remux_subtitle_renditions_v1`, `hls_copy_mpegts_v1`, `hls_variable_substitution_v1`, `codec_channel_ceilings_v1`, `native_embedded_limitations_v1`, `hls_subtitle_renditions_all_v1`, and `progressive_range_refusal_v1`:
 
 | Feature | What it promises |
 | --- | --- |
@@ -146,6 +146,7 @@ The seventeen feature strings above are the full set this server version adverti
 | `codec_channel_ceilings_v1` | `/api/v2` only. The server honors a delivery's `max_channels_by_codec` (§3). A client that needs a ceiling for one codec only (stereo AAC beside E-AC-3 5.1) sends it there instead of narrowing `max_channels` for every codec |
 | `native_embedded_limitations_v1` | `/api/v2` only. The server honors `limitations` on a `native_embedded` entry and keeps the tracks that player would show wrongly off the native route (§8). A client whose native route needs a limitation must not send that entry to a server without this feature: an older server rejects the field or ignores it and plans those tracks native |
 | `hls_subtitle_renditions_all_v1` | `/api/v2` only, and only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
+| `progressive_range_refusal_v1` | `/api/v2` only, and sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -840,6 +841,11 @@ proxy-executed progressive remux requires only the proxy's execution capability
 and remains eligible when relay capability is absent. During a rolling upgrade,
 an older node is therefore excluded from only the shapes it cannot serve before
 a client receives a URL rather than failing the stream on its first request.
+Proxies also publish `remux_range_refusal_v1`: a proxy-served progressive remux
+URL carries `remux_range=refuse` (`progressive_range_refusal_v1`) only when its
+proxy advertises it, because an older proxy streams a mid-stream range from the
+origin. The proxy refuses before it relays, so a transcode node needs no marker
+for it.
 The transcode-executed shape also requires the shared node-recipe store. The API
 writes the plan-scoped transport record before publishing the proxy URL; the
 transcode node validates it before starting each progressive response, and stop
@@ -957,8 +963,8 @@ parameter, and never carries a parameter across families.
 
 | Route family | Routes | Query parameters |
 | --- | --- | --- |
-| Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` only — the progressive-remux start offset in seconds, present only when it is non-zero — plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
-| Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` only, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
+| Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` — the progressive-remux start offset in seconds, present only when it is non-zero — and `remux_range=refuse` on a progressive remux whose start or replan request listed `progressive_range_refusal_v1` (`seek_reanchor` and `seek_failure_recovery` keep the opt-in of the attempt's stored request; a client that drops the feature on any other replan gets an unmarked URL), plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
+| Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` and `remux_range`, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
 | Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; one identity pin: `embedded_stream_index`, `external_subtitle_key`, or `downloaded_subtitle_id` (§8); `original=1` on an original-SRT `.srt` URL (§8). VTT receivers may explicitly request `timestamp_offset` in seconds |
 
 A media route never carries `file_id` or `downloaded_subtitle_id` — the session

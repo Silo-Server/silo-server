@@ -5804,11 +5804,15 @@ describe("VideoPlayer lost connection", () => {
     if (!video) throw new Error("expected video element");
 
     fireFrameTimeUpdate(video);
-    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
     // The viewer seeks past the buffered range while the server is down.
     act(() => controls.current?.onSeek(1_200));
+    // Chromium pauses the element before it reports the network error, and
+    // fires that pause after the error.
+    Object.defineProperty(video, "paused", { configurable: true, value: true });
     setNetworkError(video);
     fireEvent.error(video);
+    fireEvent.pause(video);
 
     expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, true);
     expect(onPlanFailure).not.toHaveBeenCalled();
@@ -5861,6 +5865,24 @@ describe("VideoPlayer lost connection", () => {
 
     expect(onConnectionLost).not.toHaveBeenCalled();
     expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
+  it("hands a network error on a transport settled paused on its first frame to the reconnect", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({ onConnectionLost, onPlanFailure, shouldAutoPlay: false });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    markReady(video);
+    fireEvent.canPlay(video);
+
+    // Chromium refetches the paused progressive stream and the server refuses
+    // the range: the route works, so the stream reopens, still paused.
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(expect.any(Number), false);
+    expect(onPlanFailure).not.toHaveBeenCalled();
   });
 
   it("pauses behind a reconnecting notice the viewer can leave", async () => {
