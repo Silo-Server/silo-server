@@ -322,9 +322,10 @@ function notOneOf(values: readonly string[]): string {
 
 function yearRangeLabel(from?: number, to?: number, tx: Text = t): string {
   if (from && to) {
-    return from === to
-      ? numberText(from)
-      : tx("web.admin.settings.requests.model.years.range", { from, to });
+    // A single year has no message; it takes the screen's digits only when
+    // shown, never in a name saved through `englishText`.
+    if (from === to) return tx === t ? numberText(from) : String(from);
+    return tx("web.admin.settings.requests.model.years.range", { from, to });
   }
   if (from) return tx("web.admin.settings.requests.model.years.from", { from });
   if (to) return tx("web.admin.settings.requests.model.years.to", { to });
