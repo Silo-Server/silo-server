@@ -879,8 +879,9 @@
 
 # Backups: the full restore round trip (needs the PostgreSQL 18 client), the
 # manifest written last and the sweep, the cluster-wide subsystem lock, the
-# published status of the operation holding it, and every table classified
-# for backup and restore. Selective restore: the
+# published status of the operation holding it, every table classified
+# for backup and restore, and a carried credential kept only for a profile
+# of its own account. Selective restore: the
 # restore round trip with re-run after interruption, idempotency and digest
 # refusal; plugins never installed from a backup, only reconfigured; restore job fencing;
 # a restored library whose setup partly failed, or whose provider placement
@@ -891,6 +892,7 @@
 ./internal/backup TestServerSpecificSettingsComeFromTheLiveServerDB
 ./internal/backup TestControlConnectionIsNeverOnTheLiveDatabaseDB
 ./internal/backup TestCustomPoliciesComeFromTheLiveServerDB
+./internal/backup TestCarryMatchesAProfileWithinItsAccountDB
 ./internal/backup TestBackupWritesManifestLastDB
 ./internal/backup TestSubsystemLockSerializesBackupsAndDeletesDB
 ./internal/backup TestLostLockSessionCancelsWorkDB

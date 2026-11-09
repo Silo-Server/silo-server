@@ -2015,7 +2015,9 @@ neither list.
   stays linked; the others are deleted. Accepted and revoked invitations
   are the restored history and stay. A live credential whose account,
   profile, access group, item, autoscan source, or connection is not in the
-  restored data is dropped, and so is one whose account (owner, inviter, or
+  restored data is dropped (a profile counts only under the credential's own
+  account, since a profile id is unique only within one), and so is one whose
+  account (owner, inviter, or
   creator) has more authority in the restored data than on the live server:
   a higher role (the Owner over admin over user), enabled where it is
   disabled now, break-glass access, an effective account policy wider in
