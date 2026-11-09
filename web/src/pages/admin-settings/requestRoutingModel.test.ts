@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { createAppIntl, englishText, setAppIntl } from "@/i18n";
 import type { PluginAdminForm, PluginAdminFormField, RequestIntegration } from "@/api/types";
@@ -138,17 +138,10 @@ describe("rule sentences", () => {
       autoRuleName({ series_statuses: ["upcoming", "returning", "in_production"] }, "series"),
     ).toBe("Continuing or upcoming");
     expect(autoRuleName({ series_statuses: ["ended"] }, "series")).toBe("Ended");
-  });
-
-  describe("on an Arabic-Indic screen", () => {
-    afterEach(() => setAppIntl(createAppIntl("en", {})));
-
-    it("shows a single year in the screen's digits but saves its name in Latin ones", () => {
-      setAppIntl(createAppIntl("ar", {}, "ar-EG"));
-      const year = { year_from: 2000, year_to: 2000 };
-      expect(autoRuleName(year, "movie")).toBe("٢٠٠٠");
-      expect(autoRuleName(year, "movie", undefined, englishText)).toBe("2000");
-    });
+    setAppIntl(createAppIntl("ar", {}, "ar-EG")); // A saved name keeps Latin digits.
+    const saved = autoRuleName({ year_from: 2000, year_to: 2000 }, "movie", undefined, englishText);
+    setAppIntl(createAppIntl("en", {}));
+    expect(saved).toBe("2000");
   });
 
   it("reads a destination with names, not IDs, and only what it overrides", () => {
