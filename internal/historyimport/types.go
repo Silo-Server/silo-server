@@ -327,6 +327,9 @@ type ExecutionSummary struct {
 	Warnings              []string
 	UnmatchedSamples      []UnmatchedSample
 	UnmatchedReasonCounts map[string]int
+	// HiddenSuppressed counts records refused because the profile removed
+	// them from its history.
+	HiddenSuppressed int
 }
 
 // --- Admin types ---

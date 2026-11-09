@@ -125,7 +125,7 @@ func (r *Repository) tryLargeImportSlot(ctx context.Context, claim RunClaim) (bo
 // awaitLargeSlot holds a run that has become very large until it owns the
 // slot. The heartbeat keeps running while it waits.
 func (a *runApplier) awaitLargeSlot(ctx context.Context) error {
-	if a.largeSlot || a.claim.Generation == 0 || a.summary.Fetched < a.service.largeThreshold() {
+	if a.largeSlot || a.claim.Generation == 0 || a.summary.Fetched < largeImportThreshold {
 		return nil
 	}
 	logged := false
@@ -145,21 +145,7 @@ func (a *runApplier) awaitLargeSlot(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(a.service.largePoll()):
+		case <-time.After(largeImportPollInterval):
 		}
 	}
-}
-
-func (s *Service) largeThreshold() int {
-	if s.largeImportThreshold > 0 {
-		return s.largeImportThreshold
-	}
-	return largeImportThreshold
-}
-
-func (s *Service) largePoll() time.Duration {
-	if s.largeImportPoll > 0 {
-		return s.largeImportPoll
-	}
-	return largeImportPollInterval
 }

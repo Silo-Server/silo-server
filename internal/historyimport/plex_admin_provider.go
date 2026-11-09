@@ -110,7 +110,7 @@ func (p *PlexAdminProvider) normalizePage(ctx context.Context, rows []PlexHistor
 	if err != nil {
 		return nil, err
 	}
-	itemMeta, err := p.fetchItemMetadata(ctx, rows, page, seriesMeta, ids)
+	itemMeta, err := p.fetchItemMetadata(ctx, page, seriesMeta, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -136,24 +136,16 @@ type plexItemIDLookup struct {
 // numbers and are skipped. After a sweep gives up, later pages stop asking.
 func (p *PlexAdminProvider) fetchItemMetadata(
 	ctx context.Context,
-	rows, items []PlexHistoryItem,
+	items []PlexHistoryItem,
 	seriesMeta map[string]*PlexItem,
 	ids *plexItemIDLookup,
 ) (map[string]*PlexItem, error) {
-	// A rating key is resolved when any of the page's rows already carries
-	// usable ids (Plex is inconsistent about including Guid on history rows).
-	resolved := make(map[string]struct{})
-	for _, item := range rows {
-		if hasMatchablePlexGuid(item.Guid) || hasMatchableSeriesFallback(item, seriesMeta) {
-			resolved[item.RatingKey] = struct{}{}
-		}
-	}
 	var pending []string
 	for _, item := range items {
 		if item.Type != KindMovie && item.Type != KindEpisode {
 			continue
 		}
-		if _, ok := resolved[item.RatingKey]; !ok {
+		if !hasMatchablePlexGuid(item.Guid) && !hasMatchableSeriesFallback(item, seriesMeta) {
 			pending = append(pending, item.RatingKey)
 		}
 	}

@@ -382,11 +382,12 @@ func (c *PlexClient) forEachSectionPage(ctx context.Context, baseURL, token, sec
 // the watched listing to merge against.
 func (c *PlexClient) fetchInProgressItems(ctx context.Context, baseURL, token, sectionKey string, mediaType int) ([]PlexItem, error) {
 	var items []PlexItem
-	err := c.forEachSectionPage(ctx, baseURL, token, sectionKey, mediaType, plexFilterInProgress, 0, func(page []PlexItem, _ int) error {
-		items = append(items, page...)
-		return nil
-	})
-	return items, err
+	err := c.forEachSectionPage(ctx, baseURL, token, sectionKey, mediaType, plexFilterInProgress, 0, collectHeld(ctx, &items))
+	if err != nil {
+		releaseItems(ctx, items)
+		return nil, err
+	}
+	return items, nil
 }
 
 // FetchWatchlist pages through the user's account-level watchlist on the

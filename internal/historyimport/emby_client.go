@@ -241,11 +241,12 @@ const (
 // fetchAllItems reads a short listing whole. Only held lists may use it.
 func (c *EmbyClient) fetchAllItems(ctx context.Context, auth embyLocalAuth, endpoint, filter, includeItemTypes string) ([]embyItem, error) {
 	var items []embyItem
-	err := c.forEachItemsPage(ctx, auth, endpoint, filter, includeItemTypes, 0, func(page []embyItem, _ int) error {
-		items = append(items, page...)
-		return nil
-	})
-	return items, err
+	err := c.forEachItemsPage(ctx, auth, endpoint, filter, includeItemTypes, 0, collectHeld(ctx, &items))
+	if err != nil {
+		releaseItems(ctx, items)
+		return nil, err
+	}
+	return items, nil
 }
 
 // forEachItemsPage visits one of the user's item lists (endpoint is relative

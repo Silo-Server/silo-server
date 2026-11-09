@@ -110,13 +110,3 @@ func importedShowsOf(t *testing.T, drops SeriesDropStore, episodes []importedEpi
 	}
 	return shows
 }
-
-// staticBatchProvider delivers fixed records as one stream.
-func streamOf(ctx context.Context, sink RecordSink, records []Record, warnings []string, err error) error {
-	if len(records) > 0 || len(warnings) > 0 {
-		if sinkErr := sink(RecordBatch{Records: records, Warnings: warnings}); sinkErr != nil {
-			return sinkErr
-		}
-	}
-	return err
-}

@@ -111,7 +111,6 @@ type plexSeriesLookup struct {
 	client         *PlexClient
 	baseURL, token string
 	cache          *lookupCache[*PlexItem]
-	stopped        bool
 	asked, missing int
 	firstErr       error
 	aborted        bool
@@ -122,17 +121,8 @@ func newPlexSeriesLookup(client *PlexClient, baseURL, token string) *plexSeriesL
 }
 
 func (l *plexSeriesLookup) resolve(ctx context.Context, keys []string) (map[string]*PlexItem, error) {
-	unique := uniqueNonEmpty(keys)
-	result := make(map[string]*PlexItem, len(unique))
-	var pending []string
-	for _, key := range unique {
-		if meta, ok := l.cache.get(key); ok {
-			result[key] = meta
-		} else {
-			pending = append(pending, key)
-		}
-	}
-	if len(pending) == 0 || l.stopped {
+	result, pending := l.cache.split(keys)
+	if len(pending) == 0 || l.aborted {
 		return result, nil
 	}
 	sweep, err := l.client.fetchMetadataByKey(ctx, l.baseURL, l.token, pending)
@@ -147,7 +137,7 @@ func (l *plexSeriesLookup) resolve(ctx context.Context, keys []string) (map[stri
 		}
 	}
 	if sweep.aborted {
-		l.aborted, l.stopped = true, true
+		l.aborted = true
 	}
 	for _, key := range pending {
 		// A failed key is not cached, so a later page can still resolve it.

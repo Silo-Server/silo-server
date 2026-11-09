@@ -48,6 +48,18 @@ func isSinkError(err error) bool {
 	return errors.As(err, &target)
 }
 
+// isFatalListingError reports a failure that must end the run, as opposed to
+// a listing a provider can do without and report as a warning.
+func isFatalListingError(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || errors.Is(err, ErrUpstreamResponseTooLarge) || isSinkError(err)
+}
+
+// repeatsWatch reports whether a favorite's item was already delivered as a
+// watch record. Only movies and episodes have watch listings.
+func repeatsWatch(record Record, played bool, positionTicks int64) bool {
+	return (record.Kind == KindMovie || record.Kind == KindEpisode) && (played || positionTicks > 0)
+}
+
 func markSinkErrors(sink RecordSink) RecordSink {
 	return func(batch RecordBatch) error {
 		if err := sink(batch); err != nil {
@@ -93,9 +105,18 @@ func newLookupCache[V any](capacity int) *lookupCache[V] {
 	return &lookupCache[V]{items: make(map[string]V, capacity), ring: make([]string, capacity)}
 }
 
-func (c *lookupCache[V]) get(key string) (V, bool) {
-	value, ok := c.items[key]
-	return value, ok
+// split returns the cached values for keys and the distinct keys still to look up.
+func (c *lookupCache[V]) split(keys []string) (map[string]V, []string) {
+	hits := make(map[string]V)
+	var pending []string
+	for _, key := range uniqueNonEmpty(keys) {
+		if value, ok := c.items[key]; ok {
+			hits[key] = value
+		} else {
+			pending = append(pending, key)
+		}
+	}
+	return hits, pending
 }
 
 func (c *lookupCache[V]) put(key string, value V) {
@@ -109,30 +130,43 @@ func (c *lookupCache[V]) put(key string, value V) {
 
 // heldItems is a short listing kept while a longer one streams past it, so
 // the two merge per item: the in-progress list held against the watched pages.
-// It is charged to the run's retained budget.
+// Its items were charged to the run's retained budget as they were collected.
 type heldItems[T retainedSizer] struct {
 	items    []T
 	index    map[string]int
 	consumed []bool
 }
 
-func holdItems[T retainedSizer](ctx context.Context, items []T, id func(T) string) (*heldItems[T], error) {
-	if err := retainItems(ctx, items); err != nil {
-		return nil, err
-	}
+func holdItems[T retainedSizer](items []T, id func(T) string) *heldItems[T] {
 	held := &heldItems[T]{items: items, index: make(map[string]int, len(items)), consumed: make([]bool, len(items))}
 	for i, item := range items {
 		held.index[id(item)] = i
 	}
-	return held, nil
+	return held
+}
+
+// collectHeld returns a page visitor that gathers a held listing, charging
+// each page before keeping it so the budget stops a long list as it grows.
+func collectHeld[T retainedSizer](ctx context.Context, items *[]T) func([]T, int) error {
+	return func(page []T, _ int) error {
+		if err := retainItems(ctx, page); err != nil {
+			return err
+		}
+		*items = append(*items, page...)
+		return nil
+	}
 }
 
 // take returns the held item for id and marks it as merged, so it is left out
-// of remaining. An item can be taken twice when a listing is read again.
+// of remaining. An item can be taken twice when a listing is read again. A nil
+// holder has nothing to take.
 func (h *heldItems[T]) take(id string) (T, bool) {
+	var zero T
+	if h == nil {
+		return zero, false
+	}
 	i, ok := h.index[id]
 	if !ok {
-		var zero T
 		return zero, false
 	}
 	h.consumed[i] = true

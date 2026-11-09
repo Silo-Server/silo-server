@@ -69,11 +69,6 @@ type Service struct {
 	// signals hears once per run that the profile's signals changed. Nil
 	// reports nothing.
 	signals SignalsChangedNotifier
-
-	// largeImportThreshold and largeImportPoll override the large-run gate's
-	// defaults in tests; zero uses the defaults.
-	largeImportThreshold int
-	largeImportPoll      time.Duration
 }
 
 func NewService(bgContext context.Context, repo *Repository, storeProvider userstore.UserStoreProvider) *Service {
@@ -426,7 +421,11 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 
 	reporter, _ := provider.(ContinueWatchingRowReporter)
 	apply := runApplier{service: s, run: run, claim: claim, summary: &summary, hiddenWarningAt: -1}
-	if reporter != nil {
+	if summary.HiddenSuppressed > 0 {
+		apply.hiddenWarningAt = 0 // restored by the checkpoint; the warning stays first
+	}
+	// A resumed run skips the Continue Watching pass, so it collects nothing for it.
+	if reporter != nil && from == nil {
 		apply.shows = newImportedShows()
 	}
 	// One budget covers every request the provider makes for this run, so a
@@ -499,7 +498,7 @@ func (s *Service) executeRunWithClaim(run *Run, provider Provider, claim RunClai
 // skips the pass and warns, and the next import of the source reconciles them.
 func (s *Service) reconcileRun(ctx context.Context, run *Run, row ContinueWatchingRow, shows *importedShows, resumed bool, summary *ExecutionSummary) {
 	if resumed || shows.failed != nil {
-		slog.WarnContext(ctx, "history import: continue watching pass skipped", "run_id", run.ID, "resumed", resumed, "error", shows.failed)
+		slog.WarnContext(ctx, "history import: continue watching pass skipped", "run_id", run.ID, "resumed", resumed)
 		addRunWarning(summary, warnContinueWatchingNotReconciled)
 		return
 	}
@@ -514,12 +513,11 @@ func (s *Service) reconcileRun(ctx context.Context, run *Run, row ContinueWatchi
 
 // runApplier applies one run's batches.
 type runApplier struct {
-	service          *Service
-	run              *Run
-	claim            RunClaim
-	summary          *ExecutionSummary
-	hiddenSuppressed int
-	hiddenWarningAt  int
+	service         *Service
+	run             *Run
+	claim           RunClaim
+	summary         *ExecutionSummary
+	hiddenWarningAt int
 	// shows is nil when the provider has no Continue Watching row to compare.
 	shows     *importedShows
 	largeSlot bool
@@ -652,9 +650,9 @@ func (a *runApplier) applyRecord(ctx context.Context, record Record, match *Matc
 		summary.Skipped++
 	}
 	if outcome.HiddenSuppressed {
-		a.hiddenSuppressed++
+		summary.HiddenSuppressed++
 		summary.Warnings, a.hiddenWarningAt = upsertHiddenHistoryWarning(
-			summary.Warnings, a.hiddenWarningAt, a.hiddenSuppressed)
+			summary.Warnings, a.hiddenWarningAt, summary.HiddenSuppressed)
 	}
 }
 

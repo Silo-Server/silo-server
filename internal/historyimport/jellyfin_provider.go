@@ -2,7 +2,6 @@ package historyimport
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -56,7 +55,7 @@ func (p *JellyfinProvider) Stream(ctx context.Context, from *StreamPosition, sin
 	// them verbatim, and upstream errors can carry the server's response body.
 	resumable, err := p.client.FetchResumableItems(ctx, p.auth)
 	if err != nil {
-		if ctx.Err() != nil || errors.Is(err, ErrUpstreamResponseTooLarge) {
+		if isFatalListingError(ctx, err) {
 			return err
 		}
 		slog.WarnContext(ctx, "jellyfin history import: resume positions unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
@@ -65,10 +64,7 @@ func (p *JellyfinProvider) Stream(ctx context.Context, from *StreamPosition, sin
 		}
 		resumable = nil
 	}
-	held, err := holdItems(ctx, resumable, func(item jellyfinItem) string { return item.ID })
-	if err != nil {
-		return fmt.Errorf("holding Jellyfin resumable items: %w", err)
-	}
+	held := holdItems(resumable, func(item jellyfinItem) string { return item.ID })
 	defer held.release(ctx)
 
 	series := newLookupCache[jellyfinItem](seriesLookupCacheEntries)
@@ -120,10 +116,8 @@ func (p *JellyfinProvider) emitWatched(ctx context.Context, page []jellyfinItem,
 	records := make([]Record, 0, len(page))
 	for _, item := range page {
 		record := normalizeJellyfinItem(item, meta[item.SeriesID])
-		if held != nil {
-			if progress, ok := held.take(item.ID); ok {
-				record = mergeRecords(record, normalizeJellyfinItem(progress, meta[progress.SeriesID]))
-			}
+		if progress, ok := held.take(item.ID); ok {
+			record = mergeRecords(record, normalizeJellyfinItem(progress, meta[progress.SeriesID]))
 		}
 		records = append(records, record)
 	}
@@ -142,7 +136,7 @@ func (p *JellyfinProvider) streamFavorites(ctx context.Context, from *StreamPosi
 			var err error
 			meta, err = p.resolveSeries(ctx, page, series)
 			switch {
-			case errors.Is(err, ErrUpstreamResponseTooLarge) || ctx.Err() != nil:
+			case err != nil && isFatalListingError(ctx, err):
 				return err
 			case err != nil:
 				// Like the favorites query, a failure here cannot discard the
@@ -160,13 +154,13 @@ func (p *JellyfinProvider) streamFavorites(ctx context.Context, from *StreamPosi
 			record.FavoriteOnly = true
 			// A lookback may have skipped this item's play, so only a full read
 			// has already counted it.
-			record.RepeatOfWatch = p.playedSince == nil && (item.UserData.Played || item.UserData.PlaybackPositionTicks > 0)
+			record.RepeatOfWatch = p.playedSince == nil && repeatsWatch(record, item.UserData.Played, item.UserData.PlaybackPositionTicks)
 			records = append(records, record)
 		}
 		return sink(RecordBatch{Records: records, Warnings: warnings, Resume: StreamPosition{Stage: jellyfinStageFavorites, Offset: start}})
 	})
 	if err != nil {
-		if errors.Is(err, ErrUpstreamResponseTooLarge) || ctx.Err() != nil || isSinkError(err) {
+		if isFatalListingError(ctx, err) {
 			return err
 		}
 		slog.WarnContext(ctx, "jellyfin history import: favorites unavailable", "component", "historyimport", "error", jellyfinWarningLogError(err))
@@ -192,23 +186,13 @@ func warningLogError(source string, err error) string {
 
 // resolveSeries returns the series of a page's episodes, through the cache.
 func (p *JellyfinProvider) resolveSeries(ctx context.Context, items []jellyfinItem, cache *lookupCache[jellyfinItem]) (map[string]jellyfinItem, error) {
-	result := map[string]jellyfinItem{}
-	seen := map[string]struct{}{}
-	ids := []string{}
+	keys := make([]string, 0, len(items))
 	for _, item := range items {
-		if !strings.EqualFold(item.Type, "episode") || strings.TrimSpace(item.SeriesID) == "" {
-			continue
-		}
-		if _, ok := seen[item.SeriesID]; ok {
-			continue
-		}
-		seen[item.SeriesID] = struct{}{}
-		if series, ok := cache.get(item.SeriesID); ok {
-			result[item.SeriesID] = series
-		} else {
-			ids = append(ids, item.SeriesID)
+		if strings.EqualFold(item.Type, "episode") && strings.TrimSpace(item.SeriesID) != "" {
+			keys = append(keys, item.SeriesID)
 		}
 	}
+	result, ids := cache.split(keys)
 	if len(ids) == 0 {
 		return result, nil
 	}

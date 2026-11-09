@@ -150,40 +150,25 @@ func (p *PlexServerProvider) streamSections(ctx context.Context, sections []stru
 
 func (p *PlexServerProvider) streamSection(ctx context.Context, key, title string, mediaType int, noun string, series *plexSeriesLookup, from *StreamPosition, sink RecordSink) error {
 	unavailable := func(listing string, err error) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 		// A source over the size limits fails the run rather than importing
 		// without the section.
-		if errors.Is(err, ErrUpstreamResponseTooLarge) {
+		if err == nil || isFatalListingError(ctx, err) {
 			return err
 		}
 		return sink(RecordBatch{Warnings: []string{fmt.Sprintf(warnPlexSectionUnavailable, listing, noun, title, err)}})
 	}
 
 	items, err := p.client.fetchInProgressItems(ctx, p.baseURL, p.token, key, mediaType)
-	if err != nil {
-		if err := unavailable("in-progress", err); err != nil {
-			return err
-		}
-		items = nil
+	if err := unavailable("in-progress", err); err != nil {
+		return err
 	}
-	held, err := holdItems(ctx, items, func(item PlexItem) string { return item.RatingKey })
-	if err != nil {
-		return fmt.Errorf("holding Plex in-progress items (section %s): %w", key, err)
-	}
+	held := holdItems(items, func(item PlexItem) string { return item.RatingKey })
 	defer held.release(ctx)
 
 	if from == nil || from.Stage == plexStageWatched {
 		err := p.streamWatchedPages(ctx, key, mediaType, stageOffset(from, plexStageWatched), held, series, sink)
-		switch {
-		case err == nil:
-		case ctx.Err() != nil || isSinkError(err):
+		if err := unavailable("watched", err); err != nil {
 			return err
-		default:
-			if err := unavailable("watched", err); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -224,10 +209,8 @@ func (p *PlexServerProvider) normalizePage(ctx context.Context, page []PlexItem,
 	records := make([]Record, 0, len(page))
 	for _, item := range page {
 		record := NormalizePlexItem(item, meta[item.GrandparentRatingKey])
-		if held != nil {
-			if progress, ok := held.take(item.RatingKey); ok {
-				record = mergeRecords(record, NormalizePlexItem(progress, meta[progress.GrandparentRatingKey]))
-			}
+		if progress, ok := held.take(item.RatingKey); ok {
+			record = mergeRecords(record, NormalizePlexItem(progress, meta[progress.GrandparentRatingKey]))
 		}
 		if record.Played || record.PositionSeconds > 0 {
 			records = append(records, record)

@@ -25,6 +25,26 @@ func TestRunWarningsStopAtTheStoredLimit(t *testing.T) {
 	}
 }
 
+// A played favorite series has no watch record to repeat, so it still counts.
+func TestFavoriteRepeatsWatchOnlyForWatchKinds(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		kind   string
+		played bool
+		ticks  int64
+		want   bool
+	}{
+		{KindMovie, true, 0, true},
+		{KindEpisode, false, 10, true},
+		{KindMovie, false, 0, false},
+		{KindSeries, true, 0, false},
+	} {
+		if got := repeatsWatch(Record{Kind: tc.kind}, tc.played, tc.ticks); got != tc.want {
+			t.Errorf("%s played=%v ticks=%d = %v, want %v", tc.kind, tc.played, tc.ticks, got, tc.want)
+		}
+	}
+}
+
 // Lookups keep a fixed number of entries however many distinct keys pass.
 func TestLookupCacheStaysAtCapacity(t *testing.T) {
 	t.Parallel()
@@ -32,10 +52,10 @@ func TestLookupCacheStaysAtCapacity(t *testing.T) {
 	for i, key := range []string{"a", "b", "c", "d"} {
 		cache.put(key, i)
 	}
-	if _, ok := cache.get("a"); ok {
+	if _, ok := cache.items["a"]; ok {
 		t.Fatal("oldest entry survived past capacity")
 	}
-	if got, ok := cache.get("d"); !ok || got != 3 {
+	if got, ok := cache.items["d"]; !ok || got != 3 {
 		t.Fatalf("newest = %d, %v", got, ok)
 	}
 	if len(cache.items) != 3 {

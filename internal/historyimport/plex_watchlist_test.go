@@ -257,8 +257,8 @@ type staticWatchlistProvider struct {
 	records []Record
 }
 
-func (p staticWatchlistProvider) Stream(ctx context.Context, _ *StreamPosition, sink RecordSink) error {
-	return streamOf(ctx, sink, p.records, nil, nil)
+func (p staticWatchlistProvider) Stream(_ context.Context, _ *StreamPosition, sink RecordSink) error {
+	return sink(RecordBatch{Records: p.records})
 }
 
 func newPlexWatchlistImportTestPool(t *testing.T) *pgxpool.Pool {

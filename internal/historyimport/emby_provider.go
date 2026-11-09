@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"slices"
 	"strings"
 )
@@ -58,29 +57,18 @@ type embySeriesLookup struct {
 }
 
 func (l *embySeriesLookup) resolve(ctx context.Context, items []embyItem) (map[string]embyItem, []string, error) {
-	result := make(map[string]embyItem)
-	var pending []string
-	seen := make(map[string]struct{})
+	ids := make([]string, 0, len(items))
 	for _, item := range items {
-		id := strings.TrimSpace(item.SeriesID)
-		if !strings.EqualFold(item.Type, "episode") || id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		if series, ok := l.cache.get(id); ok {
-			result[id] = series
-		} else {
-			pending = append(pending, id)
+		if strings.EqualFold(item.Type, "episode") {
+			ids = append(ids, strings.TrimSpace(item.SeriesID))
 		}
 	}
+	result, pending := l.cache.split(ids)
 	if len(pending) == 0 || l.failed {
 		return result, nil, nil
 	}
 	seriesItems, err := l.provider.client.FetchItemsByIDs(ctx, l.provider.auth, pending, "Series")
-	if errors.Is(err, ErrUpstreamResponseTooLarge) || ctx.Err() != nil {
+	if err != nil && isFatalListingError(ctx, err) {
 		return nil, nil, err
 	}
 	if err != nil {
@@ -126,11 +114,9 @@ func (p *EmbyProvider) Stream(ctx context.Context, from *StreamPosition, sink Re
 		listed = nil
 	}
 	hidden := hiddenFromResume(resumable, listed, rowRead)
-	held, err := holdItems(ctx, resumable, func(item embyItem) string { return item.ID })
-	if err != nil {
-		return fmt.Errorf("holding Emby resumable items: %w", err)
-	}
+	held := holdItems(resumable, func(item embyItem) string { return item.ID })
 	defer held.release(ctx)
+	defer releaseItems(ctx, listed)
 
 	series := &embySeriesLookup{provider: p, cache: newLookupCache[embyItem](seriesLookupCacheEntries), unfinished: map[string]bool{}}
 	listedSeries, lookupWarnings, err := series.resolve(ctx, listed)
@@ -172,7 +158,7 @@ func (p *EmbyProvider) Stream(ctx context.Context, from *StreamPosition, sink Re
 		if p.row == nil {
 			slog.WarnContext(ctx, "emby history import: continue watching lists an episode without a series; shows hidden there stay visible", "component", "historyimport")
 		} else {
-			maps.Copy(p.row.UnfinishedSourceSeries, series.unfinished)
+			p.row.UnfinishedSourceSeries = series.unfinished
 		}
 	}
 	return nil
@@ -188,10 +174,8 @@ func (p *EmbyProvider) emitWatched(ctx context.Context, page []embyItem, held *h
 	records := make([]Record, 0, len(page))
 	for _, item := range page {
 		expanded := embyWatchedRecords(item, meta[item.SeriesID])
-		if held != nil {
-			if progress, ok := held.take(item.ID); ok {
-				expanded = mergeWatchedRecords(expanded, embyWatchedRecords(progress, meta[progress.SeriesID]))
-			}
+		if progress, ok := held.take(item.ID); ok {
+			expanded = mergeWatchedRecords(expanded, embyWatchedRecords(progress, meta[progress.SeriesID]))
 		}
 		for _, record := range expanded {
 			record.HiddenFromResume = hidden[item.ID]
@@ -242,13 +226,13 @@ func (p *EmbyProvider) streamFavorites(ctx context.Context, from *StreamPosition
 			// Watch records own the runtime; a favorite's full file runtime must
 			// not replace a multi-episode file's per-episode share.
 			record.DurationSeconds = 0
-			record.RepeatOfWatch = item.UserData.Played || item.UserData.PlaybackPositionTicks > 0
+			record.RepeatOfWatch = repeatsWatch(record, item.UserData.Played, item.UserData.PlaybackPositionTicks)
 			records = append(records, record)
 		}
 		return sink(RecordBatch{Records: records, Warnings: warnings, Resume: StreamPosition{Stage: embyStageFavorites, Offset: start}})
 	})
 	if err != nil {
-		if errors.Is(err, ErrUpstreamResponseTooLarge) || ctx.Err() != nil || isSinkError(err) {
+		if isFatalListingError(ctx, err) {
 			return err
 		}
 		// Warnings store fixed text: v1 returns them verbatim, and upstream
@@ -337,15 +321,11 @@ func resumeListKey(item embyItem) string {
 // The row also records whether it lists any unstarted episode (IncludesNextUp):
 // Emby can keep Next Up out of the row, and then a show between episodes is
 // missing from it whether or not it was hidden. And it records which of the
-// import's shows Emby counts as unfinished, from each series' unplayed count:
-// a show the user finished at the source is missing from the row too.
+// import's shows Emby counts as unfinished, which Stream fills in from each
+// looked-up series' unplayed count: a show the user finished at the source is
+// missing from the row too.
 func continueWatchingRow(listed []embyItem, seriesMeta map[string]embyItem) *ContinueWatchingRow {
-	row := &ContinueWatchingRow{SourceSeriesIDs: map[string]bool{}, UnfinishedSourceSeries: map[string]bool{}}
-	for id, series := range seriesMeta {
-		if unplayed := series.UserData.UnplayedItemCount; unplayed != nil && *unplayed > 0 {
-			row.UnfinishedSourceSeries[id] = true
-		}
-	}
+	row := &ContinueWatchingRow{SourceSeriesIDs: map[string]bool{}}
 	for _, item := range listed {
 		if !strings.EqualFold(item.Type, "episode") {
 			continue

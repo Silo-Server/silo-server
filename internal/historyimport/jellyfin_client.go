@@ -194,18 +194,19 @@ func (c *JellyfinClient) FetchResumableItems(ctx context.Context, auth jellyfinL
 	query.Set("Fields", jellyfinItemFields)
 
 	var items []jellyfinItem
-	err := c.forEachPage(ctx, auth, auth.endpoint("/UserItems/Resume"), query, 0, func(page []jellyfinItem, _ int) error {
-		items = append(items, page...)
-		return nil
+	keep := collectHeld(ctx, &items)
+	err := c.forEachPage(ctx, auth, auth.endpoint("/UserItems/Resume"), query, 0, func(page []jellyfinItem, start int) error {
+		// Filter here, not in the request: paging stops on a short page, so it
+		// must see the unfiltered page sizes.
+		return keep(slices.DeleteFunc(page, func(item jellyfinItem) bool {
+			return !strings.EqualFold(item.Type, "Movie") && !strings.EqualFold(item.Type, "Episode")
+		}), start)
 	})
 	if err != nil {
+		releaseItems(ctx, items)
 		return nil, fmt.Errorf("fetching Jellyfin resumable items: %w", err)
 	}
-	// Filter after paging: paging stops on a short page, so it must see the
-	// unfiltered page sizes.
-	return slices.DeleteFunc(items, func(item jellyfinItem) bool {
-		return !strings.EqualFold(item.Type, "Movie") && !strings.EqualFold(item.Type, "Episode")
-	}), nil
+	return items, nil
 }
 
 // streamPlayedSince visits the user's played movies and episodes whose
