@@ -498,7 +498,7 @@ function LibrariesPage() {
                           <TableCell className="font-medium">{lib.name}</TableCell>
                           <TableCell className="text-xs">
                             {lib.paths.length === 1 ? (
-                              <span className="text-muted-foreground font-mono">
+                              <span dir="ltr" className="text-muted-foreground font-mono">
                                 {lib.paths[0]}
                               </span>
                             ) : (
@@ -834,7 +834,9 @@ function LibrariesPage() {
                     <TableCell className="font-medium">{activeLibrary.name}</TableCell>
                     <TableCell className="text-muted-foreground text-xs">
                       {activeLibrary.paths.length === 1 ? (
-                        <span className="font-mono">{activeLibrary.paths[0]}</span>
+                        <span dir="ltr" className="font-mono">
+                          {activeLibrary.paths[0]}
+                        </span>
                       ) : (
                         t("web.admin.libraries.list.folderCount", {
                           count: activeLibrary.paths.length,
