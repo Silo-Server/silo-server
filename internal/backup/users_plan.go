@@ -488,18 +488,12 @@ func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error
 	}
 	for i := range plan.doc.Profiles {
 		e := &plan.doc.Profiles[i]
-		becomesPrimary := e.IsPrimary && !hasPrimary
-		limited := e.LibraryRestrictionsEnabled && !becomesPrimary
-		pp := profilePlan{entry: e, preview: PreviewProfile{ID: e.ID, Name: e.Name, IsPrimary: e.IsPrimary, Restricted: limited,
+		pp := profilePlan{entry: e, preview: PreviewProfile{ID: e.ID, Name: e.Name, IsPrimary: e.IsPrimary,
 			HasPIN: e.PINHash != "", DataTypes: []PreviewDataType{}}}
 		pp.allowed, pp.preview.LibrariesLeftOut = mapLibraries(e.AllowedLibraryIDs, u.libMap)
 		if pp.allowed == nil {
 			pp.allowed = []int{}
 		}
-		if !limited {
-			pp.preview.LibrariesLeftOut = 0
-		}
-		pp.preview.NoLibraryAccess = limited && len(pp.allowed) == 0
 		for _, t := range userDataTypes {
 			raw, ok := e.Data[t.ID()]
 			if !ok {
@@ -517,6 +511,16 @@ func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error
 		}
 		pp.preview.Match, pp.localID = match, localID
 		pp.preview.LocalID = localID
+		// The backup's primary profile has no library limit here when it
+		// becomes the primary or merges into a profile here that keeps its
+		// access; otherwise it is created as another profile with its limit.
+		inheritsAccount := e.IsPrimary && (!hasPrimary || localID != "")
+		limited := e.LibraryRestrictionsEnabled && !inheritsAccount
+		pp.preview.Restricted = limited
+		if !limited {
+			pp.preview.LibrariesLeftOut = 0
+		}
+		pp.preview.NoLibraryAccess = limited && len(pp.allowed) == 0
 		switch {
 		case reason != "":
 			pp.preview.Status, pp.preview.Reason, pp.preview.Message = ItemAmbiguous, reason, message
