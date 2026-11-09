@@ -1,14 +1,12 @@
-name: Feature request
-description: Suggest an improvement or something Silo doesn't do yet
-title: "[feature] "
-labels: ["enhancement", "feature-request"]
 body:
   - type: markdown
     attributes:
       value: |
-        Silo is pre-1.0 and focused on correctness and polish. A request is most useful when it explains the problem you hit, with a concrete example, rather than prescribing a solution. One request per issue.
+        Silo is pre-1.0 and focused on correctness and polish. An idea is most useful when it explains the problem you hit, with a concrete example, rather than prescribing a solution. One idea per discussion. If someone already posted it, upvote it and add your case there instead.
 
-        Silo will not accept Live TV, OTA/DVB tuners, IPTV, EPG/XMLTV guides, DVR, or `.strm` remote-stream files; [Project non-goals](https://github.com/Silo-Server/silo-server/blob/main/docs/non-goals.md) explains why. Requests that only concern the Apple or Android apps belong in [silo-apple](https://github.com/Silo-Server/silo-apple/issues/new/choose) or [silo-android](https://github.com/Silo-Server/silo-android/issues/new/choose).
+        Maintainers turn ideas they plan to build into issues. An idea here is not a commitment, and a pull request for a feature needs an issue a maintainer has labeled `accepted`.
+
+        Silo will not accept Live TV, OTA/DVB tuners, IPTV, EPG/XMLTV guides, DVR, or `.strm` remote-stream files; [Project non-goals](https://github.com/Silo-Server/silo-server/blob/main/docs/non-goals.md) explains why. Ideas that only concern one app belong in that app's Ideas: [Apple](https://github.com/Silo-Server/silo-apple/discussions/categories/ideas), [Android](https://github.com/Silo-Server/silo-android/discussions/categories/ideas), or [Roku](https://github.com/Silo-Server/silo-roku/discussions/categories/ideas).
   - type: textarea
     id: problem
     attributes:
@@ -78,7 +76,7 @@ body:
     id: ai-review
     attributes:
       label: Independent or adversarial review
-      description: Summarize the scope, method, findings, and resolutions, or enter "n/a" when this issue does not require independent or adversarial review.
+      description: Summarize the scope, method, findings, and resolutions, or enter "n/a" when this idea does not require independent or adversarial review.
     validations:
       required: true
   - type: checkboxes
@@ -86,7 +84,7 @@ body:
     attributes:
       label: Confirmations
       options:
-        - label: I searched open and closed issues, including ones closed as not planned, and this is not already requested
+        - label: I searched Ideas and the issue tracker, including issues closed as not planned, and this is not already proposed
           required: true
         - label: This is not one of Silo's non-goals
           required: true
