@@ -202,6 +202,10 @@ type Record struct {
 	LastPlayedAt    *time.Time
 	PositionSeconds float64
 	DurationSeconds float64
+	// AllowedLibraryIDs limits which episodes a whole-series or whole-season
+	// marker expands to (MatchLeaves): those in these libraries, with their
+	// series in one too. Nil means every library; empty means none.
+	AllowedLibraryIDs []int
 	// Watchlisted marks an entry from the source account's watchlist: the
 	// matched item is added to the importing profile's watchlist instead of
 	// receiving watch state.

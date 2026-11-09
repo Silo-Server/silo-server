@@ -526,6 +526,15 @@
 # replace or drop the new account's.
 ./internal/watchsync TestImportWatchedRetriesPendingWatchesDB
 
+# A whole-series watched marker marks the aired regular episodes in a library,
+# not specials, and marks an episode a library gains later on the next sync,
+# also when another of its episodes left the library since the last one.
+./internal/watchsync TestImportWatchedSeriesMarkerDB
+
+# A whole-series watched marker marks only episodes the profile may open (its
+# libraries, its maturity limits), also when a kept marker is applied again.
+./internal/watchsync TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB
+
 # A pending-watch save from a connection's previous provider account that runs
 # during a rebind waits for it and writes nothing.
 ./internal/watchsync TestSavePendingWatchesWaitsForARebindDB

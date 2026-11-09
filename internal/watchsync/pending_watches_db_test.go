@@ -4,10 +4,13 @@ import (
 	"context"
 	"math/rand/v2"
 	"reflect"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/historyimport"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -117,6 +120,97 @@ func TestImportWatchedRetriesPendingWatchesDB(t *testing.T) {
 	}
 }
 
+// A whole-series watched marker marks the episodes in a library that had aired
+// by its time, leaving out specials, and stays kept: an episode added to a
+// library later is marked on the next sync, though the provider never returns
+// the marker again.
+func TestImportWatchedSeriesMarkerDB(t *testing.T) {
+	ctx := t.Context()
+	repo, conn, _ := newSyncStateTestConnection(t)
+	pool := repo.pool
+	finishedAt := time.Date(2021, 9, 19, 5, 17, 0, 0, time.UTC)
+	tvdbID := strconv.Itoa(900_000_000 + rand.IntN(99_999_999))
+	series := "series-tvdb-" + tvdbID
+	special, first, second, unaired, fourth := series+"-s0e1", series+"-s1e1", series+"-s1e2", series+"-s1e3", series+"-s1e4"
+	var folder int
+	if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name) VALUES('tv',$1) RETURNING id`, "series-marker-"+tvdbID).Scan(&folder); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, folder) })
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id,type,title,year,genres,tvdb_id,status)
+		VALUES ($1,'series','Brooklyn Nine-Nine',2013,'{}',$2,'matched')`, series, tvdbID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id=$1`, series) })
+	if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title,air_date) VALUES
+		($2,$1,0,1,'Special','2015-01-01'),($3,$1,1,1,'Pilot','2013-09-17'),($4,$1,1,2,'Two','2013-09-24'),($5,$1,1,3,'Later','2030-01-01'),
+		($6,$1,1,4,'Four','2013-10-01')`,
+		series, special, first, second, unaired, fourth); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id IN ($1,$2,$3,$4,$5)`, special, first, second, unaired, fourth)
+	})
+	inLibrary := func(episodes ...string) {
+		t.Helper()
+		for _, episode := range episodes {
+			if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1,$2)`, episode, folder); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	inLibrary(special, first, unaired)
+
+	watchState := &recordingWatchState{}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(historyimport.NewMatcherOn(pool)).
+		WithWatchState(watchState)
+	sync := func(rows ...RemoteWatch) ImportWatchedResult {
+		t.Helper()
+		result, err := service.ImportWatched(ctx, conn, ServerConfig{}, watchedImporterStub{
+			historyStubBase: historyStubBase{key: conn.Provider, source: userstore.WatchHistorySourceTrakt},
+			rows:            rows,
+		})
+		if err != nil {
+			t.Fatalf("ImportWatched: %v", err)
+		}
+		return result
+	}
+	marker := RemoteWatch{
+		Provider: conn.Provider, ProviderItemKey: "tvdb:" + tvdbID, Kind: historyimport.KindSeries,
+		Title: "Brooklyn Nine-Nine", Year: 2013, TVDBID: tvdbID, PlayCount: 1, LastWatchedAt: &finishedAt,
+	}
+
+	if got := sync(marker); got.Found != 1 || got.Imported != 1 {
+		t.Fatalf("first sync = %+v, want the one aired regular episode in a library", got)
+	}
+	if !reflect.DeepEqual(watchState.targetIDs, []string{first}) {
+		t.Fatalf("marked %v, want only %s", watchState.targetIDs, first)
+	}
+	inLibrary(second)
+	// The grown marker is applied again; the store keeps an episode already
+	// marked as it was.
+	before := len(watchState.targetIDs)
+	if sync(); !slices.Contains(watchState.targetIDs[before:], second) {
+		t.Fatalf("sync after an episode arrives marked %v, want %s", watchState.targetIDs[before:], second)
+	}
+	marked := len(watchState.targetIDs)
+	if got := sync(); got.Imported != 0 || len(watchState.targetIDs) != marked {
+		t.Fatalf("sync with nothing new = %+v, marked %v", got, watchState.targetIDs)
+	}
+	// Between two syncs an episode leaves the library and another arrives:
+	// the marker covers as many episodes as before, and still marks the new
+	// one.
+	if _, err := pool.Exec(ctx, `DELETE FROM episode_libraries WHERE episode_id=$1`, first); err != nil {
+		t.Fatal(err)
+	}
+	inLibrary(fourth)
+	before = len(watchState.targetIDs)
+	if sync(); !slices.Contains(watchState.targetIDs[before:], fourth) {
+		t.Fatalf("sync after an episode is swapped marked %v, want %s", watchState.targetIDs[before:], fourth)
+	}
+}
+
 // A save from the connection's previous provider account that runs while the
 // connection is being rebound waits for the rebind, then writes nothing.
 func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
@@ -142,7 +236,7 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 	}
 	saved := make(chan error, 1)
 	go func() {
-		saved <- repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, []RemoteWatch{stale})
+		saved <- repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, []PendingWatch{{Watch: stale}})
 	}()
 	// The save must wait for the rebind. The rebind holds only this test's
 	// connection row, so a session it blocks is the save.
@@ -179,18 +273,117 @@ func TestSavePendingWatchesWaitsForARebindDB(t *testing.T) {
 	}
 }
 
+// A whole-series marker marks only episodes the profile may open: in the
+// libraries it may see, of a series within its maturity limits, on its first
+// sync and when a kept marker is applied again.
+func TestImportWatchedSeriesMarkerStaysInTheProfilesLibrariesDB(t *testing.T) {
+	ctx := t.Context()
+	repo, conn, _ := newSyncStateTestConnection(t)
+	pool := repo.pool
+	finishedAt := time.Date(2021, 9, 19, 5, 17, 0, 0, time.UTC)
+	tvdbID := strconv.Itoa(900_000_000 + rand.IntN(99_999_999))
+	series := "series-tvdb-" + tvdbID
+	visible, hidden, later := series+"-s1e1", series+"-s1e2", series+"-s1e3"
+	matureTVDBID := strconv.Itoa(800_000_000 + rand.IntN(99_999_999))
+	mature := "series-tvdb-" + matureTVDBID
+	matureEpisode := mature + "-s1e1"
+	folder := func(name string) int {
+		t.Helper()
+		var id int
+		if err := pool.QueryRow(ctx, `INSERT INTO media_folders(type,name) VALUES('tv',$1) RETURNING id`, name+"-"+tvdbID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, id) })
+		return id
+	}
+	allowed, other := folder("allowed"), folder("other")
+	if _, err := pool.Exec(ctx, `INSERT INTO media_items (content_id,type,title,year,genres,tvdb_id,status,content_rating,content_rating_age)
+		VALUES ($1,'series','Brooklyn Nine-Nine',2013,'{}',$2,'matched','TV-14',14),($3,'series','A mature show',2015,'{}',$4,'matched','TV-MA',17)`,
+		series, tvdbID, mature, matureTVDBID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN ($1,$2)`, series, mature)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO media_item_libraries (content_id,media_folder_id) VALUES ($1,$3),($1,$4),($2,$3)`,
+		series, mature, allowed, other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id,series_id,season_number,episode_number,title,air_date) VALUES
+		($2,$1,1,1,'Pilot','2013-09-17'),($3,$1,1,2,'Two','2013-09-24'),($4,$1,1,3,'Three','2013-10-01'),
+		($6,$5,1,1,'Mature pilot','2015-01-01')`,
+		series, visible, hidden, later, mature, matureEpisode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM episodes WHERE content_id IN ($1,$2,$3,$4)`, visible, hidden, later, matureEpisode)
+	})
+	inLibrary := func(episode string, folder int) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO episode_libraries (episode_id,media_folder_id) VALUES ($1,$2)`, episode, folder); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inLibrary(visible, allowed)
+	inLibrary(hidden, other)
+	inLibrary(matureEpisode, allowed)
+
+	watchState := &recordingWatchState{}
+	service := NewService(repo, NewRegistry()).
+		WithMatcher(historyimport.NewMatcherOn(pool)).
+		WithWatchState(watchState).
+		WithProfileAccess(func(context.Context, int, string) (ProfileAccess, error) {
+			libraries := []int{allowed}
+			limits := access.MaturityLimits{MaxContentRating: "TV-14"}
+			return ProfileAccess{
+				AllowedLibraryIDs: libraries,
+				Accessible: func(ctx context.Context, ids []string) (map[string]bool, error) {
+					return catalog.NewLibraryItemRepository(pool).FilterAccessibleContentIDs(ctx, ids, libraries, nil, limits)
+				},
+			}, nil
+		})
+	sync := func(rows ...RemoteWatch) {
+		t.Helper()
+		if _, err := service.ImportWatched(ctx, conn, ServerConfig{}, watchedImporterStub{
+			historyStubBase: historyStubBase{key: conn.Provider, source: userstore.WatchHistorySourceTrakt},
+			rows:            rows,
+		}); err != nil {
+			t.Fatalf("ImportWatched: %v", err)
+		}
+	}
+	sync(RemoteWatch{
+		Provider: conn.Provider, ProviderItemKey: "tvdb:" + tvdbID, Kind: historyimport.KindSeries,
+		Title: "Brooklyn Nine-Nine", Year: 2013, TVDBID: tvdbID, PlayCount: 1, LastWatchedAt: &finishedAt,
+	}, RemoteWatch{
+		Provider: conn.Provider, ProviderItemKey: "tvdb:" + matureTVDBID, Kind: historyimport.KindSeries,
+		Title: "A mature show", Year: 2015, TVDBID: matureTVDBID, PlayCount: 1, LastWatchedAt: &finishedAt,
+	})
+	if !reflect.DeepEqual(watchState.targetIDs, []string{visible}) {
+		t.Fatalf("marked %v, want only %s: in the profile's library and within its maturity limits", watchState.targetIDs, visible)
+	}
+	// Episodes reach both libraries; the kept marker marks only the allowed one.
+	inLibrary(later, other)
+	sync()
+	inLibrary(later, allowed)
+	sync()
+	if slices.Contains(watchState.targetIDs, hidden) || slices.Contains(watchState.targetIDs, matureEpisode) ||
+		!slices.Contains(watchState.targetIDs, later) {
+		t.Fatalf("marked %v, want %s and never %s or %s", watchState.targetIDs, later, hidden, matureEpisode)
+	}
+}
+
 // A connection keeps at most maxPendingWatches; past it the oldest go.
 func TestSavePendingWatchesKeepsTheNewestDB(t *testing.T) {
 	ctx := t.Context()
 	repo, conn, _ := newSyncStateTestConnection(t)
 	oldest := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
-	watches := make([]RemoteWatch, maxPendingWatches+1)
+	watches := make([]PendingWatch, maxPendingWatches+1)
 	for i := range watches {
 		at := oldest.Add(time.Duration(i) * time.Minute)
-		watches[i] = RemoteWatch{
+		watches[i] = PendingWatch{Watch: RemoteWatch{
 			Provider: conn.Provider, ProviderItemKey: "tmdb:" + strconv.Itoa(i), Kind: historyimport.KindMovie,
 			TMDBID: strconv.Itoa(i), PlayCount: 1, LastWatchedAt: &at,
-		}
+		}}
 	}
 	if err := repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, watches); err != nil {
 		t.Fatal(err)
@@ -225,7 +418,11 @@ func TestImportWatchedAtTheCapKeepsOlderWatchesDB(t *testing.T) {
 	for i := range kept {
 		kept[i] = watch(i, oldest.Add(time.Duration(i)*time.Minute))
 	}
-	if err := repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, kept); err != nil {
+	pending := make([]PendingWatch, len(kept))
+	for i, watch := range kept {
+		pending[i] = PendingWatch{Watch: watch}
+	}
+	if err := repo.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, pending); err != nil {
 		t.Fatal(err)
 	}
 	// The newest kept watch's title arrives, and the provider returns a new
