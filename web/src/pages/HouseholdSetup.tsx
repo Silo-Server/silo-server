@@ -13,6 +13,7 @@ import { useAuth, getBootstrapProfile } from "@/hooks/useAuth";
 import { useAvailableUserLibraries } from "@/hooks/queries/libraries";
 import { useProfiles } from "@/hooks/queries/profiles";
 import { isHouseholdSetupDone, setHouseholdSetupDone } from "@/lib/onboarding";
+import { canAddProfile } from "@/lib/profile-management";
 
 /**
  * The "Who's watching?" onboarding step, shown once right after an invite is
@@ -28,6 +29,7 @@ export default function HouseholdSetup() {
     avatarUploadEnabled,
     maxAdvisoryAgeSupported,
     requireAdvisoryAgeSupported,
+    maxProfiles,
   } = useProfiles();
   const { data: libraries = [] } = useAvailableUserLibraries();
   const [editorOpen, setEditorOpen] = useState(false);
@@ -118,16 +120,18 @@ export default function HouseholdSetup() {
                 <span className="mt-1 text-sm font-semibold">{p.name}</span>
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => openEditor(null)}
-              className="group flex w-24 flex-col items-center gap-2 text-center"
-            >
-              <div className="border-border group-hover:border-primary text-muted-foreground grid size-20 place-items-center rounded-2xl border border-dashed transition-colors">
-                <Plus className="size-7" />
-              </div>
-              <span className="text-muted-foreground mt-1 text-sm font-medium">Add profile</span>
-            </button>
+            {canAddProfile(profiles.length, maxProfiles) ? (
+              <button
+                type="button"
+                onClick={() => openEditor(null)}
+                className="group flex w-24 flex-col items-center gap-2 text-center"
+              >
+                <div className="border-border group-hover:border-primary text-muted-foreground grid size-20 place-items-center rounded-2xl border border-dashed transition-colors">
+                  <Plus className="size-7" />
+                </div>
+                <span className="text-muted-foreground mt-1 text-sm font-medium">Add profile</span>
+              </button>
+            ) : null}
           </div>
         )}
 

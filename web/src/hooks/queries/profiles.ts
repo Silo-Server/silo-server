@@ -48,6 +48,12 @@ export interface ProfileList {
    * separately because it arrived after the limit itself.
    */
   require_advisory_age_supported: boolean;
+  /**
+   * The household profile limit createProfile enforces, or null when the
+   * server did not report one (an older server, or a limit it could not
+   * read). See canAddProfile.
+   */
+  max_profiles: number | null;
 }
 
 /**
@@ -119,6 +125,8 @@ export async function listProfiles(): Promise<ProfileList> {
     max_advisory_age_supported: list.max_advisory_age_supported === true,
     // Absent on a server that predates the require-advisory-age option.
     require_advisory_age_supported: list.require_advisory_age_supported === true,
+    // Absent on a server that predates reporting the profile limit.
+    max_profiles: list.max_profiles ?? null,
   };
 }
 
@@ -167,11 +175,12 @@ export function useHouseholdSessions(enabled = true) {
   });
 }
 
-export function useProfiles(options?: { enabled?: boolean }) {
+export function useProfiles(options?: { enabled?: boolean; refetchOnWindowFocus?: boolean }) {
   const query = useQuery({
     queryKey: profileKeys.list(),
     queryFn: listProfiles,
     enabled: options?.enabled ?? true,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus ?? false,
   });
 
   return {
@@ -180,6 +189,7 @@ export function useProfiles(options?: { enabled?: boolean }) {
     avatarUploadEnabled: query.data?.avatar_upload_enabled ?? false,
     maxAdvisoryAgeSupported: query.data?.max_advisory_age_supported ?? false,
     requireAdvisoryAgeSupported: query.data?.require_advisory_age_supported ?? false,
+    maxProfiles: query.data?.max_profiles ?? null,
   };
 }
 
@@ -210,6 +220,7 @@ export function useUpdateProfile() {
           avatar_upload_enabled: current?.avatar_upload_enabled ?? false,
           max_advisory_age_supported: current?.max_advisory_age_supported ?? false,
           require_advisory_age_supported: current?.require_advisory_age_supported ?? false,
+          max_profiles: current?.max_profiles ?? null,
         };
       });
       toast.success("Profile updated");
@@ -232,6 +243,7 @@ export function useUploadProfileAvatar(profileContext?: ProfileRequestContextSna
         avatar_upload_enabled: current?.avatar_upload_enabled ?? false,
         max_advisory_age_supported: current?.max_advisory_age_supported ?? false,
         require_advisory_age_supported: current?.require_advisory_age_supported ?? false,
+        max_profiles: current?.max_profiles ?? null,
       }));
       toast.success("Avatar updated");
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });

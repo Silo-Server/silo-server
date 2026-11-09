@@ -18,6 +18,8 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { navigateToPluginRoute } from "@/lib/buildPluginHref";
 import { useUserLibraries } from "@/hooks/queries/libraries";
+import { useProfiles } from "@/hooks/queries/profiles";
+import { canSwitchProfile } from "@/lib/profile-management";
 import { useUnreadNotificationCount } from "@/hooks/queries/notifications";
 import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { usePluginSettingsList } from "@/hooks/queries/pluginSettings";
@@ -198,6 +200,19 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
   const params = useParams<{ libraryId: string }>();
   const { user, logout, clearProfile } = useAuth();
   const { profile } = useCurrentProfile();
+  // The sidebar stays mounted, so it refetches a stale household on focus:
+  // otherwise a limit raised elsewhere would keep Switch Profile hidden
+  // until a reload.
+  const household = useProfiles({ enabled: profile != null, refetchOnWindowFocus: true });
+  // Switch Profile leads to the picker, which is pointless with one profile
+  // and no room for another. A PIN-protected profile keeps it: going back to
+  // the picker locks the profile without signing out. Until the household
+  // loads (or when it fails to) the item stays, as it always did.
+  const showSwitchProfile =
+    profile != null &&
+    (profile.has_pin ||
+      !household.isSuccess ||
+      canSwitchProfile(household.data.length, household.maxProfiles));
   const showAdminNav = useIsActingAdmin();
   const { data: libraries } = useUserLibraries();
   const { pins } = useSidebarPins();
@@ -1069,7 +1084,7 @@ export default function AppSidebar({ onNavigate, collapsed = false, swap }: AppS
               <DropdownMenuSeparator />
 
               <div className="flex flex-col gap-1 pt-0.5">
-                {profile && (
+                {showSwitchProfile && (
                   <DropdownMenuItem
                     onClick={() => {
                       clearProfile();

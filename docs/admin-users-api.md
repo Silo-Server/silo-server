@@ -87,7 +87,11 @@ inheriting, and an explicit `null` clears an override back to inherit, as with
 the other policy fields. The group's own limit is v2-only: the v1
 access-group body carries no `max_profiles`, so a group limit is set and read
 through the v2 access-group operations. `GET /api/v2/admin/users/capabilities` reports `profile_limits: true`
-when access groups and account overrides take `max_profiles`.
+when access groups and account overrides take `max_profiles`. The account
+itself reads the same limit as `max_profiles` on its own `listProfiles`
+response (omitted when the server could not read it, and on a remote-playback
+handoff), so a client can stop offering a new profile once the household is
+full; the frozen v1 `GET /profiles` does not report it.
 
 `POST /api/v2/admin/users` returns 201 with `{ "id": "..." }` and `Location`.
 Default-profile creation, when requested, uses the existing transactional
