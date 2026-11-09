@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { AlertTriangle, Info, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAppLanguage, useT, type MessageKey, type Translate } from "@/i18n";
 import {
   useAdminDownloadStorage,
   useCleanUpAdminDownloadStorageLocation,
@@ -20,6 +21,7 @@ import {
   SCRATCH_ADMISSION_PERCENT,
   budgetLabel,
   budgetSourceLabel,
+  countValues,
   diskFillPercent,
   formatPercent,
   formatStorageBytes,
@@ -47,11 +49,11 @@ const SEGMENT_CLASS: Record<MeterSegmentKind, string> = {
   free: "bg-border/70",
 };
 
-const WARNING_ACTION_LABELS: Record<NonNullable<StorageWarning["action"]>, string> = {
-  edit_location: "Edit location",
-  review_untracked: "Review",
-  review_devices: "Review devices",
-  view_location: "View files",
+const WARNING_ACTION_LABELS: Record<NonNullable<StorageWarning["action"]>, MessageKey> = {
+  edit_location: "web.admin.downloads.storage.editLocation",
+  review_untracked: "web.admin.downloads.storage.review",
+  review_devices: "web.admin.downloads.storage.warningAction.reviewDevices",
+  view_location: "web.admin.downloads.storage.warningAction.viewFiles",
 };
 
 export type StorageTabTarget = "devices" | { files: string };
@@ -61,6 +63,9 @@ export default function StorageTab({
 }: {
   onNavigate: (target: StorageTabTarget) => void;
 }) {
+  const t = useT();
+  // Warnings, labels and sizes come from plain helpers; re-render them on a language change.
+  useAppLanguage();
   const storage = useAdminDownloadStorage();
   const [editing, setEditing] = useState<AdminDownloadStorageLocation | null>(null);
   const [untrackedTarget, setUntrackedTarget] = useState<AdminDownloadStorageLocation | null>(null);
@@ -69,7 +74,11 @@ export default function StorageTab({
 
   if (storage.isLoading) {
     return (
-      <div className="space-y-4" role="status" aria-label="Loading storage">
+      <div
+        className="space-y-4"
+        role="status"
+        aria-label={t("web.admin.downloads.storage.loading")}
+      >
         <Skeleton className="h-24 rounded-2xl" />
         <div className="grid gap-4 lg:grid-cols-2">
           <Skeleton className="h-64 rounded-2xl" />
@@ -81,9 +90,9 @@ export default function StorageTab({
   if (storage.isError || !storage.data) {
     return (
       <div className="surface-panel space-y-3 rounded-2xl p-6">
-        <p>Download storage could not be read.</p>
+        <p>{t("web.admin.downloads.storage.loadError")}</p>
         <Button variant="outline" size="sm" onClick={() => void storage.refetch()}>
-          Try again
+          {t("common.tryAgain")}
         </Button>
       </div>
     );
@@ -97,10 +106,14 @@ export default function StorageTab({
       onSuccess: (result) =>
         toast.success(
           result.freed_bytes > 0
-            ? `Freed ${formatStorageBytes(result.freed_bytes)} on ${location.name}`
-            : `Nothing to clean up on ${location.name}`,
+            ? t("web.admin.downloads.storage.cleanUp.freed", {
+                size: formatStorageBytes(result.freed_bytes),
+                name: location.name,
+              })
+            : t("web.admin.downloads.storage.cleanUp.nothing", { name: location.name }),
         ),
-      onError: () => toast.error(`Clean-up on ${location.name} failed`),
+      onError: () =>
+        toast.error(t("web.admin.downloads.storage.cleanUp.failed", { name: location.name })),
     });
   }
 
@@ -126,39 +139,54 @@ export default function StorageTab({
     <div className="space-y-5">
       <StatStrip>
         <StatTile
-          label="On disk"
+          label={t("web.admin.downloads.storage.stats.onDisk")}
           value={formatStorageBytes(totals.onDisk)}
-          detail={`${data.locations.length} ${data.locations.length === 1 ? "location" : "locations"} · ${totals.files.toLocaleString(formatLocale())} files`}
+          detail={t("web.admin.downloads.storage.stats.onDiskDetail", {
+            locations: t(
+              "web.admin.downloads.storage.stats.locationCount",
+              countValues(data.locations.length),
+            ),
+            files: t(
+              "web.admin.downloads.storage.fileCount",
+              countValues(totals.files, totals.files.toLocaleString(formatLocale())),
+            ),
+          })}
         />
         <StatTile
-          label="In use"
+          label={t("web.admin.downloads.storage.stats.inUse")}
           value={formatStorageBytes(totals.inUse)}
-          detail="devices still need them"
+          detail={t("web.admin.downloads.storage.stats.inUseDetail")}
         />
         <StatTile
-          label="Cached"
+          label={t("web.admin.downloads.storage.stats.cached")}
           value={formatStorageBytes(totals.cached)}
-          detail={`expire ${data.cache_hours} h after last use`}
+          detail={t(
+            "web.admin.downloads.storage.stats.cachedDetail",
+            countValues(data.cache_hours),
+          )}
         />
         <StatTile
-          label="Untracked"
+          label={t("web.admin.downloads.storage.stats.untracked")}
           value={
             <span className={totals.untracked > 0 ? "text-warning" : undefined}>
               {formatStorageBytes(totals.untracked)}
             </span>
           }
-          detail="not in Silo's records"
+          detail={t("web.admin.downloads.storage.stats.untrackedDetail")}
         />
         <StatTile
-          label="Freed, 30 days"
+          label={t("web.admin.downloads.storage.stats.freed")}
           value={formatStorageBytes(data.freed_last_30_days_bytes)}
           detail={
             data.preparing_jobs > 0 ? (
               <Link to="/admin/downloads?tab=preparation" className="underline underline-offset-3">
-                {data.preparing_jobs} preparing now
+                {t(
+                  "web.admin.downloads.storage.stats.preparingNow",
+                  countValues(data.preparing_jobs),
+                )}
               </Link>
             ) : (
-              "nothing preparing"
+              t("web.admin.downloads.storage.stats.nothingPreparing")
             )
           }
         />
@@ -199,13 +227,22 @@ export default function StorageTab({
         onOpenChange={(open) => {
           if (!open) setUntrackedTarget(null);
         }}
-        title={untrackedTarget ? `Delete untracked files on ${untrackedTarget.name}?` : ""}
-        description={
+        title={
           untrackedTarget
-            ? `${formatStorageBytes(untrackedTarget.untracked_bytes)} in ${untrackedTarget.untracked_files} ${untrackedTarget.untracked_files === 1 ? "file" : "files"} at the last check. Silo lists the directory again first and only deletes files no prepared-file record accounts for and that nothing has written to for an hour.`
+            ? t("web.admin.downloads.storage.untracked.confirmTitle", {
+                name: untrackedTarget.name,
+              })
             : ""
         }
-        confirmLabel="Delete untracked files"
+        description={
+          untrackedTarget
+            ? t("web.admin.downloads.storage.untracked.confirmDescription", {
+                ...countValues(untrackedTarget.untracked_files),
+                size: formatStorageBytes(untrackedTarget.untracked_bytes),
+              })
+            : ""
+        }
+        confirmLabel={t("web.admin.downloads.storage.untracked.confirm")}
         variant="destructive"
         irreversible
         isPending={deleteUntracked.isPending}
@@ -214,21 +251,32 @@ export default function StorageTab({
           const target = untrackedTarget;
           deleteUntracked.mutate(target.key, {
             onSuccess: (result) => {
-              const deleted = `Deleted ${result.files} untracked ${result.files === 1 ? "file" : "files"} (${formatStorageBytes(result.bytes)})`;
+              const deleted = t("web.admin.downloads.storage.untracked.deleted", {
+                ...countValues(result.files),
+                size: formatStorageBytes(result.bytes),
+              });
               if (result.failed_files > 0) {
+                const failed = t("web.admin.downloads.storage.untracked.failed", {
+                  ...countValues(result.failed_files),
+                  name: target.name,
+                });
                 toast.error(
-                  `${result.failed_files} untracked ${result.failed_files === 1 ? "file" : "files"} on ${target.name} could not be deleted. Check the directory's permissions.` +
-                    (result.files > 0 ? ` ${deleted}.` : ""),
+                  result.files > 0
+                    ? t("web.admin.downloads.storage.untracked.failedAndDeleted", {
+                        failed,
+                        deleted,
+                      })
+                    : failed,
                 );
               } else {
                 toast.success(
-                  result.files > 0 ? deleted : "No untracked files were left to delete",
+                  result.files > 0 ? deleted : t("web.admin.downloads.storage.untracked.noneLeft"),
                 );
               }
               setUntrackedTarget(null);
             },
             // The dialog closes on confirm, so a failure is reported here.
-            onError: (error) => toast.error(untrackedDeleteError(error, target.name)),
+            onError: (error) => toast.error(untrackedDeleteError(t, error, target.name)),
           });
         }}
       />
@@ -237,14 +285,18 @@ export default function StorageTab({
 }
 
 /** Why deleting untracked files failed. */
-function untrackedDeleteError(error: Error, name: string): string {
+function untrackedDeleteError(t: Translate, error: Error, name: string): ReactNode {
   if (error instanceof V2ProblemError && error.status === 503) {
-    return `Couldn't list ${name}'s directory. Try again later.`;
+    return t("web.admin.downloads.storage.untracked.listFailed", {
+      name,
+      location: (chunks) => chunks,
+    });
   }
-  return "The untracked files could not be deleted. Try again.";
+  return t("web.admin.downloads.storage.untracked.deleteFailed");
 }
 
 function WarningBanner({ warning, onAction }: { warning: StorageWarning; onAction: () => void }) {
+  const t = useT();
   const Icon = warning.tone === "warning" ? AlertTriangle : Info;
   return (
     <div
@@ -266,7 +318,7 @@ function WarningBanner({ warning, onAction }: { warning: StorageWarning; onActio
       </p>
       {warning.action ? (
         <Button variant="outline" size="sm" className="self-start" onClick={onAction}>
-          {WARNING_ACTION_LABELS[warning.action]}
+          {t(WARNING_ACTION_LABELS[warning.action])}
         </Button>
       ) : null}
     </div>
@@ -294,6 +346,7 @@ function LocationCard({
   onReviewUntracked: () => void;
   onBrowse: () => void;
 }) {
+  const t = useT();
   const usage = location.usage;
   const segments = meterSegments(location);
   const fill = diskFillPercent(location);
@@ -302,6 +355,7 @@ function LocationCard({
   const indexed = preparedBytes(location);
   const offline = location.kind === "node" && !location.online;
   const measured = formatRelativeTime(usage?.measured_at);
+  const files = location.in_use_files + location.cached_files;
   return (
     <section
       aria-label={location.name}
@@ -318,7 +372,7 @@ function LocationCard({
         </div>
         <Button variant="ghost" size="sm" onClick={onCleanUp} disabled={cleanUpBusy || offline}>
           <RefreshCw className={cn("size-3.5", cleaningUp && "animate-spin")} aria-hidden="true" />
-          Clean up now
+          {t("web.admin.downloads.storage.card.cleanUp")}
         </Button>
       </div>
 
@@ -328,21 +382,28 @@ function LocationCard({
         </code>
         {usage?.shares_scratch ? (
           <Badge variant="outline" className="border-warning/40 text-warning">
-            Shares disk with transcode scratch
+            {t("web.admin.downloads.storage.card.sharesScratch")}
           </Badge>
         ) : usage ? (
-          <Badge variant="secondary">Own disk{usage.fs_type ? ` · ${usage.fs_type}` : ""}</Badge>
+          <Badge variant="secondary">
+            {usage.fs_type
+              ? t("web.admin.downloads.storage.card.ownDiskWithType", { fs_type: usage.fs_type })
+              : t("web.admin.downloads.storage.card.ownDisk")}
+          </Badge>
         ) : null}
         {usage?.ephemeral ? (
           <Badge variant="outline" className="border-warning/40 text-warning">
-            Temporary storage
+            {t("web.admin.downloads.storage.card.temporary")}
           </Badge>
         ) : null}
       </div>
       {location.pending_dir ? (
         <p className="text-muted-foreground text-xs">
-          Moves to <code className="font-mono break-all">{location.pending_dir}</code> when{" "}
-          {location.name} restarts.
+          {t("web.admin.downloads.storage.card.pendingDir", {
+            dir: location.pending_dir,
+            name: location.name,
+            code: (chunks) => <code className="font-mono break-all">{chunks}</code>,
+          })}
         </p>
       ) : null}
 
@@ -350,12 +411,20 @@ function LocationCard({
         <div className="space-y-2">
           <div className="text-muted-foreground flex justify-between gap-2 text-xs">
             <span>
-              <span className="text-foreground font-semibold">
-                {formatStorageBytes(usage.fs_used_bytes)}
-              </span>{" "}
-              of {formatStorageBytes(usage.fs_total_bytes)} used ({formatPercent(fill ?? 0)})
+              {t("web.admin.downloads.storage.card.diskUsed", {
+                used: formatStorageBytes(usage.fs_used_bytes),
+                total: formatStorageBytes(usage.fs_total_bytes),
+                percent: formatPercent(fill ?? 0),
+                b: (chunks) => <span className="text-foreground font-semibold">{chunks}</span>,
+              })}
             </span>
-            {usage.stale || offline ? <span>as of {measured ?? "an earlier check"}</span> : null}
+            {usage.stale || offline ? (
+              <span>
+                {measured
+                  ? t("web.admin.downloads.storage.card.asOf", { when: measured })
+                  : t("web.admin.downloads.storage.card.asOfEarlier")}
+              </span>
+            ) : null}
           </div>
           <DiskMeter
             segments={segments}
@@ -384,18 +453,24 @@ function LocationCard({
       ) : (
         <p className="text-muted-foreground text-sm">
           {offline
-            ? "Not measured: the node is offline."
-            : "Waiting for the first measurement of this directory."}
+            ? t("web.admin.downloads.storage.card.notMeasuredOffline")
+            : t("web.admin.downloads.storage.card.waitingMeasurement")}
         </p>
       )}
 
       <div className="border-border/60 space-y-1.5 border-t pt-3 text-xs">
         <div className="flex justify-between gap-2">
           <span>
-            Prepared files <span className="font-semibold">{formatStorageBytes(indexed)}</span>
             {location.budget_bytes > 0
-              ? ` of ${formatStorageBytes(location.budget_bytes)} budget`
-              : ""}
+              ? t("web.admin.downloads.storage.card.preparedWithBudget", {
+                  size: formatStorageBytes(indexed),
+                  budget: formatStorageBytes(location.budget_bytes),
+                  b: (chunks) => <span className="font-semibold">{chunks}</span>,
+                })
+              : t("web.admin.downloads.storage.card.prepared", {
+                  size: formatStorageBytes(indexed),
+                  b: (chunks) => <span className="font-semibold">{chunks}</span>,
+                })}
           </span>
           <span className="text-muted-foreground">
             {location.budget_bytes > 0 ? budgetSourceLabel(location) : budgetLabel(location)}
@@ -411,47 +486,67 @@ function LocationCard({
         ) : null}
         {location.untracked_bytes > 0 ? (
           <p className="text-warning">
-            Silo's records show {formatStorageBytes(indexed)} ·{" "}
-            {formatStorageBytes(location.untracked_bytes)} untracked ·{" "}
-            <button
-              type="button"
-              className="underline underline-offset-3"
-              onClick={onReviewUntracked}
-            >
-              Review
-            </button>
+            {t("web.admin.downloads.storage.card.recordsUntracked", {
+              indexed: formatStorageBytes(indexed),
+              untracked: formatStorageBytes(location.untracked_bytes),
+              review: (chunks) => (
+                <button
+                  type="button"
+                  className="underline underline-offset-3"
+                  onClick={onReviewUntracked}
+                >
+                  {chunks}
+                </button>
+              ),
+            })}
           </p>
         ) : drift !== 0 ? (
           <p className="text-warning">
-            Silo's records show {formatStorageBytes(indexed)}; the directory holds{" "}
-            {formatStorageBytes(usage?.bytes)}.
+            {t("web.admin.downloads.storage.card.recordsDrift", {
+              indexed: formatStorageBytes(indexed),
+              bytes: formatStorageBytes(usage?.bytes),
+            })}
           </p>
         ) : usage ? (
           <p className="text-muted-foreground">
-            On disk matches Silo's records{measured ? ` · measured ${measured}` : ""}
+            {measured
+              ? t("web.admin.downloads.storage.card.recordsMatchMeasured", { when: measured })
+              : t("web.admin.downloads.storage.card.recordsMatch")}
           </p>
         ) : null}
         {location.storage_full ? (
           <p className="text-warning">
             {location.kind === "server"
-              ? "Over its budget with nothing left to free; preparations that would run here wait for space."
-              : "Over its budget with nothing left to free; new preparations go elsewhere."}
+              ? t("web.admin.downloads.storage.card.fullServer")
+              : t("web.admin.downloads.storage.card.fullNode")}
           </p>
         ) : null}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-muted-foreground text-xs">
-          {(location.in_use_files + location.cached_files).toLocaleString(formatLocale())} files
-          {location.waiting_downloads > 0 ? ` · ${location.waiting_downloads} waiting` : ""}
-          {location.cleanup_backlog > 0 ? ` · ${location.cleanup_backlog} queued for deletion` : ""}
+          {[
+            t(
+              "web.admin.downloads.storage.fileCount",
+              countValues(files, files.toLocaleString(formatLocale())),
+            ),
+            location.waiting_downloads > 0 &&
+              t(
+                "web.admin.downloads.storage.card.waiting",
+                countValues(location.waiting_downloads),
+              ),
+            location.cleanup_backlog > 0 &&
+              t("web.admin.downloads.storage.card.queued", countValues(location.cleanup_backlog)),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
         <div className="flex gap-2">
           <Button variant="ghost" size="sm" onClick={onBrowse}>
-            Browse files
+            {t("web.admin.downloads.storage.card.browse")}
           </Button>
           <Button variant="outline" size="sm" onClick={onEdit}>
-            Edit location
+            {t("web.admin.downloads.storage.editLocation")}
           </Button>
         </div>
       </div>
@@ -460,11 +555,12 @@ function LocationCard({
 }
 
 function StatusPill({ location }: { location: AdminDownloadStorageLocation }) {
+  const t = useT();
   if (location.kind === "server" || location.online) {
     return (
       <span className="text-success bg-success/10 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium">
         <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
-        Online
+        {t("web.admin.downloads.storage.status.online")}
       </span>
     );
   }
@@ -473,7 +569,9 @@ function StatusPill({ location }: { location: AdminDownloadStorageLocation }) {
   return (
     <span className="text-muted-foreground bg-muted inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium">
       <span className="size-1.5 rounded-full bg-current" aria-hidden="true" />
-      {location.enabled ? "Offline" : "Disabled"}
+      {location.enabled
+        ? t("web.admin.downloads.storage.status.offline")
+        : t("web.admin.downloads.storage.status.disabled")}
     </span>
   );
 }
@@ -489,10 +587,22 @@ function DiskMeter({
   scratch: boolean;
   dimmed: boolean;
 }) {
+  const t = useT();
   const visible = segments.filter((s) => s.bytes > 0);
-  const label = visible.map((s) => `${s.label} ${formatStorageBytes(s.bytes)}`).join(", ");
+  const label = visible
+    .map((s) =>
+      t("web.admin.downloads.storage.meter.segment", {
+        label: s.label,
+        size: formatStorageBytes(s.bytes),
+      }),
+    )
+    .join(", ");
   return (
-    <div className="relative" role="img" aria-label={`Disk use: ${label}`}>
+    <div
+      className="relative"
+      role="img"
+      aria-label={t("web.admin.downloads.storage.meter.label", { segments: label })}
+    >
       <div className={cn("flex h-2.5 gap-0.5", dimmed && "saturate-50")}>
         {visible.map((s, index) => (
           <span
@@ -524,15 +634,18 @@ function DiskMeter({
 }
 
 function MeterKey({ ceiling }: { ceiling: number }) {
+  const t = useT();
   return (
     <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs">
       <span className="flex items-center gap-1.5">
         <span className="bg-warning inline-block h-2.5 w-0.5 rounded-full" aria-hidden="true" />
-        Clean-up ceiling ({ceiling}%)
+        {t("web.admin.downloads.storage.meter.ceiling", { ceiling: String(ceiling) })}
       </span>
       <span className="flex items-center gap-1.5">
         <span className="bg-destructive inline-block h-2.5 w-0.5 rounded-full" aria-hidden="true" />
-        Node stops taking playback ({SCRATCH_ADMISSION_PERCENT}%, scratch disks only)
+        {t("web.admin.downloads.storage.meter.scratch", {
+          percent: String(SCRATCH_ADMISSION_PERCENT),
+        })}
       </span>
     </div>
   );

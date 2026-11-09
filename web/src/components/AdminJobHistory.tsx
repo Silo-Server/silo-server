@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import { formatJobProgress } from "./adminCatalogMaintenanceFormatters";
 import { formatDateTime } from "@/lib/datetime";
+import { useAppLanguage } from "@/i18n";
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   delete_library: "Library Delete",
@@ -127,6 +128,8 @@ function jobResult(job: AdminJob) {
 }
 
 export default function AdminJobHistory() {
+  // formatJobProgress returns catalog text; re-render it on a language change.
+  useAppLanguage();
   const jobsQuery = useAllAdminJobs();
   const jobs = jobsQuery.data ?? [];
 

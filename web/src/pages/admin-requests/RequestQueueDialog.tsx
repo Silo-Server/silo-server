@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/table";
 import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
+import { useT } from "@/i18n";
 import {
   useAdminRequestEvents,
   useAdminRequestRoutePreview,
@@ -45,6 +46,11 @@ import { RequestActionButtons, type RequestQueueActionHandlers } from "./Request
 import { RequestPoster, RequestStateSummary, TargetStatusBadge } from "./queueParts";
 import { formatRequestEventType, requestQueueView, targetServerName } from "./requestQueueModel";
 
+const SEPARATOR = " · ";
+const SPACE = " ";
+/** Shown for a target no routing rule sent. */
+const NO_ROUTE = "—";
+
 /** Everything about one request: its servers, where it would go, and its history. */
 export function RequestQueueDialog({
   request,
@@ -57,6 +63,7 @@ export function RequestQueueDialog({
   handlers: RequestQueueActionHandlers;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   return (
     <Dialog open={request !== null} onOpenChange={onOpenChange}>
       <DialogContent
@@ -66,7 +73,7 @@ export function RequestQueueDialog({
         {/* Its own close button, with a backing that stays visible over the backdrop. */}
         <DialogClose className="bg-background/75 hover:bg-background focus-visible:ring-ring absolute top-3 right-3 z-10 rounded-md p-1.5 backdrop-blur transition-colors focus-visible:ring-2 focus-visible:outline-none">
           <X className="size-4" aria-hidden="true" />
-          <span className="sr-only">Close</span>
+          <span className="sr-only">{t("web.admin.requests.detail.close")}</span>
         </DialogClose>
         {request ? (
           <RequestDetail request={request} requesterName={requesterName} handlers={handlers} />
@@ -85,11 +92,14 @@ function RequestDetail({
   requesterName?: string;
   handlers: RequestQueueActionHandlers;
 }) {
+  const t = useT();
   const backdrop = tmdbImageURL(request.backdrop_path, "w780");
   const view = requestQueueView(request);
   const requester =
     requesterName ??
-    (request.requested_by_user_id ? `User ${request.requested_by_user_id}` : "Unknown account");
+    (request.requested_by_user_id
+      ? t("web.admin.requests.userFallback", { id: String(request.requested_by_user_id) })
+      : t("web.admin.requests.unknownAccount"));
   const requestedAgo = formatRelativeTime(request.created_at, { absoluteAfterDays: 30 });
   return (
     <>
@@ -128,9 +138,9 @@ function RequestDetail({
         </div>
 
         <div className="space-y-6 px-6 pt-5 pb-6">
-          <Section title="Request">
+          <Section title={t("web.admin.requests.detail.section.request")}>
             <dl className="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
-              <Term label="Requested by">
+              <Term label={t("web.admin.requests.detail.requestedBy")}>
                 {request.requested_by_user_id ? (
                   <Link
                     to={`/admin/users/${request.requested_by_user_id}`}
@@ -142,49 +152,70 @@ function RequestDetail({
                   requester
                 )}
               </Term>
-              <Term label="Requested">
+              <Term label={t("web.admin.requests.detail.requested")}>
                 {formatDateTime(request.created_at)}
                 {requestedAgo ? (
-                  <span className="text-muted-foreground"> · {requestedAgo}</span>
+                  <span className="text-muted-foreground">
+                    {SEPARATOR}
+                    {requestedAgo}
+                  </span>
                 ) : null}
                 {request.source === "watchlist" ? (
-                  <span className="text-muted-foreground"> · via watchlist</span>
+                  <span className="text-muted-foreground">
+                    {SEPARATOR}
+                    {t("web.admin.requests.viaWatchlist")}
+                  </span>
                 ) : null}
               </Term>
               {request.approved_at ? (
-                <Term label="Approved">{formatDateTime(request.approved_at)}</Term>
+                <Term label={t("web.admin.requests.detail.approved")}>
+                  {formatDateTime(request.approved_at)}
+                </Term>
               ) : null}
               {request.completed_at ? (
-                <Term label="Completed">{formatDateTime(request.completed_at)}</Term>
+                <Term label={t("web.admin.requests.detail.completed")}>
+                  {formatDateTime(request.completed_at)}
+                </Term>
               ) : null}
               {request.media_type === "series" ? (
-                <Term label="Seasons">
-                  {request.seasons?.length ? formatSeasonList(request.seasons) : "Whole series"}
+                <Term label={t("web.admin.requests.detail.seasons")}>
+                  {request.seasons?.length
+                    ? formatSeasonList(request.seasons)
+                    : t("web.admin.requests.detail.wholeSeries")}
                   {request.season_progress?.length ? (
                     <ul className="text-muted-foreground mt-1 space-y-0.5 text-xs">
                       {request.season_progress.map((season) => (
                         <li key={season.season_number}>
-                          Season {season.season_number}: {season.episodes_available}
-                          {season.episodes_aired > 0 ? ` of ${season.episodes_aired}` : ""}{" "}
-                          {season.episodes_available === 1 ? "episode" : "episodes"} in the library
+                          {season.episodes_aired > 0
+                            ? t("web.admin.requests.detail.seasonProgressOfAired", {
+                                season: String(season.season_number),
+                                available: String(season.episodes_available),
+                                count: season.episodes_aired,
+                                count_text: String(season.episodes_aired),
+                              })
+                            : t("web.admin.requests.detail.seasonProgress", {
+                                season: String(season.season_number),
+                                count: season.episodes_available,
+                                count_text: String(season.episodes_available),
+                              })}
                         </li>
                       ))}
                     </ul>
                   ) : null}
                 </Term>
               ) : null}
-              <Term label="State">
+              <Term label={t("web.admin.requests.detail.state")}>
                 <RequestStateSummary request={request} />
               </Term>
-              <Term label="TMDB ID">{request.tmdb_id}</Term>
+              <Term label={t("web.admin.requests.detail.tmdbId")}>{request.tmdb_id}</Term>
               {request.library_content_id ? (
-                <Term label="Library">
+                <Term label={t("web.admin.requests.detail.library")}>
                   <LibraryItemLink
                     contentId={request.library_content_id}
                     className="inline-flex items-center gap-1 hover:underline"
                   >
                     <Library className="h-3.5 w-3.5" aria-hidden="true" />
-                    Open in the library
+                    {t("web.admin.requests.detail.openInLibrary")}
                   </LibraryItemLink>
                 </Term>
               ) : null}
@@ -192,18 +223,18 @@ function RequestDetail({
           </Section>
 
           {request.targets?.length ? (
-            <Section title="Servers">
+            <Section title={t("web.admin.requests.detail.section.servers")}>
               <TargetsTable request={request} />
             </Section>
           ) : null}
 
           {view === "needs_approval" || view === "failed" ? (
-            <Section title="Where it would go">
+            <Section title={t("web.admin.requests.detail.section.routing")}>
               <RoutePreviewSection request={request} />
             </Section>
           ) : null}
 
-          <Section title="History">
+          <Section title={t("web.admin.requests.detail.section.history")}>
             <RequestHistory requestId={request.id} />
           </Section>
         </div>
@@ -214,7 +245,7 @@ function RequestDetail({
         <Button asChild variant="ghost" size="sm">
           <Link to={requestDetailHref(request.media_type, request.tmdb_id)}>
             <ExternalLink aria-hidden="true" />
-            Title page
+            {t("web.admin.requests.detail.titlePage")}
           </Link>
         </Button>
       </DialogFooter>
@@ -243,15 +274,16 @@ function Term({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function TargetsTable({ request }: { request: MediaRequest }) {
+  const t = useT();
   return (
     <div className="border-border overflow-x-auto rounded-lg border">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Quality</TableHead>
-            <TableHead>Server</TableHead>
-            <TableHead>Route</TableHead>
-            <TableHead>Status</TableHead>
+            <TableHead>{t("web.admin.requests.detail.column.quality")}</TableHead>
+            <TableHead>{t("web.admin.requests.detail.column.server")}</TableHead>
+            <TableHead>{t("web.admin.requests.detail.column.route")}</TableHead>
+            <TableHead>{t("web.admin.requests.detail.column.status")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -270,7 +302,7 @@ function TargetRows({ target }: { target: NonNullable<MediaRequest["targets"]>[n
       <TableRow className={target.last_error ? "border-b-0" : undefined}>
         <TableCell className="font-medium">{target.quality}</TableCell>
         <TableCell>{targetServerName(target)}</TableCell>
-        <TableCell className="text-muted-foreground">{target.route_name || "—"}</TableCell>
+        <TableCell className="text-muted-foreground">{target.route_name || NO_ROUTE}</TableCell>
         <TableCell>
           <div className="flex flex-col items-start gap-0.5">
             <TargetStatusBadge target={target} />
@@ -321,16 +353,21 @@ function RoutePreviewSection({ request }: { request: MediaRequest }) {
     () => requestRouterInstallations(installationsQuery.data ?? []),
     [installationsQuery.data],
   );
+  const t = useT();
   return (
     <div
       aria-live="polite"
       className="border-border/70 bg-foreground/[0.02] space-y-2 rounded-xl border p-3 text-sm"
     >
       {preview.isPending ? (
-        <p className="text-muted-foreground text-xs">Checking the routing rules…</p>
+        <p className="text-muted-foreground text-xs">
+          {t("web.admin.requests.detail.routePreview.checking")}
+        </p>
       ) : preview.isError ? (
         <p className="text-destructive text-xs">
-          {preview.error instanceof Error ? preview.error.message : "The preview failed."}
+          {preview.error instanceof Error
+            ? preview.error.message
+            : t("web.admin.requests.detail.routePreview.failed")}
         </p>
       ) : (
         <RoutePreviewResult
@@ -345,30 +382,43 @@ function RoutePreviewSection({ request }: { request: MediaRequest }) {
         />
       )}
       <p className="text-muted-foreground text-xs">
-        With routing as saved now.{" "}
-        <Link to="/admin/settings/requests" className="hover:text-foreground underline">
-          Routing settings
-        </Link>
+        {t("web.admin.requests.detail.routePreview.asSaved", {
+          link: (chunks) => (
+            <Link to="/admin/settings/requests" className="hover:text-foreground underline">
+              {chunks}
+            </Link>
+          ),
+        })}
       </p>
     </div>
   );
 }
 
 function RequestHistory({ requestId }: { requestId: string }) {
+  const t = useT();
   const events = useAdminRequestEvents(requestId);
-  if (events.isPending) return <p className="text-muted-foreground text-sm">Loading history…</p>;
+  if (events.isPending) {
+    return (
+      <p className="text-muted-foreground text-sm">{t("web.admin.requests.history.loading")}</p>
+    );
+  }
   if (events.isError) {
     return (
       <p className="text-destructive text-sm">
-        {events.error instanceof Error ? events.error.message : "History could not be loaded."}
+        {events.error instanceof Error
+          ? events.error.message
+          : t("web.admin.requests.history.loadFailed")}
       </p>
     );
   }
   if (events.data.length === 0) {
-    return <p className="text-muted-foreground text-sm">No history recorded.</p>;
+    return <p className="text-muted-foreground text-sm">{t("web.admin.requests.history.empty")}</p>;
   }
   return (
-    <ol aria-label="Request history" className="border-border space-y-3 border-l pl-4">
+    <ol
+      aria-label={t("web.admin.requests.history.label")}
+      className="border-border space-y-3 border-l pl-4"
+    >
       {events.data.map((event) => (
         <li key={event.id} className="relative text-sm">
           <span
@@ -376,12 +426,18 @@ function RequestHistory({ requestId }: { requestId: string }) {
             className="bg-muted-foreground/60 absolute top-1.5 -left-[1.3rem] h-2 w-2 rounded-full"
           />
           <div className="flex flex-wrap items-baseline gap-x-2">
-            <span className="font-medium">{formatRequestEventType(event.type)}</span>{" "}
+            <span className="font-medium">{formatRequestEventType(event.type)}</span>
+            {SPACE}
             {event.actor_username || event.actor_user_id ? (
               <span className="text-muted-foreground text-xs">
-                by {event.actor_username || `User ${event.actor_user_id}`}
+                {t("web.admin.requests.history.byActor", {
+                  actor:
+                    event.actor_username ||
+                    t("web.admin.requests.userFallback", { id: String(event.actor_user_id) }),
+                })}
               </span>
-            ) : null}{" "}
+            ) : null}
+            {SPACE}
             <time
               dateTime={event.created_at}
               title={formatDateTime(event.created_at)}

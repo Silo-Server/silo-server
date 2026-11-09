@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { useAutoscanSourceBusy, useUpdateAutoscanSource } from "@/hooks/queries/useAutoscan";
+import { useT, type Translate } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,7 @@ import { RotateWebhookDialog } from "./WebhookEndpoint";
 const COLUMNS = "@2xl:grid-cols-[minmax(0,1.7fr)_minmax(0,0.9fr)_minmax(0,1.3fr)_3rem_9.25rem]";
 
 export function SourceList({ children }: { children: ReactNode }) {
+  const t = useT();
   return (
     <div className="@container">
       <div className="bg-card overflow-hidden rounded-lg border">
@@ -51,10 +53,10 @@ export function SourceList({ children }: { children: ReactNode }) {
           )}
           aria-hidden
         >
-          <span>Source</span>
-          <span>Feeds</span>
-          <span>Status</span>
-          <span>On</span>
+          <span>{t("web.admin.autoscan.sources.list.columnSource")}</span>
+          <span>{t("web.admin.autoscan.sources.list.columnFeeds")}</span>
+          <span>{t("web.admin.autoscan.sources.list.columnStatus")}</span>
+          <span>{t("web.admin.autoscan.sources.list.columnOn")}</span>
           <span />
         </div>
         <ul className="divide-border divide-y">{children}</ul>
@@ -63,9 +65,12 @@ export function SourceList({ children }: { children: ReactNode }) {
   );
 }
 
-function relative(iso: string): string {
+function relative(t: Translate, iso: string): string {
   return (
-    formatRelativeTime(iso, { rounding: "floor", justNowLabel: "just now" }) ?? "at an unknown time"
+    formatRelativeTime(iso, {
+      rounding: "floor",
+      justNowLabel: t("web.admin.autoscan.sources.row.justNow"),
+    }) ?? t("web.admin.autoscan.sources.row.unknownTime")
   );
 }
 
@@ -84,13 +89,14 @@ function SourceStatus({
   source: AutoscanSource;
   hideErrorDetail?: boolean;
 }) {
+  const t = useT();
   const health = sourceHealth(source);
   switch (health.kind) {
     case "off":
       return (
         <p className="text-muted-foreground flex items-start gap-2 text-sm">
           <StatusDot className="bg-muted-foreground/60" />
-          Off
+          {t("web.admin.autoscan.sources.status.off")}
         </p>
       );
     case "ok":
@@ -100,7 +106,12 @@ function SourceStatus({
           title={formatDateTime(health.at)}
         >
           <StatusDot className="bg-success" />
-          {health.headline} {relative(health.at)}
+          {t(
+            isWebhookSource(source)
+              ? "web.admin.autoscan.sources.status.lastDeliveryAt"
+              : "web.admin.autoscan.sources.status.lastCheckedAt",
+            { time: relative(t, health.at) },
+          )}
         </p>
       );
     case "idle":
@@ -124,7 +135,7 @@ function SourceStatus({
             <AlertTriangle className="size-3.5 shrink-0" />
             {health.headline}
             {health.at && (
-              <span className="text-destructive/80 font-normal">{relative(health.at)}</span>
+              <span className="text-destructive/80 font-normal">{relative(t, health.at)}</span>
             )}
           </p>
           {/* Clamped visually; the full text stays in the DOM for screen readers
@@ -173,6 +184,7 @@ export function SourceListRow({
   onEdit: (source: AutoscanSource) => void;
   onRequestDelete: (source: AutoscanSource) => void;
 }) {
+  const t = useT();
   const [rowAuthority] = useState(captureProfileRequestContext);
   const update = useUpdateAutoscanSource(rowAuthority);
   // The switch and Edit resend this row's snapshot in full. While the list is
@@ -193,9 +205,13 @@ export function SourceListRow({
   // the most common "I set it up and nothing happened" report.
   const targets = sourceTargets(source, descriptor, libraries);
   const feeds = librariesLoading ? null : targets.unknown ? (
-    <span className="text-muted-foreground text-xs">Determined at scan time</span>
+    <span className="text-muted-foreground text-xs">
+      {t("web.admin.autoscan.sources.targets.unknown")}
+    </span>
   ) : targets.libraries.length === 0 ? (
-    <span className="text-muted-foreground text-xs">None</span>
+    <span className="text-muted-foreground text-xs">
+      {t("web.admin.autoscan.sources.targets.none")}
+    </span>
   ) : (
     targets.libraries.map((library) => (
       <Badge key={library.id} variant="secondary" className="max-w-full font-normal">
@@ -236,27 +252,25 @@ export function SourceListRow({
       </div>
 
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 [grid-area:feeds]">
-        <span className="text-muted-foreground mr-1 text-xs @2xl:sr-only">Feeds</span>
+        <span className="text-muted-foreground mr-1 text-xs @2xl:sr-only">
+          {t("web.admin.autoscan.sources.row.feedsLabel")}
+        </span>
         {feeds}
       </div>
 
       <div className="min-w-0 space-y-1 [grid-area:status]">
         <SourceStatus source={source} hideErrorDetail={connectionMissing} />
         {connectionMissing && (
-          <Warning tone="destructive">No server selected. Edit the source to pick one.</Warning>
+          <Warning tone="destructive">{t("web.admin.autoscan.sources.row.noServer")}</Warning>
         )}
         {!librariesLoading && targets.unresolvable && (
-          <Warning tone="destructive">
-            No paths configured — this source can&apos;t match anything yet.
-          </Warning>
+          <Warning tone="destructive">{t("web.admin.autoscan.sources.row.noPaths")}</Warning>
         )}
         {!librariesLoading &&
           !targets.unresolvable &&
           !targets.unknown &&
           targets.libraries.length === 0 && (
-            <Warning tone="warning">
-              Paths don&apos;t match any library root — scans won&apos;t be enqueued.
-            </Warning>
+            <Warning tone="warning">{t("web.admin.autoscan.sources.row.pathsUnmatched")}</Warning>
           )}
       </div>
 
@@ -265,7 +279,7 @@ export function SourceListRow({
           checked={source.enabled}
           onCheckedChange={toggleEnabled}
           disabled={busy}
-          aria-label={`${title} enabled`}
+          aria-label={t("web.admin.autoscan.sources.row.enabledAria", { title })}
         />
       </div>
 
@@ -276,9 +290,13 @@ export function SourceListRow({
             variant="outline"
             size="icon-sm"
             disabled={!endpoint.url}
-            onClick={() => endpoint.copy("open Edit and select the URL manually")}
-            aria-label={`Copy webhook URL for ${title}`}
-            title={endpoint.url ? "Copy webhook URL" : "Webhook URL unavailable — open Edit"}
+            onClick={() => endpoint.copy("list")}
+            aria-label={t("web.admin.autoscan.sources.row.copyAria", { title })}
+            title={
+              endpoint.url
+                ? t("web.admin.autoscan.sources.row.copyTitle")
+                : t("web.admin.autoscan.sources.row.copyUnavailable")
+            }
           >
             <Copy />
           </Button>
@@ -291,10 +309,10 @@ export function SourceListRow({
           // Edit starts its draft from this snapshot and saves it in full, so
           // it waits until a write or re-read for this source has landed.
           disabled={busy}
-          aria-label={`Edit ${title}`}
+          aria-label={t("web.admin.autoscan.sources.row.editAria", { title })}
         >
           <Pencil />
-          Edit
+          {t("web.admin.autoscan.sources.row.edit")}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -302,7 +320,7 @@ export function SourceListRow({
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label={`More actions for ${title}`}
+              aria-label={t("web.admin.autoscan.sources.row.moreAria", { title })}
             >
               <Ellipsis />
             </Button>
@@ -312,14 +330,14 @@ export function SourceListRow({
               <>
                 <DropdownMenuItem disabled={!canRotate} onSelect={endpoint.requestRotate}>
                   <RefreshCw />
-                  Rotate webhook URL
+                  {t("web.admin.autoscan.sources.row.rotate")}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
             )}
             <DropdownMenuItem variant="destructive" onSelect={() => onRequestDelete(source)}>
               <Trash2 />
-              Delete
+              {t("web.admin.autoscan.sources.row.delete")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
