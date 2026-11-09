@@ -295,6 +295,23 @@ describe("Back", () => {
       expect(router.state.location.pathname + router.state.location.search).toBe(view),
     );
   });
+
+  it("server: Save goes back to the library it was opened from only while the collection is in it", async () => {
+    const user = userEvent.setup();
+    const router = showEditorPage("/admin/collections/c1/edit?libraryId=1");
+    await sentence();
+    await user.click(screen.getByRole("button", { name: libraries("Movies, 4K Movies") }));
+    await user.click(screen.getByRole("menuitemcheckbox", { name: "Movies" }));
+    await user.keyboard("{Escape}");
+    // The read after the save sees it in 4K Movies only.
+    showServerSmart(rules({ library_ids: [3] }));
+    await save(1);
+    await vi.waitFor(() =>
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        "/admin/collections?libraryId=3&view=list",
+      ),
+    );
+  });
 });
 
 describe("the save bar before Create", () => {

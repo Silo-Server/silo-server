@@ -32,6 +32,8 @@ import { useHasUnsavedChanges, useReportUnsavedChanges } from "@/hooks/useUnsave
 import {
   CHANGED_BEFORE_DELETE,
   CHECK_BEFORE_DELETE_FAILED,
+  COLLECTION_CREATED,
+  COLLECTION_SAVED,
   DRAFT_FIELD_LABEL,
   NAME_FILLED_HELP,
   NAME_IT_THEN_CREATE,
@@ -292,6 +294,8 @@ export function CollectionEditor<Raw extends WireCollection>({
   const capabilities = isServer ? adminCapabilities.data : personalCapabilities.data;
   const hasUnsaved = useHasUnsavedChanges();
   const [leaving, setLeaving] = useState<string | null>(null);
+  // Save or Create that left for the list: the toast that says it worked.
+  const [leftSaved, setLeftSaved] = useState<string | null>(null);
   // A trip to Home rows (Add as a row), from which the editor expects to be handed back.
   const [detour, setDetour] = useState<string | null>(null);
   // A save or Create that worked: where to go once it has settled.
@@ -301,10 +305,14 @@ export function CollectionEditor<Raw extends WireCollection>({
   const location = useLocation();
   // The library the editor was opened from (an edit link from a library page names it).
   const editLibraryId = Number(new URLSearchParams(location.search).get("libraryId")) || null;
+  const openedLibraryId = libraryId ?? editLibraryId;
+  // That library's list, while the collection is still in it.
+  const listLibraryId =
+    openedLibraryId !== null && draft.libraryIds.includes(openedLibraryId)
+      ? openedLibraryId
+      : (draft.libraryIds[0] ?? null);
   const listPath = useListReturnPath(
-    scope.paths.list({
-      libraryId: isServer ? (libraryId ?? editLibraryId ?? draft.libraryIds[0] ?? null) : null,
-    }),
+    scope.paths.list({ libraryId: isServer ? listLibraryId : null }),
   );
   const remove = useScopeDelete(scope, {
     onDeleted: () => setLeaving(listPath),
@@ -366,6 +374,8 @@ export function CollectionEditor<Raw extends WireCollection>({
     if (hasUnsaved) return;
     if (leaving) {
       navigate(leaving, { replace: true });
+      // The list may be filtered so the collection isn't in view: say it worked.
+      if (leftSaved) toast.success(leftSaved, { id: "collection-left-saved" });
     } else if (detour) {
       // Carry the list the editor was opened from, so it can go back there afterwards.
       navigate(detour, { state: listReturnState(listPath) });
@@ -377,17 +387,17 @@ export function CollectionEditor<Raw extends WireCollection>({
       });
       // Create unmounts its button; carry on where the contents start.
       if (smart) focusLibrariesLine();
-      else if (!newList) document.querySelector<HTMLInputElement>("[data-title-search]")?.focus();
+      else document.querySelector<HTMLInputElement>("[data-title-search]")?.focus();
     }
   }, [
     hasUnsaved,
     leaving,
+    leftSaved,
     detour,
     libraryId,
     listPath,
     moving,
     navigate,
-    newList,
     openEdit,
     scope,
     smart,
@@ -401,6 +411,7 @@ export function CollectionEditor<Raw extends WireCollection>({
     if (afterSave.to === "detour") {
       if (!editor.isDirty) setDetour(afterSave.path);
     } else if (!editor.isDirty && staged.length === 0) {
+      setLeftSaved(afterSave.created ? COLLECTION_CREATED : COLLECTION_SAVED);
       setLeaving(listPath);
     } else if (afterSave.created) {
       setOpenEdit(afterSave.created);
@@ -472,7 +483,7 @@ export function CollectionEditor<Raw extends WireCollection>({
   const [savingFirst, setSavingFirst] = useState<{ where: string; path: string } | null>(null);
   function addAsRow(page: PageRef, where = rowPlaceInSentence(page, libraryNames)) {
     if (!editor.id) return;
-    const returnTo = scope.paths.edit(editor.id, { libraryId: libraryId ?? editLibraryId });
+    const returnTo = scope.paths.edit(editor.id, { libraryId: openedLibraryId });
     const path = isServer
       ? addRowPath(editor.id, page, returnTo)
       : addToMyHomePath({ source: "user", id: editor.id }, page, returnTo);
@@ -862,7 +873,10 @@ export function CollectionEditor<Raw extends WireCollection>({
             value={draft.artwork}
             errors={editor.artworkErrors}
             // Retry stays on the editor, so the image it tried again shows here.
-            onRetry={() => void editor.save()}
+            // Not while a save runs: the bar's Save could leave with this one in flight.
+            onRetry={() => {
+              if (!editor.isSaving) void editor.save();
+            }}
             onChange={(artwork) => editor.setDraft((current) => ({ ...current, artwork }))}
           />
         ) : null}

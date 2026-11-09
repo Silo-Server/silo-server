@@ -483,6 +483,10 @@ export function serverTimeLabel(zone?: { utc_offset: string; name?: string }): s
   return `Server time (${zone.name ? `${offset}, ${zone.name}` : offset})`;
 }
 
+/** The toasts after Save or Create returns to the list. */
+export const COLLECTION_SAVED = "Collection saved";
+export const COLLECTION_CREATED = "Collection created";
+
 /** The toast after a synced list is created: how its first sync went. */
 export function firstSyncMessage(sync?: { status: string; message: string; itemsMatched: number }) {
   if (!sync) return { tone: "success" as const, text: "Created. It syncs on its schedule." };
