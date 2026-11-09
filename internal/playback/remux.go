@@ -539,7 +539,9 @@ func (s *RemuxSession) finishOutput(readErr error) error {
 	if readErr != nil && !errors.Is(readErr, io.EOF) {
 		return fmt.Errorf("reading ffmpeg remux output: %w", readErr)
 	}
-	if err != nil {
+	// ErrWaitDelay means FFmpeg exited 0 but something it started still held
+	// a pipe: the output is complete.
+	if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return fmt.Errorf("ffmpeg remux failed: %w", err)
 	}
 	if s.stderr != nil {
