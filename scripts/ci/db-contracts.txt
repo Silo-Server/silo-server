@@ -359,6 +359,7 @@
 ./internal/notifications TestPushDeviceRepositoryUpsertApplePreservesStableIDs
 ./internal/notifications TestRetireApplePushStopsDeliveryAndOrdersAgainstRegistrationDB
 ./internal/notifications TestSendPushTestCarriesTheProfilesNewestNotification
+./internal/notifications TestSendPushTestStaysOnTheCallersAccount
 ./internal/notifications TestNotificationInboxCutoffReplayAndTies
 ./internal/notifications TestFanoutSkipsRecipientsWithoutAccess
 ./internal/notifications TestFanoutSkipsSecondLibraryCopy
