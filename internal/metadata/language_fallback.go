@@ -620,6 +620,14 @@ func (f *fallbackText) applyToItem(item *MetadataResult, requested string, exist
 	}
 }
 
+// ignoreStoredText turns keepStored off for a correction of the item's match,
+// whose stored text belongs to another title, as for an Identify.
+func (f *fallbackText) ignoreStoredText() {
+	if f != nil {
+		f.policy.keepStored = false
+	}
+}
+
 // applyToChildren fills season and episode gaps the same way. seriesID is the
 // series the write targets; stored children loaded for another series are
 // not used.

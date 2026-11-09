@@ -277,6 +277,13 @@ by mode:
   identity keeps the chosen one. Running Identify again is how an admin
   changes it.
 
+A manual refresh or Identify that corrects the match (the chosen IDs contradict
+the stored ones) also empties the stored fields, credits and localized text it
+may rewrite, so a value the new match lacks does not outlive the previous title.
+Locks and manual translations hold, and the title and artwork stay. A refresh or
+Identify that keeps the match never clears a stored field, credit or localized
+text the providers leave empty.
+
 Whenever a run keeps an identity the NFO's IDs contradict, it logs the
 conflict and leaves the NFO provider out of every phase of that run (series,
 season and episode), since its text, lists and art describe the other title
