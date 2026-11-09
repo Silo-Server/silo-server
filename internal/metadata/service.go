@@ -2781,7 +2781,12 @@ func (s *MetadataService) mergeAndPersist(
 	if req.Mode == ModeIdentify && !isNew && contentID != "" && existingItem == nil {
 		return nil, fmt.Errorf("identify target %q: %w", contentID, catalog.ErrItemNotFound)
 	}
-	contentIDBeforeMoves := contentID
+	// A correction to a different show clears the edits on its seasons and
+	// episodes, which describe the old show, in the transaction that stores the
+	// new identity. The id may move first: a rename keeps the children, but a
+	// merge onto another row takes on that row's, whose edits are its own.
+	replacesShow := req.identityCorrection && normalizeItemTypeForContentID(contentType) == matchContentTypeSeries &&
+		correctionNamesDifferentShow(contentType, storedItemIdentity(existingItem, req.durableProviderIDs), accumulator.ProviderIDs)
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.writesFieldsOnly() && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2791,6 +2796,7 @@ func (s *MetadataService) mergeAndPersist(
 		}
 		if reboundTo != "" {
 			contentID = reboundTo
+			replacesShow = false
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading rebound item: %w", err)
@@ -2810,13 +2816,14 @@ func (s *MetadataService) mergeAndPersist(
 	// rows. Placed before the durableIDs merge below so the canonical row's
 	// provider IDs are folded into the accumulator. See canonicalizeLocalContentID.
 	if !req.writesFieldsOnly() && !isNew && contentid.IsLocal(contentID) {
-		canonical, err := s.canonicalizeLocalContentID(
+		canonical, renamed, err := s.canonicalizeLocalContentID(
 			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, fmt.Errorf("canonicalize local content id: %w", err)
 		}
 		if canonical != contentID {
 			contentID = canonical
+			replacesShow = replacesShow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading canonicalized item: %w", err)
@@ -2838,14 +2845,14 @@ func (s *MetadataService) mergeAndPersist(
 	anchorRejected := identityCorrectionRejectsLiveAnchor(contentID, accumulator.ProviderIDs,
 		accumulator.rejectedIdentityProviderIDs, req.recordedStaleProviderIDs, accumulator.sameRunStaleProviderIDs)
 	if shouldReanchorProviderContentID(contentID, isNew, req.Mode, anchorRejected) {
-		reanchored, err := s.reanchorContentID(
-			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify,
-			anchorRejected && correctionNamesDifferentShow(contentType, storedItemIdentity(existingItem, req.durableProviderIDs), accumulator.ProviderIDs))
+		reanchored, renamed, err := s.reanchorContentID(
+			ctx, contentID, providerIDsStruct(accumulator.ProviderIDs), contentType, req.Mode == ModeIdentify)
 		if err != nil {
 			return nil, fmt.Errorf("reanchor provider content id: %w", err)
 		}
 		if reanchored != contentID {
 			contentID = reanchored
+			replacesShow = replacesShow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading reanchored item: %w", err)
@@ -2857,12 +2864,6 @@ func (s *MetadataService) mergeAndPersist(
 			}
 		}
 	}
-	// A correction can replace the show without moving the id, such as over a
-	// dead anchor nothing can claim. The edits go in the transaction that stores
-	// the new identity. A move already handled them.
-	clearChildEdits := req.identityCorrection && contentID == contentIDBeforeMoves &&
-		normalizeItemTypeForContentID(contentType) == matchContentTypeSeries &&
-		correctionNamesDifferentShow(contentType, storedItemIdentity(existingItem, req.durableProviderIDs), accumulator.ProviderIDs)
 
 	suppressProviderIDValues(durableIDs, accumulator.recordedStaleProviderIDs)
 	suppressProviderIDValues(durableIDs, accumulator.sameRunStaleProviderIDs)
@@ -3093,7 +3094,7 @@ func (s *MetadataService) mergeAndPersist(
 		len(durableIDs) == 0,
 		contentType,
 		req.Mode == ModeIdentify,
-		clearChildEdits,
+		replacesShow,
 	)
 	if err != nil {
 		return nil, err
@@ -3323,8 +3324,10 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 	}
 	item.ContentID = reboundTo
 	clearDroppedIdentityColumns(item, dropped)
-	// The row conflict recovery merged into holds its own edits.
-	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen, false); retryErr != nil {
+	// A row conflict recovery merged into holds its own edits; a retry on the
+	// same row still owes the clear its first attempt rolled back.
+	clearOnRetry := clearChildEdits && reboundTo == contentID
+	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen, clearOnRetry); retryErr != nil {
 		return "", fmt.Errorf("persisting provider IDs after conflict recovery for %s: %w", reboundTo, retryErr)
 	}
 	return reboundTo, nil

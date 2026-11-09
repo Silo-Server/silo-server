@@ -149,7 +149,7 @@ func TestIdentifyRenameLeavesTheMarkToTheIdentityWritePostgres(t *testing.T) {
 	if err := itemRepo.Upsert(ctx, &models.MediaItem{ContentID: from, Type: "movie", Title: from, SortTitle: from, Status: "matched"}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	got, err := svc.reanchorContentID(ctx, from, ids, "movie", true, false)
+	got, _, err := svc.reanchorContentID(ctx, from, ids, "movie", true)
 	if err != nil {
 		t.Fatalf("reanchor: %v", err)
 	}

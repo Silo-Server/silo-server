@@ -38,8 +38,13 @@ type identifyLockFixture struct {
 // and locked, and returns the series id.
 func (f *identifyLockFixture) seed(t *testing.T, tvdb string) string {
 	t.Helper()
+	return f.seedAt(t, "series-tvdb-"+tvdb, tvdb)
+}
+
+// seedAt is seed for a series stored under seriesID.
+func (f *identifyLockFixture) seedAt(t *testing.T, seriesID, tvdb string) string {
+	t.Helper()
 	ctx := t.Context()
-	seriesID := "series-tvdb-" + tvdb
 	if err := f.items.Upsert(ctx, &models.MediaItem{
 		ContentID: seriesID, Type: "series", Title: "Show", Status: "matched", TvdbID: tvdb,
 		DefaultMetadataLanguage: "en",
@@ -50,8 +55,14 @@ func (f *identifyLockFixture) seed(t *testing.T, tvdb string) string {
 	if err := f.providerIDs.ReplaceByContentID(ctx, seriesID, map[string]string{"tvdb": tvdb}); err != nil {
 		t.Fatal(err)
 	}
-	seasonID, _ := contentid.ForSeason(seriesID, 1)
-	episodeID, _ := contentid.ForEpisode(seriesID, 1, 1)
+	seasonID, ok := contentid.ForSeason(seriesID, 1)
+	if !ok {
+		seasonID = seriesID + "-s1"
+	}
+	episodeID, ok := contentid.ForEpisode(seriesID, 1, 1)
+	if !ok {
+		episodeID = seriesID + "-s1e1"
+	}
 	if err := f.seasons.Upsert(ctx, &models.Season{ContentID: seasonID, SeriesID: seriesID, SeasonNumber: 1, Title: "Season 1", DefaultMetadataLanguage: "en", MetadataSource: "provider"}); err != nil {
 		t.Fatal(err)
 	}
@@ -242,6 +253,74 @@ func TestIdentify_SeasonEpisodeLocksFollowTheShow(t *testing.T) {
 		if !slices.Equal(episode.LockedFields, identifyEpisodeLocks) || episode.Title != identifyEditTitle {
 			t.Errorf("episode = %q with locks %v, want the edit kept", episode.Title, episode.LockedFields)
 		}
+	})
+}
+
+// These corrections reach the new show without an Identify that renames the
+// series or keeps its id: a corrected NFO that moves the id off a dead anchor,
+// a matched local series's promotion, and a write retried after a provisional
+// item gave up the chosen id. Each still clears the old show's edits.
+func TestIdentify_SeasonEpisodeLocksClearOnEveryCorrectionPath(t *testing.T) {
+	pool := chainBuiltinTestPool(t)
+	f := newIdentifyLockFixture(pool)
+	providerIDs := f.providerIDs
+	nonce := time.Now().UnixNano() % 100_000_000
+	cleanup := func(t *testing.T, ids ...string) {
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = ANY($1)`, ids)
+		})
+	}
+
+	t.Run("a corrected NFO over a dead anchor clears the edits", func(t *testing.T) {
+		dead, right := strconv.FormatInt(640_000_000+nonce, 10), strconv.FormatInt(740_000_000+nonce, 10)
+		seriesID, to := f.seed(t, dead), "series-tvdb-"+right
+		cleanup(t, seriesID, to)
+		f.storeOnDeadAnchor(t, pool, seriesID, dead, map[string]string{"tvdb": dead})
+		nfo := &localHintStubProvider{hints: map[string]string{"tvdb": right}, metadata: &MetadataResult{HasMetadata: true, Title: "Named show"}}
+		remote := &remoteStubProvider{slug: "tvdb", metadata: &MetadataResult{HasMetadata: true, Title: "Named show", ProviderIDs: map[string]string{"tvdb": right}}}
+		result, err := f.service.ProcessWithProviders(t.Context(), ProcessRequest{ContentID: seriesID, Language: "en", Mode: ModeManualRefresh}, []Provider{nfo, remote})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.ContentID != to {
+			t.Fatalf("refresh moved to %q, want %q", result.ContentID, to)
+		}
+		season, episode := f.read(t, to)
+		assertEditsCleared(t, pool, to, season, episode)
+	})
+
+	t.Run("a matched local series corrected to a different show clears the edits", func(t *testing.T) {
+		dead, right := strconv.FormatInt(650_000_000+nonce, 10), strconv.FormatInt(750_000_000+nonce, 10)
+		seriesID, to := f.seedAt(t, contentid.ForLocal("/identify-locks/"+dead), dead), "series-tvdb-"+right
+		cleanup(t, seriesID, to)
+		f.storeOnDeadAnchor(t, pool, seriesID, dead, map[string]string{"tvdb": dead})
+		if got := f.identify(t, seriesID, right); got != to {
+			t.Fatalf("identify moved to %q, want %q", got, to)
+		}
+		season, episode := f.read(t, to)
+		assertEditsCleared(t, pool, to, season, episode)
+	})
+
+	t.Run("a write retried after a provisional item gives up the id clears the edits", func(t *testing.T) {
+		dead, right := strconv.FormatInt(660_000_000+nonce, 10), strconv.FormatInt(760_000_000+nonce, 10)
+		seriesID := f.seed(t, dead)
+		holder := contentid.ForLocal("/identify-locks/holder-" + right)
+		cleanup(t, seriesID, holder, "series-tvdb-"+right)
+		f.storeOnDeadAnchor(t, pool, seriesID, dead, map[string]string{"tvdb": dead})
+		if err := f.items.Upsert(t.Context(), &models.MediaItem{
+			ContentID: holder, Type: "series", Title: "Unmatched", Status: "unmatched", DefaultMetadataLanguage: "en",
+			Studios: []string{}, Networks: []string{}, Countries: []string{}, Genres: []string{},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := providerIDs.ReplaceByContentID(t.Context(), holder, map[string]string{"tvdb": right}); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.identify(t, seriesID, right); got != seriesID {
+			t.Fatalf("identify moved to %q, want the id kept at %q", got, seriesID)
+		}
+		season, episode := f.read(t, seriesID)
+		assertEditsCleared(t, pool, seriesID, season, episode)
 	})
 }
 

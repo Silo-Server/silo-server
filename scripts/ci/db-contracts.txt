@@ -51,6 +51,7 @@
 ./internal/catalog TestSeasonEpisodeLockedFieldsSurviveUpsertsDB
 ./internal/catalogseed TestSeedCarriesSeasonEpisodeLocksDB
 ./internal/metadata TestIdentify_SeasonEpisodeLocksFollowTheShow
+./internal/metadata TestIdentify_SeasonEpisodeLocksClearOnEveryCorrectionPath
 
 # Movie box sets: grouping by viewer access and the minimum, grouped browse
 # and letters, search, sync bookkeeping, and collection artwork.
