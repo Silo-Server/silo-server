@@ -32031,7 +32031,7 @@ export interface components {
        */
       quality_preference: string;
       /**
-       * @description Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager
+       * @description Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager
        * @example true
        */
       requests_allowed: boolean;
@@ -32167,7 +32167,7 @@ export interface components {
        */
       quality_preference?: string;
       /**
-       * @description Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager. Omitted means allowed
+       * @description Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager. Omitted means allowed
        * @example false
        */
       requests_allowed?: boolean;
@@ -32393,7 +32393,7 @@ export interface components {
        */
       quality_preference?: string;
       /**
-       * @description Whether the profile may use requests and request discovery. False keeps it out of both even when the account may request; the account's own requests switch still applies on top. Set by the household manager
+       * @description Whether the profile may make and follow requests and use request discovery. False keeps it out of those even when the account may request; it can still list, read and cancel the requests it made before. The account's own requests switch still applies on top. Set by the household manager
        * @example false
        */
       requests_allowed?: boolean;
