@@ -477,12 +477,13 @@ func (u *userPlanner) checkPrimaryRoom(ctx context.Context, plan *accountPlan) e
 func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error {
 	acct := plan.item.Account
 	claimed := map[string][]int{}
-	// A backup's primary profile becomes the primary here only when the
-	// account has none (pgstore.CreateRestoredProfileInTx), and then it
-	// inherits the account's libraries instead of its stored library limit.
-	hasPrimary := false
+	// The primary profile here has no library limit, and a backup's primary
+	// becomes the primary only when the account has none
+	// (pgstore.CreateRestoredProfileInTx).
+	primaryID := ""
 	if plan.localID > 0 {
-		if err := u.q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM user_profiles WHERE user_id = $1 AND is_primary)`, plan.localID).Scan(&hasPrimary); err != nil {
+		err := u.q.QueryRow(ctx, `SELECT id FROM user_profiles WHERE user_id = $1 AND is_primary`, plan.localID).Scan(&primaryID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("checking the account's primary profile: %w", err)
 		}
 	}
@@ -511,11 +512,11 @@ func (u *userPlanner) planProfiles(ctx context.Context, plan *accountPlan) error
 		}
 		pp.preview.Match, pp.localID = match, localID
 		pp.preview.LocalID = localID
-		// The backup's primary profile has no library limit here when it
-		// becomes the primary or merges into a profile here that keeps its
-		// access; otherwise it is created as another profile with its limit.
-		inheritsAccount := e.IsPrimary && (!hasPrimary || localID != "")
-		limited := e.LibraryRestrictionsEnabled && !inheritsAccount
+		// No library limit applies when the profile merges into the primary
+		// here, or is created as the primary because the account has none.
+		mergesIntoPrimary := localID != "" && localID == primaryID
+		becomesPrimary := localID == "" && e.IsPrimary && primaryID == ""
+		limited := e.LibraryRestrictionsEnabled && !mergesIntoPrimary && !becomesPrimary
 		pp.preview.Restricted = limited
 		if !limited {
 			pp.preview.LibrariesLeftOut = 0

@@ -213,7 +213,7 @@ export default function ProfilesSettings() {
       <ProfileEditorDialog
         open={editorOpen}
         profile={editingProfile}
-        createsPrimary={profiles.length === 0}
+        createsPrimary={!profilesLoading && profiles.length === 0}
         libraries={libraries}
         avatarUploadEnabled={avatarUploadEnabled}
         advisoryAgeSupported={maxAdvisoryAgeSupported}
