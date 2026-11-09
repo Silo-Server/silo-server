@@ -327,7 +327,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
         </div>
 
         {/* User */}
-        <div className="mt-auto flex items-center gap-1.5">
+        <div className="mt-auto flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
           <div
             className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
             style={{ background: `var(--primary)` }}
@@ -335,10 +335,11 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             {username.charAt(0).toUpperCase()}
           </div>
           <span className="min-w-0 truncate text-xs font-medium">{username}</span>
-          <span className="text-muted-foreground ml-auto shrink-0 text-[10px] tabular-nums">
-            {formatPlaybackPosition(session)}
+          {/* On a narrow card the times wrap below the name instead of hiding it. */}
+          <span className="text-muted-foreground ml-auto flex shrink-0 gap-1.5 text-[10px]">
+            <span className="tabular-nums">{formatPlaybackPosition(session)}</span>
+            <span>· {elapsed}</span>
           </span>
-          <span className="text-muted-foreground shrink-0 text-[10px]">· {elapsed}</span>
         </div>
       </div>
     </div>
