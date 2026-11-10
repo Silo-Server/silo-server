@@ -217,7 +217,7 @@ func (s *Service) prepareStagedGlobalConfig(
 }
 
 // stagedConfigChangesSettings reports whether a staged entry differs from the
-// stored one anywhere outside its secrets. Both sides are compared as JSON
+// stored one anywhere outside its secret values. Both sides are compared as JSON
 // values, a blank or null top-level field counts as absent, and an absent
 // field counts as its declared default, so re-sending the saved settings
 // (with the defaults the admin form fills in) is not a change.
@@ -252,6 +252,14 @@ func settingsForComparison(
 		normalized = map[string]any{}
 	}
 	for _, path := range secretPaths {
+		// A secret path can name a whole object or list (a map of servers
+		// with secrets inside, or a shape the path walker cannot address).
+		// Its other values may be destinations, so it is compared whole.
+		secret, _ := configPathValue(normalized, path)
+		switch secret.(type) {
+		case map[string]any, []any:
+			continue
+		}
 		deleteConfigPath(normalized, path)
 	}
 	for field, fieldValue := range normalized {

@@ -328,6 +328,9 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 			"endpoint": "https://api.example.invalid",
 			"token":    "saved-token",
 		},
+		"servers": map[string]any{
+			"main": map[string]any{"url": "https://api.example.invalid", "key": "saved-server-key"},
+		},
 	}
 	unchanged := func(edit func(map[string]any)) map[string]any {
 		value := map[string]any{
@@ -349,7 +352,10 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 		requireToken bool
 		wantPassword any // nil: absent
 		wantToken    any
-		wantErr      bool
+		// wantServerKey is servers.main.key; the zero value means it was
+		// not checked, because the row leaves servers out.
+		wantServerKey any
+		wantErr       bool
 	}{
 		{
 			name:         "saved settings with the secret left out",
@@ -400,6 +406,22 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 			wantToken:    "saved-token",
 		},
 		{
+			name: "same URL inside an object of secrets",
+			submitted: unchanged(func(v map[string]any) {
+				v["servers"] = map[string]any{"main": map[string]any{"url": "https://api.example.invalid", "key": ""}}
+			}),
+			wantPassword:  savedPassword,
+			wantToken:     "saved-token",
+			wantServerKey: "saved-server-key",
+		},
+		{
+			name: "changed URL inside an object of secrets",
+			submitted: unchanged(func(v map[string]any) {
+				v["servers"] = map[string]any{"main": map[string]any{"url": "https://elsewhere.example.invalid", "key": ""}}
+			}),
+			wantServerKey: nil,
+		},
+		{
 			name:         "changed server with a required secret left out",
 			submitted:    unchanged(func(v map[string]any) { v["urls"] = "ldap://elsewhere.example.invalid" }),
 			requireToken: true,
@@ -427,6 +449,16 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 							"endpoint":{"type":"string"},
 							"token":{"type":"string","writeOnly":true}
 						}` + required + `
+					},
+					"servers":{
+						"type":"object",
+						"additionalProperties":{
+							"type":"object",
+							"properties":{
+								"url":{"type":"string"},
+								"key":{"type":"string","writeOnly":true}
+							}
+						}
 					}
 				}
 			}`
@@ -449,6 +481,13 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 			serviceValue, _ := staged["service"].(map[string]any)
 			if got, present := serviceValue["token"]; (tc.wantToken == nil && present) || (tc.wantToken != nil && got != tc.wantToken) {
 				t.Fatalf("service.token = %#v (present %v), want %#v", got, present, tc.wantToken)
+			}
+			if _, sent := tc.submitted["servers"]; sent {
+				servers, _ := staged["servers"].(map[string]any)
+				main, _ := servers["main"].(map[string]any)
+				if got := main["key"]; got != tc.wantServerKey && !(tc.wantServerKey == nil && got == "") {
+					t.Fatalf("servers.main.key = %#v, want %#v", got, tc.wantServerKey)
+				}
 			}
 			if staged["plugin_owned"] != "retained" {
 				t.Fatalf("plugin-owned field = %#v, want it kept", staged["plugin_owned"])
