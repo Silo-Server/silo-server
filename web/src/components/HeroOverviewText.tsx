@@ -15,7 +15,7 @@ export function HeroOverviewText({
   return (
     <p
       className={cn(
-        "text-foreground/72 line-clamp-2 text-sm leading-7 sm:line-clamp-3 sm:text-base",
+        "bidi-text text-foreground/72 line-clamp-2 text-sm leading-7 sm:line-clamp-3 sm:text-base",
         translating && "animate-pulse opacity-50",
       )}
     >

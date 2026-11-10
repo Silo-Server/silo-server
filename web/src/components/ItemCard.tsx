@@ -349,7 +349,7 @@ export default function ItemCard({
         {episodeLabels?.episodeTitle ? (
           <ViewTransitionLink
             to={itemHref}
-            className="text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
+            className="bidi-text text-muted-foreground mt-1 block truncate text-[0.75rem] font-medium hover:underline"
           >
             {episodeLabels.episodeTitle}
           </ViewTransitionLink>

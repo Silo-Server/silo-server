@@ -141,7 +141,7 @@ function CastCarousel({
                   className="embla__slide flex shrink-0 items-start self-stretch px-3 pb-10"
                 >
                   <div className="flex h-full items-center gap-2">
-                    <span className="text-muted-foreground/70 rotate-180 text-[0.625rem] font-semibold tracking-[0.2em] uppercase [writing-mode:vertical-rl]">
+                    <span className="text-muted-foreground/70 rotate-180 text-[0.625rem] font-semibold tracking-[0.2em] uppercase [text-orientation:sideways] [writing-mode:vertical-rl]">
                       {section.label}
                     </span>
                     <span className="bg-border h-full w-px" />
@@ -205,9 +205,13 @@ function CastCard({ data: member }: { data: CreditCardData }) {
         )}
       </div>
       <div className="px-0.5">
-        <div className="text-foreground truncate text-[0.8125rem] font-medium">{member.name}</div>
+        <div className="bidi-text text-foreground truncate text-[0.8125rem] font-medium">
+          {member.name}
+        </div>
         {member.subtitle ? (
-          <div className="text-muted-foreground truncate text-[0.6875rem]">{member.subtitle}</div>
+          <div className="bidi-text text-muted-foreground truncate text-[0.6875rem]">
+            {member.subtitle}
+          </div>
         ) : null}
       </div>
     </>

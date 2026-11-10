@@ -107,4 +107,18 @@ describe("formatWith", () => {
       `${FSI}Monday${PDI} 1 primero`,
     );
   });
+
+  it.each([
+    // An isolate around "01" would split "S01E03" and render it as "03 S01E".
+    { name: "bare numbers", season: "01", episode: "03", expected: "S01E03" },
+    // Next to Arabic text, an unisolated "2-3" would show as "3-2" and "8+" as "+8".
+    { name: "a range", season: "2-3", episode: "03", expected: `S${FSI}2-3${PDI}E03` },
+    { name: "a signed number", season: "01", episode: "8+", expected: `S01E${FSI}8+${PDI}` },
+  ])(
+    "isolates $name in a right-to-left language only where needed",
+    ({ season, episode, expected }) => {
+      const arabic = createAppIntl("ar-XB", {});
+      expect(formatWith(arabic, "web.detail.episodeCode", { season, episode })).toBe(expected);
+    },
+  );
 });

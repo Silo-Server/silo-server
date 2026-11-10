@@ -141,7 +141,7 @@ export default memo(function SectionItemCard({
         ) : episodeLabels ? (
           <ViewTransitionLink to={itemHref} className="block hover:underline">
             {episodeLabels.episodeTitle ? (
-              <div className="text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
+              <div className="bidi-text text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
                 {episodeLabels.episodeTitle}
               </div>
             ) : null}

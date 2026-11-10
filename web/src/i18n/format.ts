@@ -125,10 +125,16 @@ function translation(intl: IntlShape, id: string): MessageFormatElement[] | unde
   return Array.isArray(translated) ? translated : undefined;
 }
 
+/** A bare number ("01"), which takes its direction from the letters around it. */
+const DIGITS = /^\p{Nd}+$/u;
+
 /**
  * In a right-to-left interface, wraps each printed string value in Unicode
  * isolates so a left-to-right title keeps its punctuation in place. Selector
  * values and left-to-right output are left alone, so English keeps its bytes.
+ * So are bare numbers ("01" in "S{season}E{episode}"): an isolate would cut a
+ * number off the letters it belongs to and reorder it. A range or a signed
+ * number ("2-3", "8+") keeps its isolate, or Arabic text would reorder it.
  */
 function isolateValues<V extends RichValues>(
   intl: IntlShape,
@@ -140,7 +146,9 @@ function isolateValues<V extends RichValues>(
   const isolated: RichValues = { ...values };
   for (const name of printed) {
     const value = values[name];
-    if (typeof value === "string" && !selectors.has(name)) isolated[name] = FSI + value + PDI;
+    if (typeof value === "string" && !selectors.has(name) && !DIGITS.test(value)) {
+      isolated[name] = FSI + value + PDI;
+    }
   }
   return isolated as V;
 }

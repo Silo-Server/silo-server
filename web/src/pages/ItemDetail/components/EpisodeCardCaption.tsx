@@ -56,7 +56,7 @@ export default function EpisodeCardCaption({
       {overview && (
         // Three lines are reserved, as on the Apple card, so short descriptions
         // keep the row's cards the same height.
-        <p className="text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed">
+        <p className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed">
           {overview}
         </p>
       )}

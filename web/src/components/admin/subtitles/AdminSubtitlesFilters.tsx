@@ -42,8 +42,8 @@ export default function AdminSubtitlesFilters({
   const t = useT();
   return (
     <div className="surface-panel rounded-2xl border-0 px-3 py-3 sm:px-4">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-center xl:justify-between">
+        <div className="min-w-0 flex-1 xl:min-w-48">
           <Input
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
@@ -79,10 +79,10 @@ export default function AdminSubtitlesFilters({
           })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Select value={language} onValueChange={onLanguageChange}>
             <SelectTrigger
-              className="w-[180px]"
+              className="max-w-80 min-w-[180px]"
               aria-label={t("web.admin.common.subtitles.filters.languageLabel")}
             >
               <SelectValue
@@ -103,7 +103,7 @@ export default function AdminSubtitlesFilters({
 
           <Select value={userId} onValueChange={onUserChange}>
             <SelectTrigger
-              className="w-[200px]"
+              className="max-w-80 min-w-[200px]"
               aria-label={t("web.admin.common.subtitles.filters.uploaderLabel")}
             >
               <SelectValue

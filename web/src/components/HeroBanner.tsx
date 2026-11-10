@@ -429,7 +429,7 @@ export default function HeroBanner({
             </p>
             <h1
               key={current.content_id}
-              className="font-display mb-4 max-w-4xl text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl xl:text-7xl"
+              className="bidi-text font-display mb-4 max-w-4xl text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl xl:text-7xl"
               style={{ textShadow: "var(--hero-text-shadow, none)" }}
             >
               {current.title}
