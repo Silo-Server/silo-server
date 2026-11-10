@@ -19,7 +19,7 @@ import (
 // files are finalized when their own scope runs.
 //
 // The scope is walked a page at a time in path order, so memory is bounded by
-// a page and not by the library. A page needs no help from its neighbours:
+// a page and not by the library. A page needs no help from its neighbors:
 // the sibling lookups read by owner across the whole folder, so a multipart
 // group split over pages is read in full, and written, by the first page that
 // holds one of its parts. Later pages find those files already settled.
