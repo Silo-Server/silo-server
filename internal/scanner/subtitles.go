@@ -119,8 +119,12 @@ func (c *externalSubtitleDirCache) cached(dir string) (externalSubtitleDirListin
 	if !ok {
 		return externalSubtitleDirListing{}, false
 	}
+	entry, ok := element.Value.(externalSubtitleDirEntry)
+	if !ok {
+		return externalSubtitleDirListing{}, false
+	}
 	c.recent.MoveToFront(element)
-	return element.Value.(externalSubtitleDirEntry).listing, true
+	return entry.listing, true
 }
 
 func (c *externalSubtitleDirCache) listing(dir string) (externalSubtitleDirListing, error) {
@@ -138,7 +142,9 @@ func (c *externalSubtitleDirCache) listing(dir string) (externalSubtitleDirListi
 			c.dirs[dir] = c.recent.PushFront(externalSubtitleDirEntry{dir: dir, listing: listing})
 			for c.recent.Len() > c.size {
 				oldest := c.recent.Back()
-				delete(c.dirs, oldest.Value.(externalSubtitleDirEntry).dir)
+				if entry, ok := oldest.Value.(externalSubtitleDirEntry); ok {
+					delete(c.dirs, entry.dir)
+				}
 				c.recent.Remove(oldest)
 			}
 		}

@@ -74,6 +74,9 @@ type groupInferenceResult struct {
 const (
 	overrideSourceNone   = "none"
 	overrideSourceManual = "manual"
+
+	groupStateAmbiguous = "ambiguous"
+	groupStateResolved  = "resolved"
 )
 
 // groupBucket collects one content group's files. A full scan holds a bucket
@@ -101,15 +104,15 @@ func (b *groupBucket) add(identity fileGroupAssignment) {
 		contentGroupKey:  identity.ContentGroupKey,
 		groupKeyVersion:  identity.GroupKeyVersion,
 	})
-	b.ambiguous = b.ambiguous || identity.State == "ambiguous"
+	b.ambiguous = b.ambiguous || identity.State == groupStateAmbiguous
 	b.overridden = b.overridden || identity.Overridden
 }
 
 func (b *groupBucket) state() string {
 	if b.ambiguous {
-		return "ambiguous"
+		return groupStateAmbiguous
 	}
-	return "resolved"
+	return groupStateResolved
 }
 
 func (b *groupBucket) overrideSource() string {
@@ -124,10 +127,12 @@ func (b *groupBucket) evidence() []byte {
 	for _, file := range b.files {
 		observedRoots = append(observedRoots, file.observedRootPath)
 	}
-	evidence, _ := json.Marshal(map[string]any{
-		"observed_roots": observedRoots,
-		"file_count":     len(b.files),
-	})
+	// Field order matches the sorted keys of the map this replaced, so the
+	// stored evidence is byte for byte the same.
+	evidence, _ := json.Marshal(struct {
+		FileCount     int      `json:"file_count"`
+		ObservedRoots []string `json:"observed_roots"`
+	}{FileCount: len(b.files), ObservedRoots: observedRoots})
 	return evidence
 }
 
@@ -147,7 +152,7 @@ type locationBucketFile struct {
 // groupCountAndState returns how many groups the location's files fall into
 // and the location's state.
 func (b *locationBucket) groupCountAndState() (int, string) {
-	state := "resolved"
+	state := groupStateResolved
 	seenGroups := map[*groupBucket]struct{}{}
 	nonOverriddenGroups := map[*groupBucket]struct{}{}
 	for _, file := range b.files {
@@ -156,7 +161,7 @@ func (b *locationBucket) groupCountAndState() (int, string) {
 			nonOverriddenGroups[file.group] = struct{}{}
 		}
 		if file.ambiguous {
-			state = "ambiguous"
+			state = groupStateAmbiguous
 		}
 	}
 	// A location split across groups is ambiguous only when the split was not
@@ -164,7 +169,7 @@ func (b *locationBucket) groupCountAndState() (int, string) {
 	// folder into different groups, and flagging that forever would make every
 	// resolved split look broken.
 	if len(seenGroups) > 1 && len(nonOverriddenGroups) > 1 {
-		state = "ambiguous"
+		state = groupStateAmbiguous
 	}
 	return len(seenGroups), state
 }
@@ -219,7 +224,7 @@ func inferGroupAssignments(
 		location.files = append(location.files, locationBucketFile{
 			group:      group,
 			overridden: identity.Overridden,
-			ambiguous:  identity.State == "ambiguous",
+			ambiguous:  identity.State == groupStateAmbiguous,
 		})
 	}
 
@@ -339,7 +344,7 @@ func applyGroupOverrides(result *groupInferenceResult, overridesByKey map[string
 			location.LocationType = forcedType
 		}
 		if location.ContentGroupCount <= 1 {
-			location.State = "resolved"
+			location.State = groupStateResolved
 		}
 		result.Locations[i] = location
 	}
@@ -373,7 +378,7 @@ func applyGroupOverrideToSnapshot(group models.ScannedMediaGroup, override model
 		group.TvdbID = forcedTvdbID
 	}
 	group.TypeConfidence = "high"
-	group.State = "resolved"
+	group.State = groupStateResolved
 	group.OverrideSource = overrideSourceManual
 	return group
 }

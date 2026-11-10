@@ -106,7 +106,25 @@ func (shared sharedStrings) get(s string) string {
 	return s
 }
 
-func scanScanStateRow(row pgx.Row, shared sharedStrings) (*scanStateFile, error) {
+// share points the repeated string fields of state at the shared copies.
+func (shared sharedStrings) share(state *scanStateFile) {
+	state.ContentID = shared.get(state.ContentID)
+	state.CanonicalRootPath = shared.get(state.CanonicalRootPath)
+	state.ObservedRootPath = shared.get(state.ObservedRootPath)
+	state.ContentGroupKey = shared.get(state.ContentGroupKey)
+	state.BaseTitle = shared.get(state.BaseTitle)
+	state.BaseType = shared.get(state.BaseType)
+	state.IdentityConfidence = shared.get(state.IdentityConfidence)
+	state.CodecVideo = shared.get(state.CodecVideo)
+	state.CodecAudio = shared.get(state.CodecAudio)
+	state.Resolution = shared.get(state.Resolution)
+	state.Container = shared.get(state.Container)
+	state.EditionSource = shared.get(state.EditionSource)
+	state.PresentationKind = shared.get(state.PresentationKind)
+	state.ProbeSource = shared.get(state.ProbeSource)
+}
+
+func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	var state scanStateFile
 	var contentID, episodeID *string
 	var extraID *string
@@ -172,7 +190,7 @@ func scanScanStateRow(row pgx.Row, shared sharedStrings) (*scanStateFile, error)
 	}
 
 	if contentID != nil {
-		state.ContentID = shared.get(*contentID)
+		state.ContentID = *contentID
 	}
 	if episodeID != nil {
 		state.EpisodeID = *episodeID
@@ -181,28 +199,28 @@ func scanScanStateRow(row pgx.Row, shared sharedStrings) (*scanStateFile, error)
 		state.ExtraID = *extraID
 	}
 	if canonicalRootPath != nil {
-		state.CanonicalRootPath = shared.get(*canonicalRootPath)
+		state.CanonicalRootPath = *canonicalRootPath
 	}
 	if observedRootPath != nil {
-		state.ObservedRootPath = shared.get(*observedRootPath)
+		state.ObservedRootPath = *observedRootPath
 	}
 	if contentGroupKey != nil {
-		state.ContentGroupKey = shared.get(*contentGroupKey)
+		state.ContentGroupKey = *contentGroupKey
 	}
 	if groupKeyVersion != nil {
 		state.GroupKeyVersion = *groupKeyVersion
 	}
 	if baseTitle != nil {
-		state.BaseTitle = shared.get(*baseTitle)
+		state.BaseTitle = *baseTitle
 	}
 	if baseYear != nil {
 		state.BaseYear = *baseYear
 	}
 	if baseType != nil {
-		state.BaseType = shared.get(*baseType)
+		state.BaseType = *baseType
 	}
 	if identityConfidence != nil {
-		state.IdentityConfidence = shared.get(*identityConfidence)
+		state.IdentityConfidence = *identityConfidence
 	}
 	if len(identityJSON) > 0 {
 		state.IdentityJSON = append([]byte(nil), identityJSON...)
@@ -213,16 +231,16 @@ func scanScanStateRow(row pgx.Row, shared sharedStrings) (*scanStateFile, error)
 		state.FileHash = *fileHash
 	}
 	if codecVideo != nil {
-		state.CodecVideo = shared.get(*codecVideo)
+		state.CodecVideo = *codecVideo
 	}
 	if codecAudio != nil {
-		state.CodecAudio = shared.get(*codecAudio)
+		state.CodecAudio = *codecAudio
 	}
 	if resolution != nil {
-		state.Resolution = shared.get(*resolution)
+		state.Resolution = *resolution
 	}
 	if container != nil {
-		state.Container = shared.get(*container)
+		state.Container = *container
 	}
 	if duration != nil {
 		state.Duration = *duration
@@ -234,10 +252,10 @@ func scanScanStateRow(row pgx.Row, shared sharedStrings) (*scanStateFile, error)
 		state.EditionKey = *editionKey
 	}
 	if editionSource != nil {
-		state.EditionSource = shared.get(*editionSource)
+		state.EditionSource = *editionSource
 	}
 	if presentationKind != nil {
-		state.PresentationKind = shared.get(*presentationKind)
+		state.PresentationKind = *presentationKind
 	}
 	if presentationGroupKey != nil {
 		state.PresentationGroupKey = *presentationGroupKey
@@ -252,7 +270,7 @@ func scanScanStateRow(row pgx.Row, shared sharedStrings) (*scanStateFile, error)
 		state.MultiEpisodeEnd = *multiEpisodeEnd
 	}
 	if probeSource != nil {
-		state.ProbeSource = shared.get(*probeSource)
+		state.ProbeSource = *probeSource
 	}
 	if len(externalSubtitlePathsJSON) > 0 {
 		if err := json.Unmarshal(externalSubtitlePathsJSON, &state.ExternalSubtitlePaths); err != nil {
@@ -269,10 +287,11 @@ func scanScanStateRows(rows pgx.Rows) ([]*scanStateFile, error) {
 	files := make([]*scanStateFile, 0)
 	shared := sharedStrings{}
 	for rows.Next() {
-		file, err := scanScanStateRow(rows, shared)
+		file, err := scanScanStateRow(rows)
 		if err != nil {
 			return nil, err
 		}
+		shared.share(file)
 		files = append(files, file)
 	}
 	if err := rows.Err(); err != nil {
