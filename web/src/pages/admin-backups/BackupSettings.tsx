@@ -181,7 +181,7 @@ function DestinationOption({
         </div>
       </div>
       {children ? (
-        <div className="flex items-center gap-2 pl-[30px] sm:ml-auto sm:shrink-0 sm:pl-0">
+        <div className="flex items-center gap-2 ps-[30px] sm:ms-auto sm:shrink-0 sm:ps-0">
           {children}
         </div>
       ) : null}

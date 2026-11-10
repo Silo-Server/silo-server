@@ -132,7 +132,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
       onPointerUp={endScrub}
       onPointerCancel={endScrub}
       className={cn(
-        "surface-panel fixed right-1 z-30 flex -translate-y-1/2 touch-none flex-col items-stretch rounded-full border py-1.5 select-none sm:right-2",
+        "surface-panel fixed end-1 z-30 flex -translate-y-1/2 touch-none flex-col items-stretch rounded-full border py-1.5 select-none sm:end-2",
         // Centered a little low and short of the viewport, so it clears the
         // page tabs at the top and the scroll-to-top button at the bottom.
         "top-[calc(50%+2rem)] h-[min(42rem,calc(100dvh-14rem))]",
@@ -183,7 +183,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
       {scrubbing ? (
         <span
           aria-hidden="true"
-          className="bg-primary text-primary-foreground pointer-events-none absolute top-1/2 right-full mr-3 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-2xl text-2xl font-semibold shadow-lg"
+          className="bg-primary text-primary-foreground pointer-events-none absolute end-full top-1/2 me-3 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-2xl text-2xl font-semibold shadow-lg"
         >
           {scrubbing}
         </span>

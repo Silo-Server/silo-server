@@ -221,7 +221,7 @@ export function RequestQueue() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
             <Search
-              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2"
+              className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2"
               aria-hidden="true"
             />
             <Input
@@ -230,7 +230,7 @@ export function RequestQueue() {
               placeholder={t("web.admin.requests.queue.searchPlaceholder")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="h-8 pl-9 text-[13px]"
+              className="h-8 ps-9 text-[13px]"
             />
           </div>
           <div
@@ -252,7 +252,7 @@ export function RequestQueue() {
             ))}
           </div>
           {userId !== undefined ? (
-            <Badge variant="outline" className="h-7 gap-1.5 pr-1 text-xs">
+            <Badge variant="outline" className="h-7 gap-1.5 pe-1 text-xs">
               {t("web.admin.requests.queue.requestedByFilter", {
                 name: username(userId) ?? accountFallback(t, userId),
               })}
@@ -270,7 +270,7 @@ export function RequestQueue() {
             type="button"
             variant="ghost"
             size="sm"
-            className="ml-auto"
+            className="ms-auto"
             disabled={refresh.isRefreshing}
             onClick={refresh.refresh}
           >
@@ -503,7 +503,7 @@ function QueueList({
               <span>{t("web.admin.requests.queue.column.state")}</span>
               <span>{t("web.admin.requests.queue.column.servers")}</span>
             </div>
-            <span className="w-60 shrink-0 text-right">
+            <span className="w-60 shrink-0 text-end">
               <span className="sr-only">{t("web.admin.requests.queue.column.actions")}</span>
             </span>
           </div>

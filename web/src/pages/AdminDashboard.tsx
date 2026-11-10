@@ -316,7 +316,7 @@ export default function AdminDashboard() {
           </span>
           <button
             type="button"
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring ml-auto cursor-pointer text-xs underline-offset-2 transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none"
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring ms-auto cursor-pointer text-xs underline-offset-2 transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none"
             onClick={() => layout.resetLayout()}
           >
             {t("web.admin.dashboard.customize.resetLayout")}

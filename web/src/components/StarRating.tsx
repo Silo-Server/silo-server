@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from "react";
 import { Star } from "lucide-react";
 import { readFinePointer } from "@/lib/pointerCapability";
 import { useT } from "@/i18n";
+import { readingArrowKey } from "@/lib/direction";
 
 interface StarRatingProps {
   value: number | null;
@@ -47,10 +48,11 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       let newValue: number | null = null;
-      if (e.key === "ArrowRight" || (verticalArrows && e.key === "ArrowUp")) {
+      const key = readingArrowKey(e);
+      if (key === "ArrowRight" || (verticalArrows && key === "ArrowUp")) {
         e.preventDefault();
         newValue = Math.min((value ?? 0) + 1, STAR_COUNT);
-      } else if (e.key === "ArrowLeft" || (verticalArrows && e.key === "ArrowDown")) {
+      } else if (key === "ArrowLeft" || (verticalArrows && key === "ArrowDown")) {
         e.preventDefault();
         newValue = Math.max((value ?? 2) - 1, 1);
       }

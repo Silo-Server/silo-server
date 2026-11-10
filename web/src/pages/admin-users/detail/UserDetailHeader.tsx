@@ -277,7 +277,7 @@ export function UserDetailHeader({
                 {transferable ? (
                   <DropdownMenuItem disabled={!available} onSelect={onTransfer}>
                     {t("web.admin.users.detail.header.makeOwner")}
-                    <span className="text-muted-foreground ml-auto text-xs">
+                    <span className="text-muted-foreground ms-auto text-xs">
                       {t("web.admin.users.detail.header.makeOwnerHint")}
                     </span>
                   </DropdownMenuItem>
@@ -285,7 +285,7 @@ export function UserDetailHeader({
                 {canDisable ? (
                   <DropdownMenuItem disabled={!available} onSelect={onDisable}>
                     {t("web.admin.users.detail.header.disableAccount")}
-                    <span className="text-muted-foreground ml-auto text-xs">
+                    <span className="text-muted-foreground ms-auto text-xs">
                       {t("web.admin.users.detail.header.disableHint")}
                     </span>
                   </DropdownMenuItem>
@@ -305,7 +305,7 @@ export function UserDetailHeader({
                     >
                       {t("web.admin.users.detail.header.deleteAccount")}
                       {deleteBlocked ? (
-                        <span className="text-muted-foreground ml-auto text-xs">
+                        <span className="text-muted-foreground ms-auto text-xs">
                           {t("web.admin.users.detail.header.deleteBlockedHint")}
                         </span>
                       ) : null}

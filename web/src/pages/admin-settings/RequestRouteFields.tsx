@@ -173,7 +173,7 @@ export function ValuePicker({
           {selected.map((value) => (
             <li
               key={value}
-              className="border-border bg-accent/60 inline-flex items-center gap-1 rounded-md border py-0.5 pr-0.5 pl-2 text-xs"
+              className="border-border bg-accent/60 inline-flex items-center gap-1 rounded-md border py-0.5 ps-2 pe-0.5 text-xs"
             >
               {nameOf(value)}
               <Button
@@ -459,7 +459,7 @@ function MoreSettings({
         className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs font-medium"
       >
         <ChevronRight
-          className={cn("size-3.5 transition-transform", shown && "rotate-90")}
+          className={cn("size-3.5 transition-transform", shown && "rotate-90 rtl:-rotate-90")}
           aria-hidden="true"
         />
         {t("web.admin.settings.requests.destination.moreSettings")}

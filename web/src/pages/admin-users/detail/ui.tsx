@@ -101,7 +101,7 @@ export function StatTile({
       <div className="text-xl font-semibold tabular-nums">
         {value}
         {total !== undefined ? (
-          <span className="text-muted-foreground ml-1 text-sm font-normal">
+          <span className="text-muted-foreground ms-1 text-sm font-normal">
             {t("web.admin.users.detail.common.statTotal", {
               total: typeof total === "number" ? String(total) : total,
             })}
@@ -148,8 +148,8 @@ export function KeyValueRow({
           <div className="text-muted-foreground/80 text-xs leading-relaxed">{description}</div>
         ) : null}
       </div>
-      <div className="ml-auto flex max-w-full min-w-0 items-center justify-end gap-2.5">
-        <div className="flex min-w-0 flex-col items-end text-right">
+      <div className="ms-auto flex max-w-full min-w-0 items-center justify-end gap-2.5">
+        <div className="flex min-w-0 flex-col items-end text-end">
           <div className="text-sm font-medium break-words">{value}</div>
           {below ? <div className="text-muted-foreground text-xs">{below}</div> : null}
         </div>
@@ -234,7 +234,7 @@ export function ListRow({
         {meta ? <div className="text-muted-foreground text-xs">{meta}</div> : null}
       </div>
       {trailing ? (
-        <div className="text-muted-foreground shrink-0 text-right text-xs">{trailing}</div>
+        <div className="text-muted-foreground shrink-0 text-end text-xs">{trailing}</div>
       ) : null}
     </div>
   );

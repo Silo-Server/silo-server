@@ -139,12 +139,12 @@ function LibraryEditorBody({
 
   return (
     <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-      <DialogHeader className="border-border shrink-0 border-b px-5 py-4 pr-12 sm:px-6 sm:pr-12">
+      <DialogHeader className="border-border shrink-0 border-b px-5 py-4 pe-12 sm:px-6 sm:pe-12">
         <div className="flex items-center gap-3">
           <div className="border-border bg-surface text-primary flex size-10 shrink-0 items-center justify-center rounded-xl border">
             <typeMeta.icon className="size-5" />
           </div>
-          <div className="min-w-0 space-y-0.5 text-left">
+          <div className="min-w-0 space-y-0.5 text-start">
             <DialogTitle>
               {library
                 ? t("web.admin.common.libraryEditor.dialog.editTitle")
@@ -165,7 +165,7 @@ function LibraryEditorBody({
         orientation="vertical"
         className="min-h-0 flex-1 gap-0"
       >
-        <div className="border-border shrink-0 overflow-y-auto border-r">
+        <div className="border-border shrink-0 overflow-y-auto border-e">
           <TabsList className="w-13 flex-col items-stretch justify-start gap-1 rounded-none bg-transparent p-2 sm:w-44 sm:p-3">
             {sections.map(({ id, title, icon: Icon }) => (
               <TabsTrigger
@@ -179,11 +179,11 @@ function LibraryEditorBody({
                   <span
                     className={cn(
                       "bg-destructive size-1.5 rounded-full",
-                      "absolute top-1 right-1 sm:static sm:ml-auto",
+                      "absolute end-1 top-1 sm:static sm:ms-auto",
                     )}
                   />
                 ) : id === "folders" && folderCount > 0 ? (
-                  <span className="text-muted-foreground ml-auto hidden font-mono text-[10px] tabular-nums sm:inline">
+                  <span className="text-muted-foreground ms-auto hidden font-mono text-[10px] tabular-nums sm:inline">
                     {folderCount}
                   </span>
                 ) : null}
@@ -229,7 +229,7 @@ function LibraryEditorBody({
 
       <div className="border-border flex shrink-0 items-center justify-end gap-2 border-t px-5 py-4 sm:px-6">
         {errorSections.size > 0 ? (
-          <p className="text-destructive mr-auto text-xs">
+          <p className="text-destructive me-auto text-xs">
             {[form.errors.name, form.errors.paths].filter(Boolean).join(" ")}
           </p>
         ) : null}

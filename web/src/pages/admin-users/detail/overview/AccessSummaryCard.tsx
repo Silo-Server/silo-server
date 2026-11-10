@@ -113,7 +113,7 @@ function formatQuota(t: Translate, quota: ResolvedRequestTerms["quota"]): string
 }
 
 const CUSTOM = (
-  <span className="ml-1.5 inline-block align-middle">
+  <span className="ms-1.5 inline-block align-middle">
     <SourceTag source="custom" />
   </span>
 );

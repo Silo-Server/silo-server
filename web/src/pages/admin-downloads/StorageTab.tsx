@@ -607,8 +607,8 @@ function DiskMeter({
             className={cn(
               "h-full min-w-[2px]",
               SEGMENT_CLASS[s.kind],
-              index === 0 && "rounded-l-[4px]",
-              index === visible.length - 1 && "rounded-r-[4px]",
+              index === 0 && "rounded-s-[4px]",
+              index === visible.length - 1 && "rounded-e-[4px]",
             )}
             style={{ flex: `${Math.max(s.fraction, 0.002)} 1 0%` }}
           />
@@ -616,13 +616,13 @@ function DiskMeter({
       </div>
       <span
         className="bg-warning absolute -top-1 -bottom-1 w-0.5 rounded-full"
-        style={{ left: `${ceiling}%` }}
+        style={{ insetInlineStart: `${ceiling}%` }}
         aria-hidden="true"
       />
       {scratch ? (
         <span
           className="bg-destructive absolute -top-1 -bottom-1 w-0.5 rounded-full"
-          style={{ left: `${SCRATCH_ADMISSION_PERCENT}%` }}
+          style={{ insetInlineStart: `${SCRATCH_ADMISSION_PERCENT}%` }}
           aria-hidden="true"
         />
       ) : null}

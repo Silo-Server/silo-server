@@ -819,7 +819,7 @@ function AutoscanQueue({
             <TableHead>{t("web.admin.autoscan.activity.column.library")}</TableHead>
             <TableHead>{t("web.admin.autoscan.activity.column.scope")}</TableHead>
             <TableHead>{t("web.admin.autoscan.activity.column.progress")}</TableHead>
-            <TableHead className="w-20 text-right">
+            <TableHead className="w-20 text-end">
               {t("web.admin.autoscan.activity.column.action")}
             </TableHead>
           </>
@@ -849,7 +849,7 @@ function AutoscanQueue({
               <TableCell className="text-muted-foreground text-xs [overflow-wrap:anywhere]">
                 {progress || formatActiveScanTrigger(scan.trigger)}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-end">
                 <Button
                   variant="ghost"
                   size="icon"
@@ -1081,7 +1081,7 @@ function PollEventCard({
           </div>
           <PollMetricStrip event={event} />
         </div>
-        <div className="text-muted-foreground text-right text-xs tabular-nums">
+        <div className="text-muted-foreground text-end text-xs tabular-nums">
           <div>{pollEventTimestamp(event)}</div>
           <div>{pollEventDuration(t, event)}</div>
         </div>
@@ -1394,7 +1394,7 @@ export default function ActivityPanel() {
               </Button>
             </div>
             <div className="relative min-w-0">
-              <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+              <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
               <Input
                 value={historyQuery}
                 onChange={(event) => {
@@ -1406,12 +1406,12 @@ export default function ActivityPanel() {
                     ? t("web.admin.autoscan.activity.history.searchScans")
                     : t("web.admin.autoscan.activity.history.searchPolls")
                 }
-                className="pr-9 pl-9"
+                className="ps-9 pe-9"
               />
               {historyQuery ? (
                 <button
                   type="button"
-                  className="text-muted-foreground hover:text-foreground absolute top-1/2 right-2 rounded p-1 transition-colors"
+                  className="text-muted-foreground hover:text-foreground absolute end-2 top-1/2 rounded p-1 transition-colors"
                   onClick={() => setHistoryQuery("")}
                   aria-label={t("web.admin.autoscan.activity.history.clearSearch")}
                 >

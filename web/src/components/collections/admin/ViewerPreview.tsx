@@ -29,7 +29,7 @@ function MiniCollectionCard({
       />
       <span className="line-clamp-2 text-[11px] leading-tight font-medium">
         {pinned ? (
-          <PinGlyph className="text-muted-foreground mr-0.5 size-2.5 align-[-1px]" />
+          <PinGlyph className="text-muted-foreground me-0.5 size-2.5 align-[-1px]" />
         ) : null}
         {collection.title}
       </span>

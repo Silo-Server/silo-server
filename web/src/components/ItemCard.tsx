@@ -239,16 +239,19 @@ export default function ItemCard({
             lazy
           >
             {item.status === "pending" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
                 {t("web.item.card.statusScanning")}
               </span>
             )}
             {item.status === "unmatched" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-red-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-red-300 uppercase">
                 {t("web.item.card.statusUnmatched")}
               </span>
             )}
             {item.status === "ambiguous" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="glass-subtle absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] text-amber-200 uppercase">
                 {t("web.item.card.statusAmbiguous")}
               </span>
@@ -263,8 +266,12 @@ export default function ItemCard({
             )}
             {(mangaStatus || mangaCountLabel) && (
               /* One shared row so the two chips split the card width and
-                 truncate instead of overlapping on narrow cards. */
-              <div className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5">
+                 truncate instead of overlapping on narrow cards. Left to right
+                 in every language, like the rest of the artwork's corners. */
+              <div
+                dir="ltr"
+                className="pointer-events-none absolute inset-x-2.5 top-2.5 flex items-start justify-between gap-1.5"
+              >
                 {mangaStatus ? (
                   <span
                     className={`glass-chip min-w-0 truncate rounded-full border px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase ${mangaStatus.tone}`}
@@ -310,6 +317,7 @@ export default function ItemCard({
               event.preventDefault();
               event.stopPropagation();
             }}
+            // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
             className="absolute top-2.5 left-2.5 z-20 inline-flex size-8 items-center justify-center rounded-full border border-white/20 bg-black/55 text-white shadow-sm backdrop-blur-sm transition-colors hover:bg-black/70"
           >
             <span

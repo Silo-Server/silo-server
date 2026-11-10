@@ -23,7 +23,7 @@ export function SubtitleSyncIndicator({ notice, onDismiss }: SubtitleSyncIndicat
   const t = useT();
   const running = notice.tone === "progress";
   return (
-    <div className="pointer-events-none absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-40 flex justify-end">
+    <div className="pointer-events-none absolute top-[max(1rem,env(safe-area-inset-top))] right-[max(1rem,env(safe-area-inset-right))] z-40 flex justify-end rtl:right-auto rtl:left-[max(1rem,env(safe-area-inset-left))]">
       <div
         role="status"
         aria-live="polite"
@@ -60,7 +60,7 @@ export function SubtitleSyncIndicator({ notice, onDismiss }: SubtitleSyncIndicat
                   style={{ width: `${notice.percent}%` }}
                 />
               </span>
-              <span className="w-9 text-right text-[11px] text-white/60 tabular-nums">
+              <span className="w-9 text-end text-[11px] text-white/60 tabular-nums">
                 {t("web.subtitles.sync.percent", { percent: String(notice.percent) })}
               </span>
             </span>
@@ -71,7 +71,7 @@ export function SubtitleSyncIndicator({ notice, onDismiss }: SubtitleSyncIndicat
             type="button"
             onClick={onDismiss}
             aria-label={t("web.subtitles.syncNotice.dismiss")}
-            className="-mt-1 -mr-2 shrink-0 rounded p-1 text-white/50 hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+            className="-me-2 -mt-1 shrink-0 rounded p-1 text-white/50 hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
           >
             <X className="h-3.5 w-3.5" />
           </button>

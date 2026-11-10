@@ -97,7 +97,7 @@ export default function RedetectMarkersDialog({
                 aria-describedby={`${id}-${kind}-description`}
                 disabled={isPending || reason !== null}
                 onClick={() => onConfirm(kind)}
-                className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-start transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isPending ? (
                   <Loader2 className="text-muted-foreground mt-0.5 size-5 animate-spin" />
@@ -121,7 +121,7 @@ export default function RedetectMarkersDialog({
           {anyOff && (
             <Link
               to="/admin/settings/playback"
-              className="text-muted-foreground hover:text-foreground mr-auto text-sm underline underline-offset-4 transition-colors"
+              className="text-muted-foreground hover:text-foreground me-auto text-sm underline underline-offset-4 transition-colors"
             >
               {t("web.markers.redetect.settingsLink")}
             </Link>

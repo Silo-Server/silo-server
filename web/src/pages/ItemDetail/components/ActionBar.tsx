@@ -72,6 +72,7 @@ import { parseWatchHref } from "@/pages/watchRouteHelpers";
 import VersionDropdown from "./VersionDropdown";
 import AudioTracksPopover from "./AudioTracksPopover";
 import SubtitlesPopover from "./SubtitlesPopover";
+import { isRightToLeft, readingArrowKey } from "@/lib/direction";
 
 // Keep hover feedback on the compositor. Repainting these controls while the detail backdrop is
 // animating can stall the main thread on image-heavy movie and series pages.
@@ -125,7 +126,7 @@ function DetailOverflowMenuItem({
       {...props}
       type="button"
       role="menuitem"
-      className={`focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-hidden select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 ${className ?? ""}`}
+      className={`focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm outline-hidden select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 ${className ?? ""}`}
       onClick={() => {
         closeMenu?.();
         onAction?.();
@@ -406,7 +407,7 @@ export default function ActionBar({
   const progressOverlay =
     playProgress != null && playProgress > 0 && playProgress < 100 ? (
       <span
-        className="border-primary-foreground/40 bg-primary-foreground/20 pointer-events-none absolute inset-y-0 left-0 border-r-2"
+        className="border-primary-foreground/40 bg-primary-foreground/20 pointer-events-none absolute inset-y-0 start-0 border-e-2"
         style={{ width: `${playProgress}%` }}
       />
     ) : null;
@@ -546,16 +547,27 @@ export default function ActionBar({
       );
     // Line the first item up with Manage: the menu's border and padding sit above it.
     const besideTop = clampTop(triggerRect.top - 5);
-    if (mainRect.right + gap + menuRect.width <= window.innerWidth - viewportPadding) {
-      setManagePosition({ left: mainRect.right + gap, top: besideTop });
-    } else if (mainRect.left - gap - menuRect.width >= viewportPadding) {
-      setManagePosition({ left: mainRect.left - gap - menuRect.width, top: besideTop });
+    // Beside the main menu on its end side (right, or left in a right-to-left
+    // layout), else the other side.
+    const rtl = isRightToLeft(main);
+    const right = mainRect.right + gap;
+    const left = mainRect.left - gap - menuRect.width;
+    const sides = [
+      { left: right, fits: right + menuRect.width <= window.innerWidth - viewportPadding },
+      { left, fits: left >= viewportPadding },
+    ];
+    if (rtl) sides.reverse();
+    const beside = sides.find((side) => side.fits);
+    if (beside) {
+      setManagePosition({ left: beside.left, top: besideTop });
     } else {
-      // No room beside it on a narrow screen: cascade over the main menu, under Manage.
+      // No room beside it on a narrow screen: cascade over the main menu, under
+      // Manage, stepped in from its start edge.
+      const cascade = rtl ? mainRect.right - 24 - menuRect.width : mainRect.left + 24;
       setManagePosition({
         left: Math.min(
           window.innerWidth - menuRect.width - viewportPadding,
-          Math.max(viewportPadding, mainRect.left + 24),
+          Math.max(viewportPadding, cascade),
         ),
         top: clampTop(triggerRect.bottom),
       });
@@ -657,12 +669,14 @@ export default function ActionBar({
     };
   }, [closeManageMenu, closeOverflowMenu, manageOpen, overflowOpen, positionOverflowMenu]);
   const handleOverflowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "ArrowRight" && event.target === manageTriggerRef.current) {
+    // The submenu opens toward the end side, so its keys follow the direction.
+    const key = readingArrowKey(event);
+    if (key === "ArrowRight" && event.target === manageTriggerRef.current) {
       event.preventDefault();
       openManageMenu(true);
       return;
     }
-    if (event.key === "ArrowLeft" && event.currentTarget === manageMenuRef.current) {
+    if (key === "ArrowLeft" && event.currentTarget === manageMenuRef.current) {
       event.preventDefault();
       closeManageMenu(true);
       return;
@@ -954,7 +968,7 @@ export default function ActionBar({
           >
             <Wrench className="size-4" />
             {t("web.detail.actions.manage")}
-            <ChevronRight className="ml-auto size-4" />
+            <ChevronRight className="ms-auto size-4" />
           </DetailOverflowMenuItem>,
         ]
       : manageItems,

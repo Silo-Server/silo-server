@@ -186,7 +186,7 @@ export function PlayingNextScreen({
         transition={{ delay: 0.3 }}
         onClick={onClose}
         type="button"
-        className="absolute top-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-colors hover:bg-white/20 sm:top-5 sm:right-5 sm:h-10 sm:w-10"
+        className="absolute end-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 backdrop-blur-sm transition-colors hover:bg-white/20 sm:end-5 sm:top-5 sm:h-10 sm:w-10"
         title={t("web.player.upNext.closeTitle")}
       >
         <X className="h-4 w-4 sm:h-5 sm:w-5" />
@@ -464,7 +464,7 @@ function OnDeckCarousel({
       </div>
 
       <div ref={emblaRef} className="overflow-hidden">
-        <div className="-ml-2 flex sm:-ml-3">
+        <div className="-ms-2 flex sm:-ms-3">
           {items.map((item) => {
             const detail = item.detail;
             if (!detail) return null;
@@ -494,12 +494,12 @@ function OnDeckCarousel({
             return (
               <div
                 key={contentId}
-                className="min-w-0 shrink-0 basis-1/2 pl-2 sm:basis-1/3 sm:pl-3 md:basis-1/4 lg:basis-1/5 xl:basis-1/6 2xl:basis-[14.2857%]"
+                className="min-w-0 shrink-0 basis-1/2 ps-2 sm:basis-1/3 sm:ps-3 md:basis-1/4 lg:basis-1/5 xl:basis-1/6 2xl:basis-[14.2857%]"
               >
                 <button
                   onClick={() => onPlayItem(contentId)}
                   type="button"
-                  className="group w-full text-left"
+                  className="group w-full text-start"
                 >
                   <div className="relative aspect-video overflow-hidden rounded-lg ring-1 ring-white/[0.06]">
                     {thumbnailUrl ? (
@@ -517,6 +517,7 @@ function OnDeckCarousel({
                     {/* Play overlay */}
                     <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors group-hover:bg-black/30">
                       <div className="bg-primary text-primary-foreground flex h-8 w-8 items-center justify-center rounded-full opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+                        {/* eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror */}
                         <Play className="ml-0.5 h-3.5 w-3.5" fill="currentColor" />
                       </div>
                     </div>

@@ -198,20 +198,20 @@ export default function SearchBar({
   if (prominent) {
     return (
       <form onSubmit={handleSubmit} className="relative w-full max-w-xl">
-        <Search className="text-muted-foreground absolute top-4 left-4 h-5 w-5" />
+        <Search className="text-muted-foreground absolute start-4 top-4 h-5 w-5" />
         <Input
           ref={inputRef}
           placeholder={t("web.search.placeholderProminent")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="search-paint-surface h-14 rounded-[1.4rem] border pr-10 pl-12 text-base shadow-none"
+          className="search-paint-surface h-14 rounded-[1.4rem] border ps-12 pe-10 text-base shadow-none"
         />
         {query && (
           <button
             type="button"
             onClick={handleClear}
             aria-label={t("web.search.clear")}
-            className="text-muted-foreground hover:text-foreground absolute top-1/2 right-4 -translate-y-1/2 p-1"
+            className="text-muted-foreground hover:text-foreground absolute end-4 top-1/2 -translate-y-1/2 p-1"
           >
             <X className="h-4 w-4" />
           </button>
@@ -223,7 +223,7 @@ export default function SearchBar({
   return (
     <form onSubmit={handleSubmit} role="search" className="relative">
       <Search
-        className="text-muted-foreground pointer-events-none absolute top-2.5 left-2.5 h-4 w-4"
+        className="text-muted-foreground pointer-events-none absolute start-2.5 top-2.5 h-4 w-4"
         aria-hidden
       />
       <Input
@@ -232,7 +232,7 @@ export default function SearchBar({
         aria-label={placeholder}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        className="pl-9"
+        className="ps-9"
       />
     </form>
   );

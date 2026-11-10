@@ -97,11 +97,11 @@ export function ApiClientsWidget() {
                     type="button"
                     aria-expanded={open}
                     onClick={() => setOpenSession(open ? null : client.session_id)}
-                    className="hover:bg-muted/50 relative flex w-full items-center gap-2 overflow-hidden rounded-sm px-2 py-1.5 text-left text-sm transition-colors"
+                    className="hover:bg-muted/50 relative flex w-full items-center gap-2 overflow-hidden rounded-sm px-2 py-1.5 text-start text-sm transition-colors"
                   >
                     <span
                       aria-hidden="true"
-                      className="absolute inset-y-0 left-0 rounded-r-[4px]"
+                      className="absolute inset-y-0 start-0 rounded-e-[4px]"
                       style={{
                         width: `${ratio * 100}%`,
                         minWidth: client.requests > 0 ? 6 : 0,
@@ -116,7 +116,7 @@ export function ApiClientsWidget() {
                       aria-hidden="true"
                       className={cn(
                         "text-muted-foreground relative h-3 w-3 shrink-0 transition-transform",
-                        open && "rotate-90",
+                        open && "rotate-90 rtl:-rotate-90",
                       )}
                     />
                     <span
@@ -148,7 +148,7 @@ export function ApiClientsWidget() {
                     <span className="relative shrink-0 text-[13px] font-semibold tabular-nums">
                       {client.requests.toLocaleString(formatLocale())}
                     </span>
-                    <span className="text-muted-foreground relative w-10 shrink-0 text-right text-[11px] tabular-nums">
+                    <span className="text-muted-foreground relative w-10 shrink-0 text-end text-[11px] tabular-nums">
                       {sharePercent(client.requests, data?.total_requests ?? 0)}
                     </span>
                   </button>
@@ -173,7 +173,7 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
   const signingOut = useRef(false);
 
   return (
-    <div className="border-border/60 text-muted-foreground mx-2 mt-1 mb-2 space-y-2 border-l pl-3 text-[12px]">
+    <div className="border-border/60 text-muted-foreground mx-2 mt-1 mb-2 space-y-2 border-s ps-3 text-[12px]">
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
         {client.user_agent ? (
           <>

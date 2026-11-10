@@ -929,7 +929,7 @@ function SourceCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "relative rounded-xl border p-4 text-left transition-all duration-200",
+        "relative rounded-xl border p-4 text-start transition-all duration-200",
         selected
           ? isEmby
             ? "border-emerald-500/40 bg-emerald-500/[0.06]"
@@ -960,7 +960,7 @@ function SourceCard({
         </div>
       </div>
       {selected && (
-        <div className="absolute top-3 right-3">
+        <div className="absolute end-3 top-3">
           <div
             className={cn(
               "h-2 w-2 rounded-full",
@@ -1160,7 +1160,7 @@ function RunSummary({ run }: { run: PersonalImportRun | null }) {
                 <div className="font-medium">
                   {sample.title}
                   {sample.year ? (
-                    <span className="text-muted-foreground ml-1.5 font-normal">
+                    <span className="text-muted-foreground ms-1.5 font-normal">
                       {t("web.settings.historyImport.sampleYear", { year: String(sample.year) })}
                     </span>
                   ) : null}
@@ -1228,7 +1228,7 @@ function HistoryRunCard({
       type="button"
       onClick={onClick}
       className={cn(
-        "flex w-full items-center justify-between rounded-[1.2rem] px-4 py-3 text-left transition-all duration-200",
+        "flex w-full items-center justify-between rounded-[1.2rem] px-4 py-3 text-start transition-all duration-200",
         active ? "surface-panel-subtle ring-1 ring-white/[0.08]" : "hover:surface-panel-subtle",
       )}
     >

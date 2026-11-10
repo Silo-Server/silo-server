@@ -268,7 +268,7 @@ function ChannelFormDialog({
             {t("common.cancel")}
           </Button>
           <Button onClick={submit} disabled={pending || !name.trim()}>
-            {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {pending && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
             {editing
               ? t("common.save")
               : t("web.admin.settings.notifications.serverChannels.create")}
@@ -331,7 +331,7 @@ function ChannelCard({
         <span className="text-sm font-medium">{channel.name}</span>
         <Badge variant="secondary">{channel.type}</Badge>
         <span className="text-muted-foreground text-xs">{channel.url_host}</span>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ms-auto flex items-center gap-1.5">
           <span className="text-muted-foreground text-xs">
             {channel.enabled
               ? t("web.admin.settings.notifications.serverChannels.enabled")
@@ -406,14 +406,14 @@ function ChannelCard({
           }
         >
           {test.isPending ? (
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
           ) : (
-            <Send className="mr-1.5 h-3.5 w-3.5" />
+            <Send className="me-1.5 h-3.5 w-3.5" />
           )}
           {t("web.admin.settings.notifications.serverChannels.test")}
         </Button>
         <Button variant="outline" size="sm" onClick={onEdit}>
-          <Pencil className="mr-1.5 h-3.5 w-3.5" />
+          <Pencil className="me-1.5 h-3.5 w-3.5" />
           {t("web.admin.settings.notifications.serverChannels.edit")}
         </Button>
         {channel.type === "generic" && (
@@ -427,7 +427,7 @@ function ChannelCard({
               })
             }
           >
-            <KeyRound className="mr-1.5 h-3.5 w-3.5" />
+            <KeyRound className="me-1.5 h-3.5 w-3.5" />
             {t("web.admin.settings.notifications.serverChannels.rotateSecret")}
           </Button>
         )}
@@ -437,7 +437,7 @@ function ChannelCard({
           className="text-destructive"
           onClick={() => setConfirmDelete(true)}
         >
-          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+          <Trash2 className="me-1.5 h-3.5 w-3.5" />
           {t("web.admin.settings.notifications.serverChannels.delete")}
         </Button>
       </div>
@@ -507,7 +507,7 @@ export default function ServerNotificationChannels() {
                 setFormOpen(true);
               }}
             >
-              <Plus className="mr-1.5 h-4 w-4" />
+              <Plus className="me-1.5 h-4 w-4" />
               {t("web.admin.settings.notifications.serverChannels.add")}
             </Button>
           </div>

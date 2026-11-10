@@ -199,7 +199,7 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
     <div className="space-y-1">
       <button
         type="button"
-        className="flex items-center gap-1.5 text-left"
+        className="flex items-center gap-1.5 text-start"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-controls={panelId}
@@ -212,7 +212,7 @@ function CollapsibleList({ title, items }: { title: string; items: string[] }) {
         <span className="text-sm font-medium">{title}</span>
       </button>
       {open && (
-        <ul id={panelId} className="text-muted-foreground space-y-0.5 pl-5 text-xs">
+        <ul id={panelId} className="text-muted-foreground space-y-0.5 ps-5 text-xs">
           {items.map((item) => (
             <li key={item} className="font-mono break-all">
               {item}

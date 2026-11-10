@@ -19,7 +19,7 @@ export function NextEpisodeOverlay({
 }: NextEpisodeOverlayProps) {
   const t = useT();
   return (
-    <div className="absolute right-6 bottom-24 z-50 flex min-w-[260px] flex-col gap-2 rounded-lg bg-black/80 p-4 text-white">
+    <div className="absolute end-6 bottom-24 z-50 flex min-w-[260px] flex-col gap-2 rounded-lg bg-black/80 p-4 text-white">
       <div className="text-xs tracking-wider text-white/60 uppercase">
         {t("web.player.nextEpisode.countdown", { count: secondsRemaining })}
       </div>

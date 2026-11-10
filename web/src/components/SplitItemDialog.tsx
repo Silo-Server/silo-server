@@ -213,15 +213,15 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
           <DialogTitle>{t("web.item.split.title")}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pe-1">
           <div className="bg-muted/50 shrink-0 rounded-lg px-3 py-2 text-sm">
             <span className="font-medium">{item.title}</span>
             {item.year ? (
-              <span className="text-muted-foreground ml-2">
+              <span className="text-muted-foreground ms-2">
                 {t("web.item.dialog.yearInParens", { year: String(item.year) })}
               </span>
             ) : null}
-            <Badge variant="secondary" className="ml-2 text-[10px]">
+            <Badge variant="secondary" className="ms-2 text-[10px]">
               {item.type}
             </Badge>
           </div>
@@ -255,7 +255,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                           {root}
                         </span>
                       </label>
-                      <div className="mt-1 space-y-1 pl-6">
+                      <div className="mt-1 space-y-1 ps-6">
                         {rootFiles.map((file) => (
                           <label
                             key={file.id}
@@ -350,7 +350,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
             </Button>
 
             {candidates.length > 0 && (
-              <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+              <div className="max-h-56 space-y-1 overflow-y-auto pe-1">
                 {candidates.map((candidate, index) => {
                   const key = Object.entries(candidate.provider_ids)
                     .map(([k, v]) => `${k}-${v}`)
@@ -360,7 +360,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                       key={`${key}-${index}`}
                       type="button"
                       className={cn(
-                        "flex w-full min-w-0 items-center gap-3 rounded-lg border p-2 text-left transition-colors",
+                        "flex w-full min-w-0 items-center gap-3 rounded-lg border p-2 text-start transition-colors",
                         selectedCandidate === candidate
                           ? "border-primary bg-primary/5"
                           : "border-border hover:bg-muted/50",
@@ -444,7 +444,7 @@ export default function SplitItemDialog({ item, open, onOpenChange }: SplitItemD
                   id: (chunks) => <span className="font-mono text-xs">{chunks}</span>,
                 })}
                 {preview.target_created ? (
-                  <Badge variant="secondary" className="ml-2 text-[10px]">
+                  <Badge variant="secondary" className="ms-2 text-[10px]">
                     {t("web.item.split.newItem")}
                   </Badge>
                 ) : null}

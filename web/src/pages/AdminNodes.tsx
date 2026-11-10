@@ -127,7 +127,7 @@ function NodeMetricRow({ metric }: { metric: ResourceMetric }) {
       <LoadMeter fill={metric.fill} warning={metric.warning} />
       <span
         className={cn(
-          "text-right font-mono text-[11px] tabular-nums",
+          "text-end font-mono text-[11px] tabular-nums",
           metric.muted && "text-muted-foreground",
           metric.warning && "text-warning font-medium",
         )}
@@ -183,7 +183,7 @@ function NodeCapacityBlock({ node, showEgress }: { node: StreamNode; showEgress:
         </span>
         <span />
         <span
-          className="text-right font-mono text-[11px] tabular-nums"
+          className="text-end font-mono text-[11px] tabular-nums"
           title={node.last_health_check ? formatDateTime(node.last_health_check) : undefined}
         >
           {formatRelativeTime(node.last_health_check) ?? t("web.admin.nodes.unit.never")}
@@ -292,14 +292,14 @@ function NodeEngineRow({ device }: { device: NodeGPULiveDevice }) {
       <LoadMeter fill={device.busyFill} />
       <span
         className={cn(
-          "text-right font-mono text-[11px] tabular-nums",
+          "text-end font-mono text-[11px] tabular-nums",
           device.busyMuted ? "text-muted-foreground" : "text-foreground",
         )}
         title={device.title}
       >
         {device.busy}
       </span>
-      <span className="text-muted-foreground text-right text-[10px] whitespace-nowrap">
+      <span className="text-muted-foreground text-end text-[10px] whitespace-nowrap">
         {device.sessions}
       </span>
     </>
@@ -469,7 +469,7 @@ function NodeGroupFilter({
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <p className="hero-eyebrow mr-1 text-[0.62rem]">{t("web.admin.nodes.groupFilter.heading")}</p>
+      <p className="hero-eyebrow me-1 text-[0.62rem]">{t("web.admin.nodes.groupFilter.heading")}</p>
       <GroupChip
         label={t("web.admin.nodes.groupFilter.all")}
         count={total}
@@ -551,7 +551,7 @@ function NodeUnit({
   return (
     <div
       className={cn(
-        "surface-panel relative overflow-hidden rounded-2xl border-0 p-4 pl-5 sm:p-5 sm:pl-6",
+        "surface-panel relative overflow-hidden rounded-2xl border-0 p-4 ps-5 sm:p-5 sm:ps-6",
         // A disabled node is out of the rotation, and every number on it is
         // whatever it was when it left. Dimming says that once, for the whole
         // unit, instead of qualifying each reading.
@@ -560,7 +560,7 @@ function NodeUnit({
     >
       <span
         aria-hidden="true"
-        className={cn("absolute inset-y-4 left-0 w-[3px] rounded-full", NODE_STATE_RAIL[state])}
+        className={cn("absolute inset-y-4 start-0 w-[3px] rounded-full", NODE_STATE_RAIL[state])}
       />
 
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
@@ -781,7 +781,7 @@ function NodeSection({
           <Badge variant="secondary">{nodes.length}</Badge>
         </div>
         <Button size="sm" onClick={onAdd}>
-          <Plus className="mr-1 h-4 w-4" /> {addLabel}
+          <Plus className="me-1 h-4 w-4" /> {addLabel}
         </Button>
       </div>
 
@@ -811,7 +811,7 @@ function NodeSection({
             </Button>
           ) : (
             <Button variant="outline" size="sm" onClick={onAdd}>
-              <Plus className="mr-1 h-4 w-4" /> {addLabel}
+              <Plus className="me-1 h-4 w-4" /> {addLabel}
             </Button>
           )}
         </div>

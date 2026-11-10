@@ -73,7 +73,7 @@ export function NowListening({
         <button
           type="button"
           onClick={onCollapse}
-          className="text-muted-foreground hover:bg-muted hover:text-foreground -ml-2 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors"
+          className="text-muted-foreground hover:bg-muted hover:text-foreground -ms-2 inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors"
         >
           <ChevronDown className="h-5 w-5" />
           <span>{t("web.audiobooks.player.backToPlayer")}</span>
@@ -130,7 +130,11 @@ export function NowListening({
                 forward: () => playback.skip(prefs.skipForward),
               }}
             />
-            <div className="text-muted-foreground flex items-center justify-between text-xs tabular-nums">
+            {/* Time and transport read left to right in every language, like the timeline. */}
+            <div
+              dir="ltr"
+              className="text-muted-foreground flex items-center justify-between text-xs tabular-nums"
+            >
               <span>{formatTime(playback.currentTime)}</span>
               <button
                 type="button"
@@ -144,7 +148,7 @@ export function NowListening({
             </div>
           </div>
 
-          <div className="flex items-center justify-center gap-3 sm:gap-4">
+          <div dir="ltr" className="flex items-center justify-center gap-3 sm:gap-4">
             {hasChapters && (
               <CircleButton
                 size="sm"
@@ -190,6 +194,7 @@ export function NowListening({
               {playback.playing ? (
                 <Pause className="h-8 w-8" strokeWidth={0} fill="currentColor" />
               ) : (
+                // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
                 <Play className="ml-[2px] h-8 w-8" strokeWidth={0} fill="currentColor" />
               )}
             </CircleButton>

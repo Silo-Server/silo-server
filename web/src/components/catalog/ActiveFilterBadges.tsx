@@ -18,12 +18,12 @@ export default function ActiveFilterBadges({ badges, onClear }: ActiveFilterBadg
   return (
     <div className="flex flex-wrap items-center gap-2">
       {badges.map((badge) => (
-        <Badge key={badge.key} variant="secondary" className="gap-1 pr-1">
+        <Badge key={badge.key} variant="secondary" className="gap-1 pe-1">
           {badge.label}
           <button
             type="button"
             onClick={() => onClear(badge.clearPatch)}
-            className="hover:bg-muted ml-0.5 rounded-sm p-0.5"
+            className="hover:bg-muted ms-0.5 rounded-sm p-0.5"
           >
             <X className="h-3 w-3" />
             <span className="sr-only">

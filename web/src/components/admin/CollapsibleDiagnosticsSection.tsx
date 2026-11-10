@@ -51,7 +51,7 @@ export function CollapsibleDiagnosticsSection({
     <section className="surface-panel-subtle overflow-hidden rounded-2xl">
       <button
         type="button"
-        className="hover:bg-surface-hover/40 flex w-full items-center gap-3 px-5 py-4 text-left transition-colors"
+        className="hover:bg-surface-hover/40 flex w-full items-center gap-3 px-5 py-4 text-start transition-colors"
         aria-expanded={open}
         onClick={() => onOpenChange(!open)}
       >
@@ -96,7 +96,7 @@ export function CollapsibleDiagnosticsSection({
         <ChevronDown
           className={cn(
             "text-muted-foreground h-4 w-4 shrink-0 transition-transform",
-            !open && "-rotate-90",
+            !open && "-rotate-90 rtl:rotate-90",
           )}
         />
       </button>

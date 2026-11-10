@@ -66,7 +66,7 @@ function AdminLayoutContent() {
 
   // Publish this shell on the document root, as Layout does with
   // `data-app-shell`. Out-of-tree chrome (the audiobook MiniBar, which stays
-  // mounted across admin navigation) sets its left edge from
+  // mounted across admin navigation) sets its start edge from
   // `--app-sidebar-offset`, and app.css resolves that to this shell's fixed
   // 240px sidebar only while the attribute is present; otherwise the bar
   // would start at 0px and paint over the bottom of the admin navigation.
@@ -99,7 +99,7 @@ function AdminLayoutContent() {
       />
       <a
         href="#main-content"
-        className="focus:bg-background focus:text-foreground focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-lg focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:outline-none"
+        className="focus:bg-background focus:text-foreground focus:ring-ring sr-only focus:not-sr-only focus:fixed focus:start-4 focus:top-4 focus:z-50 focus:rounded-lg focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:ring-2 focus:outline-none"
       >
         {t("web.admin.shell.skipToContent")}
       </a>
@@ -151,7 +151,7 @@ function AdminLayoutContent() {
               document.getElementById("main-content")?.focus({ preventScroll: true });
             }
           }}
-          className="w-[320px] max-w-[calc(100vw-3rem)] gap-0 border-r-0 p-0 sm:max-w-[320px]"
+          className="w-[320px] max-w-[calc(100vw-3rem)] gap-0 border-e-0 p-0 sm:max-w-[320px]"
         >
           <SheetHeader className="sr-only">
             <SheetTitle>{t("web.admin.shell.drawer.title")}</SheetTitle>
@@ -160,7 +160,7 @@ function AdminLayoutContent() {
             <button
               type="button"
               aria-label={t("web.admin.shell.drawer.close")}
-              className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/60 absolute top-4 right-4 z-10 flex h-11 w-11 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+              className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring/60 absolute end-4 top-4 z-10 flex h-11 w-11 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
             >
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
@@ -170,7 +170,7 @@ function AdminLayoutContent() {
       </Sheet>
 
       {/* Desktop activity indicator; search lives in the sidebar */}
-      <div className="fixed top-5 right-5 z-40 hidden items-center gap-2 lg:flex">
+      <div className="fixed end-5 top-5 z-40 hidden items-center gap-2 lg:flex">
         <ServerActivity />
       </div>
 
@@ -183,7 +183,7 @@ function AdminLayoutContent() {
       <main
         id="main-content"
         tabIndex={-1}
-        className={`relative z-10 min-h-screen min-w-0 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:ml-[240px] lg:pt-16 lg:pb-8 lg:[--page-gutter:2rem] xl:[--page-gutter:2.5rem] ${
+        className={`relative z-10 min-h-screen min-w-0 px-(--page-gutter) py-4 [--page-gutter:1rem] sm:[--page-gutter:1.5rem] lg:ms-[240px] lg:pt-16 lg:pb-8 lg:[--page-gutter:2rem] xl:[--page-gutter:2.5rem] ${
           hasBackgroundBar ? "pb-32 sm:pb-36" : ""
         }`}
       >

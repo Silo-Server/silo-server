@@ -612,7 +612,7 @@ export default function PlaybackSettings() {
             label={t("web.admin.settings.playback.markers.mode")}
             type="select"
             description={t("web.admin.settings.playback.markers.modeDescription")}
-            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-left [&_[data-slot=select-value]]:whitespace-normal"
+            className="[&_[data-slot=select-trigger]]:h-auto [&_[data-slot=select-trigger]]:min-h-9 [&_[data-slot=select-value]]:line-clamp-none [&_[data-slot=select-value]]:text-start [&_[data-slot=select-value]]:whitespace-normal"
             options={[
               { value: "off", label: t("web.admin.settings.playback.markers.modeOff") },
               { value: "local", label: t("web.admin.settings.playback.markers.modeLocal") },

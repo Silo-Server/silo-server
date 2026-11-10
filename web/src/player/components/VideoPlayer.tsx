@@ -147,6 +147,7 @@ import { useT, type Translate } from "@/i18n";
 import { MediaDataMeter } from "../media-data-meter";
 import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
+import { isRightToLeft } from "@/lib/direction";
 
 function pillKey(
   event: KeyboardEvent,
@@ -5133,10 +5134,12 @@ export function VideoPlayer({
       const startWidth = miniPlayerWidth;
       const target = e.currentTarget as HTMLElement;
       target.setPointerCapture(e.pointerId);
+      // The handle is at the bottom end corner: right, or left right to left.
+      const outward = isRightToLeft(target) ? -1 : 1;
 
       const onMove = (ev: PointerEvent) => {
-        // Handle is at bottom-right; dragging right grows the player.
-        const delta = ev.clientX - startX;
+        // Dragging the handle outward grows the player.
+        const delta = (ev.clientX - startX) * outward;
         setMiniPlayerWidth(Math.max(200, Math.min(640, startWidth + delta)));
       };
       const onUp = () => {
@@ -5189,9 +5192,9 @@ export function VideoPlayer({
       ref={containerRef}
       className={
         displayMode === "postroll"
-          ? `player-container fixed top-6 left-6 z-[60] aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 transition-opacity duration-700 ${hasEnded ? "pointer-events-none opacity-0" : "cursor-pointer"}`
+          ? `player-container fixed start-6 top-6 z-[60] aspect-video overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/10 transition-opacity duration-700 ${hasEnded ? "pointer-events-none opacity-0" : "cursor-pointer"}`
           : isDetached
-            ? "pointer-events-none fixed top-0 left-0 z-[-1] h-px w-px overflow-hidden opacity-0"
+            ? "pointer-events-none fixed start-0 top-0 z-[-1] h-px w-px overflow-hidden opacity-0"
             : controlsVisible
               ? "player-container fixed inset-0 z-50 bg-black"
               : "player-container fixed inset-0 z-50 cursor-none bg-black"
@@ -5202,14 +5205,19 @@ export function VideoPlayer({
       onMouseLeave={isDetached ? undefined : hideControlsOnMouseLeave}
       onMouseMove={isDetached ? undefined : resetControlsTimer}
     >
-      {/* Postroll resize handle (bottom-left corner) */}
+      {/* Postroll resize handle (bottom end corner) */}
       {isPostrollVisible && (
         <div
           onPointerDown={handleResizePointerDown}
-          className="absolute right-0 bottom-0 z-10 flex h-6 w-6 cursor-nwse-resize items-end justify-end p-1 opacity-0 transition-opacity hover:opacity-100"
+          className="absolute end-0 bottom-0 z-10 flex h-6 w-6 cursor-nwse-resize items-end justify-end p-1 opacity-0 transition-opacity hover:opacity-100 rtl:cursor-nesw-resize"
           onClick={(e) => e.stopPropagation()}
         >
-          <svg width="10" height="10" viewBox="0 0 10 10" className="text-white/50">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            className="text-white/50 rtl:-scale-x-100"
+          >
             <path
               d="M10 10L0 0M10 10L4 10M10 10L10 4"
               stroke="currentColor"
@@ -5222,7 +5230,7 @@ export function VideoPlayer({
       {/* Back button + media info */}
       {!isDetached && (
         <div
-          className={`absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] z-50 flex items-center gap-3 transition-opacity duration-300 ${
+          className={`absolute top-[max(1rem,env(safe-area-inset-top))] left-[max(1rem,env(safe-area-inset-left))] z-50 flex items-center gap-3 transition-opacity duration-300 rtl:right-[max(1rem,env(safe-area-inset-right))] rtl:left-auto ${
             controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
           }`}
         >
@@ -5344,7 +5352,7 @@ export function VideoPlayer({
             <button
               type="button"
               onClick={() => void handleExit()}
-              className="mt-4 ml-3 rounded-md border border-white/30 px-4 py-2 text-sm font-medium"
+              className="ms-3 mt-4 rounded-md border border-white/30 px-4 py-2 text-sm font-medium"
             >
               {t("web.player.room.leave")}
             </button>

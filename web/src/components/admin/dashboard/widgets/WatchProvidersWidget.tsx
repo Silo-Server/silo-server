@@ -88,7 +88,7 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
       ) : null}
       <Link
         to="/admin/tasks/sync_watch_providers"
-        className="text-muted-foreground hover:text-primary ml-auto text-[11px] whitespace-nowrap transition-colors"
+        className="text-muted-foreground hover:text-primary ms-auto text-[11px] whitespace-nowrap transition-colors"
       >
         {t("web.admin.dashboard.widgets.watchProviders.manage")}
       </Link>

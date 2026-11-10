@@ -258,7 +258,7 @@ function AdminUsersPage() {
             )}
             <Button variant="outline" size="sm" asChild>
               <Link to="/admin/access-groups">
-                <Settings2 className="mr-1 h-4 w-4" /> {t("web.admin.users.list.accessGroupsLink")}
+                <Settings2 className="me-1 h-4 w-4" /> {t("web.admin.users.list.accessGroupsLink")}
               </Link>
             </Button>
             <Dialog
@@ -270,7 +270,7 @@ function AdminUsersPage() {
             >
               <DialogTrigger asChild>
                 <Button size="sm">
-                  <Plus className="mr-1 h-4 w-4" /> {t("web.admin.users.list.addUser")}
+                  <Plus className="me-1 h-4 w-4" /> {t("web.admin.users.list.addUser")}
                 </Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-2xl">
@@ -307,7 +307,7 @@ function AdminUsersPage() {
         <TabsContent value="users" className="pt-4">
           <div className="mb-4 flex flex-col gap-2 sm:flex-row">
             <div className="relative flex-1">
-              <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+              <Search className="text-muted-foreground absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
               <Input
                 placeholder={t("web.admin.users.list.searchPlaceholder")}
                 value={search}
@@ -315,7 +315,7 @@ function AdminUsersPage() {
                   setSearch(e.target.value);
                   setPage(0);
                 }}
-                className="pr-9 pl-9"
+                className="ps-9 pe-9"
               />
               {search && (
                 <button
@@ -325,7 +325,7 @@ function AdminUsersPage() {
                     setSearch("");
                     setPage(0);
                   }}
-                  className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
+                  className="text-muted-foreground hover:text-foreground absolute end-3 top-1/2 -translate-y-1/2"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -903,7 +903,7 @@ function CreateUserForm({
           </TabsTrigger>
         </TabsList>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 overflow-y-auto pe-1">
           <TabsContent value="account" className="mt-0 space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">

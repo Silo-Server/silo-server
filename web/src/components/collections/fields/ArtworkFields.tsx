@@ -148,7 +148,7 @@ function ArtworkTile({
               type="button"
               size="icon-sm"
               aria-label={t("web.collections.fields.changeArtwork", slotValues)}
-              className="absolute right-1.5 bottom-1.5 size-7 rounded-lg bg-black/70 text-white ring-1 ring-white/10 backdrop-blur hover:bg-black/85 [&_svg]:size-3.5"
+              className="absolute end-1.5 bottom-1.5 size-7 rounded-lg bg-black/70 text-white ring-1 ring-white/10 backdrop-blur hover:bg-black/85 [&_svg]:size-3.5"
             >
               <Pencil aria-hidden />
             </Button>
@@ -183,7 +183,7 @@ function ArtworkTile({
                 ? t("web.collections.fields.useTheCollage")
                 : t("web.collections.fields.removeArtwork", slotValues)}
               {usesCollage && (state === "collage" || state === "awaiting-collage") ? (
-                <Check aria-hidden className="ml-auto" />
+                <Check aria-hidden className="ms-auto" />
               ) : null}
             </DropdownMenuItem>
           </DropdownMenuContent>

@@ -100,7 +100,7 @@ function NotifiedSeriesRow({
     ? t("web.notifications.series.unmute")
     : t("web.notifications.series.mute");
   return (
-    <li className="hover:bg-muted/60 flex items-center gap-1 rounded-xl pr-2 transition-colors">
+    <li className="hover:bg-muted/60 flex items-center gap-1 rounded-xl pe-2 transition-colors">
       <ViewTransitionLink
         to={buildItemHref({ contentId: item.content_id })}
         className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-3"
@@ -243,14 +243,14 @@ function SeriesToolbar({ series }: { series: ReturnType<typeof useSeriesOptions>
   return (
     <div className="mb-3 flex flex-col gap-2 px-3 sm:flex-row sm:items-center">
       <div className="relative min-w-0 flex-1">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-4 w-4 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2" />
         <Input
           type="search"
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder={t("web.notifications.series.search")}
           aria-label={t("web.notifications.series.search")}
-          className="h-9 pl-8"
+          className="h-9 ps-8"
         />
       </div>
       <div className="flex gap-2">

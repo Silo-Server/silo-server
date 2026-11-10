@@ -294,7 +294,7 @@ export default function AdminPlaybackHistory() {
                       <TableHead>{t("web.admin.history.column.watchTime")}</TableHead>
                       <TableHead>{t("web.admin.history.column.status")}</TableHead>
                       <TableHead>{t("web.admin.history.column.ended")}</TableHead>
-                      <TableHead className="text-right">
+                      <TableHead className="text-end">
                         {t("web.admin.history.column.logs")}
                       </TableHead>
                     </TableRow>
@@ -398,7 +398,7 @@ export default function AdminPlaybackHistory() {
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="text-right">
+                          <TableCell className="text-end">
                             <div className="flex justify-end gap-3">
                               <Link
                                 to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback`}

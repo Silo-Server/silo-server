@@ -108,7 +108,7 @@ function typeLabelKey(type: BrowseItem["type"]): MessageKey | null {
 
 // Shared by the option row and the play-overlay layer stacked on top of it, so
 // the overlay always lands on the poster even if the row's spacing changes.
-const ROW_LAYOUT_CLASSES = "flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left";
+const ROW_LAYOUT_CLASSES = "flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-start";
 const ROW_POSTER_CLASSES = "relative h-14 w-10 shrink-0";
 
 function GlobalSearchResultRow({
@@ -649,7 +649,7 @@ export function GlobalSearch({
         </VisuallyHidden.Root>
         <form onSubmit={handleSubmit}>
           <div className={cn("flex items-center px-5 sm:px-6", showResultsPanel && "border-b")}>
-            <Search className="text-muted-foreground mr-2 h-4 w-4 shrink-0" />
+            <Search className="text-muted-foreground me-2 h-4 w-4 shrink-0" />
             <input
               ref={searchInputRef}
               value={query}
@@ -695,9 +695,9 @@ export function GlobalSearch({
                 selected, Enter searches, so the ↵ chip sits here. */}
             {!showResultsPanel ? (
               // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a key cap, not text
-              <Kbd className="ml-2 hidden sm:inline-flex">ESC</Kbd>
+              <Kbd className="ms-2 hidden sm:inline-flex">ESC</Kbd>
             ) : optionCount > 0 && selectedIndex < 0 ? (
-              <span className="text-muted-foreground ml-2 hidden shrink-0 items-center gap-1.5 text-xs sm:inline-flex">
+              <span className="text-muted-foreground ms-2 hidden shrink-0 items-center gap-1.5 text-xs sm:inline-flex">
                 <EnterKeyHint />
                 {t("web.search.seeAll")}
               </span>

@@ -207,7 +207,7 @@ export default function AdminDiagnostics() {
                 disabled={!status.data || status.isError || updateUploadsEnabled.isPending}
               />
             </div>
-            <div className="text-right">
+            <div className="text-end">
               <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
                 {t("web.admin.diagnostics.page.retention")}
               </div>
@@ -331,7 +331,7 @@ export default function AdminDiagnostics() {
             onChange={(event) => setFilter("shortID", event.target.value)}
           />
         </FilterField>
-        <div className="ml-auto flex gap-2">
+        <div className="ms-auto flex gap-2">
           <Button type="submit">{t("web.admin.diagnostics.filters.apply")}</Button>
           <Button
             type="button"
@@ -357,7 +357,7 @@ export default function AdminDiagnostics() {
               <TableHead>{t("web.admin.diagnostics.columns.type")}</TableHead>
               <TableHead>{t("web.admin.diagnostics.columns.summary")}</TableHead>
               <TableHead>{t("web.admin.diagnostics.columns.state")}</TableHead>
-              <TableHead className="text-right">
+              <TableHead className="text-end">
                 {t("web.admin.diagnostics.columns.bundle")}
               </TableHead>
             </TableRow>
@@ -548,7 +548,7 @@ function DiagnosticReportRow({
       <TableCell>
         <StateBadge state={report.state} />
       </TableCell>
-      <TableCell className="text-right font-mono text-xs tabular-nums">
+      <TableCell className="text-end font-mono text-xs tabular-nums">
         {formatBytes(report.blob_bytes)}
       </TableCell>
     </TableRow>

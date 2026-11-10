@@ -244,7 +244,7 @@ function AccessGroupsPage() {
           type="button"
           variant="ghost"
           size="sm"
-          className="text-muted-foreground -ml-2 w-fit"
+          className="text-muted-foreground -ms-2 w-fit"
           onClick={() => navigate("/admin/access-groups")}
         >
           <ArrowLeft className="size-4" />
@@ -377,7 +377,7 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
     <button
       type="button"
       onClick={onClick}
-      className="surface-panel hover:border-ring/40 focus-visible:ring-ring/60 flex flex-col gap-3 rounded-2xl border border-transparent p-5 text-left transition-colors outline-none focus-visible:ring-2"
+      className="surface-panel hover:border-ring/40 focus-visible:ring-ring/60 flex flex-col gap-3 rounded-2xl border border-transparent p-5 text-start transition-colors outline-none focus-visible:ring-2"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">

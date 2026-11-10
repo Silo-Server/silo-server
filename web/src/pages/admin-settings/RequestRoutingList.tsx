@@ -107,7 +107,7 @@ function RowWarnings({
                 type="button"
                 size="xs"
                 variant="outline"
-                className="ml-auto h-6 border-amber-500/40 text-amber-600 dark:text-amber-300"
+                className="ms-auto h-6 border-amber-500/40 text-amber-600 dark:text-amber-300"
                 disabled={busy}
                 onClick={() => onFix(warning.fix!)}
               >
@@ -191,7 +191,7 @@ function RuleRow({
           <GripVertical className="size-4" aria-hidden="true" />
         </button>
         <span
-          className="text-muted-foreground mt-1 w-5 shrink-0 text-right text-xs tabular-nums"
+          className="text-muted-foreground mt-1 w-5 shrink-0 text-end text-xs tabular-nums"
           aria-hidden="true"
         >
           {index + 1}
@@ -200,7 +200,7 @@ function RuleRow({
           <button
             type="button"
             onClick={onEdit}
-            className="focus-visible:ring-ring group block w-full rounded-sm text-left focus-visible:ring-2 focus-visible:outline-none"
+            className="focus-visible:ring-ring group block w-full rounded-sm text-start focus-visible:ring-2 focus-visible:outline-none"
           >
             <span
               className={cn(
@@ -273,9 +273,9 @@ function RuleRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {/* Under the rule's text, but across to the row's right edge, so a fix
+      {/* Under the rule's text, but across to the row's end edge, so a fix
           button lines up with the switches above it. */}
-      <div className="pl-15">
+      <div className="ps-15">
         <RowWarnings warnings={warnings} onFix={onFix} busy={busy} />
       </div>
     </li>
@@ -315,7 +315,7 @@ function FallbackRow({
           <button
             type="button"
             onClick={onEdit}
-            className="focus-visible:ring-ring group block w-full rounded-sm text-left focus-visible:ring-2 focus-visible:outline-none"
+            className="focus-visible:ring-ring group block w-full rounded-sm text-start focus-visible:ring-2 focus-visible:outline-none"
           >
             <span className="block text-sm font-medium group-hover:underline">
               {t("web.admin.settings.requests.shared.everythingElse")}

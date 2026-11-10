@@ -73,6 +73,7 @@ export default memo(function SectionItemCard({
             priority={priority}
           >
             {item.status === "ambiguous" && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <span className="absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide text-amber-200 uppercase backdrop-blur-sm">
                 {t("web.home.sectionRow.ambiguous")}
               </span>
@@ -84,6 +85,7 @@ export default memo(function SectionItemCard({
               <CardWatchStatus userState={item.user_state} />
             )}
             {upcomingEvent && upcomingEvent.badges.length > 0 && (
+              // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
               <div className="absolute top-2.5 left-2.5 flex max-w-[calc(100%-2.5rem)] flex-wrap gap-1">
                 {upcomingEvent.badges.map((badge) => (
                   <span

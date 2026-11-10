@@ -48,7 +48,7 @@ export function SettingsAttention({
                 to={adminSettingsHref(item.action.page)}
                 className={cn(
                   "hover:bg-warning/10 focus-visible:ring-ring/60 border-warning/20 flex h-full items-start gap-3 rounded-xl border px-3 py-2.5 transition-colors focus-visible:ring-[3px] focus-visible:outline-none",
-                  dismissible && "pr-10",
+                  dismissible && "pe-10",
                 )}
               >
                 <span className="min-w-0 flex-1 text-sm leading-snug">
@@ -72,7 +72,7 @@ export function SettingsAttention({
                   disabled={dismissDisabled}
                   aria-label={t("web.admin.settings.attention.hideLabel", { label: item.label })}
                   title={t("web.admin.settings.attention.hide")}
-                  className="text-muted-foreground hover:text-foreground hover:bg-warning/15 focus-visible:ring-ring/60 absolute top-2 right-2 inline-flex size-6 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                  className="text-muted-foreground hover:text-foreground hover:bg-warning/15 focus-visible:ring-ring/60 absolute end-2 top-2 inline-flex size-6 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>

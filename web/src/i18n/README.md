@@ -87,6 +87,33 @@ function Dialog({ row }: { row: HomeRow }) {
   (accented, longer) or `ar-XB` (right to left) applies; a sandbox can also set the
   profile's `ui.app_language` to one through the settings API.
 
+## Right to left
+
+`<html dir>` follows the applied language, and `LocaleProvider` passes it to Radix
+(`Direction.Provider`). Code that needs it calls Radix's `Direction.useDirection()`
+(Embla carousels, the calendar, the toaster, scroll strips) or reads the element's
+computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.ts`).
+
+- Layout uses logical utilities: `ps-`/`pe-`, `ms-`/`me-`, `start-`/`end-`,
+  `text-start`/`text-end`, `rounded-s`/`rounded-e`, `border-s`/`border-e`, and logical
+  CSS properties. ESLint (`eslint-rules/no-physical-direction.js`) flags physical ones
+  and `--fix` converts them. `cn()` merges them the way it merges physical ones.
+- Direction is physical on purpose for the media timeline and transport, chart plots,
+  and anything placed on poster artwork (overlay badges, card corners), and for
+  `env(safe-area-inset-*)` edges. Those files are in `PHYSICAL_DIRECTION` in
+  `web/eslint.config.js`; a single line takes an `eslint-disable-next-line` with its
+  reason; a `dir="ltr"` box keeps flex order and text there left to right. `pre` is
+  always left to right; inline `code`, `kbd` and `samp` take their text's direction.
+- Lucide icons that point along the reading direction (chevrons, arrows, undo,
+  sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
+  and brand icons don't. Add `no-mirror` to keep one physical. A caret that also
+  rotates needs an `rtl:` rotation, because `scale` applies before `rotate`.
+- Gradients, `translate-x` and arrow keys have no logical form: add the `rtl:`
+  counterpart (`rtl:bg-gradient-to-l`, `rtl:-translate-x-…`), multiply by
+  `var(--dir-sign)` in CSS, or read keys through `readingArrowKey`. `rtl:` is
+  redefined in `app.css` so that, like the icon rule, it stops at a `dir="ltr"` box.
+- Check a change under `ar-XB` (above).
+
 ## Tests
 
 Tests render with the real English catalog (`test-setup.ts`), so they keep asserting

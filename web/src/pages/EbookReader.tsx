@@ -76,6 +76,7 @@ import {
   saveEbookReaderConfigKeepalive,
   type EbookReaderAnnotation,
 } from "@/reader/ebookReaderApi";
+import { readingArrowKey } from "@/lib/direction";
 
 export const EBOOK_READER_SETTINGS_STORAGE_KEY = "silo.ebook.reader.settings";
 
@@ -520,9 +521,11 @@ export default function EbookReader() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isEditableTarget(event.target)) return;
-      if (event.key === "ArrowLeft") {
+      // The page buttons mirror right to left, so the keys follow them.
+      const key = readingArrowKey({ key: event.key, currentTarget: document.documentElement });
+      if (key === "ArrowLeft") {
         readerRef.current?.prev();
-      } else if (event.key === "ArrowRight") {
+      } else if (key === "ArrowRight") {
         readerRef.current?.next();
       }
     };
@@ -840,7 +843,7 @@ export default function EbookReader() {
             onChange={(event) => handleProgressScrub(event.target.value)}
             className="accent-primary h-2 min-w-0 flex-1"
           />
-          <div className="text-muted-foreground w-11 text-right text-xs tabular-nums">
+          <div className="text-muted-foreground w-11 text-end text-xs tabular-nums">
             {progressLabel ?? formatReaderProgress(0)}
           </div>
         </div>
@@ -888,7 +891,7 @@ export default function EbookReader() {
                     percent: String(Math.round(effectiveRulerTop)),
                   })}
                   title={t("web.reader.ruler.dragHint")}
-                  className="focus-visible:ring-ring/50 pointer-events-auto absolute top-1/2 right-2 flex h-11 w-6 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-center rounded-md border border-yellow-500/60 bg-yellow-400/90 text-yellow-950 shadow-sm transition-colors select-none hover:bg-yellow-300 focus-visible:ring-[3px] focus-visible:outline-none"
+                  className="focus-visible:ring-ring/50 pointer-events-auto absolute end-2 top-1/2 flex h-11 w-6 -translate-y-1/2 cursor-ns-resize touch-none items-center justify-center rounded-md border border-yellow-500/60 bg-yellow-400/90 text-yellow-950 shadow-sm transition-colors select-none hover:bg-yellow-300 focus-visible:ring-[3px] focus-visible:outline-none"
                   onPointerDown={handleRulerPointerDown}
                   onPointerMove={handleRulerPointerMove}
                   onPointerUp={handleRulerPointerUp}
@@ -922,7 +925,7 @@ export default function EbookReader() {
           </p>
         )}
         {panelOpen && isReaderSupportedFile(selectedFile) && (
-          <aside className="border-border bg-background min-h-0 min-w-0 overflow-hidden border-t lg:border-t-0 lg:border-l">
+          <aside className="border-border bg-background min-h-0 min-w-0 overflow-hidden border-t lg:border-s lg:border-t-0">
             <div className="border-border/70 grid grid-cols-4 gap-1 border-b px-2 py-1.5">
               {[
                 {
@@ -987,8 +990,8 @@ export default function EbookReader() {
                         variant="ghost"
                         size="sm"
                         onClick={() => readerRef.current?.goTo(entry.href)}
-                        className="h-auto w-full justify-start py-2 text-left text-sm whitespace-normal"
-                        style={{ paddingLeft: `${0.5 + entry.depth * 1}rem` }}
+                        className="h-auto w-full justify-start py-2 text-start text-sm whitespace-normal"
+                        style={{ paddingInlineStart: `${0.5 + entry.depth * 1}rem` }}
                       >
                         {entry.label}
                       </Button>
@@ -1032,7 +1035,7 @@ export default function EbookReader() {
                         variant="ghost"
                         size="sm"
                         onClick={() => readerRef.current?.goTo(result.cfi)}
-                        className="h-auto w-full justify-start py-2 text-left whitespace-normal"
+                        className="h-auto w-full justify-start py-2 text-start whitespace-normal"
                       >
                         <span className="min-w-0">
                           {result.label && (
@@ -1065,7 +1068,7 @@ export default function EbookReader() {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleAnnotationNavigate(annotation)}
-                            className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-left whitespace-normal"
+                            className="h-auto min-w-0 flex-1 justify-start px-1 py-1 text-start whitespace-normal"
                           >
                             <span className="min-w-0">
                               <span className="text-muted-foreground block text-xs capitalize">
@@ -1121,7 +1124,7 @@ export default function EbookReader() {
                                 size="sm"
                                 aria-pressed={active}
                                 onClick={() => updateReaderSettings(profile.settings)}
-                                className="h-auto min-h-11 w-full justify-between px-3 py-2 text-left"
+                                className="h-auto min-h-11 w-full justify-between px-3 py-2 text-start"
                               >
                                 <span className="min-w-0">
                                   <span className="block text-sm font-medium">

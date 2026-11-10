@@ -124,7 +124,7 @@ export default function AdminSubtitlesTable({
               </TableHead>
               <TableHead>{t("web.admin.common.subtitles.table.column.uploader")}</TableHead>
               <TableHead>{t("web.admin.common.subtitles.table.column.added")}</TableHead>
-              <TableHead className="w-[120px] text-right">
+              <TableHead className="w-[120px] text-end">
                 {t("web.admin.common.subtitles.table.column.actions")}
               </TableHead>
             </TableRow>
@@ -207,7 +207,7 @@ export default function AdminSubtitlesTable({
                 <TableCell className="text-muted-foreground text-sm" title={subtitle.created_at}>
                   {formatRelative(subtitle.created_at)}
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-end">
                   <div className="flex items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100">
                     <Button
                       type="button"

@@ -74,6 +74,7 @@ export default function CardPlayOverlay({
       className={cn(MEDIA_CARD_CENTER_ACTION_CLASS, size === "compact" ? "h-6 w-6" : "h-9 w-9")}
     >
       <Play
+        // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
         className={cn("ml-px", size === "compact" ? "h-2.5 w-2.5" : "h-[15px] w-[15px]")}
         fill="currentColor"
       />

@@ -389,10 +389,10 @@ export function HolidayFields({ config, onChange }: FieldProps) {
                   <Label htmlFor={checkboxId} className="font-normal">
                     {theme.name}
                   </Label>
-                  <span className="text-muted-foreground ml-auto text-xs">{when}</span>
+                  <span className="text-muted-foreground ms-auto text-xs">{when}</span>
                 </div>
                 {on ? (
-                  <div className="grid gap-2 pl-7">
+                  <div className="grid gap-2 ps-7">
                     {theme.vibes.length > 1 ? (
                       <VibeSelect
                         theme={theme}

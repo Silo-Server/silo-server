@@ -80,7 +80,7 @@ export function CollectionPicker({
           <div className="relative min-w-40 flex-1">
             <Search
               aria-hidden
-              className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+              className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
             />
             <Input
               type="search"
@@ -89,7 +89,7 @@ export function CollectionPicker({
                 count: options.length,
                 count_text: String(options.length),
               })}
-              className="h-9 border-0 bg-transparent pl-9 shadow-none focus-visible:ring-0"
+              className="h-9 border-0 bg-transparent ps-9 shadow-none focus-visible:ring-0"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -169,7 +169,7 @@ function CollectionRadio({
       value={option.id}
       aria-label={option.title}
       aria-describedby={metaId}
-      className="group/radio hover:bg-accent/60 focus-visible:ring-ring/50 data-[state=checked]:bg-accent grid grid-cols-[18px_36px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2 text-left outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-60"
+      className="group/radio hover:bg-accent/60 focus-visible:ring-ring/50 data-[state=checked]:bg-accent grid grid-cols-[18px_36px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2 text-start outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-60"
     >
       <RadioDot />
       <PosterArt

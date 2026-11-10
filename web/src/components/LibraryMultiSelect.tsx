@@ -126,7 +126,7 @@ export default function LibraryMultiSelect({
             ) : null}
             {formatLibraryFilterSummary(t, value, libraries, emptyLabel)}
           </span>
-          <ChevronDown className="ml-2 h-4 w-4 shrink-0" />
+          <ChevronDown className="ms-2 h-4 w-4 shrink-0" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-[260px]" align="start">

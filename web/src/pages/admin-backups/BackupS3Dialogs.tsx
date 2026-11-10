@@ -281,7 +281,7 @@ function S3SetupForm({
       </div>
       <DialogFooter className="items-center">
         {blocker ? (
-          <p id={blockerId} className="text-muted-foreground mr-auto text-xs">
+          <p id={blockerId} className="text-muted-foreground me-auto text-xs">
             {blocker}
           </p>
         ) : null}

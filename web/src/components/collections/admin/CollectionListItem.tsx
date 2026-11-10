@@ -51,7 +51,7 @@ function SyncStatus({ collection, syncing }: { collection: LibraryCollection; sy
     return (
       <>
         <MetaDot />
-        <Loader2 aria-hidden className="mr-1 inline size-3 animate-spin align-[-1px]" />
+        <Loader2 aria-hidden className="me-1 inline size-3 animate-spin align-[-1px]" />
         {t("web.collections.list.syncingNow")}
       </>
     );
@@ -211,10 +211,10 @@ function CompactItem({
       style={style}
       data-collection-id={collection.id}
       className={cn(
-        "bg-card/60 border-border/80 hover:bg-accent/50 relative grid min-h-[54px] items-center gap-2.5 rounded-[14px] border py-1.5 pr-1.5",
+        "bg-card/60 border-border/80 hover:bg-accent/50 relative grid min-h-[54px] items-center gap-2.5 rounded-[14px] border py-1.5 pe-1.5",
         handleProps
-          ? "grid-cols-[28px_30px_minmax(0,1fr)_auto_auto] pl-1"
-          : "grid-cols-[30px_minmax(0,1fr)_auto_auto] pl-3",
+          ? "grid-cols-[28px_30px_minmax(0,1fr)_auto_auto] ps-1"
+          : "grid-cols-[30px_minmax(0,1fr)_auto_auto] ps-3",
         dragging && "bg-surface-raised z-10 shadow-lg",
       )}
     >
@@ -269,7 +269,7 @@ export function CollectionColumnHeader({ count }: { count: number }) {
       <span role="status">
         {t("web.collections.shelves.count", { count, count_text: String(count) })}
       </span>
-      <span aria-hidden className="pr-14 max-lg:pr-16">
+      <span aria-hidden className="pe-14 max-lg:pe-16">
         {t("web.collections.admin.onCollectionsTab")}
       </span>
     </div>

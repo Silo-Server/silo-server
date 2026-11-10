@@ -142,7 +142,7 @@ export function BrowseShelf({
       <button
         type="button"
         onClick={() => onOpenChange(true)}
-        className="surface-panel-subtle hover:border-ring/40 flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-3 text-left transition-colors"
+        className="surface-panel-subtle hover:border-ring/40 flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-3 text-start transition-colors"
         data-testid="browse-shelf-collapsed"
       >
         <Search className="text-muted-foreground size-4 shrink-0" />
@@ -172,13 +172,13 @@ export function BrowseShelf({
     >
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-56 flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2" />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder={t("web.watchTogether.browse.searchPlaceholder")}
             aria-label={t("web.watchTogether.browse.searchLabel")}
-            className="border-border bg-surface placeholder:text-muted-foreground h-10 w-full rounded-lg border py-2 pr-3 pl-9 text-sm outline-none focus:border-white/30"
+            className="border-border bg-surface placeholder:text-muted-foreground h-10 w-full rounded-lg border py-2 ps-9 pe-3 text-sm outline-none focus:border-white/30"
           />
         </div>
         <div

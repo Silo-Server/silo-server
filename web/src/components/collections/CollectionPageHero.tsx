@@ -60,7 +60,7 @@ export function CollectionPageHero({
         // hero does; the strong bottom fade melts it into the page under the filters.
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-8 right-[calc(var(--page-gutter,0px)*-1)] -bottom-24 left-[calc(var(--page-gutter,0px)*-1)] -z-10 overflow-hidden sm:-top-10 lg:-top-14"
+          className="pointer-events-none absolute start-[calc(var(--page-gutter,0px)*-1)] end-[calc(var(--page-gutter,0px)*-1)] -top-8 -bottom-24 -z-10 overflow-hidden sm:-top-10 lg:-top-14"
         >
           <HeroBackdropArtwork
             backdropUrl={backdrop.backdropUrl}

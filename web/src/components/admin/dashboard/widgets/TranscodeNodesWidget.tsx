@@ -319,18 +319,18 @@ function FleetSummary({ nodes }: { nodes: StreamNode[] }) {
 const HIGH_LOAD_PERCENT = 90;
 
 const COLUMN_HEADING =
-  "bg-card text-muted-foreground border-border sticky top-0 z-10 border-b pb-1 pl-2.5 text-right text-[11px] font-medium whitespace-nowrap";
-const CELL = "h-6 py-0.5 pl-2.5 text-right whitespace-nowrap";
+  "bg-card text-muted-foreground border-border sticky top-0 z-10 border-b pb-1 ps-2.5 text-end text-[11px] font-medium whitespace-nowrap";
+const CELL = "h-6 py-0.5 ps-2.5 text-end whitespace-nowrap";
 
 /** Narrow columns go first: the name and the two work numbers always stay. */
 const ACTIVE_COLUMN = "w-[72px]";
 const EGRESS_COLUMN = "w-[60px] @min-[620px]/nodes:w-[88px]";
 const CPU_COLUMN =
-  "w-[62px] text-left @max-[359px]/nodes:hidden @min-[620px]/nodes:w-[92px] @min-[1200px]/nodes:w-[150px]";
+  "w-[62px] text-start @max-[359px]/nodes:hidden @min-[620px]/nodes:w-[92px] @min-[1200px]/nodes:w-[150px]";
 const RAM_COLUMN =
-  "w-[62px] text-left @max-[439px]/nodes:hidden @min-[620px]/nodes:w-[92px] @min-[1200px]/nodes:w-[150px]";
+  "w-[62px] text-start @max-[439px]/nodes:hidden @min-[620px]/nodes:w-[92px] @min-[1200px]/nodes:w-[150px]";
 const GPU_COLUMN =
-  "hidden w-[92px] text-left @min-[620px]/nodes:table-cell @min-[1200px]/nodes:w-[150px]";
+  "hidden w-[92px] text-start @min-[620px]/nodes:table-cell @min-[1200px]/nodes:w-[150px]";
 const CHECKED_COLUMN = "hidden w-[86px] @min-[1200px]/nodes:table-cell";
 const BUILD_COLUMN = "hidden w-[150px] @min-[1200px]/nodes:table-cell";
 
@@ -350,7 +350,7 @@ function ColumnHeadings({ showsGPU }: { showsGPU: boolean }) {
   return (
     <thead>
       <tr>
-        <th scope="col" className={cn(COLUMN_HEADING, "pl-0 text-left")}>
+        <th scope="col" className={cn(COLUMN_HEADING, "ps-0 text-start")}>
           Node
         </th>
         {dataColumns(showsGPU).map(({ label, className }) => (
@@ -441,7 +441,7 @@ function GroupRows({
         <tr>
           {/* Empty cells rather than a colspan: a hidden column inside a span
               would keep its width in the fixed table layout. */}
-          <th scope="rowgroup" className="pt-1.5 pb-0.5 text-left text-[11px] font-bold">
+          <th scope="rowgroup" className="pt-1.5 pb-0.5 text-start text-[11px] font-bold">
             <div className="flex min-w-0 items-center gap-1.5">
               <StatusIcon state={group.state} />
               <span className="min-w-0 truncate" title={group.name || undefined}>
@@ -490,7 +490,7 @@ function NodeRow({
     <tr className={state === "disabled" ? "text-muted-foreground" : undefined}>
       <th
         scope="row"
-        className={cn("h-6 overflow-hidden py-0.5 text-left font-normal", indent && "pl-5")}
+        className={cn("h-6 overflow-hidden py-0.5 text-start font-normal", indent && "ps-5")}
       >
         <div className="flex min-w-0 items-center gap-1.5">
           <StatusIcon state={state} title={drain?.label} />
@@ -657,7 +657,7 @@ function LoadReading({
 }) {
   if (!metric || metric.fill === null) {
     return (
-      <span className="text-muted-foreground block w-8 text-right" title={metric?.title ?? missing}>
+      <span className="text-muted-foreground block w-8 text-end" title={metric?.title ?? missing}>
         –
       </span>
     );
@@ -665,7 +665,7 @@ function LoadReading({
   const high = metric.fill >= HIGH_LOAD_PERCENT;
   return (
     <div className="flex items-center gap-1.5" title={metric.title}>
-      <span className={cn("w-8 flex-shrink-0 text-right", high && "text-warning font-semibold")}>
+      <span className={cn("w-8 flex-shrink-0 text-end", high && "text-warning font-semibold")}>
         {metric.fill}%
       </span>
       <div className="bg-foreground/15 hidden h-1 max-w-[90px] min-w-5 flex-1 overflow-hidden rounded-sm @min-[620px]/nodes:block">

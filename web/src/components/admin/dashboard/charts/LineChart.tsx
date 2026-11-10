@@ -263,8 +263,10 @@ export function LineChart({
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
 
+  // Time runs left to right in every language; the plot and its labels use physical
+  // coordinates (eslint.config.js PHYSICAL_DIRECTION).
   return (
-    <div className={cn("w-full", fill && "flex min-h-0 flex-1 flex-col", className)}>
+    <div dir="ltr" className={cn("w-full", fill && "flex min-h-0 flex-1 flex-col", className)}>
       {stacked ? (
         // Top band first, so the legend reads in the order the bands stack.
         <ChartLegend

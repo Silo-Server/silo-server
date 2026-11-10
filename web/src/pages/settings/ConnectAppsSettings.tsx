@@ -236,7 +236,7 @@ function TroubleshootingPanel({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 text-left"
+        className="flex w-full items-center gap-2 text-start"
         aria-expanded={open}
       >
         <TriangleAlert className="text-warning h-4 w-4" />
@@ -245,7 +245,7 @@ function TroubleshootingPanel({
         </span>
         <ChevronDown
           className={cn(
-            "text-muted-foreground ml-auto h-4 w-4 transition-transform",
+            "text-muted-foreground ms-auto h-4 w-4 transition-transform",
             open && "rotate-180",
           )}
         />
@@ -253,7 +253,7 @@ function TroubleshootingPanel({
       {open ? (
         <dl className="mt-3 space-y-3 text-sm">
           {rows.map((row) => (
-            <div key={row.q} className="border-info/40 border-l-2 pl-3">
+            <div key={row.q} className="border-info/40 border-s-2 ps-3">
               <dt className="font-medium">{row.q}</dt>
               <dd className="text-muted-foreground mt-0.5 text-sm leading-relaxed break-words">
                 {row.a}

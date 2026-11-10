@@ -194,7 +194,7 @@ export function WatchHistoryCard({
       }
       footer={
         <>
-          <span className="text-muted-foreground mr-auto text-xs">
+          <span className="text-muted-foreground me-auto text-xs">
             {plays !== undefined
               ? t("web.admin.users.detail.activity.history.showingOf", {
                   shown: String(shown),
@@ -236,7 +236,7 @@ export function WatchHistoryCard({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-4 sm:pl-5">
+                <TableHead className="ps-4 sm:ps-5">
                   {t("web.admin.users.detail.activity.history.column.title")}
                 </TableHead>
                 <TableHead className="hidden sm:table-cell">
@@ -246,7 +246,7 @@ export function WatchHistoryCard({
                 <TableHead className="hidden sm:table-cell">
                   {t("web.admin.users.detail.activity.history.column.watched")}
                 </TableHead>
-                <TableHead className="pr-4 sm:pr-5">
+                <TableHead className="pe-4 sm:pe-5">
                   {t("web.admin.users.detail.activity.history.column.when")}
                 </TableHead>
               </TableRow>
@@ -254,7 +254,7 @@ export function WatchHistoryCard({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.key} data-live={row.live ? "true" : undefined}>
-                  <TableCell className="max-w-[18rem] pl-4 whitespace-normal sm:pl-5">
+                  <TableCell className="max-w-[18rem] ps-4 whitespace-normal sm:ps-5">
                     {row.itemId ? (
                       <Link
                         to={`/item/${encodeURIComponent(row.itemId)}`}
@@ -266,7 +266,7 @@ export function WatchHistoryCard({
                       <span className="font-semibold">{row.title}</span>
                     )}
                     {row.code ? (
-                      <span className="text-muted-foreground ml-1.5 text-xs">{row.code}</span>
+                      <span className="text-muted-foreground ms-1.5 text-xs">{row.code}</span>
                     ) : null}
                   </TableCell>
                   <TableCell className="hidden sm:table-cell">{row.profile}</TableCell>
@@ -281,7 +281,7 @@ export function WatchHistoryCard({
                   <TableCell className="hidden sm:table-cell">
                     <ProgressBar value={row.watched} className="w-24" />
                   </TableCell>
-                  <TableCell className="text-muted-foreground pr-4 sm:pr-5">
+                  <TableCell className="text-muted-foreground pe-4 sm:pe-5">
                     {row.live ? (
                       <span className="text-foreground inline-flex items-center gap-1.5">
                         <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-400" />

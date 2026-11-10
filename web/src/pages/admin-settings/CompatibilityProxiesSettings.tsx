@@ -157,7 +157,7 @@ function StatusLine({
   return (
     <div className="flex min-h-9 items-center justify-between gap-4 py-2 text-sm">
       <span className="text-muted-foreground">{label}</span>
-      <span className={mono ? "max-w-[60%] truncate font-mono text-xs" : "text-right"}>
+      <span className={mono ? "max-w-[60%] truncate font-mono text-xs" : "text-end"}>
         {typeof value === "boolean"
           ? value
             ? t("web.admin.settings.compatibilityProxies.details.yes")
@@ -358,7 +358,7 @@ export default function CompatibilityProxiesSettings() {
                     status?.installer_ready === false
                   }
                 >
-                  <Download className="mr-2 h-4 w-4" />
+                  <Download className="me-2 h-4 w-4" />
                   {status?.web_state === "update_available"
                     ? t("web.admin.settings.compatibilityProxies.web.update")
                     : operationRunning
@@ -377,9 +377,9 @@ export default function CompatibilityProxiesSettings() {
                   }
                 >
                   {jellyfinWebServing ? (
-                    <PowerOff className="mr-2 h-4 w-4" />
+                    <PowerOff className="me-2 h-4 w-4" />
                   ) : (
-                    <Power className="mr-2 h-4 w-4" />
+                    <Power className="me-2 h-4 w-4" />
                   )}
                   {jellyfinWebServing
                     ? t("web.admin.settings.compatibilityProxies.web.disable")
@@ -398,7 +398,7 @@ export default function CompatibilityProxiesSettings() {
                   status?.web_state === "missing"
                 }
               >
-                <Trash2 className="mr-2 h-4 w-4" />
+                <Trash2 className="me-2 h-4 w-4" />
                 {t("web.admin.settings.compatibilityProxies.web.remove")}
               </Button>
               {hasDirtyWebConfig && (

@@ -69,7 +69,7 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
 
                   {/* Completed checkmark */}
                   {isCompleted && (
-                    <div className="absolute top-2.5 right-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
+                    <div className="absolute end-2.5 top-2.5 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
                       <Check className="size-3.5" strokeWidth={3} />
                     </div>
                   )}
@@ -138,7 +138,7 @@ export function SeasonRail({ count, children }: { count: number; children: React
           <button
             type="button"
             onClick={scrollPrev}
-            className="from-background/90 absolute top-0 bottom-0 left-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute start-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-r to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-l"
             aria-label={t("web.detail.carousel.scrollLeft")}
           >
             <ChevronLeft className="text-foreground h-6 w-6" />
@@ -155,7 +155,7 @@ export function SeasonRail({ count, children }: { count: number; children: React
           <button
             type="button"
             onClick={scrollNext}
-            className="from-background/90 absolute top-0 right-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100"
+            className="from-background/90 absolute end-0 top-0 bottom-0 z-10 flex h-11 w-11 items-center justify-center self-center bg-gradient-to-l to-transparent opacity-0 transition-opacity duration-200 group-hover/carousel:opacity-100 focus-visible:opacity-100 rtl:bg-gradient-to-r"
             aria-label={t("web.detail.carousel.scrollRight")}
           >
             <ChevronRight className="text-foreground h-6 w-6" />

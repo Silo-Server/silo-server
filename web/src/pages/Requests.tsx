@@ -145,7 +145,7 @@ function RequestsHub() {
             <TabsTrigger value="yours" className="flex-none px-3">
               {t("web.requests.hub.yours")}
               {totalMine > 0 && (
-                <span className="bg-muted/80 text-muted-foreground ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
+                <span className="bg-muted/80 text-muted-foreground ms-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-semibold tabular-nums">
                   {totalMine}
                 </span>
               )}
@@ -331,7 +331,7 @@ function YoursTab({
             <section key={key} aria-labelledby={headingID} className="space-y-1">
               <h2 id={headingID} className="text-foreground text-lg font-semibold">
                 {t(titleKey)}
-                <span className="text-muted-foreground ml-2 text-sm font-normal tabular-nums">
+                <span className="text-muted-foreground ms-2 text-sm font-normal tabular-nums">
                   {items.length}
                 </span>
               </h2>
@@ -543,7 +543,7 @@ function StatusHelp() {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-muted-foreground -ml-2 sm:-mr-2 sm:ml-0">
+        <Button variant="ghost" size="sm" className="text-muted-foreground -ms-2 sm:ms-0 sm:-me-2">
           <Info className="h-4 w-4" aria-hidden />
           {t("web.requests.hub.statusHelp")}
         </Button>

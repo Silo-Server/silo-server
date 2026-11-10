@@ -201,7 +201,7 @@ function BackLink({ fallback }: { fallback: string }) {
     <ViewTransitionLink
       to={to}
       up
-      className="text-muted-foreground hover:text-foreground -ml-1 inline-flex items-center gap-1 text-sm"
+      className="text-muted-foreground hover:text-foreground -ms-1 inline-flex items-center gap-1 text-sm"
     >
       <ChevronLeft aria-hidden="true" className="size-4" />
       {t("web.admin.plugins.detail.back")}

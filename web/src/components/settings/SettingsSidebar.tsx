@@ -72,7 +72,7 @@ export function SettingsSidebar({
       data-settings-sidebar=""
       data-sidebar-entrance={entrance}
       className={cn(
-        "border-sidebar-border/70 bg-sidebar/92 fixed top-0 bottom-0 left-0 z-40 flex flex-col border-r backdrop-blur-2xl",
+        "border-sidebar-border/70 bg-sidebar/92 fixed start-0 top-0 bottom-0 z-40 flex flex-col border-e backdrop-blur-2xl",
         className,
       )}
     >

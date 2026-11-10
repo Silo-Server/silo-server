@@ -51,7 +51,7 @@ export function RestoreReview({
     <div className="max-w-[70rem] space-y-5">
       {plan.map((group) => (
         <FieldGroup key={group.section} label={group.title}>
-          <ul className="list-disc space-y-1.5 py-3.5 pl-5 text-sm">
+          <ul className="list-disc space-y-1.5 py-3.5 ps-5 text-sm">
             {group.sentences.map((sentence, position) => (
               <li key={position}>{t("web.admin.backups.restore.plan.sentence", { sentence })}</li>
             ))}

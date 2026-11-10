@@ -233,7 +233,7 @@ export const AccountRow = memo(function AccountRow({
         />
       </div>
       {open ? (
-        <div id={detailsId} className="space-y-1 pb-3 pl-7">
+        <div id={detailsId} className="space-y-1 ps-7 pb-3">
           {status ? <p className="text-[13px] md:hidden">{status}</p> : null}
           {account.admin ? (
             <p className="text-muted-foreground text-xs sm:hidden">

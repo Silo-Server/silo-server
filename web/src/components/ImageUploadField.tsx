@@ -58,7 +58,7 @@ export function ImageUploadField({
             alt={label}
             className="bg-muted h-32 w-full rounded-lg border object-cover"
           />
-          <div className="absolute top-1 right-1 flex gap-1">
+          <div className="absolute end-1 top-1 flex gap-1">
             {file && (
               <Button
                 type="button"

@@ -233,7 +233,7 @@ export function AdminUserPasswordResetDialog({
               })}
             </p>
             <Button variant="outline" size="sm" onClick={() => void copy(resetURL)}>
-              <Copy className="mr-1.5 h-4 w-4" /> {copyLabel}
+              <Copy className="me-1.5 h-4 w-4" /> {copyLabel}
             </Button>
           </div>
         )}

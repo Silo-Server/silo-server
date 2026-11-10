@@ -45,7 +45,7 @@ export function PolicyDocumentList({ domains }: PolicyDocumentListProps) {
           type="button"
           variant="ghost"
           size="sm"
-          className="text-muted-foreground -ml-2"
+          className="text-muted-foreground -ms-2"
           onClick={() => selectDocument(undefined)}
         >
           <ArrowLeft className="size-4" />

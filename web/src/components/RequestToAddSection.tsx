@@ -260,7 +260,7 @@ function DialogRow({
       tabIndex={-1}
       to={requestDetailHref(item.media_type, item.tmdb_id)}
       onClick={handleClick}
-      className="data-[selected]:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors"
+      className="data-[selected]:bg-accent flex w-full items-center gap-3 rounded-md px-3 py-2 text-start transition-colors"
     >
       <div
         className={cn(

@@ -393,7 +393,7 @@ function PercentField({
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
         }}
-        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-right text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-end text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
       <span className="text-[13px] text-white/60">{PERCENT_SIGN}</span>
     </div>
@@ -422,7 +422,9 @@ function ToggleSwitch({
     >
       <span
         className={`inline-block h-5 w-5 transform rounded-full shadow-md transition-transform ${
-          checked ? "translate-x-[22px] bg-black" : "translate-x-[2px] bg-white"
+          checked
+            ? "translate-x-[22px] bg-black rtl:-translate-x-[22px]"
+            : "translate-x-[2px] bg-white rtl:-translate-x-[2px]"
         }`}
       />
     </button>

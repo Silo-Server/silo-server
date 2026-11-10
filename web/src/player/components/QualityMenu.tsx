@@ -157,7 +157,7 @@ export function QualityMenu({
         {changedSpeed && (
           <span
             aria-hidden="true"
-            className="player-speed-badge pointer-events-none absolute top-0.5 left-6 rounded-full bg-white px-1 text-[9px] leading-[13px] font-semibold text-black tabular-nums shadow-[0_0_0_2px_rgba(0,0,0,0.65)] sm:static"
+            className="player-speed-badge pointer-events-none absolute start-6 top-0.5 rounded-full bg-white px-1 text-[9px] leading-[13px] font-semibold text-black tabular-nums shadow-[0_0_0_2px_rgba(0,0,0,0.65)] sm:static"
           >
             {changedSpeed}
           </span>
@@ -167,7 +167,7 @@ export function QualityMenu({
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 max-h-[calc(100dvh-8rem)] min-w-[224px] overflow-y-auto rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
+          className="absolute end-0 bottom-full z-30 mb-2 max-h-[calc(100dvh-8rem)] min-w-[224px] overflow-y-auto rounded-lg bg-black/90 py-1 shadow-lg backdrop-blur"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
@@ -206,7 +206,7 @@ export function QualityMenu({
                     }}
                     role="menuitem"
                     type="button"
-                    className={`flex w-full px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                    className={`flex w-full px-3 py-2 text-start text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                       v.isCurrentSource ? "text-white" : "text-white/70"
                     }`}
                     onClick={() => {
@@ -250,7 +250,7 @@ export function QualityMenu({
                     }}
                     role="menuitem"
                     type="button"
-                    className={`flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                    className={`flex w-full items-center justify-between px-3 py-2 text-start text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                       opt.id === resolvedActiveId ? "text-white" : "text-white/70"
                     }`}
                     aria-current={opt.id === resolvedActiveId ? "true" : undefined}

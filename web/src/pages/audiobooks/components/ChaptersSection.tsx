@@ -92,7 +92,9 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
           aria-expanded={expanded}
           className="hover:text-primary flex items-center gap-2 text-xl font-semibold tracking-tight transition-colors"
         >
-          <ChevronDown className={`h-5 w-5 transition-transform ${expanded ? "" : "-rotate-90"}`} />
+          <ChevronDown
+            className={`h-5 w-5 transition-transform ${expanded ? "" : "-rotate-90 rtl:rotate-90"}`}
+          />
           {t("web.audiobooks.chapters.heading")}
           <span className="text-muted-foreground text-sm font-normal">
             {t("web.audiobooks.chapters.count", { count: String(rows.length) })}
@@ -114,7 +116,7 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
             {sortOpen && (
               <div
                 role="menu"
-                className="bg-popover absolute right-0 mt-2 w-44 overflow-hidden rounded-md border shadow-lg"
+                className="bg-popover absolute end-0 mt-2 w-44 overflow-hidden rounded-md border shadow-lg"
               >
                 {(["position", "longest-first"] as SortMode[]).map((mode) => (
                   <button
@@ -122,7 +124,7 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
                     role="menuitem"
                     type="button"
                     data-active={mode === sort ? "true" : undefined}
-                    className="hover:bg-muted/60 w-full px-3 py-2 text-left text-sm"
+                    className="hover:bg-muted/60 w-full px-3 py-2 text-start text-sm"
                     onClick={() => {
                       setSort(mode);
                       setSortOpen(false);
@@ -149,11 +151,11 @@ export function ChaptersSection({ files, currentPositionSeconds, onSelect }: Cha
                   type="button"
                   onClick={() => onSelect(row.absoluteStart)}
                   data-current={isCurrent ? "true" : undefined}
-                  className={`hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                    isCurrent ? "bg-muted/50 border-primary border-l-2" : ""
+                  className={`hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-3 text-start transition-colors ${
+                    isCurrent ? "bg-muted/50 border-primary border-s-2" : ""
                   }`}
                 >
-                  <span className="text-muted-foreground w-8 shrink-0 text-right text-xs tabular-nums">
+                  <span className="text-muted-foreground w-8 shrink-0 text-end text-xs tabular-nums">
                     {row.positionIndex}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.label}</span>

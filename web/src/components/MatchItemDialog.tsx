@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo, useRef, type ChangeEvent } from "react";
 import { Copy, Folder, Plus, Search, X } from "lucide-react";
+import { Direction } from "radix-ui";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -82,6 +83,7 @@ export default function MatchItemDialog({
   onReplaced,
 }: MatchItemDialogProps) {
   const t = useT();
+  const dir = Direction.useDirection();
   const [title, setTitle] = useState(item.title);
   const [year, setYear] = useState(item.year ? String(item.year) : "");
   const [imdbId, setImdbId] = useState("");
@@ -280,16 +282,16 @@ export default function MatchItemDialog({
           <DialogTitle>{t("web.item.dialog.matchItemTitle")}</DialogTitle>
         </DialogHeader>
 
-        <div className="overlay-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pr-1">
+        <div className="overlay-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain pe-1">
           {/* Current item summary */}
           <div className="bg-muted/50 shrink-0 rounded-lg px-3 py-2 text-sm">
             <span className="font-medium">{item.title}</span>
             {item.year ? (
-              <span className="text-muted-foreground ml-2">
+              <span className="text-muted-foreground ms-2">
                 {t("web.item.dialog.yearInParens", { year: String(item.year) })}
               </span>
             ) : null}
-            <Badge variant="secondary" className="ml-2 text-[10px]">
+            <Badge variant="secondary" className="ms-2 text-[10px]">
               {item.type}
             </Badge>
           </div>
@@ -458,7 +460,7 @@ export default function MatchItemDialog({
                         key={`${candidateKey}-${index}`}
                         type="button"
                         className={cn(
-                          "flex w-full min-w-0 items-start gap-3 rounded-lg border p-3 text-left transition-colors",
+                          "flex w-full min-w-0 items-start gap-3 rounded-lg border p-3 text-start transition-colors",
                           selectedCandidate === candidate
                             ? "border-primary bg-primary/5"
                             : "border-border hover:bg-muted/50",
@@ -476,7 +478,7 @@ export default function MatchItemDialog({
                               />
                             </TooltipTrigger>
                             <TooltipContent
-                              side="right"
+                              side={dir === "rtl" ? "left" : "right"}
                               className="border-border/60 overflow-hidden border bg-transparent p-0 shadow-xl"
                             >
                               <img

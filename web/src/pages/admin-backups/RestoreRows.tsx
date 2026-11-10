@@ -228,7 +228,7 @@ function itemDetails(t: Translate, item: RestoreItem): ReactNode {
     changes.length > 0 ? (
       <div key="changes" className="text-xs">
         <p className="text-muted-foreground">{t("web.admin.backups.restore.rows.changes")}</p>
-        <ul className="text-muted-foreground list-disc pl-5">
+        <ul className="text-muted-foreground list-disc ps-5">
           {changes.map((change) => (
             <li key={change}>{change}</li>
           ))}
@@ -313,7 +313,7 @@ export const ItemRow = memo(function ItemRow({
         )}
       </div>
       {open ? (
-        <div id={detailsId} className="space-y-2 pb-3 pl-7">
+        <div id={detailsId} className="space-y-2 ps-7 pb-3">
           {details}
         </div>
       ) : null}

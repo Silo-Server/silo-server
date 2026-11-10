@@ -188,10 +188,10 @@ export function FolderFields({ form }: { form: LibraryFormController }) {
       {form.errors.paths ? <p className="text-destructive text-xs">{form.errors.paths}</p> : null}
       <div className="flex gap-1.5">
         <Button type="button" variant="outline" size="sm" onClick={() => setBrowserOpen(true)}>
-          <FolderSearch className="mr-1 size-3.5" /> {browseLabel}
+          <FolderSearch className="me-1 size-3.5" /> {browseLabel}
         </Button>
         <Button type="button" variant="outline" size="sm" onClick={form.addPath}>
-          <Plus className="mr-1 size-3.5" /> {addPathLabel}
+          <Plus className="me-1 size-3.5" /> {addPathLabel}
         </Button>
       </div>
       <FolderBrowser

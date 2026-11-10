@@ -38,8 +38,8 @@ export function KindCard({
   return (
     <div
       className={cn(
-        "border-border/90 bg-surface/60 hover:bg-accent focus-within:ring-ring/45 focus-within:border-foreground/50 relative grid grid-cols-[40px_minmax(0,1fr)] items-start gap-x-3.5 rounded-[14px] border py-3.5 pr-4 pl-3.5 text-left focus-within:ring-[3px]",
-        compact && "pr-10",
+        "border-border/90 bg-surface/60 hover:bg-accent focus-within:ring-ring/45 focus-within:border-foreground/50 relative grid grid-cols-[40px_minmax(0,1fr)] items-start gap-x-3.5 rounded-[14px] border py-3.5 ps-3.5 pe-4 text-start focus-within:ring-[3px]",
+        compact && "pe-10",
       )}
     >
       <span
@@ -57,8 +57,8 @@ export function KindCard({
           aria-describedby={sentenceId}
           onClick={onPick}
           className={cn(
-            "flex min-h-5 items-center gap-2 text-left text-[14.5px] font-semibold tracking-[-0.01em] outline-none after:absolute after:inset-0 after:rounded-[14px]",
-            tag && "pr-24",
+            "flex min-h-5 items-center gap-2 text-start text-[14.5px] font-semibold tracking-[-0.01em] outline-none after:absolute after:inset-0 after:rounded-[14px]",
+            tag && "pe-24",
           )}
         >
           {label}
@@ -80,7 +80,7 @@ export function KindCard({
       {tag ? (
         <span
           aria-hidden
-          className="bg-background/70 ring-border absolute top-3 right-3 inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset"
+          className="bg-background/70 ring-border absolute end-3 top-3 inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-xs font-semibold ring-1 ring-inset"
         >
           <Check className="text-success size-3" />
           {tag.label}
@@ -89,7 +89,7 @@ export function KindCard({
       {compact ? (
         <ChevronRight
           aria-hidden
-          className="text-muted-foreground absolute top-1/2 right-3.5 size-4 -translate-y-1/2"
+          className="text-muted-foreground absolute end-3.5 top-1/2 size-4 -translate-y-1/2"
         />
       ) : null}
     </div>

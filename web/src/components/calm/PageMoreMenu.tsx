@@ -117,7 +117,7 @@ function SwitchLook({ checked }: { checked: boolean }) {
     >
       <span
         data-state={state}
-        className="bg-foreground data-[state=checked]:bg-primary-foreground block size-4 rounded-full transition-transform data-[state=checked]:translate-x-[calc(100%-2px)]"
+        className="bg-foreground data-[state=checked]:bg-primary-foreground block size-4 rounded-full transition-transform data-[state=checked]:translate-x-[calc(100%-2px)] rtl:data-[state=checked]:-translate-x-[calc(100%-2px)]"
       />
     </span>
   );

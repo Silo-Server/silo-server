@@ -228,7 +228,7 @@ export default function ImageSelectorTab({
           </button>
         ))}
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ms-auto flex items-center gap-1">
           {/* Textless filter, hidden for logos */}
           {activeTab !== "logo" && (
             <button
@@ -339,7 +339,7 @@ export default function ImageSelectorTab({
         <ScrollArea className="min-h-0 flex-1">
           <div
             className={cn(
-              "grid gap-2 pr-3 pb-1",
+              "grid gap-2 pe-3 pb-1",
               activeTab === "poster" ? "grid-cols-3 sm:grid-cols-4" : "grid-cols-2 sm:grid-cols-3",
             )}
           >
@@ -378,7 +378,7 @@ export default function ImageSelectorTab({
 
                   {/* Current indicator */}
                   {isCurrent && (
-                    <div className="bg-primary/90 text-primary-foreground absolute top-1 left-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
+                    <div className="bg-primary/90 text-primary-foreground absolute start-1 top-1 flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-semibold">
                       <Check className="size-2.5" />
                       {t("web.item.images.current")}
                     </div>
@@ -386,13 +386,13 @@ export default function ImageSelectorTab({
 
                   {/* Selected indicator */}
                   {isSelected && !isCurrent && (
-                    <div className="bg-primary text-primary-foreground absolute top-1 right-1 flex size-5 items-center justify-center rounded-full">
+                    <div className="bg-primary text-primary-foreground absolute end-1 top-1 flex size-5 items-center justify-center rounded-full">
                       <Check className="size-3" />
                     </div>
                   )}
 
                   {/* Provider badge */}
-                  <div className="absolute right-1 bottom-1">
+                  <div className="absolute end-1 bottom-1">
                     <Badge
                       variant="secondary"
                       className="bg-black/60 px-1 py-0 text-[9px] text-white backdrop-blur-sm"

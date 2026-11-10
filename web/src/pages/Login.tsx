@@ -573,7 +573,7 @@ export default function Login() {
                     onClick={() => void handleNetworkSignIn(entry)}
                   >
                     {entry.icon_url && <img src={entry.icon_url} alt="" className="h-5 w-5" />}
-                    <span className="flex flex-col items-start text-left">
+                    <span className="flex flex-col items-start text-start">
                       <span>{label}</span>
                       {owner && (
                         <span className="text-xs font-normal opacity-80">

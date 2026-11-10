@@ -556,7 +556,7 @@ export function DiscoverRowDialog({
       <Button
         type="button"
         variant="ghost"
-        className="text-destructive hover:text-destructive -ml-3"
+        className="text-destructive hover:text-destructive -ms-3"
         disabled={busy}
         onClick={() => onDelete(editRow)}
       >

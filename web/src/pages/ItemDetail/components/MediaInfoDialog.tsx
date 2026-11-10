@@ -42,7 +42,7 @@ function VersionSpecSheet({ sections }: { sections: MediaSpecSection[] }) {
                 className="flex items-baseline justify-between gap-4 px-3 py-1.5 text-sm"
               >
                 <span className="text-muted-foreground shrink-0">{row.label}</span>
-                <span className="text-foreground min-w-0 text-right break-all">{row.value}</span>
+                <span className="text-foreground min-w-0 text-end break-all">{row.value}</span>
               </div>
             ))}
           </div>
@@ -75,7 +75,7 @@ export default function MediaInfoDialog({
           <DialogDescription className="truncate">{title}</DialogDescription>
         </DialogHeader>
 
-        <div className="overlay-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pr-1">
+        <div className="overlay-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pe-1">
           {onlyVersion ? (
             <VersionSpecSheet sections={buildMediaSpecSections(onlyVersion)} />
           ) : (

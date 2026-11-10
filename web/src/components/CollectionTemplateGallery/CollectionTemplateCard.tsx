@@ -52,7 +52,7 @@ export function PickRow({
       value={value}
       aria-labelledby={`${id}-title`}
       aria-describedby={tag ? `${id}-tag ${id}-meta` : `${id}-meta`}
-      className="group/radio hover:bg-accent/60 focus-visible:ring-ring/50 data-[state=checked]:bg-accent grid w-full grid-cols-[18px_30px_minmax(0,1fr)] items-center gap-x-3 px-3.5 py-2.5 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-inset"
+      className="group/radio hover:bg-accent/60 focus-visible:ring-ring/50 data-[state=checked]:bg-accent grid w-full grid-cols-[18px_30px_minmax(0,1fr)] items-center gap-x-3 px-3.5 py-2.5 text-start outline-none focus-visible:ring-[3px] focus-visible:ring-inset"
     >
       <RadioDot />
       <span

@@ -183,10 +183,10 @@ export default function AdminSidebar({
     <aside
       data-layout={embedded ? "drawer" : "desktop"}
       className={cn(
-        "border-sidebar-border/70 bg-sidebar/92 flex w-[240px] flex-col border-r backdrop-blur-2xl",
+        "border-sidebar-border/70 bg-sidebar/92 flex w-[240px] flex-col border-e backdrop-blur-2xl",
         embedded
-          ? "relative h-full w-full border-r-0 [&_nav_a]:min-h-11 [&_nav_button]:min-h-11"
-          : "fixed top-0 bottom-0 left-0 z-40",
+          ? "relative h-full w-full border-e-0 [&_nav_a]:min-h-11 [&_nav_button]:min-h-11"
+          : "fixed start-0 top-0 bottom-0 z-40",
       )}
     >
       {/* Logo */}
@@ -211,7 +211,7 @@ export default function AdminSidebar({
           >
             <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>{t("web.admin.shell.sidebar.search")}</span>
-            <kbd className="border-border/70 pointer-events-none ml-auto rounded border px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap select-none">
+            <kbd className="border-border/70 pointer-events-none ms-auto rounded border px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap select-none">
               {SEARCH_SHORTCUT_LABEL}
             </kbd>
           </button>

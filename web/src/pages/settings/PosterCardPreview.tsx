@@ -140,6 +140,7 @@ export function PosterCardPreviewView({
                   <div
                     aria-hidden="true"
                     className={cn(
+                      // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
                       "absolute bottom-1.5 left-1.5 z-20 flex gap-1 transition-opacity duration-200",
                       revealShortcuts
                         ? "opacity-100"

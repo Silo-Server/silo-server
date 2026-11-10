@@ -44,7 +44,7 @@ export function MonitoredSeriesCard({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-4 sm:pl-5">
+                <TableHead className="ps-4 sm:ps-5">
                   {t("web.admin.users.detail.downloads.monitor.column.series")}
                 </TableHead>
                 <TableHead className={wideOnly}>
@@ -57,7 +57,7 @@ export function MonitoredSeriesCard({
                 <TableHead className={wideOnly}>
                   {t("web.admin.users.detail.downloads.monitor.column.storageLimit")}
                 </TableHead>
-                <TableHead className="pr-4 sm:pr-5">
+                <TableHead className="pe-4 sm:pe-5">
                   {t("web.admin.users.detail.downloads.monitor.column.now")}
                 </TableHead>
               </TableRow>
@@ -65,7 +65,7 @@ export function MonitoredSeriesCard({
             <TableBody>
               {monitors.map((monitor) => (
                 <TableRow key={monitor.id}>
-                  <TableCell className="pl-4 font-semibold whitespace-normal sm:pl-5">
+                  <TableCell className="ps-4 font-semibold whitespace-normal sm:ps-5">
                     {monitor.series_title || monitor.series_id}
                   </TableCell>
                   <TableCell className={`${wideOnly} text-muted-foreground`}>
@@ -85,7 +85,7 @@ export function MonitoredSeriesCard({
                       ? formatStorageLimit(monitor.max_storage_bytes)
                       : t("web.admin.users.detail.downloads.monitor.noLimit")}
                   </TableCell>
-                  <TableCell className="text-muted-foreground pr-4 whitespace-normal sm:pr-5">
+                  <TableCell className="text-muted-foreground pe-4 whitespace-normal sm:pe-5">
                     {monitorNowLabel(monitor)}
                   </TableCell>
                 </TableRow>

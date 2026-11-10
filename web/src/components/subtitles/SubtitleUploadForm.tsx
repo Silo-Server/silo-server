@@ -385,7 +385,7 @@ export function SubtitleUploadForm({
           <Button
             onClick={handleUpload}
             disabled={uploading || detectingLanguage || !selectedFile}
-            className="sm:ml-auto"
+            className="sm:ms-auto"
           >
             {uploading ? (
               <Loader2 className="size-4 animate-spin" />

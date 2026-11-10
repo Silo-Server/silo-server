@@ -46,7 +46,7 @@ export function PosterTile({
     <button
       type="button"
       onClick={onClick}
-      className="group/tile focus-visible:outline-ring w-28 shrink-0 rounded-lg text-left focus-visible:outline-2 focus-visible:outline-offset-4 sm:w-32"
+      className="group/tile focus-visible:outline-ring w-28 shrink-0 rounded-lg text-start focus-visible:outline-2 focus-visible:outline-offset-4 sm:w-32"
       aria-label={card.title}
       aria-describedby={memberNames ? memberDescriptionId : undefined}
     >
@@ -72,7 +72,7 @@ export function PosterTile({
           </div>
         )}
         {card.type === "series" ? (
-          <span className="glass-subtle absolute right-1.5 bottom-1.5 flex items-center gap-0.5 rounded-full border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white/90">
+          <span className="glass-subtle absolute end-1.5 bottom-1.5 flex items-center gap-0.5 rounded-full border border-white/15 px-1.5 py-0.5 text-[10px] font-semibold text-white/90">
             {t("web.watchTogether.common.series")} <ChevronRight className="size-2.5" />
           </span>
         ) : null}
@@ -83,7 +83,7 @@ export function PosterTile({
             </span>
             <span
               aria-hidden="true"
-              className="absolute top-2 left-2 flex items-center gap-1 rounded-full border border-white/20 bg-zinc-900 p-0.5 shadow-md"
+              className="absolute start-2 top-2 flex items-center gap-1 rounded-full border border-white/20 bg-zinc-900 p-0.5 shadow-md"
             >
               {who.slice(0, 2).map((member) => (
                 <MemberAvatar
@@ -95,7 +95,7 @@ export function PosterTile({
                 />
               ))}
               {who.length > 2 ? (
-                <span className="pr-1 text-[11px] font-semibold text-white">
+                <span className="pe-1 text-[11px] font-semibold text-white">
                   {t("web.watchTogether.picker.moreMembers", { count: String(who.length - 2) })}
                 </span>
               ) : null}

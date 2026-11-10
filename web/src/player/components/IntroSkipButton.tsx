@@ -100,7 +100,7 @@ export function IntroSkipButton({
       {progress !== null ? (
         <span
           aria-hidden="true"
-          className="absolute inset-y-0 left-0 bg-white/15"
+          className="absolute inset-y-0 start-0 bg-white/15"
           style={{ width: `${Math.min(1, Math.max(0, progress)) * 100}%` }}
         />
       ) : null}
@@ -110,18 +110,18 @@ export function IntroSkipButton({
 
   return (
     <div
-      className={`animate-in fade-in absolute right-5 z-50 flex flex-col items-end gap-1.5 duration-150 sm:right-7 ${controlsVisible ? "bottom-24 sm:bottom-28" : "bottom-5 sm:bottom-7"}`}
+      className={`animate-in fade-in absolute end-5 z-50 flex flex-col items-end gap-1.5 duration-150 sm:end-7 ${controlsVisible ? "bottom-24 sm:bottom-28" : "bottom-5 sm:bottom-7"}`}
     >
       {provenanceLabel ? (
         <span
           data-marker-provenance="true"
-          className="pr-3 text-xs font-medium text-white/75 drop-shadow"
+          className="pe-3 text-xs font-medium text-white/75 drop-shadow"
         >
           {provenanceLabel}
         </span>
       ) : null}
       {caption ? (
-        <span className="pr-3 text-xs font-medium text-white/75 drop-shadow">{caption}</span>
+        <span className="pe-3 text-xs font-medium text-white/75 drop-shadow">{caption}</span>
       ) : null}
       {button}
     </div>

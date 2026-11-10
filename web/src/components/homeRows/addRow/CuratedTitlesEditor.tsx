@@ -108,13 +108,13 @@ export function CuratedTitlesEditor({
         <div className="relative">
           <Search
             aria-hidden
-            className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2"
+            className="text-muted-foreground absolute start-3 top-1/2 size-4 -translate-y-1/2"
           />
           <Input
             type="search"
             aria-label={t("web.home.addRow.curated.search")}
             placeholder={t("web.home.addRow.curated.searchPlaceholder")}
-            className="pl-9"
+            className="ps-9"
             autoComplete="off"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -135,7 +135,7 @@ export function CuratedTitlesEditor({
                 <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
                   <span className="min-w-0 flex-1 truncate">
                     {item.title}
-                    <span className="text-muted-foreground ml-1.5 text-xs">
+                    <span className="text-muted-foreground ms-1.5 text-xs">
                       {item.year
                         ? t("web.home.addRow.curated.resultMeta", {
                             year: String(item.year),
@@ -181,7 +181,7 @@ export function CuratedTitlesEditor({
             className="border-border divide-border divide-y rounded-xl border"
           >
             {itemIds.map((id, index) => (
-              <li key={id} className="flex items-center gap-1 py-1.5 pr-1.5 pl-3 text-sm">
+              <li key={id} className="flex items-center gap-1 py-1.5 ps-3 pe-1.5 text-sm">
                 <span className="min-w-0 flex-1 truncate">{nameOf(id)}</span>
                 <Button
                   type="button"

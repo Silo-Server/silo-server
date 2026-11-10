@@ -55,9 +55,11 @@ export default function BoxSetCard({ boxSet }: { boxSet: BoxSetSummary }) {
             thumbhash={boxSet.poster_thumbhash}
             scrim="background"
           >
+            {/* eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus */}
             <span className="glass-subtle text-foreground absolute top-2.5 left-2.5 rounded-full border border-white/15 px-2.5 py-1 text-[0.625rem] font-semibold tracking-[0.14em] uppercase">
               {t("web.detail.boxSet.label")}
             </span>
+            {/* eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus */}
             <span className="bg-background/60 text-foreground absolute right-2 bottom-2.5 rounded-md px-2 py-0.5 text-[0.6875rem] font-bold backdrop-blur-sm">
               {boxSetFilmCount(boxSet.movie_count)}
             </span>

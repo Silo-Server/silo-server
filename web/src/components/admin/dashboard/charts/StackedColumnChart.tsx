@@ -91,8 +91,10 @@ export function StackedColumnChart({
     columns.length > 0 ? (index + 0.5) / columns.length : 0.5;
   const activeRatio = activeIndex === null ? 0.5 : columnRatio(activeIndex);
 
+  // Time runs left to right in every language; the plot and its labels use physical
+  // coordinates (eslint.config.js PHYSICAL_DIRECTION).
   return (
-    <div className={cn("w-full", fill && "flex min-h-0 flex-1 flex-col", className)}>
+    <div dir="ltr" className={cn("w-full", fill && "flex min-h-0 flex-1 flex-col", className)}>
       <ChartLegend
         className="mb-2.5 shrink-0"
         entries={seriesLabels.map((label, index) => ({

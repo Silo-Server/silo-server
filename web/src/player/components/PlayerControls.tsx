@@ -251,7 +251,9 @@ export function PlayerControls({
           cluster itself is interactive. */}
       {compactControls && (
         <div className="player-compact-transport pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-[max(0.75rem,env(safe-area-inset-left))]">
+          {/* Transport reads left to right in every language, like the timeline. */}
           <div
+            dir="ltr"
             className={`flex items-center gap-2 ${visible ? "pointer-events-auto" : ""}`}
             onClick={(event) => event.stopPropagation()}
           >
@@ -286,6 +288,7 @@ export function PlayerControls({
               {playing ? (
                 <Pause className="h-7 w-7" fill="currentColor" strokeWidth={0} />
               ) : (
+                // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
                 <Play className="ml-1 h-7 w-7" fill="currentColor" strokeWidth={0} />
               )}
             </button>
@@ -347,7 +350,10 @@ export function PlayerControls({
                   {title}
                 </div>
               ) : null}
-              <div className="font-mono text-[11px] tracking-[0.12em] text-white/75 tabular-nums">
+              <div
+                dir="ltr"
+                className="font-mono text-[11px] tracking-[0.12em] text-white/75 tabular-nums"
+              >
                 {formatTime(currentTime)}
                 <span className="mx-1 text-white/30">{TIME_SEPARATOR}</span>
                 {formatTime(duration)}
@@ -436,7 +442,10 @@ export function PlayerControls({
                     <span className="text-white/25">{SEPARATOR}</span>
                   </>
                 ) : null}
-                <span className="shrink-0 font-mono text-[11px] tracking-[0.12em] whitespace-nowrap text-white/75 normal-case tabular-nums">
+                <span
+                  dir="ltr"
+                  className="shrink-0 font-mono text-[11px] tracking-[0.12em] whitespace-nowrap text-white/75 normal-case tabular-nums"
+                >
                   {formatTime(currentTime)}
                   <span className="mx-1 text-white/30">{TIME_SEPARATOR}</span>
                   {formatTime(duration)}
@@ -450,7 +459,7 @@ export function PlayerControls({
               exactly on the cluster's centerline even at the first or last
               episode. For movies the slots are omitted entirely, leaving a
               symmetric 3-button cluster that's also perfectly centered. */}
-            <div className="flex items-center justify-center gap-2 sm:gap-3">
+            <div dir="ltr" className="flex items-center justify-center gap-2 sm:gap-3">
               {showEpisodeSlots ? (
                 hasPrevEpisode ? (
                   <CircleButton
@@ -485,6 +494,7 @@ export function PlayerControls({
                 {playing ? (
                   <Pause className="h-6 w-6" strokeWidth={0} fill="currentColor" />
                 ) : (
+                  // eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror
                   <Play className="ml-[2px] h-6 w-6" strokeWidth={0} fill="currentColor" />
                 )}
               </CircleButton>
@@ -767,7 +777,7 @@ function OverflowAction({
     <button
       role="menuitem"
       type="button"
-      className={`flex min-h-12 w-full items-center gap-3 px-5 py-3 text-left text-sm ${active ? "bg-white/10 text-white" : "text-white/80"}`}
+      className={`flex min-h-12 w-full items-center gap-3 px-5 py-3 text-start text-sm ${active ? "bg-white/10 text-white" : "text-white/80"}`}
       onClick={onClick}
     >
       {icon}

@@ -184,16 +184,16 @@ function RefreshMetricsPanel({ metrics }: { metrics: MetadataRefreshMetrics }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-border bg-muted/40 border-b">
-              <th className="px-4 py-2 text-left font-medium">
+              <th className="px-4 py-2 text-start font-medium">
                 {t("web.admin.tasks.detail.columns.item")}
               </th>
-              <th className="px-4 py-2 text-left font-medium">
+              <th className="px-4 py-2 text-start font-medium">
                 {t("web.admin.tasks.detail.columns.nextRefresh")}
               </th>
-              <th className="px-4 py-2 text-left font-medium">
+              <th className="px-4 py-2 text-start font-medium">
                 {t("web.admin.tasks.detail.columns.attempts")}
               </th>
-              <th className="px-4 py-2 text-left font-medium">
+              <th className="px-4 py-2 text-start font-medium">
                 {t("web.admin.tasks.detail.columns.lastAttempt")}
               </th>
             </tr>
@@ -326,7 +326,7 @@ function TaskSchedulePanel({
               size="sm"
               onClick={() => setDraft([...draft, { type: "interval", interval_ms: 3_600_000 }])}
             >
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              <Plus className="me-1.5 h-3.5 w-3.5" />
               {t("web.admin.tasks.detail.addTrigger")}
             </Button>
           </fieldset>
@@ -543,7 +543,7 @@ export default function AdminTaskDetail() {
                 onClick={() => cancelTask.mutate(task.key)}
                 disabled={cancelTask.isPending || task.state === "cancelling"}
               >
-                <Square className="mr-1.5 h-4 w-4" />
+                <Square className="me-1.5 h-4 w-4" />
                 {t("web.admin.tasks.detail.cancelRun")}
               </Button>
             ) : (
@@ -553,7 +553,7 @@ export default function AdminTaskDetail() {
                 onClick={() => runTask.mutate(task.key)}
                 disabled={runTask.isPending}
               >
-                <Play className="mr-1.5 h-4 w-4" />
+                <Play className="me-1.5 h-4 w-4" />
                 {t("web.admin.tasks.actions.runNow")}
               </Button>
             )}
@@ -637,16 +637,16 @@ export default function AdminTaskDetail() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-border bg-muted/50 border-b">
-                <th className="px-4 py-2 text-left font-medium">
+                <th className="px-4 py-2 text-start font-medium">
                   {t("web.admin.tasks.detail.history.columns.started")}
                 </th>
-                <th className="px-4 py-2 text-left font-medium">
+                <th className="px-4 py-2 text-start font-medium">
                   {t("web.admin.tasks.detail.history.columns.duration")}
                 </th>
-                <th className="px-4 py-2 text-left font-medium">
+                <th className="px-4 py-2 text-start font-medium">
                   {t("web.admin.tasks.detail.history.columns.status")}
                 </th>
-                <th className="px-4 py-2 text-left font-medium">
+                <th className="px-4 py-2 text-start font-medium">
                   {t("web.admin.tasks.detail.history.columns.error")}
                 </th>
               </tr>

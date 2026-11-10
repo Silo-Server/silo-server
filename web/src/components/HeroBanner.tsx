@@ -502,7 +502,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={prev}
-            className="glass-subtle absolute top-1/2 left-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:left-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute start-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:start-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
             aria-label={t("web.home.hero.previousSlide")}
           >
             <ChevronLeft className="size-4 sm:size-5" />
@@ -510,7 +510,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={next}
-            className="glass-subtle absolute top-1/2 right-3 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:right-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
+            className="glass-subtle absolute end-3 top-1/2 z-20 -translate-y-1/2 rounded-full p-1.5 opacity-60 transition-opacity duration-(--duration-fast) hover:opacity-100 sm:end-5 sm:p-2 sm:opacity-80 lg:opacity-0 lg:group-hover:opacity-90"
             aria-label={t("web.home.hero.nextSlide")}
           >
             <ChevronRight className="size-4 sm:size-5" />
@@ -525,7 +525,7 @@ export default function HeroBanner({
               offset the content uses to clear that header. */}
           <div
             className={cn(
-              "absolute right-4 z-20 flex items-center gap-2 sm:hidden",
+              "absolute end-4 z-20 flex items-center gap-2 sm:hidden",
               reserveHeaderSpace ? "top-24" : "top-4",
             )}
           >
@@ -546,7 +546,7 @@ export default function HeroBanner({
               {paused ? <Play className="size-3" /> : <Pause className="size-3" />}
             </button>
           </div>
-          <div className="absolute right-6 bottom-6 z-20 hidden items-center gap-3 sm:flex lg:right-10 lg:bottom-8 xl:right-12">
+          <div className="absolute end-6 bottom-6 z-20 hidden items-center gap-3 sm:flex lg:end-10 lg:bottom-8 xl:end-12">
             <div className="hero-slide-counter" aria-hidden="true">
               <span className="num">{padded(activeIndex + 1)}</span>
               <span className="sep" />

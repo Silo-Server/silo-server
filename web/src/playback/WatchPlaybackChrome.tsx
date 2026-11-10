@@ -1335,6 +1335,7 @@ export function WatchPlaybackBar() {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <div className="bg-primary/15 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
+                {/* eslint-disable-next-line silo/no-physical-direction -- centres the play triangle, which doesn't mirror */}
                 <Play className="ml-0.5 h-4 w-4 fill-current" />
               </div>
               <div className="min-w-0">
@@ -1354,8 +1355,10 @@ export function WatchPlaybackBar() {
               )}
             </div>
 
-            <div className="mt-3 space-y-1.5">
+            {/* The timeline reads left to right in every language, like the player's. */}
+            <div dir="ltr" className="mt-3 space-y-1.5">
               <Slider
+                dir="ltr"
                 value={[displayedTime]}
                 min={0}
                 max={Math.max(snapshot?.duration ?? 0, 0)}
@@ -1391,7 +1394,7 @@ export function WatchPlaybackBar() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div dir="ltr" className="flex items-center gap-2">
             <Button
               variant="glass"
               size="icon"
@@ -1408,9 +1411,9 @@ export function WatchPlaybackBar() {
               disabled={!transport}
             >
               {snapshot?.playing ? (
-                <Pause className="mr-2 h-4 w-4" />
+                <Pause className="me-2 h-4 w-4" />
               ) : (
-                <Play className="mr-2 h-4 w-4 fill-current" />
+                <Play className="me-2 h-4 w-4 fill-current" />
               )}
               {snapshot?.playing ? t("web.player.bar.pause") : t("web.player.bar.play")}
             </Button>
@@ -1430,7 +1433,7 @@ export function WatchPlaybackBar() {
               onClick={returnToWatch}
               title={t("web.player.bar.returnTitle")}
             >
-              <Tv className="mr-2 h-4 w-4" />
+              <Tv className="me-2 h-4 w-4" />
               {t("web.player.bar.watch")}
             </Button>
             <Button

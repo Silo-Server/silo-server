@@ -77,7 +77,7 @@ export function ScanActivityWidget() {
                   {t("web.admin.dashboard.widgets.scanActivity.trigger")}
                 </TableHead>
                 <TableHead>{t("web.admin.dashboard.widgets.scanActivity.status")}</TableHead>
-                <TableHead className="text-right">
+                <TableHead className="text-end">
                   {t("web.admin.dashboard.widgets.scanActivity.duration")}
                 </TableHead>
               </TableRow>
@@ -100,7 +100,7 @@ export function ScanActivityWidget() {
                   <TableCell>
                     <ScanStatus status={scan.status} />
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-right text-[11px] tabular-nums">
+                  <TableCell className="text-muted-foreground text-end text-[11px] tabular-nums">
                     {formatScanDuration(scan)}
                   </TableCell>
                 </TableRow>

@@ -83,7 +83,7 @@ function episodeLabel(episode: NonNullable<AdminUserDownload["episode"]>): strin
     .join(" · ");
 }
 
-const sizeCell = "text-muted-foreground text-right tabular-nums";
+const sizeCell = "text-muted-foreground text-end tabular-nums";
 const mutedCell = "text-muted-foreground hidden sm:table-cell";
 
 function GroupRows({ group, android }: { group: DownloadGroup; android: boolean }) {
@@ -93,7 +93,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
     group.episodes.some((episode) => episode.status !== "completed"),
   );
   const monitored = group.monitored ? (
-    <Badge variant="outline" className="ml-2 rounded-full">
+    <Badge variant="outline" className="ms-2 rounded-full">
       {t("web.admin.users.detail.downloads.device.monitored")}
     </Badge>
   ) : null;
@@ -103,7 +103,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
     const code = row.episode ? episodeLabel(row.episode) : "";
     return (
       <TableRow>
-        <TableCell className="pl-4 whitespace-normal sm:pl-5">
+        <TableCell className="ps-4 whitespace-normal sm:ps-5">
           <span className="font-semibold">{group.title}</span>
           {monitored}
           {code ? <div className="text-muted-foreground text-xs">{code}</div> : null}
@@ -113,7 +113,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
         <TableCell>
           <StatusBadge badge={downloadStatusBadge(row.status, android)} />
         </TableCell>
-        <TableCell className={cn(mutedCell, "pr-4 sm:pr-5")}>
+        <TableCell className={cn(mutedCell, "pe-4 sm:pe-5")}>
           {formatShortDate(row.created_at)}
         </TableCell>
       </TableRow>
@@ -123,12 +123,12 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
   return (
     <>
       <TableRow>
-        <TableCell className="pl-4 whitespace-normal sm:pl-5">
+        <TableCell className="ps-4 whitespace-normal sm:ps-5">
           <button
             type="button"
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}
-            className="hover:text-foreground -ml-1 inline-flex items-center gap-1 text-left font-semibold"
+            className="hover:text-foreground -ms-1 inline-flex items-center gap-1 text-start font-semibold"
           >
             {open ? (
               <ChevronDown aria-hidden className="h-3.5 w-3.5" />
@@ -138,7 +138,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
             {group.title}
           </button>
           {monitored}
-          <div className="text-muted-foreground pl-4 text-xs">{seriesGroupSubtitle(group)}</div>
+          <div className="text-muted-foreground ps-4 text-xs">{seriesGroupSubtitle(group)}</div>
         </TableCell>
         <TableCell className={mutedCell}>
           {sharedQuality(group.episodes, t("web.admin.users.detail.downloads.quality.mixed"))}
@@ -147,14 +147,14 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
         <TableCell>
           <StatusBadge badge={seriesGroupStatus(group, android)} />
         </TableCell>
-        <TableCell className={cn(mutedCell, "pr-4 sm:pr-5")}>
+        <TableCell className={cn(mutedCell, "pe-4 sm:pe-5")}>
           {formatShortDate(latest(group.episodes))}
         </TableCell>
       </TableRow>
       {open &&
         group.episodes.map((row) => (
           <TableRow key={row.id}>
-            <TableCell className="text-muted-foreground pl-10 whitespace-normal sm:pl-11">
+            <TableCell className="text-muted-foreground ps-10 whitespace-normal sm:ps-11">
               {row.episode
                 ? episodeLabel(row.episode)
                 : t("web.admin.users.detail.downloads.unknownEpisode")}
@@ -164,7 +164,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
             <TableCell>
               <StatusBadge badge={downloadStatusBadge(row.status, android)} />
             </TableCell>
-            <TableCell className={cn(mutedCell, "pr-4 sm:pr-5")}>
+            <TableCell className={cn(mutedCell, "pe-4 sm:pe-5")}>
               {formatShortDate(row.created_at)}
             </TableCell>
           </TableRow>
@@ -243,7 +243,7 @@ export function DeviceDownloadsCard({
             : t("web.admin.users.detail.common.unknownDevice")}
         </span>
       }
-      description={<span className="block pl-12">{meta.filter(Boolean).join(" · ")}</span>}
+      description={<span className="block ps-12">{meta.filter(Boolean).join(" · ")}</span>}
       actions={
         <>
           <span className="text-muted-foreground hidden text-xs tabular-nums sm:inline">
@@ -273,17 +273,17 @@ export function DeviceDownloadsCard({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-4 sm:pl-5">
+              <TableHead className="ps-4 sm:ps-5">
                 {t("web.admin.users.detail.downloads.device.column.title")}
               </TableHead>
               <TableHead className="hidden sm:table-cell">
                 {t("web.admin.users.detail.downloads.device.column.quality")}
               </TableHead>
-              <TableHead className="text-right">
+              <TableHead className="text-end">
                 {t("web.admin.users.detail.downloads.device.column.size")}
               </TableHead>
               <TableHead>{t("web.admin.users.detail.downloads.device.column.status")}</TableHead>
-              <TableHead className="hidden pr-4 sm:table-cell sm:pr-5">
+              <TableHead className="hidden pe-4 sm:table-cell sm:pe-5">
                 {t("web.admin.users.detail.downloads.device.column.added")}
               </TableHead>
             </TableRow>

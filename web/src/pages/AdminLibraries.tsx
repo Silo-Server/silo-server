@@ -389,7 +389,7 @@ function LibrariesPage() {
             </Button>
             <Button variant="outline" size="sm" asChild>
               <Link to="/admin/maintenance">
-                <Wrench className="mr-1 h-4 w-4" />
+                <Wrench className="me-1 h-4 w-4" />
                 {t("web.admin.libraries.page.catalogMaintenance")}
               </Link>
             </Button>
@@ -400,7 +400,7 @@ function LibrariesPage() {
                 setDialogOpen(true);
               }}
             >
-              <Plus className="mr-1 h-4 w-4" /> {t("web.admin.libraries.page.addLibrary")}
+              <Plus className="me-1 h-4 w-4" /> {t("web.admin.libraries.page.addLibrary")}
             </Button>
             <LibraryEditorDialog
               open={dialogOpen}
@@ -501,7 +501,7 @@ function LibrariesPage() {
                             ) : (
                               <button
                                 type="button"
-                                className="text-muted-foreground hover:text-foreground text-left transition-colors"
+                                className="text-muted-foreground hover:text-foreground text-start transition-colors"
                                 onClick={() => {
                                   setEditingLib(lib);
                                   setDialogOpen(true);
@@ -789,7 +789,7 @@ function LibrariesPage() {
                                   onClick={() => handleMountCheck(lib.id)}
                                 >
                                   <MountCheckButtonIcon
-                                    className="mr-1 h-3.5 w-3.5"
+                                    className="me-1 h-3.5 w-3.5"
                                     pending={isCheckingMount}
                                     result={mountCheck}
                                   />
@@ -806,7 +806,7 @@ function LibrariesPage() {
                                     }
                                     onClick={() => handleConfirmEmptyRootCleanup(lib)}
                                   >
-                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                    <Trash2 className="me-1 h-3.5 w-3.5" />
                                     {t("web.admin.libraries.warning.confirmCleanup")}
                                   </Button>
                                 ) : null}
@@ -1166,7 +1166,7 @@ function LibraryActiveWorkRow({
   return (
     <TableRow className="hover:bg-transparent">
       <TableCell colSpan={7} className="bg-muted/20 px-4 py-2">
-        <div className="text-muted-foreground flex flex-col gap-1.5 pl-12 text-[11px]">
+        <div className="text-muted-foreground flex flex-col gap-1.5 ps-12 text-[11px]">
           {activeRefreshJob ? (
             <div className="flex min-w-0 items-start gap-1.5">
               <StopTaskButton
@@ -1274,7 +1274,7 @@ function LibraryScanTasks({
       </div>
       <div
         className={cn(
-          "flex min-w-0 flex-col gap-0.5 pl-[3.375rem]",
+          "flex min-w-0 flex-col gap-0.5 ps-[3.375rem]",
           expanded && "max-h-56 overflow-y-auto",
         )}
       >
@@ -1636,7 +1636,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           </SelectContent>
         </Select>
         <div className="relative flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={t("web.admin.libraries.ambiguousRoots.filterPlaceholder")}
             value={search}
@@ -1644,7 +1644,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
               setSearch(e.target.value);
               pag.setPage(0);
             }}
-            className="h-8 pl-8 text-xs"
+            className="h-8 ps-8 text-xs"
           />
         </div>
       </div>
@@ -1656,7 +1656,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
               <TableHead>{t("web.admin.libraries.column.root")}</TableHead>
               <TableHead>{t("web.admin.libraries.column.type")}</TableHead>
               <TableHead>{t("web.admin.libraries.column.confidence")}</TableHead>
-              <TableHead className="text-right">{t("web.admin.libraries.column.files")}</TableHead>
+              <TableHead className="text-end">{t("web.admin.libraries.column.files")}</TableHead>
               <TableHead className="w-[120px]">{t("web.admin.libraries.column.actions")}</TableHead>
             </TableRow>
           </TableHeader>
@@ -1707,7 +1707,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                   <TableCell>
                     <Badge variant="secondary">{root.type_confidence}</Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                  <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
                     {root.observed_file_count}
                   </TableCell>
                   <TableCell>
@@ -2030,7 +2030,7 @@ function SkippedRootsSection() {
       onOpenChange={setOpen}
     >
       <div className="relative mb-2">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
           placeholder={t("web.admin.libraries.skippedRoots.filterPlaceholder")}
           value={search}
@@ -2038,7 +2038,7 @@ function SkippedRootsSection() {
             setSearch(e.target.value);
             pag.setPage(0);
           }}
-          className="h-8 pl-8 text-xs"
+          className="h-8 ps-8 text-xs"
         />
       </div>
       <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
@@ -2069,7 +2069,7 @@ function SkippedRootsSection() {
               >
                 {t("web.admin.libraries.column.reason")}
               </SortableHead>
-              <TableHead className="text-right">{t("web.admin.libraries.column.files")}</TableHead>
+              <TableHead className="text-end">{t("web.admin.libraries.column.files")}</TableHead>
               <SortableHead
                 field="first_seen"
                 activeField={sortField}
@@ -2103,7 +2103,7 @@ function SkippedRootsSection() {
                         <ChevronRight
                           className={cn(
                             "text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform",
-                            isExpanded && "rotate-90",
+                            isExpanded && "rotate-90 rtl:-rotate-90",
                           )}
                         />
                         <span className="truncate text-sm font-medium">
@@ -2120,7 +2120,7 @@ function SkippedRootsSection() {
                         {root.reason}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                    <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
                       {root.file_count}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-xs tabular-nums">
@@ -2293,7 +2293,7 @@ function UnmatchedItemsSection() {
           </SelectContent>
         </Select>
         <div className="relative flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={
               ignoredView
@@ -2308,7 +2308,7 @@ function UnmatchedItemsSection() {
               setSearch(e.target.value);
               setPage(0);
             }}
-            className="h-8 pl-8 text-xs"
+            className="h-8 ps-8 text-xs"
           />
         </div>
       </div>
@@ -2341,7 +2341,7 @@ function UnmatchedItemsSection() {
                       {u.title}
                     </Link>
                     {u.year ? (
-                      <span className="text-muted-foreground ml-1 text-xs">
+                      <span className="text-muted-foreground ms-1 text-xs">
                         {t("web.admin.libraries.unmatched.year", { year: String(u.year) })}
                       </span>
                     ) : null}
@@ -2475,7 +2475,7 @@ function StaleIDsSection() {
       onOpenChange={setOpen}
     >
       <div className="relative mb-2">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
           placeholder={t("web.admin.libraries.staleIds.filterPlaceholder")}
           value={search}
@@ -2483,7 +2483,7 @@ function StaleIDsSection() {
             setSearch(e.target.value);
             pag.setPage(0);
           }}
-          className="h-8 pl-8 text-xs"
+          className="h-8 ps-8 text-xs"
         />
       </div>
       <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">

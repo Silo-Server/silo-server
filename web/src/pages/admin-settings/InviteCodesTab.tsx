@@ -136,7 +136,7 @@ export default function InviteCodesTab() {
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
-              <Plus className="mr-1 h-4 w-4" /> {t("web.admin.settings.inviteCodes.create.button")}
+              <Plus className="me-1 h-4 w-4" /> {t("web.admin.settings.inviteCodes.create.button")}
             </Button>
           </DialogTrigger>
           <DialogContent>
