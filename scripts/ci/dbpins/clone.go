@@ -137,7 +137,10 @@ func cloneEnv(environ []string, template, cloneURL string) []string {
 }
 
 // sameDatabase reports whether two URLs name one database on one server,
-// however their options are spelled. The loopback names count as one host.
+// however their options are spelled. The loopback names count as one host:
+// this assumes one test server answers on loopback at a port. Separate servers
+// on 127.0.0.1 and ::1 at the same port would make a URL for the other server
+// look like the template's, and its tests would run against the copy.
 func sameDatabase(a, b string) bool {
 	if a == b {
 		return true
