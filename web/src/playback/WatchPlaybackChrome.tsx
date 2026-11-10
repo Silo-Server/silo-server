@@ -1,7 +1,7 @@
 import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
 import {
+  consumeAutomaticStart,
   expectAutomaticStart,
-  noteRouteStart,
   recordAutoAdvance,
   resetStillWatchingStreak,
 } from "@/player/stillWatching";
@@ -325,8 +325,11 @@ export function WatchPlaybackProvider({ children }: { children: ReactNode }) {
   }, [profileId, state.request]);
 
   const syncRouteRequest = useCallback((request: WatchRouteRequest) => {
-    if (stateRef.current.request?.requestKey !== request.requestKey) {
-      noteRouteStart(request.contentId);
+    // A post-roll start adopts its request before the route syncs, so the
+    // automatic marker is consumed whether or not the request is new.
+    const automatic = consumeAutomaticStart(request.contentId);
+    if (!automatic && stateRef.current.request?.requestKey !== request.requestKey) {
+      resetStillWatchingStreak();
     }
     dispatch({ type: "SYNC_ROUTE_REQUEST", request });
   }, []);

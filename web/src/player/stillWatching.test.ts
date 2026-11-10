@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { storage } from "@/utils/storage";
 import {
   expectAutomaticStart,
+  consumeAutomaticStart,
   getStillWatchingThreshold,
   isStillWatchingGated,
-  noteRouteStart,
   recordAutoAdvance,
   resetStillWatchingStreak,
   setStillWatchingThreshold,
@@ -32,14 +32,12 @@ describe("still watching streak", () => {
     expect(isStillWatchingGated()).toBe(false);
   });
 
-  it("clears the streak when the route opens something the viewer picked", () => {
-    setStillWatchingThreshold(1);
+  it("treats only the expected content as an automatic start, once", () => {
     expectAutomaticStart("ep-2");
-    recordAutoAdvance();
-    noteRouteStart("ep-2");
-    expect(isStillWatchingGated()).toBe(true);
-    noteRouteStart("ep-7");
-    expect(isStillWatchingGated()).toBe(false);
+    expect(consumeAutomaticStart("ep-7")).toBe(false);
+    expect(consumeAutomaticStart("ep-2")).toBe(true);
+    // Used up: opening the same episode later is the viewer's choice.
+    expect(consumeAutomaticStart("ep-2")).toBe(false);
   });
 
   it("never gates at threshold 0", () => {

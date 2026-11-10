@@ -36,11 +36,15 @@ export function expectAutomaticStart(contentId: string): void {
   expectedAutomaticContentId = contentId;
 }
 
-/** The route adopted a new playback request for this content. */
-export function noteRouteStart(contentId: string): void {
-  const automatic = expectedAutomaticContentId === contentId;
+/**
+ * Whether the route is opening the content an automatic start asked for. The
+ * marker is used up on a match, so opening that content again later counts as
+ * the viewer's choice.
+ */
+export function consumeAutomaticStart(contentId: string): boolean {
+  if (expectedAutomaticContentId !== contentId) return false;
   expectedAutomaticContentId = null;
-  if (!automatic) resetStillWatchingStreak();
+  return true;
 }
 
 /** The limit is per browser: the contract classes it as client-local. */
