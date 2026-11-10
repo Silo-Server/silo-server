@@ -186,7 +186,8 @@ Then register again with the same key the reset carried. The cleared
 installation accepts any positive generation, so the app can restart its counter
 at 1. A provider request already sent cannot be recalled, and a registration
 from the same account that reaches the server after the reset binds the
-installation, as a first registration would. The app should send the reset and the registration after
+installation, as a first registration would, unless a retirement reached it
+first (see "Retirement without a session"). The app should send the reset and the registration after
 it on the same serialized path as its other registrations for that device. A
 registration with an older key that is still in flight can otherwise bind first,
 and the next registration with the new key gets `push_installation_key_mismatch`
@@ -235,6 +236,13 @@ retirement becomes the installation's newest intent:
   `removed: true` and writes nothing. Without a stored key the server cannot
   authorize removal, so a legacy unordered registration for that `device_id` is
   left in place.
+- An installation its owner reset returns `200` with `removed: true` and stores
+  the sent key and generation as a fence, so a registration sent before the
+  retirement that arrives after it gets `409` instead of turning pushes back on.
+  The installation stays reserved for its account: another account gets `403`
+  even with the fence's key. A fence planted with a key the owner's app does not
+  hold gives the owner `push_installation_key_mismatch`, and the owner resets
+  again. Legacy unordered rows are left in place, as above.
 
 The server keeps the key hash and owner. To receive pushes again, register
 through `registerApplePushDevice` with the same key and a higher generation.
