@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
@@ -215,13 +216,14 @@ func (p *checkingDirectory) Authenticate(ctx context.Context, req *pluginv1.Auth
 	return p.directoryPlugin.Authenticate(ctx, req)
 }
 
-// TestDirectorySignInOverlappingSignOutDB: a sign-out everywhere that
-// commits after a directory sign-in began checking the password refuses the
-// sign-in, whether it lands during the directory's answer or after account
-// resolution commits (#2920). A sign-out that committed before the sign-in
-// began, the revocation a sign-in's own role change makes, and a sign-out
-// mark from another cluster's transaction ids do not.
-func TestDirectorySignInOverlappingSignOutDB(t *testing.T) {
+// TestPasswordSignInOverlappingSignOutDB: a sign-out everywhere that
+// commits after a password sign-in began checking the password refuses the
+// sign-in. For a directory sign-in it may land during the directory's answer
+// or after account resolution commits (#2920); a local sign-in is refused by
+// one that was still in progress when it began. A sign-out that committed
+// before the sign-in began, the revocation a sign-in's own role change
+// makes, and a sign-out mark from another cluster's transaction ids do not.
+func TestPasswordSignInOverlappingSignOutDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 	ctx := t.Context()
 	users := NewUserRepository(env.pool)
@@ -312,5 +314,51 @@ func TestDirectorySignInOverlappingSignOutDB(t *testing.T) {
 		if n := env.activeSessions(t, user.ID); n != wantLive {
 			t.Errorf("%s: %d live sessions, want %d", tc.name, n, wantLive)
 		}
+	}
+
+	// A local sign-in that begins while a sign-out everywhere holds the
+	// account and has not committed waits for the account lock, then finds
+	// the sign-out committed after it began.
+	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
+	local := env.localAccount(t, "fern", models.RoleUser)
+	tx, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	var signOutPID int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&signOutPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockUser(ctx, tx, local.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := RevokeSignInsInTransaction(ctx, tx, local.ID); err != nil {
+		t.Fatal(err)
+	}
+	signIn := make(chan error, 1)
+	go func() {
+		_, _, err := svc.Login(ctx, local.Username, "correct horse battery", "test", "")
+		signIn <- err
+	}()
+	for blocked := false; !blocked; {
+		if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE $1 = ANY(pg_blocking_pids(pid)))`, signOutPID).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case err := <-signIn:
+			t.Fatalf("local sign-in finished before the sign-out committed: %v", err)
+		default:
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-signIn; !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("local sign-in that overlapped a sign-out = %v, want %v", err, ErrInvalidCredentials)
+	}
+	if n := env.activeSessions(t, local.ID); n != 0 {
+		t.Errorf("local sign-in that overlapped a sign-out left %d live sessions", n)
 	}
 }

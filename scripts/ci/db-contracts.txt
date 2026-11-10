@@ -157,7 +157,7 @@
 ./internal/auth TestLoginIdentitySpaceDB
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
-./internal/auth TestDirectorySignInOverlappingSignOutDB
+./internal/auth TestPasswordSignInOverlappingSignOutDB
 ./internal/auth TestSignupPolicySerializationDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres

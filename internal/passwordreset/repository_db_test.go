@@ -42,7 +42,7 @@ func newResetDB(t *testing.T) resetDB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = admin.Exec(context.WithoutCancel(ctx), "DROP SCHEMA "+q+" CASCADE"); admin.Close() })
-	for _, table := range []string{"users", "auth_sessions", "password_reset_tokens", "abs_sessions", "jellycompat_sessions", "device_login_requests"} {
+	for _, table := range []string{"users", "auth_sessions", "account_sign_outs", "password_reset_tokens", "abs_sessions", "jellycompat_sessions", "device_login_requests"} {
 		if _, err = admin.Exec(ctx, "CREATE TABLE "+q+"."+table+" (LIKE public."+table+" INCLUDING ALL)"); err != nil {
 			t.Fatal(err)
 		}
