@@ -282,4 +282,27 @@ describe("ProfilesSettings", () => {
 
     expect(selectProfile).toHaveBeenCalledWith(lockedProfile, "verified-token");
   });
+
+  it("switches to a locked profile without its PIN while an administrator views as the account", async () => {
+    const lockedProfile = makeProfile({ id: "profile-2", name: "Kids", has_pin: true });
+    mocks.useProfiles.mockReturnValue({
+      data: [makeProfile(), lockedProfile],
+      isLoading: false,
+      maxProfiles: null,
+    });
+    mocks.useAuth.mockReturnValue({
+      profile: makeProfile(),
+      selectProfile,
+      verifyProfilePin,
+      isImpersonating: true,
+    });
+
+    await render(<ProfilesSettings />);
+
+    await click(findButton(container, "Use"));
+
+    expect(container.textContent).not.toContain("confirm-pin");
+    expect(verifyProfilePin).not.toHaveBeenCalled();
+    expect(selectProfile).toHaveBeenCalledWith(lockedProfile);
+  });
 });

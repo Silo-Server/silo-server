@@ -91,11 +91,9 @@ func (c *Claims) IsOwnLoginSession() bool {
 }
 
 // SkipsProfilePIN reports whether the credential may act as a PIN-locked
-// profile without that profile's verification token. An API key carries no
-// PIN proof by design. An administrator viewing as the account already holds
-// authority over its profiles (they can reset a profile's PIN), so the PIN
-// does not stand between them and the profile. Household management still
-// needs a real proof: a scope resolved this way is PINVerificationSkipped.
+// profile without its verification token: an API key or a view-as session.
+// Scopes resolved this way are PINVerificationSkipped; see
+// docs/architecture/profile-verification-tokens.md.
 func (c *Claims) SkipsProfilePIN() bool {
 	return c != nil && (c.TokenType == TokenTypeAPIKey || c.ImpersonatorUserID != nil)
 }

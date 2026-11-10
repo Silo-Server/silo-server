@@ -421,9 +421,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if authority.Role != identity.Role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		// A login-session ticket; a view-as session needs no PIN proof, as
-		// at the viewer gate (auth.Claims.SkipsProfilePIN).
-		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken, SkipPINVerification: identity.ImpersonatorUserID != nil})
+		// The login-session claims the ticket stands for; Role is set below.
+		base := auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, TokenType: auth.TokenTypeAccess}
+		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken, SkipPINVerification: base.SkipsProfilePIN()})
 		if errors.Is(err, access.ErrProfileUnverified) || (err == nil && !scope.ProfileVerified) {
 			return ctx, nil, errSocketAccessChanged
 		}
@@ -437,8 +437,10 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		}
 		role := authority.Role
 		if role == eventsAdminRole {
+			admin := base
+			admin.Role = role
 			acting, err := actingAdmin(checkCtx, apimw.ActingAdminRequest{
-				Claims:    &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess},
+				Claims:    &admin,
 				ProfileID: identity.ProfileID,
 				DeviceID:  identity.DeviceID,
 			})
@@ -452,7 +454,8 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if identity.AccessFingerprint != "" && identity.EffectiveRole != role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		claims := &auth.Claims{ImpersonatorUserID: identity.ImpersonatorUserID, UserID: identity.UserID, SessionID: identity.SessionID, Role: role, TokenType: auth.TokenTypeAccess}
+		claims := &base
+		claims.Role = role
 		authority.Narrow(claims)
 		ctx = apimw.SetClaims(ctx, claims)
 		ctx = apimw.SetProfileID(ctx, identity.ProfileID)

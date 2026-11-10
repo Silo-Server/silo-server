@@ -85,6 +85,7 @@ func TestV1ViewerReadWithoutProfileHeader(t *testing.T) {
 		EpisodeLookup: fakeMarkerEpisodeLookup{"episode-mature": {ContentID: "episode-mature", SeriesID: "series-mature"}},
 	}
 
+	viewAsAdmin := 1
 	route := func(profiles []userstore.Profile) http.Handler {
 		stores := householdGateStores{store: householdGateStore{profiles: profiles}}
 		viewer := apimw.NewViewerAccessMiddleware(policy.NewViewerResolver(fakeMarkerUsers{user.ID: user}, stores, nil, policy.NewPDP(engine)))
@@ -99,24 +100,20 @@ func TestV1ViewerReadWithoutProfileHeader(t *testing.T) {
 		profiles   []userstore.Profile
 		tokenType  string
 		profileID  string
-		viewAs     bool
+		viewAs     *int // the impersonating administrator, if any
 		wantStatus int
 	}{
-		{"child profile cannot see the mature series", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "kid", false, http.StatusNotFound},
-		{"omitting the header no longer unlocks it", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "", false, http.StatusBadRequest},
-		{"PIN-locked parent still needs its token", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "parent", false, http.StatusForbidden},
-		{"administrator viewing as the account needs no PIN", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "parent", true, http.StatusOK},
-		{"administrator viewing as the account keeps the child's limits", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "kid", true, http.StatusNotFound},
-		{"unlimited household keeps account scope", []userstore.Profile{{ID: "parent", IsPrimary: true}, guest}, auth.TokenTypeAccess, "", false, http.StatusOK},
-		{"API key keeps profile-less access", []userstore.Profile{parent, kid}, auth.TokenTypeAPIKey, "", false, http.StatusOK},
+		{"child profile cannot see the mature series", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "kid", nil, http.StatusNotFound},
+		{"omitting the header no longer unlocks it", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "", nil, http.StatusBadRequest},
+		{"PIN-locked parent still needs its token", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "parent", nil, http.StatusForbidden},
+		{"administrator viewing as the account needs no PIN", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "parent", &viewAsAdmin, http.StatusOK},
+		{"administrator viewing as the account keeps the child's limits", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "kid", &viewAsAdmin, http.StatusNotFound},
+		{"unlimited household keeps account scope", []userstore.Profile{{ID: "parent", IsPrimary: true}, guest}, auth.TokenTypeAccess, "", nil, http.StatusOK},
+		{"API key keeps profile-less access", []userstore.Profile{parent, kid}, auth.TokenTypeAPIKey, "", nil, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/markers/items/episode-mature", nil)
-			claims := &auth.Claims{UserID: user.ID, Role: user.Role, SessionID: "session-1", TokenType: tc.tokenType}
-			if tc.viewAs {
-				admin := 1
-				claims.ImpersonatorUserID = &admin
-			}
+			claims := &auth.Claims{UserID: user.ID, Role: user.Role, SessionID: "session-1", TokenType: tc.tokenType, ImpersonatorUserID: tc.viewAs}
 			req = req.WithContext(apimw.SetClaims(req.Context(), claims))
 			if tc.profileID != "" {
 				req.Header.Set("X-Profile-Id", tc.profileID)

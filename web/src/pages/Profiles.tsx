@@ -72,9 +72,7 @@ export default function Profiles() {
   }
 
   function handleSelect(profile: Profile) {
-    // An administrator viewing as the account opens a locked profile
-    // without its PIN; the server accepts the view-as session the same way.
-    // Managing the household still asks for the primary profile's PIN.
+    // View-as opens a locked profile without its PIN; the server allows it too.
     if (profile.has_pin && !isImpersonating) {
       setPinRequest({ profile, purpose: "select" });
       return;

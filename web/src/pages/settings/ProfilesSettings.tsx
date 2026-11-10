@@ -58,7 +58,7 @@ export default function ProfilesSettings() {
   const { data: libraries = [], isLoading: librariesLoading } = useAvailableUserLibraries({
     includeHidden: true,
   });
-  const { profile: activeProfile, selectProfile, verifyProfilePin } = useAuth();
+  const { profile: activeProfile, selectProfile, verifyProfilePin, isImpersonating } = useAuth();
   const deleteMutation = useDeleteProfile();
 
   const [editorOpen, setEditorOpen] = useState(false);
@@ -86,7 +86,8 @@ export default function ProfilesSettings() {
   }
 
   function handleUseProfile(profile: Profile) {
-    if (profile.has_pin) {
+    // View-as opens a locked profile without its PIN; the server allows it too.
+    if (profile.has_pin && !isImpersonating) {
       setPinProfile(profile);
       return;
     }

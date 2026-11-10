@@ -235,11 +235,10 @@ func (h *EventsHandler) withProfileProof(decide func(context.Context) (bool, err
 		return decide
 	}
 	input := access.ResolveInput{
-		UserID:       claims.UserID,
-		SessionID:    claims.SessionID,
-		ProfileID:    profileID,
-		ProfileToken: profileToken,
-		// As at the viewer gate (auth.Claims.SkipsProfilePIN).
+		UserID:              claims.UserID,
+		SessionID:           claims.SessionID,
+		ProfileID:           profileID,
+		ProfileToken:        profileToken,
 		SkipPINVerification: claims.SkipsProfilePIN(),
 	}
 	return func(ctx context.Context) (bool, error) {
