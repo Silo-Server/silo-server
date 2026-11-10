@@ -46,6 +46,8 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 			Config:      s.Config,
 			Position:    s.Position,
 			WebOnly:     s.WebOnly,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		}
 
 		if hasOverride {
@@ -55,6 +57,7 @@ func Resolve(admin []*PageSection, overrides []ProfileSectionOverride) []Resolve
 			}
 			if o.Title != "" {
 				rs.Title = o.Title
+				rs.TitleKey, rs.TitleArgs = overrideTitleKey(s, o.Title)
 			}
 			if o.Featured != nil {
 				rs.Featured = *o.Featured
@@ -117,6 +120,8 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			Config:      s.Config,
 			Position:    s.Position,
 			WebOnly:     s.WebOnly,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		}
 
 		if hasOverride {
@@ -127,6 +132,7 @@ func ResolveForSettings(admin []*PageSection, overrides []ProfileSectionOverride
 			}
 			if o.Title != "" {
 				rs.Title = o.Title
+				rs.TitleKey, rs.TitleArgs = overrideTitleKey(s, o.Title)
 			}
 			if o.Featured != nil {
 				rs.Featured = *o.Featured
@@ -221,6 +227,17 @@ func resolveUserAdded(o ProfileSectionOverride) ResolvedSection {
 		IsCustom:    true,
 		Hidden:      o.Hidden,
 	}
+}
+
+// overrideTitleKey is the title key of admin section s under a profile's
+// title override. Before October 2026 the web saved the admin title with
+// every override of a row, so an override equal to the stored admin title
+// keeps its key; any other override is the profile's own text.
+func overrideTitleKey(s *PageSection, title string) (string, map[string]string) {
+	if title == s.Title {
+		return s.TitleKey, s.TitleArgs
+	}
+	return "", nil
 }
 
 // readableTitle replaces a blank title, or one that is just the raw

@@ -287,3 +287,24 @@ func TestGeneratedHomeLibraryRecentDefaultsMangaScope(t *testing.T) {
 		}
 	}
 }
+
+// Every row the server builds as a default carries the catalog key of its
+// title, so clients can translate it; a generated library row also names
+// its library.
+func TestDefaultSectionsCarryTitleKeys(t *testing.T) {
+	library := 7
+	rows := DefaultHomeSections([]*models.MediaFolder{{ID: 3, Name: "Books", Type: "audiobooks"}, {ID: 4, Name: "Manga", Type: "manga"}, {ID: 5, Name: "Shows", Type: "series"}})
+	for _, libraryType := range []string{"movies", "series", "audiobooks", "ebooks", "manga", "mixed"} {
+		rows = append(rows, DefaultLibrarySectionsForType(&library, libraryType)...)
+	}
+	rows = append(rows, DefaultLibrarySections(&library)...)
+	rows = append(rows, generatedHomeLibraryRecentDefaults(5, "Shows", "series")...)
+	for _, row := range rows {
+		if row.TitleKey == "" {
+			t.Errorf("default row %q (%s) has no title key", row.Title, row.SectionType)
+		}
+		if _, generated := ParseGeneratedHomeLibraryRecentConfig(row.Config); generated && row.TitleArgs[titleArgLibrary] == "" {
+			t.Errorf("generated row %q has no library argument", row.Title)
+		}
+	}
+}

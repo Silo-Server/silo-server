@@ -1677,6 +1677,12 @@ miss cards that a fetcher drops after applying its limit. A client sends `item_l
 two reads only when `getHomeCapabilities` reports `row_item_limit_max` (100), which a server that
 predates the parameter on them does not send. A row that draws a random subset on each read may answer
 different cards when read again.
+`Section`, `SectionLayoutEntry`, and `ProfileSectionSetting` carry optional `title_key` and
+`title_args` (an object of strings) while the row's `title` is server text, so a client can show
+the title in its own language; `getHomeCapabilities` reports `section_title_keys: true` when the
+server sends them. `page_sections.title_key` stores the key beside the title, and a trigger
+clears it on any update that changes the title without changing the key, so an older binary's
+rename cannot leave a stale key. See [the catalog API](../catalog-api.md#section-titles).
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond

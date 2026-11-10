@@ -211,6 +211,8 @@ func sectionLayoutOf(resolved []sections.ResolvedSection) SectionLayoutView {
 			ItemLimit:   s.ItemLimit,
 			IsCustom:    s.IsCustom,
 			Customized:  s.Customized,
+			TitleKey:    s.TitleKey,
+			TitleArgs:   s.TitleArgs,
 		})
 	}
 	return resp
@@ -292,6 +294,8 @@ func (h *SectionHandler) librarySectionItems(ctx context.Context, libraryID int,
 				IsCustom:    withItems.IsCustom,
 				Customized:  withItems.Customized,
 				Items:       []sectionItemResponse{},
+				TitleKey:    withItems.TitleKey,
+				TitleArgs:   withItems.TitleArgs,
 			}, nil
 		}
 		return resp.Sections[0], nil
