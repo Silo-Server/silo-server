@@ -5,17 +5,27 @@
 > [Bridge note](#bridge-note) and are retired after the pre-1.0 bridge window. See
 > [the native API contract](architecture/api-contract.md).
 
-Server-administration operations under `/api/v2/admin`. Every `/api/v2/admin`
-operation requires an authenticated account with the server-wide `admin` role — the
-same authorization as `/api/v2/admin/sessions` — and none of them are part of
-the client-facing contract that third-party apps build against. Acting-administrator
+Server-administration operations under `/api/v2/admin`. These operations are part of
+the `/api/v2` contract and its 1.0 additive-only lock, like every other native route.
+Player and viewer apps don't need them; administration and monitoring tools build on
+them, usually with a [scoped API key](api-keys-api.md#monitoring-and-session-control-scopes).
+Most require an authenticated account with the server-wide `admin` role, the same
+authorization as `/api/v2/admin/sessions`. The exceptions: the item metadata edit, refresh, match and
+translation routes take the `metadata_curation` permission (see
+[catalog administration](admin-catalog-api.md)); `GET /api/v2/admin/jobs/{id}` also
+lets an account read an item-refresh job it started (see
+[retained jobs](admin-tasks-api.md#retained-jobs)); and the job artifact download and
+the log socket are authorized by a signed capability and a socket ticket (see
+[artifact download](admin-catalog-api.md#artifact-download) and
+[the log stream handshake](#administrator-log-stream-handshake-in-v2)). Acting-administrator
 authority belongs to the account: a secondary profile on an administrator account does
 not inherit it. A few deliberately public reads outside `/api/v2/admin` (marked
 `public` in the route tables) are documented beside the admin writes they pair with.
 
-This document covers only the operations listed below. The rest of the
-admin surface predates it and is currently documented by the code and by the
-design documents under `docs/design/`.
+This document covers only the operations listed below. Backups are in
+[backups-api.md](backups-api.md). The rest of the admin surface predates it
+and is currently documented by the code and by the design documents under
+`docs/design/`.
 
 ## Wire conventions
 
@@ -95,14 +105,54 @@ read the same URLs as the web app. Recommend source art at or above the stored
 size — anything larger is downscaled, anything smaller is either left small
 (wordmark, login background) or upscaled (mark).
 
-Failure modes: `400 bad_request` for an unknown kind, a missing `file` field, or
-a content type the kind does not accept; `413 too_large` past the cap;
-`503 unavailable` when asset storage is not configured.
+Failure modes: `422 validation_failed` for an unknown kind, a missing `file` field, or
+a content type the kind does not accept; `413 payload_too_large` past the cap;
+`503 dependency_unavailable` with `Retry-After: 30` when asset storage is not
+configured. The frozen v1 upload route answers `400 bad_request`, `413 too_large`
+and `503 unavailable` for the same cases.
 
 Uploaded SVG favicons are admin-controlled but served from the app origin, so
 every asset response carries `X-Content-Type-Options: nosniff` and a sandboxing
 `Content-Security-Policy` — a directly-navigated SVG cannot run script in the
 viewer's session.
+
+## Card overlay images
+
+Administrators upload images that card overlay badges draw: a logo beside a badge's
+label, or an image that replaces the whole badge for one value. The library is
+server-wide; profiles and the server default (`defaults.card_overlays`) name images
+by `ref` in their `ui.card_overlays` document (see
+[card-overlays.md](architecture/card-overlays.md)).
+
+| Route                                       | Auth      | Purpose                                                                |
+| ------------------------------------------- | --------- | ---------------------------------------------------------------------- |
+| `POST /api/v2/admin/overlay-images`         | admin     | Upload (multipart, fields `file` and `name`). `201` with the image.    |
+| `DELETE /api/v2/admin/overlay-images/{ref}` | admin     | Remove the image and delete its bytes. `204`; an unknown ref is `404`. |
+| `GET /api/v2/overlay-images/{ref}`          | public    | Serve the stored WebP. Content-addressed, so `immutable` cached.       |
+| `GET /api/v2/settings/overlay-config`       | signed in | Lists the library under `images`, with `image_uploads_available`.      |
+
+`file` accepts PNG, JPEG or WebP up to 4 MiB. The server re-encodes it to WebP,
+keeping transparency, scaled down to fit 600×300 and never enlarged; `width` and
+`height` report the stored size. `ref` is the SHA-256 of the stored bytes plus
+`.webp`, so uploading the same image again keeps one entry and takes the new
+`name` (1 to 64 characters after trimming). The library holds at most 256 images.
+
+The image row in `overlay_images` is what makes a ref current: the public read
+answers `404` for a ref that was deleted, even while a client still has its bytes
+cached. A document that names a missing image falls back to the badge's own
+rendering. The bytes live under `overlay-images/` in the assets store, and the
+`preserve_uploads` storage transition copies them.
+
+Failure modes: `422 validation_failed` at `body.file` for a missing file, a
+content type outside the list, or bytes that are not a readable image, and at
+`body.name` for a missing or overlong name; `413 payload_too_large` past 4 MiB;
+`409 conflict` when the library is full; `409 capability_not_configured` when
+the server has no asset storage. Both routes are demo-restricted, and the
+upload is `non_retryable`: a delayed retry can restore an image deleted in
+between.
+
+Image responses carry `X-Content-Type-Options: nosniff` and a sandboxing
+`Content-Security-Policy`, like branding assets.
 
 ## Server status and restarts
 
@@ -260,7 +310,7 @@ configuration, last health result, and last stored hardware inventory. See
 | Field | Type | Meaning |
 |---|---|---|
 | `id`, `name`, `type`, `url` | string, string, string, string | Identity. `type` is `proxy` or `transcode`. `url` is the backend address: what the API server dials for health checks, capability fetches, and dispatch, and what a proxy dials to reach a transcode node — a private/internal address is fine and keeps that traffic off the public network. |
-| `public_url` | string \| null | Client-facing base URL, when it differs from `url`. Stream and download URLs handed to players are built on it. Only meaningful on proxy nodes — clients never talk to transcode nodes. Absent or `null` means clients use `url`, which must then be publicly reachable. |
+| `public_url` | string | Client-facing base URL, when it differs from `url`. Stream and download URLs handed to players are built on it. Only meaningful on proxy nodes: clients never talk to transcode nodes. Omitted when unset, and clients then use `url`, which must be publicly reachable. |
 | `enabled` | bool | Whether the node is eligible for new placement. Disabling also stops routine health sampling after pool reconciliation; existing streams continue. See the v2 node configuration lifecycle below. |
 | `healthy` | bool | Result of the last health check. |
 | `drain_requested` | bool | An administrator asked this transcode node to drain: it stays listed and health-checked, but new work goes to other nodes while its sessions finish. See [node drain (v2)](#node-drain-v2). Always `false` on a proxy. |
@@ -333,10 +383,9 @@ proxy has none. The Jellyfin-compatible playback redirects use the same
 accessor.
 
 A node finds its own row by URL first: `NODE_URL` on the node is matched
-against `stream_nodes.url`, ignoring a trailing slash on either side. Set
-`NODE_URL` explicitly on every node. Without it a node guesses
-`http://localhost:<port>` and adopts whatever row carries that URL, which on a
-multi-node deployment can be a different machine's policy.
+against `stream_nodes.url`, ignoring a trailing slash on either side. A proxy
+or transcode node refuses to start without `NODE_URL`: a URL guessed from its
+listen port could match a different machine's row and adopt its policy.
 
 If the URL does not match, the node falls back to `NODE_NAME` against the
 registered name. This covers split-horizon topologies where `stream_nodes.url`
@@ -637,15 +686,20 @@ non-positive cap and an empty group mean "unlimited" and "ungrouped"; an empty
 `public_url` means clients use `url`.
 
 `201 Created` with the created node in the same shape as one list entry (with
-no capability fields yet — nothing has been fetched). `400 Bad Request` when a
-required field is missing or `type` is not one of the two allowed values. The
+no capability fields yet: nothing has been fetched). `422 validation_failed` when a
+required field is missing or `type` is not one of the two allowed values, and
+`409` when a node with that URL already exists with a different configuration; see
+[node configuration lifecycle (v2)](#node-configuration-lifecycle-v2). The
 node pools are reloaded afterwards.
 
 ## `PUT /api/v2/admin/nodes/{id}`
 
 Updates a node's mutable fields. Every field is optional; an omitted field is
 left unchanged. An empty-string `group` clears the group, and a non-positive
-`max_jobs` or `max_bandwidth_kbps` clears that cap.
+`max_jobs` or `max_bandwidth_kbps` clears that cap. The request needs the node's
+`config_etag` in `If-Match`: `428` without one, `412` when it is stale. A new
+`url` that belongs to another node gets `409`. See
+[node configuration lifecycle (v2)](#node-configuration-lifecycle-v2).
 
 `public_url` follows the same convention as the overrides below: `null` or an
 empty string clears it, sending clients back to `url`; an omitted field leaves
@@ -658,7 +712,7 @@ change with a real effect, so it is deliberately expressible rather than being
 indistinguishable from omission.
 
 `200 OK` with the updated node, `404 Not Found` for an unknown id,
-`400 Bad Request` when `hw_accel_override` is not one of `auto`, `qsv`,
+`422 validation_failed` when `hw_accel_override` is not one of `auto`, `qsv`,
 `vaapi`, `nvenc`, `none` (matched case-insensitively and stored lowercase, as
 `playback.hw_accel` is). The node pools are reloaded afterwards, so remote
 dispatch honors a new override immediately; the target node itself picks it up
@@ -681,7 +735,8 @@ because only the node can say what hardware it has.
 
 Removes a node. `204 No Content`, or `404 Not Found` for an unknown id. The
 node pools are reloaded afterwards. Sessions already streaming from the node
-are not torn down by this call.
+are not torn down by this call. Like PUT, it needs the node's `config_etag` in
+`If-Match`: `428` without one, `412` when it is stale.
 
 ## `POST /api/v2/admin/nodes/{id}/check`
 
@@ -696,6 +751,7 @@ than as an error status. `404 Not Found` for an unknown id.
 | `healthy` | bool | The node answered its health endpoint. |
 | `active_jobs`, `egress_kbps` | int | What it reported. Zero when unhealthy. |
 | `capabilities_hash` | string | The hash the node advertised on this check. Omitted when the node reports none. |
+| `health_persisted` | bool | The call that stores the result returned successfully. `false` does not erase the live observation; see [node health and reprobe commands (v2)](#node-health-and-reprobe-commands-v2). |
 
 The check also persists the node's resource sample, so `last_stats` on the list
 response reflects this check immediately. The sample itself is not echoed here.
@@ -733,9 +789,9 @@ reported in the body rather than as an HTTP error status, matching
 
 | Field | Type | Meaning |
 |---|---|---|
-| `node_id`, `node_name` | int, string | The node this action ran against. |
+| `node_id`, `node_name` | string, string | The node this action ran against. `node_id` is an opaque decimal string. |
 | `status` | string | `ok` or `error`. |
-| `error` | string | Why the node failed. Omitted on success. |
+| `error` | string | A fixed summary saying the node refused or the re-probe could not be confirmed; the node's own error is not returned. Omitted on success. |
 | `resolved` | string | The backend the node picked after re-probing. Omitted on failure. |
 | `capability_hash` | string | The snapshot the node published. Compare it against `capabilities_hash` from the list response taken *before* the call to see whether anything changed. Omitted on failure. |
 | `capabilities_refreshed` | bool | Whether this server also stored the node's new inventory before answering. |
@@ -887,7 +943,7 @@ nothing and cannot hang regardless of what a mount or a GPU query is doing.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `available` | bool | This host can be sampled. False on a non-Linux host, before the first sample lands, or when no sampler is running — in which case the fields below are absent. |
+| `available` | bool | This host can be sampled. False on a non-Linux host, before the first sample lands, or when no sampler is running. `sampled_at` and `system` are then absent and `gpu` is an empty array. |
 | `sampled_at` | RFC3339 string | When the sample was taken. Omitted when there is none. |
 | `system` | object | Same shape as `last_stats.system` above. |
 | `gpu` | object[] | Same shape as `last_stats.gpu` above. |
@@ -897,7 +953,8 @@ is not an error. History and alerting are Prometheus's job — the same numbers
 are exposed as `streamapp_node_*` gauges on this process's dedicated opt-in `/metrics`
 endpoint, with one deliberate difference: `/metrics` is unauthenticated, so its
 disk series are labeled `mount="scratch"` / `mount="library-N"` and the library
-paths themselves appear only here, behind admin auth.
+paths themselves appear only here, behind admin auth. A scoped API key receives
+the same document without disk `path` values.
 
 ## `GET /api/v2/admin/stream-telemetry/parity`
 
@@ -986,10 +1043,10 @@ existed — so a second copy of that schema on the server would only be another
 place to update whenever a widget is added. That also means a layout written by
 a newer build degrades gracefully on an older one instead of being rejected.
 
-Writes are last-write-wins. The layout is one admin's own blob, so a race
-between two of their tabs can cost only the older arrangement; `updated_at` is
-returned so a compare-and-set could be layered on later without a contract
-change.
+Saves are guarded: a save needs the layout's current `ETag` (from the GET or the
+previous save's `204`) in `If-Match`, so a stale tab's save is refused with `412`
+instead of replacing a newer arrangement.
+See [Save the administrator dashboard layout (v2)](#save-the-administrator-dashboard-layout-v2).
 
 The web client keeps a copy in `localStorage` for instant paint and offline use,
 adopts the server document when it arrives, and — the first time it finds no
@@ -1017,22 +1074,30 @@ is the normal first-load answer, not an error.
 
 ### `PUT /api/v2/admin/dashboard/layout`
 
-Body: `{"layout": {…}}`. Responds `204 No Content` on success, and
-`400 bad_request` when the body is not valid JSON, when `layout` is absent or
-`null`, when `layout` is not a JSON object, or when the body exceeds 16 KiB.
+Body: `{"layout": {…}}`. The request needs the layout's current `ETag`, from the
+GET or the previous save's `204`, in `If-Match`: `428` without one, `412` when it
+is stale. Responds `204 No Content` with the new
+`ETag` on success, `400` when the body is not valid JSON, `422 validation_failed`
+when `layout` is absent, `null` or not a JSON object, and `413` when the body
+exceeds 16 KiB.
 
 ### `DELETE /api/v2/admin/dashboard/layout`
 
-Resets this admin to the default arrangement. `204 No Content`, and idempotent:
-deleting a layout that is not there succeeds.
+Resets this admin to the default arrangement. `204 No Content`, including when no
+layout is stored. It is not safe to retry: a repeated reset can delete a save made
+in between. See
+[Reset the administrator dashboard layout (v2)](#reset-the-administrator-dashboard-layout-v2).
 
 ## `GET /api/v2/admin/dashboard/capabilities`
 
 Feature detection for the admin dashboard surface. Per the v1 rules a new
 feature is detected rather than inferred from a server version, and every field
 here is additive: a server that has this endpoint answers `true` for all of
-them, and a server that predates the dashboard answers `404`. That is how a
+them except `server_layouts`, and a server that predates the dashboard answers `404`. That is how a
 client tells "this deployment is older than my build" from "the request failed".
+On v2, `server_layouts` stays `false` until the layout lifecycle is accepted, even
+though layout save and reset are served; see
+[dashboard capability discovery in v2](#dashboard-capability-discovery-in-v2).
 
 | Field | Meaning |
 |---|---|
@@ -1045,10 +1110,12 @@ client tells "this deployment is older than my build" from "the request failed".
 | `watch_providers` | `GET /admin/stats` carries the per-provider `watch_providers` array. |
 | `downloads_stats` | `GET /admin/stats/downloads` serves the offline-download aggregate, and timeseries points carry the additive `download_egress_kbps` split. |
 | `egress_totals` | `GET /admin/stats/timeseries` carries the window's additive `egress_bytes` and `download_egress_bytes` totals. |
+| `egress_by_source` | `GET /admin/stats/timeseries` carries `egress_sources` and each point's `egress_by_source` split. |
+| `api_clients` | `GET /admin/stats/api-clients` and `GET /admin/stats/api-clients/{session_id}/endpoints` serve per-session API request counts. |
 
 ```json
 {
-  "server_layouts": true,
+  "server_layouts": false,
   "timeseries": true,
   "playback_activity": true,
   "top_activity": true,
@@ -1056,7 +1123,9 @@ client tells "this deployment is older than my build" from "the request failed".
   "log_level_list": true,
   "watch_providers": true,
   "downloads_stats": true,
-  "egress_totals": true
+  "egress_totals": true,
+  "egress_by_source": true,
+  "api_clients": true
 }
 ```
 
@@ -1069,6 +1138,7 @@ provider. Cached in-process for 15s and bypassed with `?refresh=1`.
 |---|---|---|
 | `total_items`, `total_files`, `total_users` | int | Catalog and account totals. |
 | `total_movies`, `total_movie_files`, `total_shows`, `total_show_files` | int | Per-kind catalog totals. |
+| `advisory_titles` | int | Movies and series that carry an advisory age, which is what a profile's `max_advisory_age` limit acts on. Compare it with `total_movies` + `total_shows`. |
 | `active_streams` | int | Playback sessions currently synced as live. |
 | `total_storage_bytes` | int | Sum of every scanned media file's size. |
 | `watch_providers` | object[] | One entry per watch provider, ordered by `provider`. Always an array, never null. |
@@ -1207,6 +1277,14 @@ without it a deployment with no stream nodes would chart zero egress forever.
 Relay traffic is excluded, so bytes a proxy node passes through the API node are
 not counted twice.
 
+The per-node split lives in `dashboard_node_egress_samples`: one row per node
+serving traffic, written in the same statement as the shared row and only by
+the replica whose shared row won the minute, so the split and the total come
+from one snapshot. It breaks down egress the shared row already holds, and it
+is kept out of `dashboard_metric_samples` so a reader that sums that table,
+including an older build during a rolling upgrade or after a rollback, never
+counts node egress twice.
+
 Stream counts in a point therefore come from the shared row, while `egress_kbps`
 sums every source for a minute before the peak minute of the bucket is taken.
 Precision is mixed by design: node egress is a 30-second rolling average and
@@ -1227,6 +1305,23 @@ subset as separate series rather than deriving a playback series. Samples
 written before the split report `0` — read that as "not measured yet", not
 "no downloads".
 
+`egress_by_source` splits `egress_kbps` by the keys `egress_sources` lists,
+read in the same database snapshot as the points:
+`api` for every API process together and `node:<node_id>` for one stream node,
+named from `stream_nodes` (a node deleted since is named `Removed node <id>`).
+Unlike the other columns, the split is read from the minute whose
+`egress_kbps` peaked in the bucket, so its values add up to no more than that
+point's `egress_kbps`. The remainder is egress no source accounts for: minutes
+sampled before per-node rows existed still carry their `api` entry, but their
+node egress is unattributed. Nodes with no traffic in the bucket's peak minute
+are absent from its split.
+
+`egress_sources` lists every source with samples anywhere in the window, so it
+also covers sources that never served at a bucket's peak minute. Each carries
+`egress_bytes`, what it served over the whole window, integrated from every
+sampled minute like the window's own `egress_bytes`. Rank sources by that, not
+by summing the per-point split, which only sees peak minutes.
+
 A bucket with no sample in it is absent from `points` rather than zero — a gap
 (a restart, a stopped server) and an idle bucket are different facts. Stream
 telemetry being disabled means no `proc:` rows, not an error.
@@ -1241,6 +1336,10 @@ fresh install renders "collecting data" instead of an empty chart.
   "oldest_sample_at": "2026-08-24T09:31:00Z",
   "egress_bytes": 412500000000,
   "download_egress_bytes": 37800000000,
+  "egress_sources": [
+    { "key": "api", "kind": "api", "name": "API server", "egress_bytes": 41300000000 },
+    { "key": "node:4", "kind": "node", "node_id": "4", "name": "proxy-ams", "egress_bytes": 371200000000 }
+  ],
   "points": [
     {
       "t": "2026-08-26T11:55:00Z",
@@ -1249,7 +1348,8 @@ fresh install renders "collecting data" instead of an empty chart.
       "remux": 0,
       "transcode": 2,
       "egress_kbps": 48211,
-      "download_egress_kbps": 6100
+      "download_egress_kbps": 6100,
+      "egress_by_source": { "api": 9211, "node:4": 39000 }
     }
   ]
 }
@@ -1334,9 +1434,12 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 | `limit` | int | Rows per list. Default 10, accepted range 1..25. |
 | `refresh` | bool | Bypass the cache for this read. |
 
-`plays` on both lists counts `user_watch_history` rows with source `playback`
-or `legacy` (the default for rows written without a source). Playback from Silo
-and Jellyfin clients both writes `playback` rows. Marking something watched is
+`plays` on both lists counts completed `user_watch_history` rows with source
+`playback` or `legacy` (the default for rows written without a source). Every
+playback stop writes a row, completed only past the watched threshold, so a
+title watched in several sittings is one play and a title abandoned partway is
+none; the time spent in those sittings still counts toward `total_seconds`.
+Playback from Silo and Jellyfin clients both writes `playback` rows. Marking something watched is
 not a play: `manual` rows from Silo clients and `jellycompat` rows from
 Jellyfin clients are all marks, and marking a series writes one row per
 episode, so both are excluded. Episodes are rolled up to their series, so a
@@ -1379,7 +1482,7 @@ Both lists are `[]` on a server with no history, never `null`.
   ],
   "profiles": [
     {
-      "user_id": 3,
+      "user_id": "3",
       "username": "quick",
       "profile_id": "p1",
       "profile_name": "Quick",
@@ -1389,6 +1492,42 @@ Both lists are `[]` on a server with no history, never `null`.
   ]
 }
 ```
+
+## `GET /api/v2/admin/stats/api-clients`
+
+The login sessions with the most API requests in a window, for the dashboard's
+**Busiest API clients** card. It leaves out what the session quota leaves out
+(see [Session quota](auth-api.md#session-quota)): playback and media transfer
+routes, admins, and requests made while impersonating. `requests` includes
+requests a rate limit refused. The hidden `summarize_api_usage` task writes UTC
+hourly summaries from the activity log every 15 minutes, so the newest requests
+can be up to 15 minutes late, and keeps them for 30 days.
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `hours` | int | Window in hours. The read starts at the beginning of the hour the window begins in, so a 1-hour window at 13:10 reads the 12:00 and 13:00 summaries. Default 24, accepted range 1..720. |
+| `limit` | int | Sessions returned. Default 10, accepted range 1..25. |
+
+| Field | Type | Meaning |
+|---|---|---|
+| `hours`, `from` | int, instant | The window: `from` is the first hour it reads. |
+| `total_requests` | int | Requests of every session in the window, for each client's share. |
+| `clients` | object[] | Sessions by requests, most first; `[]` when there are none. |
+
+Each `clients` entry: `session_id`, `user_id`, `username`, `device_name` and
+`device_platform` (from the login session), `user_agent` (the one the session
+sent most in its latest hour), `requests`, `refused` (429 responses from any
+rate limit), `peak_hour_requests`, `first_hour`, `last_hour`, and
+`session_active` (false once the session was revoked, expired, or deleted).
+`DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}` signs one
+session out without touching the account's other devices.
+
+## `GET /api/v2/admin/stats/api-clients/{session_id}/endpoints`
+
+The ten routes one session called most, each with `method`, `route` (the
+matched route pattern), `requests` and `refused`. `hours` is 1..24, default 24:
+it reads the activity log rows of that one session, so its window stays short.
+A session with no summarized requests in the window is `404 not_found`.
 
 ## `GET /api/v2/admin/stats/downloads`
 
@@ -1435,8 +1574,8 @@ an error — the table exists on every deployment.
   "downloads_completed_24h": 2,
   "limit": 10,
   "top_users": [
-    { "user_id": 3, "username": "quick", "downloads": 11, "total_bytes": 41234567890 },
-    { "user_id": 5, "username": "kid", "downloads": 3, "total_bytes": 11378781486 }
+    { "user_id": "3", "username": "quick", "downloads": 11, "total_bytes": 41234567890 },
+    { "user_id": "5", "username": "kid", "downloads": 3, "total_bytes": 11378781486 }
   ]
 }
 ```
@@ -1496,18 +1635,18 @@ to the operation, acting account and profile, filters and limit; `offset` is ref
 read the live log. Account and file identifiers are strings, instants are RFC 3339, and
 `duration_seconds` is null when the media duration was never recorded. A deleted account
 lists with an empty `username`; an item no longer in the catalog lists with an empty
-`media_title` and `media_type`. The stored client address is not part of this projection,
-matching v1. It is the viewer's last address on the playback session. Rows written by
-earlier server versions hold the address of the request that ended the attempt instead:
-the administrator's when an administrator stopped or terminated it, and none when it
-expired. A missing database returns 503; storage errors are masked as 500.
+`media_title` and `media_type`. A missing database returns 503; storage errors are
+masked as 500.
 
-Two v2-only additions have no v1 counterpart. `ended_after` (an RFC 3339 instant) keeps
-attempts that ended at or after it; an unparsable value is 422, and the cursor binds it
-like the other filters, so a cursor from one window is refused under another. Each entry
-also carries `series_title`, `season_number` and `episode_number`: for an episode attempt
-they come from the catalog episode and its series (`series_title` is empty when the series
-left the catalog); for anything else they are empty and null.
+Several v2-only additions have no v1 counterpart. `ended_after` and `ended_before`
+(RFC 3339 instants) bound the window: `ended_after` keeps attempts that ended at or
+after it (inclusive), `ended_before` keeps attempts that ended strictly before it
+(exclusive), so consecutive windows that share a bound list each attempt once. An
+unparsable value is 422, and the cursor binds both like the other filters, so a cursor
+from one window is refused under another. Each entry also carries `series_title`,
+`season_number` and `episode_number`: for an episode attempt they come from the catalog
+episode and its series (`series_title` is empty when the series left the catalog); for
+anything else they are empty and null.
 
 `watched_seconds` is where the attempt ended, not how long it was watched: an attempt
 resumed partway through reports the resume point plus what was watched. `played_seconds`
@@ -1516,12 +1655,50 @@ seeks or buffering. The playback session measures it from its progress reports
 (`playback.WatchTime`): a position advance between two reports counts as watched when it
 fits playback at up to twice normal speed plus a short allowance for report jitter, and
 anything larger is a seek. Time after the last progress report before the stop is not
-counted. It is null for an attempt with no measurement, which includes every attempt
-recorded before measurement existed. A session finalized more than once keeps the largest
-measurement when the copies overlap in time (copies on several replicas), and adds them when
-one began measuring after the other ended (a session rebuilt under the same id after it was
-finalized). The history row also stores the first reported
-position and the time spent paused; the route does not expose them.
+counted. A session finalized more than once keeps the largest measurement when the
+copies overlap in time (copies on several replicas), and adds them when one began
+measuring after the other ended (a session rebuilt under the same id after it was
+finalized). `measured` says whether the attempt has a measurement. With one,
+`start_position_seconds` is the first position it saw (where the play began or
+resumed), `paused_seconds` the time spent paused between reports, and `measured_since`
+and `measured_until` the first and last report behind it. Without one, which includes
+every attempt recorded before measurement existed, `played_seconds` and those four
+fields are null.
+
+`client_ip` is the viewer's last address on the playback session, or null when none was
+recorded. Rows written by earlier server versions hold the address of the request that
+ended the attempt instead: the administrator's when an administrator stopped or
+terminated it, and none when it expired.
+
+`device_id` and `device_platform` are the device the client declared when playback
+started, as on the live session rows above; `client_name` and `client_version` are the
+app the client reported. `video_decision` and `audio_decision` are how each stream was
+delivered on the transport the attempt ended on, with the live rows' values: `direct`,
+`remux` (copied into a new container) or `transcode`. These describe the play, so the
+first finalization that knows one records it and later ones never change it, even one
+that did not get further. `end_reason` is why the attempt ended: `stopped` (the viewer's
+client stopped it), `terminated` (an administrator stopped or terminated it), `expired`
+(the liveness reaper ended it after the client went quiet), `aborted` (the server
+abandoned it) or `replaced` (a Jellyfin client switched play method, and the play
+continues under a new session with its own row). Every end records a row, including a
+stop, close or abort handled by a server that did not hold the session's live copy;
+that row takes the start time, client and device from the shared live row when one is
+left. The one exception is a Jellyfin session copy that never reported progress: it may
+only have served media while another copy took the play's reports, so it leaves the row
+to that copy and records nothing. A play whose media file left the catalog before the end
+was recorded still gets its row, without the item and duration only the file gave. When
+an attempt is finalized more than once (copies on several servers, a retried stop), the
+end that stopped the session's lifecycle first sets the reason, and `lifecycle_seq` is
+that end's sequence number on the sessions channel (null on rows recorded before
+lifecycle numbers existed). Every one of these fields is
+null when unknown, which includes every attempt recorded before it existed; `end_reason`
+is also null for a server teardown the client never recovered from (an encoder exit, a
+withdrawn plan).
+
+`GET /api/v2/admin/playback-history/capabilities` reports `available`, `ended_before`,
+`watch_measurement`, `client_ip`, `device_identity`, `client_identity`,
+`stream_decisions`, `end_reason`, `end_reason_values` and `lifecycle_seq`, for feature
+detection.
 
 The administrator history page and the user detail watch-history tab read this route
 under the authority captured when the query was created, keyed by an opaque authority
@@ -1597,8 +1774,11 @@ worker acknowledges cancellation at its next boundary. Pending cancellation retu
 202, an already cancelled run returns 200, and completed or failed runs return
 409 `job_not_cancelable`. Already committed external
 history effects are not undone. Editing a source or mapping invalidates previously
-captured execution configuration rather than retargeting its run. Stale executions
-fail without automatic replay. See [History import execution](architecture/history-import-execution.md)
+captured execution configuration rather than retargeting its run. A stale or interrupted
+execution with a checkpoint returns to `queued` and resumes near where it stopped, with its
+counts so far; one without a checkpoint, or past five restarts without progress, fails.
+While a run is active, `fetched` counts the source items read so far, not the listing's
+total. See [History import execution](architecture/history-import-execution.md)
 for the persistence and cancellation boundaries. Run monitor errors and warnings use safe summaries; stored source
 credentials are never returned. The explicit Plex login exchange returns its newly
 issued token so the administrator can assign it to a source.
@@ -1681,7 +1861,7 @@ claim, cleanup, and failure boundaries.
 
 ## Dashboard aggregate reads
 
-The dashboard uses four acting-administrator operations under `/api/v2/admin/stats`:
+The dashboard uses these acting-administrator operations under `/api/v2/admin/stats`:
 
 | Path | Operation ID | Query bounds |
 | --- | --- | --- |
@@ -1689,8 +1869,10 @@ The dashboard uses four acting-administrator operations under `/api/v2/admin/sta
 | `/playback-activity` | `getAdminDashboardPlaybackActivity` | `hours`: 1–744, default 24 |
 | `/top-activity` | `getAdminDashboardTopActivity` | `days`: 1–30, default 7; `limit`: 1–25, default 10 |
 | `/downloads` | `getAdminDashboardDownloadsStats` | `limit`: 1–25, default 10 |
+| `/api-clients` | `getAdminDashboardAPIClients` | `hours`: 1–720, default 24; `limit`: 1–25, default 10 |
+| `/api-clients/{session_id}/endpoints` | `getAdminDashboardAPIClientEndpoints` | `hours`: 1–24, default 24 |
 
-All accept `refresh=true` to invalidate the provider cache before reading.
+The first four accept `refresh=true` to invalidate the provider cache before reading.
 Out-of-range inputs return a validation problem; the frozen v1 routes continue
 their existing clamping behavior. Missing data services return 503. The web normalizes
 its window before choosing a query cache key and retains its existing page-owned
@@ -1734,6 +1916,19 @@ compatibility. Worker readiness and wire behavior remain owned by the worker
 protocol layer. No native client or Jellyfin caller consumes this administrator
 inventory operation.
 
+`GET /api/v2/admin/nodes/summary` (`listAdminNodeSummaries`) pages the same
+nodes, in the same order and with the same limits and cursor rules, as a
+monitoring view. Each item keeps `id`, `name`, `type`, `enabled`, `healthy`,
+`active_jobs`, `group`, `max_jobs`, `max_bandwidth_kbps`, `egress_kbps`,
+`last_health_check`, `created_at`, `drain_requested` and `drain_state`. It leaves
+out every address (`url`, `public_url`, `network_access`), configuration override,
+capability document and the configuration tag. In place of the opaque
+`last_stats` it carries `resources`: the node's last sample in the shape of
+`GET /api/v2/admin/system/resources` (`sampled_at`, `system`, `gpu`,
+`attribution`), without mount paths, build identity or download-storage
+measurements. `resources` is absent when the node reported no sample. Scoped API
+keys read nodes only through this operation.
+
 ## Server status detail
 
 `GET /api/v2/admin/server/status` (`getAdminServerStatus`) returns the API
@@ -1773,7 +1968,9 @@ late result presentation. No native or Jellyfin caller consumes this operation.
 
 `GET /api/v2/admin/rate-limits/config` returns desired rate-limit settings with a
 strong, administrator/profile-bound ETag and conditional read support. It includes
-API-key tiers and authentication endpoint budgets. Map entries remain extensible.
+API-key tiers, authentication endpoint budgets, and `session_quota` (`mode` of
+`off`, `log` or `enforce`, `requests_per_hour`, `burst`; see Session quota in
+[auth-api.md](auth-api.md#session-quota)). Map entries remain extensible.
 `GET /api/v2/admin/rate-limits/status` returns process-local `active`, optional
 `active_backend`, and `redis_available`. The latter reflects valid persisted or
 bootstrap Redis configuration, not a successful reachability probe. Both reads
@@ -1792,7 +1989,8 @@ An `If-Match` validator is required. Both conditional headers are evaluated agai
 the canonical configuration inside the same settings transaction that validates
 and saves changes, including wildcard conditions and Redis backend eligibility.
 A stale request returns 412 with the current validator. Invalid budgets or backend
-selection return 422. Success returns `status` and `restart_required`; this receipt
+selection return 422, as does a `session_quota` with an unknown mode or a burst that
+would take more than a week to refill (more than 168 times `requests_per_hour`). Success returns `status` and `restart_required`; this receipt
 is not the canonical configuration and does not carry an ETag. Read config again
 for the next edit.
 
@@ -1854,15 +2052,15 @@ change. This read adds no installation, update, removal or provider request.
 
 The autoscan administrator UI displays and copies the accepted
 `/api/v2/autoscan/webhooks/{token}` delivery URL, including immediately created or
-rotated source responses. Bridge management responses retain their frozen URL;
-the UI projects only the known delivery path to v2 and preserves the configured
+rotated source responses. Bridge management responses also mint the v2 delivery
+URL; the UI projects any `/api/v1` delivery path to v2 and preserves the configured
 host, deployment prefix, query and existing secret. An already-v2 URL is unchanged.
 
-Operators must replace the saved URL in existing download-manager connections.
-Displaying or copying it does not rotate the secret, update a provider, send a
-test delivery or replay an event. New setup and existing-source instructions both
-state the external configuration step. Other source-management operations remain
-separate migration work.
+The server does not update existing download-manager connections. Displaying or
+copying the URL does not rotate the secret, update a provider, send a test
+delivery or replay an event. The bridge serves both delivery routes, so a
+connection that still holds a `/api/v1` delivery URL keeps working until
+`/api/v1` retires.
 
 `GET /api/v2/admin/autoscan/sources` returns administrator-only source metadata in
 signed, account/profile/page-size-bound cursor pages ordered by label then source
@@ -1896,8 +2094,12 @@ signed administrator/profile/limit-bound name-and-ID cursor. Each page enumerate
 the full configured connection list; concurrent edits can reorder the live list.
 The response preserves connection metadata and `has_api_key`, while excluding
 credential references and resolved secrets. Reading does not contact a provider.
-The existing web picker drains bounded pages under captured authority; connection
-writes remain on the bridge. No native or Jellyfin connection-list caller exists.
+The existing web picker drains bounded pages under captured authority, and the web
+writes connections through the v2
+[create](#creating-an-autoscan-connection-in-v2),
+[update](#update-an-autoscan-connection-v2) and
+[delete](#delete-an-autoscan-connection-v2) operations. No native or Jellyfin
+connection-list caller exists.
 
 ### Native administrator playback observations
 
@@ -1930,6 +2132,31 @@ Capabilities advertise `user_filter` and `summary` when the reader is available.
 adds `available` for this loader and `node_observations` for the Redis reader.
 These reads require an acting administrator and do not enforce a demo restriction.
 
+With `device_identity: true` in the capabilities, detailed rows may carry
+`device_id` and `device_platform`: the device the client declared for the
+profile device registry when playback started (`X-Silo-Device-Id` and
+`X-Silo-Device-Platform`, on `/api/v2/playback/start` or the v1 bridge's start).
+It is not the playback device the v2 `X-Device-ID` header names. The platform is
+only what the client declared; the server never derives one from the user agent.
+A Jellyfin play carries the `DeviceId` of its MediaBrowser authorization and no
+platform; an Audiobookshelf play carries neither. A session rebuilt after a
+restart from the server's recovery card keeps its device; one rebuilt from a
+stream token comes back without it, as it does without its client name. The
+fields are absent when the client declared none, and the frozen v1 row never
+carries them.
+
+With `lifecycle_events: true` in the capabilities, the admin sessions channel
+announces session starts, pauses, resumes and ends
+([realtime-api.md](realtime-api.md#playback-session-lifecycle-events)), and detailed
+rows carry `lifecycle_seq`: the number of the session's last lifecycle transition.
+A row's `is_paused` then comes from that same transition, so a row and an event with
+equal numbers agree. A session whose lifecycle has ended is left out of the list, and
+a native session no server holds in memory but whose attempt is still live (media a
+node keeps serving after its API server restarted) is listed from the row recorded at
+its start, at the attempt's last position, with an empty `reporting_node`. Rows for
+sessions that started before the server recorded lifecycle transitions omit
+`lifecycle_seq` and keep the observed `is_paused`.
+
 `GET /api/v2/admin/node-sessions` returns `{items, page, undecodable}` using the
 owning node-session reader. Optional positive string `node_id` filters by the
 registered node URL; invalid IDs fail validation and unknown nodes return 404.
@@ -1941,7 +2168,7 @@ ownership keys remain `"0"`; the older `user_id` is a display label, while
 `auth_user_id` identifies the account when reported. The frozen v1 raw-record
 response is unchanged.
 
-Both lists accept `limit` (default 50, maximum 100) and an opaque `cursor` bound
+Both lists accept `limit` (default 50, maximum 200) and an opaque `cursor` bound
 to the acting account/profile, filter and page size. The playback list applies
 its session-ID keyset and limit in SQL, fetching one extra row to determine
 continuation. The frozen v1 loader retains its newest-200 cap. The node list
@@ -1997,6 +2224,8 @@ error, the latest `progress` reading (`encoded_seconds`, `duration_seconds`,
 `speed`, `updated_at`) of a running job, `progress_unavailable` when the worker
 cannot report progress, the `log_session_id` its FFmpeg output is logged under,
 and the download rows waiting on it with their account, profile, and device.
+A scoped API key receives items without `error`, because failure text can quote
+file paths.
 
 `POST /api/v2/admin/downloads/preparations/pause`, `/resume`, and `/cancel`
 take `{"ids": [...]}` (1–500 job ids) and return one `{id, outcome}` per
@@ -2126,7 +2355,11 @@ client can represent it exactly, that must rise within the session), plus option
 whole body on retry.
 
 The server keeps one ledger per playback session in the process that serves
-the session's realtime lane. The ledger is bounded per session and released
+the session's realtime lane. With several API replicas, a command that reaches
+a replica without the lane is relayed to the replica that holds it, so every
+command for a session meets the same ledger whichever replica receives it
+([playback control relay](architecture/playback-control-relay.md)). The ledger
+is bounded per session and released
 with the session: terminate and the stop fallback drop it directly, and a
 throttled sweep on the command path prunes the ledgers of sessions that ended
 by any other route. It answers deterministically:
@@ -2153,16 +2386,23 @@ by any other route. It answers deterministically:
   rather than starting a fresh session
   ([playback API](playback-api.md#progress-and-stop)).
 - An unknown session is `404`; a server without playback control answers
-  `503 dependency_unavailable`.
+  `503 dependency_unavailable`. So does a command relayed to the replica
+  holding the lane when that replica does not answer in time: it may still
+  have applied the command, so retry with the same body, and a retry that
+  reaches it replays the recorded receipt.
 
 `GET /api/v2/admin/sessions/command-capabilities` reports `available`, the
 `actions` list and `sequenced_commands: true`. All of these require an acting
 administrator. Commands enforce the demo restriction; capability reads do not.
 The web session actions send
 pause, resume, stop and message through these operations under captured
-administrator authority, allocate a fresh identity per click, and raise the
-allocation floor from a stale refusal's `X-Silo-Latest-Sequence`; terminate
-stays on the bridge.
+administrator authority. Each click is a new identity, except that a command
+whose answer left its outcome unknown (a `5xx` or no response) keeps its
+identity, and repeating the same command on the same session under the same
+signed-in profile sends it again so the server replays the receipt; any other
+answer, a different command, or a profile or account change drops it. They
+raise the allocation floor from a stale refusal's `X-Silo-Latest-Sequence`.
+Terminate has its own operation, described next.
 
 
 ### Administrator terminate (v2)
@@ -2183,9 +2423,17 @@ reconstructs the session from a stream token that is still inside its TTL
 ([restart-resilient playback](architecture/restart-resilient-playback.md)). Only
 then is the dismissal dispatched on the session's realtime control lane, without
 waiting for an acknowledgement. Terminates for one session are serialized, so a
-repeat observes the first outcome instead of racing it.
+repeat observes the first outcome instead of racing it. With several API
+replicas, the terminate runs on the replica that holds the session's lane, which
+ends its live session and notifies the player. When no replica holds a lane, or
+its holder does not answer, the receiving replica revokes the session itself.
+When the holder did not answer, the answer is `503 dependency_unavailable`
+unless the receiving replica told the player itself: the holder may still be
+telling the player, or may already have ended the session, so whether the
+player was notified is unknown. Retrying the terminate is safe.
 
-The optional JSON body carries `reason`. The `200` receipt carries
+The JSON body is required (`{}` when there is no reason) and carries an optional
+`reason`. The `200` receipt carries
 `session_id`, `authority_revoked`, `already_revoked`, `durable_state`,
 `client_notified`, `delivery` (`dispatched`, `unavailable`, `failed`, `none`)
 and `command_id` when a dismissal was issued. `durable_state` reports `stopped`:
@@ -2223,6 +2471,11 @@ the acknowledged batch validator; an intervening writer's snapshot cannot rebase
 them. Batch validation considers the
 prospective combined values. Single-key validation preserves the existing paired
 setting repair behavior. Empty values retain the established clear/default rules.
+Machine-managed keys, including the `auth.jwt_secret` and
+`audiobooks.abs.jwt_secret` signing keys the server generates itself, are
+refused with `422 validation_failed` (`400 bad_request` on `/api/v1`) and the
+detail `<key> is managed internally`, and nothing is written. The batch PUT
+checks `If-Match` before the keys, so a stale validator still answers 412.
 
 Both writes are nonretryable. Enabling diagnostics can probe storage before the
 transaction, a change to the Redis connection connects to Redis before it (see
@@ -2267,13 +2520,14 @@ invalidates the exact compatibility status scope only for the active authority.
 
 ### Dashboard capability discovery in v2
 
-`GET /api/v2/admin/dashboard/capabilities` returns the nine dashboard support
+`GET /api/v2/admin/dashboard/capabilities` returns the eleven dashboard support
 flags to an acting administrator. These describe the v2 surface in the API build;
 they do not promise that a database or other runtime dependency is healthy.
 
 `timeseries`, `playback_activity`, `top_activity`, `health`, `watch_providers`,
-`downloads_stats` and `egress_totals` are true for the existing v2 dashboard operations.
-`server_layouts` remains false while the v2 layout lifecycle is unavailable.
+`downloads_stats`, `egress_totals`, `egress_by_source` and `api_clients` are true for
+the existing v2 dashboard operations. `server_layouts` remains false until the full
+layout lifecycle is accepted, although layout read, save and reset are served.
 `log_level_list` is true for the accepted multi-level application-log reader. Clients
 must not infer v2 support from the bridge's independently retained capabilities.
 
@@ -2367,7 +2621,13 @@ bound to acting account/profile/access, normalized filters and page size. Source
 time precision is retained; response timestamps use UTC milliseconds and IDs use
 decimal strings. `user_id` is the subject account; `impersonator_user_id` separately
 identifies the impersonating account when recorded. Existing audit metadata and
-collector redaction behavior are unchanged. Pagination is a live retained view,
+collector redaction behavior are preserved. Audit `user_agent` is diagnostic text:
+capture and persistence keep an owned prefix of at most 512 UTF-8 bytes, replacing
+invalid UTF-8 runs and NUL bytes with U+FFFD. A valid rune crossing the prefix
+boundary is omitted. Newly written rows carry the same metadata in history and
+live updates; history also limits the database projection for older rows without
+rewriting those rows. Request headers and authentication/device identity are
+unaffected. Pagination is a live retained view,
 without snapshot, late-commit or retention completeness guarantees.
 
 The web logs page uses the scoped v2 HTTP readers for application and audit
@@ -2432,18 +2692,17 @@ spans. The extension object preserves future fields and JSON number precision.
 Timestamps use UTC milliseconds.
 
 The strong conditional-read ETag binds the account, acting profile/access scope,
-canonical layout object and full stored timestamp. It supports If-Match and
-If-None-Match/304, but is not an acknowledged write revision or a promise of
-write-side compare-and-set. Save/reset transport and the complete `server_layouts`
-capability remain separate work; a read alone does not advertise that lifecycle.
+stored layout generation, canonical layout object and full stored timestamp. It
+supports If-Match and If-None-Match/304, and a save needs it in If-Match; see
+[Save the administrator dashboard layout (v2)](#save-the-administrator-dashboard-layout-v2)
+and [Reset the administrator dashboard layout (v2)](#reset-the-administrator-dashboard-layout-v2).
+`server_layouts` stays false, so a read alone does not advertise that lifecycle.
 
 The web reader keys its cache by captured service/account authentication context,
 profile and setter-owned non-secret PIN generation, and rejects responses decoded
-after authority changes. Legacy save/reset success invalidates layout query
+after authority changes. Save/reset success invalidates layout query
 variants so active readers fetch the canonical document; it does not seed a local
-timestamp as a server acknowledgement. Local immediate edits, debounced saves
-and serialized legacy writes remain unchanged. This read migration does not add
-write-side conflict handling or change the legacy writer's authority semantics.
+timestamp as a server acknowledgement.
 
 ### Hardware-acceleration inventory in v2
 
@@ -2552,7 +2811,7 @@ or durable job. Failed completion may follow a committed insert; explicitly refr
 and reconcile before submitting again. Both dialogs capture copied body/authority
 before queueing, disable retries/auth replay and reject stale completion. A late
 result cannot close a newer connection draft or select the created ID in a changed
-inline source draft. Update/delete and source writes remain separate migrations.
+inline source draft.
 
 ### Update an autoscan connection (v2)
 
@@ -2798,7 +3057,6 @@ explicit submission. The actual Sources confirmation captures source and authori
 when opened, keeps them through queueing, disables retries/authentication replay,
 and fences dispatch, completion and invalidation. Source query cache includes the
 setter-owned non-secret PIN generation; a changed PIN cannot reuse cached success.
-Other source and webhook lifecycle operations remain separate migrations.
 
 ### Create and update autoscan sources (v2)
 
@@ -2867,7 +3125,8 @@ Missing source or connection returns404; invalid configuration422; missing depen
 private failures500 with uncertain completion. Both operations are non_retryable.
 Update is last-write-wins with no revision/ordering receipt; optional webhook readback
 can observe current state. Neither promises execution, scheduling, provider changes
-or durable job completion. The existing webhook setup operation remains separate.
+or durable job completion. Webhook setup is a separate operation; see
+[autoscan source webhook lifecycle (v2)](#autoscan-source-webhook-lifecycle-v2).
 
 The web Add and Edit dialog and the list's enabled switch capture a copied, complete
 body and draft authority before queueing, disable retry/authentication replay and
@@ -3002,7 +3261,8 @@ jobs, not prepared downloads stored on the node, which are unavailable while it
 is stopped.
 
 `GET /api/v2/admin/nodes/capabilities` (`getAdminNodeCapabilities`) advertises
-`drain: true`. The web nodes page shows `Draining · N transcodes left` and then
+`drain: true`, and `summary: true` when `GET /api/v2/admin/nodes/summary` is
+served. The web nodes page shows `Draining · N transcodes left` and then
 `Drained · safe to stop` from these fields. See
 [node drain](architecture/node-drain.md) for the protocol.
 
@@ -3112,6 +3372,14 @@ capabilities (installations, catalog entries, and the install, upload and update
 when the plugin declares neither. For an installation they come from the capability stored at
 install or update, which is what routing reads.
 
+An installation whose last automatic update failed carries `update_failure`: the `version`
+Silo tried, the `reason` (the same administrator-facing text a manual update would show, or a
+generic line pointing at the server log; never a URL or checksum) and `failed_at`. The update
+check records it on the installation row, so every node returns it. It disappears when the
+installed version changes or a later check handles the plugin without failing; a check that
+cannot reach the plugin's repository leaves it in place. The frozen `/api/v1` view does not
+carry it.
+
 Both reads require an acting administrator and answer 503 when the
 plugin service or stores are not wired. The web plugins page and admin sidebar read these
 routes under captured profile authority and drain pages with a bounded loop; a stale
@@ -3127,6 +3395,11 @@ replaced rather than duplicated, and metadata-provider capabilities are appended
 library chains as on v1. Success is 201 with the installation. There is no replay identity
 and no database uniqueness, so the row is non-retryable: a lost response may follow a
 committed install and the client reconciles from the installation list.
+
+A manifest whose ID or version maps to an empty, `.` or `..` directory name (after the host
+replaces `/`, `\`, `:` and `@` with `_`) is an invalid package, as is a replacement package
+that names a different plugin ID than the installation. Both are refused as package errors
+(422) and nothing is installed.
 
 `PUT /api/v2/admin/plugins/installations/{id}` assigns `enabled` and/or `update_policy`
 (`auto`, `notify`, `off`, `manual`); an empty body is 422. Disabling stops the running plugin
@@ -3169,13 +3442,20 @@ failures until restarted or reconfigured), `state` (`stopped`, `starting`, `runn
 Plugins declaring `network_access_provider.v1` are resident; every other plugin starts on
 first use and reports `running`, `stopped`, or `failed` when its last launch on the answering
 server failed, with `last_error` saying why. A later successful launch, an administrator
-restart, an update or a configuration change clears that failure.
+restart, an update or a configuration change clears that failure. A plugin that isn't running
+also reports `failed` when the answering server has to restore its files from the stored
+archive and the archive can't be read (it won't open or extract, or doesn't match the
+installation). That server still lists the installation, without its manifest fields, so it
+can be turned off or uninstalled; a server that still has a good copy of the files is
+unaffected.
 
 `DELETE /api/v2/admin/plugins/installations/{id}` stops the plugin, deletes the row
 (configuration, bindings and archives cascade) and removes its files; on a failed row delete
 an enabled plugin is restarted. Row delete and file removal are not one transaction and a
-repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. Success is
-204.
+repeat finds no row, so a later 404 is not this caller's receipt; non-retryable. A row
+admitted before the host refused IDs and versions that map to an empty, `.` or `..` directory
+name never loads: the installation list shows it without manifest fields, the user settings
+list omits it, and deleting it removes the row but leaves its files on disk. Success is 204.
 
 `POST /api/v2/admin/plugins/uploads` installs one uploaded archive from the multipart
 `archive` part, capped at 256 MiB; JSON on this operation is 415, a missing part 422 at
@@ -3264,27 +3544,65 @@ The frozen alpha surface serves the same administration features under `/api/v1/
 through the pre-1.0 bridge window. It uses integer IDs, second-precision timestamps,
 bare JSON arrays with offset paging, a flat `{error, message}` envelope, and clamps
 out-of-range numeric query parameters instead of rejecting them. Those routes are
-frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1`
-namespace with `410 Gone` and the `client_upgrade_required` problem code. Build
+frozen: no feature work lands on them. After the bridge window, and once a
+maintainer decides to retire it
+([#886](https://github.com/Silo-Server/silo-server/issues/886)), the main API
+listener answers the `/api/v1` business routes with `410 Gone` and the
+`client_upgrade_required` problem code; `/api/v1/health` and `/api/v1/ready` keep
+answering. Build
 against `/api/v2`.
 
 ### Account and permission audit details (v2)
 
-Successful v2 administrator account and access-group mutations record an audit
-row in the mutation transaction. Actions are `user.created`, `user.updated`,
-`user.deleted`, `access_group.created`, `access_group.updated`, and
-`access_group.deleted`. `target_type` and `target_id` identify the affected
-entity; `user_id` identifies the authenticated subject, and a present
-`impersonator_user_id` identifies the acting administrator. Actor filters use
+Successful v2 account, permission and credential mutations record an audit
+row in the mutation transaction. `target_type` and `target_id` identify the
+affected entity, and an action's prefix is its target type. `user_id`
+identifies the authenticated subject, and a present `impersonator_user_id`
+identifies the acting administrator. Actor filters use
 `COALESCE(impersonator_user_id, user_id)`.
 
-`changes` lists changed allowlisted identity/policy fields. `before` and `after`
-are optional strings containing canonical JSON values: JSON null represents an
-unset account override, while an absent side represents creation/deletion.
-A password change includes only `{ "field": "password" }`; passwords, hashes,
-tokens, arbitrary request bodies and headers are excluded. Permission arrays
-show the exact prior and resulting membership. Rollbacks record no successful
-domain action, and a repeated identical policy write has no change details.
+| Action | Operation | `changes` |
+| --- | --- | --- |
+| `user.created`, `user.updated`, `user.deleted` | v2 account administration | allowlisted identity and policy fields |
+| `access_group.created`, `access_group.updated`, `access_group.deleted` | v2 access-group administration | allowlisted group policy fields |
+| `user.impersonation_started` | `impersonateAdminUser` | `impersonation_session_id` (after) |
+| `user.impersonation_ended` | `endImpersonation` | `impersonation_session_id` (before) |
+| `user.ownership_transferred` | `transferAdminUserOwnership`; target is the new Owner | `owner_user_id` |
+| `user.password_reset_link_created` | `createAdminUserPasswordReset` | `delivery`, `expires_at` |
+| `user.password_reset_completed` | `completePasswordReset` | `password` (field name only) |
+| `user.password_changed` | `changePassword` | `password` (field name only) |
+| `user.login_session_revoked` | `deleteSession`, `deleteAdminUserLoginSession` | `login_session_id` (before) |
+| `user.login_sessions_revoked` | `deleteAdminUserLoginSessions` | `revoked_login_sessions` count; recorded when the call ended any login session or Audiobookshelf, Jellyfin-compatible or device sign-in |
+| `api_key.created`, `api_key.updated`, `api_key.deleted` | `createAdminAPIKey`, `updateAdminAPIKeyTier`, `deleteAdminAPIKey`, `createPersonalAPIKey`, `revokePersonalAPIKey` | `user_id` (owner), `label`, `rate_tier`, `scopes` (an empty list is an unscoped key with its owner's full access) |
+| `profile.created`, `profile.updated`, `profile.deleted` | `createProfile`, `updateProfile`, `deleteProfile` | `name`, `is_child`, `is_primary`, `max_content_rating`, `max_advisory_age`, `require_advisory_age`, `library_restrictions_enabled`, `allowed_library_ids`, `max_playback_quality`, `pin` |
+| `profile.updated` | `allowTitle`, `disallowTitle`, `allowCollection`, `disallowCollection`, `allowCollectionTitles`; target is the profile the allowance is for | `allowed_title` or `allowed_collection` (the item or collection ID, after when allowed, before when removed); `allowed_titles_added` count for a copy |
+
+`changes` lists changed allowlisted fields. `before` and `after` are optional
+strings containing canonical JSON values: JSON null represents an unset account
+override, while an absent side represents creation/deletion. Permission arrays
+show the exact prior and resulting membership. A password change or reset
+includes only `{ "field": "password" }`. A profile's `pin` is `true` or
+`false` for whether the profile has a PIN; `true` on both sides is a PIN
+replaced by another. A profile row's `user_id` is the account that owns the
+profile. Login session IDs identify sessions and are not credentials.
+
+Audit rows never contain a password, password or PIN hash, PIN, access or
+refresh token, API key or its prefix, reset link, its token or digest, or an
+arbitrary request body or header. The path of `completePasswordReset` is stored
+with its link token replaced by `[redacted]`, and that row has no `user_id`
+because the request is unauthenticated.
+
+Rollbacks and refused requests record no domain action, and neither does a
+write that changes no allowlisted value: a repeated identical policy write,
+a profile update that only changes playback preferences or the avatar, or
+revoking a login session that had already ended. A committed domain row
+replaces the request's own row when both carry the same status. Outside
+`/api/v2/admin/`, only the operations listed above record domain rows (the
+v2 registry's `Audited` declaration); the frozen v1 routes keep request rows
+only. `requestPasswordReset` records none: it is anonymous, answers alike
+whether an account matched, and issues the link in the background, so its
+request row is the record. Profile rows require the PostgreSQL user store;
+the SQLite user store records request rows only.
 
 Audit history and live streams accept `action`, `actor_user_id`, `target_type`,
 and `target_id` alongside existing filters. History cursors bind these filters.

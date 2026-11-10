@@ -567,7 +567,7 @@ func (s *MetadataService) fillTargetChildText(
 	fetchCtx, cancel := fallbackFetchContext(ctx)
 	defer cancel()
 	if seasonGap {
-		if found, _, err := s.fetchTargetSeasonResults(fetchCtx, providerIDs, folderID, fallback, seasonNumber, childCtx, true); err == nil {
+		if found, _, _, err := s.fetchTargetSeasonResults(fetchCtx, providerIDs, folderID, fallback, seasonNumber, childCtx, true); err == nil {
 			fetched.seasons = make(map[int]SeasonResult)
 			collectFallbackSeasons(fetched.seasons, found, fallback)
 		}
@@ -617,6 +617,14 @@ func (f *fallbackText) applyToItem(item *MetadataResult, requested string, exist
 				item.Tagline = ""
 			}
 		}
+	}
+}
+
+// ignoreStoredText turns keepStored off for a correction of the item's match,
+// whose stored text belongs to another title, as for an Identify.
+func (f *fallbackText) ignoreStoredText() {
+	if f != nil {
+		f.policy.keepStored = false
 	}
 }
 

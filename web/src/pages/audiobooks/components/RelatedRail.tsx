@@ -26,8 +26,6 @@ export function RelatedRail({
   const { cardPresentation } = useUICustomization();
   if (items.length === 0) return null;
   const coverAspectClass = coverAspect === "poster" ? "aspect-[2/3]" : "aspect-square";
-  const showCaption = cardPresentation.caption !== "artwork";
-  const showMetadata = cardPresentation.caption === "title_metadata";
   return (
     <section>
       <div className="mb-4">
@@ -55,10 +53,8 @@ export function RelatedRail({
                 />
               ) : null}
             </div>
-            {showCaption ? (
-              <div className="mt-2 truncate text-sm font-medium">{item.title}</div>
-            ) : null}
-            {showMetadata && item.subtitle ? (
+            <div className="mt-2 truncate text-sm font-medium">{item.title}</div>
+            {item.subtitle ? (
               <div className="text-muted-foreground truncate text-xs">{item.subtitle}</div>
             ) : null}
           </ViewTransitionLink>

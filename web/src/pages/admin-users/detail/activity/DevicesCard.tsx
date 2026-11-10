@@ -6,6 +6,7 @@ import type { AdminUserDeviceRow } from "@/api/v2/adminUserActivity";
 import { PlatformTile, classifyPlatform, platformLabel } from "@/components/admin/deviceOverrides";
 import { Button } from "@/components/ui/button";
 import { useAdminUserDevices } from "@/hooks/queries/admin/userActivity";
+import { useT } from "@/i18n";
 
 import { formatLastSeen } from "../format";
 import { deviceLevelId } from "../preferences/levels";
@@ -36,6 +37,7 @@ function preferencesSearch(device: AdminUserDeviceRow): string {
 }
 
 export function DevicesCard({ userId }: { userId: number }) {
+  const t = useT();
   const devices = useAdminUserDevices(userId);
   const [showAll, setShowAll] = useState(false);
   const all = devices.data ?? [];
@@ -45,18 +47,20 @@ export function DevicesCard({ userId }: { userId: number }) {
 
   return (
     <DetailCard
-      title="Devices"
-      description={`Seen in the last ${RECENT_DAYS} days`}
+      title={t("web.admin.users.detail.activity.devices.title")}
+      description={t("web.admin.users.detail.activity.devices.description", { days: RECENT_DAYS })}
       actions={
         <>
           {hasOlder && (
             <Button variant="ghost" size="sm" onClick={() => setShowAll((value) => !value)}>
-              {showAll ? "Show recent" : `Show all ${all.length}`}
+              {showAll
+                ? t("web.admin.users.detail.activity.devices.showRecent")
+                : t("web.admin.users.detail.activity.showAllCount", { count: all.length })}
             </Button>
           )}
           <Button variant="ghost" size="sm" asChild>
             <Link to="/admin/devices">
-              Devices
+              {t("web.admin.users.detail.activity.devices.openDevices")}
               <ArrowUpRight className="h-3 w-3" />
             </Link>
           </Button>
@@ -65,16 +69,20 @@ export function DevicesCard({ userId }: { userId: number }) {
     >
       {devices.isError ? (
         <div role="alert" className="flex items-center gap-3 px-5 py-4 text-sm">
-          <span className="text-destructive">Couldn&apos;t load devices.</span>
+          <span className="text-destructive">
+            {t("web.admin.users.detail.activity.devices.failed")}
+          </span>
           <Button variant="outline" size="sm" onClick={() => void devices.refetch()}>
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       ) : devices.isLoading ? (
-        <p className="text-muted-foreground px-5 py-6 text-center text-sm">Loading devices...</p>
+        <p className="text-muted-foreground px-5 py-6 text-center text-sm">
+          {t("web.admin.users.detail.activity.devices.loading")}
+        </p>
       ) : shown.length === 0 ? (
         <p className="text-muted-foreground px-5 py-6 text-center text-sm">
-          No devices seen in the last {RECENT_DAYS} days.
+          {t("web.admin.users.detail.activity.devices.empty", { days: RECENT_DAYS })}
         </p>
       ) : (
         <div>
@@ -82,7 +90,7 @@ export function DevicesCard({ userId }: { userId: number }) {
             <ListRow
               key={device.device_id}
               leading={<PlatformTile kind={classifyPlatform(device.device_platform)} />}
-              title={device.device_name || "Unnamed device"}
+              title={device.device_name || t("web.admin.users.detail.common.unnamedDevice")}
               meta={
                 <>
                   {platformLabel(device.device_platform)}
@@ -93,8 +101,10 @@ export function DevicesCard({ userId }: { userId: number }) {
                         to={{ search: preferencesSearch(device) }}
                         className="hover:text-foreground underline-offset-2 hover:underline"
                       >
-                        {device.override_count}{" "}
-                        {device.override_count === 1 ? "saved setting" : "saved settings"}
+                        {t("web.admin.users.detail.activity.devices.savedSettings", {
+                          count: device.override_count,
+                          count_text: device.override_count,
+                        })}
                       </Link>
                     </>
                   ) : null}

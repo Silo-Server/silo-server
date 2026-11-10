@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
@@ -197,5 +200,58 @@ func TestAdminApplePushHandlerRegistersFreshDeploymentWhenRotationIsRejected(t *
 	}
 	if got := settings.values[notifications.SettingPushRelayReregister]; got != "false" {
 		t.Fatalf("stored marker = %q", got)
+	}
+}
+
+type fakeAdminPushTests struct {
+	calls    int
+	userID   int
+	platform string
+}
+
+func (f *fakeAdminPushTests) send(platform string, userID int) (*notifications.ApplePushTestResult, error) {
+	f.calls++
+	f.platform, f.userID = platform, userID
+	return &notifications.ApplePushTestResult{AttemptID: "attempt-1", Outcome: notifications.PushOutcomeDelivered}, nil
+}
+
+func (f *fakeAdminPushTests) SendApplePushTest(_ context.Context, userID int, _, _ string) (*notifications.ApplePushTestResult, error) {
+	return f.send("apple", userID)
+}
+
+func (f *fakeAdminPushTests) SendAndroidPushTest(_ context.Context, userID int, _, _ string) (*notifications.ApplePushTestResult, error) {
+	return f.send("android", userID)
+}
+
+// The v1 routes target the authenticated caller's account, never one named in
+// the request.
+func TestAdminPushTestUsesTheCallersAccount(t *testing.T) {
+	for _, route := range []struct {
+		platform string
+		handle   func(*AdminApplePushHandler, http.ResponseWriter, *http.Request)
+	}{
+		{"apple", (*AdminApplePushHandler).HandleTest},
+		{"android", (*AdminApplePushHandler).HandleTestAndroid},
+	} {
+		t.Run(route.platform, func(t *testing.T) {
+			fake := new(fakeAdminPushTests)
+			h := &AdminApplePushHandler{pushTests: fake}
+			serve := func(claims *auth.Claims) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"profile_id":"default","user_id":99}`))
+				if claims != nil {
+					req = req.WithContext(apimw.SetClaims(req.Context(), claims))
+				}
+				rec := httptest.NewRecorder()
+				route.handle(h, rec, req)
+				return rec
+			}
+
+			if rec := serve(nil); rec.Code != http.StatusUnauthorized || fake.calls != 0 {
+				t.Fatalf("no claims: status %d, calls %d", rec.Code, fake.calls)
+			}
+			if rec := serve(&auth.Claims{UserID: 7, Role: "admin"}); rec.Code != http.StatusOK || fake.userID != 7 || fake.platform != route.platform {
+				t.Fatalf("status %d (%s), sent as %+v", rec.Code, rec.Body.String(), fake)
+			}
+		})
 	}
 }

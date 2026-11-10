@@ -332,7 +332,10 @@ func registerAdminHistoryImports(reg *Registry) {
 	create.DefaultStatus = http.StatusCreated
 	Register(reg, create, reg.createAdminHistorySource)
 	Register(reg, op(http.MethodPut, "/admin/history-import-sources/{id}", "updateAdminHistoryImportSource", true), reg.updateAdminHistorySource)
-	Register(reg, op(http.MethodDelete, "/admin/history-import-sources/{id}", "deleteAdminHistoryImportSource", true), func(ctx context.Context, in *AdminHistoryImportGuardedInput) (*struct{}, error) {
+	// A source that mappings still reference is 409.
+	deleteSource := op(http.MethodDelete, "/admin/history-import-sources/{id}", "deleteAdminHistoryImportSource", true)
+	deleteSource.Errors = append(deleteSource.Errors, http.StatusConflict)
+	Register(reg, deleteSource, func(ctx context.Context, in *AdminHistoryImportGuardedInput) (*struct{}, error) {
 		s, p := reg.adminHistoryImports()
 		if p != nil {
 			return nil, p

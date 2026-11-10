@@ -23,6 +23,7 @@ type fakeAdminRequests struct {
 	action, reason, requestID string
 	probedBaseURL             string
 	probedBaseURLCleared      bool
+	probedTestConnection      bool
 	// failed gives every returned request the errors a failed submission
 	// leaves (withSubmissionErrors).
 	failed bool
@@ -108,6 +109,7 @@ func (f *fakeAdminRequests) LoadIntegrationOptions(_ context.Context, v mediareq
 	f.viewer = v
 	f.probedBaseURL = r.BaseURL
 	f.probedBaseURLCleared = r.BaseURLCleared
+	f.probedTestConnection = r.TestConnection
 	if r.APIKeyRef == "bad" {
 		return nil, &mediarequests.ValidationError{FieldErrors: map[string]string{"api_key_ref": "invalid key"}}
 	}
@@ -259,7 +261,8 @@ func TestAdminRequestIntegrationSecretsAndGuard(t *testing.T) {
 }
 
 // The v2 probe sends a scheme-less address with http:// in front and refuses
-// one it could never reach as a field error, without asking the plugin.
+// one it could never reach as a field error, without asking the plugin. It
+// asks for the router's connection test, which the frozen v1 route does not.
 func TestAdminRequestOptionsNormalizesBaseURL(t *testing.T) {
 	f := fixtureAdminRequests()
 	h := adminRequestsHandler(f)
@@ -267,8 +270,8 @@ func TestAdminRequestOptionsNormalizesBaseURL(t *testing.T) {
 	if rec := do(t, h, http.MethodPost, path, `{"base_url":"10.0.0.5:8989/","api_key_ref":"k"}`, actingRequestAdmin); rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if f.probedBaseURL != "http://10.0.0.5:8989" {
-		t.Fatalf("probed base URL = %q", f.probedBaseURL)
+	if f.probedBaseURL != "http://10.0.0.5:8989" || !f.probedTestConnection {
+		t.Fatalf("probed base URL = %q, connection test = %v", f.probedBaseURL, f.probedTestConnection)
 	}
 	f.probedBaseURL = "unset"
 	rec := do(t, h, http.MethodPost, path, `{"base_url":"ftp://10.0.0.5","api_key_ref":"k"}`, actingRequestAdmin)

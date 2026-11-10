@@ -44,6 +44,14 @@ it (see [subtitle sync](subtitle-sync.md#jobs)). Subtitle files next to the
 media (sidecars) are never stored here; their corrections live in
 `external_subtitle_timings` (see [subtitle sync](subtitle-sync.md#sidecar-subtitles)).
 
+Embedded tracks the server has read whole are kept under `subtitles/embedded/`
+in a private store, the operational one when there is one (see
+[blob storage](blob-storage.md)), with rows in `embedded_subtitle_tracks`. They are a cache
+of the media file, not subtitles in their own right: their keys hold a content
+hash, a changed or deleted file retires them, a store-wide budget stops more
+being kept, and the blob collector deletes their objects. See
+[embedded-subtitle-index.md](embedded-subtitle-index.md#kept-tracks).
+
 Deletion removes the row before attempting object cleanup. A delayed cleanup
 cannot remove a new publication because its object key differs. Successful
 deletion means metadata is absent, not that physical cleanup is durable. Failed
@@ -54,8 +62,7 @@ physical erasure guarantee or durable operation replay from these methods.
 All subtitle writers must use the immutable object implementation before relying
 on these publication guarantees. The revision trigger invalidates guards for
 older writers, but cannot make an older binary's object moves or shared-key
-cleanup safe. This storage foundation alone does not enable API v2 mutations or
-activate playback for existing accounts.
+cleanup safe.
 
 AI job cancellation attempts the guarded terminal job-state transition before
 canceling a local worker context. A database error is returned even when local
@@ -94,5 +101,4 @@ already-streamed transient cues limit how quickly work stops. The database
 publication fence does not depend on prompt provider cancellation and does not
 undo provider compute or previously committed output. All AI workers must use
 this fenced publication path before relying on these guarantees; an older
-worker can still bypass it. This change does not activate playback or port the
-AI creation/cancellation wire operations.
+worker can still bypass it.

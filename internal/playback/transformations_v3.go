@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -51,11 +52,11 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 	// capability advertised here holds for the binary that later runs.
 	ffmpegPath = ResolveFFmpegPath(ffmpegPath)
 	bsfCtx, cancelBSF := context.WithTimeout(ctx, 3*time.Second)
-	bsfs, bsfErr := exec.CommandContext(bsfCtx, ffmpegPath, "-hide_banner", "-bsfs").Output()
+	bsfs, bsfErr := procgroup.CommandContext(bsfCtx, ffmpegPath, "-hide_banner", "-bsfs").Output()
 	bsfContextErr := bsfCtx.Err()
 	cancelBSF()
 	encoderCtx, cancelEncoders := context.WithTimeout(ctx, 3*time.Second)
-	encoders, encoderErr := exec.CommandContext(encoderCtx, ffmpegPath, "-hide_banner", "-encoders").Output()
+	encoders, encoderErr := procgroup.CommandContext(encoderCtx, ffmpegPath, "-hide_banner", "-encoders").Output()
 	encoderContextErr := encoderCtx.Err()
 	cancelEncoders()
 	normalizeRecipeErr, normalizeRecipeContextErr := probeAudioRecipeFilterV3(ctx, ffmpegPath, "stereo", aacTimestampNormalizeFilterV3)
@@ -64,6 +65,7 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 	_, ffmpegErr := exec.LookPath(ffmpegPath)
 	registry := NewTransformationRegistryV3([]TransformationSpecV3{
 		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: bytes.Contains(bsfs, []byte("dovi_rpu")) && bytes.Contains(bsfs, []byte("filter_units")), RequiredCapability: "ffmpeg_bsf:dovi_rpu+filter_units", PromisedDynamicRange: DynamicRangeHDR10V3, ValidatedClaims: DV7ToHDR10ClaimsV3(), TerminalReason: TerminalDVConversionUnsupportedV3},
+		{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: bytes.Contains(bsfs, []byte("filter_units")), RequiredCapability: "ffmpeg_bsf:filter_units", PromisedDynamicRange: DynamicRangeDolbyVisionV3, ValidatedClaims: DV7ToDV81ClaimsV3(), TerminalReason: TerminalDVConversionUnsupportedV3},
 		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: ffmpegErr == nil && bytes.Contains(encoders, []byte(" aac ")) && normalizeRecipeErr == nil && downmixRecipeErr == nil, RequiredCapability: "ffmpeg_encoder:aac+ffmpeg_filter_smoke:timestamp_normalization_and_stereo_downmix_v4", ValidatedClaims: []string{ClaimAudioDecodeV3}, TerminalReason: TerminalAudioConversionUnsupportedV3},
 		{Name: TransformationVideoToH264V3, RecipeVersion: TransformationVideoToH264RecipeVersionV3, Available: ffmpegErr == nil && h264EncoderAvailableV3(encoders), RequiredCapability: "ffmpeg_encoder:h264", PromisedDynamicRange: DynamicRangeSDRV3, ValidatedClaims: []string{ClaimH264DecodeV3}, TerminalReason: TerminalVideoConversionUnsupportedV3},
 		{Name: TransformationVideoToHEVCV3, RecipeVersion: TransformationVideoToHEVCRecipeVersionV3, Available: ffmpegErr == nil && hevcEncoderAvailableV3(encoders) && hevcRecipeErr == nil, RequiredCapability: "ffmpeg_encoder:hevc+ffmpeg_encode_smoke:main_8bit_sdr", PromisedDynamicRange: DynamicRangeSDRV3, ValidatedClaims: []string{ClaimHEVCDecodeV3}, TerminalReason: TerminalVideoConversionUnsupportedV3},
@@ -96,7 +98,7 @@ func ProbeTransformationRegistryWithToneMapV3Result(ctx context.Context, ffmpegP
 // failures at the registry boundary.
 func probeAudioRecipeFilterV3(ctx context.Context, ffmpegPath, channelLayout, filter string) (error, error) {
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
-	probeErr := exec.CommandContext(probeCtx, ffmpegPath,
+	probeErr := procgroup.CommandContext(probeCtx, ffmpegPath,
 		"-hide_banner", "-loglevel", "error",
 		"-f", "lavfi", "-i", "anullsrc=r=8000:cl="+channelLayout,
 		"-frames:a", "1", "-af", filter,
@@ -117,7 +119,7 @@ func probeHEVCRecipeV3(ctx context.Context, ffmpegPath string, encoders []byte) 
 		return errHEVCEncoderUnavailableV3, nil
 	}
 	probeCtx, cancelProbe := context.WithTimeout(ctx, 3*time.Second)
-	probeErr := exec.CommandContext(probeCtx, ffmpegPath, hevcSoftwareSmokeArgsV3()...).Run()
+	probeErr := procgroup.CommandContext(probeCtx, ffmpegPath, hevcSoftwareSmokeArgsV3()...).Run()
 	probeContextErr := probeCtx.Err()
 	cancelProbe()
 	return probeErr, probeContextErr

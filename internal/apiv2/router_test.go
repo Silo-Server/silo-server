@@ -683,7 +683,8 @@ func TestSystemInfo(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
-	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+	// request_origin is per-request, so no shared cache may store it.
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-cache" {
 		t.Fatalf("Cache-Control = %q", cc)
 	}
 	var info SystemInfo

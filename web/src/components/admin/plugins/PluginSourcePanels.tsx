@@ -12,12 +12,15 @@ import {
   usePluginUpload,
   useUpdatePluginRepository,
 } from "@/hooks/queries/admin/plugins";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 const PANEL = "rounded-xl border bg-card px-4 py-4";
+const REPOSITORY_URL_PLACEHOLDER = "https://plugins.example.test/index.json";
 
 /** "Install from a file": upload a plugin archive that isn't in a repository. */
 export function PluginUploadPanel() {
+  const t = useT();
   const { upload, progress, isPending } = usePluginUpload();
   const [file, setFile] = useState<File | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -37,21 +40,21 @@ export function PluginUploadPanel() {
   return (
     <section className={PANEL} aria-labelledby="plugin-upload-heading">
       <h2 id="plugin-upload-heading" className="text-[15px] font-semibold">
-        Install from a file
+        {t("web.admin.plugins.upload.heading")}
       </h2>
       <p className="text-muted-foreground text-[13px]">
-        Upload a plugin file for a plugin that isn&apos;t in a repository.
+        {t("web.admin.plugins.upload.description")}
       </p>
       <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2.5 sm:flex-row">
         <label className="border-border hover:border-foreground/20 focus-within:ring-ring flex h-9 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg border border-dashed px-3.5 text-sm transition-colors focus-within:ring-2">
           <Upload className="text-muted-foreground h-4 w-4 shrink-0" aria-hidden />
           <span className="text-muted-foreground truncate">
-            {file ? file.name : "Choose plugin file..."}
+            {file ? file.name : t("web.admin.plugins.upload.choose")}
           </span>
           <input
             ref={inputRef}
             type="file"
-            aria-label="Plugin file"
+            aria-label={t("web.admin.plugins.upload.fileLabel")}
             className="sr-only"
             disabled={isPending}
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
@@ -59,11 +62,17 @@ export function PluginUploadPanel() {
         </label>
         <Button type="submit" variant="outline" size="sm" disabled={!file || isPending}>
           <Upload className="h-3.5 w-3.5" />
-          {isPending ? "Uploading..." : "Upload"}
+          {isPending
+            ? t("web.admin.plugins.upload.uploading")
+            : t("web.admin.plugins.upload.submit")}
         </Button>
       </form>
       {progress !== null && (
-        <Progress value={progress} aria-label="Plugin upload progress" className="mt-3" />
+        <Progress
+          value={progress}
+          aria-label={t("web.admin.plugins.upload.progress")}
+          className="mt-3"
+        />
       )}
     </section>
   );
@@ -76,6 +85,7 @@ export function PluginRepositoriesPanel({
   repositories: PluginRepository[];
   repositoriesError: unknown;
 }) {
+  const t = useT();
   const createRepository = useCreatePluginRepository();
   const updateRepository = useUpdatePluginRepository();
   const deleteRepository = useDeletePluginRepository();
@@ -105,19 +115,21 @@ export function PluginRepositoriesPanel({
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 id="plugin-repositories-heading" className="text-[15px] font-semibold">
-            Repositories
+            {t("web.admin.plugins.repositories.heading")}
           </h2>
-          <p className="text-muted-foreground text-[13px]">Where Silo finds plugins.</p>
+          <p className="text-muted-foreground text-[13px]">
+            {t("web.admin.plugins.repositories.description")}
+          </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setShowForm(!showForm)}>
           {showForm ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
-          {showForm ? "Cancel" : "Add repository"}
+          {showForm ? t("common.cancel") : t("web.admin.plugins.repositories.add")}
         </Button>
       </div>
 
       {repositoriesError ? (
         <p role="alert" className="text-destructive mt-3 text-sm">
-          Failed to load plugin repositories.
+          {t("web.admin.plugins.repositories.loadFailed")}
         </p>
       ) : null}
 
@@ -126,19 +138,19 @@ export function PluginRepositoriesPanel({
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Repository name"
-            aria-label="Repository name"
+            placeholder={t("web.admin.plugins.repositories.name")}
+            aria-label={t("web.admin.plugins.repositories.name")}
             className="sm:flex-1"
           />
           <Input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://plugins.example.test/index.json"
-            aria-label="Repository URL"
+            placeholder={REPOSITORY_URL_PLACEHOLDER}
+            aria-label={t("web.admin.plugins.repositories.url")}
             className="sm:flex-[2]"
           />
           <Button type="submit" size="sm" disabled={createRepository.isPending}>
-            Add
+            {t("web.admin.plugins.repositories.submit")}
           </Button>
         </form>
       )}
@@ -156,7 +168,7 @@ export function PluginRepositoriesPanel({
               />
               <span className="shrink-0 font-medium">{repo.display_name}</span>
               <span className="text-muted-foreground min-w-0 flex-1 truncate text-[12.5px]">
-                {repo.managed ? "Managed by Silo" : repo.url}
+                {repo.managed ? t("web.admin.plugins.repositories.managed") : repo.url}
               </span>
               {repo.managed ? null : (
                 <span className="flex shrink-0 gap-1">
@@ -167,12 +179,16 @@ export function PluginRepositoriesPanel({
                       updateRepository.mutate({ id: repo.id, body: { enabled: !repo.enabled } })
                     }
                   >
-                    {repo.enabled ? "Disable" : "Enable"}
+                    {repo.enabled
+                      ? t("web.admin.plugins.repositories.disable")
+                      : t("web.admin.plugins.repositories.enable")}
                   </Button>
                   <Button
                     variant="ghost"
                     size="xs"
-                    aria-label={`Remove ${repo.display_name}`}
+                    aria-label={t("web.admin.plugins.repositories.remove", {
+                      name: repo.display_name,
+                    })}
                     className="text-muted-foreground hover:text-destructive"
                     onClick={() => deleteRepository.mutate(repo.id)}
                   >
@@ -187,7 +203,7 @@ export function PluginRepositoriesPanel({
 
       {repositories.length === 0 && !showForm && !repositoriesError ? (
         <p className="text-muted-foreground mt-3 text-sm">
-          No repositories configured. Add one to browse available plugins.
+          {t("web.admin.plugins.repositories.empty")}
         </p>
       ) : null}
     </section>

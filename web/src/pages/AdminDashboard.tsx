@@ -22,6 +22,8 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { SettingsAttention } from "@/components/admin/SettingsAttention";
 import { useSettingsAttentionDismissals } from "@/hooks/admin/useSettingsAttentionDismissals";
+import { formatLocale } from "@/lib/appLocale";
+import { useT, type Translate } from "@/i18n";
 
 // Query prefixes the dashboard's stats/sessions/libraries/users refetch does
 // not already cover. Widgets fetch these themselves, so Refresh only has to
@@ -31,6 +33,7 @@ const DASHBOARD_WIDGET_QUERY_PREFIXES = [
   adminKeys.playbackActivityRoot(),
   adminKeys.topActivityRoot(),
   adminKeys.downloadsStatsRoot(),
+  adminKeys.apiClientsRoot(),
   adminKeys.serverStatus(),
   adminKeys.systemResources(),
   adminKeys.nodes(),
@@ -44,6 +47,7 @@ const DASHBOARD_AUTO_REFRESH_MS = 60_000;
 const RELATIVE_UPDATED_LABEL_TICK_MS = 30_000;
 
 export default function AdminDashboard() {
+  const t = useT();
   const queryClient = useQueryClient();
   const statsQuery = useAdminStats();
   const sessionsQuery = useAdminSessions();
@@ -79,7 +83,7 @@ export default function AdminDashboard() {
     usersQuery.dataUpdatedAt,
   );
   const lastUpdatedLabel = lastDashboardUpdatedAt
-    ? formatRelativeUpdatedLabel(relativeUpdatedNow, lastDashboardUpdatedAt)
+    ? formatRelativeUpdatedLabel(t, relativeUpdatedNow, lastDashboardUpdatedAt)
     : null;
   const settingsAttention = useSettingsAttentionDismissals();
   const adminSearchSections = useMemo(
@@ -214,8 +218,8 @@ export default function AdminDashboard() {
 
       {/* Page header */}
       <PageHeader
-        title="Dashboard"
-        subtitle="Live sessions, content health, and server activity in one view."
+        title={t("web.admin.dashboard.page.title")}
+        subtitle={t("web.admin.dashboard.page.subtitle")}
         actions={
           <div className="grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center">
             <div className="grid gap-2 sm:flex sm:items-center">
@@ -223,19 +227,22 @@ export default function AdminDashboard() {
                 <button
                   type="button"
                   onClick={settingsAttention.restoreAll}
-                  aria-label={`Show ${settingsAttention.hiddenCount} hidden setup ${
-                    settingsAttention.hiddenCount === 1 ? "notice" : "notices"
-                  }`}
-                  title="Show hidden setup notices"
-                  className="border-warning/35 bg-warning/8 text-warning hover:bg-warning/15 focus-visible:ring-ring/60 inline-flex cursor-pointer items-center justify-center gap-1.5 justify-self-start rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+                  disabled={settingsAttention.saving}
+                  aria-label={t("web.admin.dashboard.page.showHiddenNoticesLabel", {
+                    count: settingsAttention.hiddenCount,
+                  })}
+                  title={t("web.admin.dashboard.page.showHiddenNoticesHint")}
+                  className="border-warning/35 bg-warning/8 text-warning hover:bg-warning/15 focus-visible:ring-ring/60 inline-flex cursor-pointer items-center justify-center gap-1.5 justify-self-start rounded-full border px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors focus-visible:ring-[3px] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
                 >
                   <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
-                  {settingsAttention.hiddenCount} hidden
+                  {t("web.admin.dashboard.page.hiddenNoticesChip", {
+                    count: settingsAttention.hiddenCount,
+                  })}
                 </button>
               )}
               {lastUpdatedLabel && (
                 <span className="text-muted-foreground text-xs sm:whitespace-nowrap">
-                  Updated {lastUpdatedLabel}
+                  {lastUpdatedLabel}
                 </span>
               )}
               <Button
@@ -251,7 +258,9 @@ export default function AdminDashboard() {
                 <RefreshCw
                   className={`h-3.5 w-3.5 ${isManualRefreshPending ? "animate-spin" : ""}`}
                 />
-                {isManualRefreshPending ? "Refreshing..." : "Refresh"}
+                {isManualRefreshPending
+                  ? t("web.admin.dashboard.page.refreshing")
+                  : t("web.admin.dashboard.page.refresh")}
               </Button>
               <Button
                 variant="outline"
@@ -261,7 +270,7 @@ export default function AdminDashboard() {
                 aria-pressed={layout.isCustomizing}
               >
                 <LayoutDashboard className="h-3.5 w-3.5" />
-                {layout.isCustomizing ? "Done" : "Customize"}
+                {layout.isCustomizing ? t("common.done") : t("web.admin.dashboard.page.customize")}
               </Button>
             </div>
             <Button
@@ -276,7 +285,7 @@ export default function AdminDashboard() {
               disabled={scanAll.isPending || libraries.length === 0}
             >
               <ScanLine className="h-3.5 w-3.5" />
-              Scan All Libraries
+              {t("web.admin.dashboard.page.scanAllLibraries")}
             </Button>
           </div>
         }
@@ -285,7 +294,11 @@ export default function AdminDashboard() {
       {/* Setup the server still owes, each item linking to the page that
           fixes it. The admin sidebar marks the broken ones too. Setup the
           admin hides here comes back from the header's "hidden" chip. */}
-      <SettingsAttention items={settingsAttention.visible} onDismiss={settingsAttention.dismiss} />
+      <SettingsAttention
+        items={settingsAttention.visible}
+        onDismiss={settingsAttention.dismiss}
+        dismissDisabled={settingsAttention.saving}
+      />
 
       {layout.isCustomizing && (
         <div className="surface-panel-subtle flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl px-4 py-2.5">
@@ -296,27 +309,26 @@ export default function AdminDashboard() {
             onClick={() => setIsAddPanelOpen(true)}
           >
             <Plus className="h-3.5 w-3.5" />
-            Add widget
+            {t("web.admin.dashboard.customize.addWidget")}
           </Button>
           <span className="text-muted-foreground text-xs">
-            Drag a widget to move it · drag its corner to resize · × removes it
+            {t("web.admin.dashboard.customize.hint")}
           </span>
           <button
             type="button"
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring ml-auto cursor-pointer text-xs underline-offset-2 transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none"
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring ms-auto cursor-pointer text-xs underline-offset-2 transition-colors hover:underline focus-visible:ring-2 focus-visible:outline-none"
             onClick={() => layout.resetLayout()}
           >
-            Reset to default layout
+            {t("web.admin.dashboard.customize.resetLayout")}
           </button>
         </div>
       )}
 
       {layout.serverSaveBlocked && (
         <div role="status" className="text-sm">
-          Local edits are not being saved. Reload the server layout to discard local edits and
-          resume.
+          {t("web.admin.dashboard.page.saveBlocked")}
           <Button variant="outline" size="sm" onClick={() => void layout.reloadServerLayout()}>
-            Reload server layout
+            {t("web.admin.dashboard.page.reloadServerLayout")}
           </Button>
         </div>
       )}
@@ -332,15 +344,16 @@ export default function AdminDashboard() {
 
 // --- Helpers ---
 
-function formatRelativeUpdatedLabel(now: number, updatedAt: number) {
+/** The header's "Updated … ago" line. */
+function formatRelativeUpdatedLabel(t: Translate, now: number, updatedAt: number) {
   const elapsedMinutes = Math.floor(Math.max(0, now - updatedAt) / 60_000);
   if (elapsedMinutes < 1) {
-    return "less than 1 minute ago";
+    return t("web.admin.dashboard.page.updatedJustNow");
   }
-  if (elapsedMinutes === 1) {
-    return "1 minute ago";
-  }
-  return `${elapsedMinutes.toLocaleString()} minutes ago`;
+  return t("web.admin.dashboard.page.updatedMinutesAgo", {
+    minutes: elapsedMinutes,
+    minutes_text: elapsedMinutes.toLocaleString(formatLocale()),
+  });
 }
 
 function delay(ms: number) {

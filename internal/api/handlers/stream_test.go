@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -294,6 +296,78 @@ func TestHandleStream_AudioOnlyRemuxServesAudioContentType(t *testing.T) {
 			}
 			if got := rr.Header().Get("Content-Type"); got != tc.wantContent {
 				t.Fatalf("Content-Type = %q, want %q", got, tc.wantContent)
+			}
+		})
+	}
+}
+
+// A progressive remux can only stream from its seek origin. A URL that opted in
+// with remux_range=refuse answers a range past byte 0 with 409 before ffmpeg
+// starts, and leaves the session for the client's reopen. Every other request,
+// and every request without the opt-in, streams from the origin as before.
+func TestHandleStream_RemuxRangeRefusal(t *testing.T) {
+	const optIn = "?" + playback.RemuxRangeQueryParam + "=" + playback.RemuxRangeRefuse
+	for _, tc := range []struct {
+		name, method, query, rangeHeader string
+		v1                               bool
+		wantStatus                       int
+	}{
+		{name: "resumed range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusConflict},
+		{name: "suffix range", method: http.MethodGet, query: optIn, rangeHeader: "bytes=-500", wantStatus: http.StatusConflict},
+		{name: "range set reaching past the origin", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-1,5000-", wantStatus: http.StatusConflict},
+		{name: "range from the origin", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-", wantStatus: http.StatusOK},
+		{name: "byte-range probe", method: http.MethodGet, query: optIn, rangeHeader: "bytes=0-1", wantStatus: http.StatusOK},
+		{name: "no range", method: http.MethodGet, query: optIn, wantStatus: http.StatusOK},
+		{name: "unparseable range", method: http.MethodGet, query: optIn, rangeHeader: "items=5-", wantStatus: http.StatusOK},
+		{name: "head", method: http.MethodHead, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+		{name: "resumed range without the opt-in", method: http.MethodGet, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+		{name: "resumed range on the v1 route", v1: true, method: http.MethodGet, query: optIn, rangeHeader: "bytes=1048576-", wantStatus: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := models.MediaFile{
+				ID: 42, ContentID: "movie-1", CodecVideo: "h264", CodecAudio: "aac",
+				VideoTracks: []models.VideoTrack{{Codec: "h264"}}, Duration: 3600,
+				FilePath: writePlaybackTestMediaFile(t, "source.mkv"),
+			}
+			sessionMgr := playback.NewSessionManager(0, 0)
+			session, err := sessionMgr.StartSession(1, "profile-1", file.ID, playback.PlayRemux, false)
+			if err != nil {
+				t.Fatalf("StartSession: %v", err)
+			}
+			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
+			if err := os.WriteFile(ffmpeg, []byte("#!/bin/sh\nprintf muxed\n"), 0o755); err != nil {
+				t.Fatalf("write fake ffmpeg: %v", err)
+			}
+			handler := NewStreamHandler(sessionMgr, testPlaybackFileResolver{file: &file})
+			handler.PlaybackConfig = func() config.PlaybackConfig {
+				return config.PlaybackConfig{FFmpegPath: ffmpeg}
+			}
+
+			req := httptest.NewRequest(tc.method, "/api/v2/stream/"+session.ID+tc.query, nil)
+			if tc.rangeHeader != "" {
+				req.Header.Set("Range", tc.rangeHeader)
+			}
+			ctx := newAuthorizedPlaybackContext()
+			if !tc.v1 {
+				ctx = WithNativeAPIV2(ctx)
+			}
+			req = req.WithContext(ctx)
+			req = withPlaybackRouteParam(req, "session_id", session.ID)
+			rr := httptest.NewRecorder()
+			handler.HandleStream(rr, req)
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d, body = %s", rr.Code, tc.wantStatus, rr.Body.String())
+			}
+			if tc.wantStatus == http.StatusConflict {
+				if strings.Contains(rr.Body.String(), "muxed") {
+					t.Fatal("a refused range started the remux")
+				}
+				if _, err := sessionMgr.GetSession(session.ID); err != nil {
+					t.Fatalf("a refused range ended the session: %v", err)
+				}
+			} else if tc.method == http.MethodGet && rr.Body.String() != "muxed" {
+				t.Fatalf("body = %q, want the remux from its origin", rr.Body.String())
 			}
 		})
 	}
@@ -775,12 +849,20 @@ func TestSubtitleExplicitWindow(t *testing.T) {
 func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, script string
-		status       int
-		interrupted  bool
+		// codec is the track's, subrip when empty; busy makes the node
+		// admit no more whole-track reads.
+		codec       string
+		busy        bool
+		status      int
+		interrupted bool
 	}{
-		{"before_output", "exit 1", http.StatusInternalServerError, false},
-		{"after_output", "printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nPartial\\n\\n'; exit 1", http.StatusOK, true},
-		{"complete", "printf 'WEBVTT\\n\\n00:20:01.000 --> 00:20:02.000\\nComplete\\n\\n'", http.StatusOK, false},
+		{name: "before_output", script: "exit 1", status: http.StatusInternalServerError},
+		{name: "after_output", script: "printf 'WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000\\nPartial\\n\\n'; exit 1", status: http.StatusOK, interrupted: true},
+		{name: "complete", script: "printf 'WEBVTT\\n\\n00:20:01.000 --> 00:20:02.000\\nComplete\\n\\n'", status: http.StatusOK},
+		// A busy node answers before any byte, without a demux (the script
+		// would fail it).
+		{name: "busy_text", script: "exit 1", busy: true, status: http.StatusServiceUnavailable},
+		{name: "busy_sup", script: "exit 1", codec: "hdmv_pgs_subtitle", busy: true, status: http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ffmpeg := filepath.Join(t.TempDir(), "ffmpeg")
@@ -789,8 +871,19 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			}
 			handler := NewStreamHandler(nil, nil)
 			handler.PlaybackConfig = func() config.PlaybackConfig { return config.PlaybackConfig{FFmpegPath: ffmpeg} }
-			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/media.mkv", SubtitleTracks: []models.SubtitleTrack{{Codec: "subrip"}}}
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { handler.streamEmbeddedSubtitle(w, r, file, 0, "vtt") }))
+			if tc.busy {
+				dir := t.TempDir()
+				handler.SubtitleCache = playback.NewSubtitleCache(func() string { return dir })
+				handler.SubtitleCache.SetEmbeddedSource(busySubtitleSource{})
+			}
+			codec, format := cmp.Or(tc.codec, "subrip"), []string{"vtt"}
+			if playback.IsPGS(codec) {
+				format = nil
+			}
+			file := &models.MediaFile{ID: 42, FilePath: "/synthetic/media.mkv", SubtitleTracks: []models.SubtitleTrack{{Codec: codec, Index: 2}}}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				handler.streamEmbeddedSubtitle(w, r, file, 0, format...)
+			}))
 			defer server.Close()
 			response, err := server.Client().Get(server.URL)
 			if err != nil {
@@ -801,6 +894,9 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			if response.StatusCode != tc.status {
 				t.Fatalf("status=%d, want %d", response.StatusCode, tc.status)
 			}
+			if retry := response.Header.Get("Retry-After"); tc.busy && retry != strconv.Itoa(playback.SubtitleReadsRetryAfter) {
+				t.Fatalf("Retry-After %q on a busy answer", retry)
+			}
 			if tc.interrupted && err == nil {
 				t.Fatal("failed extraction ended with successful EOF")
 			}
@@ -809,4 +905,24 @@ func TestEmbeddedSubtitleExtractionFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+// busySubtitleSource is the embedded subtitle source of a node that admits
+// no more whole-track reads.
+type busySubtitleSource struct{}
+
+func (busySubtitleSource) WholeTrack(context.Context, string, playback.EmbeddedSubtitleRef) (*playback.SubtitlePacketInput, error) {
+	return nil, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) Window(context.Context, string, playback.EmbeddedSubtitleRef, time.Duration, time.Duration) (*playback.SubtitlePacketInput, error) {
+	return nil, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) DemuxCopy(context.Context, string, playback.EmbeddedSubtitleRef) (playback.DemuxCopy, error) {
+	return playback.DemuxCopy{}, playback.ErrSubtitleReadsBusy
+}
+
+func (busySubtitleSource) KeepDemuxed(context.Context, string, playback.EmbeddedSubtitleRef, playback.DemuxCopy, int64, time.Time) error {
+	return playback.ErrSubtitleReadsBusy
 }

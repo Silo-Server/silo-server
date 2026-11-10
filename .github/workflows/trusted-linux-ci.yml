@@ -107,6 +107,14 @@ jobs:
   repo-checks:
     name: Repository checks
     runs-on: ubuntu-24.04
+    # The cache key, download URLs and checksums below all read these, so a
+    # version or checksum change also changes the key. The Makefile's
+    # verify-actionlint and verify-shellcheck targets pin the same versions.
+    env:
+      ACTIONLINT_VERSION: 1.7.12
+      ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+      SHELLCHECK_VERSION: 0.11.0
+      SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,17 +128,28 @@ jobs:
             !/web/assets-source/
           sparse-checkout-cone-mode: false
           persist-credentials: false
+      # GitHub release downloads sometimes return 504s for a stretch while the
+      # rest of Actions works, and that stops every run at the step below. Keep
+      # the archives in the Actions cache so most runs never fetch them. The
+      # checksums still verify every archive, cached or downloaded.
+      - name: Restore pinned workflow and shell tool archives
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/workflow-tool-archives
+          key: workflow-tool-archives-actionlint-${{ env.ACTIONLINT_VERSION }}-${{ env.ACTIONLINT_SHA256 }}-shellcheck-${{ env.SHELLCHECK_VERSION }}-${{ env.SHELLCHECK_SHA256 }}
       - name: Install pinned workflow and shell tools
         shell: bash
         run: |
-          mkdir -p "$RUNNER_TEMP/workflow-tools"
+          archives="$RUNNER_TEMP/workflow-tool-archives"
+          mkdir -p "$archives" "$RUNNER_TEMP/workflow-tools"
+          cd "$archives"
+          [ -f actionlint.tar.gz ] || curl -fsSL --retry 3 -o actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          [ -f shellcheck.tar.xz ] || curl -fsSL --retry 3 -o shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
           cd "$RUNNER_TEMP/workflow-tools"
-          curl -fsSL --retry 3 -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
-          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | sha256sum -c -
-          tar -xzf actionlint.tar.gz actionlint
-          curl -fsSL --retry 3 -o shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
-          echo '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  shellcheck.tar.xz' | sha256sum -c -
-          tar -xJf shellcheck.tar.xz --strip-components=1 shellcheck-v0.11.0/shellcheck
+          tar -xzf "$archives/actionlint.tar.gz" actionlint
+          tar -xJf "$archives/shellcheck.tar.xz" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           echo "$RUNNER_TEMP/workflow-tools" >> "$GITHUB_PATH"
       - name: Test CI helper changes
         run: |
@@ -142,6 +161,8 @@ jobs:
           fi
       - name: Check workflows and shell
         run: make verify-actionlint verify-shellcheck
+      - name: Test image packaging scripts
+        run: sh scripts/tests/intel-qsv-runtime.sh
       - name: Check action SHA pins
         shell: bash
         run: |
@@ -652,7 +673,7 @@ jobs:
       - *libvips-restore
       - *libvips-install
 
-      # The image docker-compose.yml runs: the schema needs pgvector.
+      # The image dev/compose.yml runs: the schema needs pgvector.
       - name: Start Postgres
         run: docker run -d --rm --cidfile "$RUNNER_TEMP/pg" -p 5432:5432 --tmpfs /var/lib/postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=silo_test pgvector/pgvector:pg18 > "$RUNNER_TEMP/pg.log" 2>&1 &
 
@@ -675,6 +696,79 @@ jobs:
 
       - name: Migrate the test database
         run: DATABASE_URL="$SILO_TEST_DATABASE_URL" go run ./scripts/ci/migrate/ --migrate-only
+
+      # The backup tests in db-contracts.txt run pg_dump and pg_restore, which
+      # must be at least the server's major version, and the hosted runner's
+      # client is older than the pg18 server above. The backup package picks
+      # the newest major under /usr/lib/postgresql, so the older client can
+      # stay on PATH. apt reads only the Ubuntu sources and PGDG, whose key is
+      # checked against its published fingerprint and trusted for that source
+      # alone. The packages are cached per runner image, as libvips's are.
+      - name: Read the PostgreSQL client cache key
+        if: runner.environment == 'github-hosted'
+        id: pg-client-cache-key
+        shell: bash
+        run: echo "key=postgresql-client-18-${ImageOS:?}-${ImageVersion:?}-${RUNNER_ARCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the PostgreSQL client packages
+        if: runner.environment == 'github-hosted'
+        id: pg-client-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pg-client-debs/*.deb
+          key: ${{ steps.pg-client-cache-key.outputs.key }}
+
+      - name: Install the PostgreSQL 18 client
+        shell: bash
+        run: |
+          pg_dump=/usr/lib/postgresql/18/bin/pg_dump
+          if "$pg_dump" --version 2>/dev/null; then
+            exit 0
+          fi
+          test -f /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(
+            -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+            -o Dir::Etc::sourceparts=/etc/apt/pgdg.sources.d
+          )
+          if [ "$RUNNER_ENVIRONMENT" = github-hosted ]; then
+            mkdir -p "$RUNNER_TEMP/pg-client-debs"
+            apt_options+=(-o "Dir::Cache::archives=$RUNNER_TEMP/pg-client-debs")
+            debs=("$RUNNER_TEMP"/pg-client-debs/*.deb)
+            if [ -e "${debs[0]}" ]; then
+              echo "apt-get install cached"
+              if sudo apt-get "${apt_options[@]}" install -y --no-install-recommends --no-download "${debs[@]}"; then
+                "$pg_dump" --version
+                exit 0
+              fi
+            fi
+          fi
+          key="$RUNNER_TEMP/pgdg.asc"
+          curl -fsSL --retry 3 -o "$key" https://apt.postgresql.org/pub/repos/apt/ACCC4CF8.asc
+          # apt trusts every key in the file, so it must hold exactly one
+          # primary key, PGDG's. A key's fpr record follows its pub or sub
+          # record; only the pub ones are primary keys.
+          fingerprints="$(gpg --show-keys --with-colons "$key" | awk -F: '$1 == "pub" { primary = 1 } $1 == "fpr" { if (primary) print $10; primary = 0 }')"
+          if [ "$fingerprints" != B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8 ]; then
+            echo "::error::The PGDG key file holds primary keys '${fingerprints//$'\n'/ }', not only the published one"
+            exit 1
+          fi
+          sudo install -D -m 0644 "$key" /etc/apt/keyrings/pgdg.asc
+          codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+          printf '%s\n' 'Types: deb' 'URIs: https://apt.postgresql.org/pub/repos/apt' \
+            "Suites: ${codename}-pgdg" 'Components: main' 'Signed-By: /etc/apt/keyrings/pgdg.asc' \
+            | sudo install -D -m 0644 /dev/stdin /etc/apt/pgdg.sources.d/pgdg.sources
+          echo "apt-get update"
+          sudo apt-get "${apt_options[@]}" update
+          echo "apt-get install"
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends postgresql-client-18
+          "$pg_dump" --version
+
+      - name: Save the PostgreSQL client packages
+        if: runner.environment == 'github-hosted' && github.event_name != 'pull_request' && steps.pg-client-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/pg-client-debs/*.deb
+          key: ${{ steps.pg-client-cache.outputs.cache-primary-key }}
 
       - name: Run the query-budget pins
         run: make test-db-pins
@@ -742,7 +836,7 @@ jobs:
       - name: Test external sign-in against Postgres
         run: |
           (cd internal/api/handlers && "$RUNNER_TEMP/race/handlers.test" -test.run='^(TestLocalLoginSettingRequiresBreakGlassDB|TestV1AdminUserChangesKeepBreakGlassDB|TestDeviceApprovalInheritsSessionProviderChainDB|TestExternalSignInAdminIdentityGuardsDB)$' -test.count=1 -test.timeout=10m)
-          (cd internal/auth && "$RUNNER_TEMP/race/auth.test" -test.run='^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff).*DB$' -test.count=1 -test.timeout=10m)
+          (cd internal/auth && "$RUNNER_TEMP/race/auth.test" -test.run='^(TestExternalSignIn|TestProviderRecheck|TestPGOAuthStore|TestOAuthNativeFlowAcrossNodes|TestOAuthNativeStartOrigin|TestOAuthWebFlowBrowserBinding|TestOAuthUnredeemedCode|TestOAuthLinkFlow|TestOAuthForcedLink|TestLinkCredentialsIdentity|TestNetworkSignIn|TestNetworkIdentity|TestLinkNetworkIdentity|TestLocalPasswordPolicy|TestPasswordLoginRouting|TestIdentityService|TestConcurrentFirstSignInCreatesOneAccount|TestEnableAccountLocalLogin|TestSignupRefusedWhileLocalLoginIsOff|TestSignupRechecksLocalPolicyBeforeSpendingInvite).*DB$' -test.count=1 -test.timeout=10m)
           (cd internal/jellycompat && "$RUNNER_TEMP/race/jellycompat.test" -test.run='^TestLoginPINConventionStaysLocalDB$' -test.count=1 -test.timeout=10m)
           (cd internal/plugins && "$RUNNER_TEMP/race/plugins.test" -test.run='^TestUpsertAuthBindingAllows(OneEnabledProvider|NetworkProviderBesidePrimary)$' -test.count=1 -test.timeout=10m)
 

@@ -6,6 +6,7 @@ import { SideNavItem, SideNavSection } from "@/components/SideNav";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { SettingsSearchInput } from "@/components/settings/SettingsSearchInput";
 import type { SidebarSwap } from "@/hooks/useSidebarSwap";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
@@ -65,12 +66,13 @@ export function SettingsSidebar({
   entrance,
   className,
 }: SettingsSidebarProps) {
+  const t = useT();
   return (
     <aside
       data-settings-sidebar=""
       data-sidebar-entrance={entrance}
       className={cn(
-        "border-sidebar-border/70 bg-sidebar/92 fixed top-0 bottom-0 left-0 z-40 flex flex-col border-r backdrop-blur-2xl",
+        "border-sidebar-border/70 bg-sidebar/92 fixed start-0 top-0 bottom-0 z-40 flex flex-col border-e backdrop-blur-2xl",
         className,
       )}
     >
@@ -97,8 +99,14 @@ export function SettingsSidebar({
       </div>
 
       <nav aria-label={title} className="sidebar-scroll flex-1 space-y-5 overflow-y-auto px-3 pb-6">
-        {groups.map((group) => (
-          <SideNavSection key={group.label} label={group.label} idPrefix={idPrefix}>
+        {groups.map((group, index) => (
+          // The groups carry no id; the position only has to be unique in this render.
+          <SideNavSection
+            key={group.label}
+            id={String(index)}
+            label={group.label}
+            idPrefix={idPrefix}
+          >
             {group.items.map((item) => (
               <SideNavItem
                 key={item.id}
@@ -111,7 +119,7 @@ export function SettingsSidebar({
           </SideNavSection>
         ))}
         {groups.length === 0 ? (
-          <p className="text-muted-foreground px-2 text-sm">No matching settings</p>
+          <p className="text-muted-foreground px-2 text-sm">{t("web.settings.search.noMatches")}</p>
         ) : null}
       </nav>
     </aside>

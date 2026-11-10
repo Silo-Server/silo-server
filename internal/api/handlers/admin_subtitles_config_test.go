@@ -108,7 +108,7 @@ func (p *adminSubtitleTestProvider) Search(context.Context, subtitles.SearchRequ
 	return nil, nil
 }
 
-func (p *adminSubtitleTestProvider) Download(context.Context, string) ([]byte, subtitles.SubtitleFormat, error) {
+func (p *adminSubtitleTestProvider) Download(context.Context, string, subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	return []byte("subtitle"), subtitles.FormatSRT, nil
 }
 

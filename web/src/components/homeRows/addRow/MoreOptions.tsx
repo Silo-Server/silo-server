@@ -9,6 +9,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/i18n";
 import { titleCount } from "@/lib/homeRows/describe";
 
 /** Most Home rows hold up to 50 titles; the editor has always allowed up to 100. */
@@ -21,20 +22,28 @@ const MAX_ITEM_LIMIT = 100;
 export function MoreOptions({
   itemLimit,
   hero,
+  webOnly = false,
   summary,
   onItemLimitChange,
   onHeroChange,
+  onWebOnlyChange,
   children,
 }: {
   itemLimit: number;
-  hero: boolean;
+  /** Absent where rows have no hero banner (Requests > Discover Page). */
+  hero?: boolean;
+  /** The hero banner is kept off the apps. */
+  webOnly?: boolean;
   /** What the kind's own options hold, first on the summary line ("Highest rated first"). */
   summary?: string;
   onItemLimitChange: (limit: number) => void;
-  onHeroChange: (hero: boolean) => void;
+  onHeroChange?: (hero: boolean) => void;
+  /** With it, a hero row offers "Show in the apps" under Hero banner. */
+  onWebOnlyChange?: (webOnly: boolean) => void;
   /** Kind-specific fields, shown above the common ones. */
   children?: ReactNode;
 }) {
+  const t = useT();
   const id = useId();
   // What the box holds while it is being typed in; it may be blank or out of
   // range for a moment. Only a whole number from 1 to 100 reaches the draft.
@@ -46,22 +55,25 @@ export function MoreOptions({
           <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5">
             <span className="inline-flex items-center gap-2.5 font-semibold">
               <SlidersHorizontal aria-hidden className="text-muted-foreground size-4 self-center" />
-              More options
+              {t("web.home.addRow.more.title")}
             </span>
             <span className="text-muted-foreground text-[13px] font-normal">
-              {summary ? (
-                <>
-                  {summary}
+              {t("web.home.addRow.more.summary", {
+                has_summary: summary ? "yes" : "no",
+                summary: summary ?? "",
+                titles: titleCount(itemLimit),
+                has_hero: onHeroChange ? "yes" : "no",
+                hero: hero
+                  ? webOnly
+                    ? t("web.home.addRow.more.heroWebOnly")
+                    : t("web.home.addRow.more.hero")
+                  : t("web.home.addRow.more.notHero"),
+                dot: (chunks) => (
                   <span aria-hidden className="mx-1.5">
-                    ·
+                    {chunks}
                   </span>
-                </>
-              ) : null}
-              {titleCount(itemLimit)}
-              <span aria-hidden className="mx-1.5">
-                ·
-              </span>
-              {hero ? "the hero banner" : "not the hero banner"}
+                ),
+              })}
             </span>
           </span>
         </AccordionTrigger>
@@ -69,9 +81,9 @@ export function MoreOptions({
           {children}
           <div className="flex items-center justify-between gap-4">
             <div>
-              <Label htmlFor={`${id}-limit`}>Number of titles</Label>
+              <Label htmlFor={`${id}-limit`}>{t("web.home.addRow.more.itemLimit")}</Label>
               <p className="text-muted-foreground mt-1 text-[13px]">
-                The most titles the row shows.
+                {t("web.home.addRow.more.itemLimitHint")}
               </p>
             </div>
             <Input
@@ -91,19 +103,40 @@ export function MoreOptions({
               onBlur={() => setTypedLimit(null)}
             />
           </div>
-          <div className="border-border/70 flex items-center justify-between gap-4 border-t pt-4">
-            <div>
-              <Label htmlFor={`${id}-hero`}>Hero banner</Label>
-              <p className="text-muted-foreground mt-1 text-[13px]">
-                The web shows this row as a banner. The apps show it as a regular row.
-              </p>
+          {onHeroChange ? (
+            <div className="border-border/70 flex items-center justify-between gap-4 border-t pt-4">
+              <div>
+                <Label htmlFor={`${id}-hero`}>{t("web.home.addRow.more.heroBanner")}</Label>
+                <p className="text-muted-foreground mt-1 text-[13px]">
+                  {onWebOnlyChange
+                    ? t("web.home.addRow.more.heroHintWeb")
+                    : t("web.home.addRow.more.heroHint")}
+                </p>
+              </div>
+              <Switch
+                id={`${id}-hero`}
+                checked={hero ?? false}
+                onCheckedChange={(checked) => onHeroChange(checked === true)}
+              />
             </div>
-            <Switch
-              id={`${id}-hero`}
-              checked={hero}
-              onCheckedChange={(checked) => onHeroChange(checked === true)}
-            />
-          </div>
+          ) : null}
+          {hero && onHeroChange && onWebOnlyChange ? (
+            <div className="border-border/70 ms-4 flex items-center justify-between gap-4 border-s-2 ps-4">
+              <div>
+                <Label htmlFor={`${id}-apps`}>{t("web.home.addRow.more.showInApps")}</Label>
+                <p className="text-muted-foreground mt-1 text-[13px]">
+                  {webOnly
+                    ? t("web.home.addRow.more.webOnlyHint")
+                    : t("web.home.addRow.more.appsHint")}
+                </p>
+              </div>
+              <Switch
+                id={`${id}-apps`}
+                checked={!webOnly}
+                onCheckedChange={(checked) => onWebOnlyChange(checked !== true)}
+              />
+            </div>
+          ) : null}
         </AccordionContent>
       </AccordionItem>
     </Accordion>

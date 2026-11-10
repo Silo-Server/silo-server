@@ -1,35 +1,31 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { Info, Lock, Pencil } from "lucide-react";
-import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import { MDBListBrowser } from "@/components/CollectionTemplateGallery/MDBListBrowser";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioCardItem, RadioGroup } from "@/components/ui/radio-group";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useUserCollectionTemplates } from "@/hooks/queries/userCollectionImports";
 import { useCollectionTemplates } from "@/lib/collectionTemplates";
 import {
-  ALL_MY_LIBRARIES_LABEL,
-  CHANGE_LINK,
-  CHART_RULES_NOTE,
-  CHART_SET_WHEN_MADE,
-  LINK_CHANGES_AT_NEXT_SYNC,
-  LIST_DECIDES,
-  LIST_DECIDES_ITEMS,
-  MDBLIST_LINK,
-  MDBLIST_LINK_INVALID,
-  PASTE_TMDB_LIST_LINK,
-  PERSONAL_SCHEDULE_LOCKED,
-  SYNCED_CAPTION,
-  SYNCED_HEADING,
-  SYNCED_OFF,
-  TMDB_LIST_HELP,
-  TMDB_LIST_LINK,
-  YOU_DECIDE,
+  allMyLibrariesLabel,
+  changeLink,
+  chartSetWhenMade,
+  linkChangesAtNextSync,
+  listDecides,
+  listDecidesItems,
+  mdblistLinkLabel,
+  mdblistLinkInvalid,
+  pasteTmdbListLink,
+  personalScheduleLocked,
+  syncedCaption,
+  syncedHeading,
+  syncedOff,
+  tmdbListHelp,
+  tmdbListLinkLabel,
+  youDecide,
   ineligibleLibrariesLine,
   youDecideItems,
 } from "@/lib/collections/copy";
@@ -49,6 +45,7 @@ import {
   linkPick,
   popularPicks,
   savedListMediaKind,
+  shownLink,
   TAB_OF_SOURCE,
   type ImportSource,
   type SyncedDraft,
@@ -56,38 +53,24 @@ import {
   type SyncedPick,
   type SyncedTab,
 } from "@/lib/collections/synced";
-import {
-  CHART_MEDIA_LABEL,
-  CHART_WINDOW_LABEL,
-  chartHasTimeWindow,
-  chartLockReason,
-  chartMediaTypes,
-  chartSummary,
-  defaultChart,
-  normalizeChart,
-  TMDB_CHARTS,
-  type TMDBChart,
-  type TMDBChartMediaType,
-  type TMDBChartPreset,
-  type TMDBChartTimeWindow,
-} from "@/lib/collections/tmdbSources";
+import { chartSummary } from "@/lib/collections/tmdbSources";
 import { isValidTMDBListURL } from "@/lib/tmdbList";
 
-import { SYNCED_SOURCE_LABEL } from "@/lib/collections/types";
+import { syncedSourceLabel } from "@/lib/collections/types";
 
 import { FranchiseIdField } from "../fields/FranchiseIdField";
 import { LibrariesLine } from "../fields/LibrariesLine";
 import { OrderBlock } from "../fields/OrderBlock";
 import { ScheduleField } from "../fields/ScheduleField";
+import { SourceCard } from "../fields/SourceCard";
+import { TMDBChartField } from "../fields/TMDBChartField";
 import { TMDBListURLField } from "../TMDBListURLField";
 import { LockedSourceSummary } from "./LockedSourceSummary";
 import { SyncFailedCallout, SyncStatusBlock } from "./SyncStatusBlock";
+import { useAppLanguage, useT } from "@/i18n";
 
-const TAB_LABEL: Record<SyncedTab, string> = {
-  mdblist: "MDBList",
-  tmdb_chart: "TMDB chart",
-  tmdb_list: "TMDB list",
-};
+/** A link, not text: the same in every language. */
+const MDBLIST_LINK_PLACEHOLDER = "https://mdblist.com/lists/…";
 const TAB_ORDER: readonly SyncedTab[] = ["mdblist", "tmdb_chart", "tmdb_list"];
 
 interface LibraryOption {
@@ -113,136 +96,22 @@ function fittingLibraryIds(
   });
 }
 
-/** A row of mutually exclusive choices, as in Show: Movies / TV shows / Both. */
-function Segmented<Value extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: Value;
-  options: ReadonlyArray<{ value: Value; label: string; disabled?: boolean }>;
-  onChange: (value: Value) => void;
-}) {
-  const id = useId();
+/** Synced lists get their genre and franchise sets from Starter packs. */
+function StarterPacksNote() {
+  const t = useT();
   return (
-    <div className="grid content-start gap-2">
-      <span id={id} className="text-[14px] font-semibold">
-        {label}
-      </span>
-      <RadioGroupPrimitive.Root
-        aria-labelledby={id}
-        value={value}
-        onValueChange={(next) => onChange(next as Value)}
-        orientation="horizontal"
-        className="bg-muted/50 inline-flex w-fit gap-1 rounded-xl p-1"
-      >
-        {options.map((option) => (
-          <RadioGroupPrimitive.Item
-            key={option.value}
-            value={option.value}
-            disabled={option.disabled}
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 data-[state=checked]:bg-background data-[state=checked]:text-foreground h-9 rounded-lg px-3.5 text-[13.5px] font-medium outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-45"
+    <>
+      {t("web.collections.syncedList.starterPacksNote", {
+        link: (chunks) => (
+          <Link
+            to={`${SERVER_SCOPE.paths.list()}?dialog=starter-packs`}
+            className="text-foreground font-medium underline underline-offset-4"
           >
-            {option.label}
-          </RadioGroupPrimitive.Item>
-        ))}
-      </RadioGroupPrimitive.Root>
-    </div>
-  );
-}
-
-/** The TMDB chart tab: chart cards, then Show and "Trending over" as TMDB allows them. */
-function ChartTab({
-  chart,
-  onChart,
-  isServer,
-}: {
-  chart: TMDBChart | null;
-  onChart: (chart: TMDBChart) => void;
-  isServer: boolean;
-}) {
-  const id = useId();
-  const allowed = chart ? chartMediaTypes(chart.preset) : [];
-  const lock = chart ? chartLockReason(chart.preset) : null;
-  const shows: TMDBChartMediaType[] =
-    chart?.preset === "trending" ? ["movie", "tv", "all"] : ["movie", "tv"];
-  return (
-    <div className="grid gap-4">
-      <div className="grid gap-2">
-        <span id={`${id}-chart`} className="text-[14px] font-semibold">
-          Chart
-        </span>
-        <RadioGroup
-          aria-labelledby={`${id}-chart`}
-          value={chart?.preset ?? ""}
-          onValueChange={(value) => {
-            const preset = value as TMDBChartPreset;
-            onChart(chart ? normalizeChart({ ...chart, preset }) : defaultChart(preset));
-          }}
-          className="grid-cols-2 gap-2.5 sm:grid-cols-4"
-        >
-          {TMDB_CHARTS.map((entry) => (
-            <RadioCardItem
-              key={entry.preset}
-              value={entry.preset}
-              label={entry.label}
-              hint={entry.hint}
-            />
-          ))}
-        </RadioGroup>
-      </div>
-      {chart ? (
-        <div className="grid gap-2">
-          <div className="flex flex-wrap gap-x-8 gap-y-3">
-            <Segmented
-              label="Show"
-              value={chart.mediaType}
-              options={shows.map((value) => ({
-                value,
-                label: CHART_MEDIA_LABEL[value],
-                disabled: !allowed.includes(value),
-              }))}
-              onChange={(mediaType) => onChart({ ...chart, mediaType })}
-            />
-            {chartHasTimeWindow(chart.preset) ? (
-              <Segmented<TMDBChartTimeWindow>
-                label="Trending over"
-                value={chart.timeWindow ?? "day"}
-                options={(["day", "week"] as const).map((value) => ({
-                  value,
-                  label: CHART_WINDOW_LABEL[value],
-                }))}
-                onChange={(timeWindow) => onChart({ ...chart, timeWindow })}
-              />
-            ) : null}
-          </div>
-          {lock ? (
-            <p className="text-muted-foreground flex items-center gap-1.5 text-[13px]">
-              <Lock aria-hidden className="size-3.5" />
-              {lock}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      <p className="text-muted-foreground text-[13px]">
-        {CHART_RULES_NOTE}
-        {isServer ? (
-          <>
-            {" "}
-            Genre and franchise sets come from{" "}
-            <Link
-              to={`${SERVER_SCOPE.paths.list()}?dialog=starter-packs`}
-              className="text-foreground font-medium underline underline-offset-4"
-            >
-              Starter packs
-            </Link>
-            .
-          </>
-        ) : null}
-      </p>
-    </div>
+            {chunks}
+          </Link>
+        ),
+      })}
+    </>
   );
 }
 
@@ -260,6 +129,7 @@ function NewListContents({
   capabilities,
   initialTab,
 }: PanelBase & { draft: CollectionDraft & { synced: SyncedDraft }; initialTab?: SyncedTab }) {
+  const t = useT();
   const id = useId();
   const isServer = scopeKind === "server";
   const adminTemplates = useCollectionTemplates(isServer);
@@ -323,10 +193,13 @@ function NewListContents({
     <>
       {activeTab ? (
         <Tabs value={activeTab} onValueChange={(next) => setTab(next as SyncedTab)}>
-          <TabsList aria-label="Where the list comes from" className="h-11 w-full sm:w-fit">
+          <TabsList
+            aria-label={t("web.collections.syncedList.sourceTabs")}
+            className="h-11 w-full sm:w-fit"
+          >
             {tabs.map((entry) => (
               <TabsTrigger key={entry} value={entry} className="px-3.5">
-                {TAB_LABEL[entry]}
+                {syncedSourceLabel(entry)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -342,8 +215,8 @@ function NewListContents({
             />
           </TabsContent>
           <TabsContent value="tmdb_chart" className="mt-3">
-            <ChartTab
-              isServer={isServer}
+            <TMDBChartField
+              note={isServer ? <StarterPacksNote /> : undefined}
               chart={list?.source === "tmdb_chart" ? list.chart : null}
               onChart={(chart) =>
                 follow(chartPick(chart, templates, scopeKind), {
@@ -356,8 +229,8 @@ function NewListContents({
           <TabsContent value="tmdb_list" className="mt-3">
             <TMDBListURLField
               id={`${id}-tmdb-list`}
-              label={PASTE_TMDB_LIST_LINK}
-              help={TMDB_LIST_HELP}
+              label={pasteTmdbListLink()}
+              help={tmdbListHelp()}
               value={synced.tmdbListLink}
               onChange={onTMDBListLink}
             />
@@ -366,7 +239,7 @@ function NewListContents({
       ) : capabilities ? (
         <p className="bg-muted/60 flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-[13px]">
           <Info aria-hidden className="text-muted-foreground mt-0.5 size-4 shrink-0" />
-          {SYNCED_OFF}
+          {syncedOff()}
         </p>
       ) : (
         <Skeleton aria-hidden className="h-11 rounded-xl" />
@@ -419,17 +292,22 @@ function ListSettings({
   scheduleLockedReason?: string;
   timeZone?: { utc_offset: string; name?: string };
 }) {
+  const t = useT();
   const id = useId();
   return (
     <>
       <div className="border-border/70 border-t pt-4">
         <LibrariesLine
-          lead="Match into"
+          lead={t("web.collections.syncedList.matchInto")}
           libraries={[...libraries]}
           value={draft.libraryIds}
-          allLabel={isServer ? undefined : ALL_MY_LIBRARIES_LABEL}
+          allLabel={isServer ? undefined : allMyLibrariesLabel()}
           eligibleKinds={eligibleKinds}
-          ineligibleReason={eligibleKinds ? ONLY_KIND_REASON[eligibleKinds[0]!] : undefined}
+          ineligibleReason={
+            eligibleKinds
+              ? t("web.collections.syncedList.onlyKind", { kind: eligibleKinds[0]! })
+              : undefined
+          }
           onChange={(libraryIds) => onChange((current) => ({ ...current, libraryIds }))}
           warning={
             librariesNote ? (
@@ -450,7 +328,7 @@ function ListSettings({
 
       <section aria-labelledby={`${id}-sync`} className="border-border/70 grid gap-3 border-t pt-4">
         <h3 id={`${id}-sync`} className="text-[14.5px] font-semibold">
-          Sync
+          {t("web.collections.syncedList.syncHeading")}
         </h3>
         {isServer ? (
           <ScheduleField
@@ -479,45 +357,6 @@ function ListSettings({
   );
 }
 
-/** Why a library of the other kind can't be picked for a list of one kind. */
-const ONLY_KIND_REASON: Record<string, string> = {
-  movies: "This list only has movies.",
-  series: "This list only has TV shows.",
-};
-
-/** "mdblist.com/lists/u/top": a list link as the source card shows it. */
-function shownLink(link: string) {
-  return link
-    .trim()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/json$/, "");
-}
-
-/** What a saved list follows, as one line, with the button that changes it. */
-function SourceCard({
-  title,
-  detail,
-  action,
-  onChange,
-}: {
-  title: string;
-  detail: string;
-  action: string;
-  onChange: () => void;
-}) {
-  return (
-    <div className="bg-muted/40 flex flex-wrap items-center gap-3 rounded-xl px-4 py-3">
-      <div className="grid min-w-0 flex-1 gap-0.5">
-        <span className="text-[14px] font-semibold">{title}</span>
-        <span className="text-muted-foreground truncate text-[13px]">{detail}</span>
-      </div>
-      <Button type="button" size="sm" variant="outline" onClick={onChange}>
-        {action}
-      </Button>
-    </div>
-  );
-}
-
 /** A list followed by its link: the link, and Change link to paste another. */
 function LinkSource({
   source,
@@ -528,6 +367,7 @@ function LinkSource({
   link: string;
   onChange: (link: string) => void;
 }) {
+  useAppLanguage();
   const id = useId();
   const [changing, setChanging] = useState(false);
   const fieldId = `${id}-${source === "tmdb_list" ? "tmdb-list" : "mdblist"}`;
@@ -538,9 +378,9 @@ function LinkSource({
   if (!changing) {
     return (
       <SourceCard
-        title={SYNCED_SOURCE_LABEL[source]}
+        title={syncedSourceLabel(source)}
         detail={shownLink(link)}
-        action={CHANGE_LINK}
+        action={changeLink()}
         onChange={() => setChanging(true)}
       />
     );
@@ -549,8 +389,8 @@ function LinkSource({
     return (
       <TMDBListURLField
         id={fieldId}
-        label={TMDB_LIST_LINK}
-        help={LINK_CHANGES_AT_NEXT_SYNC}
+        label={tmdbListLinkLabel()}
+        help={linkChangesAtNextSync()}
         value={link}
         onChange={onChange}
       />
@@ -559,11 +399,11 @@ function LinkSource({
   const invalid = link.trim() !== "" && !isMDBListLink(cleanMDBListLink(link));
   return (
     <div className="grid gap-2">
-      <Label htmlFor={fieldId}>{MDBLIST_LINK}</Label>
+      <Label htmlFor={fieldId}>{mdblistLinkLabel()}</Label>
       <Input
         id={fieldId}
         value={link}
-        placeholder="https://mdblist.com/lists/…"
+        placeholder={MDBLIST_LINK_PLACEHOLDER}
         aria-invalid={invalid || undefined}
         aria-describedby={`${id}-mdblist-help`}
         onChange={(event) => onChange(event.target.value)}
@@ -572,7 +412,7 @@ function LinkSource({
         id={`${id}-mdblist-help`}
         className={invalid ? "text-destructive text-xs" : "text-muted-foreground text-xs"}
       >
-        {invalid ? MDBLIST_LINK_INVALID : LINK_CHANGES_AT_NEXT_SYNC}
+        {invalid ? mdblistLinkInvalid() : linkChangesAtNextSync()}
       </p>
     </div>
   );
@@ -589,6 +429,7 @@ function TMDBSource({
   list: ListDraft;
   onChange: (fields: Partial<ListDraft>) => void;
 }) {
+  const t = useT();
   const id = useId();
   const [changing, setChanging] = useState(false);
   const isList = list.source === "tmdb_list";
@@ -605,9 +446,9 @@ function TMDBSource({
     if (!isList) detail = list.chart ? chartSummary(list.chart) : "";
     return (
       <SourceCard
-        title={SYNCED_SOURCE_LABEL[list.source]}
+        title={syncedSourceLabel(list.source)}
         detail={detail}
-        action={isList ? CHANGE_LINK : "Change chart"}
+        action={isList ? changeLink() : t("web.collections.syncedList.changeChart")}
         onChange={() => setChanging(true)}
       />
     );
@@ -619,24 +460,28 @@ function TMDBSource({
     >
       <TabsList
         id={`${id}-tabs`}
-        aria-label="Where the list comes from"
+        aria-label={t("web.collections.syncedList.sourceTabs")}
         className="h-11 w-full sm:w-fit"
       >
         <TabsTrigger value="tmdb_chart" className="px-3.5">
-          {TAB_LABEL.tmdb_chart}
+          {syncedSourceLabel("tmdb_chart")}
         </TabsTrigger>
         <TabsTrigger value="tmdb_list" className="px-3.5">
-          {TAB_LABEL.tmdb_list}
+          {syncedSourceLabel("tmdb_list")}
         </TabsTrigger>
       </TabsList>
       <TabsContent value="tmdb_chart" className="mt-3">
-        <ChartTab isServer chart={list.chart ?? null} onChart={(chart) => onChange({ chart })} />
+        <TMDBChartField
+          note={<StarterPacksNote />}
+          chart={list.chart ?? null}
+          onChart={(chart) => onChange({ chart })}
+        />
       </TabsContent>
       <TabsContent value="tmdb_list" className="mt-3">
         <TMDBListURLField
           id={`${id}-tmdb-list`}
-          label={TMDB_LIST_LINK}
-          help={LINK_CHANGES_AT_NEXT_SYNC}
+          label={tmdbListLinkLabel()}
+          help={linkChangesAtNextSync()}
           value={list.link}
           onChange={(link) => onChange({ link })}
         />
@@ -647,17 +492,21 @@ function TMDBSource({
 
 /** A source a profile can't change, as text: "TMDB chart: Trending movies, this week". */
 function FixedSource({ list }: { list: ListDraft }) {
+  const t = useT();
   const what =
     list.source === "tmdb_chart" && list.chart
-      ? `${SYNCED_SOURCE_LABEL.tmdb_chart}: ${chartSummary(list.chart)}`
-      : SYNCED_SOURCE_LABEL[list.source];
+      ? t("web.collections.syncedList.fixedChart", {
+          source: syncedSourceLabel("tmdb_chart"),
+          chart: chartSummary(list.chart),
+        })
+      : syncedSourceLabel(list.source);
   return (
     <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13.5px]">
-      <span className="text-muted-foreground">Follows</span>
+      <span className="text-muted-foreground">{t("web.collections.syncedList.follows")}</span>
       <span className="font-medium">{what}</span>
       <span className="text-muted-foreground flex items-center gap-1 text-[12.5px]">
         <Lock aria-hidden className="size-3.5" />
-        {CHART_SET_WHEN_MADE}
+        {chartSetWhenMade()}
       </span>
     </div>
   );
@@ -708,10 +557,11 @@ function SavedSource({
  * lists say this in their locked summary instead.
  */
 function WhoDecides({ scheduleEditable }: { scheduleEditable: boolean }) {
+  useAppLanguage();
   const id = useId();
   const groups = [
-    { key: "list", icon: Lock, title: LIST_DECIDES, items: LIST_DECIDES_ITEMS },
-    { key: "you", icon: Pencil, title: YOU_DECIDE, items: youDecideItems(scheduleEditable) },
+    { key: "list", icon: Lock, title: listDecides(), items: listDecidesItems() },
+    { key: "you", icon: Pencil, title: youDecide(), items: youDecideItems(scheduleEditable) },
   ];
   return (
     <div className="grid gap-2.5 sm:grid-cols-2">
@@ -764,6 +614,7 @@ function SavedListContents({
   capabilities,
   saved,
 }: PanelBase & { draft: CollectionDraft & { list: ListDraft }; saved: SavedListSync }) {
+  useAppLanguage();
   const isServer = scopeKind === "server";
   const { list } = draft;
   const { view, syncing } = saved;
@@ -776,7 +627,7 @@ function SavedListContents({
   // A profile's schedule stays put until the server says it may change.
   const scheduleLockedReason =
     !isServer && capabilities?.sync_schedule_editable === false
-      ? PERSONAL_SCHEDULE_LOCKED
+      ? personalScheduleLocked()
       : undefined;
   const scheduleLocked = !isServer && !capabilities?.sync_schedule_editable;
   // A new source unticks libraries that can't hold its titles, as on create.
@@ -864,6 +715,7 @@ export type SyncedListPanelProps = PanelBase &
  * order and its sync schedule.
  */
 export function SyncedListPanel(props: SyncedListPanelProps) {
+  useAppLanguage();
   const id = useId();
   return (
     <section
@@ -872,9 +724,9 @@ export function SyncedListPanel(props: SyncedListPanelProps) {
     >
       <div>
         <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
-          {SYNCED_HEADING}
+          {syncedHeading()}
         </h2>
-        <p className="text-muted-foreground mt-1 text-[13.5px]">{SYNCED_CAPTION}</p>
+        <p className="text-muted-foreground mt-1 text-[13.5px]">{syncedCaption()}</p>
       </div>
       {props.saved ? <SavedListContents {...props} /> : <NewListContents {...props} />}
     </section>

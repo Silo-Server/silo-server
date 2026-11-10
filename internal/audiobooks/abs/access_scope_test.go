@@ -116,6 +116,8 @@ func TestScopeResolutionFailure_FailsClosed(t *testing.T) {
 			params: map[string]string{"id": "pl1"}, handler: func(h *Handler) http.HandlerFunc { return h.handleGetPlaylist }},
 		{name: "create playlist", method: http.MethodPost, path: "/api/playlists",
 			body: `{"name":"New","items":[{"libraryItemId":"book-known"}]}`, handler: func(h *Handler) http.HandlerFunc { return h.handleCreatePlaylist }},
+		{name: "reset progress", method: http.MethodDelete, path: "/api/me/progress/book-known",
+			params: map[string]string{"libraryItemId": "book-known"}, handler: func(h *Handler) http.HandlerFunc { return h.handleDeleteItemProgress }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,6 +137,51 @@ func TestScopeResolutionFailure_FailsClosed(t *testing.T) {
 				if n := len(plays.rows); n != 1 {
 					t.Errorf("playlists = %d after the refused create, want only the 1 seeded", n)
 				}
+			}
+		})
+	}
+}
+
+type resetProgressStore struct {
+	fakeProgressStore
+	deletes int
+}
+
+func (s *resetProgressStore) DeleteProgress(context.Context, string, string, string) error {
+	s.deletes++
+	return nil
+}
+
+func TestResetProgressRequiresAccessibleAudiobook(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		id   string
+		libs []int
+		want int
+	}{
+		{"accessible book", "book", []int{1}, http.StatusNoContent},
+		{"unknown identifier", "unknown", []int{1}, http.StatusNotFound},
+		{"denied book", "book", []int{2}, http.StatusNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			progress := &resetProgressStore{}
+			h := New(Dependencies{
+				MediaStore: &accessMediaStore{
+					item:  &models.MediaItem{ContentID: "book", Type: "audiobook"},
+					files: []*models.MediaFile{{MediaFolderID: 1}},
+				},
+				ProgressStore:  progress,
+				AccessResolver: newFakeOwnerResolver().set("1", "p1", catalog.AccessFilter{AllowedLibraryIDs: tc.libs}),
+			})
+			for range 2 {
+				rec := dispatchABSWithParams(http.MethodDelete, "/api/me/progress/"+tc.id,
+					map[string]string{"libraryItemId": tc.id}, nil, "1", "p1", h.handleDeleteItemProgress)
+				if rec.Code != tc.want {
+					t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.want, rec.Body.String())
+				}
+			}
+			if tc.want == http.StatusNotFound && progress.deletes != 0 {
+				t.Fatalf("refused reset reached persistence %d times", progress.deletes)
 			}
 		})
 	}

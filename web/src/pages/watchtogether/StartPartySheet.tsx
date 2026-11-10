@@ -1,7 +1,7 @@
 import { captureRoomCreationDraft } from "@/api/v2/watchTogetherCreate";
 import { updateRoomPolicy } from "@/api/v2/watchTogetherPolicy";
 import { stageRoomItem } from "@/api/v2/watchTogetherStage";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { isCapturedProfileAuthorityActive, StaleApiRequestContextError } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -14,11 +14,14 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { useOptionalAuth } from "@/hooks/useAuth";
+import { useSettingValue } from "@/hooks/queries/settingValues";
 import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { useSeasonEpisodes, useSeasons } from "@/hooks/queries/episodes";
+import { codeNumber, useT, type MessageKey } from "@/i18n";
 import { createWatchTogetherRoom, type WatchTogetherSelectionMode } from "@/lib/watchTogether";
 import { copyWatchTogetherInvite } from "@/lib/watchTogetherActions";
 import { decodeThumbhash } from "@/lib/thumbhash";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 import type { EpisodeListItem, ItemDetail } from "@/api/types";
 import { rememberRecentRoom } from "./hooks/useRecentRooms";
 
@@ -46,18 +49,25 @@ export interface StartPartySheetProps {
 
 const modeOptions: {
   value: WatchTogetherSelectionMode;
-  title: string;
-  caption: (what: string) => string;
+  title: MessageKey;
+  /** The caption with a title chosen, and with none yet. */
+  caption: { target: MessageKey; empty: MessageKey };
 }[] = [
   {
     value: "host_pick",
-    title: "Host picks",
-    caption: (what) => `${what} is up next. You start it when everyone is here.`,
+    title: "web.watchTogether.common.hostPicks",
+    caption: {
+      target: "web.watchTogether.startSheet.hostPickCaptionTarget",
+      empty: "web.watchTogether.startSheet.hostPickCaptionEmpty",
+    },
   },
   {
     value: "vote",
-    title: "Everyone votes",
-    caption: (what) => `${what} is the first suggestion. Anyone can add and vote.`,
+    title: "watchParty.options.everyoneVotes",
+    caption: {
+      target: "web.watchTogether.startSheet.voteCaptionTarget",
+      empty: "web.watchTogether.startSheet.voteCaptionEmpty",
+    },
   },
 ];
 
@@ -72,6 +82,7 @@ function EpisodeChooser({
   onPick: (episode: EpisodeListItem, seasonNumber: number) => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const seasons = useSeasons(seriesId);
   const seasonList = useMemo(() => seasons.data?.seasons ?? [], [seasons.data?.seasons]);
   const [season, setSeason] = useState<number | null>(initialSeasonNumber ?? null);
@@ -97,7 +108,9 @@ function EpisodeChooser({
                 : "bg-surface-raised text-muted-foreground hover:text-foreground"
             }`}
           >
-            {s.is_specials ? "Specials" : `Season ${s.season_number}`}
+            {s.is_specials
+              ? t("web.watchTogether.common.specials")
+              : t("web.watchTogether.common.season", { number: s.season_number })}
           </button>
         ))}
       </div>
@@ -107,26 +120,30 @@ function EpisodeChooser({
             <button
               type="button"
               onClick={() => onPick(episode, season ?? episode.season_number)}
-              className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-white/[0.04]"
+              className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-start hover:bg-white/[0.04]"
             >
               <span className="text-muted-foreground w-7 shrink-0 text-xs font-semibold tabular-nums">
-                E{episode.episode_number}
+                {t("web.watchTogether.common.episodeNumber", {
+                  number: codeNumber(episode.episode_number),
+                })}
               </span>
               <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>
               {episode.user_data?.played ? (
-                <span className="text-muted-foreground text-[11px]">watched</span>
+                <span className="text-muted-foreground text-[11px]">
+                  {t("web.watchTogether.startSheet.watched")}
+                </span>
               ) : null}
             </button>
           </li>
         ))}
         {!episodes.isLoading && playable.length === 0 ? (
           <li className="text-muted-foreground px-2 py-4 text-center text-sm">
-            No playable episodes here.
+            {t("web.watchTogether.startSheet.noEpisodes")}
           </li>
         ) : null}
       </ul>
       <Button type="button" variant="ghost" size="sm" onClick={onCancel} className="self-start">
-        Keep the current pick
+        {t("web.watchTogether.startSheet.keepPick")}
       </Button>
     </div>
   );
@@ -146,20 +163,44 @@ export function StartPartySheet({
   seriesId,
   initialSeasonNumber,
 }: StartPartySheetProps) {
+  const t = useT();
   const navigate = useViewTransitionNavigate();
   const auth = useOptionalAuth();
   const [mode, setMode] = useState<WatchTogetherSelectionMode>("host_pick");
-  const [guestsCanPause, setGuestsCanPause] = useState(false);
+  const savedPolicy = useSettingValue<string>(SETTING_KEYS.WATCH_PARTY_GUEST_CONTROL_POLICY, {
+    enabled: open,
+  });
+  // null follows the profile's saved choice, which the server applies to the
+  // new room itself; the switch overrides it once the host flips it.
+  const [guestsCanPauseChoice, setGuestsCanPause] = useState<boolean | null>(null);
+  const guestsCanPause = guestsCanPauseChoice ?? savedPolicy.value === "guest_play_pause";
+  const refetchSavedPolicy = savedPolicy.refetch;
   const [target, setTarget] = useState<StartPartyTarget | null>(initialTarget);
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Detail pages pass a new initialTarget object on every render, so reset on
+  // open or when the page's item changes, never on identity alone: a page
+  // render must not undo the episode or switch choice the host made here.
+  const initialTargetRef = useRef(initialTarget);
+  useEffect(() => {
+    initialTargetRef.current = initialTarget;
+  });
+  const initialTargetId = initialTarget?.content_id;
   useEffect(() => {
     if (open) {
-      setTarget(initialTarget);
+      setTarget(initialTargetRef.current);
       setChoosing(false);
       setBusy(false);
     }
-  }, [open, initialTarget]);
+  }, [open, initialTargetId]);
+  useEffect(() => {
+    if (open) {
+      setGuestsCanPause(null);
+      // Re-read on every open: the cached value can be minutes old, and the
+      // sheet writes what it shows back to the room and the profile.
+      void refetchSavedPolicy({ cancelRefetch: false });
+    }
+  }, [open, refetchSavedPolicy]);
 
   const thumbhash = target?.poster_thumbhash
     ? decodeThumbhash(target.poster_thumbhash)
@@ -167,7 +208,6 @@ export function StartPartySheet({
       ? decodeThumbhash(item.poster_thumbhash)
       : "";
   const posterUrl = target?.poster_url ?? item.poster_url;
-  const what = target ? "This" : "Nothing";
 
   const create = useCallback(async () => {
     const draft = captureRoomCreationDraft(mode);
@@ -179,11 +219,35 @@ export function StartPartySheet({
       const created = await createWatchTogetherRoom(draft);
       if (!active() || !created.room_access_token) return;
       const roomId = created.room.room_id;
-      if (guestsCanPause) {
-        await updateRoomPolicy(roomId, "guest_play_pause", authority!).catch((error: unknown) => {
-          if (error instanceof StaleApiRequestContextError) throw error;
-          toast.error("Room created, but guests can't pause yet. Change it from the room.");
-        });
+      // Make the room match the switch the host saw. An explicit choice is
+      // also saved for the next party unless it already is. An untouched
+      // switch whose saved value could not be read leaves the server's choice
+      // and says what it was.
+      const policy = guestsCanPause ? "guest_play_pause" : "host_only";
+      const explicit = guestsCanPauseChoice !== null;
+      const alreadySaved = savedPolicy.isSuccess && savedPolicy.value === policy;
+      if (!explicit && !savedPolicy.isSuccess) {
+        if (created.room.guest_control_policy !== policy)
+          toast.info(
+            created.room.guest_control_policy === "guest_play_pause"
+              ? t("web.watchTogether.startSheet.policyGuestsCanPause")
+              : t("web.watchTogether.startSheet.policyHostOnly"),
+          );
+      } else if (created.room.guest_control_policy !== policy || (explicit && !alreadySaved)) {
+        const notApplied = () =>
+          toast.error(
+            guestsCanPause
+              ? t("web.watchTogether.startSheet.policyFailed")
+              : t("web.watchTogether.startSheet.policyHostOnlyFailed"),
+          );
+        const updated = await updateRoomPolicy(roomId, policy, authority!).catch(
+          (error: unknown) => {
+            if (error instanceof StaleApiRequestContextError) throw error;
+            notApplied();
+            return null;
+          },
+        );
+        if (updated && updated.room.guest_control_policy !== policy) notApplied();
         if (!active()) return;
       }
       if (target && mode === "host_pick") {
@@ -193,7 +257,7 @@ export function StartPartySheet({
           authority!,
         ).catch((error: unknown) => {
           if (error instanceof StaleApiRequestContextError) throw error;
-          toast.error("Room created, but that item couldn't be queued. Pick it from the room.");
+          toast.error(t("web.watchTogether.startSheet.stageFailed"));
         });
         if (!active()) return;
       }
@@ -230,22 +294,36 @@ export function StartPartySheet({
     } catch (error) {
       if (error instanceof StaleApiRequestContextError) return;
       if (active())
-        toast.error(error instanceof Error ? error.message : "Could not create the room");
+        toast.error(
+          error instanceof Error ? error.message : t("web.watchTogether.startSheet.createFailed"),
+        );
     } finally {
       setBusy(false);
     }
-  }, [auth?.profile, auth?.user, guestsCanPause, mode, navigate, onOpenChange, target]);
+  }, [
+    auth?.profile,
+    auth?.user,
+    guestsCanPause,
+    guestsCanPauseChoice,
+    mode,
+    navigate,
+    onOpenChange,
+    savedPolicy.isSuccess,
+    savedPolicy.value,
+    t,
+    target,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-w-md flex-col gap-4">
         <DialogHeader>
           <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-            Watch Together
+            {t("web.watchTogether.startSheet.eyebrow")}
           </p>
-          <DialogTitle>Start a party with this</DialogTitle>
+          <DialogTitle>{t("web.watchTogether.startSheet.title")}</DialogTitle>
           <DialogDescription className="sr-only">
-            Create a watch party with this title queued.
+            {t("web.watchTogether.startSheet.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -266,7 +344,12 @@ export function StartPartySheet({
             <div className="truncate font-semibold">{item.title}</div>
             <div className="text-muted-foreground truncate text-xs">
               {item.type === "series"
-                ? `Series${item.season_count ? ` · ${item.season_count} seasons` : ""}`
+                ? item.season_count
+                  ? t("web.watchTogether.startSheet.seriesSeasons", {
+                      count: item.season_count,
+                      count_text: item.season_count,
+                    })
+                  : t("web.watchTogether.common.series")
                 : item.type === "season"
                   ? item.title
                   : item.year
@@ -297,24 +380,35 @@ export function StartPartySheet({
             <div className="surface-panel-subtle flex items-center gap-3 rounded-xl px-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <div className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-                  Episode
+                  {t("web.watchTogether.startSheet.episode")}
                 </div>
                 <div className="truncate text-sm font-medium">
                   {target
-                    ? `${target.subtitle ? `${target.subtitle} ` : ""}"${target.title}"`
-                    : "Choose an episode"}
+                    ? target.subtitle
+                      ? t("web.watchTogether.startSheet.episodeWithCode", {
+                          code: target.subtitle,
+                          title: target.title,
+                        })
+                      : t("web.watchTogether.startSheet.episodeTitle", { title: target.title })
+                    : t("web.watchTogether.startSheet.chooseEpisode")}
                 </div>
               </div>
               <Button type="button" variant="ghost" size="sm" onClick={() => setChoosing(true)}>
-                {target ? "Change" : "Choose"}
+                {target
+                  ? t("web.watchTogether.common.change")
+                  : t("web.watchTogether.startSheet.choose")}
               </Button>
             </div>
           )
         ) : null}
 
-        <div role="radiogroup" aria-label="How to pick" className="flex flex-col gap-2">
+        <div
+          role="radiogroup"
+          aria-label={t("web.watchTogether.startSheet.howToPick")}
+          className="flex flex-col gap-2"
+        >
           <div className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-            How to pick
+            {t("web.watchTogether.startSheet.howToPick")}
           </div>
           {modeOptions.map((option) => {
             const selected = mode === option.value;
@@ -325,14 +419,16 @@ export function StartPartySheet({
                 role="radio"
                 aria-checked={selected}
                 onClick={() => setMode(option.value)}
-                className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                className={`rounded-lg border px-3 py-2.5 text-start text-sm transition-colors ${
                   selected
                     ? "border-foreground/50 bg-accent"
                     : "text-muted-foreground hover:bg-muted/60"
                 }`}
               >
-                <div className="font-medium">{option.title}</div>
-                <div className="text-muted-foreground mt-0.5 text-xs">{option.caption(what)}</div>
+                <div className="font-medium">{t(option.title)}</div>
+                <div className="text-muted-foreground mt-0.5 text-xs">
+                  {t(target ? option.caption.target : option.caption.empty)}
+                </div>
               </button>
             );
           })}
@@ -340,9 +436,9 @@ export function StartPartySheet({
 
         <label className="flex items-center justify-between gap-3 text-sm">
           <span>
-            <span className="font-medium">Allow guests to pause</span>
+            <span className="font-medium">{t("web.watchTogether.startSheet.allowPause")}</span>
             <span className="text-muted-foreground block text-xs">
-              Otherwise only you control playback
+              {t("web.watchTogether.startSheet.allowPauseHint")}
             </span>
           </span>
           <Switch checked={guestsCanPause} onCheckedChange={setGuestsCanPause} />
@@ -351,14 +447,15 @@ export function StartPartySheet({
         <Button
           type="button"
           onClick={() => void create()}
-          disabled={busy || choosing}
+          disabled={busy || choosing || savedPolicy.isFetching}
           className="h-11"
         >
-          {busy ? "Creating…" : "Create party & copy invite"}
+          {busy
+            ? t("web.watchTogether.startSheet.creating")
+            : t("web.watchTogether.startSheet.create")}
         </Button>
         <p className="text-muted-foreground text-center text-xs">
-          You'll land in the room. Nothing plays until you start it. The room can see what members
-          are mid-way through.
+          {t("web.watchTogether.startSheet.footnote")}
         </p>
       </DialogContent>
     </Dialog>

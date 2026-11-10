@@ -79,7 +79,9 @@ unavailable.
   migrations have finished before deploying 1.0. The 1.0 startup guard refuses a database that has
   not reached the bridge's final migration version.
 - [ ] Back up PostgreSQL using the deployment's normal tested procedure, and verify that the
-  backup can be restored.
+  backup can be restored. Silo takes its own database backup before startup migrations when
+  backups are on (see [before upgrades](architecture/backups.md#before-upgrades)), but that copy
+  stays at the backup destination, by default on the same server, so keep an off-server copy too.
 - [ ] If `userdb.backend=sqlite` is configured, back up the local SQLite user store at
   `/var/lib/silo/userdb` with the same care and verify it can be restored. The bridge's one-way
   SQLite-to-Postgres import reads this data; losing the directory loses profiles and per-user
@@ -105,6 +107,12 @@ unavailable.
   other native client that will connect after cutover.
 - [ ] If users are waiting on verification, invitation, unsubscribe, or other emailed links,
   expect to resend them after 1.0 is running.
+- [ ] Optional: copy the `cap_add: [NET_ADMIN]` line and its comment from the new
+  `docker-compose.yml` into your Compose file. With it, Silo uses kernel BBR on its client
+  connections and a larger TCP send buffer for remote clients on long, fast links. Read its risk
+  in [TCP congestion control](architecture/tcp-congestion.md) first. Without it, Silo still asks
+  for BBR where the host allows it, keeps the kernel's send buffer limits, and logs at start what
+  it could not change and how to fix it.
 
 ## Perform the update
 

@@ -80,7 +80,8 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 	if err != nil || len(afterDateEdit) != len(beforeDateEdit) || dto.PlaybackPositionTicks != 15000000000 || dto.LastPlayedDate != "2023-01-01T00:00:00Z" {
 		t.Fatalf("date-only edit changed history/progress: %+v %v", dto, err)
 	}
-	dto = run(`{"Played":false,"PlaybackPositionTicks":50000000,"LastPlayedDate":"2024-01-01T00:00:00Z"}`)
+	// Jellyfin reads a LastPlayedDate without an offset as UTC (#3257).
+	dto = run(`{"Played":false,"PlaybackPositionTicks":50000000,"LastPlayedDate":"2024-01-01T00:00:00.0000000"}`)
 	if dto.Played || dto.PlaybackPositionTicks != 50000000 || dto.LastPlayedDate != "2024-01-01T00:00:00Z" {
 		t.Fatalf("historical edit suppressed: %+v", dto)
 	}
@@ -107,8 +108,21 @@ func TestUserDataUpdatePersistsPartialFieldsAndProfileIsolation(t *testing.T) {
 }
 
 func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
-	for _, key := range []string{"datePlayed", "DATEPLAYED"} {
-		t.Run(key, func(t *testing.T) {
+	// Jellyfin's legacy binder takes the compact yyyyMMddHHmmss form as UTC
+	// and falls back to its default binder, which also takes a date-time
+	// without an offset (#3257).
+	for _, tc := range []struct{ name, query, want string }{
+		{"rfc3339", "datePlayed=2025-02-03T04:05:06Z", "2025-02-03T04:05:06Z"},
+		{"uppercase key", "DATEPLAYED=2025-02-03T04:05:06Z", "2025-02-03T04:05:06Z"},
+		{"legacy compact", "DatePlayed=20250203040506", "2025-02-03T04:05:06Z"},
+		{"fractional offset", "datePlayed=2025-02-03T05:05:06.0000000%2B01:00", "2025-02-03T04:05:06Z"},
+		{"no offset", "datePlayed=2025-02-03T04:05:06.000", "2025-02-03T04:05:06Z"},
+		{"space separator", "datePlayed=2025-02-03%2004:05:06", "2025-02-03T04:05:06Z"},
+		{"offset without colon", "datePlayed=2025-02-03T05:05:06%2B0100", "2025-02-03T04:05:06Z"},
+		{"minutes", "datePlayed=2025-02-03T04:05", "2025-02-03T04:05:00Z"},
+		{"date only", "datePlayed=2025-02-03", "2025-02-03T00:00:00Z"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: store}, &notifications.System{})
 			service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
@@ -117,10 +131,10 @@ func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
 			h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, service, codec, &config.Config{})
 			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 			rec := httptest.NewRecorder()
-			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+key+"=2025-02-03T04:05:06Z", "", "itemId", id, session))
+			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+tc.query, "", "itemId", id, session))
 			var dto itemUserDataDTO
 			_ = json.Unmarshal(rec.Body.Bytes(), &dto)
-			if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != "2025-02-03T04:05:06Z" {
+			if rec.Code != 200 || !dto.Played || dto.LastPlayedDate != tc.want {
 				t.Fatalf("mark played %d %+v %s", rec.Code, dto, rec.Body.String())
 			}
 			rec = httptest.NewRecorder()
@@ -136,6 +150,59 @@ func TestPlayedMutationsReturnCurrentDTOAndDate(t *testing.T) {
 				t.Fatalf("mark unplayed %d %+v", rec.Code, dto)
 			}
 
+		})
+	}
+}
+
+// A watched item with a resume position is a rewatch in progress. A played
+// mark on it must clear the position, as Jellyfin does, or the client reads it
+// back as in progress (#3257).
+func TestMarkPlayedClearsRewatchPosition(t *testing.T) {
+	for _, query := range []string{"", "datePlayed=2025-02-03T04:05:06Z"} {
+		t.Run("query="+query, func(t *testing.T) {
+			store := newJellycompatUserStore(t)
+			provider := notifications.WrapUserStoreProvider(compatTestUserStoreProvider{store: store}, &notifications.System{})
+			service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
+			codec := NewResourceIDCodec()
+			id := codec.EncodeStringID(EncodedIDItem, "episode-1")
+			h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "episode-1", Type: "episode", Runtime: 100}}, service, codec, &config.Config{})
+			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
+			rec := httptest.NewRecorder()
+			h.HandleUpdateUserData(rec, viewerRequest("POST", "/", `{"Played":true,"PlaybackPositionTicks":70000000,"LastPlayedDate":"2025-01-01T00:00:00Z"}`, "itemId", id, session))
+			if rec.Code != 200 {
+				t.Fatalf("set rewatch state: %d %s", rec.Code, rec.Body.String())
+			}
+			plays := func() int {
+				t.Helper()
+				history, err := store.ListHistory(t.Context(), session.ProfileID, 10, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return len(history)
+			}
+			before := plays()
+
+			rec = httptest.NewRecorder()
+			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+query, "", "itemId", id, session))
+			var dto itemUserDataDTO
+			_ = json.Unmarshal(rec.Body.Bytes(), &dto)
+			if rec.Code != 200 || !dto.Played || dto.PlaybackPositionTicks != 0 {
+				t.Fatalf("mark played kept the rewatch position: %d %+v", rec.Code, dto)
+			}
+			progress, err := store.GetProgress(t.Context(), session.ProfileID, "episode-1")
+			if err != nil || progress == nil || !progress.Completed || progress.PositionSeconds != 0 {
+				t.Fatalf("stored progress = %+v, %v; want watched with no position", progress, err)
+			}
+			if got := plays(); got != before+1 {
+				t.Fatalf("plays after rewatch mark = %d, want %d", got, before+1)
+			}
+
+			// A repeat with no new position in between records nothing.
+			rec = httptest.NewRecorder()
+			h.HandleMarkPlayed(rec, viewerRequest("POST", "/?"+query, "", "itemId", id, session))
+			if got := plays(); rec.Code != 200 || got != before+1 {
+				t.Fatalf("repeated mark: status %d, plays %d, want %d", rec.Code, got, before+1)
+			}
 		})
 	}
 }
@@ -396,7 +463,7 @@ func TestDatedPlayedBatchNeedsNoIndividualProgressRewrites(t *testing.T) {
 	service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
 	date := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	ids := []string{"episode-1", "episode-2"}
-	if err := service.MarkPlayedBatchAt(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, ids, date); err != nil {
+	if err := service.MarkPlayedBatchAt(t.Context(), &Session{StreamAppUserID: 1, ProfileID: "profile-1"}, ids, date, false); err != nil {
 		t.Fatal(err)
 	}
 	dates, err := jellycompatProgressDates(t.Context(), store, "profile-1", ids)
@@ -414,9 +481,16 @@ func TestDatedPlayedBatchNeedsNoIndividualProgressRewrites(t *testing.T) {
 	}
 }
 
-func TestUserDataZeroDateUsesCurrentTime(t *testing.T) {
-	for _, supplied := range []string{"0001-01-01T00:00:00Z", "2024-01-02T03:04:05Z"} {
-		t.Run(supplied, func(t *testing.T) {
+func TestUserDataDateBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name, supplied string
+		wantCurrent    bool
+	}{
+		{"zero", "0001-01-01T00:00:00Z", true},
+		{"future", time.Now().UTC().Add(24 * time.Hour).Format(time.RFC3339), true},
+		{"historical", "2024-01-02T03:04:05Z", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			store := newJellycompatUserStore(t)
 			provider := compatTestUserStoreProvider{store: store}
 			service := &directUserDataService{storeProvider: provider, watchState: watchstate.NewService(provider)}
@@ -424,8 +498,8 @@ func TestUserDataZeroDateUsesCurrentTime(t *testing.T) {
 			h := NewUserDataHandler(&stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Type: "movie"}}, service, codec, &config.Config{})
 			session := &Session{StreamAppUserID: 1, ProfileID: "profile-1"}
 			recorder := httptest.NewRecorder()
-			before := time.Now().UTC()
-			h.HandleUpdateUserData(recorder, viewerRequest("POST", "/", `{"Played":true,"LastPlayedDate":"`+supplied+`"}`, "itemId", codec.EncodeStringID(EncodedIDItem, "movie-1"), session))
+			before := time.Now().UTC().Truncate(time.Millisecond)
+			h.HandleUpdateUserData(recorder, viewerRequest("POST", "/", `{"Played":true,"LastPlayedDate":"`+tc.supplied+`"}`, "itemId", codec.EncodeStringID(EncodedIDItem, "movie-1"), session))
 			after := time.Now().UTC()
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("update: %d %s", recorder.Code, recorder.Body.String())
@@ -438,11 +512,11 @@ func TestUserDataZeroDateUsesCurrentTime(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(supplied, "0001") {
+			if tc.wantCurrent {
 				if actual.Before(before) || actual.After(after) {
-					t.Fatalf("zero date was not normalized to current time: %s", actual)
+					t.Fatalf("date was not normalized to current time: %s", actual)
 				}
-			} else if dto.LastPlayedDate != supplied {
+			} else if dto.LastPlayedDate != tc.supplied {
 				t.Fatalf("historical date changed: %s", dto.LastPlayedDate)
 			}
 			history, err := store.ListHistory(t.Context(), "profile-1", 10, 0)

@@ -121,7 +121,7 @@ func (s *System) ClearEmailAddress(ctx context.Context, userID int, profileID st
 	if s.profileIsChild(ctx, userID, profileID) {
 		return ErrEmailChildProfile
 	}
-	return s.EmailPrefs.ClearCustomAddress(ctx, profileID)
+	return s.EmailPrefs.ClearCustomAddress(ctx, userID, profileID)
 }
 
 // VerifyEmailToken consumes a verification token from a clicked link,

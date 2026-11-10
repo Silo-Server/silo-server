@@ -16,18 +16,20 @@ const (
 	scopeHome    = "home"
 	scopeLibrary = "library"
 
-	titleContinueWatching    = "Continue Watching"
-	titleContinueListening   = "Continue Listening"
-	titleContinueReading     = "Continue Reading"
-	titleRecentlyAdded       = "Recently Added"
-	titleRecentlyAddedMovies = "Recently Added Movies"
-	titleRecentlyAddedTV     = "Recently Added TV"
-	titleRecommendedForYou   = "Recommended for You"
-	titleReturningShows      = "Returning Shows"
-	titleTrendingThisWeek    = "Trending This Week"
-	titleTopRated            = "Top Rated"
-	titleHiddenGems          = "Hidden Gems"
-	titleRandomPicks         = "Random Picks"
+	titleContinueWatching      = "Continue Watching"
+	titleContinueListening     = "Continue Listening"
+	titleContinueReading       = "Continue Reading"
+	titleRecentlyAdded         = "Recently Added"
+	titleRecentlyAddedMovies   = "Recently Added Movies"
+	titleRecentlyAddedTV       = "Recently Added TV"
+	titleRecommendedForYou     = "Recommended for You"
+	titleReturningShows        = "Returning Shows"
+	titleTrendingThisWeek      = "Trending This Week"
+	titleTopRated              = "Top Rated"
+	titleHiddenGems            = "Hidden Gems"
+	titleRandomPicks           = "Random Picks"
+	titleRecentlyAddedManga    = "Recently Added Manga"
+	titleRecentlyReleasedManga = "Recently Released Manga"
 
 	idContinueWatching    = "default-continue-watching"
 	idContinueListening   = "default-continue-listening"
@@ -43,6 +45,18 @@ const (
 // DefaultItemLimit is the row size of default rows and of rows an admin
 // creates without a limit.
 const DefaultItemLimit = 100
+
+// MaxItemLimit is the largest row size a section may ask for, whether an
+// admin sets it or a profile overrides it. Fetchers size their buffers from
+// the limit, so it must stay bounded. The /api/v2 schemas carry the same
+// value as a literal `maximum:"500"` tag on every item_limit they accept.
+const MaxItemLimit = 500
+
+// ClampItemLimit caps a stored row size at MaxItemLimit. Values below 1 pass
+// through unchanged; the fetchers already read them as "use the default".
+func ClampItemLimit(limit int) int {
+	return min(limit, MaxItemLimit)
+}
 
 // betaLibraryItemLimit is the row size of default rows for beta library
 // types (audiobooks, ebooks, manga, podcasts). Those surfaces stay as they
@@ -111,7 +125,7 @@ func DefaultHomeSections(libraries []*models.MediaFolder) []*PageSection {
 	for i, section := range result {
 		section.Position = i
 	}
-	return result
+	return withDefaultTitleKeys(result)
 }
 
 // IsVideoLibraryType reports whether a library holds movies or TV, the
@@ -182,6 +196,10 @@ func generatedHomeLibraryRecentDefaults(libraryID int, libraryName, libraryType 
 		})
 	}
 
+	for _, s := range sections {
+		s.TitleKey = generatedHomeLibraryRecentTitleKey(s)
+		s.TitleArgs = map[string]string{titleArgLibrary: libraryName}
+	}
 	return sections
 }
 
@@ -224,6 +242,10 @@ func defaultRecentEpisodesConfig() json.RawMessage {
 // library type. These are used when seeding new libraries and restoring
 // library defaults.
 func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSection {
+	return withDefaultTitleKeys(defaultLibrarySectionsForType(libraryID, libraryType))
+}
+
+func defaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSection {
 	emptyCfg := json.RawMessage(`{}`)
 	continueWatchingCfg := ContinueTypeConfig(ContinueTypeWatching)
 
@@ -271,8 +293,8 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 		// the per-chapter ebook items are scoped out by the "manga" media scope.
 		return []*PageSection{
 			{ID: idContinueReading, Scope: scopeLibrary, LibraryID: libraryID, Position: 0, SectionType: SectionContinueWatching, Title: titleContinueReading, ItemLimit: betaLibraryItemLimit, Config: ContinueTypeConfig(ContinueTypeReading), Enabled: true},
-			{ID: "default-recently-added-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added Manga", ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
-			{ID: "default-recently-released-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: "Recently Released Manga", ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
+			{ID: "default-recently-added-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 1, SectionType: SectionRecentlyAdded, Title: titleRecentlyAddedManga, ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
+			{ID: "default-recently-released-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 2, SectionType: SectionRecentlyReleased, Title: titleRecentlyReleasedManga, ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
 			{ID: idRecommendedForYou, Scope: scopeLibrary, LibraryID: libraryID, Position: 3, SectionType: SectionRecommendedForYou, Title: titleRecommendedForYou, ItemLimit: betaLibraryItemLimit, Config: emptyCfg, Enabled: true},
 			{ID: "default-random-manga", Scope: scopeLibrary, LibraryID: libraryID, Position: 4, SectionType: SectionRandom, Title: titleRandomPicks, ItemLimit: betaLibraryItemLimit, Config: defaultMediaScopeConfig("manga"), Enabled: true},
 		}
@@ -285,7 +307,7 @@ func DefaultLibrarySectionsForType(libraryID *int, libraryType string) []*PageSe
 // with no admin-configured sections. This remains available as a degraded-path
 // fallback when typed defaults cannot be resolved safely.
 func DefaultLibrarySections(libraryID *int) []*PageSection {
-	return defaultLibrarySections(libraryID, DefaultItemLimit)
+	return withDefaultTitleKeys(defaultLibrarySections(libraryID, DefaultItemLimit))
 }
 
 func defaultLibrarySections(libraryID *int, itemLimit int) []*PageSection {

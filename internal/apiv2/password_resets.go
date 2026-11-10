@@ -103,6 +103,7 @@ type PasswordResetLookupOutput struct {
 
 // PasswordResetCompleteInput sets the new password through a link.
 type PasswordResetCompleteInput struct {
+	SignInDeviceHeaders
 	Token     string `path:"token" minLength:"1" maxLength:"128"`
 	UserAgent string `header:"User-Agent"`
 	Body      struct {
@@ -197,8 +198,10 @@ func registerPasswordResets(reg *Registry) {
 	Register(reg, Operation{Operation: request, RetrySafety: RetrySafetyNonRetryable, Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketPasswordResetRequest}, reg.requestPasswordReset)
 	Register(reg, public(http.MethodGet, "/password-resets/{token}", "lookupPasswordReset",
 		"Describe a usable password reset link for the reset screen."), reg.lookupPasswordReset)
-	Register(reg, public(http.MethodPost, "/password-resets/{token}/complete", "completePasswordReset",
-		"Set a new password through a reset link, sign out everywhere, and sign in."), reg.completePasswordReset)
+	complete := public(http.MethodPost, "/password-resets/{token}/complete", "completePasswordReset",
+		"Set a new password through a reset link, sign out everywhere, and sign in.")
+	complete.Audited = true
+	Register(reg, complete, reg.completePasswordReset)
 }
 
 func (reg *Registry) createAdminUserPasswordReset(ctx context.Context, in *AdminPasswordResetInput) (*AdminPasswordResetOutput, error) {

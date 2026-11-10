@@ -11,12 +11,7 @@ import type {
   CollectionTemplateSource,
 } from "@/lib/collectionTemplates";
 
-import {
-  FRANCHISE_ID_INVALID,
-  MDBLIST_LINK_INVALID,
-  PICK_A_CHART,
-  TMDB_LIST_INVALID,
-} from "./copy";
+import { franchiseIdInvalid, mdblistLinkInvalid, pickAChart, tmdbListInvalid } from "./copy";
 import type { ListDraft } from "./scope";
 import {
   chartMediaKind,
@@ -105,6 +100,14 @@ export function franchiseIdOf(typed: string): number | null {
   if (!/^\d+$/.test(trimmed)) return null;
   const id = Number(trimmed);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/** "mdblist.com/lists/u/top": a list link as the source card shows it. */
+export function shownLink(link: string) {
+  return link
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/json$/, "");
 }
 
 /**
@@ -327,13 +330,13 @@ export function eligibleLibraryKinds(mediaKind: ListMediaKind | undefined): stri
 export function savedListProblem(list: ListDraft): string | null {
   switch (list.source) {
     case "mdblist":
-      return isMDBListLink(cleanMDBListLink(list.link)) ? null : MDBLIST_LINK_INVALID;
+      return isMDBListLink(cleanMDBListLink(list.link)) ? null : mdblistLinkInvalid();
     case "tmdb_list":
-      return isValidTMDBListURL(list.link) ? null : TMDB_LIST_INVALID;
+      return isValidTMDBListURL(list.link) ? null : tmdbListInvalid();
     case "tmdb_chart":
-      return list.chart ? null : PICK_A_CHART;
+      return list.chart ? null : pickAChart();
     case "tmdb_franchise":
-      return franchiseIdOf(list.franchiseId) ? null : FRANCHISE_ID_INVALID;
+      return franchiseIdOf(list.franchiseId) ? null : franchiseIdInvalid();
     default:
       return null;
   }

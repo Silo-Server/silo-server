@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 23;
+export const SETTINGS_REVISION = 28;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -22,6 +22,19 @@ export interface SettingOptionSet {
 }
 
 export const SETTING_OPTION_SETS = {
+  app_languages: {
+    type: "language_tag",
+    options: [
+      { value: "en", introducedIn: 28 },
+      { value: "es", introducedIn: 28 },
+      { value: "de", introducedIn: 28 },
+      { value: "fr", introducedIn: 28 },
+      { value: "pt-BR", introducedIn: 28 },
+      { value: "ja", introducedIn: 28 },
+      { value: "zh-Hans", introducedIn: 28 },
+      { value: "ar", introducedIn: 28 },
+    ],
+  },
   catalog_metadata_languages: {
     type: "language_tag",
     options: [
@@ -232,6 +245,10 @@ export const SETTING_KEYS = {
   PLAYBACK_PREFERRED_QUALITY: "playback.preferred_quality",
   /** Show forced subtitles */
   PLAYBACK_SHOW_FORCED_SUBTITLES: "playback.show_forced_subtitles",
+  /** Show marker confidence */
+  PLAYBACK_SHOW_MARKER_CONFIDENCE: "playback.show_marker_confidence",
+  /** Show marker source */
+  PLAYBACK_SHOW_MARKER_SOURCE: "playback.show_marker_source",
   /** Subtitle appearance */
   PLAYBACK_SUBTITLE_APPEARANCE: "playback.subtitle_appearance",
   /** Preferred subtitle language */
@@ -280,6 +297,8 @@ export const SETTING_KEYS = {
   SEARCH_MEDIA_SCOPE: "search.media_scope",
   /** Match device caption settings */
   SUBTITLE_MATCHES_DEVICE: "subtitle.matches_device",
+  /** App language */
+  UI_APP_LANGUAGE: "ui.app_language",
   /** Poster badges */
   UI_CARD_OVERLAYS: "ui.card_overlays",
   /** Card overlays enabled */
@@ -326,6 +345,8 @@ export const SETTING_KEYS = {
   UI_TIME_FORMAT: "ui.time_format",
   /** Show title art */
   UI_TITLE_ART: "ui.title_art",
+  /** Watch Party playback controls */
+  WATCH_PARTY_GUEST_CONTROL_POLICY: "watch_party.guest_control_policy",
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
@@ -841,6 +862,38 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "playback",
     control: "switch",
   },
+  "playback.show_marker_confidence": {
+    key: "playback.show_marker_confidence",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 24,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [24, 24],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Show marker confidence",
+    description:
+      "Show how confident the source is above the Skip Intro button. Each source rates on its own scale, so the percentage is only comparable within one source; turn the source line on to see which one it is.",
+    category: "playback",
+    control: "switch",
+  },
+  "playback.show_marker_source": {
+    key: "playback.show_marker_source",
+    type: "boolean",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 24,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [24, 24],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: false,
+    label: "Show marker source",
+    description:
+      "Show where the skip came from above the Skip Intro button: Silo's own detection, a person, or the provider that supplied the marker.",
+    category: "playback",
+    control: "switch",
+  },
   "playback.subtitle_appearance": {
     key: "playback.subtitle_appearance",
     type: "object",
@@ -1316,6 +1369,24 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     control: "switch",
     platforms: ["ios", "tvos", "macos", "android", "android_tv"],
   },
+  "ui.app_language": {
+    key: "ui.app_language",
+    type: "language_tag",
+    nullable: true,
+    persistence: "remote",
+    introducedIn: 28,
+    scopes: ["profile", "profile_device"],
+    scopeIntroducedIn: [28, 28],
+    resolutionOrder: ["profile_device", "profile", "default"],
+    defaultValue: null,
+    label: "App language",
+    description:
+      "Language of the app's menus, buttons and messages. Separate from the audio, subtitle and metadata languages.",
+    category: "appearance",
+    control: "select",
+    suggestedOptions: "app_languages",
+    unsetLabel: "Match device",
+  },
   "ui.card_overlays": {
     key: "ui.card_overlays",
     type: "object",
@@ -1358,7 +1429,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     resolutionOrder: ["profile_device", "profile_client", "profile", "default"],
     defaultValue: { poster_size: "standard", caption: "title_metadata" },
     label: "Media cards",
-    description: "Poster size and caption detail used by media cards.",
+    description: "Poster size used by media cards.",
     category: "appearance",
     control: "panel",
     platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
@@ -1717,5 +1788,25 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     category: "appearance",
     control: "switch",
     platforms: ["web", "ios", "tvos", "macos", "android", "android_tv"],
+  },
+  "watch_party.guest_control_policy": {
+    key: "watch_party.guest_control_policy",
+    type: "enum",
+    nullable: false,
+    persistence: "remote",
+    introducedIn: 27,
+    scopes: ["profile"],
+    scopeIntroducedIn: [27],
+    resolutionOrder: ["profile", "default"],
+    defaultValue: "host_only",
+    label: "Watch Party playback controls",
+    description:
+      "Who can play and pause in Watch Parties you host. Changing it in a party saves it for your next one.",
+    category: "watch_party",
+    control: "select",
+    values: [
+      { value: "host_only", label: "Host only", introducedIn: 27 },
+      { value: "guest_play_pause", label: "Host and guests", introducedIn: 27 },
+    ],
   },
 };

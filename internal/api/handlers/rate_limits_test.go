@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -311,5 +312,43 @@ func TestRateLimitHandlerDoesNotTreatActiveRedisAsDurableConfiguration(t *testin
 	}
 	if store.setManyCalls != 0 {
 		t.Fatalf("invalid Redis selection wrote settings: SetMany=%d", store.setManyCalls)
+	}
+}
+
+// The session quota must name a known mode and refill from empty within the
+// week an idle bucket is kept, or dropping that bucket would hand back more
+// than the quota refills.
+func TestRateLimitHandlerValidatesSessionQuota(t *testing.T) {
+	str := func(v string) *string { return &v }
+	num := func(v float64) *float64 { return &v }
+	count := func(v int) *int { return &v }
+	for _, tc := range []struct {
+		name  string
+		quota AdminRateLimitSessionQuotaUpdate
+		ok    bool
+	}{
+		{name: "unknown mode", quota: AdminRateLimitSessionQuotaUpdate{Mode: str("block")}},
+		{name: "refills slower than a week", quota: AdminRateLimitSessionQuotaUpdate{RequestsPerHour: num(100), Burst: count(16801)}},
+		{name: "refills in exactly a week", quota: AdminRateLimitSessionQuotaUpdate{Mode: str("enforce"), RequestsPerHour: num(100), Burst: count(16800)}, ok: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeRateLimitStore()
+			h := NewRateLimitHandler(store, nil, nil, NewServerRestartStatusTracker())
+			quota := tc.quota
+			_, err := h.UpdateAdminRateLimitConfig(context.Background(), AdminRateLimitUpdate{SessionQuota: &quota}, nil)
+			if tc.ok {
+				if err != nil || store.setManyCalls+store.setCalls == 0 {
+					t.Fatalf("valid quota: err = %v, writes = %d", err, store.setManyCalls+store.setCalls)
+				}
+				return
+			}
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest {
+				t.Fatalf("err = %v, want a 400", err)
+			}
+			if store.setManyCalls != 0 || store.setCalls != 0 {
+				t.Fatalf("invalid quota wrote settings: SetMany=%d Set=%d", store.setManyCalls, store.setCalls)
+			}
+		})
 	}
 }

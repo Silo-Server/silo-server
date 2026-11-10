@@ -82,7 +82,7 @@ func TestServeExtractConcurrentViewersShareOneFill(t *testing.T) {
 			c, source := newTestCache(t)
 			opts := StreamExtractOpts{InputPath: source, SourceCodec: tc.codec}
 			const track = "first cues, rest of the track"
-			started, secondGotCues := make(chan struct{}), make(chan struct{})
+			secondGotCues := make(chan struct{})
 			var calls atomic.Int32
 			extract := func(ctx context.Context, opts StreamExtractOpts) error {
 				if calls.Add(1) > 1 {
@@ -90,7 +90,6 @@ func TestServeExtractConcurrentViewersShareOneFill(t *testing.T) {
 					return err
 				}
 				fill := inflightFill(c)
-				close(started)
 				if _, err := io.WriteString(opts.Writer, "first cues, "); err != nil {
 					return err
 				}
@@ -108,7 +107,7 @@ func TestServeExtractConcurrentViewersShareOneFill(t *testing.T) {
 				return err
 			}
 			// The first viewer's client stops reading.
-			stalled := &stalledResponse{ResponseRecorder: httptest.NewRecorder(), release: make(chan struct{})}
+			stalled := &stalledResponse{ResponseRecorder: httptest.NewRecorder(), wrote: make(chan struct{}), release: make(chan struct{})}
 			firstCtx, leave := context.WithCancel(t.Context())
 			firstDone := make(chan error, 1)
 			go func() {
@@ -119,7 +118,8 @@ func TestServeExtractConcurrentViewersShareOneFill(t *testing.T) {
 				close(stalled.release)
 				<-firstDone
 			}()
-			<-started
+			// Stall the first viewer before the second can break the temp file.
+			<-stalled.wrote
 
 			second := &signalingResponse{ResponseRecorder: httptest.NewRecorder(), wrote: secondGotCues}
 			if err := c.ServeExtract(second, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/subtitle", nil), opts, extract); err != nil {
@@ -158,13 +158,15 @@ func inflightFill(c *SubtitleCache) *SubtitleCacheFill {
 	return nil
 }
 
-// stalledResponse blocks every write until release is closed, then fails it.
+// stalledResponse signals its write, blocks until release is closed, then fails it.
 type stalledResponse struct {
 	*httptest.ResponseRecorder
+	wrote   chan struct{}
 	release chan struct{}
 }
 
 func (s *stalledResponse) Write([]byte) (int, error) {
+	close(s.wrote)
 	<-s.release
 	return 0, errors.New("client stopped reading")
 }

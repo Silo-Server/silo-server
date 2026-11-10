@@ -117,10 +117,13 @@ provider's contribution settings when its config row is first created; later
 admin changes stick, and a reinstall starts from the defaults again.
 `default_contribute_enabled` on the v2 provider configuration reports a provider
 whose manifest turns sharing on. The server setting `markers.share_by_default`
-(`true` or `false`, default `true`, set by the setup wizard) decides whether
-those defaults apply: when it is `false`, new providers start with sharing off,
-and changing it to `false` also turns contribution and automatic sharing off
-for existing providers whose manifest turns sharing on. That change commits
+(`true` or `false`) decides whether those defaults apply; they apply only when
+it is `true`. A new server leaves it unset until the admin saves the setup
+wizard's Features step, which shows sharing as on, so a server whose admin
+never saves that step starts every provider with sharing off. A migration
+stored `true` on servers set up before the wizard saved the choice. Changing it
+to `false` also turns contribution and automatic sharing off for existing
+providers whose manifest turns sharing on. That change commits
 with the setting: if it fails, the save fails and the setting keeps its old
 value. Changing it back to `true` changes no existing provider. Every
 contribution, whether from the automatic run, a manual marker save, or an admin
@@ -148,6 +151,12 @@ adds the kind again. Other marker kinds are unchanged.
 Manual writes require a Movie or Series library, including their mixed-library
 variants. Unsupported library kinds return `422 validation_failed` without
 changing markers, contributing them, or emitting a playback update.
+
+An enabled administrator bypasses the `marker_edit` grant only while acting as
+administrator: on the primary profile, or with no profile declared on a
+household that does not require one. Otherwise the admin needs an explicitly
+assigned grant. Non-admin accounts require the effective grant, including the
+access group mask.
 
 Local detection finds episode intros and end credits, and movie end credits on
 a best-effort basis: from chapters and the picture near the end, never intros.

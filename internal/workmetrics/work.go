@@ -52,7 +52,7 @@ func Category(key string) string {
 		return workloadScan
 	case "match_media", "matcher":
 		return "matching"
-	case "cache_metadata_images", "backfill_metadata_images", "reconcile_artwork_cache", "verify_artwork_delivery", "cleanup_artwork_revisions", "generate_extra_stills", workloadImages:
+	case "cache_metadata_images", "backfill_metadata_images", "reconcile_artwork_cache", "cleanup_artwork_revisions", "generate_extra_stills", workloadImages:
 		return workloadImages
 	case "sync_catalog_search_index", "rebuild_catalog_search_index", workloadSearch:
 		return workloadSearch
@@ -72,7 +72,7 @@ func Category(key string) string {
 		return "recommendations"
 	case "seed_content_availability", "rebuild_release_interest":
 		return workloadNotifications
-	case "reconcile_requests", "refresh_request_downloads", "reconcile_watch_history", "database_maintenance", "cleanup_client_diagnostics", "cleanup_operational_log", "cleanup_orphaned_media_items", "setting_mutations_retention", "backfill_media_item_aliases", "repair_provider_id_integrity", "sync_collections", "sync_user_collections", "check_plugin_updates", "recheck_external_identities":
+	case "reconcile_requests", "refresh_request_downloads", "refresh_request_discover_lists", "reconcile_watch_history", "database_maintenance", "cleanup_client_diagnostics", "cleanup_operational_log", "cleanup_orphaned_media_items", "setting_mutations_retention", "backfill_media_item_aliases", "repair_provider_id_integrity", "sync_collections", "sync_user_collections", "check_plugin_updates", "recheck_external_identities":
 		return "maintenance"
 	default:
 		if strings.HasPrefix(key, "plugin:") || strings.HasPrefix(key, "plugin_") {

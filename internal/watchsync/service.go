@@ -26,6 +26,7 @@ type Service struct {
 	ratings        ratingStore
 	signals        SignalsChangedNotifier
 	dropped        droppedStore
+	profileAccess  ProfileAccessFunc
 	locks          sync.Map
 	scrobbleQueues sync.Map
 }
@@ -67,16 +68,28 @@ const (
 
 	manualSyncCooldown = time.Hour
 	manualSyncTimeout  = 10 * time.Minute
-	// A completed stop may require a cold metadata lookup in a provider plugin.
+	// ConfirmedStopDispatchTimeout bounds one provider's confirmed stop. A
+	// completed stop may require a cold metadata lookup in a provider plugin.
 	// Match the plugin-host watch-sync deadline so the durable confirmation path
 	// does not cancel valid provider work before the RPC can finish. The reclaim
 	// lease must remain longer than that entire dispatch and finalization window
 	// so a second request cannot take over while the first is still valid.
-	confirmedStopDispatchTimeout = 2 * time.Minute
-	confirmedStopLease           = confirmedStopDispatchTimeout + 30*time.Second
+	// Callers of ScrobbleStopConfirmed must leave at least this much time.
+	ConfirmedStopDispatchTimeout = 2 * time.Minute
+	confirmedStopLease           = ConfirmedStopDispatchTimeout + 30*time.Second
+
+	// importedWatchSamePlayWindow is how close a provider's watch time must be
+	// to a scrobble stop the connection sent for a watched import to treat it
+	// as that scrobbled play. A scrobble carries no watch time, so the provider
+	// stamps its copy when the stop arrives, within a second of it; the window
+	// covers clock skew and a slow provider. A second play of the same item
+	// can't finish inside it unless the item is shorter than the window.
+	importedWatchSamePlayWindow = 2 * time.Minute
 )
 
-var errConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
+// ErrConfirmedStopInProgress means another dispatch of the same confirmed stop
+// still holds its claim, so its outcome is not known yet.
+var ErrConfirmedStopInProgress = errors.New("watch provider stop confirmation already in progress")
 
 func NewService(repo Repository, registry *Registry) *Service {
 	return &Service{
@@ -109,6 +122,54 @@ func (s *Service) WithUserStoreProvider(provider userstore.UserStoreProvider) *S
 
 func (s *Service) WithDefaultWatchState(provider userstore.UserStoreProvider) *Service {
 	return s.WithUserStoreProvider(provider).WithWatchState(watchstate.NewService(provider))
+}
+
+// ProfileAccess is what a connection's profile may open.
+type ProfileAccess struct {
+	// AllowedLibraryIDs are the libraries it may see: nil for every library,
+	// an empty slice for none.
+	AllowedLibraryIDs []int
+	// Accessible reports which of the content IDs it may open, by every
+	// access rule (libraries, maturity limits). Nil allows all.
+	Accessible func(ctx context.Context, contentIDs []string) (map[string]bool, error)
+}
+
+// ProfileAccessFunc resolves a profile's ProfileAccess.
+type ProfileAccessFunc func(ctx context.Context, userID int, profileID string) (ProfileAccess, error)
+
+// WithProfileAccess installs how a watched import learns what the
+// connection's profile may open. A whole-series marker expands only to
+// episodes the profile may open, so a provider marker cannot record, or a
+// second provider's export reveal, episodes of a library it can't see or a
+// series above its maturity limits. Without it a marker expands to every
+// episode.
+func (s *Service) WithProfileAccess(resolve ProfileAccessFunc) *Service {
+	if s != nil {
+		s.profileAccess = resolve
+	}
+	return s
+}
+
+// accessibleLeaves keeps the matched episodes the profile may open.
+func accessibleLeaves(ctx context.Context, profile ProfileAccess, matches []historyimport.Match) ([]historyimport.Match, error) {
+	if profile.Accessible == nil || len(matches) == 0 {
+		return matches, nil
+	}
+	ids := make([]string, len(matches))
+	for i, match := range matches {
+		ids[i] = match.MediaItemID
+	}
+	open, err := profile.Accessible(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("check the profile's access: %w", err)
+	}
+	kept := matches[:0:0]
+	for _, match := range matches {
+		if open[match.MediaItemID] {
+			kept = append(kept, match)
+		}
+	}
+	return kept, nil
 }
 
 // WithSignalsChangedNotifier installs where a sync run reports that its
@@ -296,61 +357,24 @@ func (s *Service) DeleteConnection(ctx context.Context, userID int, profileID st
 }
 
 func (s *Service) RequestManualSync(ctx context.Context, userID int, profileID string, providerKey string) (ManualSyncResult, error) {
-	conn, ok, err := s.repo.GetConnection(ctx, providerKey, userID, profileID)
-	if err != nil {
-		return ManualSyncResult{}, err
-	}
-	if !ok {
+	admitted, err := s.repo.AdmitSyncRun(ctx, Connection{
+		Provider: providerKey, UserID: userID, ProfileID: profileID,
+	}, SyncRun{Trigger: manualSyncTrigger, StartedAt: s.now()})
+	if errors.Is(err, ErrConnectionNotFound) {
+		// Preserve the frozen v1 handler's existing error message as well as
+		// the sentinel used by v2's problem mapping.
 		return ManualSyncResult{}, ErrConnectionNotFound
 	}
-	// A manual sync against a rate-limited provider would fail immediately
-	// while still spending the account's request quota, so honor the deferral.
-	if conn.RateLimitedUntil != nil {
-		if remaining := conn.RateLimitedUntil.Sub(s.now()); remaining > 0 {
-			return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: ceilSeconds(remaining)}
-		}
-	}
-
-	for {
-		active, ok, err := s.repo.GetActiveSyncRun(ctx, conn.ID)
-		if err != nil {
-			return ManualSyncResult{}, err
-		}
-		if !ok {
-			break
-		}
-		if !active.StartedAt.IsZero() && s.now().Sub(active.StartedAt) <= manualSyncTimeout {
-			return ManualSyncResult{Run: active}, nil
-		}
-		active.Status = string(SyncRunStatusFailed)
-		active.Error = "watch provider sync timed out before completion"
-		if _, err := s.completeSyncRun(ctx, active); err != nil {
-			return ManualSyncResult{}, err
-		}
-	}
-
-	if latest, ok, err := s.repo.GetLatestSyncRun(ctx, conn.ID); err != nil {
-		return ManualSyncResult{}, err
-	} else if ok {
-		reference := latest.StartedAt
-		if latest.CompletedAt != nil {
-			reference = *latest.CompletedAt
-		}
-		if retryAfter := retryAfterSeconds(s.now(), reference, manualSyncCooldown); retryAfter > 0 {
-			return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: retryAfter}
-		}
-	}
-
-	run, err := s.repo.CreateSyncRun(ctx, SyncRun{
-		ConnectionID: conn.ID,
-		Trigger:      "manual",
-		Status:       string(SyncRunStatusRunning),
-		Provider:     conn.Provider,
-		StartedAt:    s.now(),
-	})
 	if err != nil {
 		return ManualSyncResult{}, err
 	}
+	if admitted.RetryAfterSeconds > 0 {
+		return ManualSyncResult{}, SyncCooldownError{RetryAfterSeconds: admitted.RetryAfterSeconds}
+	}
+	if !admitted.Created {
+		return ManualSyncResult{Run: admitted.Run}, nil
+	}
+	conn, run := admitted.Connection, admitted.Run
 
 	go func() {
 		runCtx, cancel := context.WithTimeout(context.Background(), manualSyncTimeout)
@@ -745,28 +769,21 @@ func (s *Service) SyncDueConnections(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) SyncConnection(ctx context.Context, conn Connection, trigger string) (err error) {
-	run := SyncRun{
-		ConnectionID: conn.ID,
-		Trigger:      trigger,
-		Status:       string(SyncRunStatusRunning),
-		Provider:     conn.Provider,
-		StartedAt:    s.now(),
-	}
+func (s *Service) SyncConnection(ctx context.Context, conn Connection, trigger string) error {
 	if conn.ID == "" {
 		return fmt.Errorf("connection id is required")
 	}
-	unlock, ok := s.tryLock(conn.ID)
-	if !ok {
-		return fmt.Errorf("watch provider sync already running for connection %s", conn.ID)
-	}
-	defer unlock()
-
-	run, err = s.repo.CreateSyncRun(ctx, run)
+	admitted, err := s.repo.AdmitSyncRun(ctx, conn, SyncRun{Trigger: trigger, StartedAt: s.now()})
 	if err != nil {
 		return err
 	}
-	_, err = s.executeSyncRun(ctx, conn, run)
+	if !admitted.Created {
+		return nil
+	}
+	// Both producers reserve before taking the local execution guard. Taking
+	// the guard first could make the manual worker and scheduled admission
+	// each skip in favor of the other, leaving neither to perform the sync.
+	_, err = s.syncConnectionWithRun(ctx, admitted.Connection, admitted.Run)
 	return err
 }
 
@@ -905,7 +922,7 @@ func (s *Service) executeSyncRun(ctx context.Context, conn Connection, run SyncR
 			result, err := s.ImportWatched(ctx, conn, cfg, importer)
 			run.InboundWatchedFound = result.Found
 			run.InboundWatchedImported = result.Imported
-			signalsChanged = signalsChanged || result.Imported > 0
+			signalsChanged = signalsChanged || result.Imported > 0 || result.ProgressUpdated > 0
 			run.Warning = appendWarning(run.Warning, result.Warnings)
 			afterFlow("watched import", err)
 		}
@@ -1077,7 +1094,11 @@ func providerSyncNeedsAccessToken(caps Capabilities) bool {
 func (s *Service) completeSyncRun(ctx context.Context, run SyncRun) (SyncRun, error) {
 	completedAt := s.now()
 	run.CompletedAt = &completedAt
-	return s.repo.CompleteSyncRun(ctx, run)
+	// Persist terminal state even after a manual deadline or task cancellation.
+	// Provider work continues to use its original context.
+	completeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signalsNotifyTimeout)
+	defer cancel()
+	return s.repo.CompleteSyncRun(completeCtx, run)
 }
 
 func retryAfterSeconds(now time.Time, reference time.Time, cooldown time.Duration) int {
@@ -1160,10 +1181,13 @@ func summarizeWarnings(warnings []string) []string {
 }
 
 type ImportWatchedResult struct {
-	Found     int
-	Imported  int
-	Unmatched int
-	Warnings  []string
+	Found    int
+	Imported int
+	// ProgressUpdated counts provider copies of Silo's own plays that added
+	// no history row but moved the item's progress.
+	ProgressUpdated int
+	Unmatched       int
+	Warnings        []string
 }
 
 type matchedWatchedLeaf struct {
@@ -1189,9 +1213,30 @@ func (s *Service) ImportWatched(
 	}
 	rows := batch.Rows
 	result := ImportWatchedResult{Found: len(rows), Warnings: append([]string{}, batch.Warnings...)}
+	var profile ProfileAccess
+	if s.profileAccess != nil {
+		if profile, err = s.profileAccess(ctx, conn.UserID, conn.ProfileID); err != nil {
+			return result, fmt.Errorf("resolve the profile's access: %w", err)
+		}
+	}
 	matchedLeaves := make(map[string]matchedWatchedLeaf)
+	addLeaf := func(match historyimport.Match, watchedAt time.Time) {
+		existing, ok := matchedLeaves[match.MediaItemID]
+		if !ok || watchedAt.After(existing.watchedAt) {
+			matchedLeaves[match.MediaItemID] = matchedWatchedLeaf{match: match, watchedAt: watchedAt}
+		}
+	}
+	// fresh holds what the provider returned this sync: its current state,
+	// which replaces any watch kept from an earlier one.
+	fresh := make(map[pendingWatchKey]bool, len(rows))
+	// keep is what stays kept after this sync: unmatched watches, and
+	// aggregate markers with the episodes they covered. applied is what
+	// leaves the store.
+	var keep []PendingWatch
+	var applied []RemoteWatch
 	for _, row := range rows {
-		matches, reason, err := s.matchWatchedLeaves(ctx, row)
+		fresh[pendingKeyOf(row)] = true
+		matches, reason, err := s.matchWatchedLeaves(ctx, row, profile)
 		if err != nil {
 			return result, err
 		}
@@ -1200,30 +1245,66 @@ func (s *Service) ImportWatched(
 			if reason != "" {
 				result.Warnings = append(result.Warnings, reason)
 			}
+			pending := PendingWatch{Watch: row}
+			if aggregateMarker(row) {
+				pending.AppliedEpisodes = historyimport.LeafSetHash(nil)
+			}
+			keep = append(keep, pending)
 			continue
 		}
 		if row.LastWatchedAt == nil {
 			continue
 		}
-		for _, match := range matches {
-			existing, ok := matchedLeaves[match.MediaItemID]
-			if !ok || row.LastWatchedAt.After(existing.watchedAt) {
-				matchedLeaves[match.MediaItemID] = matchedWatchedLeaf{
-					match:     match,
-					watchedAt: *row.LastWatchedAt,
-				}
-			}
+		if aggregateMarker(row) {
+			keep = append(keep, PendingWatch{Watch: row, AppliedEpisodes: historyimport.LeafSetHash(matches)})
+		} else {
+			applied = append(applied, row)
 		}
+		for _, match := range matches {
+			addLeaf(match, *row.LastWatchedAt)
+		}
+	}
+	pending, keepsPending := s.repo.(pendingWatchStore)
+	if keepsPending {
+		retried, changed, err := s.retryPendingWatches(ctx, pending, conn, profile, fresh, addLeaf)
+		if err != nil {
+			return result, err
+		}
+		applied = append(applied, retried...)
+		keep = append(keep, changed...)
 	}
 	mediaItemIDs := make([]string, 0, len(matchedLeaves))
 	for mediaItemID := range matchedLeaves {
 		mediaItemIDs = append(mediaItemIDs, mediaItemID)
 	}
 	sort.Strings(mediaItemIDs)
+	var store userstore.UserStore
+	var scrobbleStops map[string][]time.Time
+	if s.storeProvider != nil && len(mediaItemIDs) > 0 {
+		store, err = s.storeProvider.ForUser(ctx, conn.UserID)
+		if err != nil {
+			return result, fmt.Errorf("open user store: %w", err)
+		}
+		if scrobbleStops, err = s.repo.ListScrobbleStops(ctx, conn.ID, mediaItemIDs); err != nil {
+			return result, err
+		}
+	}
 	for _, mediaItemID := range mediaItemIDs {
 		leaf := matchedLeaves[mediaItemID]
-		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
 		watchedAt := leaf.watchedAt
+		duration, _ := s.mediaDuration(ctx, leaf.match.MediaItemID)
+		if playNear(scrobbleStops[mediaItemID], watchedAt, importedWatchSamePlayWindow) {
+			// The provider's copy of a play this connection scrobbled: Silo
+			// recorded the play, but a later completion still counts.
+			wrote, err := store.SetProgressIfNewer(ctx, conn.ProfileID, mediaItemID, 0, duration, true, watchedAt)
+			if err != nil {
+				return result, err
+			}
+			if wrote {
+				result.ProgressUpdated++
+			}
+			continue
+		}
 		created, err := s.watchState.RecordImportedWatchIfNewerWithSource(
 			ctx,
 			conn.UserID,
@@ -1243,6 +1324,17 @@ func (s *Service) ImportWatched(
 			result.Imported++
 		}
 	}
+	// The kept watches are settled before the cursor moves past them, so a
+	// failure here leaves the provider's rows to be read again. Imported ones
+	// leave first, so a save at the cap trims only what is still unmatched.
+	if keepsPending {
+		if err := pending.DeletePendingWatches(ctx, conn.ID, conn.ProviderAccountID, applied); err != nil {
+			return result, err
+		}
+		if err := pending.SavePendingWatches(ctx, conn.ID, conn.ProviderAccountID, keep); err != nil {
+			return result, err
+		}
+	}
 	now := s.now()
 	update := flowSucceeded(now)
 	update.LastInboundSyncAt = &now
@@ -1253,14 +1345,131 @@ func (s *Service) ImportWatched(
 	return result, nil
 }
 
-func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch) ([]historyimport.Match, string, error) {
+// retryPendingWatches matches the watches kept from earlier syncs again and
+// passes each match to add. It skips a kept watch the provider returned again
+// this sync. It returns the movie and episode watches that matched, which
+// leave the store, and the aggregate markers whose set of covered episodes
+// changed since they were last applied, applied again and with the new set.
+// Applying again is safe: an episode already marked keeps its play. A kept
+// watch that still matches nothing adds no warning: its sync already
+// reported it.
+func (s *Service) retryPendingWatches(
+	ctx context.Context,
+	store pendingWatchStore,
+	conn Connection,
+	profile ProfileAccess,
+	fresh map[pendingWatchKey]bool,
+	add func(historyimport.Match, time.Time),
+) (retried []RemoteWatch, changed []PendingWatch, err error) {
+	kept, err := store.ListPendingWatches(ctx, conn.ID, conn.ProviderAccountID)
+	if err != nil {
+		return nil, nil, err
+	}
+	// reapply applies a marker again when the episodes it covers (hash,
+	// a historyimport.LeafSetHash) differ from those it was last applied to.
+	reapply := func(pending PendingWatch, hash string) error {
+		if hash == pending.AppliedEpisodes {
+			return nil
+		}
+		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch, profile)
+		if err != nil {
+			return err
+		}
+		for _, match := range matches {
+			add(match, *pending.Watch.LastWatchedAt)
+		}
+		changed = append(changed, PendingWatch{Watch: pending.Watch, AppliedEpisodes: historyimport.LeafSetHash(matches)})
+		return nil
+	}
+	var batched []PendingWatch
+	var records []historyimport.Record
+	for _, pending := range kept {
+		if fresh[pendingKeyOf(pending.Watch)] {
+			continue
+		}
+		if batchMatchable(pending.Watch) {
+			batched = append(batched, pending)
+			records = append(records, pending.Watch.HistoryRecord())
+			continue
+		}
+		matches, _, err := s.matchWatchedLeaves(ctx, pending.Watch, profile)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := reapply(pending, historyimport.LeafSetHash(matches)); err != nil {
+			return nil, nil, err
+		}
+	}
+	if len(records) == 0 {
+		return nil, changed, nil
+	}
+	matches, err := store.MatchPendingWatches(ctx, records)
+	if err != nil {
+		return nil, nil, err
+	}
+	var markers []PendingWatch
+	var seriesIDs []string
+	var cutoffs []time.Time
+	for i, match := range matches {
+		pending := batched[i]
+		if pending.Watch.Kind == historyimport.KindSeries {
+			if match == nil {
+				if err := reapply(pending, historyimport.LeafSetHash(nil)); err != nil {
+					return nil, nil, err
+				}
+				continue
+			}
+			markers = append(markers, pending)
+			seriesIDs = append(seriesIDs, match.MediaItemID)
+			cutoffs = append(cutoffs, *pending.Watch.LastWatchedAt)
+			continue
+		}
+		if match == nil {
+			continue
+		}
+		add(*match, *pending.Watch.LastWatchedAt)
+		retried = append(retried, pending.Watch)
+	}
+	// A series the profile may not open covers nothing for it.
+	if profile.Accessible != nil && len(seriesIDs) > 0 {
+		open, err := profile.Accessible(ctx, seriesIDs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("check the profile's access: %w", err)
+		}
+		for i, id := range seriesIDs {
+			if !open[id] {
+				seriesIDs[i] = ""
+			}
+		}
+	}
+	hashes, err := store.SeriesLeafHashes(ctx, seriesIDs, cutoffs, profile.AllowedLibraryIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, pending := range markers {
+		if err := reapply(pending, hashes[i]); err != nil {
+			return nil, nil, err
+		}
+	}
+	return retried, changed, nil
+}
+
+// matchWatchedLeaves matches a provider watch to library items. An aggregate
+// marker expands only to episodes the profile may open.
+func (s *Service) matchWatchedLeaves(ctx context.Context, row RemoteWatch, profile ProfileAccess) ([]historyimport.Match, string, error) {
 	record := row.HistoryRecord()
+	record.AllowedLibraryIDs = profile.AllowedLibraryIDs
 	if row.Kind == historyimport.KindSeries || row.Kind == historyimport.KindSeason {
 		matcher, ok := s.matcher.(watchedLeafMatcher)
 		if !ok {
 			return nil, "watch provider matcher cannot expand aggregate watched state", nil
 		}
-		return matcher.MatchLeaves(ctx, record)
+		matches, reason, err := matcher.MatchLeaves(ctx, record)
+		if err != nil || len(matches) == 0 {
+			return matches, reason, err
+		}
+		matches, err = accessibleLeaves(ctx, profile, matches)
+		return matches, "", err
 	}
 	match, reason, err := s.matcher.Match(ctx, record)
 	if err != nil || match == nil {
@@ -1471,6 +1680,16 @@ func visiblePlays(ctx context.Context, store completedHistoryLister, query users
 		}
 	}
 	return kept, nil
+}
+
+// playNear reports whether any of times is within window of at, either side.
+func playNear(times []time.Time, at time.Time, window time.Duration) bool {
+	for _, play := range times {
+		if play.Sub(at).Abs() <= window {
+			return true
+		}
+	}
+	return false
 }
 
 func hasVisibleCompletedHistoryAtOrAfter(ctx context.Context, store completedHistoryLister, profileID, mediaItemID string, at time.Time) (bool, error) {
@@ -2163,6 +2382,8 @@ func (s *Service) ScrobbleStop(ctx context.Context, event ScrobbleEvent) error {
 // ScrobbleStopConfirmed waits for each provider dispatch and reports provider
 // or persistence failures to the caller. It is used when the caller owns a
 // durable terminal event that must not be acknowledged after a mere enqueue.
+// Connections whose provider is unregistered or cannot scrobble are skipped,
+// not reported.
 func (s *Service) ScrobbleStopConfirmed(ctx context.Context, event ScrobbleEvent) error {
 	return s.scrobble(ctx, event, scrobbleActionStop, true)
 }
@@ -2191,30 +2412,26 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 	var dispatchErrors []error
 	var confirmedTargets []confirmedScrobbleTarget
 	for _, conn := range conns {
+		// A connection whose provider cannot take a scrobble is skipped, even
+		// for a confirmed stop. Failing the stop would make its caller retry
+		// the whole event, and the dispatch to every other provider, until the
+		// session expires: an unregistered provider may never come back, as
+		// when its plugin was removed or now registers under another key. On a
+		// connection that exports watched history, a completed play still
+		// reaches the provider once it is registered: the history-export sync
+		// reconciles all completed local history, not only scrobbled plays.
 		provider, ok := s.registry.Get(conn.Provider)
 		if !ok {
 			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q is not registered", conn.Provider,
-				))
+				slog.WarnContext(ctx, "skipped scrobble stop for unregistered watch provider", "component", "watchsync", "provider", conn.Provider, "connection_id", conn.ID, "user_id", conn.UserID, "profile_id", conn.ProfileID)
 			}
 			continue
 		}
 		if !provider.Capabilities().ScrobblePlayback {
-			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q does not support playback scrobbling", conn.Provider,
-				))
-			}
 			continue
 		}
 		scrobbler, ok := provider.(Scrobbler)
 		if !ok {
-			if confirm {
-				dispatchErrors = append(dispatchErrors, fmt.Errorf(
-					"watch provider %q has no scrobble dispatcher", conn.Provider,
-				))
-			}
 			continue
 		}
 		connAction := action
@@ -2266,7 +2483,7 @@ func (s *Service) scrobble(ctx context.Context, event ScrobbleEvent, action stri
 		results := make(chan error, len(confirmedTargets))
 		for _, target := range confirmedTargets {
 			go func() {
-				providerCtx, cancel := context.WithTimeout(ctx, confirmedStopDispatchTimeout)
+				providerCtx, cancel := context.WithTimeout(ctx, ConfirmedStopDispatchTimeout)
 				defer cancel()
 				results <- s.dispatchScrobbleConfirmed(
 					providerCtx,
@@ -2337,7 +2554,7 @@ func (s *Service) dispatchScrobbleConfirmed(ctx context.Context, provider Provid
 		case confirmedStopAlreadySent:
 			return nil
 		case confirmedStopInProgress:
-			return errConfirmedStopInProgress
+			return ErrConfirmedStopInProgress
 		}
 
 		cfg, err := s.serverConfig(ctx, conn.Provider)

@@ -37,8 +37,8 @@ func (h *SettingValuesHandler) identityRequestFrom(r *http.Request, key string) 
 		ClientFamily:    r.Header.Get(clientFamilyHeader),
 		LibraryID:       query.Get("library_id"),
 		SeriesID:        query.Get("series_id"),
-		VerifyProfile: func(profileID string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, profileID)
+		VerifyProfile: func(profile *userstore.Profile) error {
+			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 		},
 	}
 }
@@ -107,6 +107,11 @@ func (h *SettingValuesHandler) HandleGetValues(w http.ResponseWriter, r *http.Re
 func (h *SettingValuesHandler) HandleSetValue(w http.ResponseWriter, r *http.Request) {
 	store, ok := h.storeFor(w, r)
 	if !ok {
+		return
+	}
+	// Writing another profile's value needs household authority. The body is
+	// read first so a PIN change during a slow upload revokes the proof.
+	if !readHouseholdRequestBody(w, r) {
 		return
 	}
 	identity, ok := h.identityFromRequest(w, r, store)
@@ -248,8 +253,8 @@ func (h *SettingValuesHandler) effectiveQueryFrom(r *http.Request, keys []string
 		ClientFamily:    r.Header.Get(clientFamilyHeader),
 		LibraryIDs:      parseIntCSV(query.Get("library_ids")),
 		SeriesIDs:       splitCSV(query.Get("series_ids")),
-		VerifyProfile: func(profileID string) error {
-			return verifyProfileToken(r, h.storeProvider, h.ProfileTokens, profileID)
+		VerifyProfile: func(profile *userstore.Profile) error {
+			return verifyProfileTokenFor(r, h.ProfileTokens, profile)
 		},
 	}
 }

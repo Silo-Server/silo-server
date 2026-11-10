@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/playback/keyframes"
 )
 
@@ -106,7 +107,7 @@ func sheetKeyframes(ctx context.Context, req Request) []float64 {
 // or returns nil. The file opens without blocking, so a FIFO in its place
 // cannot hold the lookup, and only a regular file is read.
 func matroskaKeyframes(ctx context.Context, path string) []float64 {
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := fspath.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil
 	}

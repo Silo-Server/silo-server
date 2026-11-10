@@ -1,5 +1,7 @@
 import type React from "react";
 
+import { t, type MessageKey } from "@/i18n";
+
 export type WidgetId =
   | "stat-active-streams"
   | "stat-egress-now"
@@ -27,7 +29,8 @@ export type WidgetId =
   | "downloads"
   | "scan-activity"
   | "recent-errors"
-  | "recent-activity";
+  | "recent-activity"
+  | "api-clients";
 
 /**
  * The window a metric widget covers.
@@ -57,8 +60,14 @@ export interface WidgetRangeOptions {
  */
 export interface DashboardWidgetDefinition {
   id: WidgetId;
-  title: string;
-  description: string;
+  /** Catalog key of the widget's name; the layout stores `id`, never this text. */
+  titleKey: MessageKey;
+  /** Catalog key of the one-line summary in the Add-widget sheet. */
+  descriptionKey: MessageKey;
+  /** `titleKey` in the current interface language, read when accessed. */
+  readonly title: string;
+  /** `descriptionKey` in the current interface language, read when accessed. */
+  readonly description: string;
   minSpan: number;
   maxSpan: number;
   defaultSpan: number;
@@ -76,6 +85,25 @@ export interface DashboardWidgetDefinition {
   collapsedRows?: number;
   ranges?: WidgetRangeOptions;
   Component: React.ComponentType;
+}
+
+/** A registry entry as written: the text fields are derived from the keys. */
+export type DashboardWidgetSpec = Omit<DashboardWidgetDefinition, "title" | "description">;
+
+/**
+ * Adds `title` and `description` to a registry entry as getters, so the text
+ * follows the interface language instead of being frozen when the module loads.
+ */
+export function defineDashboardWidget(spec: DashboardWidgetSpec): DashboardWidgetDefinition {
+  return {
+    ...spec,
+    get title() {
+      return t(spec.titleKey);
+    },
+    get description() {
+      return t(spec.descriptionKey);
+    },
+  };
 }
 
 export interface DashboardLayoutEntry {

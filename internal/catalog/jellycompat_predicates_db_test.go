@@ -284,6 +284,84 @@ func TestJellycompatPredicatesPostgres(t *testing.T) {
 			}
 		}
 	})
+	t.Run("episodes across series", func(t *testing.T) {
+		// A series sort title ahead of the other puts its episodes first; the
+		// metadata-only episode has no library row and stays out.
+		exec(`UPDATE media_items SET sort_title='A Synthetic Series' WHERE content_id=$1`, otherSeries)
+		defer exec(`UPDATE media_items SET sort_title='' WHERE content_id=$1`, otherSeries)
+		all := BrowseFilters{UserID: userID, ProfileID: profiles[0], LibraryID: libraryID, Limit: 10}
+		items, total, err := episodes.BrowseEpisodes(ctx, "", "", nil, "", all, access, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{episodeIDs[5], episodeIDs[0], episodeIDs[1], episodeIDs[2], episodeIDs[3], episodeIDs[4]}
+		got := make([]string, 0, len(items))
+		for _, item := range items {
+			got = append(got, item.ContentID)
+		}
+		if total != len(want) || !slices.Equal(got, want) {
+			t.Fatalf("all-series page total=%d items=%v, want %v", total, got, want)
+		}
+
+		favorites := all
+		favorites.IsFavorite = true
+		favorites.Limit = 0
+		items, total, err = episodes.BrowseEpisodes(ctx, "", "", nil, "", favorites, access, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 5 || len(items) != 0 {
+			t.Fatalf("favorite count total=%d items=%d, want 5 and no page", total, len(items))
+		}
+
+		// The highest-rated episode leads a descending rating sort, and unrated
+		// episodes stay last.
+		exec(`UPDATE episodes SET rating_imdb=CASE content_id WHEN $1 THEN 8.0 WHEN $2 THEN 9.0 END WHERE content_id=ANY($3)`, episodeIDs[1], episodeIDs[3], episodeIDs)
+		defer exec(`UPDATE episodes SET rating_imdb=NULL WHERE content_id=ANY($1)`, episodeIDs)
+		rated := all
+		rated.Sort, rated.Order = BrowseSortRatingIMDB, BrowseOrderDescending
+		items, _, err = episodes.BrowseEpisodes(ctx, "", "", nil, "", rated, access, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(items) != 6 || items[0].ContentID != episodeIDs[3] || items[1].ContentID != episodeIDs[1] {
+			t.Fatalf("rating order = %v, want e3 then e1 first", items)
+		}
+
+		// Filters the series listing shares map onto episode and series columns.
+		filtered := all
+		filtered.MinPremiereDate = "2024-01-01"
+		filtered.ExcludeContentIDs = []string{episodeIDs[0]}
+		filtered.OfficialRatings = []string{"PG"}
+		items, total, err = episodes.BrowseEpisodes(ctx, "", "", nil, "", filtered, access, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 4 || len(items) != 4 {
+			t.Fatalf("filtered total=%d items=%d, want the four 2024 episodes other than e0", total, len(items))
+		}
+
+		// An undated episode stays last in a descending year or date sort.
+		exec(`UPDATE episodes SET air_date=NULL WHERE content_id=$1`, episodeIDs[0])
+		defer exec(`UPDATE episodes SET air_date=$2 WHERE content_id=$1`, episodeIDs[0], time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+		for _, sort := range []string{BrowseSortYear, BrowseSortReleaseDate} {
+			dated := all
+			dated.Sort, dated.Order = sort, BrowseOrderDescending
+			items, _, err = episodes.BrowseEpisodes(ctx, "", "", nil, "", dated, access, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 6 || items[5].ContentID != episodeIDs[0] {
+				t.Fatalf("%s descending = %v, want the undated e0 last", sort, items)
+			}
+		}
+
+		otherLibrary := all
+		otherLibrary.LibraryID = disabledID
+		if _, total, err = episodes.BrowseEpisodes(ctx, "", "", nil, "", otherLibrary, access, true); err != nil || total != 0 {
+			t.Fatalf("other library total=%d err=%v, want 0", total, err)
+		}
+	})
 	t.Run("episode parent numeric season count offset", func(t *testing.T) {
 		items, total, err := episodes.BrowseEpisodes(ctx, seriesID, "", new(1), "", q, access, true)
 		if err != nil {

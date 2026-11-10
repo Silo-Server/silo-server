@@ -86,6 +86,8 @@ func sessionRecipeCardV3(card playback.RecipeCard, session *playback.Session) *p
 	card.ClientBuild = session.ClientBuild
 	card.ClientChannel = session.ClientChannel
 	card.ClientUserAgent = session.ClientUserAgent
+	card.DeviceID = session.DeviceID
+	card.DevicePlatform = session.DevicePlatform
 	return &card
 }
 
@@ -154,6 +156,8 @@ func (h *PlaybackHandler) followSessionRecipeMoveV3(ctx context.Context, session
 	next.ClientBuild = stored.ClientBuild
 	next.ClientChannel = stored.ClientChannel
 	next.ClientUserAgent = stored.ClientUserAgent
+	next.DeviceID = stored.DeviceID
+	next.DevicePlatform = stored.DevicePlatform
 	stampLiveRouteV3(&next, current)
 	h.putSessionRecipeV3(ctx, next)
 }

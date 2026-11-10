@@ -4,13 +4,15 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 type contextKey string
 
 const clientIPKey contextKey = "client_ip"
 const requestSchemeKey contextKey = "request_scheme"
-const requestHostKey contextKey = "request_host"
+const forwardedHostKey contextKey = "forwarded_host"
 
 // peerIPKey holds the transport-level peer address exactly as the listener saw
 // it, before Middleware overwrote RemoteAddr with the resolved client IP.
@@ -35,13 +37,13 @@ func Middleware(resolver *Resolver) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			peer := r.RemoteAddr
 			scheme := resolver.requestScheme(r)
-			host := resolver.requestHost(r)
+			forwardedHost := resolver.forwardedHost(r)
 			resolved, clientUnknown := resolver.resolve(r)
 			ip := normalize(resolved)
 			r.RemoteAddr = ip
 			ctx := context.WithValue(r.Context(), clientIPKey, ip)
 			ctx = context.WithValue(ctx, requestSchemeKey, scheme)
-			ctx = context.WithValue(ctx, requestHostKey, host)
+			ctx = context.WithValue(ctx, forwardedHostKey, forwardedHost)
 			ctx = context.WithValue(ctx, peerIPKey, peer)
 			if clientUnknown {
 				ctx = context.WithValue(ctx, forwardedClientUnknownKey, true)
@@ -118,13 +120,58 @@ func RequestScheme(r *http.Request) string {
 	return "http"
 }
 
-// RequestHost returns the host[:port] the client addressed: the single
-// X-Forwarded-Host value a trusted proxy sent, else the Host header. A proxy
-// that rewrites Host to its upstream address keeps the client's host this
-// way. Without Middleware, forwarding headers are never consulted.
+// RequestHost returns the host[:port] the client addressed: ForwardedHost,
+// else the Host header. A proxy that rewrites Host to its upstream address
+// keeps the client's host this way. Without Middleware, forwarding headers are
+// never consulted.
 func RequestHost(r *http.Request) string {
-	if host, ok := r.Context().Value(requestHostKey).(string); ok && host != "" {
+	if host := ForwardedHost(r); host != "" {
 		return host
 	}
 	return r.Host
+}
+
+// ForwardedHost returns the single X-Forwarded-Host value a trusted proxy
+// sent, or "" when Middleware accepted none: no header, a peer that is not a
+// trusted proxy, or an ambiguous value. It tells a proxy that named the
+// client's host apart from one that left only Host, even when the two match.
+func ForwardedHost(r *http.Request) string {
+	host, _ := r.Context().Value(forwardedHostKey).(string)
+	return host
+}
+
+// RequestOrigin is the origin r arrived on, scheme://host[:port] as
+// SerializeOrigin writes it: the host from RequestHost and the scheme from
+// RequestScheme, so forwarding headers count only from a trusted proxy and
+// only after Middleware ran. Ambiguous proxy scheme metadata names the
+// transport's scheme; a client that compares this origin with the one it
+// configured then sees a mismatch and refuses, never a false match.
+func RequestOrigin(r *http.Request) string {
+	scheme := RequestScheme(r)
+	if scheme == "" {
+		scheme = "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+	}
+	return SerializeOrigin(scheme, RequestHost(r))
+}
+
+// SerializeOrigin is scheme://host[:port] with the scheme and host in lower
+// case, the default port of the scheme left out, IPv6 hosts in brackets, and
+// no path or trailing slash.
+func SerializeOrigin(scheme, host string) string {
+	scheme = strings.ToLower(strings.TrimSpace(scheme))
+	hostURL := url.URL{Host: strings.TrimSpace(host)}
+	name, port := strings.ToLower(hostURL.Hostname()), hostURL.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if strings.Contains(name, ":") {
+		name = "[" + name + "]"
+	}
+	if port != "" {
+		name += ":" + port
+	}
+	return scheme + "://" + name
 }

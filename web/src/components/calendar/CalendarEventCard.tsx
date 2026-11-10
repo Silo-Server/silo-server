@@ -9,17 +9,17 @@ import {
   upcomingBadgeLabel,
 } from "@/lib/upcomingEventPresentation";
 import type { CalendarEvent } from "@/hooks/queries/calendar";
-import { useUICustomization } from "@/hooks/useUICustomization";
+import { useAppLanguage, useT } from "@/i18n";
 
 export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
+  const t = useT();
+  // The subtitle, air time and badges come from plain helpers; follow language changes.
+  useAppLanguage();
   const [loaded, setLoaded] = useState(false);
   // Keyed by URL so a re-signed poster is tried again.
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const thumbhashUrl = event.poster_thumbhash ? decodeThumbhash(event.poster_thumbhash) : "";
   const watched = event.watched === true;
-  const { cardPresentation } = useUICustomization();
-  const showCaption = cardPresentation.caption !== "artwork";
-  const showMetadata = cardPresentation.caption === "title_metadata";
 
   const href =
     event.type === "movie"
@@ -65,7 +65,7 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
           )}
           <div className="from-background/70 pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t to-transparent opacity-90" />
           {event.badges.length > 0 && (
-            <div className="absolute top-2.5 left-2.5 flex flex-wrap gap-1">
+            <div className="absolute start-2.5 top-2.5 flex flex-wrap gap-1">
               {event.badges.map((badge) => (
                 <span
                   key={badge}
@@ -80,31 +80,30 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <span
                 className="bg-background/70 text-foreground flex h-8 w-8 items-center justify-center rounded-full text-base backdrop-blur-sm"
-                aria-label="Watched"
+                aria-label={t("web.calendar.watched")}
               >
-                ✓
+                {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a check mark glyph, labelled above */}
+                {"✓"}
               </span>
             </div>
           )}
         </div>
       </ViewTransitionLink>
-      {showCaption ? (
-        <ViewTransitionLink to={href} className="block px-1 pt-3">
-          <div
-            className={`truncate text-[14px] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
-          >
-            {event.title}
+      <ViewTransitionLink to={href} className="block px-1 pt-3">
+        <div
+          className={`truncate text-[14px] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
+        >
+          {event.title}
+        </div>
+        {subtitle ? (
+          <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
+            {subtitle}
           </div>
-          {showMetadata && subtitle ? (
-            <div className="text-muted-foreground mt-1 truncate text-[11px] font-medium tracking-[0.14em] uppercase">
-              {subtitle}
-            </div>
-          ) : null}
-          {showMetadata && airTime ? (
-            <div className="text-muted-foreground mt-0.5 text-[11px] font-medium">{airTime}</div>
-          ) : null}
-        </ViewTransitionLink>
-      ) : null}
+        ) : null}
+        {airTime ? (
+          <div className="text-muted-foreground mt-0.5 text-[11px] font-medium">{airTime}</div>
+        ) : null}
+      </ViewTransitionLink>
     </div>
   );
 }

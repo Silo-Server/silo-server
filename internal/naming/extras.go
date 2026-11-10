@@ -3,6 +3,8 @@ package naming
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // extraSuffixKinds maps the Jellyfin/Plex filename-suffix convention onto the
@@ -55,6 +57,6 @@ func ExtraTitleFromFile(filePath string) string {
 			stem = stem[:idx]
 		}
 	}
-	stem = strings.NewReplacer(".", " ", "_", " ").Replace(stem)
+	stem = strings.NewReplacer(".", " ", "_", " ").Replace(fspath.Display(stem))
 	return strings.Join(strings.Fields(stem), " ")
 }

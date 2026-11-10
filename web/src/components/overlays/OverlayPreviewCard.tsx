@@ -1,11 +1,14 @@
 import CardOverlays from "./CardOverlays";
+import CardWatchStatus from "./CardWatchStatus";
 import { RequestDownloadBar } from "./RequestDownloadBar";
 import {
   OVERLAY_PREVIEW_SAMPLES,
+  OVERLAY_PREVIEW_WATCH_STATES,
   requestDownloadBarPercent,
   type CardOverlayPrefs,
   type OverlayPreviewVariant,
 } from "@/lib/overlays";
+import { carouselCardWidthClasses, type PosterSize } from "@/lib/uiCustomization";
 
 /**
  * Which sample item the preview stands in for. Picked by
@@ -23,29 +26,25 @@ const PLACEHOLDER_LABEL: Record<OverlayPreviewVariant, string> = {
 interface OverlayPreviewCardProps {
   prefs: CardOverlayPrefs;
   variant?: OverlayPreviewVariant;
-  size?: "sm" | "md";
+  /** The poster size to draw at; the card is as wide as a home-row card. */
+  posterSize?: PosterSize;
   showPosterOverlays?: boolean;
 }
 
-const SIZE_CLASSES: Record<NonNullable<OverlayPreviewCardProps["size"]>, string> = {
-  sm: "w-[140px]",
-  md: "w-[180px]",
-};
-
 // Preview used by the admin defaults editor. Renders a 2:3 poster
 // placeholder with the actual <CardOverlays /> renderer on top of it,
-// fed sample data.
+// fed sample data, at the width a home-row card draws at so badges show at
+// their real size.
 export function OverlayPreviewCard({
   prefs,
   variant = "movie",
-  size = "md",
+  posterSize = "standard",
   showPosterOverlays = true,
 }: OverlayPreviewCardProps) {
   const data = OVERLAY_PREVIEW_SAMPLES[variant];
-  const sizeClass = SIZE_CLASSES[size];
   const downloadPercent = showPosterOverlays ? requestDownloadBarPercent(data, prefs) : null;
   return (
-    <div className={`mx-auto ${sizeClass}`}>
+    <div className={`mx-auto ${carouselCardWidthClasses(posterSize)}`}>
       <div className="bg-muted/40 relative aspect-[2/3] overflow-hidden rounded-xl border">
         <div className="text-muted-foreground/30 flex h-full items-center justify-center text-xs font-medium tracking-wider uppercase">
           {PLACEHOLDER_LABEL[variant]}
@@ -54,6 +53,7 @@ export function OverlayPreviewCard({
         {showPosterOverlays ? (
           <CardOverlays data={data} prefs={prefs} hasProgressBar={downloadPercent !== null} />
         ) : null}
+        <CardWatchStatus userState={OVERLAY_PREVIEW_WATCH_STATES[variant]} />
       </div>
     </div>
   );

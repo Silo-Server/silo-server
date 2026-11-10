@@ -159,6 +159,42 @@ func TestResolveForSettings_KeepsAdminTitleAsDefault(t *testing.T) {
 	}
 }
 
+// A row keeps the admin row's title key while the profile shows the admin
+// title, including an override that saved that same title (older web
+// builds saved it with every override), and loses it under a title of the
+// profile's own, while its default title keeps the key. A profile-built row
+// has none.
+func TestResolveKeepsTitleKeyOnlyForTheAdminTitle(t *testing.T) {
+	args := map[string]string{"library": "Films"}
+	admin := []*PageSection{{ID: "1", SectionType: SectionRecentlyAdded, Title: "Recently Added in Films", TitleKey: "home.section.recentlyAddedIn", TitleArgs: args, Config: json.RawMessage(`{}`)}}
+	for _, tc := range []struct {
+		name     string
+		override ProfileSectionOverride
+		wantKey  string
+	}{
+		{"no override", ProfileSectionOverride{SectionID: "other"}, "home.section.recentlyAddedIn"},
+		{"override without title", ProfileSectionOverride{SectionID: "1", Featured: new(true)}, "home.section.recentlyAddedIn"},
+		{"override saving the admin title", ProfileSectionOverride{SectionID: "1", Title: "Recently Added in Films"}, "home.section.recentlyAddedIn"},
+		{"profile title", ProfileSectionOverride{SectionID: "1", Title: "Fresh films"}, ""},
+	} {
+		for name, resolve := range map[string]func([]*PageSection, []ProfileSectionOverride) []ResolvedSection{"Resolve": Resolve, "ResolveForSettings": ResolveForSettings} {
+			got := resolve(admin, []ProfileSectionOverride{tc.override})[0]
+			if got.TitleKey != tc.wantKey || (tc.wantKey != "" && got.TitleArgs["library"] != "Films") {
+				t.Errorf("%s %s: key %q args %v, want key %q", name, tc.name, got.TitleKey, got.TitleArgs, tc.wantKey)
+			}
+		}
+		// The admin title a renamed row offers to go back to keeps its key.
+		got := ResolveForSettings(admin, []ProfileSectionOverride{tc.override})[0]
+		if got.DefaultTitleKey != "home.section.recentlyAddedIn" || got.DefaultTitleArgs["library"] != "Films" {
+			t.Errorf("ResolveForSettings %s: default key %q args %v", tc.name, got.DefaultTitleKey, got.DefaultTitleArgs)
+		}
+	}
+	custom := Resolve(nil, []ProfileSectionOverride{{ID: "c", IsUserAdded: true, UserSectionType: SectionHiddenGems, UserTitle: "Hidden Gems"}})
+	if custom[0].TitleKey != "" {
+		t.Errorf("profile-built row has key %q", custom[0].TitleKey)
+	}
+}
+
 func TestResolveIncludesUserAddedRecipeFromOverride(t *testing.T) {
 	admin := []*PageSection{}
 	overrides := []ProfileSectionOverride{
@@ -250,6 +286,78 @@ func TestResolveForSettings_RawKeyAdminTitleIsNotARename(t *testing.T) {
 	for id, w := range want {
 		if got[id] != w {
 			t.Errorf("section %s (title, default title) = %q, want %q", id, got[id], w)
+		}
+	}
+}
+
+// A web-only hero row reaches the web app alone. It goes to every client
+// again while it is not this profile's hero banner: once the profile turns
+// the banner off, or another featured row comes first and takes the banner.
+// A row a profile built itself is never web-only.
+func TestForClientKeepsWebOnlyHeroesOffTheApps(t *testing.T) {
+	admin := []*PageSection{
+		{ID: "hero", Position: 0, SectionType: SectionTrendingDiscover, Title: "Discover", Featured: true, WebOnly: true, ItemLimit: 10, Config: json.RawMessage(`{}`)},
+		{ID: "recent", Position: 1, SectionType: SectionRecentlyAdded, Title: "Recently Added", ItemLimit: 20, Config: json.RawMessage(`{}`)},
+	}
+	featured, plain := true, false
+	own := ProfileSectionOverride{ID: "own", SectionType: SectionFavorites, Title: "Mine", Featured: &featured, Position: new(2)}
+	ownFirst := own
+	ownFirst.Position = new(-1)
+	ids := func(resolved []ResolvedSection) []string {
+		var out []string
+		for _, s := range resolved {
+			out = append(out, s.ID)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name      string
+		overrides []ProfileSectionOverride
+		web, app  []string
+	}{
+		{"admin hero", nil, []string{"hero", "recent"}, []string{"recent"}},
+		{"profile turned the hero off", []ProfileSectionOverride{{SectionID: "hero", Featured: &plain}}, []string{"hero", "recent"}, []string{"hero", "recent"}},
+		{"profile's own hero after it", []ProfileSectionOverride{own}, []string{"hero", "recent", "own"}, []string{"recent", "own"}},
+		{"profile's own hero takes the banner", []ProfileSectionOverride{ownFirst}, []string{"own", "hero", "recent"}, []string{"own", "hero", "recent"}},
+	} {
+		resolved := Resolve(admin, tc.overrides)
+		before := ids(resolved)
+		if got := ids(ForClient(resolved, true)); !slices.Equal(got, tc.web) {
+			t.Errorf("%s: web gets %v, want %v", tc.name, got, tc.web)
+		}
+		if got := ids(ForClient(resolved, false)); !slices.Equal(got, tc.app) {
+			t.Errorf("%s: apps get %v, want %v", tc.name, got, tc.app)
+		}
+		if !slices.Equal(ids(resolved), before) {
+			t.Errorf("%s: ForClient changed its input", tc.name)
+		}
+	}
+}
+
+// A stored override above MaxItemLimit predates the save-time check; every
+// resolve path caps it so the fetchers never size a buffer from it.
+func TestResolveClampsStoredItemLimit(t *testing.T) {
+	huge := 1_000_000_000
+	admin := []*PageSection{
+		{ID: "1", SectionType: SectionRecentlyAdded, Title: "A", ItemLimit: 20, Config: json.RawMessage(`{}`)},
+		{ID: "2", Position: 1, SectionType: SectionFavorites, Title: "B", ItemLimit: huge, Config: json.RawMessage(`{}`)},
+	}
+	overrides := []ProfileSectionOverride{
+		{SectionID: "1", ItemLimit: &huge},
+		{ID: "custom-1", SectionType: "genre", Title: "Mine", ItemLimit: &huge},
+	}
+	for name, resolve := range map[string]func([]*PageSection, []ProfileSectionOverride) []ResolvedSection{
+		"Resolve":            Resolve,
+		"ResolveForSettings": ResolveForSettings,
+	} {
+		got := resolve(admin, overrides)
+		if len(got) != 3 {
+			t.Fatalf("%s: resolved %d sections, want 3", name, len(got))
+		}
+		for _, s := range got {
+			if s.ItemLimit != MaxItemLimit {
+				t.Errorf("%s: section %q ItemLimit = %d, want %d", name, s.ID, s.ItemLimit, MaxItemLimit)
+			}
 		}
 	}
 }

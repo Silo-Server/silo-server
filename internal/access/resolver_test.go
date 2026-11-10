@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -85,6 +86,7 @@ func TestResolver_UnrestrictedAccountRestrictedProfile(t *testing.T) {
 			AllowedLibraryIDs:          []int{2, 4},
 			MaxContentRating:           "PG-13",
 			MaxPlaybackQuality:         "720p",
+			PINRevision:                6,
 		}}},
 		nil,
 	)
@@ -102,6 +104,10 @@ func TestResolver_UnrestrictedAccountRestrictedProfile(t *testing.T) {
 	}
 	if scope.MaxContentRating != "PG-13" || scope.MaxPlaybackQuality != "1080p" {
 		t.Fatalf("unexpected scope ceilings: %+v", scope)
+	}
+	// Credentials bound to the profile's PIN revision compare against this.
+	if scope.ProfilePINRevision != 6 {
+		t.Fatalf("ProfilePINRevision = %d, want 6", scope.ProfilePINRevision)
 	}
 }
 
@@ -512,5 +518,19 @@ func TestResolver_ContentAccessOnlyIgnoresHiddenLibraries(t *testing.T) {
 				t.Fatalf("MaxContentRating = %q, want the profile's ceiling", scope.MaxContentRating)
 			}
 		})
+	}
+}
+
+// ProfileMaturity is what readers outside Resolve, such as account restore,
+// filter by, so it carries the profile's allowed titles whenever it has a
+// limit to lift, and none when it has no limit.
+func TestProfileMaturityCarriesAllowedTitles(t *testing.T) {
+	allowed := []string{"movie:heat-1995"}
+	limited := ProfileMaturity(&userstore.Profile{MaxContentRating: "PG", AllowedTitleIDs: allowed}, false)
+	if !slices.Equal(limited.AllowedTitleIDs, allowed) {
+		t.Errorf("limited profile AllowedTitleIDs = %v, want %v", limited.AllowedTitleIDs, allowed)
+	}
+	if open := ProfileMaturity(&userstore.Profile{AllowedTitleIDs: allowed}, false); open.AllowedTitleIDs != nil {
+		t.Errorf("unlimited profile AllowedTitleIDs = %v, want none", open.AllowedTitleIDs)
 	}
 }

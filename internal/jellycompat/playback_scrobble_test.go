@@ -24,8 +24,18 @@ type compatScrobbleCall struct {
 	event  watchsync.ScrobbleEvent
 }
 
+// recordingCompatWatchScrobbler records scrobbles. Recovery can deliver stops
+// in parallel, so calls are appended under mu; tests read calls once the
+// delivery they wait for has finished.
 type recordingCompatWatchScrobbler struct {
+	mu    sync.Mutex
 	calls []compatScrobbleCall
+}
+
+func (s *recordingCompatWatchScrobbler) record(action string, event watchsync.ScrobbleEvent) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, compatScrobbleCall{action: action, event: event})
 }
 
 type channelCompatWatchScrobbler struct {
@@ -179,17 +189,17 @@ func (s *terminalReleaseObservingStore) ReleaseTerminalClaim(
 }
 
 func (s *recordingCompatWatchScrobbler) ScrobbleStart(_ context.Context, event watchsync.ScrobbleEvent) error {
-	s.calls = append(s.calls, compatScrobbleCall{action: "start", event: event})
+	s.record("start", event)
 	return nil
 }
 
 func (s *recordingCompatWatchScrobbler) ScrobblePause(_ context.Context, event watchsync.ScrobbleEvent) error {
-	s.calls = append(s.calls, compatScrobbleCall{action: "pause", event: event})
+	s.record("pause", event)
 	return nil
 }
 
 func (s *recordingCompatWatchScrobbler) ScrobbleStop(_ context.Context, event watchsync.ScrobbleEvent) error {
-	s.calls = append(s.calls, compatScrobbleCall{action: "stop", event: event})
+	s.record("stop", event)
 	return nil
 }
 
@@ -1441,6 +1451,230 @@ func TestTerminalScrobbleRecoveryWaitsForConfirmedProviderStop(t *testing.T) {
 	}
 	if _, ok := store.GetFinalizable("play-1", "token-1"); ok {
 		t.Fatal("successful confirmed stop left the terminal event pending")
+	}
+}
+
+// deadlineCompatWatchScrobbler acts like a watch-provider plugin that keeps a
+// reserve before the host deadline: it defers, without writing, a stop whose
+// remaining time is under needs.
+type deadlineCompatWatchScrobbler struct {
+	confirmingCompatWatchScrobbler
+	store      *PlaybackSessionStore
+	needs      time.Duration
+	deadline   time.Time
+	claimUntil time.Time
+}
+
+func (s *deadlineCompatWatchScrobbler) ScrobbleStopConfirmed(ctx context.Context, _ watchsync.ScrobbleEvent) error {
+	s.confirmedCalls++
+	s.deadline, _ = ctx.Deadline()
+	if pending, ok := s.store.GetFinalizable("play-1", "token-1"); ok {
+		s.claimUntil = pending.TerminalClaimUntil
+	}
+	if s.confirmedErr != nil {
+		return s.confirmedErr
+	}
+	if time.Until(s.deadline) < s.needs {
+		return errors.New("provider sync time limit reached; the event will be retried")
+	}
+	return nil
+}
+
+// Based on the reproduction in issue #3506 and the reporter's test on their
+// fork.
+func TestConfirmedTerminalStopDelivery(t *testing.T) {
+	providerDown := errors.New("provider unavailable")
+	tests := []struct {
+		name        string
+		needs       time.Duration
+		err         error
+		stoppedAgo  time.Duration
+		wantPending bool
+	}{
+		// A plugin keeps a 5-second reserve, and a cold provider write can take
+		// 15 seconds more.
+		{name: "provider keeping a reserve has time to write", needs: 20 * time.Second},
+		{name: "recent failing stop is kept for retry", err: providerDown, stoppedAgo: time.Minute, wantPending: true},
+		{name: "stop failing past its retry window is dropped", err: providerDown, stoppedAgo: compatConfirmedStopRetryWindow + time.Minute},
+		{
+			name:        "stop still being confirmed past its retry window is kept",
+			err:         errors.Join(providerDown, fmt.Errorf("mdblist: %w", watchsync.ErrConfirmedStopInProgress)),
+			stoppedAgo:  compatConfirmedStopRetryWindow + time.Minute,
+			wantPending: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			store.Put(PlaybackSession{ID: "play-1", CompatToken: "token-1"})
+			event := watchsync.ScrobbleEvent{PlaybackSessionID: "upstream-1", OccurredAt: time.Now().Add(-tt.stoppedAgo)}
+			if _, err := store.StageTerminal("play-1", "token-1", event, true); err != nil {
+				t.Fatalf("stage terminal event: %v", err)
+			}
+			scrobbler := &deadlineCompatWatchScrobbler{store: store, needs: tt.needs}
+			scrobbler.confirmedErr = tt.err
+			handler := &PlaybackHandler{playbackStore: store, WatchScrobbler: scrobbler}
+
+			handler.deliverCompatTerminal(context.Background(), "play-1", "token-1", true, time.Time{}, 0, false)
+
+			if scrobbler.deadline.IsZero() {
+				t.Fatal("confirmed stop dispatched without a deadline")
+			}
+			if !scrobbler.claimUntil.After(scrobbler.deadline) {
+				t.Fatalf("terminal claim lease ends at %s, before the dispatch deadline %s",
+					scrobbler.claimUntil.Format(time.RFC3339Nano), scrobbler.deadline.Format(time.RFC3339Nano))
+			}
+			if _, pending := store.GetFinalizable("play-1", "token-1"); pending != tt.wantPending {
+				t.Fatalf("stop pending = %v, want %v (%s left before the deadline)",
+					pending, tt.wantPending, time.Until(scrobbler.deadline).Round(time.Second))
+			}
+
+			// Only a stop still pending is delivered again by the recovery scan.
+			if err := recoverPendingTerminalScrobbles(context.Background(), handler); err != nil {
+				t.Fatalf("recover terminal events: %v", err)
+			}
+			wantCalls := 1
+			if tt.wantPending {
+				wantCalls = 2
+			}
+			if scrobbler.confirmedCalls != wantCalls {
+				t.Fatalf("confirmed stop calls = %d, want %d", scrobbler.confirmedCalls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestStoppedReportDoesNotWaitForSlowConfirmedStop(t *testing.T) {
+	handler, mgr, _, sourceID := newReportLivenessHandler("upstream-1", true)
+	handler.terminalRequestWait = 10 * time.Millisecond
+	// An unbuffered channel holds the provider until the test receives.
+	scrobbler := &channelCompatWatchScrobbler{stopEvents: make(chan watchsync.ScrobbleEvent)}
+	handler.WatchScrobbler = scrobbler
+	mgr.sessions["upstream-1"].UserID = 7
+	mgr.sessions["upstream-1"].ProfileID = "profile-1"
+	mgr.sessions["upstream-1"].MediaFileID = 42
+
+	req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Stopped", strings.NewReader(
+		`{"PlaySessionId":"play-1","MediaSourceId":"`+sourceID+`","PositionTicks":900000000}`))
+	req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+		&Session{Token: "token-1", StreamAppUserID: 7, ProfileID: "profile-1"}))
+	answered := make(chan int, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		handler.HandleSessionPlayingStopped(rec, req)
+		answered <- rec.Code
+	}()
+
+	select {
+	case code := <-answered:
+		if code != http.StatusNoContent {
+			t.Fatalf("status = %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stopped report waited for the provider")
+	}
+	if _, ok := handler.playbackStore.GetFinalizable("play-1", "token-1"); !ok {
+		t.Fatal("stop record was completed before the provider took it")
+	}
+	select {
+	case event := <-scrobbler.stopEvents:
+		if event.PositionSeconds != 90 {
+			t.Fatalf("delivered stop = %+v, want 90s", event)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the detached stop delivery")
+	}
+	awaitTerminalCompleted(t, handler.playbackStore, "play-1", "token-1",
+		"stop record remained after the provider took the stop")
+}
+
+// stallingCompatWatchScrobbler holds one session's confirmed stop until
+// released and records every other stop it takes.
+type stallingCompatWatchScrobbler struct {
+	unconfirmedCompatWatchScrobbler
+	stalledSessionID string
+	release          chan struct{}
+	delivered        chan string
+}
+
+func (s *stallingCompatWatchScrobbler) ScrobbleStop(context.Context, watchsync.ScrobbleEvent) error {
+	return nil
+}
+
+func (s *stallingCompatWatchScrobbler) ScrobbleStopConfirmed(_ context.Context, event watchsync.ScrobbleEvent) error {
+	if event.PlaybackSessionID == s.stalledSessionID {
+		<-s.release
+	}
+	s.delivered <- event.PlaybackSessionID
+	return nil
+}
+
+func TestTerminalScrobbleRecoveryIsNotHeldByStalledProvider(t *testing.T) {
+	tests := []struct {
+		name string
+		scan func(context.Context, *PlaybackHandler) error
+		// The startup sweep of open scrobbles runs after the initial scan, so
+		// that scan must not finish while a recovered stop is in flight.
+		waitsForStalled bool
+	}{
+		{name: "periodic scan", scan: recoverPendingTerminalScrobbles},
+		{name: "initial scan", scan: recoverInitialPendingTerminalScrobbles, waitsForStalled: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewPlaybackSessionStore(time.Hour, nil)
+			for _, id := range []string{"play-1", "play-2"} {
+				store.Put(PlaybackSession{ID: id, CompatToken: "token-1"})
+				event := watchsync.ScrobbleEvent{PlaybackSessionID: "upstream-" + id, OccurredAt: time.Now()}
+				if _, err := store.StageTerminal(id, "token-1", event, true); err != nil {
+					t.Fatalf("stage terminal event %s: %v", id, err)
+				}
+			}
+			scrobbler := &stallingCompatWatchScrobbler{
+				stalledSessionID: "upstream-play-1",
+				release:          make(chan struct{}),
+				delivered:        make(chan string, 2),
+			}
+			handler := &PlaybackHandler{playbackStore: store, WatchScrobbler: scrobbler, terminalRequestWait: 10 * time.Millisecond}
+			released := false
+			release := func() {
+				if !released {
+					released = true
+					close(scrobbler.release)
+				}
+			}
+			t.Cleanup(release)
+
+			scanned := make(chan error, 1)
+			go func() { scanned <- tt.scan(context.Background(), handler) }()
+			select {
+			case id := <-scrobbler.delivered:
+				if id != "upstream-play-2" {
+					t.Fatalf("delivered %s while the first stop was stalled", id)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the second stop was not delivered while the first was stalled")
+			}
+			if tt.waitsForStalled {
+				select {
+				case <-scanned:
+					t.Fatal("initial scan finished while a recovered stop was in flight")
+				default:
+				}
+				release()
+			}
+			select {
+			case err := <-scanned:
+				if err != nil {
+					t.Fatalf("recover terminal events: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("recovery scan did not finish")
+			}
+			release()
+			awaitTerminalCompleted(t, store, "play-1", "token-1", "stalled stop remained after the provider took it")
+			awaitTerminalCompleted(t, store, "play-2", "token-1", "second stop remained after the provider took it")
+		})
 	}
 }
 

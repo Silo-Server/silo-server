@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 
-import { SHOW_TO_OTHER_PROFILES_HELP, SHOW_TO_OTHER_PROFILES_LABEL } from "@/lib/collections/copy";
+import { showToOtherProfilesHelp, showToOtherProfilesLabel } from "@/lib/collections/copy";
 
 import { ToggleRow } from "./fields/ToggleRow";
+import { useAppLanguage } from "@/i18n";
 
 /**
  * The one sharing switch of a personal collection (#1615): on, every profile
@@ -20,10 +21,11 @@ export function ShowToOtherProfilesField({
   disabled?: boolean;
   children?: ReactNode;
 }) {
+  useAppLanguage();
   return (
     <ToggleRow
-      label={SHOW_TO_OTHER_PROFILES_LABEL}
-      help={SHOW_TO_OTHER_PROFILES_HELP}
+      label={showToOtherProfilesLabel()}
+      help={showToOtherProfilesHelp()}
       checked={checked}
       onCheckedChange={onCheckedChange}
       disabled={disabled}

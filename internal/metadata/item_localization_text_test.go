@@ -10,7 +10,8 @@ import (
 // fakeItemLocalizationRepo records the rows a refresh upserts. It stores them
 // as written; the provenance rules of the real upsert are covered in catalog.
 type fakeItemLocalizationRepo struct {
-	rows map[string]*models.MediaItemLocalization
+	rows     map[string]*models.MediaItemLocalization
+	clearErr error
 }
 
 func newFakeItemLocalizationRepo() *fakeItemLocalizationRepo {
@@ -29,6 +30,24 @@ func (r *fakeItemLocalizationRepo) Get(_ context.Context, contentID, language st
 func (r *fakeItemLocalizationRepo) Upsert(_ context.Context, loc *models.MediaItemLocalization) error {
 	cp := *loc
 	r.rows[loc.ContentID+"/"+loc.Language] = &cp
+	return nil
+}
+
+func (r *fakeItemLocalizationRepo) ClearMatchText(_ context.Context, contentID string, keepTitle, keepText bool) error {
+	if r.clearErr != nil {
+		return r.clearErr
+	}
+	for _, row := range r.rows {
+		if row.ContentID != contentID {
+			continue
+		}
+		if !keepTitle {
+			row.Title, row.SortTitle = "", ""
+		}
+		if !keepText {
+			row.Overview, row.Tagline = "", ""
+		}
+	}
 	return nil
 }
 
@@ -160,7 +179,7 @@ func TestLocalizationRefreshKeepsTranslationsAndLocks(t *testing.T) {
 		manual := buildItemLocalizationRecord(&models.MediaItemLocalization{
 			Overview: "An English overview.", OverviewSource: models.LocalizationSourceManual,
 		}, "series-shared", "fr", "series", &MetadataResult{}, &MetadataResult{Overview: "An English overview."},
-			nil, modeMergeMode(mode), "fr", "", false, true)
+			nil, modeMergeMode(mode), "fr", "", false, true, false)
 		if manual.Overview != "An English overview." {
 			t.Errorf("mode %d: manual overview = %q, want it kept", mode, manual.Overview)
 		}

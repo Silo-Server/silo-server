@@ -18,6 +18,7 @@ import type {
   DiagnosticStatus,
 } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
+import { t } from "@/i18n";
 
 export interface AdminDiagnosticsQuery {
   user_id?: number | string;
@@ -65,7 +66,9 @@ export function useUpdateDiagnosticsUploadsEnabled() {
   const saved = (enabled: boolean) => {
     void queryClient.invalidateQueries({ queryKey: adminKeys.diagnosticStatus() });
     toast.success(
-      enabled ? "Client diagnostic uploads enabled" : "Client diagnostic uploads disabled",
+      enabled
+        ? t("web.admin.diagnostics.hooks.diagnostics.uploadsEnabled")
+        : t("web.admin.diagnostics.hooks.diagnostics.uploadsDisabled"),
     );
   };
   const values = (enabled: boolean) => ({
@@ -156,11 +159,15 @@ export function useDeleteDiagnosticReport() {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
       queryClient.removeQueries({ queryKey: adminKeys.diagnosticReport(intent.id) });
       void queryClient.invalidateQueries({ queryKey: ["admin", "diagnostics", "reports"] });
-      toast.success("Diagnostic report deleted");
+      toast.success(t("web.admin.diagnostics.hooks.diagnostics.reportDeleted"));
     },
     onError: (error, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(error instanceof Error ? error.message : "Failed to delete diagnostic report");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t("web.admin.diagnostics.hooks.diagnostics.deleteFailed"),
+      );
     },
   });
   return {
@@ -168,7 +175,7 @@ export function useDeleteDiagnosticReport() {
     mutate: (id: string, options?: { onSuccess?: () => void }) => {
       const profileContext = captureProfileRequestContext();
       if (!profileContext) {
-        toast.error("Select an administrator profile before deleting.");
+        toast.error(t("web.admin.diagnostics.hooks.diagnostics.deleteSelectProfile"));
         return;
       }
       mutation.mutate(

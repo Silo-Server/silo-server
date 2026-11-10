@@ -241,6 +241,217 @@ override(base, _) := base if {`,
 	}
 }
 
+// A reload must stop answering from decisions the previous bundle made, even
+// when it loads the same generation.
+func TestEngineReloadForgetsRememberedDecisions(t *testing.T) {
+	ctx := context.Background()
+	engine, err := NewEngine(ctx, WithRevision(7))
+	if err != nil {
+		t.Fatalf("NewEngine() error: %v", err)
+	}
+	pdp := NewPDP(engine)
+	input := ScopeInput{
+		SchemaVersion:        1,
+		UserID:               42,
+		SessionID:            "sess-1",
+		AccessPolicyRevision: 9,
+		ProfileVerified:      true,
+		RequestTime:          "2026-07-02T12:00:00Z",
+	}
+	for range 2 {
+		decision, _, err := pdp.ResolveViewerScope(ctx, input)
+		if err != nil {
+			t.Fatalf("ResolveViewerScope() error: %v", err)
+		}
+		if !decision.Unrestricted {
+			t.Fatalf("Unrestricted = false, want vendor-only unrestricted decision: %#v", decision)
+		}
+	}
+
+	if err := engine.Reload(ctx, map[string]ActiveSource{
+		"scope": {DocumentID: 1, VersionID: 1, Source: tighteningScopeOverrideSource()},
+	}, 7); err != nil {
+		t.Fatalf("Reload() error: %v", err)
+	}
+	decision, _, err := pdp.ResolveViewerScope(ctx, input)
+	if err != nil {
+		t.Fatalf("ResolveViewerScope() after reload error: %v", err)
+	}
+	if decision.Unrestricted {
+		t.Fatalf("Unrestricted = true after reload, want the tightening override applied: %#v", decision)
+	}
+}
+
+func TestDecisionMemoEvictsLeastRecentlyUsed(t *testing.T) {
+	memo := newDecisionMemo(2, unreadRequestFields{})
+	key := func(input string) decisionMemoKey { return decisionMemoKey{name: DecisionScope, input: input} }
+	memo.put(key("a"), []byte("1"))
+	memo.put(key("b"), []byte("2"))
+	if _, ok := memo.get(key("a")); !ok {
+		t.Fatal("get(a) missed before the memo was full")
+	}
+	memo.put(key("c"), []byte("3"))
+
+	if _, ok := memo.get(key("b")); ok {
+		t.Fatal("get(b) hit, want the least recently used entry evicted")
+	}
+	for _, input := range []string{"a", "c"} {
+		if _, ok := memo.get(key(input)); !ok {
+			t.Fatalf("get(%s) missed, want it kept", input)
+		}
+	}
+	if len(memo.entries) != 2 {
+		t.Fatalf("memo holds %d entries, want its limit of 2", len(memo.entries))
+	}
+}
+
+// Requests seconds apart share a memo entry only while no rule can read
+// request_time; once a loaded policy reads it, each request time is decided
+// on its own.
+func TestEngineMemoKeysOnRequestTimeWhenPolicyReadsIt(t *testing.T) {
+	ctx := context.Background()
+	engine, err := NewEngine(ctx)
+	if err != nil {
+		t.Fatalf("NewEngine() error: %v", err)
+	}
+	pdp := NewPDP(engine)
+	early := ScopeInput{SchemaVersion: 1, UserID: 42, SessionID: "sess-1", ProfileVerified: true, RequestTime: "2026-07-02T12:00:00Z"}
+	late := early
+	late.RequestTime = "2026-07-02T12:00:01Z"
+	unrestricted := func(input ScopeInput) bool {
+		t.Helper()
+		decision, _, err := pdp.ResolveViewerScope(ctx, input)
+		if err != nil {
+			t.Fatalf("ResolveViewerScope() error: %v", err)
+		}
+		return decision.Unrestricted
+	}
+
+	if !unrestricted(early) || !unrestricted(late) {
+		t.Fatal("vendor bundle restricted a viewer with no limits")
+	}
+	if n := len(engine.memo.entries); n != 1 {
+		t.Fatalf("vendor bundle remembered %d entries for two request times, want 1", n)
+	}
+
+	if err := engine.Reload(ctx, map[string]ActiveSource{"scope": {DocumentID: 1, VersionID: 1, Source: `package silo_custom.scope
+
+import rego.v1
+
+override(_, _) := {"unrestricted": false, "allowed_library_ids": [2]} if {
+	input.request_time == "2026-07-02T12:00:01Z"
+}`}}, 1); err != nil {
+		t.Fatalf("Reload() error: %v", err)
+	}
+	if !unrestricted(early) {
+		t.Fatal("early request restricted, want the override to skip it")
+	}
+	if unrestricted(late) {
+		t.Fatal("late request answered from the early one, want the override that reads request_time applied")
+	}
+}
+
+func TestUnreadRequestFieldsFollowInputThroughPolicy(t *testing.T) {
+	allUnread := unreadRequestFields{requestTime: true, deviceID: true, clientIP: true}
+	tests := []struct {
+		name   string
+		domain string
+		rules  string
+		want   unreadRequestFields
+	}{
+		{name: "vendor only", want: allUnread},
+		{
+			name:   "unrelated field",
+			domain: DomainScope,
+			rules:  `override(_, i) := {} if i.profile_id == "kids"`,
+			want:   allUnread,
+		},
+		{
+			name:   "input reference",
+			domain: DomainScope,
+			rules:  `override(_, _) := {} if input.request_time == "x"`,
+			want:   unreadRequestFields{deviceID: true, clientIP: true},
+		},
+		{
+			name:   "override parameter",
+			domain: DomainAction,
+			rules:  `override(_, i) := {} if i.client_ip == "192.0.2.1"`,
+			want:   unreadRequestFields{requestTime: true, deviceID: true},
+		},
+		{
+			name:   "helper function and object.get",
+			domain: DomainPermission,
+			rules: `override(_, i) := {} if from_tv(i)
+
+from_tv(x) if object.get(x, "device_id", "") == "tv"`,
+			want: unreadRequestFields{requestTime: true, clientIP: true},
+		},
+		{
+			name:   "local copy",
+			domain: DomainScope,
+			rules: `override(_, i) := {} if {
+	copied := i
+	copied.request_time == "x"
+}`,
+			want: unreadRequestFields{deviceID: true, clientIP: true},
+		},
+		{
+			name:   "dynamic key",
+			domain: DomainScope,
+			rules: `override(_, i) := {} if {
+	some key in ["device", "client"]
+	i[concat("_", [key, "id"])] == "x"
+}`,
+		},
+		{
+			name:   "iteration",
+			domain: DomainScope,
+			rules: `override(_, i) := {} if {
+	some value in i
+	value == "x"
+}`,
+		},
+		{
+			name:   "builtin over the document",
+			domain: DomainAction,
+			rules:  `override(_, _) := {} if contains(json.marshal(input), "x")`,
+		},
+		{
+			name:   "returned document",
+			domain: DomainScope,
+			rules: `override(_, i) := {} if same(i).request_time == "x"
+
+same(x) := x`,
+		},
+		{
+			name:   "with modifier",
+			domain: DomainScope,
+			rules: `override(_, _) := {} if probe with input.profile_id as "x"
+
+probe if input.profile_id == "x"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			modules, err := vendorModules(false)
+			if err != nil {
+				t.Fatalf("vendorModules() error: %v", err)
+			}
+			if tt.domain != "" {
+				source := "package silo_custom." + tt.domain + "\n\nimport rego.v1\n\n" + tt.rules
+				// A source that fails to compile would read as "every field".
+				if err := CompileCheck(context.Background(), tt.domain, source); err != nil {
+					t.Fatalf("CompileCheck() error: %v", err)
+				}
+				modules = append(modules, ModuleSource{Path: customModulePath(tt.domain), Source: source})
+			}
+			if got := unreadRequestFieldsOf(modules); got != tt.want {
+				t.Fatalf("unreadRequestFieldsOf() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEvaluateTimeoutFailsClosed(t *testing.T) {
 	engine, err := newEngineFromModules(context.Background(), time.Nanosecond, []ModuleSource{{
 		Path: "slow.rego",

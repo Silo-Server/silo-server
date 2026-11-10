@@ -1,7 +1,7 @@
 ---
 title: Visible change evidence
-model: gpt-6-luna
-reasoning: high
+model: gpt-6.1-terra
+reasoning: medium
 input: full_diff
 tools:
   - browse_code

@@ -54,6 +54,8 @@ type MediaFileMetadata struct {
 	IMDbID     string
 	Season     int
 	Episode    int
+	// EpisodeEnd is the last episode a multi-episode file covers, or 0.
+	EpisodeEnd int
 }
 
 // SubtitleSearchHandler handles user-facing subtitle search operations.
@@ -64,6 +66,7 @@ type SubtitleSearchHandler struct {
 	FileAuthorizer *MediaFileAuthorizer
 	sync           SubtitleSyncService
 	external       ExternalTimingStore
+	ready          SubtitleReadyAnnouncer
 }
 
 // NewSubtitleSearchHandler creates a new SubtitleSearchHandler.

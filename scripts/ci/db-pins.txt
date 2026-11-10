@@ -53,6 +53,10 @@
 # re-id can rename an item whatever child rows it has (#933).
 ./migrations TestContentIDFamilyFKsCascadeOnUpdatePostgres
 
+# Schema: every content_id-family reference is COLLATE "C", so a join on it can
+# use the referencing table's index, as the bulk enrichment state check does.
+./migrations TestContentIDFamilyReferencesUseCCollationPostgres
+
 # Watch detail artwork: movies, episodes and extras carry the poster and
 # backdrop clients publish to system media controls (#803).
 ./internal/catalog TestGetWatchDetailArtwork
@@ -70,11 +74,20 @@
 # once per episode, on the Jellyfin season page path.
 ./internal/catalog TestGetEpisodeDetailsForSeriesResolvesPreferencesOncePerSeries
 
-# Seek previews: one availability lookup per item or episode page.
+# Seek previews: one availability lookup per item or episode page, and none
+# for a detail that leaves previews out.
 ./internal/catalog TestTrickplayAvailabilityBatchesItemDetails
+./internal/catalog TestItemDetailSkipsPlaybackPreviewsOnlyWhenAsked
 ./internal/catalog TestTrickplayAvailabilityBatchesEpisodeDetails
 ./internal/catalog TestEpisodeDetailsFallBackAfterBatchFileFailureDB
 ./internal/jellycompat TestTrickplayNegotiatedSourceSurvivesAPIReplicaDB
+
+# Jellyfin Items/Latest with MediaSources: a fixed number of statements per
+# page, and every card identical to its single-item detail rendering.
+./internal/jellycompat TestLatestStatementBudgetDB
+./internal/jellycompat TestLatestMatchesDetailRenderingDB
+./internal/jellycompat TestIdsListKeepsSubtitleDefaultsDB
+./internal/userstore/pgstore TestListAudioPreferencesMatchesGet
 
 # Listings: COUNT queries only when a total is requested and cannot be derived
 # from the page.
@@ -99,14 +112,26 @@
 ./internal/catalog TestEpisodeExactTierCursorAndPlanPostgres
 ./internal/catalog TestSearchYearSuffixedTitleIsExactPostgres
 
+# People search: each query is planned for its own words, exact names rank
+# first, and viewer access applies before the limit.
+./internal/catalog TestPersonSearchRanksExactNamesFirstWithCustomPlansPostgres
+
 # Card play targets: leaf cards and a validated anchor hint resolve without a
-# watch-progress query, and the PostgreSQL path picks what the general path
-# picks.
+# watch-progress query, a page of cards reads the profile's resumable progress
+# once, and the PostgreSQL path picks what the general path picks.
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
 ./internal/catalog TestPlayableTargetResolverResumesDeepInsideLongSeries
 ./internal/catalog TestPlayableTargetResolverStaleCompletedProgressPlan
 ./internal/catalog TestCatalogOverlaySummariesPreserveLegacyWinners
 ./internal/catalog TestPlayableTargetsPostgresMatchesGeneral
+
+# One series' watch rollup runs on a generic plan that looks up each episode's
+# completed history instead of hashing a heavy profile's whole history.
+./internal/userstore/pgstore TestOneSeriesWatchCountsLooksUpHistoryPerEpisode
+
+# Home Recently Added TV: the newest cards take one round trip for the cutoff
+# and one for the window, with the JIT guard in the same batches.
+./internal/catalog TestRecentTVListNewestRoundTrips
 
 # Continue Watching: only an in-progress episode sets how far back the
 # superseded walk reads the profile's completed rows.
@@ -128,6 +153,10 @@
 # Shared personal collections: a listing resolves each other owner's access
 # once, and a profile's own collections resolve nobody.
 ./internal/api/handlers TestPersonalCollectionOwnerLookupBudgetDB
+
+# Viewer access: the account, its access group, the profile and its viewer
+# preferences cost one batch, and answer what reading each on its own does.
+./internal/policy TestViewerResolverBatchedReadsMatchEachDB
 
 # Metadata refresh: season and episode writes cost the same number of
 # statements for 1 and 100 episodes; episode refresh debt the same for 1, 100
@@ -179,6 +208,10 @@
 # Subtree file reads bound file_path on the folder path index under a generic
 # plan, and match the same literal paths as a prefix LIKE.
 ./internal/scanner TestFolderPathPrefixQueryUsesPathRangeUnderGenericPlanDB
+
+# Subtree theme passes read the scanned subtree and probe canonical roots above
+# it on their indexes instead of reading every file in the library.
+./internal/themesongs TestDirectoriesReadsOnlyTheScannedSubtreeDB
 ./internal/scanner TestScopedPathRangesMatchLiteralPathsWithGenericPlans
 
 # Book scans (beta): unchanged files skip without per-file or literary-works
@@ -308,3 +341,8 @@
 # A Jellyfin item request resolves the viewer access scope once, however many
 # catalog reads in the request need it.
 ./internal/jellycompat TestCompatEpisodeItemResolvesScopeOnceDB
+
+# Administrator catalog listing: present movies, series and episodes only, per-library
+# versus earliest first-seen times, every present file with one track's facts, and two
+# statements for a page with files, whatever else it holds.
+./internal/catalog TestListAdminCatalogItemsDB

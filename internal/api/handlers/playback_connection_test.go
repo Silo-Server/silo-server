@@ -279,6 +279,68 @@ func TestBufferedAutoPrefersCopyVersion(t *testing.T) {
 	}
 }
 
+// TestBufferedAutoRefinesAudioOnTheLowerVersion: a start that names no audio
+// track refines its preference on the version that plays. The requested file's
+// E-AC-3 5.1 maps to the lower version's stereo AAC by position; refining the
+// TrueHD preference there keeps its 5.1 conversion instead.
+func TestBufferedAutoRefinesAudioOnTheLowerVersion(t *testing.T) {
+	source := v3HandlerFixtureFile(t)
+	source.Container, source.FilePath = "mkv", writePlaybackTestMediaFile(t, "movie-high.mkv")
+	source.Bitrate, source.VideoTracks[0].Bitrate = 63000, 63000
+	source.CodecAudio, source.AudioChannels = "truehd", 8
+	source.AudioTracks = []models.AudioTrack{
+		{Language: "en", Codec: "truehd", Channels: 8, Layout: "7.1", Default: true},
+		{Language: "en", Codec: "eac3", Channels: 6, Layout: "5.1(side)"},
+	}
+	alternateValue := *source
+	alternate := &alternateValue
+	alternate.ID, alternate.FilePath = 84, writePlaybackTestMediaFile(t, "movie-low.mkv")
+	alternate.Bitrate = 31600
+	alternate.VideoTracks = append([]models.VideoTrack(nil), source.VideoTracks...)
+	alternate.VideoTracks[0].Bitrate = 31600
+	alternate.AudioTracks = []models.AudioTrack{
+		{Language: "en", Codec: "truehd", Channels: 8, Layout: "7.1", Default: true},
+		{Language: "en", Codec: "aac", Channels: 2, Layout: "stereo"},
+	}
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), mapPlaybackFileResolver{files: map[int]*models.MediaFile{source.ID: source, alternate.ID: alternate}})
+	h.FileVersionFetcher = testPlaybackFileVersionFetcher{byContent: map[string][]*models.MediaFile{source.ContentID: {source, alternate}}}
+	h.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{"transcode_enabled": "true"}}
+	h.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+	presetLocalRegistryV3(h, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+		{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+	}))
+	h.ItemAccess = allowAllPlaybackItemAccess{}
+	h.InstallationID = serviceInstallation
+
+	req := v3HandlerStartRequest()
+	req.FileID = source.ID
+	req.QualityPreference = playback.QualityAutoV3
+	req.BandwidthEstimateKbps = new(44100)
+	req.ClientFeatures = append(req.ClientFeatures, playback.FeatureBufferingQualityV1)
+	req.Capabilities.CodecsAudio = []string{"aac", "ac3", "eac3"}
+	req.Capabilities.Containers = []string{"mkv", "matroska", "m3u8", "hls"}
+	req.Capabilities.VideoDecode[0].MaxBitrateKbps = 100_000
+	audio := []string{"aac", "ac3", "eac3"}
+	req.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{
+		playback.DeliveryClassOriginalHTTPV3: {Enabled: true, SupportedOnDevice: true, Containers: []string{"mkv", "matroska"}, VideoCodecs: []string{"h264"}, AudioDecodeCodecs: audio, Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true}},
+		playback.DeliveryClassHLSV3:          {Enabled: true, SupportedOnDevice: true, Containers: []string{"m3u8", "hls"}, VideoCodecs: []string{"h264"}, AudioDecodeCodecs: audio, Subtitles: playback.DeliverySubtitleCapabilitiesV3{SidecarText: true}, Features: []string{playback.ClientNativeHLSPlaybackV3}},
+	}
+	caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
+	started, err := h.StartPlaybackV2(newAuthorizedPlaybackContext(), caller, req)
+	if err != nil || started.PlaybackPlan == nil {
+		t.Fatalf("start: err=%v response=%#v", err, started)
+	}
+	t.Cleanup(func() { h.tm.CloseTranscodeSession(started.SessionID, "") })
+	plan := started.PlaybackPlan
+	if plan.EffectiveMediaFileID != alternate.ID {
+		t.Fatalf("effective file %d, want the lower version %d", plan.EffectiveMediaFileID, alternate.ID)
+	}
+	if plan.SelectedTracks.Audio == nil || plan.SelectedTracks.Audio.Index == nil || *plan.SelectedTracks.Audio.Index != 0 ||
+		plan.EffectiveRecipe.AudioChannels == nil || *plan.EffectiveRecipe.AudioChannels != 6 {
+		t.Fatalf("audio %#v recipe %s %v, want track 0 as 5.1 AAC", plan.SelectedTracks.Audio, plan.EffectiveRecipe.AudioCodec, plan.EffectiveRecipe.AudioChannels)
+	}
+}
+
 // TestBufferedAutoPicksTheBestFittingVersion: of the versions within an Auto
 // budget, one that keeps the source's dynamic range plays first, then the
 // highest bitrate, whatever order the catalog lists them in (SDR and non-4K
@@ -355,8 +417,8 @@ func TestLearnedLimitAnnotationRequiresAdditionalReduction(t *testing.T) {
 }
 
 // TestV1StartIgnoresBufferingQualityFields: /api/v1 is frozen and ignored
-// these fields as unknown before buffering_quality_v1 existed. A v1 start that
-// sends them without the feature still plays rather than failing with 400.
+// these fields, and max_channels_by_codec, as unknown before /api/v2 added
+// them. A v1 start that sends them still plays rather than failing with 400.
 func TestV1StartIgnoresBufferingQualityFields(t *testing.T) {
 	source := v3HandlerFixtureFile(t)
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: source})
@@ -365,6 +427,9 @@ func TestV1StartIgnoresBufferingQualityFields(t *testing.T) {
 	start := v3HandlerStartRequest()
 	start.BandwidthEstimateSource = playback.BandwidthEstimateObservedRebufferV3
 	start.LearnedLimit = playback.LearnedLimitClearV3
+	hls := start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3]
+	hls.MaxChannelsByCodec = map[string]int{"aac": 99}
+	start.ClientPlaybackContext.Deliveries[playback.DeliveryClassHLSV3] = hls
 	rr := httptest.NewRecorder()
 	handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(newAuthorizedPlaybackContext()))
 	if rr.Code != http.StatusCreated {

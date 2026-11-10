@@ -151,8 +151,9 @@ func (s *WebPushService) PublicKey(ctx context.Context) (string, error) {
 
 // Subscribe registers (or reassigns) a browser PushSubscription for the
 // profile. The endpoint must be an HTTPS URL on a public host — it is
-// attacker-controllable input that the server will POST to.
-func (s *WebPushService) Subscribe(ctx context.Context, userID int, profileID, endpoint, p256dh, auth, deviceName string) (*WebPushSubscription, error) {
+// attacker-controllable input that the server will POST to. loginSessionID is
+// the caller's login session, empty for an API key; delivery stops once it ends.
+func (s *WebPushService) Subscribe(ctx context.Context, userID int, profileID, endpoint, p256dh, auth, deviceName, loginSessionID string) (*WebPushSubscription, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" || p256dh == "" || auth == "" {
 		return nil, fmt.Errorf("%w: endpoint and keys are required", ErrWebPushInvalid)
@@ -167,13 +168,14 @@ func (s *WebPushService) Subscribe(ctx context.Context, userID int, profileID, e
 		deviceName = deviceName[:128]
 	}
 	return s.repo.Upsert(ctx, WebPushSubscription{
-		ID:         ulid.Make().String(),
-		UserID:     userID,
-		ProfileID:  profileID,
-		Endpoint:   endpoint,
-		P256dh:     p256dh,
-		Auth:       auth,
-		DeviceName: deviceName,
+		ID:             ulid.Make().String(),
+		UserID:         userID,
+		ProfileID:      profileID,
+		Endpoint:       endpoint,
+		P256dh:         p256dh,
+		Auth:           auth,
+		DeviceName:     deviceName,
+		LoginSessionID: loginSessionID,
 	})
 }
 

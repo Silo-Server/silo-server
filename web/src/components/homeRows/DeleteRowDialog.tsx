@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useT } from "@/i18n";
 
 /**
  * Confirms deleting one row for everyone. The row was read (with its version)
@@ -15,6 +16,7 @@ import {
 export function DeleteRowDialog({
   rowTitle,
   pageLabel,
+  description,
   open,
   conflict,
   busy,
@@ -26,6 +28,8 @@ export function DeleteRowDialog({
 }: {
   rowTitle: string;
   pageLabel: string;
+  /** Replaces the line about the row and its collection. */
+  description?: string;
   open: boolean;
   conflict: boolean;
   busy: boolean;
@@ -35,34 +39,34 @@ export function DeleteRowDialog({
   onOpenChange: (open: boolean) => void;
   onCloseAutoFocus?: (event: Event) => void;
 }) {
+  const t = useT();
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
-          <DialogTitle>Delete {rowTitle}?</DialogTitle>
+          <DialogTitle>{t("web.home.rows.deleteTitle", { row: rowTitle })}</DialogTitle>
           <DialogDescription>
-            The row goes away from {pageLabel} for everyone. If Silo made a collection just for this
-            row, it removes that collection too when nothing else uses it.
+            {description ?? t("web.home.rows.delete.description", { page: pageLabel })}
           </DialogDescription>
         </DialogHeader>
         {conflict ? (
           <p role="alert" className="text-sm">
-            This row changed since you opened it. Reload it before deleting.
+            {t("web.home.rows.delete.conflict")}
           </p>
         ) : null}
         <DialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-sm">This can&apos;t be undone.</p>
+          <p className="text-muted-foreground text-sm">{t("web.home.rows.cantUndo")}</p>
           <div className="flex gap-2">
             <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             {conflict ? (
               <Button disabled={busy} onClick={onReload}>
-                Reload row
+                {t("web.home.rows.delete.reloadRow")}
               </Button>
             ) : (
               <Button variant="destructive" disabled={busy || !canConfirm} onClick={onConfirm}>
-                Delete row
+                {t("web.home.rows.deleteRow")}
               </Button>
             )}
           </div>
@@ -94,26 +98,24 @@ export function DeleteRowsDialog({
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
-  const rows = count === 1 ? "1 row" : `${count} rows`;
+  const t = useT();
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete {rows}?</DialogTitle>
+          <DialogTitle>{t("web.home.rows.deleteMany.title", { count })}</DialogTitle>
           <DialogDescription>
-            {count === 1 ? "The row goes" : "The rows go"} away from {pageLabel} for everyone. If
-            Silo made a collection just for one of them, it removes that collection too when nothing
-            else uses it.
+            {t("web.home.rows.deleteMany.description", { count, page: pageLabel })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-sm">This can&apos;t be undone.</p>
+          <p className="text-muted-foreground text-sm">{t("web.home.rows.cantUndo")}</p>
           <div className="flex gap-2">
             <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" disabled={busy} onClick={onConfirm}>
-              {busy && progress ? progress : `Delete ${rows}`}
+              {busy && progress ? progress : t("web.home.rows.deleteMany.confirm", { count })}
             </Button>
           </div>
         </DialogFooter>

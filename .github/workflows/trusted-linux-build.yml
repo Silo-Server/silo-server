@@ -100,6 +100,12 @@ jobs:
             BUILD_DIRTY=false
             BUILD_NUMBER=${{ inputs.build_number }}
             BUILD_DATE=${{ inputs.built_at }}
+          # Pull fresh base images and rebuild the runtime stage on every build
+          # so a cached apt layer cannot hold back Debian security updates. The
+          # frontend and Go stages still use the cache until their base images
+          # change.
+          pull: true
+          no-cache-filters: runtime
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_LC }}:buildcache-${{ env.PLATFORM_PAIR }}
           cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_LC }}:buildcache-${{ env.PLATFORM_PAIR }},mode=max,image-manifest=true,oci-mediatypes=true
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_LC }},push-by-digest=true,name-canonical=true,push=true

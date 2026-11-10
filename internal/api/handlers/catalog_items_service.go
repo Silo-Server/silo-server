@@ -157,6 +157,11 @@ func catalogResolveError(ctx context.Context, err error, groupedByWork bool) err
 }
 
 func catalogBrowseView(result *catalog.CatalogResult, items []itemListResponse) CatalogBrowseView {
+	for i := range items {
+		if progress, ok := result.SectionCardProgress[items[i].ContentID]; ok {
+			items[i].ProgressUpdatedAt, items[i].ItemSource = progress.ProgressUpdatedAt, progress.ItemSource
+		}
+	}
 	var snapshot string
 	if !result.SnapshotAt.IsZero() {
 		snapshot = result.SnapshotAt.Format(time.RFC3339Nano)
@@ -370,7 +375,10 @@ func (h *CatalogHandler) AudiobookGroups(ctx context.Context, v ItemViewer, quer
 // ItemDetail answers the full detail of one item, a synthetic season
 // included, enriched with the viewer's state.
 func (h *CatalogResourceHandler) ItemDetail(ctx context.Context, v ItemViewer, id string) (*catalog.ItemDetail, error) {
-	detail, err := h.items.detailSvc.GetItemDetail(ctx, id, v.Access)
+	// Neither view carries playback previews, and only curators see folder
+	// paths, so the detail leaves out what the response would drop.
+	curates := h.items.canViewFilePaths(ctx)
+	detail, err := h.items.detailSvc.GetItemDetailWithOptions(ctx, id, v.Access, catalog.ItemDetailOptions{SkipPlaybackPreviews: true, SkipFolderPaths: !curates})
 	if err != nil {
 		if isNotFound(err) {
 			syntheticDetail, syntheticErr := h.syntheticSeasonDetail(ctx, v, id)
@@ -380,13 +388,13 @@ func (h *CatalogResourceHandler) ItemDetail(ctx context.Context, v ItemViewer, i
 				}
 				return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to get item detail")
 			}
-			h.enrichItemDetail(ctx, v, syntheticDetail)
+			h.enrichItemDetail(ctx, v, syntheticDetail, curates)
 			h.items.maybeRequestStaleDetailMetadataRefresh(ctx, syntheticDetail)
 			return syntheticDetail, nil
 		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to get item detail")
 	}
-	h.enrichItemDetail(ctx, v, detail)
+	h.enrichItemDetail(ctx, v, detail, curates)
 	h.items.maybeRequestStaleDetailMetadataRefresh(ctx, detail)
 	return detail, nil
 }

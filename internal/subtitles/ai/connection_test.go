@@ -31,7 +31,7 @@ func TestDisconnectedTextProviderRejectsTranslationAndPreservesASR(t *testing.T)
 		return llm.Config{}, errors.New("sign in required")
 	}})
 	repo := &finishedJobRepo{finished: make(chan JobStatus, 1)}
-	cfg := Config{Configured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "stale-model", ASRModel: "whisper-1", TextConfigSource: client.TextConfig}
+	cfg := Config{Configured: true, SpeechConfigured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "stale-model", ASRModel: "whisper-1", TextConfigSource: client.TextConfig}
 	svc := NewService(t.Context(), cfg, repo, nil, stubTranscriber{}, nil, nil, nilFileResolver{}, nil, "", nil, nil)
 	if svc.Enabled(t.Context()) || !svc.TranscribeEnabled() {
 		t.Fatal("disconnected text provider changed ASR readiness or advertised translation")
@@ -95,7 +95,7 @@ func TestSubtitleJobUsesEnqueueProviderAcrossQueuedLiveChunks(t *testing.T) {
 	sem := jobrunner.NewSemaphore(1)
 	sem <- struct{}{}
 	transcriber := &chunkedTranscriber{detected: "en", chunks: [][]SubtitleCue{{testCue(0, "first")}, {testCue(2, "second")}}}
-	svc := NewService(t.Context(), Config{Configured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "stale-model", ASRModel: "whisper-1", TextConfigSource: client.TextConfig}, repo,
+	svc := NewService(t.Context(), Config{Configured: true, SpeechConfigured: true, TranslateEnabled: true, TranscribeEnabled: true, ChatModel: "stale-model", ASRModel: "whisper-1", TextConfigSource: client.TextConfig}, repo,
 		snapshotTranslator{client: client, models: modelsUsed}, transcriber, &notifyingSubtitleStore{finished: repo.finished}, nil,
 		runTranscribeFileResolver{file: &models.MediaFile{ID: 1, AudioTracks: []models.AudioTrack{{Language: "en"}}}}, &recordingNotifier{}, "", nil, sem)
 	job, err := svc.Enqueue(t.Context(), JobRequest{MediaFileID: 1, Kind: JobKindTranscribeTranslate, TargetLanguage: "fr", SessionID: "fixture"})

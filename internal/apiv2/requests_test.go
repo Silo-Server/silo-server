@@ -67,18 +67,24 @@ func (f *fakeRequests) Search(_ context.Context, viewer mediarequests.Viewer, qu
 	return &mediarequests.MediaPage{Page: page, TotalPages: 3, TotalResults: 41, Results: []mediarequests.MediaResult{fixtureResult(949)}}, nil
 }
 
-func (f *fakeRequests) Discover(_ context.Context, viewer mediarequests.Viewer, section string, page int) (*mediarequests.DiscoverySection, error) {
-	if err := f.record(viewer, "discover", section, page); err != nil {
+func (f *fakeRequests) DiscoverRow(_ context.Context, viewer mediarequests.Viewer, rowID string, page int) (*mediarequests.DiscoverySection, error) {
+	if err := f.record(viewer, "discover", rowID, page); err != nil {
 		return nil, err
 	}
-	return &mediarequests.DiscoverySection{Key: section, Title: "Trending Movies", Page: page, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}, NextPage: page + 2}, nil
+	return &mediarequests.DiscoverySection{Key: rowID, Title: "Trending Movies", Page: page, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}, NextPage: page + 2}, nil
 }
 
-func (f *fakeRequests) DiscoverAll(_ context.Context, viewer mediarequests.Viewer) ([]mediarequests.DiscoverySection, error) {
+func (f *fakeRequests) DiscoverRows(_ context.Context, viewer mediarequests.Viewer) (*mediarequests.DiscoverLayoutPage, error) {
 	if err := f.record(viewer, "discoverAll"); err != nil {
 		return nil, err
 	}
-	return []mediarequests.DiscoverySection{{Key: "trending_movies", Title: "Trending Movies", Page: 1, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}}}, nil
+	return &mediarequests.DiscoverLayoutPage{
+		Order: []mediarequests.DiscoverRowRef{
+			{Key: "trending_movies", Type: "tmdb_chart", Title: "Trending Movies"},
+			{Key: "studios", Type: "studios", Title: "Studios"},
+		},
+		Sections: []mediarequests.DiscoverySection{{Key: "trending_movies", Title: "Trending Movies", Page: 1, TotalPages: 500, TotalResults: 10000, Results: []mediarequests.MediaResult{fixtureResult(949)}}},
+	}, nil
 }
 
 func (f *fakeRequests) GetDetail(_ context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (*mediarequests.MediaDetail, error) {
@@ -399,6 +405,49 @@ func requireTargets(t *testing.T, label string, rec *httptest.ResponseRecorder) 
 	return req
 }
 
+// Progress with no report time is left out rather than failing the response:
+// a zero timestamp cannot be marshaled, and one bad row would take down every
+// request on the page.
+func TestRequestDownloadWithoutReportTimeIsOmitted(t *testing.T) {
+	svc := fixtureRequests()
+	svc.requests[0].Status = mediarequests.StatusDownloading
+	svc.requests[0].Targets = []mediarequests.Target{
+		{ID: 1, Quality: "1080p", Status: mediarequests.StatusDownloading, CreatedAt: fixedTime(), UpdatedAt: fixedTime(),
+			Download: &mediarequests.DownloadProgress{Phase: mediarequests.DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 500}},
+		{ID: 2, Quality: "4k", Status: mediarequests.StatusDownloading, CreatedAt: fixedTime(), UpdatedAt: fixedTime(),
+			Download: &mediarequests.DownloadProgress{Phase: mediarequests.DownloadPhaseDownloading, BytesTotal: 1000, BytesLeft: 250, UpdatedAt: fixedTime()}},
+	}
+	h := newTestHandler(t, requestDeps(svc))
+
+	rec := do(t, h, http.MethodGet, "/api/v2/requests/mine", "", requestOwner)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("listMyRequests: %d %s", rec.Code, rec.Body.String())
+	}
+	var mine struct {
+		Items []map[string]any `json:"items"`
+	}
+	decodeBody(t, rec.Body, &mine)
+	var item map[string]any
+	for _, candidate := range mine.Items {
+		if candidate["id"] == svc.requests[0].ID {
+			item = candidate
+		}
+	}
+	if item == nil {
+		t.Fatalf("request %s missing from %v", svc.requests[0].ID, mine.Items)
+	}
+	if _, present := item["download"]; present {
+		t.Fatalf("request download = %v, want it omitted", item["download"])
+	}
+	targets := item["targets"].([]any)
+	if _, present := targets[0].(map[string]any)["download"]; present {
+		t.Fatalf("target without report time: download = %v, want it omitted", targets[0])
+	}
+	if targets[1].(map[string]any)["download"] == nil {
+		t.Fatalf("target with report time lost its download: %v", targets[1])
+	}
+}
+
 // The profile-scoped request operations leave the download server details
 // out for a requester and keep them for an admin.
 func TestRequestDownloadServerDetailsAreForAdmins(t *testing.T) {
@@ -545,12 +594,26 @@ func TestDiscover(t *testing.T) {
 			Key     string `json:"key"`
 			Results []any  `json:"results"`
 		} `json:"items"`
-		Page *any `json:"page"`
+		RowOrder []DiscoverRowRef `json:"row_order"`
+		Page     *any             `json:"page"`
 	}
 	decodeBody(t, rec.Body, &sections)
 	if rec.Code != 200 || len(sections.Items) != 1 || sections.Items[0].Key != "trending_movies" || len(sections.Items[0].Results) != 1 || sections.Page != nil {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
+	if len(sections.RowOrder) != 2 || sections.RowOrder[1] != (DiscoverRowRef{Key: "studios", Type: "studios", Title: "Studios"}) {
+		t.Fatalf("row_order = %+v, want the title row then the brand row", sections.RowOrder)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/requests/discover/rows/r_abc?page=2", "", requestOwner)
+	var custom struct {
+		Key  string `json:"key"`
+		Page int    `json:"page"`
+	}
+	decodeBody(t, rec.Body, &custom)
+	if rec.Code != 200 || custom.Key != "r_abc" || custom.Page != 2 {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/requests/discover/rows/Not-A-Key", "", requestOwner), TypeValidationFailed)
 
 	rec = do(t, h, http.MethodGet, "/api/v2/requests/discover/popular_series?page=3", "", requestOwner)
 	var section struct {

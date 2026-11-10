@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1081,6 +1082,50 @@ func TestValidateKeyframePlaylistAttestation(t *testing.T) {
 	}
 }
 
+// A node that ignores requested MPEG-TS packaging would publish fMP4 under a
+// plan that promises MPEG-TS.
+func TestValidateCopyVideoMPEGTSAttestation(t *testing.T) {
+	request := TranscodeStartRequest{CopyVideoMPEGTS: true}
+	if err := ValidateCopyVideoMPEGTSAttestation(request, TranscodeStartResponse{CopyVideoMPEGTS: true}); err != nil {
+		t.Fatalf("matching attestation rejected: %v", err)
+	}
+	if err := ValidateCopyVideoMPEGTSAttestation(request, TranscodeStartResponse{}); !errors.Is(err, ErrCopyVideoMPEGTSAttestationMismatch) {
+		t.Fatalf("missing attestation error = %v, want %v", err, ErrCopyVideoMPEGTSAttestationMismatch)
+	}
+	if err := ValidateCopyVideoMPEGTSAttestation(TranscodeStartRequest{}, TranscodeStartResponse{}); err != nil {
+		t.Fatalf("fMP4 request rejected a legacy node response: %v", err)
+	}
+}
+
+// A node that ignores the copied codec writes AAC into fMP4 without
+// aac_adtstoasc and fails after the first segment. Runs that need no filter
+// keep working on older nodes, which omit the receipt.
+func TestValidateCopyAudioCodecAttestation(t *testing.T) {
+	aacIntoFMP4 := TranscodeStartRequest{SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "copy", CopyAudioCodec: "aac"}
+	aacIntoMPEGTS := aacIntoFMP4
+	aacIntoMPEGTS.CopyVideoMPEGTS = true
+	ac3IntoFMP4 := aacIntoFMP4
+	ac3IntoFMP4.CopyAudioCodec = "ac3"
+	for _, test := range []struct {
+		name     string
+		request  TranscodeStartRequest
+		response TranscodeStartResponse
+		wantErr  bool
+	}{
+		{name: "aac into fmp4 confirmed", request: aacIntoFMP4, response: TranscodeStartResponse{CopyAudioCodec: "aac"}},
+		{name: "aac into fmp4 on an older node", request: aacIntoFMP4, wantErr: true},
+		{name: "aac into mpeg-ts on an older node", request: aacIntoMPEGTS},
+		{name: "ac3 into fmp4 on an older node", request: ac3IntoFMP4},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateCopyAudioCodecAttestation(test.request, test.response)
+			if got := errors.Is(err, ErrCopyAudioCodecAttestationMismatch); got != test.wantErr {
+				t.Fatalf("error = %v, want mismatch %v", err, test.wantErr)
+			}
+		})
+	}
+}
+
 // Requests the node cannot execute as written are refused with 400 before
 // anything runs.
 func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
@@ -1088,6 +1133,7 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 		name         string
 		prepare      bool
 		catalogPaths bool
+		artifactDir  string // relative to the transcode root; empty keeps the default
 		body         any
 	}{
 		{name: "start with unversioned source audio recipe", body: TranscodeStartRequest{
@@ -1098,6 +1144,27 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			SessionID: "unversioned-copy", InputPath: "/media/movie.mkv",
 			TargetCodecVideo: "copy",
 		}},
+		{name: "start with session id outside the transcode root", body: TranscodeStartRequest{
+			SessionID: "../sibling", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the transcode root", body: TranscodeStartRequest{
+			SessionID: ".", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the prepared-download store", body: TranscodeStartRequest{
+			SessionID: downloadprepare.ArtifactDirectoryName, InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming the prepared-download store in another case", body: TranscodeStartRequest{
+			SessionID: "Download-Artifacts", InputPath: "/media/movie.mkv",
+			TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+		}},
+		{name: "start with session id naming a configured prepared-download store", artifactDir: "prepared/store",
+			body: TranscodeStartRequest{
+				SessionID: "prepared", InputPath: "/media/movie.mkv",
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2,
+			}},
 		{name: "start with unapproved input path", catalogPaths: true,
 			body: json.RawMessage(`{"session_id":"unsafe-input","input_path":"http://example.test/movie.mkv"}`)},
 		{name: "prepare with partial stereo downmix recipe", prepare: true, body: downloadprepare.Request{
@@ -1113,6 +1180,9 @@ func TestHandleStartAndPrepareRejectInvalidRequests(t *testing.T) {
 			server := newTestServer(t)
 			if test.catalogPaths {
 				server.inputPaths = NewCatalogPathAuthorizer(staticCatalogPaths{})
+			}
+			if test.artifactDir != "" {
+				server.artifactRoot = filepath.Join(server.transcodeDir, test.artifactDir)
 			}
 			post := postStartRequest
 			if test.prepare {
@@ -1151,6 +1221,28 @@ func TestHandleStartAttestsRecipeVersions(t *testing.T) {
 			},
 			receipt: func(response TranscodeStartResponse) string { return response.CopyFMP4RecipeVersion },
 			want:    playback.CopyFMP4RecipeVersion,
+		},
+		{
+			// Without the echo the API refuses the node rather than publish
+			// fMP4 under a plan that promises MPEG-TS.
+			name: "copy MPEG-TS",
+			request: TranscodeStartRequest{
+				SessionID: "attested-copy-ts", InputPath: "/media/movie.mkv",
+				SourceVideoCodec: "hevc", TargetCodecVideo: "copy", TargetCodecAudio: "copy",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, CopyVideoMPEGTS: true, SegmentDuration: 2,
+			},
+			receipt: func(response TranscodeStartResponse) string { return strconv.FormatBool(response.CopyVideoMPEGTS) },
+			want:    "true",
+		},
+		{
+			name: "copied AAC into fMP4",
+			request: TranscodeStartRequest{
+				SessionID: "attested-copy-aac", InputPath: "/media/movie.ts",
+				SourceVideoCodec: "h264", TargetCodecVideo: "copy", TargetCodecAudio: "copy", CopyAudioCodec: "aac",
+				CopyFMP4RecipeVersion: playback.CopyFMP4RecipeVersion, SegmentDuration: 2,
+			},
+			receipt: func(response TranscodeStartResponse) string { return response.CopyAudioCodec },
+			want:    "aac",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -1579,6 +1671,8 @@ func TestHandleProgressiveRemuxRejectsProxyExecutionToken(t *testing.T) {
 
 func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	server := newTestServer(t)
+	tracker := &recordingSessionTracker{}
+	server.tracker = tracker
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	releaseHandler := make(chan struct{})
@@ -1632,6 +1726,12 @@ func TestHandleStopCancelsProgressiveRemux(t *testing.T) {
 	}
 	if got := server.activeJobs.Load(); got != 0 {
 		t.Fatalf("active jobs after stop = %d, want 0", got)
+	}
+	// A running remux is tracked under the viewer's playback session id.
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	if len(tracker.removed) != 1 || tracker.removed[0] != "playback-1" {
+		t.Fatalf("removed sessions = %v, want playback session %q", tracker.removed, "playback-1")
 	}
 }
 
@@ -1718,6 +1818,46 @@ func TestHandleStopDoesNotFenceOrdinaryHLSSession(t *testing.T) {
 	server.mu.RUnlock()
 	if fenced {
 		t.Fatal("ordinary HLS teardown was retained in the progressive-remux fence map")
+	}
+}
+
+// A stop removes the tracker record under the transport id unless a progressive
+// remux is still running here: a native v3 HLS job is tracked under that id, not
+// its card's playback session id, and an ended remux already removed its own.
+func TestHandleStopRemovesTrackerRecordByTransportID(t *testing.T) {
+	const transportID = "playback-1-plan-transport"
+	remuxCard := nativeTransportCard("playback-1", transportID)
+	remuxCard.PlayMethod = playback.PlayRemux
+	for _, tc := range []struct {
+		name    string
+		card    *playback.RecipeCard
+		running bool
+	}{
+		{name: "native HLS transcode", card: nativeTransportCard("playback-1", transportID), running: true},
+		{name: "remux no longer running here", card: remuxCard},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := newTestServer(t)
+			tracker := &recordingSessionTracker{}
+			server.tracker = tracker
+			if tc.running {
+				server.sessions[transportID] = &playback.TranscodeSession{}
+				server.activeJobs.Store(1)
+			}
+			server.SetRecipeStore(&stubRecipeStore{card: tc.card, ok: true})
+			rr := httptest.NewRecorder()
+
+			server.handleStop(rr, stopRequest(transportID))
+
+			if rr.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			tracker.mu.Lock()
+			defer tracker.mu.Unlock()
+			if len(tracker.removed) != 1 || tracker.removed[0] != transportID {
+				t.Fatalf("removed sessions = %v, want transport %q", tracker.removed, transportID)
+			}
+		})
 	}
 }
 
@@ -2303,6 +2443,49 @@ func TestReconstructFromToken_TokenlessRebuildsFromTheStoredTransportRecipe(t *t
 	}
 }
 
+func TestReconstructFromTokenKeepsSubtitleRenditionMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		change  func(*playback.RecipeCard)
+		hydrate bool
+	}{
+		{name: "matching record", change: func(c *playback.RecipeCard) { c.SubtitleRenditionTracks[0].Default = false }, hydrate: true},
+		{name: "different source", change: func(c *playback.RecipeCard) { c.SubtitleRenditionSource.Size++ }},
+		{name: "different track", change: func(c *playback.RecipeCard) { c.SubtitleRenditionTracks[0].TrackNumber++ }},
+		{name: "different owner", change: func(c *playback.RecipeCard) { c.UserID++ }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const sessionID = "sess-rendition-metadata"
+			const transportID = sessionID + "-plan1234-abcd1234"
+			s := newLoopingFFmpegServer(t)
+			card := nativeTransportCard(sessionID, transportID)
+			card.SubtitleRendition = true
+			card.SubtitleRenditionSource = playback.SubtitleRenditionSource{Size: 100, ModTimeUnixNano: 10}
+			card.SubtitleRenditionTracks = []playback.SubtitleRenditionTrack{{StreamIndex: 2, TrackNumber: 3, Codec: "subrip", Name: "English forced", Language: "en", Forced: true, Default: true}}
+			stored := *card
+			stored.SubtitleRenditionTracks = slices.Clone(card.SubtitleRenditionTracks)
+			tc.change(&stored)
+			s.SetRecipeStore(&stubRecipeStore{ok: true, card: &stored})
+			session, err := s.reconstructFromToken(requestWithToken(transportID, signCard(t, *card)), transportID, 5)
+			if err != nil || session == nil {
+				t.Fatalf("reconstruct: %v, %v", session, err)
+			}
+			t.Cleanup(func() { _ = session.CloseProcess() })
+			want := playback.RecipeCardFromClaims(new(card.ToClaims())).SubtitleRenditionTracks
+			if tc.hydrate {
+				want = card.SubtitleRenditionTracks
+			}
+			opts := session.Opts()
+			if !slices.Equal(opts.SubtitleRenditionTracks, want) {
+				t.Fatalf("reconstructed rendition metadata = %+v, want %+v", opts.SubtitleRenditionTracks, want)
+			}
+			if opts.SubtitleRenditionSource != card.SubtitleRenditionSource {
+				t.Fatalf("reconstruction changed token source: %+v", opts.SubtitleRenditionSource)
+			}
+		})
+	}
+}
+
 // Without a recipe to rebuild from, a tokenless request is still a genuine
 // not-found: the node must never spawn ffmpeg on a guess.
 func TestReconstructFromToken_TokenlessWithoutARecipeIsNotFound(t *testing.T) {
@@ -2712,6 +2895,26 @@ func TestTouchSession_RefreshesIdleClock(t *testing.T) {
 	}
 	if _, ok := s.lastAccess["ghost-1"]; ok {
 		t.Fatal("touch recorded access for an unregistered session")
+	}
+}
+
+func TestSpawnReconstructRejectsSessionIDOutsideTranscodeRoot(t *testing.T) {
+	server := newTestServer(t)
+	logPath := filepath.Join(t.TempDir(), "invocations.log")
+	useFakeFFmpeg(t, server, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+logPath+"\nexit 1\n")
+
+	const sessionID = ".."
+	card := *nativeTransportCard(sessionID, sessionID)
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, card)
+	if session != nil {
+		_ = session.Close()
+		t.Fatal("reconstruct registered a session outside the transcode root")
+	}
+	if err != nil {
+		t.Fatalf("spawnReconstruct err = %v, want nil", err)
+	}
+	if _, statErr := os.Stat(logPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("ffmpeg ran for a rejected session id (stat err %v)", statErr)
 	}
 }
 

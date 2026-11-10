@@ -579,6 +579,39 @@ func TestHandleStartPlaybackV3DoesNotWaitForSessionSync(t *testing.T) {
 	close(syncer.release)
 }
 
+// preparedAtSessionManager records when the start path committed the session
+// state its prepared transport produced.
+type preparedAtSessionManager struct {
+	*playback.SessionManager
+	preparedAt time.Time
+}
+
+func (m *preparedAtSessionManager) UpdateStreamState(sessionID string, state playback.SessionStreamState) error {
+	err := m.SessionManager.UpdateStreamState(sessionID, state)
+	m.preparedAt = time.Now()
+	return err
+}
+
+// The startup grace must run from when the client gets its plan, not from
+// admission: transport preparation can take long enough that a grace started
+// at admission expires before the client's startup timeout (issue #3202).
+func TestHandleStartPlaybackV3StartsStartupGraceAfterTransportPreparation(t *testing.T) {
+	file := v3HandlerFixtureFile(t)
+	manager := &preparedAtSessionManager{SessionManager: playback.NewSessionManager(0, 0)}
+	handler := NewPlaybackHandler(manager, testPlaybackFileResolver{file: file})
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+
+	response := startPlayablePlaybackV3(t, handler, marshalV3StartRequest(t, v3HandlerStartRequest()))
+	session, err := manager.GetSession(response.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manager.preparedAt.IsZero() || session.PlanCommittedAt.Before(manager.preparedAt) {
+		t.Fatalf("PlanCommittedAt = %v, before the transport was prepared at %v", session.PlanCommittedAt, manager.preparedAt)
+	}
+}
+
 func TestPlaybackStartSideEffectsPreserveImmediateStopScrobbleOrder(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	scrobbler := &orderedBlockingPlaybackScrobblerV3{
@@ -602,7 +635,7 @@ func TestPlaybackStartSideEffectsPreserveImmediateStopScrobbleOrder(t *testing.T
 	}
 	stopped := make(chan struct{})
 	go func() {
-		handler.finalizeSessionStop(context.Background(), session, false, "", true)
+		handler.finalizeSessionStop(context.Background(), session, false, "", PlaybackEndStopped)
 		close(stopped)
 	}()
 	select {
@@ -2478,6 +2511,135 @@ func TestPrepareRemoteTransportV3RemuxOmitsToneMapOnlyDolbyVisionEvidence(t *tes
 	}
 }
 
+// A /api/v2 start whose hls delivery lists hls_copy_mpegts_v1 runs its copy
+// remux as MPEG-TS, and a seek reanchor keeps that packaging. The frozen
+// /api/v1 surface never advertised the feature and ignores it.
+func TestStartPlaybackV3HLSCopyMPEGTSOnV2Only(t *testing.T) {
+	newHandler := func(t *testing.T) *PlaybackHandler {
+		handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+		stubCopySeekAnchorV3(handler)
+		handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+		handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{}}
+		handler.ItemAccess = allowAllPlaybackItemAccess{}
+		return handler
+	}
+	request := v3HandlerStartRequest()
+	request.ClientPlaybackContext.Deliveries = map[string]playback.DeliveryCapabilityV3{
+		playback.DeliveryClassHLSV3: {Enabled: true, SupportedOnDevice: true, Features: []string{playback.FeatureHLSCopyMPEGTSV3}},
+	}
+
+	handler := newHandler(t)
+	v2, err := handler.startPlaybackV2ForTest(t, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v2.PlaybackPlan == nil || v2.PlaybackPlan.Delivery != playback.DeliveryRemuxHLSV3 || v2.PlaybackPlan.EffectiveRecipe.SegmentContainer != playback.SegmentContainerMPEGTSV3 {
+		t.Fatalf("v2 plan = %#v, terminal = %#v", v2.PlaybackPlan, v2.Terminal)
+	}
+	if ts := handler.tm.GetTranscodeSession(v2.SessionID); ts == nil || !ts.Opts().CopyVideoMPEGTS {
+		t.Fatal("the v2 MPEG-TS plan started an fMP4 transport")
+	}
+	frozen := *v2.PlaybackPlan
+	reanchored, err := handler.ReplanPlaybackV2(newAuthorizedPlaybackContext(), PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}, v2.SessionID, PlaybackReplanCommand{Digest: "mpegts-seek-digest", Request: playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationSeekReanchorV3,
+		PlaybackAttemptID: request.PlaybackAttemptID,
+		ReplanRequestID:   "mpegts-seek-reanchor-0001", FailedPlanID: frozen.PlanID,
+		PlanAttemptID: "mpegts-seek-plan-0001", PlanAttemptKey: frozen.PlanAttemptKey,
+		AttemptCount: 1, QualityPreference: request.QualityPreference, PositionSeconds: 600,
+		SelectedTracks:        frozen.SelectedTracks,
+		Capabilities:          request.Capabilities,
+		ClientPlaybackContext: request.ClientPlaybackContext,
+	}})
+	if err != nil || reanchored.PlaybackPlan == nil || reanchored.PlaybackPlan.PlanID != frozen.PlanID {
+		t.Fatalf("reanchored = %#v, terminal = %#v, err = %v", reanchored.PlaybackPlan, reanchored.Terminal, err)
+	}
+	if ts := handler.tm.GetTranscodeSession(v2.SessionID); ts == nil || !ts.Opts().CopyVideoMPEGTS || ts.Opts().SeekSeconds == 0 {
+		t.Fatal("the seek reanchor did not reopen the MPEG-TS transport")
+	}
+
+	request.PlaybackAttemptID = "attempt-handler-0002"
+	v1Handler := newHandler(t)
+	rr := httptest.NewRecorder()
+	v1Handler.HandleStartPlayback(rr, httptest.NewRequest(http.MethodPost, "/api/v1/playback/start", strings.NewReader(marshalV3StartRequest(t, request))).WithContext(newAuthorizedPlaybackContext()))
+	var v1 playback.DecisionResponseV3
+	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &v1) != nil || v1.PlaybackPlan == nil {
+		t.Fatalf("v1 status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if v1.PlaybackPlan.Delivery != playback.DeliveryRemuxHLSV3 || v1.PlaybackPlan.EffectiveRecipe.SegmentContainer != "" {
+		t.Fatalf("v1 plan = %#v", v1.PlaybackPlan)
+	}
+	if ts := v1Handler.tm.GetTranscodeSession(v1.SessionID); ts == nil || ts.Opts().CopyVideoMPEGTS {
+		t.Fatal("the v1 start honored a /api/v2-only delivery feature")
+	}
+}
+
+// A fresh remote start of an MPEG-TS copy remux asks the node for MPEG-TS and
+// refuses, and stops, a node that does not attest it, so an fMP4 stream is
+// never published under a plan that promises MPEG-TS.
+func TestPrepareRemoteTransportV3RefusesUnattestedMPEGTSCopy(t *testing.T) {
+	for _, attests := range []bool{true, false} {
+		t.Run(fmt.Sprintf("attests=%t", attests), func(t *testing.T) {
+			var startRequest transcodenode.TranscodeStartRequest
+			stopRequests := 0
+			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/hw-capabilities":
+					writeJSON(w, http.StatusOK, playback.HWAccelInfo{})
+				case r.Method == http.MethodPost && r.URL.Path == "/transcode/start":
+					if err := json.NewDecoder(r.Body).Decode(&startRequest); err != nil {
+						t.Errorf("decode remote start: %v", err)
+					}
+					writeJSON(w, http.StatusAccepted, transcodenode.TranscodeStartResponse{
+						SessionID: startRequest.SessionID, Status: "started",
+						CopyFMP4RecipeVersion: startRequest.CopyFMP4RecipeVersion,
+						CopyVideoMPEGTS:       attests && startRequest.CopyVideoMPEGTS,
+					})
+				case r.Method == http.MethodDelete:
+					stopRequests++
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer remote.Close()
+
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.JWTSecret = "test-secret"
+			handler.NodePlanner = staticNodePlannerV3{plan: nodepool.Plan{TranscodeNode: &nodepool.Node{URL: remote.URL}}}
+			plan := &playback.PlanV3{PlanID: "plan:remote-mpegts-copy", Delivery: playback.DeliveryRemuxHLSV3,
+				EffectiveRecipe: playback.EffectiveRecipeV3{SegmentContainer: playback.SegmentContainerMPEGTSV3}}
+			// Pin the remux to the worker so a refusal cannot fall back to a
+			// local FFmpeg on the test host.
+			policy := config.DefaultPlaybackRoutingPolicy()
+			policy.RemuxExecution = config.PlaybackExecutionWorkerOnly
+			transport, transportErr := handler.prepareTransportWithPolicyV3(
+				httptest.NewRequest(http.MethodPost, "/", nil),
+				&playback.Session{ID: "session-remote-mpegts-copy", UserID: 7, ProfileID: "profile-1"},
+				v3HandlerFixtureFile(t),
+				playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TargetVideoCodec: "copy", TargetAudioCodec: "copy"},
+				mediaAuthModeV3{}, policy,
+			)
+			if !startRequest.CopyVideoMPEGTS {
+				t.Fatalf("remote start did not request MPEG-TS: %#v", startRequest)
+			}
+			if attests {
+				if transportErr != nil {
+					t.Fatalf("prepare attested MPEG-TS copy: %#v", transportErr)
+				}
+				transport.rollback()
+				return
+			}
+			if transportErr == nil || transportErr.reason != transcodeStartFailedReasonV3 || !errors.Is(transportErr.cause, transcodenode.ErrCopyVideoMPEGTSAttestationMismatch) {
+				transport.rollback()
+				t.Fatalf("transport error = %#v, want the MPEG-TS attestation refusal", transportErr)
+			}
+			if stopRequests != 1 {
+				t.Fatalf("stop requests = %d, want one cleanup for the unattested job", stopRequests)
+			}
+		})
+	}
+}
+
 func TestVideoSampleEntryForPlanV3(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2489,6 +2651,15 @@ func TestVideoSampleEntryForPlanV3(t *testing.T) {
 			plan: &playback.PlanV3{Delivery: playback.DeliveryRemuxHLSV3,
 				Source:          playback.SourceDescriptorV3{DVProfile: 8},
 				EffectiveRecipe: playback.EffectiveRecipeV3{DynamicRange: playback.DynamicRangeDolbyVisionV3}},
+			want: playback.VideoSampleEntryDVH1,
+		},
+		{
+			// MPEG-TS publishes no sample entry; dvh1 still selects the
+			// strictness that keeps the DOVI descriptor.
+			name: "preserved profile 8 in MPEG-TS",
+			plan: &playback.PlanV3{Delivery: playback.DeliveryRemuxHLSV3,
+				Source:          playback.SourceDescriptorV3{DVProfile: 8},
+				EffectiveRecipe: playback.EffectiveRecipeV3{DynamicRange: playback.DynamicRangeDolbyVisionV3, SegmentContainer: playback.SegmentContainerMPEGTSV3}},
 			want: playback.VideoSampleEntryDVH1,
 		},
 		{
@@ -2809,6 +2980,27 @@ func TestHandleStartPlaybackV3SafariDolbyVisionRemuxServesHLSManifest(t *testing
 	handler.HandleGetTranscodeManifest(manifestRecorder, manifestRequest)
 	if manifestRecorder.Code != http.StatusOK || !strings.Contains(manifestRecorder.Body.String(), "#EXTM3U") {
 		t.Fatalf("manifest status=%d body=%s", manifestRecorder.Code, manifestRecorder.Body.String())
+	}
+}
+
+// A per-account cap must not present as server capacity: a busy server means
+// wait, a spent allowance means stop the other session. A fresh attempt works
+// once that session ends, so both caps stay retryable.
+func TestSessionStartErrorV3SeparatesAccountLimitsFromServerCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		err       error
+		reason    string
+		retryable bool
+	}{
+		{err: playback.ErrTooManyStreams, reason: "stream_limit_reached", retryable: true},
+		{err: playback.ErrTooManyTranscodes, reason: "transcode_limit_reached", retryable: true},
+		{err: playback.ErrTranscodingDisabled, reason: "transcoding_disabled"},
+		{err: playback.ErrPlaybackNotAllowed, reason: "policy_denied"},
+	} {
+		got := sessionStartErrorV3(fmt.Errorf("wrapped: %w", tc.err))
+		if got == nil || got.reason != tc.reason || got.retryable != tc.retryable {
+			t.Fatalf("sessionStartErrorV3(%v) = %#v, want reason %q retryable %v", tc.err, got, tc.reason, tc.retryable)
+		}
 	}
 }
 
@@ -5139,6 +5331,58 @@ func TestPrepareTransportV3RoutesDirectPlayThroughProxyNode(t *testing.T) {
 	}
 }
 
+// A progressive remux URL carries remux_range=refuse only where its egress
+// refuses the range: an older proxy would stream it from the origin instead.
+func TestPrepareTransportV3PublishesRemuxRangeRefusalOnlyToAProxyThatHonorsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		features []string
+		want     bool
+	}{
+		{name: "upgraded proxy", features: []string{playback.TransportFeatureProgressiveRemuxRelayV1, playback.TransportFeatureRemuxRangeRefusalV1}, want: true},
+		{name: "older proxy", features: []string{playback.TransportFeatureProgressiveRemuxRelayV1}, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
+			handler.JWTSecret = "test-secret"
+			stubCopySeekAnchorV3(handler)
+			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/hw-capabilities" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				writeJSON(w, http.StatusOK, playback.HWAccelInfo{
+					TransportFeatures: tc.features,
+					Transformations: []playback.TransformationV3{
+						{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3},
+					},
+				})
+			}))
+			t.Cleanup(proxy.Close)
+			handler.NodePlanner = &recordingNodePlannerV3{plan: nodepool.Plan{ProxyNode: &nodepool.Node{ID: 42, URL: proxy.URL + "/"}}}
+
+			plan := identityProxyPlanV3(playback.DeliveryRemuxProgressiveV3, playback.TransformationV3{Name: playback.TransformationAudioToAACV3, Executor: playback.ExecutorServerV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3})
+			transport, transportErr := handler.prepareTransportV3(
+				httptest.NewRequest(http.MethodPost, "/", nil),
+				&playback.Session{ID: "session-remux-range", UserID: 7, ProfileID: "profile-1"},
+				v3HandlerFixtureFile(t),
+				playback.PlannerResultV3{Plan: plan, PlayMethod: playback.PlayRemux, TranscodeAudio: true, TargetAudioCodec: "aac"},
+				mediaAuthModeV3{progressiveRangeRefusal: true})
+			if transportErr != nil {
+				t.Fatalf("prepare identity transport: %v", transportErr)
+			}
+			defer transport.rollback()
+
+			if !strings.HasPrefix(transport.url, proxy.URL+"/stream/remux/") {
+				t.Fatalf("remux stream url = %q, want a proxy /stream/remux URL", transport.url)
+			}
+			if got := strings.Contains(transport.url, playback.RemuxRangeQueryParam+"="+playback.RemuxRangeRefuse); got != tc.want {
+				t.Fatalf("remux stream url = %q, carries the refusal = %v, want %v", transport.url, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestPrepareTransportV3RoutesProgressiveRemuxThroughProxyNodeWithSeekAndDV(t *testing.T) {
 	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0))
 	handler.JWTSecret = "test-secret"
@@ -6470,4 +6714,36 @@ func TestAttachSubtitleArtifactV3UsesFrozenDownloadedIdentityWithoutOrdinalLooku
 	if plan.Subtitle.Artifact == nil || !strings.Contains(plan.Subtitle.Artifact.URL, "downloaded_subtitle_id=71") {
 		t.Fatalf("artifact = %#v, want frozen downloaded subtitle 71", plan.Subtitle.Artifact)
 	}
+	t.Run("restored inventory includes a newly added stored track", func(t *testing.T) {
+		repo.listErr = nil
+		repo.list = []subtitles.DownloadedSubtitle{
+			*repo.subtitles[71],
+			{ID: 72, MediaFileID: file.ID, Format: subtitles.FormatSRT},
+		}
+		before := playback.PlanV3{
+			Subtitle: playback.SubtitleDecisionV3{
+				Mode:      playback.SubtitleRenderV3,
+				Inventory: playback.BuildSubtitleInventoryV3(file, downloadedSubtitleEntriesV3(file, repo.list[:1])),
+			},
+			Timeline: playback.TimelineV3{StreamOriginSeconds: 321},
+		}
+		raw, err := json.Marshal(before)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored playback.PlanV3
+		if err := json.Unmarshal(raw, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if err := handler.attachSubtitleArtifactV3(t.Context(), "session-frozen-subtitle", file, &restored, selectedIndex, &recipe, nil); err != nil {
+			t.Fatal(err)
+		}
+		if len(restored.Subtitle.Inventory) != 2 || !strings.Contains(restored.Subtitle.Inventory[1].URL, "downloaded_subtitle_id=72") {
+			t.Fatalf("restored menu lost newly added subtitle 72: %+v", restored.Subtitle.Inventory)
+		}
+		if restored.Subtitle.Artifact == nil || !strings.Contains(restored.Subtitle.Artifact.URL, "downloaded_subtitle_id=71") || restored.Subtitle.Mode != before.Subtitle.Mode || restored.Timeline != before.Timeline {
+			t.Fatalf("restoring the menu changed the selected recipe: %+v", restored)
+		}
+	})
+
 }

@@ -1,10 +1,13 @@
 package tonemap
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -518,9 +521,11 @@ func TestProbeDevicesCapsTheConfiguredSet(t *testing.T) {
 	}
 }
 
-// TestProbeSmokesDolbyVisionOnlyOnRPUExecutors verifies the Dolby Vision kind
-// is tried and advertised only where the filter can apply an RPU.
-func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
+// TestProbeSmokesOptionalKindsOnlyOnCapableExecutors verifies the Dolby Vision
+// kind is tried and advertised only where the filter can apply an RPU, and the
+// full-range PQ kind only on the software executor, whose filters read each
+// frame's range.
+func TestProbeSmokesOptionalKindsOnlyOnCapableExecutors(t *testing.T) {
 	tests := []struct {
 		name         string
 		backend      string
@@ -552,6 +557,9 @@ func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
 					t.Fatalf("capabilities = %#v, lost standard kind %q", got, kind)
 				}
 			}
+			if !got.Supports(ModeSoftware, SourcePQFullRange) || got.Supports(ModeHardware, SourcePQFullRange) {
+				t.Fatalf("capabilities = %#v, want full-range PQ on software only", got)
+			}
 			wantSmokes := 0
 			if tt.wantSoftware {
 				wantSmokes++
@@ -563,6 +571,37 @@ func TestProbeSmokesDolbyVisionOnlyOnRPUExecutors(t *testing.T) {
 				t.Fatalf("Dolby Vision smokes = %q, want %d", dolbyVisionSmokes, wantSmokes)
 			}
 		})
+	}
+}
+
+// TestProbeFailedFullRangeSmokeExpires verifies a software inventory missing
+// the full-range PQ kind is incomplete, so a failed smoke is retried after
+// probeNegativeTTL instead of being cached for good.
+func TestProbeFailedFullRangeSmokeExpires(t *testing.T) {
+	resetProbeCache(t)
+	now := time.Unix(100, 0)
+	calls, failures := 0, 1
+	runner := listingRunner(&calls, softwareListing, "libx264", func(args string) ([]byte, error) {
+		if strings.Contains(args, SourceParameters(SourcePQFullRange)) && failures > 0 {
+			failures--
+			return nil, errors.New("exit status 1")
+		}
+		return nil, nil
+	})
+	probe := func() Capabilities {
+		t.Helper()
+		got, err := probeCached(t.Context(), "/ffmpeg-full-range", BackendSoftware, "", runner, func() time.Time { return now })
+		if err != nil {
+			t.Fatalf("probe error = %v", err)
+		}
+		return got
+	}
+	if got := probe(); got.Supports(ModeSoftware, SourcePQFullRange) || !got.Supports(ModeSoftware, SourcePQ) {
+		t.Fatalf("first capabilities = %#v, want PQ without full-range PQ", got)
+	}
+	now = now.Add(probeNegativeTTL + time.Second)
+	if got := probe(); !got.Supports(ModeSoftware, SourcePQFullRange) {
+		t.Fatalf("retried capabilities = %#v, want full-range PQ once the smoke passes", got)
 	}
 }
 
@@ -643,5 +682,92 @@ func TestProbeTransientDolbyVisionSmokeFailureRetries(t *testing.T) {
 				t.Fatalf("retried capabilities = %#v, want Dolby Vision once the smoke passes", got)
 			}
 		})
+	}
+}
+
+// TestProbeLogsWhyHardwareToneMappingIsUnavailable verifies an operator can see
+// why a configured GPU failed the hardware smoke or the probe ran out of time,
+// once per distinct result rather than on every retry.
+func TestProbeLogsWhyHardwareToneMappingIsUnavailable(t *testing.T) {
+	resetProbeCache(t)
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	gpu := "slow"
+	attempt := 0
+	filters := softwareListing + " .S. tonemap_opencl V->V\n .S. hwmap V->V\n .S. scale_vaapi V->V\n .S. overlay_opencl VV->V\n .S. scale_opencl V->V\n"
+	runner := listingRunner(nil, filters, "libx264 h264_qsv", func(args string) ([]byte, error) {
+		if !strings.Contains(args, "h264_qsv") {
+			return nil, nil
+		}
+		switch gpu {
+		case "slow":
+			return nil, context.DeadlineExceeded
+		case "no_opencl":
+			// The pointer in the prefix differs on every run, as FFmpeg's does.
+			attempt++
+			return []byte(fmt.Sprintf("[OpenCL @ 0x5fc1%08x] Failed to get number of OpenCL platforms: -1001.\nDevice creation failed: -19.\n"+
+				"Failed to set value 'opencl=ocl@va' for option 'init_hw_device': No such device\nError parsing global options: No such device\n", attempt)), errors.New("exit status 234")
+		}
+		return nil, nil
+	})
+	clock := time.Unix(0, 0)
+	now := func() time.Time { return clock }
+	probe := func() {
+		t.Helper()
+		_, err := probeCached(context.Background(), "/ffmpeg-log", BackendQSV, "/dev/dri/renderD128", runner, now)
+		if (err != nil) != (gpu == "slow") {
+			t.Fatalf("probe error = %v with GPU %s", err, gpu)
+		}
+	}
+	records := func() []map[string]any {
+		t.Helper()
+		var out []map[string]any
+		for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+			if len(line) == 0 {
+				continue
+			}
+			var record map[string]any
+			if err := json.Unmarshal(line, &record); err != nil {
+				t.Fatalf("decode log line %q: %v", line, err)
+			}
+			if record["component"] == "tonemap" && record["ffmpeg"] == "/ffmpeg-log" {
+				out = append(out, record)
+			}
+		}
+		return out
+	}
+
+	probe()
+	probe()
+	got := records()
+	if len(got) != 1 || got[0]["level"] != "WARN" || got[0]["timed_out"] != "hardware test conversion" {
+		t.Fatalf("timed-out probes logged %v, want one warning naming the hardware test conversion", got)
+	}
+
+	gpu = "no_opencl"
+	probe()
+	got = records()
+	if len(got) != 2 || got[1]["level"] != "WARN" {
+		t.Fatalf("failed hardware smoke logged %v, want a second warning", got)
+	}
+	if !strings.Contains(fmt.Sprint(got[1]["ffmpeg_error"]), "'init_hw_device': No such device") || got[1]["hardware_kinds"] != "" || got[1]["software_kinds"] == "" {
+		t.Fatalf("warning = %v, want the OpenCL device error, no hardware kinds and the software kinds", got[1])
+	}
+
+	clock = clock.Add(2 * probeNegativeTTL)
+	probe()
+	if got := records(); len(got) != 2 {
+		t.Fatalf("unchanged re-probe logged again: %v", got)
+	}
+
+	gpu = "works"
+	clock = clock.Add(2 * probeNegativeTTL)
+	probe()
+	got = records()
+	if len(got) != 3 || got[2]["level"] != "INFO" || !strings.Contains(fmt.Sprint(got[2]["hardware_kinds"]), string(SourcePQ)) {
+		t.Fatalf("changed result logged %v, want an info line with hardware kinds", got)
 	}
 }

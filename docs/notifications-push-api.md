@@ -9,8 +9,11 @@ push registration.
 > **API lifecycle:** the operations below are the stable `/api/v2` native contract,
 > which locks with Silo 1.0. The frozen alpha `/api/v1` surface serves the same
 > Apple display-token flow at the matching `/api/v1` paths through the pre-1.0
-> bridge window, after which Silo answers the whole `/api/v1` namespace with
-> `410 Gone` and the `client_upgrade_required` problem code. See
+> bridge window. After the bridge window, and once a maintainer decides to retire
+> it ([#886](https://github.com/Silo-Server/silo-server/issues/886)), the main API
+> listener answers the `/api/v1` business routes with `410 Gone` and the
+> `client_upgrade_required` problem code; `/api/v1/health` and `/api/v1/ready`
+> keep answering. See
 > [the native API contract](architecture/api-contract.md).
 
 Android is unaffected: it fetches `GET /api/v2/notifications/{id}` through the app's
@@ -85,13 +88,118 @@ the display credential:
   Apple client re-registers a week ahead.
 - Both fields are omitted when the server cannot mint a token. Clients must
   fall back to the access token in that case.
-- Registration with an API key (`sa_` prefix) never returns a token: there is
-  no login session to bind.
+- `registerApplePushDevice` requires a current login session, so an API key
+  (`sa_` prefix) gets `403 permission_denied`. The frozen v1 route registers an
+  API-key caller without a display token.
 
 Store the token where the extension can read it (the Apple client uses the
 shared Keychain access group) and clear it on sign-out, server removal, or
 profile change. The server revokes it implicitly when the login session is
 revoked or expires.
+
+## Delivery follows the login
+
+A registration records the login session that made it. Once that session ends,
+by sign-out, revocation, a password change, an admin, or expiry, the server sends
+nothing more to the device, including attempts already queued, which fail with
+reason `login_session_ended`. Notification retention then deletes the registration
+and its token. The next sign-in registers again at a newer generation.
+
+A registration with no recorded session keeps delivering: an API key has none, and
+neither does a registration made before the server recorded them. An Apple client
+fills it in when it renews its display token, which can be weeks later. An Android
+client registers once more at a newer generation when capabilities report
+`binds_login_session`, because a replay of its current generation records nothing.
+A registration stays unbound until then.
+
+A device that is already signed out can never fill it in, so notification retention
+also deletes an unbound registration when the device has no live login. Because
+deleting a working phone's registration stops its push until its next sign-in, it
+does this only when all of these hold:
+
+- The account holds no API key.
+- No live login, on any account, names the device.
+- Either the account has no live login at all, or, for Apple, a login of this account
+  naming the device was live at the registration's last write and has ended, and no
+  live login of the account lacks a device ID.
+
+A full restore carries registrations but no logins, so the first retention run after
+one deletes every unbound registration on an account that has not signed in again and
+holds no API key. Those phones have to sign in again anyway, and that registers them.
+
+Some signed-out phones can't be told apart from working ones, so they stay unbound
+and keep delivering until they sign in again or the conditions above start to hold:
+
+- An Android login does not name its push device, so an Android registration on an
+  account still signed in anywhere else waits until that account's last login ends.
+- The Apple condition needs the ended login's row, which cleanup deletes once the
+  login's expiry passes. An Apple phone on an account signed in elsewhere is not
+  matched if that row is gone or names no device, or if another live login of the
+  account names no device.
+
+The device IDs read here are client-supplied and authorize nothing; this sweep only
+uses them as evidence, and only to stop push to the account's own registrations.
+
+## Reset after a lost installation key
+
+The server binds an Apple installation (`device_id`) to the installation key and
+account of its first ordered registration. An app that loses the key keeps its
+`device_id` but sends a new key, for example after a reinstall, and every
+registration is refused. When the refused account is the one that owns the
+installation, the refusal is `403` with the problem type
+`push_installation_key_mismatch` instead of `permission_denied`; the status and
+the refusal are otherwise the same. Any other account still gets
+`permission_denied`, so the code says nothing about who owns a `device_id`.
+
+`GET /api/v2/devices/push/apple/capabilities` reports
+`installation_reset_available: true` when the server can reset an installation.
+On `push_installation_key_mismatch` the app resets its own installation:
+
+```
+POST /api/v2/devices/push/apple/reset
+Authorization: Bearer <access token>
+X-Profile-Id: <profile>
+X-Push-Installation-Key: <the app's current installation secret>
+
+{"device_id": "<installation device_id>"}
+```
+
+`resetApplePushInstallation` needs a current login session of the account the
+installation is bound to, from any of its profiles. Display tokens and API keys
+are refused. Under the installation lock it deletes the installation's Apple
+push rows, which also drops their queued delivery attempts, and clears the
+stored key and generation. The installation stays reserved for the account
+until that account registers again: another account's ordered or legacy
+registration for the `device_id` is still refused. It answers `200`:
+
+- `{"reset": true}` when it cleared a binding.
+- `{"reset": false}` when there was nothing to clear: the server has no ordered
+  record for that `device_id`, or the installation is already bound to the sent
+  key. The second case makes a retry safe: a reset repeated after its answer
+  was lost leaves the registration that followed it alone, and that
+  registration's generation still orders later intents.
+- `403 permission_denied` when another account owns the installation, when
+  `X-Push-Installation-Key` is not a canonical installation key, or when the
+  credential is not a current login session. Nothing changes.
+
+Then register again with the same key the reset carried. The cleared
+installation accepts any positive generation, so the app can restart its counter
+at 1. A provider request already sent cannot be recalled, and a registration
+from the same account that reaches the server after the reset binds the
+installation, as a first registration would. The app should send the reset and the registration after
+it on the same serialized path as its other registrations for that device. A
+registration with an older key that is still in flight can otherwise bind first,
+and the next registration with the new key gets `push_installation_key_mismatch`
+again; the app recovers by resetting on that later attempt.
+
+The retained-owner guarantee requires every API writer sharing the database to
+enforce it. Upgrade all API replicas before allowing reset requests. An older
+writer can treat a cleared generation as an unowned installation and overwrite
+the reserved account. `installation_reset_available` describes the responding
+server; it does not certify that other replicas have been upgraded. Recovery to
+an older release must follow the [backup and rollback policy](release-versioning.md#backups-and-rollback),
+restoring the pre-upgrade database instead of running older writers against
+reservations created by reset.
 
 ## Retirement without a session
 
@@ -176,9 +284,10 @@ the same way.
 
 ## Ordered Android registration
 
-`GET /api/v2/notifications/push/devices/capabilities` describes the
-`ordered_android_v1` registration contract and whether local registration storage
-is configured. It requires the acting login/profile. `registration_available`
+`GET /api/v2/notifications/push/devices/capabilities` reports `platforms`
+(`["android"]`), `binds_login_session` (see "Delivery follows the login"), and
+`registration_available`, which says whether local registration storage is
+configured. It requires the acting login/profile. `registration_available`
 is independent of relay delivery availability; use notification capabilities
 for delivery configuration. Apple registration and browser web push remain
 separate contracts.
@@ -214,10 +323,13 @@ Bootstrap may bind an unclaimed installation or one whose legacy Android rows
 belong to the acting account. It cannot take over a legacy row belonging to a
 different account. Initial removal additionally requires the existing profile.
 Bind while the existing account is selected; do not resolve a conflict by
-silently changing ownership or replaying under another account. Losing the
-installation secret, resetting the generation counter, or exhausting int64 has
-no automatic recovery/rebinding path in this contract. Native persistence must
-handle that state explicitly without sending guessed replacement credentials.
+silently changing ownership or replaying under another account. An Apple app
+that lost its installation secret recovers through
+[the owner reset](#reset-after-a-lost-installation-key): the account that owns
+the installation clears it and registers again with the new key. Android has no
+such path, and resetting the generation counter or exhausting int64 has no
+recovery path on either platform. Native persistence must handle those states
+explicitly without sending guessed replacement credentials.
 
 The installation authority, last intent and generation survive device-row and
 profile deletion. Removal keeps a tombstone. Changed registrations receive new
@@ -291,9 +403,19 @@ This operation is **non-retryable**: a delayed repeat can remove a newer registr
 
 `POST /api/v2/notifications/web-push/subscriptions` (`subscribeNotificationWebPush`) takes the browser's `endpoint`, `keys.p256dh`, `keys.auth`, and optional `device_name`. Authenticated profile authority is required. The existing service validates a public HTTPS endpoint and registers or reassigns it to the current profile. `201` returns the subscription view used by the list; encryption keys remain write-only. Invalid input returns `422`, unavailable storage `503`. The request body is bounded to 16 KiB.
 
+Registration records the caller's login session on the row, replacing any earlier one, including when the endpoint moves to another account. See "Browser delivery follows the login" below.
+
 Registration is **non-retryable**. The existing endpoint upsert may re-enable delivery or replace a newer profile/token intent; it is not an ordered installation protocol. Existing provider callbacks and registration identity behavior remain unchanged, including the absence of generation-based late-callback isolation. The response describes stored registration state, not successful delivery. Android installation keys/generations and Apple display-token renewal do not apply.
 
 The browser captures authority before permission and checks it after each service-worker/subscription await and HTTP response. It sends once without authentication replay and publishes only under the captured authority. An already-issued browser or server operation cannot be undone by these checks. Failure or uncertainty does not trigger automatic retry, local unsubscribe, or compensating server removal; such compensation could remove a newer intent. Browser permission and local subscription may therefore remain after a failed registration.
+
+### Browser delivery follows the login
+
+A subscription records the login session that last registered it. Once that session ends, by sign-out, revocation, a password change, an admin, or expiry, the server sends nothing more to the browser, including attempts already queued, which fail with the message `login session ended`. Notification retention then deletes the subscription and its keys. There are no test sends for web push. A session that no longer exists counts as ended: backups carry `web_push_subscriptions` but leave `auth_sessions` out. A subscription with no recorded session keeps delivering while its account still has a live login or an API key: an API key has none, and neither does a subscription made before the server recorded them or one carried through a restore of a backup taken before then. Once the account has neither, retention deletes it too; the web app does not bring that one back, so its owner turns push on again in Settings.
+
+The web app registers again on its own, so push survives a fresh sign-in. Once per sign-in and profile, after the page's first content, it sends the browser's existing subscription through the registration operation above if the server lists that endpoint under the current profile, or if this browser remembers enabling it for the current account and profile (`localStorage`, kept across sign-out, cleared by disable). This also binds a subscription made before the server recorded logins. It never registers for anyone else: someone else signing in on the same browser gets no push until they turn it on, and the endpoint stays with its owner until then. Permission is never requested. The automatic send is still a single attempt without authentication replay; a failure waits for the next page load. Impersonated sessions skip it.
+
+The remaining gaps follow from where the web app runs. A subscription made before the server recorded logins stays unbound, and keeps delivering after a revoke while the account is signed in anywhere else, until the web app next loads in that browser under its account and profile. After a fresh sign-in under a sibling profile, the subscribed profile's push stays stopped until that profile is next active in the browser. A subscription removed from another device is forgotten only when this browser next loads during the same login; if it signs in again first, the removal is undone.
 
 ## Legacy mobile registration ownership
 
@@ -310,9 +432,9 @@ which serializes bridge writers and ordered v2 writers across API nodes.
 
 An older client switching accounts can therefore receive a conflict while the
 previous account's destination remains registered. Repeating registration does
-not resolve it, and neither does signing out or revoking the owning account's
-sessions. The conflict clears only when the owning account unregisters that
-device, or when the owning profile or account is deleted. Ordered bootstrap must
+not resolve it. The conflict clears when the owning account unregisters that
+device, when the owning profile or account is deleted, or when notification
+retention removes the registration because its login session ended. Ordered bootstrap must
 occur while that existing account is selected; subsequent account transfers
 require its installation key and a newer generation. This repair adds no
 recovery or automatic rebinding mechanism.

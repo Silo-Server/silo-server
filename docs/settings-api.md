@@ -3,7 +3,7 @@
 > **API lifecycle:** this documents the stable `/api/v2` native contract, which locks with Silo
 > 1.0. The frozen alpha `/api/v1` settings routes are kept in
 > [Bridge: the frozen `/api/v1` settings routes](#bridge-the-frozen-apiv1-settings-routes) at the
-> end of this document and are retired after the pre-1.0 bridge window. See
+> end of this document and are served through the pre-1.0 bridge window. See
 > [the native API contract](architecture/api-contract.md).
 
 The canonical settings API stores typed user preferences from the shared
@@ -64,10 +64,10 @@ overlay-config and plugin operations. `X-Profile-Token` is optional everywhere.
 `If-None-Match` GET is not carried yet; it lands with the foundation caching rules, so a v2
 client compares the `ETag` (or the capability document's `contract_etag`) itself and re-fetches.
 
-`GET /api/v2/settings/contract/capabilities` returns nine settings-specific members plus the
+`GET /api/v2/settings/contract/capabilities` returns eleven settings-specific members plus the
 common `revision`, `state` and `allowed` fields. The previous numeric `revision` is now
 `manifest_revision`; string `revision` identifies the complete authorized capability document.
-All twelve fields are present, and `scopes` and `client_families` are never null. This capability
+All fourteen fields are present, and `scopes` and `client_families` are never null. This capability
 read supports `ETag` and `If-None-Match` revalidation with `Cache-Control: private, no-cache`;
 a matching authorized representation returns a bodyless `304`.
 
@@ -94,7 +94,9 @@ is illustrative):
   ],
   "supports_batched_effective": true,
   "supports_idempotent_writes": true,
-  "supports_atomic_shortcuts": true
+  "supports_atomic_shortcuts": true,
+  "supports_device_rename": true,
+  "supports_overlay_images": false
 }
 ```
 
@@ -104,7 +106,26 @@ gates the shortcut editor on `supports_atomic_shortcuts`. Read `supports_idempot
 care: the server computes the flag for the v1 `X-Silo-Mutation-Id` replay, but no v2 write
 declares that header (see "Writes have no mutation id" below), so a v2 client must not rely on
 replay semantics while the flag is `true`. The web client masks the flag to `false` for exactly
-this reason.
+this reason. `supports_overlay_images` says the server keeps the card overlay image library
+described under "Overlay configuration" below.
+
+### Overlay configuration
+
+`GET /api/v2/settings/overlay-config` returns the server-wide card overlay defaults: `enabled`,
+`defaults` (the administrator's `ui.card_overlays` document as a JSON string, absent when none
+is set), `quick_actions_enabled` and `quick_actions_default`, as v1 does. v2 adds two members
+the frozen v1 response does not carry:
+
+- `images` lists the card overlay image library in upload order, always present and possibly
+  empty. Each entry has `ref`, `name`, `url`, `width` and `height`. A card overlay document names
+  an image by `ref`; `url` is `/api/v2/overlay-images/{ref}`, a public read whose bytes never
+  change for a ref, served `immutable`. A failed library read degrades to an empty list instead
+  of failing the configuration every card depends on.
+- `image_uploads_available` says whether the server has the asset storage
+  `uploadAdminOverlayImage` needs. Without it the library stays empty.
+
+Administrators manage the library with `uploadAdminOverlayImage` and `deleteAdminOverlayImage`;
+see [admin-api.md](admin-api.md#card-overlay-images).
 
 ### Query parameters are repeated, not comma-separated
 
@@ -195,7 +216,8 @@ contexts in one store read; use it for a grid or list instead of one GET per ite
 and each context is `{context_id, library_id | series_id}` with `library_id` as a string `ID`.
 The response preserves the requested key order, including repeated keys. Each `context_id` is an
 opaque caller token: whitespace is retained, and uniqueness is checked on the exact token. Empty
-or whitespace-only tokens are rejected. v1 retains its existing trimmed, deduplicated behavior.
+or whitespace-only tokens are rejected. v1 trims each `context_id` before the same uniqueness
+check, and trims and deduplicates `keys`.
 
 The batch resolves for the acting profile and declared device, so the operation declares only the
 device and client-family headers: the `profile_id`, `device_id`, `library_ids` and `series_ids`
@@ -208,6 +230,11 @@ spends on `library_ids` plus `series_ids` — and a context may name both a `lib
 more than 100 contexts name both. Halving the declared bound keeps every valid context shape
 inside one request and leaves v1 and the store query untouched; a 101st context is a 422 at
 `body.contexts`.
+
+A repeated key returns its stored value once per mention, and the batch returns it again in every
+context. The stored values in one `resolveEffectiveSettings` or `listSettingValues` response are
+therefore bounded at 16 MiB in total; a request past that bound is a 422 at `body.keys`
+(`query.keys` on `listSettingValues`).
 
 ```http
 POST /api/v2/settings/values/effective
@@ -359,8 +386,8 @@ over-long value is a `422` where v1 truncated it.
 whose keys the plugin's `user_config_schema` defines; a refusal by the plugin is `422` at
 `body.values`. It answers `200` with the same `{installation, values}` document
 `getPluginSettings` serves (v1: `204`). `values` is `{}` rather than null when the account has
-none. The v1 `admin_form` member of an installation is not carried: it is an administrator-form
-descriptor no user-settings client renders.
+none. The v1 `admin_form` member of each `user_config_schema` entry is not carried: it is an
+administrator-form descriptor no user-settings client renders.
 
 ```http
 PUT /api/v2/settings/plugins/3
@@ -445,7 +472,7 @@ A missing `values` member (`update_plugin_settings_values_required.json`):
 | v1                                                                               | v2                                                                              |
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `GET /settings/manifest` or `/settings/contract`                                 | `GET /api/v2/settings/contract` (same bytes and `ETag`; no `If-None-Match` yet) |
-| `GET /settings/capability`                                                       | `GET /api/v2/settings/contract/capabilities` (nine settings members plus the common capability fields)       |
+| `GET /settings/capability`                                                       | `GET /api/v2/settings/contract/capabilities` (settings members plus the common capability fields)       |
 | `?keys=a,b`, `?library_ids=1,2`, `?series_ids=x,y`                               | `?keys=a&keys=b`, `?library_ids=1&library_ids=2`, `?series_ids=x&series_ids=y`  |
 | `{values: [...], revision}`, `{settings: [...], revision}`                       | `{items: [...], revision}`                                                      |
 | `{contexts: [...], revision}` (batch POST)                                       | `{items: [{context_id, settings: [...]}], revision}`                            |
@@ -455,9 +482,9 @@ A missing `values` member (`update_plugin_settings_values_required.json`):
 | `X-Silo-Mutation-Id`, `X-Silo-Idempotent-Replay`, `409 mutation_id_conflict`     | Not declared; retry the plain `PUT`                                             |
 | `PUT /settings/device/subtitle_appearance` → `204`                               | `PUT /api/v2/settings/device/subtitle-appearance` → `200` effective appearance  |
 | `PUT /settings/plugins/{id}` → `204`                                             | `PUT /api/v2/settings/plugins/{id}` → `200 {installation, values}`              |
-| Numeric `library_id`, `profile_id`, installation `id`                            | String `ID`s                                                                    |
+| Numeric `library_id`, installation `id`                                          | String `ID`s (`profile_id` was already a string)                                |
 | `updated_at` as stored text                                                      | RFC 3339 instant                                                                |
-| `admin_form` on a plugin installation                                            | Not carried                                                                     |
+| `admin_form` on a `user_config_schema` entry                                     | Not carried                                                                     |
 | `/settings/`, `/settings/{key}`, `/settings/device/{key}`, `/settings/effective` | Removed; use the typed operations above                                         |
 
 
@@ -699,8 +726,10 @@ onboarding counterpart.
 ## Bridge: the frozen `/api/v1` settings routes
 
 The alpha surface below is frozen. Silo serves it through the pre-1.0 bridge window so
-existing clients keep working; Silo 1.0 then answers the whole `/api/v1` namespace with
-`410 Gone` and the `client_upgrade_required` problem code. No feature work lands here.
+existing clients keep working. After the bridge window, and once a maintainer decides to retire
+it ([#886](https://github.com/Silo-Server/silo-server/issues/886)), the main API listener
+answers the `/api/v1` business routes with `410 Gone` and the `client_upgrade_required` problem
+code; `/api/v1/health` and `/api/v1/ready` keep answering. No feature work lands here.
 Use [Migrating from v1](#migrating-from-v1) to move a caller to the stable operations.
 
 All paths in this section are relative to `/api/v1`.
@@ -1010,7 +1039,7 @@ PUT /api/v1/admin/users/42/settings/values/ui.card_presentation?scope=profile_cl
 Authorization: Bearer <admin-token>
 Content-Type: application/json
 
-{"value":{"poster_size":"large","caption":"artwork"}}
+{"value":{"poster_size":"large","caption":"title_metadata"}}
 ```
 
 The five accepted `client_family` values are also returned by the capability
@@ -1026,8 +1055,8 @@ restart.
 The first write to the assets store records its storage identity; writes to a
 shared local root count too. At startup, Silo records any configured private
 bucket, even if it is empty. A direct settings write that changes a recorded
-location is rejected with `409` and the problem code
-`artwork_storage_locked`: a change of `artwork.storage_backend`, of
+location is rejected with `409` (problem type `conflict` in `/api/v2`;
+`artwork_storage_locked` in the frozen `/api/v1`): a change of `artwork.storage_backend`, of
 `artwork.local_path` for a local store, of `s3.public_endpoint`,
 `s3.public_bucket`, or `s3.public_key_prefix` for an S3 store, or of
 `s3.private_bucket` on either backend. While a private bucket is configured, its
@@ -1179,3 +1208,24 @@ Native adoption is tracked in [Apple #267](https://github.com/Silo-Server/silo-a
 and [Android #300](https://github.com/Silo-Server/silo-android/issues/300).
 Jellyfin clients keep their own seek controls; this does not extend the
 Jellyfin protocol.
+
+## App language
+
+Revision 28 adds `ui.app_language`, the language of a client's menus, buttons and messages. It
+is a nullable `language_tag` stored at `profile` or `profile_device` and resolved
+`profile_device` → `profile` → `default`. The default `null` means "follow the device or browser
+language". The value is an open tag that the server canonicalizes on write (`pt_br` is stored as
+`pt-BR`); the `app_languages` option set is an advisory list. A client applies a stored tag only
+when it ships that language, matched as it matches the device language list (`es-MX` → `es`,
+`zh-CN` → `zh-Hans`), and otherwise behaves as if the value were `null`. Its picker still shows a
+stored tag it does not ship, so a re-save never erases the profile's choice. It is unrelated to
+the spoken-language and text preferences `playback.audio_language`, `playback.subtitle_language`
+and `catalog.metadata_language`.
+
+A household parent sets it for another profile on the account with the usual
+`PUT /api/v2/settings/values/ui.app_language?scope=profile&profile_id=<id>`, and an administrator
+uses `setAdminUserSettingValue`. Jellyfin clients choose their own interface language; this does
+not extend the Jellyfin protocol.
+
+How each client matches, loads and applies the language is in
+[the client translation architecture](architecture/i18n.md).

@@ -170,7 +170,7 @@ func (s *System) EmailPreferences(ctx context.Context, userID int, profileID str
 	if s == nil || s.EmailPrefs == nil {
 		return state, nil
 	}
-	prefs, err := s.EmailPrefs.Get(ctx, profileID)
+	prefs, err := s.EmailPrefs.Get(ctx, userID, profileID)
 	if err != nil {
 		return state, err
 	}
@@ -195,7 +195,7 @@ func (s *System) SetEmailMode(ctx context.Context, userID int, profileID, mode s
 		return ErrEmailModeNotAllowed
 	}
 	if mode != EmailModeOff {
-		prefs, err := s.EmailPrefs.Get(ctx, profileID)
+		prefs, err := s.EmailPrefs.Get(ctx, userID, profileID)
 		if err != nil {
 			return err
 		}

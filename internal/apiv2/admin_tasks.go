@@ -141,8 +141,13 @@ func taskExecutionOf(e taskmanager.ExecutionResult) AdminTaskExecution {
 			out.Steps = result.Steps
 		}
 	}
-	if e.Status == adminjob.StatusFailed {
+	switch e.Status {
+	case adminjob.StatusFailed:
 		out.ErrorMessage = "Task failed. Inspect administrator diagnostics for details."
+	case adminjob.StatusCancelled:
+		// The task runner writes the message of a run it stopped itself (a
+		// max runtime stop), so unlike failure text it is safe to show.
+		out.ErrorMessage = e.ErrorMessage
 	}
 	return out
 }
@@ -164,8 +169,14 @@ func registerAdminTasks(reg *Registry) {
 	Register(reg, adminTaskOp("GET", "/{key}/metrics", "getAdminTaskMetrics", "Read bounded refresh-debt metrics."), reg.getAdminTaskMetrics)
 	Register(reg, adminTaskOp("GET", "", "listAdminTasks", "List the finite task registry and process-local runtime state."), reg.listAdminTasks)
 	Register(reg, adminTaskOp("GET", "/{key}", "getAdminTask", "Read task state on this process."), reg.getAdminTask)
-	Register(reg, adminTaskOp("POST", "/{key}/run", "runAdminTask", "Start a task on this process. This acknowledgment does not persist work intent."), reg.runAdminTask)
-	Register(reg, adminTaskOp("POST", "/{key}/cancel", "cancelAdminTask", "Request cancellation on this process; effects already performed remain."), reg.cancelAdminTask)
+	// A run request for a task already running here, or a cancel request for
+	// one that is not, is 409.
+	run := adminTaskOp("POST", "/{key}/run", "runAdminTask", "Start a task on this process. This acknowledgment does not persist work intent.")
+	run.Errors = append(run.Errors, http.StatusConflict)
+	Register(reg, run, reg.runAdminTask)
+	cancel := adminTaskOp("POST", "/{key}/cancel", "cancelAdminTask", "Request cancellation on this process; effects already performed remain.")
+	cancel.Errors = append(cancel.Errors, http.StatusConflict)
+	Register(reg, cancel, reg.cancelAdminTask)
 	Register(reg, adminTaskOp("GET", "/{key}/triggers", "getAdminTaskSchedule", "Read persisted schedule configuration and its canonical validator."), reg.getAdminTaskSchedule)
 	update := adminTaskOp("PUT", "/{key}/triggers", "updateAdminTaskSchedule", "Replace a captured schedule and apply it on this process. Other processes reload on restart.")
 	update.Guarded = true

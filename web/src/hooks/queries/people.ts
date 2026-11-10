@@ -7,6 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 
 import { adminRefreshPerson, adminUpdatePerson } from "@/api/v2/people";
 import type { ItemDetail, Person, UpdatePersonRequest } from "@/api/types";
@@ -255,11 +256,13 @@ export function useRefreshPerson(id: string | undefined, isAdmin: boolean) {
         observePersonRefresh(queryClient, refreshedId);
       }
       toast.success(
-        result.mode === "admin" ? "Person metadata refreshed" : "Person refresh queued",
+        result.mode === "admin"
+          ? t("web.person.toast.refreshed")
+          : t("web.person.toast.refreshQueued"),
       );
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Refresh failed");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.refreshFailed"));
     },
   });
 }
@@ -286,10 +289,10 @@ export function useUpdatePersonMetadata(id: string | undefined) {
         queryClient.invalidateQueries({ queryKey: personKeys.detail(id) }),
         invalidatePersonItemDetails(queryClient, id),
       ]);
-      toast.success("Person metadata saved");
+      toast.success(t("web.person.toast.saved"));
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save metadata");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.saveMetadataFailed"));
     },
   });
 }

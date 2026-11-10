@@ -9,6 +9,7 @@ import (
 	"net/mail"
 	"net/url"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,18 @@ const (
 // can refuse to reopen the wizard once an install has been through it; it says
 // nothing about whether any optional step was configured.
 const SetupCompletedSettingKey = "setup.completed"
+
+// DashboardHiddenAttentionSettingKey lists the setup notices (by health item
+// id, such as "email") an admin hid from the Dashboard's Needs attention
+// panel, as a JSON array of strings. It is server-wide, so a server that
+// deliberately runs without mail stops asking every admin. Only the web
+// client reads it; empty hides nothing.
+const DashboardHiddenAttentionSettingKey = "ui.dashboard.hidden_attention"
+
+const (
+	maxDashboardHiddenAttentionIDs   = 32
+	maxDashboardHiddenAttentionIDLen = 64
+)
 
 // CatalogScopeVersionsToLibrarySettingKey makes a library-scoped catalog read
 // (library_id on the v2 item, versions, and episode operations) return only
@@ -207,6 +220,63 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // takes effect on restart.
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
 
+// Backup settings (docs/architecture/backups.md). internal/backup reads them
+// live at each run, so none needs a restart.
+const (
+	// BackupEnabledSettingKey turns the nightly backup on. "Back up now" works
+	// either way.
+	BackupEnabledSettingKey = "backup.enabled"
+	// BackupTimeSettingKey is the server-local HH:MM the nightly backup starts.
+	BackupTimeSettingKey = "backup.time"
+	// BackupKeepSettingKey is how many nightly and manual backups rotation
+	// keeps, from MinBackupKeep to MaxBackupKeep.
+	BackupKeepSettingKey = "backup.keep"
+	// BackupIncludeIntroFingerprintsSettingKey keeps intro fingerprint data in
+	// the dump. Without it, intro detection analyzes a season again when its
+	// next episode arrives.
+	BackupIncludeIntroFingerprintsSettingKey = "backup.include_intro_fingerprints"
+	// BackupIncludeSubtitlesSettingKey copies downloaded subtitles into the
+	// backup's blobs.
+	BackupIncludeSubtitlesSettingKey = "backup.include_subtitles"
+	// BackupDestinationSettingKey names where backups are written:
+	// BackupDestinationDefault, the operational blob store, or
+	// BackupDestinationS3, the dedicated bucket the backup.s3.* keys name.
+	BackupDestinationSettingKey = "backup.destination"
+	BackupDestinationDefault    = "default"
+	BackupDestinationS3         = "s3"
+	// The dedicated backup bucket. The secret key is encrypted at rest.
+	BackupS3EndpointSettingKey  = "backup.s3.endpoint"
+	BackupS3RegionSettingKey    = "backup.s3.region"
+	BackupS3PathStyleSettingKey = "backup.s3.path_style"
+	BackupS3BucketSettingKey    = "backup.s3.bucket"
+	BackupS3KeyPrefixSettingKey = "backup.s3.key_prefix"
+	BackupS3AccessKeySettingKey = "backup.s3.access_key"
+	BackupS3SecretKeySettingKey = "backup.s3.secret_key"
+	// BackupS3KeyAcknowledgedSettingKey is the SECRET_KEY check value the
+	// admin confirmed keeping a copy of. S3 backups run only while it equals
+	// this server's; only the acknowledge-key endpoint writes it.
+	BackupS3KeyAcknowledgedSettingKey = "backup.s3.key_acknowledged"
+	MinBackupKeep                     = 1
+	MaxBackupKeep                     = 60
+	DefaultBackupTime                 = "04:00"
+	DefaultBackupKeep                 = 7
+)
+
+// ParseBackupTime reads a backup.time value, "H:MM" or "HH:MM" on a 24-hour
+// clock.
+func ParseBackupTime(value string) (hour, minute int, ok bool) {
+	h, m, found := strings.Cut(strings.TrimSpace(value), ":")
+	if !found || len(h) < 1 || len(h) > 2 || len(m) != 2 {
+		return 0, 0, false
+	}
+	hour, errH := strconv.Atoi(h)
+	minute, errM := strconv.Atoi(m)
+	if errH != nil || errM != nil || hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+		return 0, 0, false
+	}
+	return hour, minute, true
+}
+
 // ServerLocalURLSettingKey is the API server's address on the local network,
 // for a deployment whose LAN advertisement cannot reach the network or names
 // the wrong port (Docker bridge networking). Signed-in clients read it from the
@@ -349,7 +419,9 @@ var adminSettingDefaults = map[string]string{
 	"markers.online_storage":               "stored",
 	"markers.detect_intros":                "true",
 	"markers.detect_credits":               "true",
-	"markers.share_by_default":             "true",
+	// Unset until the admin saves the setup wizard's sharing choice; a
+	// migration stored true on servers set up before the wizard saved it.
+	"markers.share_by_default": "",
 
 	// Background person metadata lookups per API node per minute.
 	MetadataPersonRefreshPerMinuteSettingKey: "120",
@@ -374,6 +446,7 @@ var adminSettingDefaults = map[string]string{
 	"playback.preview_image_width":                   "300",
 	"playback.trickplay_interval_seconds":            "10",
 	"playback.trickplay_workers":                     "1",
+	"playback.trickplay_node_capacity":               "1",
 	"playback.trickplay_execution":                   "local",
 	ChapterThumbnailSoftwareToneMapSettingKey:        "true",
 	PlaybackTranscodeHardwareToneMapSettingKey:       "true",
@@ -400,8 +473,6 @@ var adminSettingDefaults = map[string]string{
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",
-	"recommendations.embedding_base_url":         "http://ollama:11434",
-	"recommendations.embedding_model":            "all-minilm",
 	"recommendations.embeddings_cron":            "0 3 * * *",
 	"recommendations.taste_profiles_cron":        "0 4 * * *",
 	"recommendations.cowatch_cron":               "30 4 * * *",
@@ -409,10 +480,10 @@ var adminSettingDefaults = map[string]string{
 	"recommendations.taste_decay_half_life_days": "180",
 	"recommendations.diversity_lambda":           "0.7",
 
-	"ai.base_url":                         "https://api.openai.com",
 	"ai.auth_mode":                        "api_key",
 	"ai.reasoning_effort":                 "",
-	"ai.chat_model":                       "gpt-4o-mini",
+	AIServiceTierSettingKey:               "",
+	"ai.chat_model":                       "gpt-6-luna",
 	"ai.asr_model":                        "whisper-1",
 	"ai.max_concurrent_jobs":              "2",
 	"subtitle_ai.enabled":                 "false",
@@ -518,6 +589,19 @@ var adminSettingDefaults = map[string]string{
 
 	PlaybackBandwidthProbeAutomaticSettingKey:  "true",
 	PlaybackBandwidthProbeMaxAgeDaysSettingKey: strconv.Itoa(DefaultBandwidthProbeMaxAgeDays),
+
+	BackupEnabledSettingKey:                  "true",
+	BackupTimeSettingKey:                     DefaultBackupTime,
+	BackupKeepSettingKey:                     strconv.Itoa(DefaultBackupKeep),
+	BackupIncludeIntroFingerprintsSettingKey: "false",
+	BackupIncludeSubtitlesSettingKey:         "true",
+	BackupDestinationSettingKey:              BackupDestinationDefault,
+	BackupS3EndpointSettingKey:               "",
+	BackupS3RegionSettingKey:                 "",
+	BackupS3PathStyleSettingKey:              "false",
+	BackupS3BucketSettingKey:                 "",
+	BackupS3KeyPrefixSettingKey:              "",
+	BackupS3AccessKeySettingKey:              "",
 }
 
 var legacyAdminSettingFallbacks = []struct {
@@ -543,9 +627,18 @@ var legacyAdminSettingFallbacks = []struct {
 	{"s3.private_key_prefix", "s3.operational_key_prefix"},
 	{"s3.private_access_key", "s3.operational_access_key"},
 	{"s3.private_secret_key", "s3.operational_secret_key"},
-	{"ai.base_url", "subtitle_ai.base_url"}, //nolint:goconst // Explicit compatibility pair.
-	{"ai.api_key", "subtitle_ai.api_key"},   //nolint:goconst // Explicit compatibility pair.
 	{"ai.chat_model", "subtitle_ai.chat_model"},
+}
+
+// AdminSettingDefaultKeys lists every key with an admin default, sorted. The
+// backup restore table must classify each one.
+func AdminSettingDefaultKeys() []string {
+	keys := make([]string, 0, len(adminSettingDefaults))
+	for key := range adminSettingDefaults {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // EffectiveAdminSettings overlays persisted values onto the runtime defaults
@@ -654,8 +747,25 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"notifications.apple_push_delivery_enabled", "notifications.android_push_delivery_enabled",
 		"catalog.search.meilisearch.semantic_enabled", "catalog.search.meilisearch.binary_quantized",
 		"s3.public_path_style", "s3.private_path_style", "s3.user_db_path_style",
-		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey:
+		AuthLocalPasswordLoginSettingKey, AuthEmailAutoMatchSettingKey, ServerLANDiscoverySettingKey,
+		BackupEnabledSettingKey, BackupIncludeIntroFingerprintsSettingKey, BackupIncludeSubtitlesSettingKey,
+		BackupS3PathStyleSettingKey:
 		return normalizeAdminBool(key, value)
+
+	case BackupTimeSettingKey:
+		hour, minute, ok := ParseBackupTime(value)
+		if !ok {
+			return "", fmt.Errorf("%s must be a 24-hour time such as 04:00", key)
+		}
+		return fmt.Sprintf("%02d:%02d", hour, minute), nil
+	case BackupKeepSettingKey:
+		return normalizeAdminInt(key, value, MinBackupKeep, MaxBackupKeep)
+	case BackupDestinationSettingKey:
+		return normalizeAdminEnum(key, value, BackupDestinationDefault, BackupDestinationS3)
+	case BackupS3EndpointSettingKey:
+		return normalizeAdminURL(key, value)
+	case BackupS3KeyPrefixSettingKey:
+		return strings.Trim(value, "/"), nil
 
 	case AuthProviderRecheckIntervalSettingKey:
 		parsed, err := parseDuration(value)
@@ -712,7 +822,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		// Rows are retained 30 days after their last update, so a longer
 		// lifetime would outlive the reading it describes.
 		return normalizeAdminInt(key, value, 1, maxBandwidthProbeMaxAgeDays)
-	case "playback.trickplay_workers":
+	// A node takes no more runs than API servers send it, so its capacity
+	// shares the per-server worker range.
+	case "playback.trickplay_workers", "playback.trickplay_node_capacity":
 		return normalizeAdminInt(key, value, 1, 64)
 	case "playback.watched_threshold":
 		return normalizeAdminInt(key, value, 1, 100)
@@ -847,9 +959,11 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return "", fmt.Errorf("%s must be a two-letter ISO 639-1 code or %q", key, MetadataFallbackOriginal)
 	case "ai.auth_mode":
-		return normalizeAdminEnum(key, value, "api_key", "chatgpt")
+		return normalizeAdminEnum(key, value, "api_key", aiAuthModeChatGPT)
 	case "ai.reasoning_effort":
 		return normalizeAdminEnum(key, value, "", "none", "minimal", "low", "medium", "high", "xhigh", "max")
+	case AIServiceTierSettingKey:
+		return normalizeAdminEnum(key, value, "", "priority", "ultrafast")
 	case "subtitle_ai.transcribe_quota_period":
 		return normalizeAdminEnum(key, value, "day", "week", "month")
 	case "policy.decision_log_verbosity":
@@ -872,8 +986,16 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		}
 		return value, nil
 
-	case "ai.base_url", "ai.asr_base_url", "recommendations.embedding_base_url",
-		"server.public_url", "jellyfin_compat.public_url",
+	case legacyAITextURLSetting, legacyAITextKeySetting, legacyAISpeechURLSetting, legacyAISpeechKeySetting,
+		legacySubtitleURLSetting, legacySubtitleKeySetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; connect the provider in AI Services", key)
+	case legacyEmbeddingURLSetting, legacyEmbeddingTokenSetting, legacyOpenAIEmbeddingModel,
+		legacyOpenAIEmbeddingToken, legacyEmbeddingProviderSetting:
+		return "", fmt.Errorf("%s was replaced by AI providers; choose the embedding provider on Recommendations", key)
+	case AITextProviderSettingKey, AISpeechProviderSettingKey, EmbeddingProviderSettingKey:
+		return value, nil
+
+	case "server.public_url", "jellyfin_compat.public_url",
 		"s3.public_endpoint", "s3.public_read_endpoint", "s3.private_endpoint",
 		"s3.user_db_endpoint", "catalog.search.meilisearch.url":
 		return normalizeAdminURL(key, value)
@@ -895,6 +1017,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 			return "", fmt.Errorf("%s must be a valid email address", key)
 		}
 		return value, nil
+
+	case DashboardHiddenAttentionSettingKey:
+		return normalizeDashboardHiddenAttention(value)
 
 	case "defaults.card_overlays", "opslog.bucket_policies", "ui.admin_theme_vars":
 		if value == "" {
@@ -981,6 +1106,9 @@ func ValidateAdminSettingsWithCapabilities(values map[string]string, capabilitie
 
 	effective := EffectiveAdminSettings(values)
 	if err := reasoning.Validate(effective["ai.chat_model"], effective["ai.reasoning_effort"]); err != nil {
+		return err
+	}
+	if err := ValidateAIProviderBindings(effective); err != nil {
 		return err
 	}
 	for _, prefix := range []string{"s3.public", "s3.private"} {
@@ -1322,6 +1450,47 @@ func normalizeRatingSourceList(key, value string) (string, error) {
 		return "", fmt.Errorf("%s: %q is not a rating source name", key, malformed)
 	}
 	return strings.Join(sources, ","), nil
+}
+
+// normalizeDashboardHiddenAttention canonicalizes the hidden notice list:
+// trimmed, unique, non-empty ids in their original order. An empty list
+// stores as empty.
+func normalizeDashboardHiddenAttention(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	// Decode loosely and check each element: a []string target would take
+	// JSON null, at the top or as an element, without an error.
+	notStrings := fmt.Errorf("%s must be a JSON array of strings", DashboardHiddenAttentionSettingKey)
+	var ids []any
+	if err := json.Unmarshal([]byte(value), &ids); err != nil || ids == nil {
+		return "", notStrings
+	}
+	kept := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, element := range ids {
+		id, ok := element.(string)
+		if !ok {
+			return "", notStrings
+		}
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		if len(id) > maxDashboardHiddenAttentionIDLen {
+			return "", fmt.Errorf("%s ids must be at most %d characters", DashboardHiddenAttentionSettingKey, maxDashboardHiddenAttentionIDLen)
+		}
+		seen[id] = true
+		kept = append(kept, id)
+	}
+	if len(kept) > maxDashboardHiddenAttentionIDs {
+		return "", fmt.Errorf("%s may list at most %d ids", DashboardHiddenAttentionSettingKey, maxDashboardHiddenAttentionIDs)
+	}
+	if len(kept) == 0 {
+		return "", nil
+	}
+	encoded, _ := json.Marshal(kept)
+	return string(encoded), nil
 }
 
 func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {

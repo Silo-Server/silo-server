@@ -445,6 +445,92 @@
       "body_file": "admin_account_ips.json"
     },
     {
+      "name": "admin_account_profile_clear_pin",
+      "operation_id": "updateAdminUserProfile",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "PATCH",
+        "path": "/api/v2/admin/users/7/profiles/p-owner",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"pin\":null}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Profile",
+      "body_file": "admin_account_profile_clear_pin.json"
+    },
+    {
+      "name": "admin_account_profile_create",
+      "operation_id": "createAdminUserProfile",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/users/7/profiles",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        },
+        "body": "{\"name\":\"Guest\"}"
+      },
+      "expected_status": 201,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Profile",
+      "body_file": "admin_account_profile_create.json"
+    },
+    {
+      "name": "admin_account_profile_get",
+      "operation_id": "getAdminUserProfile",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-owner",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Profile",
+      "body_file": "admin_account_profile_get.json"
+    },
+    {
+      "name": "admin_account_profile_not_found",
+      "operation_id": "getAdminUserProfile",
+      "scenario": "Administrator account and group management with synthetic records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/users/7/profiles/p-elsewhere",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 404,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "admin_account_profile_not_found.json"
+    },
+    {
       "name": "admin_account_profile_section_settings",
       "operation_id": "getAdminUserProfileSectionSettings",
       "scenario": "Administrator account and group management with synthetic records.",
@@ -889,6 +975,27 @@
       "body_file": "admin_apple_push_test_notification.json"
     },
     {
+      "name": "admin_catalog_capabilities",
+      "operation_id": "getAdminCatalogCapabilities",
+      "scenario": "Catalog capabilities report the item listing and its content_ids bound.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/catalog/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminCatalogCapabilities",
+      "body_file": "admin_catalog_capabilities.json"
+    },
+    {
       "name": "admin_catalog_export_link",
       "operation_id": "publishCatalogExportJob",
       "scenario": "A saved signed URL retains its original seven-day expiry.",
@@ -1131,6 +1238,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminJob",
       "body_file": "admin_collection_template_job_accepted.json"
+    },
+    {
+      "name": "admin_dashboard_layout_unsaved",
+      "operation_id": "getAdminDashboardLayout",
+      "scenario": "An account with no saved layout reads null for both members and still gets a validator for its first save.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/dashboard/layout",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json",
+        "ETag": "\"4e70bed0e7ca91734d4c67a3.2yvhksboyyzbs\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminDashboardLayout",
+      "body_file": "admin_dashboard_layout_unsaved.json"
     },
     {
       "name": "admin_device",
@@ -2394,6 +2521,25 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminMatchApplied",
       "body_file": "admin_match_apply.json"
+    },
+    {
+      "name": "admin_match_hints",
+      "operation_id": "getAdminItemMatchHints",
+      "scenario": "Delegated curator reads the title, year, and provider IDs the scanner parsed from the item's folder.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/items/item-1/match/hints",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminMatchHints",
+      "body_file": "admin_match_hints.json"
     },
     {
       "name": "admin_match_search",
@@ -6453,6 +6599,28 @@
       "body_file": "get_admin_item_trickplay_ok.json"
     },
     {
+      "name": "get_admin_playback_history_capabilities_ok",
+      "operation_id": "getAdminPlaybackHistoryCapabilities",
+      "scenario": "Administrator playback history capabilities name the window filter and the entry fields the server records.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/playback-history/capabilities",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json",
+        "ETag": "\"8e5e419f09c4d6506da92cbfdc72d8ec4f2ae7ca528d216366c0adf84abb8e43\""
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminPlaybackHistoryCapabilities",
+      "body_file": "get_admin_playback_history_capabilities_ok.json"
+    },
+    {
       "name": "get_admin_section_ok",
       "operation_id": "getAdminSection",
       "scenario": "The canonical administrator section editor returns its recipe configuration and a strong validator.",
@@ -6841,6 +7009,23 @@
       "body_file": "get_current_user_ok.json"
     },
     {
+      "name": "get_device_login_bound",
+      "operation_id": "getDeviceLogin",
+      "scenario": "The lookup of a request started with a session binding carries the binding, which a sender compares with the binding of the request whose code the person compared.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/device?code=1357-2468"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DeviceLogin",
+      "body_file": "get_device_login_bound.json"
+    },
+    {
       "name": "get_device_login_capability_ok",
       "operation_id": "getDeviceLoginCapability",
       "scenario": "Device pairing support before login.",
@@ -7217,7 +7402,7 @@
     {
       "name": "get_home_capabilities_ok",
       "operation_id": "getHomeCapabilities",
-      "scenario": "The home capability document: getHomeLayout accepts include_items up to include_items_max.",
+      "scenario": "The home capability document: getHomeLayout accepts include_items up to include_items_max, listHomeSections and listLibrarySections accept item_limit up to section_item_limit_max, and getHomeSectionItems and getHomeLayout accept item_limit up to row_item_limit_max.",
       "request": {
         "method": "GET",
         "path": "/api/v2/home/capabilities",
@@ -7230,7 +7415,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"59a9dab7b74c563cd0809b2a1152c35a11c592c44ebda15b6ca6c64da090c7a9\""
+        "ETag": "\"e524a14c4883542923d7e2be58ae12ff5a2e649615878e7fcafd8ff387f88801\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/HomeCapabilities",
@@ -7256,6 +7441,27 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "get_home_layout_include_items_out_of_range.json"
+    },
+    {
+      "name": "get_home_layout_item_limit_out_of_range",
+      "operation_id": "getHomeLayout",
+      "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/layout?include_items=1&item_limit=101",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_home_layout_item_limit_out_of_range.json"
     },
     {
       "name": "get_home_layout_ok",
@@ -7318,6 +7524,48 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/HomeLayout",
       "body_file": "get_home_layout_with_items_ok.json"
+    },
+    {
+      "name": "get_home_section_items_capped_ok",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "A read with item_limit answers at most that many cards, and has_more reports that the section holds more than it answered.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/continue_watching/items?item_limit=1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/Section",
+      "body_file": "get_home_section_items_capped_ok.json"
+    },
+    {
+      "name": "get_home_section_items_item_limit_out_of_range",
+      "operation_id": "getHomeSectionItems",
+      "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections/continue_watching/items?item_limit=101",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "get_home_section_items_item_limit_out_of_range.json"
     },
     {
       "name": "get_home_section_items_not_found",
@@ -8656,7 +8904,7 @@
       },
       "expected_status": 200,
       "response_headers": {
-        "Cache-Control": "no-cache",
+        "Cache-Control": "private, no-cache",
         "Content-Type": "application/json"
       },
       "response_media_type": "application/json",
@@ -9235,6 +9483,27 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AccountIdentityCollection",
       "body_file": "list_account_identities_ok.json"
+    },
+    {
+      "name": "list_admin_catalog_items_ok",
+      "operation_id": "listAdminCatalogItems",
+      "scenario": "Administrator catalog page carries an episode with its series placement and one file version, a series with no versions, string IDs and a scoped cursor.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/catalog/items?limit=2",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminCatalogItemCollection",
+      "body_file": "list_admin_catalog_items_ok.json"
     },
     {
       "name": "list_admin_collection_sections_ok",
@@ -10168,6 +10437,27 @@
       "body_file": "list_home_sections_invalid_image_size.json"
     },
     {
+      "name": "list_home_sections_item_limit_out_of_range",
+      "operation_id": "listHomeSections",
+      "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/home/sections?item_limit=101",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_home_sections_item_limit_out_of_range.json"
+    },
+    {
       "name": "list_home_sections_ok",
       "operation_id": "listHomeSections",
       "scenario": "The home page's sections with their catalog cards, artwork presigned at the requested size.",
@@ -10412,6 +10702,27 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "list_library_sections_invalid_image_size.json"
+    },
+    {
+      "name": "list_library_sections_item_limit_out_of_range",
+      "operation_id": "listLibrarySections",
+      "scenario": "An item_limit above the maximum of 100 is a validation failure naming the parameter.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/library/1/sections?item_limit=101",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 422,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "list_library_sections_item_limit_out_of_range.json"
     },
     {
       "name": "list_library_sections_ok",
@@ -13072,6 +13383,24 @@
       "body_file": "playback_stop_replayed.json"
     },
     {
+      "name": "poll_device_login_binding_mismatch",
+      "operation_id": "pollDeviceLogin",
+      "scenario": "A poll of a bound request without the secret its binding was made from: 403 under the domain's own type, and the request is left as it was.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/device/poll",
+        "body": "{\"device_code\":\"dev-bound\"}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "poll_device_login_binding_mismatch.json"
+    },
+    {
       "name": "poll_device_login_device_code_required",
       "operation_id": "pollDeviceLogin",
       "scenario": "A poll without its device code is a validation failure naming the member.",
@@ -13746,6 +14075,26 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "rematch_stale_id_permission_denied.json"
+    },
+    {
+      "name": "remove_failed_request_ok",
+      "operation_id": "removeFailedRequest",
+      "scenario": "Profile-scoped lifecycle response with synthetic provider state.",
+      "request": {
+        "method": "DELETE",
+        "path": "/api/v2/requests/r-1",
+        "headers": {
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
+        }
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
     },
     {
       "name": "remove_history_entries_not_found",

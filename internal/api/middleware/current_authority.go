@@ -48,7 +48,7 @@ func (am *AuthMiddleware) RevalidateCurrent(ctx context.Context, bearer string, 
 		// The bounded operations that recheck here do not depend on the
 		// account role, so only the session itself must still be active,
 		// and a remote-playback session must still admit the operation.
-		authority, active, err := am.sessionValidator.ActiveSession(ctx, current.SessionID)
+		authority, active, err := am.sessionValidator.ActiveSession(ctx, current.SessionID, current.UserID)
 		if err != nil {
 			return err
 		}

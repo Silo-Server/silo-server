@@ -5,6 +5,7 @@ import type {
   RequestIntegration,
 } from "@/api/types";
 import type { RequestRoute, RequestRouteMediaType, RequestRouting } from "@/api/v2/adminRequests";
+import { t } from "@/i18n";
 import type { Tier } from "./requestRoutingModel";
 
 /** Every request server is fulfilled by a plugin exposing this capability. */
@@ -134,7 +135,9 @@ export function serverTypeLabel(
   const kind = serverKind(server);
   if (KIND_LABELS[kind]) return KIND_LABELS[kind];
   const entry = serverInstallation(installations, server.installation_id, server.capability_id);
-  return entry ? installationOptionLabel(entry) : "Request server";
+  return entry
+    ? installationOptionLabel(entry)
+    : t("web.admin.settings.requests.servers.typeFallback");
 }
 
 /**
@@ -194,16 +197,18 @@ export function serverReady(
   );
 }
 
-export function mediaTypePlural(mediaType: RequestRouteMediaType): string {
-  return mediaType === "series" ? "series" : "movies";
-}
-
 function routeUsage(route: RequestRoute, serverId: string): string | null {
   const hd = route.hd.integration_id === serverId;
   const uhd = route.uhd.integration_id === serverId;
   if (!hd && !uhd) return null;
-  const name = route.is_fallback ? "Everything else" : route.name;
-  return `${hd ? name : `${name} 4K`} (${mediaTypePlural(route.media_type)})`;
+  const name = route.is_fallback
+    ? t("web.admin.settings.requests.shared.everythingElse")
+    : route.name;
+  return t("web.admin.settings.requests.servers.routeUsage", {
+    route: name,
+    tier: hd ? "hd" : "uhd",
+    media_type: route.media_type,
+  });
 }
 
 /**
@@ -225,11 +230,14 @@ export function serverRouteUsage(serverId: string, routes: RequestRoute[]): stri
 export function standardServerUsage(serverId: string, routing: RequestRouting): string {
   return routing.standard
     .flatMap((destination) => {
-      const plural = mediaTypePlural(destination.media_type);
-      const label = plural.charAt(0).toUpperCase() + plural.slice(1);
+      const values = { media_type: destination.media_type };
       return [
-        destination.hd_integration_id === serverId ? label : null,
-        destination.uhd_integration_id === serverId ? `4K ${plural}` : null,
+        destination.hd_integration_id === serverId
+          ? t("web.admin.settings.requests.servers.standardUsageHd", values)
+          : null,
+        destination.uhd_integration_id === serverId
+          ? t("web.admin.settings.requests.servers.standardUsageUhd", values)
+          : null,
       ];
     })
     .filter(Boolean)

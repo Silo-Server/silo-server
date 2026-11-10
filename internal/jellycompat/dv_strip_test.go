@@ -3,13 +3,16 @@ package jellycompat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderouting"
@@ -92,8 +95,8 @@ var (
 	androidTVHDR10Display = append(append([]string(nil), androidTVDVProfile8Disabled...), "HDR10Plus")
 )
 
-// newDVStripHandler serves one profile 8.1 version with tone mapping off (the
-// server default), so a full HDR encode is never available.
+// newDVStripHandler serves one profile 8.1 version with tone mapping off,
+// so a full HDR encode is never available.
 func newDVStripHandler(t *testing.T, localStrip bool) (*PlaybackHandler, string) {
 	t.Helper()
 	return newDVStripHandlerWithTrack(t, localStrip, dvStripProfile8Track())
@@ -112,7 +115,10 @@ func newDVStripHandlerWithTrack(t *testing.T, localStrip bool, track models.Vide
 	version.AudioTracks = []models.AudioTrack{{Codec: "eac3", Channels: 6, Default: true}}
 	version.SubtitleTracks = nil
 	handler.content = &stubContentService{detail: &upstreamItemDetail{ContentID: "movie-1", Versions: []catalog.FileVersion{version}}}
-	handler.SettingsRepo = stubSettingsReader{values: map[string]string{}}
+	handler.SettingsRepo = stubSettingsReader{values: map[string]string{
+		config.PlaybackTranscodeHardwareToneMapSettingKey: "false",
+		config.PlaybackTranscodeSoftwareToneMapSettingKey: "false",
+	}}
 	handler.compatDVRPUProbe = func(context.Context, string) bool { return true }
 	handler.compatDVStripLocalProbe = func() bool { return localStrip }
 	return handler, routeID
@@ -213,11 +219,25 @@ func TestPlaybackInfoWithoutStripOrToneMapStillHasNoRoute(t *testing.T) {
 
 			rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(androidTVSDRDisplay...))
 
-			if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "PlaybackUnavailable") {
-				t.Fatalf("status = %d body = %s, want PlaybackUnavailable", rr.Code, rr.Body.String())
-			}
+			assertNoCompatibleStream(t, handler, routeID, rr.Code, rr.Body.Bytes())
 		})
 	}
+}
+
+// The strip is packaged as fMP4, so a client that lists HEVC for MPEG-TS HLS
+// only, and cannot take a progressive remux of HEVC, must not be handed one.
+func TestPlaybackInfoSkipsStripForTSOnlyClient(t *testing.T) {
+	handler, routeID := newDVStripHandler(t, true)
+	body := androidTVRangeProfile(androidTVDVProfile8Disabled...)
+	body = strings.Replace(body, `,{"AudioCodec":"aac,ac3,eac3","Container":"mp4","Context":"Streaming","Protocol":"hls","Type":"Video","VideoCodec":"hevc,h264"}`, "", 1)
+	body = strings.Replace(body, `"VideoCodec":"h264,hevc,av1"`, `"VideoCodec":"h264,av1"`, 1)
+	if strings.Contains(body, `"Container":"mp4"`) || strings.Contains(body, "h264,hevc,av1") {
+		t.Fatal("fixture still lists fMP4 HLS or HEVC direct play")
+	}
+
+	rr := servePlaybackInfo(handler, routeID, body)
+
+	assertNoCompatibleStream(t, handler, routeID, rr.Code, rr.Body.Bytes())
 }
 
 func TestPlaybackInfoSkipsStripWhenRPUCannotBeStripped(t *testing.T) {
@@ -226,9 +246,7 @@ func TestPlaybackInfoSkipsStripWhenRPUCannotBeStripped(t *testing.T) {
 
 	rr := servePlaybackInfo(handler, routeID, androidTVRangeProfile(androidTVDVProfile8Disabled...))
 
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d body = %s, want no strip route for an unparseable RPU", rr.Code, rr.Body.String())
-	}
+	assertNoCompatibleStream(t, handler, routeID, rr.Code, rr.Body.Bytes())
 }
 
 func TestCompatDVStripCandidateMatchesNativePlanner(t *testing.T) {
@@ -539,5 +557,24 @@ func TestCompatDVStripIgnoresUnroutableNodes(t *testing.T) {
 
 	if handler.compatDVStripExecutable(context.Background(), catalog.FileVersion{FilePath: "/media/movie.mkv"}, 0) {
 		t.Fatal("an unhealthy or disabled node made the strip executable")
+	}
+}
+
+// Under a server cap too low for any encode, the capped pass never loads the
+// tone-map policy, so the check without the cap is the first to. A failed
+// lookup there leaves the HDR encode unknown, not impossible: the answer is
+// the same temporary 503 the negotiation loop gives, not NoCompatibleStream.
+func TestPlaybackInfoToneMapPolicyFailureWithoutCapIsTemporary(t *testing.T) {
+	version := hdr10PlusRangeTestVersion("HDR10")
+	version.Resolution, version.Bitrate = "1080p", 8_000
+	version.VideoTracks[0].Width, version.VideoTracks[0].Height = 1920, 1080
+	handler, routeID := newUnreadablePlaybackInfoHandler(t, version)
+	handler.ScopeResolver = &stubScopeResolver{scope: access.Scope{MaxLocalStreamBitrateKbps: 50, MaxRemoteStreamBitrateKbps: 50}}
+	handler.SettingsRepo = stubSettingsReader{err: errors.New("settings store unavailable")}
+	body := `{"DeviceProfile":{"DirectPlayProfiles":[],"TranscodingProfiles":[{"Type":"Video","Container":"ts","Protocol":"hls","VideoCodec":"h264","AudioCodec":"aac"}]}}`
+
+	rec := servePlaybackInfo(handler, routeID, body)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "Tone-map policy is temporarily unavailable") {
+		t.Fatalf("status = %d, body = %s; want 503 for the unknown tone-map policy", rec.Code, rec.Body.String())
 	}
 }
