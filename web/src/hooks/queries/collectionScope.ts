@@ -3,7 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { toast } from "sonner";
 
 import { normalizeQueryDefinition, type QueryDefinition } from "@/api/types";
-import { isNotFoundProblem, v2, V2ProblemError } from "@/api/v2/request";
+import { isNotFoundProblem, problemFieldDetail, v2, V2ProblemError } from "@/api/v2/request";
 import { useDebounce } from "@/hooks/useDebounce";
 import { artworkSlotLabel, draftFieldLabel, saveFailed } from "@/lib/collections/copy";
 import { changedFields, mergeDraft, takeFields, type DraftField } from "@/lib/collections/draft";
@@ -346,6 +346,8 @@ export function useCollectionDraft<Raw extends WireCollection>(
   }, []);
   const [isSaving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // The server's refusal of a name, with the name it refused: it shows until the name changes.
+  const [nameRefusal, setNameRefusal] = useState<{ name: string; message: string } | null>(null);
   const [artworkErrors, setArtworkErrors] = useState<Partial<Record<ArtworkSlot, string>>>({});
   const syncRun = useRef(0);
   const initKind = init.kind;
@@ -512,7 +514,9 @@ export function useCollectionDraft<Raw extends WireCollection>(
       }
       return { id: outcome.id, failedItems, sync: outcome.sync, warnings: outcome.warnings };
     } catch (error) {
-      setSaveError(scope.errorMessage(error, saveFailed()));
+      const refused = nameFieldError(error);
+      setNameRefusal(refused === null ? null : { name: saved.name, message: refused });
+      setSaveError(refused ?? scope.errorMessage(error, saveFailed()));
       return null;
     } finally {
       setSaving(false);
@@ -568,7 +572,11 @@ export function useCollectionDraft<Raw extends WireCollection>(
         }
       }
     } catch (error) {
-      setSaveError(scope.errorMessage(error, saveFailed()));
+      const refused = nameFieldError(error);
+      setNameRefusal(
+        refused === null ? null : { name: current.current.draft.name, message: refused },
+      );
+      setSaveError(refused ?? scope.errorMessage(error, saveFailed()));
       return false;
     } finally {
       setSaving(false);
@@ -592,6 +600,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
   const discard = useCallback(() => {
     setArtworkErrors({});
     setSaveError(null);
+    setNameRefusal(null);
     setState((previous) => ({
       ...previous,
       draft: { ...previous.base, stagedItems: previous.draft.stagedItems },
@@ -615,6 +624,9 @@ export function useCollectionDraft<Raw extends WireCollection>(
     isDirty: changed.length > 0 || artwork.length > 0,
     isSaving,
     saveError,
+    /** Why the server refused the name being edited, such as one another collection already has. */
+    nameError:
+      nameRefusal !== null && nameRefusal.name === state.draft.name ? nameRefusal.message : null,
     artworkErrors,
     syncWithServer,
     create,
@@ -623,4 +635,16 @@ export function useCollectionDraft<Raw extends WireCollection>(
     resolveConflicts,
     discard,
   };
+}
+
+/**
+ * The text of a save's refusal of the collection's name (`body.title` on a
+ * server collection, `body.name` on a personal one), or null for any other error.
+ */
+function nameFieldError(error: unknown): string | null {
+  if (!(error instanceof V2ProblemError)) return null;
+  const refusal = error.problem.errors?.find(
+    (fieldError) => fieldError.location === "body.title" || fieldError.location === "body.name",
+  );
+  return refusal ? problemFieldDetail(refusal) : null;
 }

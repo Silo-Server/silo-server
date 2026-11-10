@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestAdminCollectionServiceRejectsArtworkInDefinition(t *testing.T) {
@@ -53,6 +55,34 @@ func TestAdminCollectionServiceRejectsUnknownVisibility(t *testing.T) {
 	}
 }
 
+// TestCollectionNameErrorNamesTheField: a taken name or slug is a field
+// error, which v2 answers as 422 validation_failed at body.title or
+// body.slug and v1 as 400, never a 500.
+func TestCollectionNameErrorNamesTheField(t *testing.T) {
+	slugConflict := &pgconn.PgError{Code: "23505", ConstraintName: "library_collections_library_slug_unique"}
+	for _, tc := range []struct {
+		err       error
+		wantField string
+		wantMsg   string
+	}{
+		{err: fmt.Errorf("updating: %w", &catalog.LibraryCollectionTitleTakenError{LibraryName: "Movies"}), wantField: "title", wantMsg: "Another collection in Movies already has this name"},
+		{err: fmt.Errorf("updating library collection: %w", slugConflict), wantField: "slug"},
+		{err: &pgconn.PgError{Code: "23505", ConstraintName: "some_other_unique"}},
+		{err: errors.New("connection reset")},
+	} {
+		got := collectionNameError(tc.err)
+		if tc.wantField == "" {
+			if got != nil {
+				t.Fatalf("%v: got %v, want no field error", tc.err, got)
+			}
+			continue
+		}
+		if got == nil || got.Status != 400 || got.Field != tc.wantField || (tc.wantMsg != "" && got.Message != tc.wantMsg) {
+			t.Fatalf("%v: got %+v, want a 400 at %s", tc.err, got, tc.wantField)
+		}
+	}
+}
+
 func TestAdminCollectionLookupAPIErrorPreservesFailureClass(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -87,6 +117,60 @@ func TestAdminCollectionSourceUpdateAcceptsFranchiseID(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("validateAdminCollectionSourceUpdate: %v", err)
+	}
+}
+
+// TestAdminCollectionUpdateNameRuleDB: the editor sends its whole draft on
+// Save, so an update checks the title only when it changes it or adds a
+// library. A collection that already shares its title (made by an import)
+// still saves its other fields; a rename into a taken name, or adding a
+// library that has the name, is refused at title.
+func TestAdminCollectionUpdateNameRuleDB(t *testing.T) {
+	f := newPagingIntegrationFixture(t)
+	repo := catalog.NewLibraryCollectionRepository(f.pool)
+	h := NewLibraryCollectionHandler(repo, nil, catalog.NewItemRepository(f.pool), nil)
+	title := fmt.Sprintf("Staff Picks %d", f.account)
+	create := func(name string, library int, unique bool) string {
+		t.Helper()
+		var id string
+		if unique {
+			created, err := h.CreateAdminCollection(t.Context(), AdminCollectionCreate{LibraryIDs: []int{library}, Title: name, CollectionType: "manual"})
+			if err != nil {
+				t.Fatalf("create %q: %v", name, err)
+			}
+			id = created.ID
+		} else {
+			created, err := repo.Create(t.Context(), catalog.CreateLibraryCollectionInput{LibraryIDs: []int{library}, Slug: "staff-picks", Title: name})
+			if err != nil {
+				t.Fatalf("import %q: %v", name, err)
+			}
+			id = created.ID
+		}
+		t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM library_collections WHERE id = $1`, id) })
+		return id
+	}
+	create(title, f.library, true)
+	imported := create(title, f.library, false)
+	other := create(title+" too", f.library, true)
+	create(title, f.hidden, true)
+
+	for _, tc := range []struct {
+		name      string
+		id        string
+		update    AdminCollectionUpdate
+		wantTaken bool
+	}{
+		{name: "full draft of an existing duplicate", id: imported, update: AdminCollectionUpdate{Title: new(title), Description: new("Edited"), LibraryIDs: &[]int{f.library}}},
+		{name: "case and spaces only", id: imported, update: AdminCollectionUpdate{Title: new("  " + strings.ToUpper(title) + " ")}},
+		{name: "rename into a taken name", id: other, update: AdminCollectionUpdate{Title: new(title)}, wantTaken: true},
+		{name: "add a library that has the name", id: imported, update: AdminCollectionUpdate{Title: new(title), LibraryIDs: &[]int{f.library, f.hidden}}, wantTaken: true},
+	} {
+		_, err := h.UpdateAdminCollection(t.Context(), tc.id, tc.update)
+		apiErr, isField := errors.AsType[*APIError](err)
+		taken := isField && apiErr.Field == "title"
+		if taken != tc.wantTaken || (!tc.wantTaken && err != nil) {
+			t.Fatalf("%s: err = %v, want title taken %v", tc.name, err, tc.wantTaken)
+		}
 	}
 }
 

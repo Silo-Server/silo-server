@@ -401,6 +401,27 @@ replaces that with the schedule's next run unless the schedule was saved while i
 The frozen `/api/v1/collections/{id}` update ignores a `sync_schedule` member, and `/api/v1`
 collection responses carry no `sync_cadence`.
 
+## Server collection names
+
+`createAdminCollection` and `updateAdminCollection` refuse a title that another server
+collection already has in one of the collection's libraries (its `library_ids`, or the legacy
+`library_id` of a collection without them). Titles compare without case or extra spaces,
+and hidden collections count. The refusal is `422 validation_failed` with one error at
+`body.title`, whose `detail` names a library both collections show in ("Another collection in
+Movies already has this name"). The frozen `/api/v1` routes answer `400 bad_request` with the
+same message. Clients send the whole collection on update, so an update checks the title only
+when it changes it (beyond case and spaces), in all the collection's libraries, or adds
+libraries, in just the added ones. Collections that already share a title, such as an import's,
+still save their other fields. Imports, templates and restores don't apply the rule.
+
+The `slug` is a URL name the server derives from the title when a create leaves it out. It is
+unique only within the collection's first library, and a create takes the first free
+`<slug>-<n>` instead of failing, so titles that differ only in punctuation ("Sci-Fi" and
+"Sci Fi"), or that have no Latin letters or digits (which derive `collection`), save as
+separate collections. A collection whose `library_ids` no longer include its first library
+moves to the new first one the same way. An update that names a `slug` another collection of
+that library uses is refused at `body.slug`.
+
 ## Collections that hold a title
 
 `listCollections` (`GET /api/v2/collections`) accepts an optional `contains_item`, a title's
