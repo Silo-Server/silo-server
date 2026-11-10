@@ -3130,10 +3130,6 @@ func (s *MetadataService) mergeAndPersist(
 		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
 			return nil, err
 		}
-	} else if req.resetToProvider {
-		if err := s.clearUnlistedCredits(ctx, contentID, item, mergeLocked); err != nil {
-			return nil, err
-		}
 	}
 	persistedContentID, err := s.persistItemAndProviderIDs(
 		ctx,
@@ -3156,6 +3152,14 @@ func (s *MetadataService) mergeAndPersist(
 	item.ContentID = contentID
 	unlockProviderDedup()
 	providerDedupReleased = true
+	// A reset's item write committed, so the credits the providers no longer
+	// list can go: before it, a failed write would have lost them for nothing.
+	// Credits the providers do list replace the stored ones below.
+	if req.resetToProvider {
+		if err := s.clearUnlistedCredits(ctx, contentID, item, mergeLocked); err != nil {
+			return nil, err
+		}
+	}
 	if handleArtwork {
 		// The failure is logged; a local re-apply also fails on it, so its
 		// fingerprint does not advance past artwork that was never queued.
