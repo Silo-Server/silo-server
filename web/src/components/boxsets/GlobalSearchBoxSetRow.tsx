@@ -3,6 +3,7 @@ import { EnterKeyHint } from "@/components/ui/kbd";
 import { useImageLoaded } from "@/hooks/useImageLoaded";
 import { boxSetFilmCount, boxSetYears } from "@/lib/boxSets";
 import { cn } from "@/lib/utils";
+import { useAppLanguage, useT } from "@/i18n";
 
 /** A box set option in the global search list; the list owns the layout. */
 export function GlobalSearchBoxSetRow({
@@ -22,6 +23,9 @@ export function GlobalSearchBoxSetRow({
   onSelect: () => void;
   onPick: (boxSet: BoxSetSummary) => void;
 }) {
+  const t = useT();
+  // The film count comes from a plain helper; follow language changes.
+  useAppLanguage();
   const { loaded, onLoad, onError } = useImageLoaded(boxSet.poster_url);
   const detail = [boxSetFilmCount(boxSet.movie_count), boxSetYears(boxSet)]
     .filter(Boolean)
@@ -31,7 +35,7 @@ export function GlobalSearchBoxSetRow({
       id={optionId}
       role="option"
       aria-selected={isSelected}
-      aria-label={`${boxSet.title}, Box set, ${detail}`}
+      aria-label={t("web.detail.boxSet.searchOptionLabel", { title: boxSet.title, detail })}
       data-selected={isSelected || undefined}
       onMouseMove={isSelected ? undefined : onSelect}
       onClick={() => onPick(boxSet)}
@@ -64,7 +68,7 @@ export function GlobalSearchBoxSetRow({
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">{boxSet.title}</span>
           <span className="border-border text-muted-foreground shrink-0 rounded-full border px-1.5 py-px text-[0.5625rem] font-semibold tracking-[0.12em] uppercase">
-            Box set
+            {t("web.detail.boxSet.label")}
           </span>
         </div>
         <div className="text-muted-foreground text-xs">{detail}</div>

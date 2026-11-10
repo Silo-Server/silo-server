@@ -47,6 +47,7 @@ import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { useQualityPreference } from "@/hooks/queries/qualityPreference";
 import { useDetailWatchTogether } from "@/pages/watchtogether/DetailWatchTogether";
 import { hasMachineTranslation } from "./components/machineTranslation";
+import { useT } from "@/i18n";
 
 export default function MovieContent({
   item,
@@ -58,6 +59,7 @@ export default function MovieContent({
   libraryId?: number;
   showAdvisoryAge?: boolean;
 }) {
+  const t = useT();
   const { translating: overviewTranslating, onTranslate: onTranslateOverview } =
     useOnViewTranslation(item);
   const navigate = useNavigate();
@@ -203,7 +205,7 @@ export default function MovieContent({
     deleteSubtitlePreference.mutate(item.content_id);
   };
 
-  const primaryAction = resolveLeafPrimaryAction(item, "Play");
+  const primaryAction = resolveLeafPrimaryAction(item, t("web.detail.actions.play"));
   const watchTogether = useDetailWatchTogether({
     item,
     target:
@@ -218,7 +220,7 @@ export default function MovieContent({
         : null,
   });
   const restartHref =
-    primaryAction.label === "Resume" && item.versions.length > 0
+    primaryAction.label === t("web.detail.actions.resume") && item.versions.length > 0
       ? `/watch/${item.content_id}?restart=1`
       : undefined;
   const { data: similarData, isLoading: similarLoading } = useSimilarItems(item.content_id);
@@ -252,7 +254,7 @@ export default function MovieContent({
         <DetailHero
           title={title}
           topNav={<PageBack />}
-          context="Movie"
+          context={t("web.detail.hero.typeMovie")}
           studioLabel={firstStudio}
           backdropUrl={item.backdrop_url}
           backdropThumbhash={item.backdrop_thumbhash}
@@ -418,7 +420,7 @@ export default function MovieContent({
       }
     >
       {((item.cast?.length ?? 0) > 0 || crewGroups.some((g) => g.members.length > 0)) && (
-        <DetailSection title="Cast & Crew">
+        <DetailSection title={t("web.detail.sections.castAndCrew")}>
           <CastCarousel cast={item.cast ?? []} crewGroups={crewGroups} limit={12} prefetchPeople />
         </DetailSection>
       )}
@@ -440,7 +442,7 @@ export default function MovieContent({
 
       {canCurateMetadata && (
         <MediaLocations
-          title="Media locations"
+          title={t("web.detail.sections.mediaLocations")}
           versions={item.versions}
           onShowMediaInfo={openMediaInfo}
         />

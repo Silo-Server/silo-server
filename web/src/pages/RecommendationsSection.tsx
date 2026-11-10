@@ -9,20 +9,27 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { cardGridClasses } from "@/lib/uiCustomization";
+import { useT, type Translate } from "@/i18n";
 
-const KIND_FALLBACK_LABEL: Record<string, (key?: string) => string> = {
-  "for-you-main": () => "For You",
-  cluster: (key) => (key ? `Personalized cluster ${key}` : "Personalized cluster"),
-  "similar-users": () => "Profiles Like You Enjoyed",
-  popular: () => "Popular on This Server",
-  "recently-added": () => "Recently Added",
-  "top-rated": () => "Highly Rated in Your Library",
-  genre: (key) => (key ? `Top ${key}` : "Genre picks"),
+const KIND_FALLBACK_LABEL: Record<string, (t: Translate, key?: string) => string> = {
+  "for-you-main": (t) => t("web.recommendations.title"),
+  cluster: (t, key) =>
+    key
+      ? t("web.recommendations.fallbackClusterKey", { key })
+      : t("web.recommendations.fallbackCluster"),
+  "similar-users": (t) => t("web.recommendations.fallbackSimilarUsers"),
+  popular: (t) => t("web.recommendations.fallbackPopular"),
+  "recently-added": (t) => t("web.recommendations.fallbackRecentlyAdded"),
+  "top-rated": (t) => t("web.recommendations.fallbackTopRated"),
+  genre: (t, key) =>
+    key
+      ? t("web.recommendations.fallbackGenre", { genre: key })
+      : t("web.recommendations.fallbackGenrePicks"),
 };
 
-function fallbackTitle(kind: string, key?: string) {
+function fallbackTitle(t: Translate, kind: string, key?: string) {
   const fn = KIND_FALLBACK_LABEL[kind];
-  return fn ? fn(key) : "Recommendations";
+  return fn ? fn(t, key) : t("web.recommendations.fallbackDefault");
 }
 
 function GridSkeleton() {
@@ -41,28 +48,30 @@ function GridSkeleton() {
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
+  const t = useT();
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
-      <p className="text-muted-foreground text-sm">Failed to load this section.</p>
+      <p className="text-muted-foreground text-sm">{t("web.recommendations.sectionLoadFailed")}</p>
       <button
         onClick={onRetry}
         className="text-primary hover:text-primary/80 inline-flex items-center gap-2 text-sm font-medium"
       >
         <RefreshCw className="h-4 w-4" />
-        Retry
+        {t("common.retry")}
       </button>
     </div>
   );
 }
 
 function EmptyState() {
+  const t = useT();
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
       <Sparkles className="text-muted-foreground/50 h-10 w-10" />
       <div className="space-y-1">
-        <p className="text-sm font-medium">Nothing here yet</p>
+        <p className="text-sm font-medium">{t("web.recommendations.sectionEmptyTitle")}</p>
         <p className="text-muted-foreground max-w-sm text-xs">
-          Watch and rate more content to surface picks for this section.
+          {t("web.recommendations.sectionEmptyBody")}
         </p>
       </div>
     </div>
@@ -70,12 +79,13 @@ function EmptyState() {
 }
 
 export default function RecommendationsSection() {
+  const t = useT();
   const params = useParams<{ kind: string; key?: string }>();
   const kind = params.kind ?? "";
   const key = params.key;
 
   const { data, isLoading, isError, refetch } = useRecommendationSection(kind, key);
-  const title = data?.label || fallbackTitle(kind, key);
+  const title = data?.label || fallbackTitle(t, kind, key);
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
   const { cardPresentation } = useUICustomization();
 
@@ -88,7 +98,10 @@ export default function RecommendationsSection() {
         <h1 className="text-foreground text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
         {data && data.items.length > 0 && (
           <p className="text-muted-foreground text-sm">
-            {data.items.length} {data.items.length === 1 ? "title" : "titles"}
+            {t("web.recommendations.sectionCount", {
+              count: data.items.length,
+              count_text: String(data.items.length),
+            })}
           </p>
         )}
       </div>

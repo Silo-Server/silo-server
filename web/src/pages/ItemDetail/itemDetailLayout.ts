@@ -1,4 +1,5 @@
 import type { EpisodeListItem, ItemDetail, Season } from "@/api/types";
+import { t } from "@/i18n";
 
 export interface SeriesPrimaryAction {
   label: string;
@@ -34,12 +35,13 @@ function clampProgress(progress: number): number {
 
 export function resolveLeafPrimaryAction(
   item: Pick<ItemDetail, "user_data">,
-  defaultLabel = "Play",
+  defaultLabel?: string,
 ): LeafPrimaryAction {
   const userData = item.user_data;
 
+  const playLabel = defaultLabel ?? t("web.detail.actions.play");
   if (!userData || !("position_seconds" in userData)) {
-    return { label: defaultLabel };
+    return { label: playLabel };
   }
 
   const positionSeconds = userData.position_seconds ?? 0;
@@ -54,31 +56,31 @@ export function resolveLeafPrimaryAction(
 
   if (isInProgress) {
     return {
-      label: "Resume",
+      label: t("web.detail.actions.resume"),
       progress,
     };
   }
 
   return {
-    label: defaultLabel,
+    label: playLabel,
     progress,
   };
 }
 
 export function getSeasonDisplayTitle(season: Season): string {
   if (season.is_specials || season.season_number === 0) {
-    return "Specials";
+    return t("web.detail.seasons.specials");
   }
 
   if (season.title && season.title !== `Season ${season.season_number}`) {
     return season.title;
   }
 
-  return `Season ${season.season_number}`;
+  return t("web.detail.seasons.numbered", { season: String(season.season_number) });
 }
 
 export function formatEpisodeCount(count: number): string {
-  return `${count} ${count === 1 ? "episode" : "episodes"}`;
+  return t("web.detail.seasons.episodeCount", { count, count_text: String(count) });
 }
 
 export function formatSeasonMeta(season: Season): string {
@@ -87,7 +89,11 @@ export function formatSeasonMeta(season: Season): string {
 
 /** Watched progress for a season card, e.g. "1 of 2 episodes". */
 export function formatSeasonProgress(season: Season, watchedCount: number): string {
-  return `${watchedCount} of ${formatEpisodeCount(season.episode_count)}`;
+  return t("web.detail.seasons.watchedProgress", {
+    count: season.episode_count,
+    watched: String(watchedCount),
+    count_text: String(season.episode_count),
+  });
 }
 
 export function resolveEpisodeSiblingSeason(
@@ -114,17 +120,17 @@ export function resolveSeriesPrimaryAction(
   item: Pick<ItemDetail, "play_content_id" | "user_data">,
 ): SeriesPrimaryAction {
   if (!item.play_content_id) {
-    return { label: "Browse Series" };
+    return { label: t("web.detail.actions.browseSeries") };
   }
 
   const href = `/watch/${item.play_content_id}`;
   const rollup = item.user_data && "in_progress_count" in item.user_data ? item.user_data : null;
   if (rollup && rollup.in_progress_count > 0) {
-    return { label: "Resume", href };
+    return { label: t("web.detail.actions.resume"), href };
   }
   if (rollup && rollup.watched_count > 0 && !rollup.played) {
-    return { label: "Play Next", href };
+    return { label: t("web.detail.actions.playNext"), href };
   }
   // Unstarted and fully watched series both resolve to the first episode.
-  return { label: "Start From Episode 1", href };
+  return { label: t("web.detail.actions.startFromFirstEpisode"), href };
 }

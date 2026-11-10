@@ -10,6 +10,7 @@ import { fetchRecipeCatalog } from "@/lib/recipes";
 import { useQuery } from "@tanstack/react-query";
 import { useAdminCollections } from "@/hooks/queries/admin/collections";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAppLanguage } from "@/i18n";
 import {
   useAdminHomeRows,
   type BatchFailure,
@@ -146,6 +147,8 @@ export default function AdminHomeRows() {
     staleTime: 5 * 60 * 1000,
   });
   // Every library collection, hidden ones included: a row may show one the picker no longer offers.
+  // Each summary's collection type is translated text; rebuild it on a language change.
+  const language = useAppLanguage();
   const collectionSummaries = useMemo(
     () =>
       new Map<string, CollectionSummary>(
@@ -154,7 +157,8 @@ export default function AdminHomeRows() {
           { title: collection.title, kind: collectionKind(collection.collection_type) },
         ]),
       ),
-    [collectionsData],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- language: the kinds' language
+    [collectionsData, language],
   );
   const [confirmDeleteSection, setConfirmDeleteSection] = useState<PageSectionConfig | null>(null);
   const [confirmDeleteSelected, setConfirmDeleteSelected] = useState(false);

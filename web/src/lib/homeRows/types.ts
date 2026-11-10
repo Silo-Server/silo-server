@@ -4,6 +4,7 @@
  * adapter hook, so nothing under components/homeRows reads an account role or
  * an API type.
  */
+import { t } from "@/i18n";
 import type { CollectionOption } from "@/hooks/queries/useAllUserCollections";
 import type { PeekRequest } from "@/components/calm/usePeekLimiter";
 import type { RowDraft } from "./rowDraft";
@@ -65,7 +66,7 @@ export interface EditSession {
 /** Thrown by `save` when the row changed since the edit session was read. */
 export class RowChangedError extends Error {
   constructor() {
-    super("This row changed since you opened it.");
+    super(t("web.home.rows.draft.rowChanged"));
     this.name = "RowChangedError";
   }
 }

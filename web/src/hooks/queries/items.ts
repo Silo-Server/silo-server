@@ -26,6 +26,7 @@ import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import {
   getCachedWatchedInvalidationKeys,
   getWatchedToastMessage,
@@ -100,8 +101,8 @@ export function useRefreshItemMetadata() {
     onMutate: ({ mode }: RefreshItemMetadataVariables): RefreshItemMetadataContext => ({
       toastID: toast.loading(
         mode === "complete"
-          ? "Complete metadata refresh running…"
-          : "Quick metadata refresh running…",
+          ? t("web.item.toast.refreshRunningComplete")
+          : t("web.item.toast.refreshRunningQuick"),
       ),
     }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
@@ -123,19 +124,22 @@ export function useRefreshItemMetadata() {
       const artworkWarning = result.artwork_cache_warning;
 
       if (artworkWarning) {
-        toast.warning("Metadata refreshed, but artwork caching did not finish", {
+        toast.warning(t("web.item.toast.refreshArtworkWarning"), {
           id: context?.toastID,
           description: artworkWarning,
         });
       } else if (mode === "complete") {
-        toast.success("Complete refresh finished", { id: context?.toastID });
+        toast.success(t("web.item.toast.completeRefreshFinished"), { id: context?.toastID });
       } else if (newFiles > 0) {
         toast.success(
-          `Metadata refreshed. Found ${newFiles} new file version${newFiles === 1 ? "" : "s"}`,
+          t("web.item.toast.refreshedNewFiles", {
+            count: newFiles,
+            new_files: String(newFiles),
+          }),
           { id: context?.toastID },
         );
       } else {
-        toast.success("Metadata refreshed", { id: context?.toastID });
+        toast.success(t("web.item.toast.refreshed"), { id: context?.toastID });
       }
 
       await Promise.all([
@@ -208,7 +212,7 @@ export function useRefreshItemMetadata() {
       }
     },
     onError: (err, _variables, context) => {
-      toast.error(err instanceof Error ? err.message : "Refresh failed", {
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.refreshFailed"), {
         id: context?.toastID,
       });
     },
@@ -248,12 +252,12 @@ const redetectionToasts = {
   onSuccess: (response: { status: string }) => {
     toast.success(
       response.status === "already_running"
-        ? "Re-detection already running"
-        : "Re-detection started",
+        ? t("web.item.toast.redetectAlreadyRunning")
+        : t("web.item.toast.redetectStarted"),
     );
   },
   onError: (error: unknown) => {
-    toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
+    toast.error(error instanceof Error ? error.message : t("web.item.toast.redetectFailed"));
   },
 };
 
@@ -343,10 +347,10 @@ export function useUpdateItemMetadata(contentId: string) {
       void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
         bumpHomeRefreshSignal(queryClient);
       });
-      toast.success("Metadata saved");
+      toast.success(t("web.item.toast.metadataSaved"));
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save metadata");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.saveMetadataFailed"));
     },
   });
 }
@@ -400,7 +404,7 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
       }));
-      toast.error(err instanceof Error ? err.message : "Failed to update watched state");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.watchedUpdateFailed"));
     },
     onSuccess: (_data, nextPlayed) => {
       toast.success(getWatchedToastMessage(item, nextPlayed));
@@ -447,7 +451,7 @@ export function useSearchItemMatchCandidates(contentId: string) {
       })),
     retry: false,
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Match search failed");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.matchSearchFailed"));
     },
     meta: { queryClient },
   });
@@ -504,7 +508,7 @@ export function useApplyItemMatch() {
     },
     retry: false,
     onSuccess: async (result, { item, onReplaced }) => {
-      toast.success("Match applied successfully");
+      toast.success(t("web.item.toast.matchApplied"));
       const adminLists = Promise.all([
         queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() }),
         queryClient.invalidateQueries({ queryKey: adminKeys.unmatchedItems() }),
@@ -583,7 +587,7 @@ export function useApplyItemMatch() {
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to apply match");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.matchApplyFailed"));
     },
   });
 }
@@ -609,7 +613,10 @@ export function useSplitItem() {
     onSuccess: async (result, { contentId }) => {
       if (result.dry_run) return;
       toast.success(
-        `Moved ${result.files_moved} file${result.files_moved === 1 ? "" : "s"} to a separate item`,
+        t("web.item.toast.splitMoved", {
+          count: result.files_moved,
+          files_moved: String(result.files_moved),
+        }),
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["items", "detail", contentId] }),
@@ -620,7 +627,7 @@ export function useSplitItem() {
       ]);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to split item");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.splitFailed"));
     },
   });
 }
@@ -690,11 +697,11 @@ export function useApplyItemImage() {
     }) => applyAdminItemImage(item.content_id, request),
     retry: false,
     onSuccess: async (_, { item }) => {
-      toast.success("Image applied successfully");
+      toast.success(t("web.item.toast.imageApplied"));
       await invalidateAppliedImage(queryClient, item);
     },
     onError: (err) => {
-      toast.error(imageErrorMessage(err, "Failed to apply image"));
+      toast.error(imageErrorMessage(err, t("web.item.toast.imageApplyFailed")));
     },
   });
 }
@@ -714,11 +721,11 @@ export function useUploadItemImage() {
     }) => uploadAdminItemImage(item.content_id, type, file),
     retry: false,
     onSuccess: async (_, { item }) => {
-      toast.success("Image uploaded");
+      toast.success(t("web.item.toast.imageUploaded"));
       await invalidateAppliedImage(queryClient, item);
     },
     onError: (err) => {
-      toast.error(imageErrorMessage(err, "Failed to upload image"));
+      toast.error(imageErrorMessage(err, t("web.item.toast.imageUploadFailed")));
     },
   });
 }
@@ -753,7 +760,7 @@ export function useTranslateItemMetadata(contentId: string) {
       });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to start translation");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.translateFailed"));
     },
   });
 }

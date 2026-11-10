@@ -78,7 +78,7 @@ describe("serverTextWith", () => {
   });
 
   it("isolates printed arguments in a right-to-left language", () => {
-    const arabic = createAppIntl("ar", translated);
+    const arabic = createAppIntl("ar-XB", translated);
     expect(serverTextWith(arabic, "home.section.recentlyAddedIn", { library: "Movies" }, "x")).toBe(
       `Añadido en ${FSI}Movies${PDI}`,
     );
@@ -102,7 +102,7 @@ describe("formatWith", () => {
       "Monday, April 1st",
     );
     // `day` is printed and selected on: the select must still see "1".
-    expect(formatWith(createAppIntl("ar", translated), "web.calendar.dayHeading", values)).toBe(
+    expect(formatWith(createAppIntl("ar-XB", translated), "web.calendar.dayHeading", values)).toBe(
       `${FSI}Monday${PDI} 1 primero`,
     );
   });

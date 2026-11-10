@@ -1,4 +1,5 @@
 import type { BoxSetSummary, BrowseItem } from "@/api/types";
+import { t } from "@/i18n";
 
 /** "2001 – 2011", or one year when the box set spans one. */
 export function boxSetYears(boxSet: Pick<BoxSetSummary, "first_year" | "last_year">) {
@@ -9,7 +10,7 @@ export function boxSetYears(boxSet: Pick<BoxSetSummary, "first_year" | "last_yea
 }
 
 export function boxSetFilmCount(count: number) {
-  return `${count} ${count === 1 ? "film" : "films"}`;
+  return t("web.detail.boxSet.filmCount", { count });
 }
 
 /**

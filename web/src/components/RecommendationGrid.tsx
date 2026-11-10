@@ -6,6 +6,7 @@ import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
+import { useT } from "@/i18n";
 
 const MAX_MORE_LIKE_THIS_ITEMS = 12;
 
@@ -80,12 +81,13 @@ export function MoreLikeThisRow<T>({
   renderItem,
   maxItems = MAX_MORE_LIKE_THIS_ITEMS,
 }: MoreLikeThisRowProps<T>) {
+  const t = useT();
   const { cardPresentation } = useUICustomization();
   const itemLimit = Math.max(0, Math.min(maxItems, MAX_MORE_LIKE_THIS_ITEMS));
   const posterWidthClasses = carouselCardWidthClasses(cardPresentation.poster_size);
 
   return (
-    <MediaCarousel title="More Like This" edgePadding={false}>
+    <MediaCarousel title={t("web.recommendations.moreLikeThis")} edgePadding={false}>
       {items.slice(0, itemLimit).map((item) => (
         <div key={itemKey(item)} className={posterWidthClasses}>
           {renderItem(item)}

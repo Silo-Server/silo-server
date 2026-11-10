@@ -12,6 +12,7 @@ import {
   formatSampleRate,
 } from "@/lib/mediaFormat";
 import { formatLocale, pinnedLocaleUnlessLocalized } from "@/lib/appLocale";
+import { t } from "@/i18n";
 
 /**
  * Atmos evidence for the audio stream a version's codec_audio describes. The
@@ -28,7 +29,10 @@ export function versionAudioAtmosEvidence(version: FileVersion): string | undefi
 
 export function formatPageCount(pages?: number): string {
   if (!pages || pages <= 0) return "";
-  return `${pages.toLocaleString(formatLocale())} ${pages === 1 ? "page" : "pages"}`;
+  return t("web.detail.ebook.pageCount", {
+    count: pages,
+    count_text: pages.toLocaleString(formatLocale()),
+  });
 }
 
 export function formatAddedAt(value?: string): string {
@@ -88,7 +92,7 @@ export function videoTitle(track: VersionVideoTrack): string {
     [track.width && track.height ? `${track.width}x${track.height}` : "", track.codec]
       .filter(Boolean)
       .join(" ") ||
-    "Video"
+    t("web.detail.mediaInfo.video")
   );
 }
 
@@ -97,13 +101,14 @@ export function audioTitle(track: VersionAudioTrack): string {
     track.title ||
     track.embedded_title ||
     [track.language, track.codec, formatChannels(track.channels)].filter(Boolean).join(" ") ||
-    "Audio"
+    t("web.detail.mediaInfo.audio")
   );
 }
 
 export function subtitleTitle(track: VersionSubtitleTrack): string {
   const language = formatLanguageName(track.language);
-  const title = track.title || track.embedded_title || track.codec || "Subtitle";
+  const title =
+    track.title || track.embedded_title || track.codec || t("web.detail.mediaInfo.subtitle");
 
   const languageLower = language.toLowerCase();
   const titleLower = title.toLowerCase();
@@ -119,13 +124,13 @@ export function compactVideoMeta(track: VersionVideoTrack): string {
   return metadataLine([
     track.profile,
     track.aspect_ratio,
-    track.frame_rate ? `${track.frame_rate} fps` : "",
+    track.frame_rate ? t("web.detail.mediaInfo.frameRate", { rate: String(track.frame_rate) }) : "",
     formatBitrate(track.bitrate),
-    track.bit_depth ? `${track.bit_depth}-bit` : "",
+    track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: String(track.bit_depth) }) : "",
     track.video_range,
     track.dolby_vision,
     track.color_space,
-    track.interlaced ? "Interlaced" : "",
+    track.interlaced ? t("web.detail.mediaInfo.interlaced") : "",
   ]);
 }
 
@@ -134,16 +139,16 @@ export function compactAudioMeta(track: VersionAudioTrack): string {
     track.layout,
     formatBitrate(track.bitrate),
     formatSampleRate(track.sample_rate),
-    track.bit_depth ? `${track.bit_depth}-bit` : "",
+    track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: String(track.bit_depth) }) : "",
   ]);
 }
 
 export function compactSubtitleMeta(track: VersionSubtitleTrack): string {
   return metadataLine([
-    track.external ? "External" : "Embedded",
-    track.forced ? "Forced" : "",
-    track.hearing_impaired ? "HI" : "",
-    track.default ? "Default" : "",
+    track.external ? t("web.detail.mediaInfo.external") : t("web.detail.mediaInfo.embedded"),
+    track.forced ? t("web.detail.mediaInfo.forced") : "",
+    track.hearing_impaired ? t("web.detail.mediaInfo.hearingImpairedShort") : "",
+    track.default ? t("web.detail.mediaInfo.defaultBadge") : "",
     track.resolution,
   ]);
 }

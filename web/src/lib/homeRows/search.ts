@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { PickerGroup } from "./catalog";
 import { variantFamily } from "./variants";
 
@@ -33,7 +34,7 @@ function haystack(card: PickerGroup["cards"][number]): string {
     card.label,
     card.sentence,
     ...card.def.presets.map((preset) => preset.display_name),
-    ...(family?.options.flatMap((option) => [option.chip, option.label]) ?? []),
+    ...(family?.options.flatMap((option) => [t(option.chip), t(option.label)]) ?? []),
     ...(ALIASES[card.type] ?? []),
   ]
     .join("\n")

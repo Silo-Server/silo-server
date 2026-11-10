@@ -52,6 +52,9 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Placeholders:** pass dates, durations and sizes already formatted, as strings
   (`formatLocale()` / `appLanguage()` from `@/lib/appLocale`). Pass a number that is
   not a plural count as a string too, or ICU groups it (`2,026`).
+- **Apostrophes:** the catalog validator rejects an ASCII `'` next to a brace or `#`
+  (`{name}'s`, `'{title}'`). Extraction can't change English, so such a string stays
+  literal, with an `eslint-disable` comment saying why, until a wording change replaces it.
 - **Right to left:** in an RTL language every printed string placeholder is
   wrapped in Unicode isolates, so a left-to-right title keeps its punctuation in
   place. `select` and `plural` arguments are not. English bytes never change.

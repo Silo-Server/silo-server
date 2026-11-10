@@ -1,4 +1,5 @@
 import type { KeyboardEvent } from "react";
+import { useT } from "@/i18n";
 import type { PickerGroup, RowGroup } from "@/lib/homeRows/catalog";
 import { cn } from "@/lib/utils";
 import { GROUP_ICONS, GROUP_TINTS } from "../rowIcons";
@@ -22,6 +23,7 @@ export function PickerRail({
   onSelect: (group: RowGroup) => void;
   orientation: "vertical" | "horizontal";
 }) {
+  const t = useT();
   const vertical = orientation === "vertical";
   const activeIndex = Math.max(
     0,
@@ -46,7 +48,7 @@ export function PickerRail({
   return (
     <div
       role="tablist"
-      aria-label="Kinds of rows"
+      aria-label={t("web.home.addRow.picker.kinds")}
       aria-orientation={orientation}
       onKeyDown={handleKeyDown}
       className={cn(
@@ -89,8 +91,10 @@ export function PickerRail({
             {group.label}
             {vertical ? (
               <span className="ml-auto text-xs tabular-nums opacity-80">
-                {group.cards.length}
-                <span className="sr-only"> kinds</span>
+                {t("web.home.addRow.picker.groupCount", {
+                  count: group.cards.length,
+                  hidden: (chunks) => <span className="sr-only">{chunks}</span>,
+                })}
               </span>
             ) : null}
           </button>

@@ -23,6 +23,7 @@ import { getWatchedActionLabel } from "./watchedState";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { formatPageCount, metadataLine } from "./components/versionFormatUtils";
 import { hasMachineTranslation } from "./components/machineTranslation";
+import { useT } from "@/i18n";
 
 function authorNames(item: ItemDetail): string[] {
   const extensionAuthors = (item.ebook?.authors ?? [])
@@ -82,6 +83,7 @@ export default function EbookContent({
   libraryId?: number;
   showAdvisoryAge?: boolean;
 }) {
+  const t = useT();
   useAmbientColor(item.poster_thumbhash);
   const { user } = useAuth();
   const { data: readerProgress } = useEbookReaderProgress(item.content_id);
@@ -116,7 +118,7 @@ export default function EbookContent({
         overviewMachineTranslated={hasMachineTranslation(item.machine_translated_fields)}
         title={item.title}
         topNav={<PageBack />}
-        context="Ebook"
+        context={t("web.detail.hero.typeEbook")}
         studioLabel={publisher}
         backdropUrl={item.backdrop_url}
         backdropThumbhash={item.backdrop_thumbhash}
@@ -135,8 +137,11 @@ export default function EbookContent({
         crewLine={
           authors.length > 0 ? (
             <div className="text-muted-foreground text-[13px]">
-              <span className="text-muted-foreground/60">By </span>
-              <span className="text-foreground/70 font-medium">{authors.join(", ")}</span>
+              {t("web.detail.books.byAuthor", {
+                label: (chunks) => <span className="text-muted-foreground/60">{chunks}</span>,
+                name: (chunks) => <span className="text-foreground/70 font-medium">{chunks}</span>,
+                author: authors.join(", "),
+              })}
             </div>
           ) : undefined
         }
@@ -151,7 +156,9 @@ export default function EbookContent({
               >
                 <ViewTransitionLink to={readerHref}>
                   <BookOpen className="size-[18px]" />
-                  {hasSavedProgress ? "Continue" : "Read"}
+                  {hasSavedProgress
+                    ? t("web.detail.books.continueReading")
+                    : t("web.detail.books.read")}
                   {progressLabel && (
                     <span className="text-primary-foreground/75 text-xs font-semibold tabular-nums">
                       {progressLabel}
@@ -168,7 +175,7 @@ export default function EbookContent({
                 onClick={() => setDownloadOpen(true)}
               >
                 <Download className="size-[18px]" />
-                Download
+                {t("web.detail.actions.download")}
               </Button>
             )}
             <Button
@@ -188,14 +195,20 @@ export default function EbookContent({
       <div className="page-shell detail-supporting-content space-y-12 py-10 sm:space-y-14">
         {item.ebook?.series && item.ebook.series.entries.length > 0 && (
           <RelatedRail
-            heading={item.ebook.series.name ? `In ${item.ebook.series.name}` : "In this series"}
+            heading={
+              item.ebook.series.name
+                ? t("web.detail.books.inSeries", { series: item.ebook.series.name })
+                : t("web.detail.books.inThisSeries")
+            }
             coverAspect="poster"
             items={item.ebook.series.entries.map((entry) => ({
               content_id: entry.content_id,
               title: entry.title,
               poster_url: entry.poster_url,
               subtitle:
-                typeof entry.series_index === "number" ? `Book ${entry.series_index}` : undefined,
+                typeof entry.series_index === "number"
+                  ? t("web.detail.books.bookNumber", { number: String(entry.series_index) })
+                  : undefined,
               highlight: entry.content_id === item.content_id,
             }))}
           />
@@ -203,7 +216,11 @@ export default function EbookContent({
 
         {(item.ebook?.related.also_by_author ?? []).length > 0 && (
           <RelatedRail
-            heading={`Also by ${authors[0] ?? "this author"}`}
+            heading={
+              authors[0]
+                ? t("web.detail.books.alsoByAuthor", { author: authors[0] })
+                : t("web.detail.books.alsoByThisAuthor")
+            }
             coverAspect="poster"
             items={(item.ebook?.related.also_by_author ?? []).map((entry) => ({
               content_id: entry.content_id,
@@ -216,7 +233,7 @@ export default function EbookContent({
 
         {(item.ebook?.related.similar ?? []).length > 0 && (
           <RelatedRail
-            heading="You might also like"
+            heading={t("web.detail.books.youMightAlsoLike")}
             coverAspect="poster"
             items={(item.ebook?.related.similar ?? []).map((entry) => ({
               content_id: entry.content_id,
@@ -228,9 +245,9 @@ export default function EbookContent({
         )}
 
         <MediaLocations
-          title="Files"
+          title={t("web.detail.sections.files")}
           versions={item.versions}
-          emptyMessage="No ebook files found."
+          emptyMessage={t("web.detail.ebook.noFiles")}
           summaryBuilder={ebookVersionSummary}
         />
       </div>

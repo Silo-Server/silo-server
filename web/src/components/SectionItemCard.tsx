@@ -21,6 +21,7 @@ import {
 import type { SectionItem } from "@/api/types";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
+import { useAppLanguage, useT } from "@/i18n";
 
 interface SectionItemCardProps {
   item: SectionItem;
@@ -38,6 +39,9 @@ export default memo(function SectionItemCard({
   quickActionMode = "none",
   priority = false,
 }: SectionItemCardProps) {
+  const t = useT();
+  // The upcoming and episode lines come from plain helpers; follow language changes.
+  useAppLanguage();
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const upcomingEvent = item.upcoming_event;
   const subtitle = upcomingEvent ? formatUpcomingSubtitle(upcomingEvent) : "";
@@ -70,7 +74,7 @@ export default memo(function SectionItemCard({
           >
             {item.status === "ambiguous" && (
               <span className="absolute top-2.5 left-2.5 rounded-full border border-amber-500/25 bg-black/40 px-2 py-0.5 text-[0.625rem] leading-none font-semibold tracking-wide text-amber-200 uppercase backdrop-blur-sm">
-                Ambiguous
+                {t("web.home.sectionRow.ambiguous")}
               </span>
             )}
             {item.status === "matched" && overlayPrefs && (
@@ -151,7 +155,9 @@ export default memo(function SectionItemCard({
           </ViewTransitionLink>
         ) : (
           <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
-            {item.year ? `${item.year}` : ""} {item.type === "series" ? "Series" : ""}
+            {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
+            {item.year ? String(item.year) : null}{" "}
+            {item.type === "series" ? t("web.home.sectionRow.seriesType") : null}
           </ViewTransitionLink>
         )}
       </div>
