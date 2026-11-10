@@ -1,5 +1,6 @@
-// Command dbpins runs the DB-backed pins listed in
-// scripts/ci/db-pins.txt and fails unless every one of them ran and passed.
+// Command dbpins runs the DB-backed tests named in one or more lists, such
+// as scripts/ci/db-pins.txt, and fails unless every one of them ran and
+// passed.
 //
 // A DB-backed test skips when SILO_TEST_DATABASE_URL is unset or the database
 // has not been migrated, and go test counts a skip as success. A budget that
@@ -9,7 +10,7 @@
 // Usage (the repository root is the cwd; SILO_TEST_DATABASE_URL names a
 // migrated, disposable database):
 //
-//	go run ./scripts/ci/dbpins -list scripts/ci/db-pins.txt
+//	go run ./scripts/ci/dbpins -list scripts/ci/db-pins.txt -list scripts/ci/db-contracts.txt
 package main
 
 import (
@@ -26,6 +27,16 @@ import (
 	"strings"
 )
 
+// listFlag collects every -list.
+type listFlag []string
+
+func (l *listFlag) String() string { return strings.Join(*l, ",") }
+
+func (l *listFlag) Set(path string) error {
+	*l = append(*l, path)
+	return nil
+}
+
 // pin is one listed test: a package directory such as ./internal/catalog and
 // a top-level test name.
 type pin struct {
@@ -35,16 +46,16 @@ type pin struct {
 var testName = regexp.MustCompile(`^Test[A-Za-z0-9_]*$`)
 
 func main() {
-	list := flag.String("list", "scripts/ci/db-pins.txt", "file naming the pinned tests")
+	var lists listFlag
+	flag.Var(&lists, "list", "file naming the pinned tests; repeat to run several lists in one pass")
 	flag.Parse()
+	if len(lists) == 0 {
+		lists = listFlag{"scripts/ci/db-pins.txt"}
+	}
 
-	data, err := os.ReadFile(*list)
+	pins, err := readLists(lists)
 	if err != nil {
 		fail(err)
-	}
-	pins, err := parseList(string(data))
-	if err != nil {
-		fail(fmt.Errorf("%s: %w", *list, err))
 	}
 	// GOWORK=off: in a workspace, go list -m prints every module.
 	listModule := exec.Command("go", "list", "-m")
@@ -84,7 +95,7 @@ func main() {
 		problems = append(problems, "go test: "+waitErr.Error())
 	}
 	if len(problems) > 0 {
-		fmt.Printf("\n::error::%d problem(s) running the pins in %s; a missing or skipped test fails like a failing one\n", len(problems), *list)
+		fmt.Printf("\n::error::%d problem(s) running the pins in %s; a missing or skipped test fails like a failing one\n", len(problems), strings.Join(lists, " and "))
 		for _, problem := range problems {
 			fmt.Println("  " + problem)
 		}
@@ -96,6 +107,31 @@ func main() {
 func fail(err error) {
 	fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
 	os.Exit(1)
+}
+
+// readLists parses each list and merges them; a test may be listed once
+// across all of them.
+func readLists(paths []string) ([]pin, error) {
+	var pins []pin
+	listedIn := map[pin]string{}
+	for _, path := range paths {
+		data, err := os.ReadFile(path) //nolint:gosec // paths come from the -list flags of the make target or the developer
+		if err != nil {
+			return nil, err
+		}
+		listed, err := parseList(string(data))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		for _, p := range listed {
+			if other, ok := listedIn[p]; ok {
+				return nil, fmt.Errorf("%s %s is listed in both %s and %s", p.dir, p.test, other, path)
+			}
+			listedIn[p] = path
+			pins = append(pins, p)
+		}
+	}
+	return pins, nil
 }
 
 // parseList reads one "<package dir> <TestName>" pair per line, ignoring blank
