@@ -29,6 +29,30 @@ const (
 
 	defaultPostgresTuneMemoryBudgetPercent = 75
 
+	// defaultPostgresTuneSharedBuffersMaxBytes is the ceiling on the tuned
+	// shared_buffers. A quarter of the memory budget suits a database that is
+	// the only tenant of its host, but a media catalogue's hot set (indexes
+	// and recently read rows) is far smaller than a large host's quarter, and
+	// the operating system's page cache still holds whatever falls outside it.
+	// The ceiling is fixed, not sized from the database: shared_buffers
+	// changes only at a restart, and the omnibus image writes it before the
+	// database has any content.
+	defaultPostgresTuneSharedBuffersMaxBytes = 2 * sizeGB
+
+	// minPostgresTuneSharedBuffersMaxBytes is the smallest shared_buffers
+	// PostgreSQL accepts.
+	minPostgresTuneSharedBuffersMaxBytes = 128 * sizeKB
+
+	// maxPostgresTuneDetectedCPUs bounds a detected CPU count. A container
+	// without a CPU limit sees every core of its host, and one worker slot per
+	// core is far more than a catalogue database can use: a query runs at most
+	// four parallel workers. POSTGRES_TUNE_CPUS is not bounded.
+	maxPostgresTuneDetectedCPUs = 16
+
+	// maxPostgresTuneAutovacuumWorkMemKB bounds each autovacuum worker, which
+	// would otherwise take up to maintenance_work_mem.
+	maxPostgresTuneAutovacuumWorkMemKB = 256 * sizeMB / sizeKB
+
 	sizeKB = int64(1024)
 	sizeMB = 1024 * sizeKB
 	sizeGB = 1024 * sizeMB
@@ -69,12 +93,18 @@ type PostgresTuneOptions struct {
 	DetectedMemoryBytes int64
 	MemorySource        string
 	MemoryBudgetPercent int
-	CPUs                int
-	Connections         int
-	Storage             string
-	DBSize              string
-	OSType              string
-	IOMethod            string
+	// SharedBuffersMaxBytes caps shared_buffers; zero means the default.
+	SharedBuffersMaxBytes int64
+	CPUs                  int
+	// DetectedCPUs is the machine's CPU count before it was bounded, or zero
+	// when CPUs was set explicitly. work_mem is sized from it, so bounding
+	// the workers does not raise work_mem.
+	DetectedCPUs int
+	Connections  int
+	Storage      string
+	DBSize       string
+	OSType       string
+	IOMethod     string
 }
 
 // PostgresTuneSetting is one recommended PostgreSQL parameter.
@@ -143,7 +173,12 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 		return PostgresTuneOptions{}, err
 	}
 
-	cpus, err := loadPostgresTuneCPUs()
+	sharedBuffersMax, err := loadPostgresTuneSharedBuffersMax()
+	if err != nil {
+		return PostgresTuneOptions{}, err
+	}
+
+	cpus, detectedCPUs, err := loadPostgresTuneCPUs()
 	if err != nil {
 		return PostgresTuneOptions{}, err
 	}
@@ -171,22 +206,25 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 	ioMethod := strings.ToLower(firstNonEmptyEnv("POSTGRES_TUNE_IO_METHOD", "SILO_POSTGRES_TUNE_IO_METHOD"))
 
 	return PostgresTuneOptions{
-		Enabled:             true,
-		Profile:             profile,
-		MemoryBudgetBytes:   memory.BudgetBytes,
-		DetectedMemoryBytes: memory.DetectedBytes,
-		MemorySource:        memory.Source,
-		MemoryBudgetPercent: memory.Percent,
-		CPUs:                cpus,
-		Connections:         connections,
-		Storage:             storage,
-		DBSize:              dbSize,
-		OSType:              osType,
-		IOMethod:            ioMethod,
+		Enabled:               true,
+		Profile:               profile,
+		MemoryBudgetBytes:     memory.BudgetBytes,
+		DetectedMemoryBytes:   memory.DetectedBytes,
+		MemorySource:          memory.Source,
+		MemoryBudgetPercent:   memory.Percent,
+		SharedBuffersMaxBytes: sharedBuffersMax,
+		CPUs:                  cpus,
+		DetectedCPUs:          detectedCPUs,
+		Connections:           connections,
+		Storage:               storage,
+		DBSize:                dbSize,
+		OSType:                osType,
+		IOMethod:              ioMethod,
 	}, nil
 }
 
-// RecommendPostgresOLTPSettings returns pgtune-style OLTP recommendations.
+// RecommendPostgresOLTPSettings returns pgtune-style OLTP recommendations,
+// with shared_buffers and autovacuum_work_mem bounded for a catalogue database.
 func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersion int) []PostgresTuneSetting {
 	memoryBudgetKB := opts.MemoryBudgetBytes / sizeKB
 	if memoryBudgetKB <= 0 {
@@ -199,7 +237,19 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	}
 
 	settings := make([]PostgresTuneSetting, 0, 24)
-	sharedBuffers := memoryBudgetKB / 4
+	// work_mem keeps the uncapped quarter and the unbounded CPU count as its
+	// basis, so neither bound raises it.
+	budgetQuarter := memoryBudgetKB / 4
+	sharedBuffers := budgetQuarter
+	sharedBuffersMax := opts.SharedBuffersMaxBytes
+	if sharedBuffersMax <= 0 {
+		sharedBuffersMax = defaultPostgresTuneSharedBuffersMaxBytes
+	}
+	if sharedBuffers > sharedBuffersMax/sizeKB {
+		sharedBuffers = sharedBuffersMax / sizeKB
+	}
+	// A planner hint, not an allocation: the page cache holds what
+	// shared_buffers does not, so it stays sized from the whole budget.
 	effectiveCacheSize := (memoryBudgetKB * 3) / 4
 	maintenanceWorkMem := memoryBudgetKB / 16
 	if maintenanceWorkMem > 8*sizeGB/sizeKB {
@@ -222,7 +272,7 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	}
 
 	settings = append(settings,
-		PostgresTuneSetting{Name: "work_mem", Value: formatPostgresTuneKB(workMem(memoryBudgetKB, sharedBuffers, connections, opts.CPUs, opts.DBSize))},
+		PostgresTuneSetting{Name: "work_mem", Value: formatPostgresTuneKB(workMem(memoryBudgetKB, budgetQuarter, connections, max(opts.CPUs, opts.DetectedCPUs), opts.DBSize))},
 		PostgresTuneSetting{Name: "huge_pages", Value: hugePages(sharedBuffers, opts.OSType)},
 	)
 
@@ -238,9 +288,10 @@ func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersio
 	if autovacuumWorkers := autovacuumMaxWorkers(opts.CPUs); autovacuumWorkers != "" {
 		settings = append(settings, PostgresTuneSetting{Name: "autovacuum_max_workers", Value: autovacuumWorkers})
 	}
-	if maintenanceWorkMem >= 2*sizeGB/sizeKB {
-		settings = append(settings, PostgresTuneSetting{Name: "autovacuum_work_mem", Value: "2GB"})
-	}
+	settings = append(settings, PostgresTuneSetting{
+		Name:  "autovacuum_work_mem",
+		Value: formatPostgresTuneKB(min(maintenanceWorkMem, maxPostgresTuneAutovacuumWorkMemKB)),
+	})
 
 	settings = append(settings,
 		PostgresTuneSetting{Name: "min_wal_size", Value: "2GB"},
@@ -438,21 +489,40 @@ func loadPostgresTuneMemoryBudgetPercent() (int, error) {
 	return percent, nil
 }
 
-func loadPostgresTuneCPUs() (int, error) {
+func loadPostgresTuneSharedBuffersMax() (int64, error) {
+	raw := firstNonEmptyEnv("POSTGRES_TUNE_SHARED_BUFFERS_MAX", "SILO_POSTGRES_TUNE_SHARED_BUFFERS_MAX")
+	if raw == "" {
+		return defaultPostgresTuneSharedBuffersMaxBytes, nil
+	}
+	limit, err := parsePostgresTuneByteSize(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid POSTGRES_TUNE_SHARED_BUFFERS_MAX: %w", err)
+	}
+	if limit < minPostgresTuneSharedBuffersMaxBytes {
+		return 0, fmt.Errorf("invalid POSTGRES_TUNE_SHARED_BUFFERS_MAX %q: PostgreSQL needs at least 128kB", raw)
+	}
+	return limit, nil
+}
+
+// loadPostgresTuneCPUs returns the CPU count to tune for and, when it was
+// detected, the count before bounding.
+func loadPostgresTuneCPUs() (cpus, detected int, err error) {
 	raw := firstNonEmptyEnv("POSTGRES_TUNE_CPUS", "SILO_POSTGRES_TUNE_CPUS")
 	if raw == "" || strings.EqualFold(raw, "auto") {
-		cpus := runtime.NumCPU()
-		if cpus < 1 {
-			cpus = 1
-		}
-		return cpus, nil
+		detected = runtime.NumCPU()
+		return detectedPostgresTuneCPUs(detected), detected, nil
 	}
 
-	cpus, err := strconv.Atoi(raw)
+	cpus, err = strconv.Atoi(raw)
 	if err != nil || cpus < 1 {
-		return 0, fmt.Errorf("invalid POSTGRES_TUNE_CPUS %q", raw)
+		return 0, 0, fmt.Errorf("invalid POSTGRES_TUNE_CPUS %q", raw)
 	}
-	return cpus, nil
+	return cpus, 0, nil
+}
+
+// detectedPostgresTuneCPUs bounds a CPU count read from the machine.
+func detectedPostgresTuneCPUs(detected int) int {
+	return max(1, min(detected, maxPostgresTuneDetectedCPUs))
 }
 
 func loadPostgresTuneConnections(appMaxConnections int) (int, error) {
