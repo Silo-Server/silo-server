@@ -833,22 +833,26 @@ func TestMaturityOverriddenRejectsAllowancesUnderPolicyLimits(t *testing.T) {
 
 // A credential exempt from the PIN (an API key, a view-as session) that still
 // sends a valid profile token proved the PIN: household management, which
-// refuses a skipped verification, must accept it. Without a token the scope
-// stays skipped.
+// refuses a skipped verification, must accept it. Without a valid token the
+// scope stays skipped: still browsable, never enough to manage the household.
 func TestViewerResolverExemptCredentialWithProfileTokenCountsAsVerified(t *testing.T) {
 	ctx := context.Background()
 	pdp := newViewerResolverTestPDP(t, ctx)
 	user := &models.User{ID: 1, AccessPolicyRevision: 5}
 	profile := &userstore.Profile{ID: "prof-1", PINHash: "pin-hash", PINRevision: 3}
-	tokens := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", PINRevision: 3}}
+	valid := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", PINRevision: 3}}
+	// Minted before the PIN last changed.
+	stale := stubProfileTokenValidator{claims: &access.ProfileTokenClaims{UserID: 1, SessionID: "sess-1", ProfileID: "prof-1", PINRevision: 2}}
 
 	for _, tc := range []struct {
 		name        string
 		token       string
+		tokens      stubProfileTokenValidator
 		wantSkipped bool
 	}{
-		{"valid token", "valid", false},
-		{"no token", "", true},
+		{"valid token", "valid", valid, false},
+		{"no token", "", valid, true},
+		{"stale token", "stale", stale, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stores := viewerResolverStoreProvider{store: viewerResolverTestStore{profile: profile}}
@@ -857,8 +861,8 @@ func TestViewerResolverExemptCredentialWithProfileTokenCountsAsVerified(t *testi
 			for name, resolver := range map[string]interface {
 				Resolve(context.Context, access.ResolveInput) (access.Scope, error)
 			}{
-				"legacy": access.NewResolver(users, stores, tokens),
-				"policy": NewViewerResolver(users, stores, tokens, pdp),
+				"legacy": access.NewResolver(users, stores, tc.tokens),
+				"policy": NewViewerResolver(users, stores, tc.tokens, pdp),
 			} {
 				scope, err := resolver.Resolve(ctx, input)
 				if err != nil {
