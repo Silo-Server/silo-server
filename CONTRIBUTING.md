@@ -301,9 +301,9 @@ stale.
 `make test-go` has no database, so every DB-backed test in it skips. The
 `Go DB pins` CI job covers the DB-backed pins listed in
 [scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
-and runs `make test-db-pins`, which checks those budgets and then the database
-contracts in `scripts/ci/db-contracts.txt`. Both lists fail when a named test is
-missing, skipped or failing. A test that pins a statement count or query plan
+and runs `make test-db-pins`, which checks those budgets and the database
+contracts in `scripts/ci/db-contracts.txt` in one pass. Both lists fail when a
+named test is missing, skipped or failing. A test that pins a statement count or query plan
 belongs in the budget list, added in the same change. Run this target when you
 change database or query code or add a pin. It needs a disposable, migrated
 database; with the PostgreSQL service from

@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -44,14 +43,11 @@ func TestGoTestArgsAnchorsEveryName(t *testing.T) {
 	}
 }
 
-// The committed list must parse, so a malformed edit fails make test-go
-// rather than only the CI job that has a database.
-func TestCommittedListParses(t *testing.T) {
-	data, err := os.ReadFile("../db-pins.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := parseList(string(data)); err != nil {
+// The committed lists must parse and name each test once between them, so a
+// malformed edit fails make test-go rather than only the CI job that has a
+// database.
+func TestCommittedListsParse(t *testing.T) {
+	if _, err := readLists([]string{"../db-pins.txt", "../db-contracts.txt"}); err != nil {
 		t.Fatal(err)
 	}
 }
