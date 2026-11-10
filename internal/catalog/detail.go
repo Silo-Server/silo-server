@@ -2071,13 +2071,21 @@ func (s *DetailService) GetEpisodeDetailsForSeries(
 		// A failed optional batch leaves the per-episode reads in place. Their
 		// existing error handling skips only the detail that could not be built.
 	}
+	// One read for the whole page, rather than one per episode.
+	episodes, err := s.episodeRepo.GetByIDs(ctx, episodeContentIDs)
+	if err != nil {
+		return nil, err
+	}
+	episodesByID := make(map[string]*models.Episode, len(episodes))
+	for _, episode := range episodes {
+		if episode != nil {
+			episodesByID[episode.ContentID] = episode
+		}
+	}
 	for _, contentID := range episodeContentIDs {
-		episode, err := s.episodeRepo.GetByID(ctx, contentID)
-		if err != nil {
-			if errors.Is(err, ErrEpisodeNotFound) {
-				continue
-			}
-			return nil, err
+		episode := episodesByID[contentID]
+		if episode == nil {
+			continue
 		}
 		if err := s.validatePresentationItemAccess(ctx, filter, contentID); err != nil {
 			if errors.Is(err, ErrItemNotFound) {
