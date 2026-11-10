@@ -209,7 +209,7 @@ func (s *Service) prepareStagedGlobalConfig(
 	}
 	removeGlobalConfigClears(manifest, key, merged, value, clearSet)
 	if len(secretPaths) > 0 && stagedConfigChangesSettings(manifest, key, merged, stored, value, secretPaths) {
-		keepOnlySubmittedSecrets(merged, value, secretPaths)
+		keepOnlySubmittedSecrets(merged, value, secretPaths, clearSet)
 		dropStoredUndeclaredFields(manifest, key, merged, value)
 	}
 	if err := validateMergedGlobalConfig(manifest, key, merged, value); err != nil {
@@ -357,11 +357,18 @@ func globalConfigFieldDefaults(manifest *pluginv1.PluginManifest, key string) ma
 
 // keepOnlySubmittedSecrets replaces every secret in merged with the value the
 // admin submitted at the same path, removing it when the submission left it
-// blank or out. Stored secrets merged in by a blank field are dropped.
-func keepOnlySubmittedSecrets(merged map[string]any, submitted map[string]any, secretPaths [][]string) {
+// blank or out, or named its field in clearSet. Stored secrets merged in by a
+// blank field are dropped.
+func keepOnlySubmittedSecrets(
+	merged map[string]any,
+	submitted map[string]any,
+	secretPaths [][]string,
+	clearSet map[string]struct{},
+) {
 	for _, path := range secretPaths {
+		_, cleared := clearSet[path[0]]
 		typed, present := configPathValue(submitted, path)
-		if !present || isClearedConfigValue(typed) {
+		if cleared || !present || isClearedConfigValue(typed) {
 			deleteConfigPath(merged, path)
 			continue
 		}

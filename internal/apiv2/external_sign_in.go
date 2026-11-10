@@ -190,7 +190,7 @@ type AdminPluginAuthBindingTestInput struct {
 	RawBody []byte
 	Body    struct {
 		CapabilityID string                   `json:"capability_id,omitempty" maxLength:"256" doc:"auth_provider.v1 capability to test; empty tests the plugin's first one"`
-		Config       []AdminPluginConfigWrite `json:"config,omitempty" maxItems:"64" doc:"Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret; clear_secrets drops it from the test"`
+		Config       []AdminPluginConfigWrite `json:"config,omitempty" maxItems:"64" doc:"Staged global configuration entries, unsaved, merged as updateAdminPluginInstallationConfig would merge them. Entries and fields not named here use the stored values; a declared non-secret field sent as null or a blank string is cleared so the plugin default applies; blank secret fields use the stored secret only while the rest of that entry is unchanged and no secret in it is entered, otherwise only the secrets entered are used; clear_secrets drops it from the test"`
 	}
 }
 
@@ -562,7 +562,7 @@ func registerExternalSignIn(reg *Registry) {
 
 	test := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/plugins/installations/{id}/auth-binding/test", "testAdminPluginAuthBinding", "admin-plugins",
 		"Test an auth plugin's connection with staged, unsaved settings."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
-	test.Description = "The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A blank secret field reuses the stored secret only while the rest of that entry is unchanged and no secret in it is entered; otherwise the test runs with only the secrets entered. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically."
+	test.Description = "The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A blank secret field reuses the stored secret only while the rest of that entry is unchanged and no secret in it is entered; otherwise that entry is tested with only the secrets entered. The rule is per entry: stored entries not named here keep their secrets. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically."
 	test.Errors = []int{http.StatusNotFound, http.StatusConflict}
 	Register(reg, test, func(ctx context.Context, in *AdminPluginAuthBindingTestInput) (*AuthConnectionTestOutput, error) {
 		if reg.deps.ExternalSignIn == nil || !reg.deps.ExternalSignIn.ConnectionTestAvailable() {

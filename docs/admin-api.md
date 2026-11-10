@@ -3507,7 +3507,9 @@ other field, after clears, matches the stored entry; a field the stored entry la
 matches its declared default. A staged entry that changes a server URL, issuer, CA or any
 other setting, or types a secret, is tested with only the secrets the administrator typed
 and without undeclared stored fields, so a test never sends a saved credential to a
-destination it was not saved for. The server validates the merged entry against the
+destination it was not saved for. The rule is per entry: the other stored entries go to the
+plugin unchanged, so a plugin that keeps a credential in one entry and its destination in
+another is not covered. The server validates the merged entry against the
 plugin's schema and returns 422 with the plugin's own message on failure, then persists
 under a compare-and-swap on the stored revision and stops the running plugin so it rebinds.
 Success is 204. Repeating the same request converges on one stored entry, so the row is
