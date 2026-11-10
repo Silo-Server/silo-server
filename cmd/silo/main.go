@@ -1916,7 +1916,13 @@ func main() {
 				return out, nil
 			},
 		)
+		pluginIdleStopAfter, idleErr := pluginhost.ParseIdleStopAfter(os.Getenv(pluginhost.EnvIdleStopAfter))
+		if idleErr != nil {
+			slog.Warn("invalid plugin idle period; using the default", "component", "plugins",
+				"env", pluginhost.EnvIdleStopAfter, "error", idleErr, "default", pluginIdleStopAfter)
+		}
 		pluginHost = pluginhost.NewHost(pluginhost.Config{
+			IdleStopAfter:   pluginIdleStopAfter,
 			EventPublisher:  eventsHub,
 			LibraryLister:   pluginhost.NewLibraryLister(libDataSource),
 			CatalogPresence: catalogPresence,
