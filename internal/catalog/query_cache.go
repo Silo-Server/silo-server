@@ -11,6 +11,11 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// queryCachePruneInterval is the least time between sweeps that drop expired
+// entries. Without them a value nobody asks for again would stay until newer
+// values pushed it out of the budget, which a quiet cache never does.
+const queryCachePruneInterval = time.Minute
+
 // queryCache holds values derived from catalog queries in memory, keyed by a
 // hash of the exact SQL and arguments that built them (queryCacheKey), so
 // every access predicate (libraries, disabled libraries, maturity limits,
@@ -35,6 +40,8 @@ type queryCache[V any] struct {
 	// recently used, lru.prev the least.
 	lru  queryCacheItem[V]
 	used int
+	// lastPrune is when expired entries were last swept.
+	lastPrune time.Time
 }
 
 // queryCacheFlight carries a load's value through singleflight, whose results
@@ -97,15 +104,19 @@ func (c *queryCache[V]) get(ctx context.Context, key string, load func(context.C
 }
 
 // lookup returns key's value while it is fresh, dropping it once expired.
+// Every get passes through here, so it also runs the sweep of other keys'
+// expired entries.
 func (c *queryCache[V]) lookup(key string) (V, bool) {
 	var zero V
+	now := c.now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.pruneExpiredLocked(now)
 	item, ok := c.entries[key]
 	if !ok {
 		return zero, false
 	}
-	if !c.now().Before(item.expires) {
+	if !now.Before(item.expires) {
 		c.removeLocked(item)
 		return zero, false
 	}
@@ -159,6 +170,22 @@ func (c *queryCache[V]) storeLocked(key string, v V) {
 	c.used += weight
 	for c.used > c.budget {
 		c.removeLocked(c.lru.prev)
+	}
+}
+
+// pruneExpiredLocked drops every expired entry, at most once per
+// queryCachePruneInterval.
+func (c *queryCache[V]) pruneExpiredLocked(now time.Time) {
+	if now.Sub(c.lastPrune) < queryCachePruneInterval {
+		return
+	}
+	c.lastPrune = now
+	for item := c.lru.prev; item != &c.lru; {
+		prev := item.prev
+		if !now.Before(item.expires) {
+			c.removeLocked(item)
+		}
+		item = prev
 	}
 }
 

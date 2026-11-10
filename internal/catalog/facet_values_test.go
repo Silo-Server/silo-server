@@ -165,6 +165,11 @@ func TestFacetValueCacheTTL(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("loads within TTL = %d, want 1", calls.Load())
 	}
+	// "idle" is never asked for again, so only the sweep can drop it.
+	var idleCalls atomic.Int32
+	if _, err := c.get(t.Context(), "idle", staticLoad(listOf(1), &idleCalls)); err != nil {
+		t.Fatal(err)
+	}
 	now = now.Add(time.Minute)
 	if _, err := c.get(t.Context(), "k", load); err != nil {
 		t.Fatal(err)
