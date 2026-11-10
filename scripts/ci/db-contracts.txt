@@ -45,6 +45,7 @@
 ./internal/scanner TestFinalizeVariantsKeepsMatchSuppressionDB
 ./internal/scanner TestFinalizeVariantsRetotalsPartsLeftByARenameDB
 ./internal/scanner TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB
+./internal/scanner TestFinalizeVariantsPagesTheScopeDB
 ./internal/scanner TestScanKeepsFileRowAcrossRenameDB
 ./internal/scanner TestScanIndexesFileWithNonUTF8Name
 ./migrations TestScanRunForeignKeysHaveLeadingIndexesDB

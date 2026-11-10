@@ -238,3 +238,60 @@ func TestFinalizeVariantsReadsWholeGroupFoundOutsideTheScopeDB(t *testing.T) {
 		t.Fatalf("disc 2 part total = %d, want 2", got)
 	}
 }
+
+// A scope is finalized a page at a time. A multipart group whose parts land on
+// different pages still gets its full total, and files on the later pages are
+// finalized too.
+func TestFinalizeVariantsPagesTheScopeDB(t *testing.T) {
+	for _, pageSize := range []int{1, 2} {
+		t.Run(fmt.Sprintf("page size %d", pageSize), func(t *testing.T) {
+			fx := seedVariantContractMovie(t, fmt.Sprintf("paged-%d", pageSize))
+			previous := variantFinalizePageSize
+			variantFinalizePageSize = pageSize
+			t.Cleanup(func() { variantFinalizePageSize = previous })
+
+			ctx := context.Background()
+			dir := fx.root + "/Discs (2010)"
+			// In path order: a plain file, the three discs, then a plain
+			// file stored with a stale edition.
+			discs := map[string]bool{"Discs.2010.CD1.mkv": true, "Discs.2010.CD2.mkv": true, "Discs.2010.CD3.mkv": true}
+			names := []string{"Discs.2010.1080p.mkv", "Discs.2010.CD1.mkv", "Discs.2010.CD2.mkv", "Discs.2010.CD3.mkv", "Discs.2010.mkv"}
+			ids := make(map[string]int, len(names))
+			for _, name := range names {
+				var id int
+				if err := fx.pool.QueryRow(ctx, `
+					INSERT INTO media_files (content_id, media_folder_id, file_path, file_size)
+					VALUES ($1, $2, $3, 1024) RETURNING id`, fx.movieID, fx.folderID, dir+"/"+name).Scan(&id); err != nil {
+					t.Fatalf("seed %s: %v", name, err)
+				}
+				ids[name] = id
+			}
+			if _, err := fx.pool.Exec(ctx, `
+				UPDATE media_files SET edition_key = 'stale', edition_source = 'heuristic_file'
+				WHERE id = $1`, ids["Discs.2010.mkv"]); err != nil {
+				t.Fatalf("seed stale edition: %v", err)
+			}
+
+			fx.finalize(t, dir)
+			// A scope that is one file takes the same paged path.
+			fx.finalize(t, dir+"/Discs.2010.CD3.mkv")
+
+			for _, name := range names {
+				var editionKey string
+				var total int
+				if err := fx.pool.QueryRow(ctx, `
+					SELECT COALESCE(edition_key, ''), COALESCE(presentation_part_total, 0)
+					FROM media_files WHERE id = $1`, ids[name]).Scan(&editionKey, &total); err != nil {
+					t.Fatalf("load %s: %v", name, err)
+				}
+				wantTotal := 0
+				if discs[name] {
+					wantTotal = 3
+				}
+				if total != wantTotal || editionKey != "" {
+					t.Fatalf("%s: part total = %d, edition = %q, want total %d and no edition", name, total, editionKey, wantTotal)
+				}
+			}
+		})
+	}
+}

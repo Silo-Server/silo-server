@@ -17,6 +17,12 @@ import (
 // other files of the same owner, so files outside the scope are loaded only as
 // variantSiblingOwners and variantOwnersToWiden choose. Other out-of-scope
 // files are finalized when their own scope runs.
+//
+// The scope is walked a page at a time in path order, so memory is bounded by
+// a page and not by the library. A page needs no help from its neighbours:
+// the sibling lookups read by owner across the whole folder, so a multipart
+// group split over pages is read in full, and written, by the first page that
+// holds one of its parts. Later pages find those files already settled.
 func (s *Scanner) FinalizeVariantsByPathPrefix(
 	ctx context.Context,
 	folder *models.MediaFolder,
@@ -26,14 +32,39 @@ func (s *Scanner) FinalizeVariantsByPathPrefix(
 		return nil
 	}
 
-	scopedFiles, err := s.fileRepo.ListVariantFilesByPathPrefix(ctx, folder.ID, pathPrefix)
-	if err != nil {
-		return fmt.Errorf("loading files for variant finalization: %w", err)
+	limit := variantFinalizePageSize
+	after := ""
+	for {
+		scopedFiles, err := s.fileRepo.ListVariantFilesByPathPrefix(ctx, folder.ID, pathPrefix, after, limit)
+		if err != nil {
+			return fmt.Errorf("loading files for variant finalization: %w", err)
+		}
+		if len(scopedFiles) == 0 {
+			return nil
+		}
+		for i := range scopedFiles {
+			after = max(after, scopedFiles[i].FilePath)
+		}
+		if err := s.finalizeVariantPage(ctx, folder, pathPrefix, scopedFiles); err != nil {
+			return err
+		}
+		if len(scopedFiles) < limit {
+			return nil
+		}
 	}
-	if len(scopedFiles) == 0 {
-		return nil
-	}
+}
 
+// variantFinalizePageSize is the number of in-scope files one finalization
+// step loads, parses and writes. It is a variable so tests can split a scope
+// across pages.
+var variantFinalizePageSize = 2000
+
+func (s *Scanner) finalizeVariantPage(
+	ctx context.Context,
+	folder *models.MediaFolder,
+	pathPrefix string,
+	scopedFiles []VariantFile,
+) error {
 	candidates, err := s.variantFinalizationCandidates(ctx, folder, scopedFiles)
 	if err != nil {
 		return err
