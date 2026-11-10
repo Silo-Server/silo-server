@@ -152,3 +152,40 @@ func TestCheck(t *testing.T) {
 		})
 	}
 }
+
+// The wrapper repoints a database variable only when it names the template,
+// however its options are spelled, and never passes its own variables on.
+func TestCloneEnv(t *testing.T) {
+	const template = "postgres://u:p@localhost:5432/silo_test?sslmode=disable"
+	const clone = "postgres://u:p@localhost:5432/dbpins_x?sslmode=disable"
+	got := cloneEnv([]string{
+		"SILO_TEST_DATABASE_URL=" + template,
+		"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgresql://u:p@localhost/silo_test",
+		"OTHER=" + template,
+		cloneTemplateEnv + "=" + template,
+		cloneRunEnv + "=abcd",
+	}, template, clone)
+	want := []string{
+		"SILO_TEST_DATABASE_URL=" + clone,
+		"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=" + clone,
+		"OTHER=" + template,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("env = %q, want %q", got, want)
+	}
+	other := cloneEnv([]string{"SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgres://u:p@localhost:5432/subtitles"}, template, clone)
+	if other[0] != "SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL=postgres://u:p@localhost:5432/subtitles" {
+		t.Fatalf("a different database was repointed: %q", other)
+	}
+}
+
+// Postgres truncates names past 63 bytes, which would make two copies collide.
+func TestCloneNameFitsPostgres(t *testing.T) {
+	name, err := cloneName("0123abcd", "/home/runner/work/silo-server/silo-server/internal/a_very_long_parent_package_name/another_long_package_name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(name) > 63 || !strings.HasPrefix(name, clonePrefix+"0123abcd_") || !strings.Contains(name, "another_long_package_name_") {
+		t.Fatalf("clone name %q (%d bytes)", name, len(name))
+	}
+}

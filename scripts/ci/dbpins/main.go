@@ -7,6 +7,10 @@
 // skips guards nothing, so this command fails on a listed test that is
 // missing, skipped or failing, and on any skipped subtest.
 //
+// Each package runs against its own copy of the database (see clone.go), so
+// the database must have no other sessions; -shared runs every package
+// against it directly instead.
+//
 // Usage (the repository root is the cwd; SILO_TEST_DATABASE_URL names a
 // migrated, disposable database):
 //
@@ -15,6 +19,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -22,6 +27,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"slices"
 	"strings"
@@ -46,8 +52,13 @@ type pin struct {
 var testName = regexp.MustCompile(`^Test[A-Za-z0-9_]*$`)
 
 func main() {
+	if template := os.Getenv(cloneTemplateEnv); template != "" {
+		os.Exit(runCloned(template, os.Args[1:]))
+	}
+
 	var lists listFlag
 	flag.Var(&lists, "list", "file naming the pinned tests; repeat to run several lists in one pass")
+	shared := flag.Bool("shared", false, "run every package against SILO_TEST_DATABASE_URL instead of a copy of it")
 	flag.Parse()
 	if len(lists) == 0 {
 		lists = listFlag{"scripts/ci/db-pins.txt"}
@@ -64,11 +75,29 @@ func main() {
 	if err != nil {
 		fail(fmt.Errorf("go list -m: %w", err))
 	}
-	if os.Getenv("SILO_TEST_DATABASE_URL") == "" {
+
+	args := goTestArgs(pins)
+	env := os.Environ()
+	template := os.Getenv("SILO_TEST_DATABASE_URL")
+	run := ""
+	switch {
+	case template == "":
 		fmt.Println("dbpins: SILO_TEST_DATABASE_URL is not set, so every pin will skip")
+	case !*shared:
+		var execPath string
+		if execPath, run, err = setUpClones(template); err != nil {
+			fail(err)
+		}
+		args = slices.Insert(args, 1, "-exec", execPath)
+		env = append(env, cloneTemplateEnv+"="+template, cloneRunEnv+"="+run)
 	}
 
-	cmd := exec.Command("go", goTestArgs(pins)...)
+	// Ctrl-C reaches go test and the test binaries through the process
+	// group; stay up to drop this run's database copies once they exit.
+	signal.Notify(make(chan os.Signal, 1), os.Interrupt)
+
+	cmd := exec.CommandContext(context.Background(), "go", args...) //nolint:gosec // fixed go executable with separate arguments, no shell
+	cmd.Env = env
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -84,6 +113,12 @@ func main() {
 		_, _ = io.Copy(io.Discard, stdout)
 	}
 	waitErr := cmd.Wait()
+	if run != "" {
+		// A wrapper killed by go test cannot drop its own copy.
+		if err := dropRunClones(template, run); err != nil {
+			fmt.Fprintf(os.Stderr, "dbpins: %v\n", err)
+		}
+	}
 	if readErr != nil {
 		fail(readErr)
 	}

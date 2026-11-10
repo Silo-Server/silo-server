@@ -302,11 +302,13 @@ stale.
 `Go DB pins` CI job covers the DB-backed pins listed in
 [scripts/ci/db-pins.txt](scripts/ci/db-pins.txt): it migrates a fresh database
 and runs `make test-db-pins`, which checks those budgets and the database
-contracts in `scripts/ci/db-contracts.txt` in one pass. Both lists fail when a
-named test is missing, skipped or failing. A test that pins a statement count or query plan
+contracts in `scripts/ci/db-contracts.txt` in one pass, each package against its
+own copy of the database. Both lists fail when a named test is missing, skipped
+or failing. A test that pins a statement count or query plan
 belongs in the budget list, added in the same change. Run this target when you
 change database or query code or add a pin. It needs a disposable, migrated
-database; with the PostgreSQL service from
+database that nothing else is connected to (`go run ./scripts/ci/dbpins -shared`
+runs against it directly instead); with the PostgreSQL service from
 [DEVELOPMENT.md](DEVELOPMENT.md#local-development)
 running under the Compose defaults:
 
