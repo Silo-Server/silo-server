@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 import "@/styles/admin-settings.css";
 
@@ -42,11 +43,11 @@ export interface ProviderTileProps {
   children?: ReactNode;
 }
 
-const STATE_LABELS: Record<ProviderTileState, string> = {
-  connected: "Connected",
-  not_connected: "Not connected",
-  error: "Error",
-  editing: "Editing",
+const STATE_LABELS: Record<ProviderTileState, MessageKey> = {
+  connected: "web.settings.providerTile.state.connected",
+  not_connected: "web.settings.providerTile.state.notConnected",
+  error: "web.settings.providerTile.state.error",
+  editing: "web.settings.providerTile.state.editing",
 };
 
 const STATE_DOT_CLASSES: Record<ProviderTileState, string> = {
@@ -66,6 +67,7 @@ export function ProviderState({
   label?: string;
   className?: string;
 }) {
+  const t = useT();
   return (
     <span
       data-state={state}
@@ -76,7 +78,7 @@ export function ProviderState({
       )}
     >
       <span aria-hidden="true" className={cn("size-1.5 rounded-full", STATE_DOT_CLASSES[state])} />
-      {label ?? STATE_LABELS[state]}
+      {label ?? t(STATE_LABELS[state])}
     </span>
   );
 }
@@ -104,10 +106,15 @@ export interface ProviderTestState {
   durationMs: number;
 }
 
-function testedLabel(test: ProviderTestState): string {
+function testedLabel(t: Translate, test: ProviderTestState): string {
   const seconds = Math.max(0, Math.round((Date.now() - test.at) / 1000));
-  const ago = seconds < 60 ? `${seconds}s ago` : `${Math.round(seconds / 60)}m ago`;
-  return `Tested ${ago} · ${test.durationMs} ms`;
+  const duration = String(test.durationMs);
+  return seconds < 60
+    ? t("web.settings.providerTile.testedSeconds", { seconds: String(seconds), duration })
+    : t("web.settings.providerTile.testedMinutes", {
+        minutes: String(Math.round(seconds / 60)),
+        duration,
+      });
 }
 
 /**
@@ -141,6 +148,7 @@ export function ProviderPanelActions({
   test?: ProviderTestState;
   children: ReactNode;
 }) {
+  const t = useT();
   return (
     // Buttons sit at the right edge — the same corner as the collapsed tile's
     // Manage button — so the eye finds the actions in one place in both
@@ -155,7 +163,7 @@ export function ProviderPanelActions({
               : "mr-auto text-xs text-amber-600 dark:text-amber-400"
           }
         >
-          {test.ok ? testedLabel(test) : test.message}
+          {test.ok ? testedLabel(t, test) : test.message}
         </span>
       ) : null}
       {children}

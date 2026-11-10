@@ -4,18 +4,21 @@ import { PosterTile } from "@/components/calm/PosterTile";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ScopePreview } from "@/hooks/queries/collectionScope";
 import {
-  PREVIEW_EMPTY,
-  PREVIEW_EMPTY_HELP,
-  PREVIEW_FAILED,
-  PREVIEW_LIVE,
+  previewEmpty,
+  previewEmptyHelp,
+  previewFailed,
+  previewLive,
   PREVIEW_NEEDS_RULE,
   PREVIEW_NEEDS_RULE_HELP,
   previewMatches,
 } from "@/lib/collections/copy";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 const GRID = "grid grid-cols-4 gap-2.5 sm:grid-cols-6 lg:grid-cols-8";
 const GHOSTS = 8;
+/** A separator, the same in every language. */
+const DOT = "·";
 
 /**
  * "● Live preview · 40 titles match · showing 24": the first titles the
@@ -32,6 +35,7 @@ export function CollectionPreviewPane({
   /** No rule is complete yet: show the prompt to add one, not the last result. */
   needsRules?: boolean;
 }) {
+  const t = useT();
   const id = useId();
   const ready = !needsRules && preview.status === "ready" ? preview : null;
   const busy = !needsRules && (preview.status === "loading" || Boolean(ready?.refreshing));
@@ -51,22 +55,24 @@ export function CollectionPreviewPane({
             aria-hidden
             className="bg-success ring-success/20 size-1.5 rounded-full ring-[3px]"
           />
-          {PREVIEW_LIVE}
+          {previewLive()}
         </h2>
         {/* Read out once the debounced request answers, not on every keystroke. */}
         <p aria-live="polite" className="inline-flex flex-wrap items-center gap-x-2">
           {ready ? (
             <>
               <span aria-hidden className="text-muted-foreground">
-                ·
+                {DOT}
               </span>
               <b className="font-semibold">{previewMatches(ready.total)}</b>
               {ready.items.length > 0 && ready.total > ready.items.length ? (
                 <>
                   <span aria-hidden className="text-muted-foreground">
-                    ·
+                    {DOT}
                   </span>
-                  <span className="text-muted-foreground">{`showing ${ready.items.length}`}</span>
+                  <span className="text-muted-foreground">
+                    {t("web.collections.preview.showing", { shown: String(ready.items.length) })}
+                  </span>
                 </>
               ) : null}
             </>
@@ -81,6 +87,7 @@ export function CollectionPreviewPane({
 
 /** Posters, loading skeletons, or ghost posters with the reason there are none. */
 function PreviewBody({ preview, needsRules }: { preview: ScopePreview; needsRules: boolean }) {
+  const t = useT();
   if (needsRules) {
     return (
       <PreviewGhosts announce>
@@ -101,7 +108,7 @@ function PreviewBody({ preview, needsRules }: { preview: ScopePreview; needsRule
   if (preview.status === "ready" && preview.items.length > 0) {
     return (
       <ul
-        aria-label="Matching titles"
+        aria-label={t("web.collections.preview.matchingTitles")}
         className={cn(GRID, "transition-opacity", preview.refreshing && "opacity-60")}
       >
         {preview.items.map((item) => (
@@ -112,12 +119,12 @@ function PreviewBody({ preview, needsRules }: { preview: ScopePreview; needsRule
       </ul>
     );
   }
-  let message = <p className="text-muted-foreground text-[13px]">{PREVIEW_FAILED}</p>;
+  let message = <p className="text-muted-foreground text-[13px]">{previewFailed()}</p>;
   if (preview.status === "ready") {
     message = (
       <>
-        <p className="text-[14.5px] font-semibold">{PREVIEW_EMPTY}</p>
-        <p className="text-muted-foreground mt-1 text-[13px]">{PREVIEW_EMPTY_HELP}</p>
+        <p className="text-[14.5px] font-semibold">{previewEmpty()}</p>
+        <p className="text-muted-foreground mt-1 text-[13px]">{previewEmptyHelp()}</p>
       </>
     );
   }

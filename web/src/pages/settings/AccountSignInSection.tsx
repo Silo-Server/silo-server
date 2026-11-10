@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useSearchParams } from "react-router";
 import { toast } from "sonner";
 
@@ -30,6 +30,7 @@ import {
   type AccountIdentity,
 } from "@/hooks/queries/account";
 import { useAuth, type AuthProviderOption } from "@/hooks/useAuth";
+import { useT, type Translate } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate } from "@/lib/datetime";
 import {
@@ -43,44 +44,43 @@ import {
 // error=oauth_link_failed&reason=<reason>.
 const LINK_RETURN_PATH = "/settings/account";
 
-type Banner = { kind: "success"; text: string } | { kind: "error"; text: string };
-
-const NO_LOCAL_PASSWORD =
-  "Your account has no Silo password to confirm this with. Ask an admin to connect the provider for you.";
+// The text is formatted at render, so a banner follows a language change.
+type Banner = { kind: "success" | "error"; text: (t: Translate) => string };
 
 /** Readable text for a failed connect, by the problem the server answered. */
-function connectErrorText(error: unknown, provider: AuthProviderOption): string {
+function connectErrorText(t: Translate, error: unknown, provider: AuthProviderOption): string {
   const fromStart = error instanceof LinkStartError;
   const problem = fromStart ? error.original : error;
   if (!(problem instanceof V2ProblemError)) {
-    return "Couldn't reach the server. Try again.";
+    return t("web.settings.accountSignIn.error.unreachable");
   }
   if (problem.status === 429) {
-    return "Too many attempts. Wait a minute and try again.";
+    return t("web.settings.accountSignIn.error.tooManyAttempts");
   }
+  const name = { provider: provider.display_name };
   const location = problem.problem.errors?.[0]?.location;
   switch (problem.problemType) {
     case "network_identity_required":
-      return `Open this server at its ${provider.display_name} address to connect ${provider.display_name}.`;
+      return t("web.settings.accountSignIn.error.networkIdentityRequired", name);
     case "validation_failed":
       if (location === "body.directory_password") {
-        return `${provider.display_name} didn't accept that username and password.`;
+        return t("web.settings.accountSignIn.error.directoryRejected", name);
       }
       if (location === "body.password") {
-        return "That isn't your current Silo password.";
+        return t("web.settings.accountSignIn.error.wrongPassword");
       }
       break;
     case "local_password_required":
-      return NO_LOCAL_PASSWORD;
+      return t("web.settings.accountSignIn.error.noLocalPassword");
     case "conflict":
       // link-start's 409: the page is not on the server's public URL.
-      return "Open this server at its public address to connect a sign-in provider.";
+      return t("web.settings.accountSignIn.error.publicAddressRequired");
     case "account_disabled":
-      return `Your ${provider.display_name} account is disabled.`;
+      return t("web.settings.accountSignIn.error.accountDisabled", name);
     case "password_expired":
-      return `Your ${provider.display_name} password has expired. Change it there, then try again.`;
+      return t("web.settings.accountSignIn.error.passwordExpired", name);
     case "permission_denied":
-      return "This session can't change how the account signs in. Sign in to the account itself and try again.";
+      return t("web.settings.accountSignIn.error.permissionDenied");
     case "not_permitted":
     case "provider_unavailable":
       return oauthFailureText(problem.problemType);
@@ -89,33 +89,39 @@ function connectErrorText(error: unknown, provider: AuthProviderOption): string 
       return oauthLinkFailureText(problem.problemType);
     case "not_found":
       return fromStart
-        ? "That took too long. Try again."
-        : `${provider.display_name} isn't available right now.`;
+        ? t("web.settings.accountSignIn.error.timedOut")
+        : t("web.settings.accountSignIn.error.providerUnavailable", name);
   }
   return problem.message;
 }
 
-/** What connecting asks for, by how the provider signs in. */
-function connectIntro(provider: AuthProviderOption): string {
-  const name = provider.display_name;
+/** What connecting asks for, by how the provider signs in, and what changes after. */
+function connectIntro(t: Translate, provider: AuthProviderOption): ReactNode {
+  const name = { provider: provider.display_name };
   if (provider.mode === "network") {
     const owner = networkIdentityName(provider);
-    const account = owner ? `${owner}'s ${name} account` : `the ${name} account`;
-    return `Confirm your Silo password to connect ${account} on this device.`;
+    return owner
+      ? t("web.settings.accountSignIn.intro.networkOwner", {
+          ...name,
+          owner,
+          name: (chunks) => chunks,
+        })
+      : t("web.settings.accountSignIn.intro.network", name);
   }
   if (provider.mode === "credentials") {
-    return `Confirm your Silo password, then enter your ${name} username and password.`;
+    return t("web.settings.accountSignIn.intro.credentials", name);
   }
-  return `Confirm your Silo password, then sign in at ${name}.`;
+  return t("web.settings.accountSignIn.intro.oauth", name);
 }
 
 /** Reads the result a web linking flow came back with, once. */
 function linkResultBanner(params: URLSearchParams): Banner | null {
   if (params.get("linked") === "1") {
-    return { kind: "success", text: "Your account is connected to the sign-in provider." };
+    return { kind: "success", text: (t) => t("web.settings.accountSignIn.linked") };
   }
   if (params.get("error") === "oauth_link_failed") {
-    return { kind: "error", text: oauthLinkFailureText(params.get("reason")) };
+    const reason = params.get("reason");
+    return { kind: "error", text: () => oauthLinkFailureText(reason) };
   }
   return null;
 }
@@ -126,6 +132,7 @@ function linkResultBanner(params: URLSearchParams): Banner | null {
  * and disconnecting it while the account can still sign in another way.
  */
 export function AccountSignInSection() {
+  const t = useT();
   const { providers = [], isImpersonating, refreshSignInProviders } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [banner, setBanner] = useState<Banner | null>(() => linkResultBanner(searchParams));
@@ -169,8 +176,8 @@ export function AccountSignInSection() {
 
   return (
     <SettingsGroup
-      title="Sign-in"
-      description="Sign in to this account with your organization's sign-in provider."
+      title={t("web.settings.accountSignIn.title")}
+      description={t("web.settings.accountSignIn.description")}
     >
       <div className="max-w-2xl space-y-4">
         {banner ? (
@@ -182,18 +189,16 @@ export function AccountSignInSection() {
                 : "border-border/60 bg-background/50 rounded-md border p-3 text-sm"
             }
           >
-            {banner.text}
+            {banner.text(t)}
           </p>
         ) : null}
 
         {identities.isLoading ? (
-          <div role="status" aria-label="Loading sign-in settings">
+          <div role="status" aria-label={t("web.settings.accountSignIn.loading")}>
             <Skeleton className="h-14 w-full" />
           </div>
         ) : identities.isError ? (
-          <p className="text-destructive text-sm">
-            Sign-in settings could not be loaded. Refresh the page to try again.
-          </p>
+          <p className="text-destructive text-sm">{t("web.settings.accountSignIn.loadFailed")}</p>
         ) : (
           <>
             {linked.map((identity) => (
@@ -208,8 +213,7 @@ export function AccountSignInSection() {
 
             {isImpersonating ? (
               <p className="text-muted-foreground text-sm">
-                Only the account itself can change how it signs in, not while you view it as another
-                user.
+                {t("web.settings.accountSignIn.impersonating")}
               </p>
             ) : (
               connectable.map((provider) =>
@@ -222,7 +226,10 @@ export function AccountSignInSection() {
                       setConnecting(null);
                       setBanner({
                         kind: "success",
-                        text: `Connected ${provider.display_name}. Sign in with it from now on.`,
+                        text: (translate) =>
+                          translate("web.settings.accountSignIn.connected", {
+                            provider: provider.display_name,
+                          }),
                       });
                     }}
                   />
@@ -240,7 +247,9 @@ export function AccountSignInSection() {
                     {provider.icon_url ? (
                       <img src={provider.icon_url} alt="" className="h-5 w-5" />
                     ) : null}
-                    Connect {provider.display_name}
+                    {t("web.settings.accountSignIn.connectProvider", {
+                      provider: provider.display_name,
+                    })}
                   </Button>
                 ),
               )
@@ -254,8 +263,8 @@ export function AccountSignInSection() {
   );
 }
 
-function identityProviderName(identity: AccountIdentity) {
-  return identity.provider_name || "Sign-in provider (turned off)";
+function identityProviderName(t: Translate, identity: AccountIdentity) {
+  return identity.provider_name || t("web.settings.accountSignIn.providerTurnedOff");
 }
 
 function LinkedIdentityRow({
@@ -269,31 +278,36 @@ function LinkedIdentityRow({
   onlyWayIn: boolean;
   onDisconnect: () => void;
 }) {
+  const t = useT();
   const who = [identity.username, identity.email].filter(Boolean);
   const lastSignIn = formatRelativeTime(identity.last_sign_in_at, { absoluteAfterDays: 30 });
   // The provider's latest answer about the identity: a sign-in, or the
   // server's periodic re-check that the account may still sign in.
   const lastChecked = formatRelativeTime(identity.last_checked_at, { absoluteAfterDays: 30 });
   const history = [
-    `Connected ${formatDate(identity.linked_at, "medium")}`,
-    lastSignIn ? `Last sign-in ${lastSignIn}` : "Not used to sign in yet",
-    lastChecked ? `Last checked ${lastChecked}` : "",
+    t("web.settings.accountSignIn.history.connected", {
+      date: formatDate(identity.linked_at, "medium"),
+    }),
+    lastSignIn
+      ? t("web.settings.accountSignIn.history.lastSignIn", { time: lastSignIn })
+      : t("web.settings.accountSignIn.history.neverUsed"),
+    lastChecked ? t("web.settings.accountSignIn.history.lastChecked", { time: lastChecked }) : "",
   ].filter(Boolean);
   return (
     <div className="border-border/60 flex flex-wrap items-center justify-between gap-3 rounded-md border p-3">
       <div className="min-w-0 space-y-0.5 text-sm">
-        <p className="font-medium">{identityProviderName(identity)}</p>
+        <p className="font-medium">{identityProviderName(t, identity)}</p>
         {who.length > 0 ? <p className="break-all">{who.join(" · ")}</p> : null}
         <p className="text-muted-foreground text-xs">{history.join(" · ")}</p>
         {onlyWayIn ? (
           <p className="text-muted-foreground text-xs">
-            This is how you sign in to this account, so it stays connected.
+            {t("web.settings.accountSignIn.onlyWayIn")}
           </p>
         ) : null}
       </div>
       {canDisconnect ? (
         <Button type="button" variant="outline" size="sm" onClick={onDisconnect}>
-          Disconnect
+          {t("web.settings.accountSignIn.disconnect")}
         </Button>
       ) : null}
     </div>
@@ -309,6 +323,7 @@ function ConnectForm({
   onCancel: () => void;
   onLinked: () => void;
 }) {
+  const t = useT();
   const startLink = useStartAccountIdentityLink();
   const linkCredentials = useLinkAccountIdentityWithCredentials();
   const linkNetwork = useLinkAccountIdentityWithNetwork();
@@ -324,6 +339,7 @@ function ConnectForm({
   const network = provider.mode === "network";
   const busy = startLink.isPending || linkCredentials.isPending || linkNetwork.isPending || leaving;
   const idPrefix = `connect-${installationId}`;
+  const name = { provider: provider.display_name };
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -360,7 +376,7 @@ function ConnectForm({
       setLeaving(true);
       leaveForProvider(started.authorize_url);
     } catch (failure) {
-      setError(connectErrorText(failure, provider));
+      setError(connectErrorText(t, failure, provider));
     }
   }
 
@@ -368,17 +384,16 @@ function ConnectForm({
     <form
       className="border-border/60 space-y-4 rounded-md border p-4"
       onSubmit={(event) => void handleSubmit(event)}
-      aria-label={`Connect ${provider.display_name}`}
+      aria-label={t("web.settings.accountSignIn.connectProvider", name)}
     >
       <div className="space-y-1 text-sm">
-        <p className="font-medium">Connect {provider.display_name}</p>
-        <p className="text-muted-foreground">
-          {connectIntro(provider)} Afterwards you sign in with {provider.display_name} instead of
-          your Silo password.
-        </p>
+        <p className="font-medium">{t("web.settings.accountSignIn.connectProvider", name)}</p>
+        <p className="text-muted-foreground">{connectIntro(t, provider)}</p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-password`}>Silo password</Label>
+        <Label htmlFor={`${idPrefix}-password`}>
+          {t("web.settings.accountSignIn.siloPassword")}
+        </Label>
         <PasswordInput
           id={`${idPrefix}-password`}
           autoComplete="current-password"
@@ -390,7 +405,9 @@ function ConnectForm({
       {directory ? (
         <>
           <div className="space-y-2">
-            <Label htmlFor={`${idPrefix}-username`}>{provider.display_name} username</Label>
+            <Label htmlFor={`${idPrefix}-username`}>
+              {t("web.settings.accountSignIn.providerUsername", name)}
+            </Label>
             <Input
               id={`${idPrefix}-username`}
               autoComplete="off"
@@ -402,7 +419,7 @@ function ConnectForm({
           </div>
           <div className="space-y-2">
             <Label htmlFor={`${idPrefix}-directory-password`}>
-              {provider.display_name} password
+              {t("web.settings.accountSignIn.providerPassword", name)}
             </Label>
             <PasswordInput
               id={`${idPrefix}-directory-password`}
@@ -422,13 +439,13 @@ function ConnectForm({
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={busy}>
           {busy
-            ? "Connecting…"
+            ? t("web.settings.accountSignIn.connecting")
             : directory || network
-              ? "Connect"
-              : `Continue to ${provider.display_name}`}
+              ? t("web.settings.accountSignIn.connect")
+              : t("web.settings.accountSignIn.continueTo", name)}
         </Button>
         <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     </form>
@@ -442,27 +459,30 @@ function DisconnectDialog({
   identity: AccountIdentity | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const unlink = useUnlinkAccountIdentity();
   const [error, setError] = useState<string | null>(null);
-  const name = identity ? identityProviderName(identity) : "";
+  const name = identity ? identityProviderName(t, identity) : "";
 
   async function disconnect() {
     if (!identity) return;
     setError(null);
     try {
       await unlink.mutateAsync(identity.id);
-      toast.success(`Disconnected ${name}`);
+      toast.success(t("web.settings.accountSignIn.disconnected", { provider: name }));
       onClose();
     } catch (failure) {
       if (failure instanceof V2ProblemError && failure.problemType === "last_sign_in_method") {
-        setError(
-          `${name} is the only way to sign in to your account, so it can't be disconnected. Ask an admin to set a Silo password for you first.`,
-        );
+        setError(t("web.settings.accountSignIn.error.lastMethod", { provider: name }));
       } else if (failure instanceof V2ProblemError && failure.status === 404) {
         // Already gone; the list refreshes.
         onClose();
       } else {
-        setError(failure instanceof Error ? failure.message : "Couldn't disconnect. Try again.");
+        setError(
+          failure instanceof Error
+            ? failure.message
+            : t("web.settings.accountSignIn.error.disconnectFailed"),
+        );
       }
     }
   }
@@ -479,11 +499,11 @@ function DisconnectDialog({
     >
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Disconnect {name}?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {t("web.settings.accountSignIn.disconnectTitle", { provider: name })}
+          </AlertDialogTitle>
           <AlertDialogDescription>
-            You won&apos;t be able to sign in with {name} anymore. Afterwards, sign in with your
-            Silo password. The server only allows this while your account can still sign in another
-            way.
+            {t("web.settings.accountSignIn.disconnectDescription", { provider: name })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error ? (
@@ -492,7 +512,7 @@ function DisconnectDialog({
           </p>
         ) : null}
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={unlink.isPending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={unlink.isPending}>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction
             disabled={unlink.isPending}
             onClick={(event) => {
@@ -500,7 +520,9 @@ function DisconnectDialog({
               void disconnect();
             }}
           >
-            {unlink.isPending ? "Disconnecting…" : "Disconnect"}
+            {unlink.isPending
+              ? t("web.settings.accountSignIn.disconnecting")
+              : t("web.settings.accountSignIn.disconnect")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

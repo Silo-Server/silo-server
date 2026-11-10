@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { OverlayPreset, PresetId } from "./types";
 
 // Presets are pure data — no runtime branching, no per-render computation.
@@ -9,8 +10,12 @@ import type { OverlayPreset, PresetId } from "./types";
 export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   minimal: {
     id: "minimal",
-    label: "Minimal",
-    description: "Near-invisible. Tiny text, no background.",
+    get label() {
+      return t("web.settings.overlays.preset.minimal.label");
+    },
+    get description() {
+      return t("web.settings.overlays.preset.minimal.description");
+    },
     layout: "stack",
     sourceChips: false,
     fontWeight: 600,
@@ -37,8 +42,12 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   },
   classic: {
     id: "classic",
-    label: "Classic",
-    description: "Semi-transparent dark pill with a white border. The default.",
+    get label() {
+      return t("web.settings.overlays.preset.classic.label");
+    },
+    get description() {
+      return t("web.settings.overlays.preset.classic.description");
+    },
     layout: "stack",
     sourceChips: false,
     fontWeight: 600,
@@ -63,8 +72,12 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   },
   vibrant: {
     id: "vibrant",
-    label: "Vibrant",
-    description: "Opaque, accent-colored badges. High contrast.",
+    get label() {
+      return t("web.settings.overlays.preset.vibrant.label");
+    },
+    get description() {
+      return t("web.settings.overlays.preset.vibrant.description");
+    },
     layout: "stack",
     sourceChips: false,
     fontWeight: 700,
@@ -90,8 +103,12 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   },
   pill: {
     id: "pill",
-    label: "Pill",
-    description: "Larger pill with more padding. Works well with icons.",
+    get label() {
+      return t("web.settings.overlays.preset.pill.label");
+    },
+    get description() {
+      return t("web.settings.overlays.preset.pill.description");
+    },
     layout: "stack",
     sourceChips: false,
     fontWeight: 600,
@@ -118,8 +135,12 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   },
   square: {
     id: "square",
-    label: "Square",
-    description: "Blocky, high-density. Plex-inspired.",
+    get label() {
+      return t("web.settings.overlays.preset.square.label");
+    },
+    get description() {
+      return t("web.settings.overlays.preset.square.description");
+    },
     layout: "stack",
     sourceChips: false,
     fontWeight: 700,
@@ -148,8 +169,12 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   },
   plate: {
     id: "plate",
-    label: "Plate",
-    description: "Large dark plates with heavy type. Ratings lead with a coloured source chip.",
+    get label() {
+      return t("web.settings.overlays.preset.plate.label");
+    },
+    get description() {
+      return t("web.settings.overlays.preset.plate.description");
+    },
     layout: "stack",
     sourceChips: true,
     fontWeight: 800,
@@ -176,8 +201,12 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
   },
   band: {
     id: "band",
-    label: "Edge band",
-    description: "Each edge's badges in one strip of marks over a soft scrim.",
+    get label() {
+      return t("web.settings.overlays.preset.band.label");
+    },
+    get description() {
+      return t("web.settings.overlays.preset.band.description");
+    },
     layout: "band",
     sourceChips: false,
     fontWeight: 800,
@@ -220,16 +249,76 @@ export function getPreset(id: PresetId): OverlayPreset {
 // overrides. Values cover most reasonable contrast scenarios over a dark badge
 // background.
 export const ACCENT_PALETTE: { label: string; value: string }[] = [
-  { label: "Gold", value: "#f5c518" }, // IMDb yellow
-  { label: "Tomato", value: "#fa320a" }, // RT critic red
-  { label: "Orange", value: "#f97316" },
-  { label: "Amber", value: "#f59e0b" },
-  { label: "Emerald", value: "#10b981" },
-  { label: "Cyan", value: "#06b6d4" },
-  { label: "Blue", value: "#3b82f6" },
-  { label: "Indigo", value: "#6366f1" },
-  { label: "Violet", value: "#8b5cf6" },
-  { label: "Pink", value: "#ec4899" },
-  { label: "Slate", value: "#64748b" },
-  { label: "White", value: "#ffffff" },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.gold");
+    },
+    value: "#f5c518",
+  }, // IMDb yellow
+  {
+    get label() {
+      return t("web.settings.overlays.accent.tomato");
+    },
+    value: "#fa320a",
+  }, // RT critic red
+  {
+    get label() {
+      return t("web.settings.overlays.accent.orange");
+    },
+    value: "#f97316",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.amber");
+    },
+    value: "#f59e0b",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.emerald");
+    },
+    value: "#10b981",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.cyan");
+    },
+    value: "#06b6d4",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.blue");
+    },
+    value: "#3b82f6",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.indigo");
+    },
+    value: "#6366f1",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.violet");
+    },
+    value: "#8b5cf6",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.pink");
+    },
+    value: "#ec4899",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.slate");
+    },
+    value: "#64748b",
+  },
+  {
+    get label() {
+      return t("web.settings.overlays.accent.white");
+    },
+    value: "#ffffff",
+  },
 ];

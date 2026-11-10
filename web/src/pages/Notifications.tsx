@@ -26,8 +26,9 @@ import { NotifiedSeriesList } from "@/components/notifications/NotifiedSeriesLis
 import { useNotificationCapability } from "@/hooks/queries/notificationWebhooks";
 import { NotificationPoster } from "@/components/notifications/NotificationPoster";
 import { NOTIFICATION_REASONS } from "@/components/notifications/reasons";
+import { useT, type Translate } from "@/i18n";
 
-function formatNotificationTime(value: string): string {
+function formatNotificationTime(t: Translate, value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return "";
@@ -35,65 +36,67 @@ function formatNotificationTime(value: string): string {
   const diffMs = Date.now() - date.getTime();
   const diffMinutes = Math.round(diffMs / 60_000);
   if (diffMinutes < 1) {
-    return "Just now";
+    return t("web.notifications.inbox.justNow");
   }
   if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`;
+    return t("web.notifications.inbox.minutesAgo", { minutes: String(diffMinutes) });
   }
   const diffHours = Math.round(diffMinutes / 60);
   if (diffHours < 24) {
-    return `${diffHours}h ago`;
+    return t("web.notifications.inbox.hoursAgo", { hours: String(diffHours) });
   }
   const diffDays = Math.round(diffHours / 24);
   if (diffDays < 7) {
-    return `${diffDays}d ago`;
+    return t("web.notifications.inbox.daysAgo", { days: String(diffDays) });
   }
   return date.toLocaleDateString(preferredDateLocale(), { month: "short", day: "numeric" });
 }
 
-function notificationTitle(notification: AppNotification): string {
+function notificationTitle(t: Translate, notification: AppNotification): string {
   if (notification.type === "episode.available") {
-    return notification.series_title || "New episode available";
+    return notification.series_title || t("web.notifications.inbox.newEpisode");
   }
   if (notification.type === "request.fulfilled") {
-    return notification.series_title || "Request available";
+    return notification.series_title || t("web.notifications.inbox.requestAvailable");
   }
   if (notification.type === "request.approved" || notification.type === "request.declined") {
-    return notification.reason_flags?.title || "Media request";
+    return notification.reason_flags?.title || t("web.notifications.inbox.mediaRequest");
   }
   // Unknown types render with a generic fallback by design — the type
   // registry is extensible.
-  return "Notification";
+  return t("web.notifications.inbox.genericTitle");
 }
 
-function notificationDescription(notification: AppNotification): string {
+function notificationDescription(t: Translate, notification: AppNotification): string {
   if (notification.type === "episode.available") {
     const code = formatEpisodeCode(notification);
-    return (
-      [code, notification.episode_title].filter(Boolean).join(" — ") || "New episode available"
-    );
+    const title = notification.episode_title;
+    if (code && title) return t("web.notifications.inbox.episodeLine", { code, title });
+    return code || title || t("web.notifications.inbox.newEpisode");
   }
   if (notification.type === "request.fulfilled") {
     const mediaType = notification.reason_flags?.media_type;
     if (notification.reason_flags?.follower) {
       return mediaType === "movie"
-        ? "A movie you followed is now available"
+        ? t("web.notifications.inbox.followedMovieAvailable")
         : mediaType === "series"
-          ? "A series you followed is now available"
-          : "A title you followed is now available";
+          ? t("web.notifications.inbox.followedSeriesAvailable")
+          : t("web.notifications.inbox.followedTitleAvailable");
     }
     return mediaType === "movie"
-      ? "Your requested movie is now available"
+      ? t("web.notifications.inbox.requestedMovieAvailable")
       : mediaType === "series"
-        ? "Your requested series is now available"
-        : "Your request is now available";
+        ? t("web.notifications.inbox.requestedSeriesAvailable")
+        : t("web.notifications.inbox.requestAvailableBody");
   }
   if (notification.type === "request.approved") {
-    return "Your request was approved";
+    return t("web.notifications.inbox.requestApproved");
   }
   if (notification.type === "request.declined") {
     const reason = notification.reason_flags?.reason;
-    return reason ? `Your request was declined — ${reason}` : "Your request was declined";
+    return reason
+      ? t("web.notifications.inbox.requestDeclinedReason", { reason })
+      : t("web.notifications.inbox.requestDeclined");
   }
   return notification.type;
 }
@@ -115,9 +118,11 @@ function notificationHref(notification: AppNotification): string | null {
   return null;
 }
 
-function reasonLabels(notification: AppNotification): string[] {
+function reasonLabels(t: Translate, notification: AppNotification): string[] {
   const flags = notification.reason_flags ?? {};
-  return NOTIFICATION_REASONS.filter((reason) => flags[reason.key]).map((reason) => reason.label);
+  return NOTIFICATION_REASONS.filter((reason) => flags[reason.key]).map((reason) =>
+    t(reason.labelKey),
+  );
 }
 
 function NotificationRow({
@@ -127,8 +132,10 @@ function NotificationRow({
   notification: AppNotification;
   onMarkRead: (id: string) => void;
 }) {
+  const t = useT();
   const unread = !notification.read_at;
   const detailHref = notificationHref(notification);
+  const reasons = reasonLabels(t, notification);
 
   const body = (
     <>
@@ -139,22 +146,22 @@ function NotificationRow({
             <span
               className="h-2 w-2 shrink-0 rounded-full"
               style={{ background: "var(--primary)" }}
-              aria-label="Unread"
+              aria-label={t("web.notifications.inbox.unread")}
             />
           )}
           <span className={`truncate text-sm ${unread ? "font-semibold" : "font-medium"}`}>
-            {notificationTitle(notification)}
+            {notificationTitle(t, notification)}
           </span>
           <span className="text-muted-foreground ml-auto shrink-0 text-xs">
-            {formatNotificationTime(notification.created_at)}
+            {formatNotificationTime(t, notification.created_at)}
           </span>
         </div>
         <div className="text-muted-foreground mt-0.5 truncate text-sm">
-          {notificationDescription(notification)}
+          {notificationDescription(t, notification)}
         </div>
-        {reasonLabels(notification).length > 0 && (
+        {reasons.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {reasonLabels(notification).map((label) => (
+            {reasons.map((label) => (
               <span
                 key={label}
                 className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[10px] font-medium"
@@ -192,7 +199,7 @@ function NotificationRow({
           variant="ghost"
           size="icon"
           className="absolute right-2 bottom-2 h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100"
-          title="Mark as read"
+          title={t("web.notifications.inbox.markRead")}
           onClick={(event) => {
             event.preventDefault();
             onMarkRead(notification.id);
@@ -215,6 +222,7 @@ function NotificationPreferencesPopover({
   /** Opens the Series view; absent when the server has none. */
   onSeeSeries?: () => void;
 }) {
+  const t = useT();
   const { data: prefs, isLoading, refetch } = useNotificationPreferences();
   const updatePrefs = useUpdateNotificationPreferences();
 
@@ -230,28 +238,28 @@ function NotificationPreferencesPopover({
   }> = [
     {
       key: "enabled",
-      label: "Notifications",
-      description: "Master switch for this profile",
+      label: t("web.notifications.preferences.enabled"),
+      description: t("web.notifications.preferences.enabledDescription"),
     },
     {
       key: "notify_favorites",
-      label: "Favorites",
-      description: "New episodes of favorited series",
+      label: t("web.notifications.preferences.favorites"),
+      description: t("web.notifications.preferences.favoritesDescription"),
     },
     {
       key: "notify_watchlist",
-      label: "Watchlist",
-      description: "New episodes of watchlisted series",
+      label: t("web.notifications.preferences.watchlist"),
+      description: t("web.notifications.preferences.watchlistDescription"),
     },
     {
       key: "notify_continue_watching",
-      label: "Continue Watching",
-      description: "Series you are actively watching",
+      label: t("web.notifications.preferences.continueWatching"),
+      description: t("web.notifications.preferences.continueWatchingDescription"),
     },
     {
       key: "notify_next_up",
-      label: "Next Up",
-      description: "The next episode after your progress",
+      label: t("web.notifications.preferences.nextUp"),
+      description: t("web.notifications.preferences.nextUpDescription"),
     },
   ];
 
@@ -260,7 +268,7 @@ function NotificationPreferencesPopover({
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm">
           <Settings2 className="mr-1.5 h-4 w-4" />
-          Preferences
+          {t("web.notifications.preferences.open")}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-4">
@@ -272,9 +280,11 @@ function NotificationPreferencesPopover({
           </div>
         ) : !prefs ? (
           <div className="space-y-3">
-            <p className="text-muted-foreground text-sm">Couldn’t load preferences.</p>
+            <p className="text-muted-foreground text-sm">
+              {t("web.notifications.preferences.loadFailed")}
+            </p>
             <Button size="sm" variant="outline" onClick={() => void refetch()}>
-              Retry
+              {t("common.retry")}
             </Button>
           </div>
         ) : (
@@ -311,7 +321,7 @@ function NotificationPreferencesPopover({
                     onSeeSeries();
                   }}
                 >
-                  See which series notify you
+                  {t("web.notifications.preferences.seeSeries")}
                 </Button>
               </>
             )}
@@ -327,7 +337,8 @@ export default function Notifications() {
   return <NotificationsInbox key={notificationScope()} />;
 }
 function NotificationsInbox() {
-  useDocumentTitle("Notifications");
+  const t = useT();
+  useDocumentTitle(t("web.notifications.inbox.title"));
   const [statusFilter, setStatusFilter] = useState<"all" | "unread">("all");
   const [searchParams, setSearchParams] = useSearchParams();
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -360,7 +371,7 @@ function NotificationsInbox() {
       <div className="mb-6 flex flex-wrap items-center gap-3">
         <h1 className="flex items-center gap-2.5 text-2xl font-semibold">
           <Bell className="h-6 w-6" />
-          Notifications
+          {t("web.notifications.inbox.title")}
         </h1>
         <div className="ml-auto flex items-center gap-2">
           {!showSeries && (unreadCount ?? 0) > 0 && (
@@ -371,7 +382,7 @@ function NotificationsInbox() {
               disabled={markAllRead.isPending || markAllRead.isError || !cutoff}
             >
               <CheckCheck className="mr-1.5 h-4 w-4" />
-              Mark all read
+              {t("web.notifications.inbox.markAllRead")}
             </Button>
           )}
           <NotificationPreferencesPopover
@@ -393,12 +404,16 @@ function NotificationsInbox() {
               if (showSeries) setSearchParams({}, { replace: true });
             }}
           >
-            {status === "all" ? "All" : `Unread${unreadCount ? ` (${unreadCount})` : ""}`}
+            {status === "all"
+              ? t("web.notifications.inbox.filterAll")
+              : unreadCount
+                ? t("web.notifications.inbox.filterUnreadCount", { count: String(unreadCount) })
+                : t("web.notifications.inbox.filterUnread")}
           </Button>
         ))}
         {openSeries && (
           <Button variant={showSeries ? "secondary" : "ghost"} size="sm" onClick={openSeries}>
-            Series
+            {t("web.notifications.inbox.filterSeries")}
           </Button>
         )}
       </div>
@@ -412,27 +427,32 @@ function NotificationsInbox() {
         <>
           {markAllRead.isError && (
             <p role="alert">
-              Could not mark the displayed notifications read.{" "}
-              <Button
-                onClick={() => {
-                  void list.restart().then(() => markAllRead.reset());
-                }}
-              >
-                Reload inbox
-              </Button>{" "}
-              before trying again.
+              {t("web.notifications.inbox.markAllFailed", {
+                reload: (chunks) => (
+                  <Button
+                    onClick={() => {
+                      void list.restart().then(() => markAllRead.reset());
+                    }}
+                  >
+                    {chunks}
+                  </Button>
+                ),
+              })}
             </p>
           )}
           {list.isError && (
             <div role="alert">
-              Could not load notifications.{" "}
-              <Button
-                onClick={() => {
-                  void list.restart().then(() => markAllRead.reset());
-                }}
-              >
-                Reload notifications
-              </Button>
+              {t("web.notifications.inbox.loadFailed", {
+                reload: (chunks) => (
+                  <Button
+                    onClick={() => {
+                      void list.restart().then(() => markAllRead.reset());
+                    }}
+                  >
+                    {chunks}
+                  </Button>
+                ),
+              })}
             </div>
           )}
           {list.isLoading ? (
@@ -445,15 +465,14 @@ function NotificationsInbox() {
             <div className="text-muted-foreground flex flex-col items-center gap-3 py-20 text-center">
               <BellOff className="h-10 w-10 opacity-50" />
               <div className="text-sm">
-                {statusFilter === "unread" ? "No unread notifications" : "No notifications yet"}
+                {statusFilter === "unread"
+                  ? t("web.notifications.inbox.emptyUnread")
+                  : t("web.notifications.inbox.emptyAll")}
               </div>
-              <div className="max-w-sm text-xs">
-                You will be notified here when new episodes arrive for series you favorite,
-                watchlist, or are watching.
-              </div>
+              <div className="max-w-sm text-xs">{t("web.notifications.inbox.emptyHint")}</div>
               {openSeries && (
                 <Button variant="link" size="sm" onClick={openSeries}>
-                  See which series can notify you
+                  {t("web.notifications.inbox.seeSeriesCanNotify")}
                 </Button>
               )}
             </div>
@@ -476,7 +495,7 @@ function NotificationsInbox() {
                     disabled={list.isFetchingNextPage}
                   >
                     {list.isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Load more
+                    {t("web.notifications.inbox.loadMore")}
                   </Button>
                 </div>
               )}

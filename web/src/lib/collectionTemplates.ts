@@ -4,6 +4,7 @@ import { v2 } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
 import type { ImportMDBListCollectionRequest, ImportTMDBCollectionRequest } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
+import { t } from "@/i18n";
 
 export type CollectionTemplateCategory =
   | "trending"
@@ -194,10 +195,10 @@ export function useCollectionTemplateBundles(enabled = true) {
 export function mediaKindLabel(kind: CollectionTemplateMediaKind): string {
   switch (kind) {
     case "movie":
-      return "Movies";
+      return t("web.collections.templates.mediaKind.movie");
     case "tv":
-      return "TV";
+      return t("web.collections.templates.mediaKind.tv");
     case "mixed":
-      return "Movies + TV";
+      return t("web.collections.templates.mediaKind.mixed");
   }
 }

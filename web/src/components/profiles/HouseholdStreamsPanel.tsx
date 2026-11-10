@@ -15,24 +15,30 @@ import {
   getPlaybackSessionTitle,
 } from "@/pages/adminActivityPresentation";
 import { buildWatchHref, createWatchRouteRequest } from "@/pages/watchRouteHelpers";
+import { useT, type Translate } from "@/i18n";
 
-function formatElapsed(startedAt: string): string {
+function formatElapsed(t: Translate, startedAt: string): string {
   const started = new Date(startedAt).getTime();
   if (Number.isNaN(started)) {
     return "";
   }
   const minutes = Math.max(0, Math.floor((Date.now() - started) / 60_000));
   if (minutes < 60) {
-    return `${minutes}m`;
+    return t("web.profiles.streams.elapsedMinutes", { minutes: String(minutes) });
   }
   const hours = Math.floor(minutes / 60);
   const remainder = minutes % 60;
-  return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
+  return remainder > 0
+    ? t("web.profiles.streams.elapsedHoursMinutes", {
+        hours: String(hours),
+        minutes: String(remainder),
+      })
+    : t("web.profiles.streams.elapsedHours", { hours: String(hours) });
 }
 
-function streamMeta(session: AdminSession): string {
+function streamMeta(t: Translate, session: AdminSession): string {
   return [
-    formatElapsed(session.started_at),
+    formatElapsed(t, session.started_at),
     getSessionClientLabel(session),
     session.client_ip,
     session.node_display_name,
@@ -42,9 +48,10 @@ function streamMeta(session: AdminSession): string {
 }
 
 function StreamRow({ session }: { session: AdminSession }) {
+  const t = useT();
   const title = getPlaybackSessionTitle(session);
   const subtitle = getPlaybackSessionSubtitle(session);
-  const profileLabel = session.profile_name?.trim() || "Profile";
+  const profileLabel = session.profile_name?.trim() || t("web.profiles.streams.profileFallback");
   const methodMeta = activityMethodMeta(classifyActivityMethod(session));
   const bitrate = formatSessionBitrate(session.stream_bitrate_kbps);
   const watchHref =
@@ -70,12 +77,13 @@ function StreamRow({ session }: { session: AdminSession }) {
           <Badge variant="outline">{profileLabel}</Badge>
           <Badge variant="outline" className="gap-1">
             {session.is_paused ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-            {session.is_paused ? "Paused" : "Playing"}
+            {session.is_paused
+              ? t("web.profiles.streams.paused")
+              : t("web.profiles.streams.playing")}
           </Badge>
           <span className={`inline-flex h-2 w-2 rounded-full ${methodMeta.swatchClass}`} />
           <span className="text-muted-foreground text-xs">
-            {methodMeta.label}
-            {bitrate ? ` · ${bitrate}` : ""}
+            {[methodMeta.label, bitrate].filter(Boolean).join(" · ")}
           </span>
           <JellyfinSessionPill session={session} />
         </div>
@@ -91,13 +99,14 @@ function StreamRow({ session }: { session: AdminSession }) {
           {subtitle ? <p className="text-muted-foreground truncate text-xs">{subtitle}</p> : null}
         </div>
 
-        <p className="text-muted-foreground text-xs">{streamMeta(session)}</p>
+        <p className="text-muted-foreground text-xs">{streamMeta(t, session)}</p>
       </div>
     </div>
   );
 }
 
 export function HouseholdStreamsPanel() {
+  const t = useT();
   const { data: sessions = [], isLoading, isFetching } = useHouseholdSessions();
 
   return (
@@ -105,17 +114,18 @@ export function HouseholdStreamsPanel() {
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold">Active streams</h3>
+            <h3 className="text-sm font-semibold">{t("web.profiles.streams.heading")}</h3>
             {sessions.length > 0 ? (
               <span className="live-badge flex items-center gap-1">
                 <Radio className="h-3 w-3" />
-                {sessions.length} live
+                {t("web.profiles.streams.live", {
+                  count: sessions.length,
+                  count_text: String(sessions.length),
+                })}
               </span>
             ) : null}
           </div>
-          <p className="text-muted-foreground text-sm">
-            Playback happening on any profile in this account.
-          </p>
+          <p className="text-muted-foreground text-sm">{t("web.profiles.streams.hint")}</p>
         </div>
         {isFetching && !isLoading ? (
           <Loader className="text-muted-foreground h-4 w-4 animate-spin" />
@@ -128,7 +138,7 @@ export function HouseholdStreamsPanel() {
           <Skeleton className="h-20 w-full rounded-md" />
         </div>
       ) : sessions.length === 0 ? (
-        <p className="text-muted-foreground text-sm">No one is streaming right now.</p>
+        <p className="text-muted-foreground text-sm">{t("web.profiles.streams.empty")}</p>
       ) : (
         <div className="space-y-2">
           {sessions.map((session) => (

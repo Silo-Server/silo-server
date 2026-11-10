@@ -80,11 +80,11 @@ import {
 } from "@/lib/collections/adminList";
 import { MAX_SELECTED_COLLECTIONS, runBatch } from "@/lib/collections/batch";
 import {
-  CHECK_BEFORE_DELETE_FAILED,
-  COLLECTION_IN_USE,
-  COLLECTIONS_IN_USE,
-  SHOW_IT_FIRST,
-  STARTER_PACK_BLOCKS_DELETE,
+  checkBeforeDeleteFailed,
+  collectionInUse,
+  collectionsInUse,
+  showItFirst,
+  starterPackBlocksDelete,
   alreadyShown,
   batchResult,
   rowsLeftMessage,
@@ -108,7 +108,7 @@ import {
 } from "@/lib/collections/rows";
 import { collectionsInAdminScope, SERVER_SCOPE } from "@/lib/collections/scope";
 import {
-  COLLECTION_KIND_LABEL,
+  collectionKindLabel,
   collectionKindOf,
   isListBackedCollectionType,
 } from "@/lib/collections/types";
@@ -125,16 +125,17 @@ import {
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
 import { cn } from "@/lib/utils";
 import { buildLibraryCollectionCatalogHref } from "./catalogSearchParams";
+import { useAppLanguage } from "@/i18n";
 
 /** Under this width More and New collection move to a bar docked at the bottom. */
 const NARROW_QUERY = "(max-width: 1023px)";
 const ALL_LIBRARIES = "all";
 
-const KIND_OPTIONS: ReadonlyArray<{ value: KindFilter; label: string }> = [
+const kindOptions = (): ReadonlyArray<{ value: KindFilter; label: string }> => [
   { value: "all", label: "All" },
-  { value: "manual", label: COLLECTION_KIND_LABEL.manual },
-  { value: "smart", label: COLLECTION_KIND_LABEL.smart },
-  { value: "synced", label: COLLECTION_KIND_LABEL.synced },
+  { value: "manual", label: collectionKindLabel("manual") },
+  { value: "smart", label: collectionKindLabel("smart") },
+  { value: "synced", label: collectionKindLabel("synced") },
 ];
 
 /** Several collections about to be deleted together, each read fresh for its ETag. */
@@ -183,7 +184,7 @@ function isCollectionInUse(error: unknown) {
 }
 
 function deleteErrorMessage(error: unknown): string {
-  if (isCollectionInUse(error)) return COLLECTION_IN_USE;
+  if (isCollectionInUse(error)) return collectionInUse();
   return SERVER_SCOPE.errorMessage(error, "Couldn't delete it");
 }
 
@@ -194,6 +195,7 @@ function deleteErrorMessage(error: unknown): string {
  * opened from here come back to it.
  */
 export default function AdminCollections() {
+  useAppLanguage();
   useDocumentTitle("Collections");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -442,7 +444,7 @@ export default function AdminCollections() {
                 ...current,
                 ...fresh,
                 rows: null,
-                error: fresh ? DELETE_CHANGED : CHECK_BEFORE_DELETE_FAILED,
+                error: fresh ? DELETE_CHANGED : checkBeforeDeleteFailed(),
               }
             : current,
         );
@@ -660,7 +662,7 @@ export default function AdminCollections() {
       const used = (collection: LibraryCollection) => (collection.row_count ?? 0) > 0;
       const deletable = counted.filter((collection) => !used(collection));
       if (deletable.length === 0) {
-        toast.error(COLLECTIONS_IN_USE);
+        toast.error(collectionsInUse());
         return;
       }
       const snapshots = await prepareAdminCollectionDeletes(deletable.map((entry) => entry.id));
@@ -932,7 +934,7 @@ export default function AdminCollections() {
                                         ...rowPageChoices.others,
                                       ],
                                       onAdd: (page) => navigate(addRowPath(collection.id, page)),
-                                      disabledReason: visible ? undefined : SHOW_IT_FIRST,
+                                      disabledReason: visible ? undefined : showItFirst(),
                                     }}
                                     onDelete={() => void prepareDelete(collection)}
                                   />
@@ -1097,7 +1099,7 @@ export default function AdminCollections() {
         where={bulkDelete?.wholeView ? (activeLibrary?.name ?? "this view") : null}
         elsewhere={bulkDeleteElsewhere}
         kept={bulkDelete?.kept ?? []}
-        blocked={activeApplyJob ? STARTER_PACK_BLOCKS_DELETE : null}
+        blocked={activeApplyJob ? starterPackBlocksDelete() : null}
         onConfirm={confirmBulkDelete}
       />
     </div>
@@ -1158,6 +1160,7 @@ function ListFilters({
   failedCount: number;
   onChange: (patch: Partial<AdminListState>) => void;
 }) {
+  useAppLanguage();
   return (
     <div className="border-border/75 flex flex-wrap items-center gap-2.5 border-b px-3 pt-2.5 pb-3">
       <div className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
@@ -1177,7 +1180,7 @@ function ListFilters({
       <Segmented
         label="Type"
         value={state.kind}
-        options={KIND_OPTIONS}
+        options={kindOptions()}
         onChange={(kind) => onChange({ kind })}
       />
       {failedCount > 0 || state.failed ? (
@@ -1330,6 +1333,7 @@ function ArrangeView({
 }
 
 function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
+  useAppLanguage();
   const result = job?.status === "completed" ? templateResultOf(job) : null;
   // Read the packs only for a finished job, to name it and count what it shows.
   const bundles = useCollectionTemplateBundles(result !== null);

@@ -81,6 +81,7 @@ export function CollectionPageHero({
 
       <div className="max-w-3xl min-w-0">
         <p className="hero-eyebrow mb-3 hidden sm:mb-4 sm:block">
+          {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up */}
           <span className="hero-eyebrow-strong">Collection</span>
         </p>
         <h1

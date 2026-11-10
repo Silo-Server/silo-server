@@ -5,6 +5,7 @@ import CardOverlays from "@/components/overlays/CardOverlays";
 import CardWatchStatus from "@/components/overlays/CardWatchStatus";
 import { RequestDownloadBar } from "@/components/overlays/RequestDownloadBar";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useT, type MessageKey } from "@/i18n";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import {
   showsFavoriteQuickAction,
@@ -27,20 +28,23 @@ import {
 import { cn } from "@/lib/utils";
 
 /** Made-up titles: the preview must never look like someone's real library. */
-const SAMPLES: Record<OverlayPreviewVariant, { title: string; meta: string; art: string }> = {
+const SAMPLES: Record<
+  OverlayPreviewVariant,
+  { titleKey: MessageKey; metaKey: MessageKey; art: string }
+> = {
   movie: {
-    title: "Northern Lights",
-    meta: "2024 · 2h 28m",
+    titleKey: "web.settings.interface.preview.movieTitle",
+    metaKey: "web.settings.interface.preview.movieMeta",
     art: "from-sky-700 via-indigo-800 to-slate-950",
   },
   show: {
-    title: "The Long Coast",
-    meta: "2024 · Series",
+    titleKey: "web.settings.interface.preview.showTitle",
+    metaKey: "web.settings.interface.preview.showMeta",
     art: "from-amber-600 via-rose-800 to-slate-950",
   },
   requested: {
-    title: "Glass Harbor",
-    meta: "2026 · Requested",
+    titleKey: "web.settings.interface.preview.requestedTitle",
+    metaKey: "web.settings.interface.preview.requestedMeta",
     art: "from-emerald-700 via-teal-900 to-slate-950",
   },
 };
@@ -72,6 +76,7 @@ export function PosterCardPreviewView({
   variants,
   revealShortcuts = false,
 }: PosterCardPreviewViewProps) {
+  const t = useT();
   // Sample posters are as wide as the profile's poster cards in a home row
   // at this window size, so badges show at the size they really draw at;
   // they scale with the card. Every sample shows at every size, wrapping
@@ -84,10 +89,15 @@ export function PosterCardPreviewView({
   const hasShortcuts = quickActionMode !== "none";
 
   return (
-    <figure className="surface-panel-subtle rounded-2xl border p-4" aria-label="Preview">
+    <figure
+      className="surface-panel-subtle rounded-2xl border p-4"
+      aria-label={t("web.settings.interface.preview.title")}
+    >
       <figcaption className="mb-3 flex items-baseline justify-between gap-3">
-        <span className="text-sm font-semibold">Preview</span>
-        <span className="text-muted-foreground text-[13px]">Updates as you change things</span>
+        <span className="text-sm font-semibold">{t("web.settings.interface.preview.title")}</span>
+        <span className="text-muted-foreground text-[13px]">
+          {t("web.settings.interface.preview.caption")}
+        </span>
       </figcaption>
       <div
         className="flex min-h-56 flex-wrap items-start justify-center gap-2 @5xl:w-[var(--preview-row)]"
@@ -150,8 +160,8 @@ export function PosterCardPreviewView({
                 ) : null}
               </div>
               <div className="mt-1.5 min-w-0">
-                <p className="truncate text-xs font-medium">{sample.title}</p>
-                <p className="text-muted-foreground truncate text-xs">{sample.meta}</p>
+                <p className="truncate text-xs font-medium">{t(sample.titleKey)}</p>
+                <p className="text-muted-foreground truncate text-xs">{t(sample.metaKey)}</p>
               </div>
             </div>
           );
@@ -159,7 +169,7 @@ export function PosterCardPreviewView({
       </div>
       {hasShortcuts ? (
         <p className="text-muted-foreground mt-3 text-[13px] leading-relaxed">
-          Point at a poster to see its shortcuts. On touch screens, press and hold instead.
+          {t("web.settings.interface.preview.shortcutsHint")}
         </p>
       ) : null}
     </figure>

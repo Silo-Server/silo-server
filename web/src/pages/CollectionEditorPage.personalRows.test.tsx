@@ -10,7 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import getCollectionOk from "../../../contracts/api/v2/fixtures/get_collection_ok.json";
-import { ROWS_NOT_LISTED } from "@/lib/collections/copy";
+import { rowsNotListed } from "@/lib/collections/copy";
 import { safeReturnPath } from "@/lib/homeRows/rowLinks";
 import { emptyPreview, personalSmartCollection } from "@/test/fixtures/collectionAnswers";
 import { installV2Recorder, v2Recorder, type RecordedCall } from "@/test/v2Recorder";
@@ -209,7 +209,7 @@ describe("rows that show a personal collection", () => {
       }),
     ).toHaveAttribute("href", "/settings/home-screen?page=2&edit=u-kids");
     expect(group).toHaveTextContent("2 rows");
-    expect(group).not.toHaveTextContent(ROWS_NOT_LISTED);
+    expect(group).not.toHaveTextContent(rowsNotListed());
   });
 
   it("lists a row on the page of a library it doesn't match", async () => {

@@ -4,6 +4,7 @@ import { Pin, PinOff, User } from "lucide-react";
 import type { LibraryTabCollection } from "@/api/types";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useToggleSidebarPin } from "@/hooks/queries/sidebarPins";
+import { useT } from "@/i18n";
 import {
   buildLibraryCollectionCatalogHref,
   buildUserCollectionCatalogHref,
@@ -37,6 +38,7 @@ export function CollectionPosterCard({
   /** A drag handle over the poster's top-left corner. */
   handle?: ReactNode;
 }) {
+  const t = useT();
   const { loaded, onLoad, onError } = useImageLoaded(collection.poster_url);
 
   const isUserCollection = kind === "user_collections";
@@ -46,9 +48,17 @@ export function CollectionPosterCard({
   // A card with its own meta line draws it below the link instead.
   let subline: ReactNode = null;
   if (ownerName) {
-    subline = <div className="text-muted-foreground truncate text-xs">by {ownerName}</div>;
+    subline = (
+      <div className="text-muted-foreground truncate text-xs">
+        {t("web.collections.posterCard.byOwner", { owner: ownerName })}
+      </div>
+    );
   } else if (meta === undefined && isUserCollection) {
-    subline = <div className="text-muted-foreground text-xs">User collection</div>;
+    subline = (
+      <div className="text-muted-foreground text-xs">
+        {t("web.collections.posterCard.userCollection")}
+      </div>
+    );
   }
 
   return (
@@ -106,6 +116,7 @@ function SidebarPinButton({
   collection: LibraryTabCollection;
   libraryId: number;
 }) {
+  const t = useT();
   const { togglePin, isPinned, canToggle } = useToggleSidebarPin();
   if (!canToggle) return null;
   const pinned = isPinned(libraryId, "collection", collection.id);
@@ -125,7 +136,11 @@ function SidebarPinButton({
           ? "bg-primary/90 text-primary-foreground"
           : "bg-background/50 text-foreground opacity-0 group-hover/card:opacity-100"
       }`}
-      title={pinned ? "Unpin from sidebar" : "Pin to sidebar"}
+      title={
+        pinned
+          ? t("web.collections.posterCard.unpinFromSidebar")
+          : t("web.collections.posterCard.pinToSidebar")
+      }
     >
       {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
     </button>

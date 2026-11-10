@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { normalizeQueryDefinition, type QueryDefinition } from "@/api/types";
 import { isNotFoundProblem, v2, V2ProblemError } from "@/api/v2/request";
 import { useDebounce } from "@/hooks/useDebounce";
-import { ARTWORK_SLOT_LABEL, DRAFT_FIELD_LABEL, SAVE_FAILED } from "@/lib/collections/copy";
+import { artworkSlotLabel, draftFieldLabel, saveFailed } from "@/lib/collections/copy";
 import { changedFields, mergeDraft, takeFields, type DraftField } from "@/lib/collections/draft";
 import type {
   ArtworkDraft,
@@ -22,6 +22,7 @@ import type {
   SyncOutcome,
   WireCollection,
 } from "@/lib/collections/scope";
+import { useAppLanguage } from "@/i18n";
 
 /**
  * An editor read may carry no artwork URLs (they are presigned, and would move
@@ -319,6 +320,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
   scope: CollectionScope<Raw>,
   init: { snapshot?: EditorSnapshot<Raw>; kind: CreateKind; libraryId?: number | null },
 ) {
+  useAppLanguage();
   const queryClient = useQueryClient();
   const [state, setStateValue] = useState<DraftState<Raw>>(() => {
     const draft = scope.toDraft(init.snapshot?.view ?? null, init);
@@ -505,7 +507,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
       }
       return { id: outcome.id, failedItems, sync: outcome.sync, warnings: outcome.warnings };
     } catch (error) {
-      setSaveError(scope.errorMessage(error, SAVE_FAILED));
+      setSaveError(scope.errorMessage(error, saveFailed()));
       return null;
     } finally {
       setSaving(false);
@@ -561,7 +563,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
         }
       }
     } catch (error) {
-      setSaveError(scope.errorMessage(error, SAVE_FAILED));
+      setSaveError(scope.errorMessage(error, saveFailed()));
       return false;
     } finally {
       setSaving(false);
@@ -601,8 +603,8 @@ export function useCollectionDraft<Raw extends WireCollection>(
     /** What the save bar names: changed fields, then staged artwork. */
     pendingLabels: [
       ...new Set([
-        ...changed.map((field) => DRAFT_FIELD_LABEL[field]),
-        ...artwork.map((slot) => ARTWORK_SLOT_LABEL[slot]),
+        ...changed.map((field) => draftFieldLabel(field)),
+        ...artwork.map((slot) => artworkSlotLabel(slot)),
       ]),
     ],
     isDirty: changed.length > 0 || artwork.length > 0,

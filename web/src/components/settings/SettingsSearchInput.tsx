@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
+import { useT } from "@/i18n";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { cn } from "@/lib/utils";
 
@@ -25,13 +26,16 @@ export function SettingsSearchInput({
   value,
   onChange,
   resultCount,
-  placeholder = "Search settings",
-  emptyLabel = "No matching settings",
+  placeholder: placeholderProp,
+  emptyLabel: emptyLabelProp,
   className,
   shortcutMediaQuery,
   showShortcutHint = false,
   captureShortcut = true,
 }: SettingsSearchInputProps) {
+  const t = useT();
+  const placeholder = placeholderProp ?? t("web.settings.search.placeholder");
+  const emptyLabel = emptyLabelProp ?? t("web.settings.search.noMatches");
   const inputId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const hasQuery = value.trim().length > 0;
@@ -40,7 +44,7 @@ export function SettingsSearchInput({
   const status = hasQuery
     ? resultCount === 0
       ? emptyLabel
-      : `${resultCount} ${resultCount === 1 ? "match" : "matches"}`
+      : t("web.settings.search.matchCount", { count: resultCount, count_text: String(resultCount) })
     : null;
 
   useEffect(() => {
@@ -88,7 +92,7 @@ export function SettingsSearchInput({
         {hasQuery ? (
           <button
             type="button"
-            aria-label="Clear settings search"
+            aria-label={t("web.settings.search.clear")}
             onClick={() => onChange("")}
             className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center rounded-xl transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
           >

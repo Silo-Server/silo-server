@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import "@/styles/admin-settings.css";
 
@@ -55,11 +56,13 @@ export interface AdvancedSectionProps {
 export function AdvancedSection({
   id,
   count,
-  title = "Advanced",
+  title: titleProp,
   defaultOpen = false,
   forceOpen = false,
   children,
 }: AdvancedSectionProps) {
+  const t = useT();
+  const title = titleProp ?? t("web.settings.advancedSection.title");
   // Persisted choice, read once: a section's id is fixed for the life of the
   // instance (give the component a `key` if a caller ever swaps ids).
   const [persistedOpen, setPersistedOpen] = useState(() => readPersisted(id) ?? defaultOpen);
@@ -90,7 +93,13 @@ export function AdvancedSection({
   // The number reads as a bare count on screen; the accessible name spells out
   // what it counts, since it is visually pushed to the right of the row.
   const accessibleLabel =
-    typeof count === "number" ? `${title} · ${count} setting${count === 1 ? "" : "s"}` : title;
+    typeof count === "number"
+      ? t("web.settings.advancedSection.accessibleLabel", {
+          title,
+          count,
+          count_text: String(count),
+        })
+      : title;
 
   return (
     <div className="min-w-0">

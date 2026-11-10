@@ -10,7 +10,6 @@ import { fetchRecipeCatalog } from "@/lib/recipes";
 import { useQuery } from "@tanstack/react-query";
 import { useAdminCollections } from "@/hooks/queries/admin/collections";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { useAppLanguage } from "@/i18n";
 import {
   useAdminHomeRows,
   type BatchFailure,
@@ -37,6 +36,7 @@ import { AddRowDialog } from "@/components/homeRows/addRow/AddRowDialog";
 import { AddToOtherLibrariesDialog } from "@/components/homeRows/AddToOtherLibrariesDialog";
 import { canCopyToLibraries, copyTargetPages } from "@/lib/homeRows/bulkCopy";
 import { collectionKind, type CollectionSummary } from "@/lib/homeRows/describe";
+import { useAppLanguage } from "@/i18n";
 import type { ActionMenuItem } from "@/components/calm/ActionMenu";
 import { useNewRowHighlight } from "@/components/homeRows/useNewRowHighlight";
 import { useRowFocus } from "@/components/homeRows/useRowFocus";
@@ -157,7 +157,7 @@ export default function AdminHomeRows() {
           { title: collection.title, kind: collectionKind(collection.collection_type) },
         ]),
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- language: the kinds' language
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `language` changes what collectionKind() returns.
     [collectionsData, language],
   );
   const [confirmDeleteSection, setConfirmDeleteSection] = useState<PageSectionConfig | null>(null);

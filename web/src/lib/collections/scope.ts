@@ -45,6 +45,7 @@ import type {
 import { normalizeQueryDefinition } from "@/api/types";
 import { requiredETag } from "@/api/v2/etag";
 import { v2, V2ProblemError } from "@/api/v2/request";
+import { t } from "@/i18n";
 import { normalizeSmartCollectionLimit } from "@/components/collections/smartCollectionLimits";
 import {
   invalidateAdminCollectionQueries,
@@ -360,7 +361,7 @@ function isStaged(slot: ArtworkSlotDraft | undefined) {
 
 function followedList(draft: SyncedCreateDraft) {
   const { list } = draft.synced;
-  if (!list) throw new Error("Pick a list first.");
+  if (!list) throw new Error(t("web.collections.scope.pickAListFirst"));
   return list;
 }
 
@@ -444,7 +445,9 @@ async function hideFromTabs(id: string): Promise<string | undefined> {
     return undefined;
   } catch (error) {
     // The list exists either way; say that it still shows.
-    return `It still shows on Collections tabs: ${adminMutationMessage(error, "hiding it failed")}`;
+    return t("web.collections.scope.stillShowsOnTabs", {
+      reason: adminMutationMessage(error, t("web.collections.scope.hidingFailed")),
+    });
   }
 }
 
@@ -495,7 +498,7 @@ async function createPersonalSynced(draft: SyncedCreateDraft) {
       });
     } catch (error) {
       outcome.warnings.push(
-        personalMutationMessage(error, "Couldn't show it on the Collections tab"),
+        personalMutationMessage(error, t("web.collections.scope.showOnTabFailed")),
       );
     }
   }
@@ -653,7 +656,7 @@ function personalFields(draft: ManualOrSmartDraft) {
 
 function personalMutationMessage(error: unknown, fallback: string) {
   if (error instanceof V2ProblemError && error.status === 412) {
-    return "This collection changed while you were editing. Reload it and review your changes before saving again.";
+    return t("web.collections.scope.changedWhileEditing");
   }
   return error instanceof Error ? error.message : fallback;
 }

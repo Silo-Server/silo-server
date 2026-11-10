@@ -3,6 +3,7 @@ import { ChevronLeft, Info, Pencil, ShieldCheck, Trash2, Users } from "lucide-re
 import { toast } from "sonner";
 
 import type { UserDevice } from "@/api/types";
+import { useT } from "@/i18n";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +50,7 @@ import { cn } from "@/lib/utils";
  * kid's iPad without borrowing it.
  */
 export default function DeviceSettings() {
+  const t = useT();
   const actingAdmin = useIsActingAdmin();
   const { profile } = useCurrentProfile();
   const canSeeHousehold = actingAdmin || profile?.is_primary === true;
@@ -111,8 +113,8 @@ export default function DeviceSettings() {
           is about one device, and its own header says which. */}
       <PageHeader
         className={cn(showDetailOnMobile && "hidden xl:flex")}
-        title="Your Devices"
-        subtitle="Every phone, tablet, TV and browser you watch on. Pick one to see what's set differently there and change it — from here, whichever device you're holding."
+        title={t("web.settings.device.title")}
+        subtitle={t("web.settings.device.subtitle")}
       />
 
       {/* Kept by this browser itself, not the server, so it sits apart from
@@ -182,9 +184,7 @@ export default function DeviceSettings() {
             />
           </div>
         ) : (
-          <p className="text-muted-foreground text-sm">
-            No devices yet. They appear here as you sign in on them.
-          </p>
+          <p className="text-muted-foreground text-sm">{t("web.settings.device.empty")}</p>
         )}
       </div>
     </div>
@@ -207,18 +207,21 @@ function HouseholdSwitch({
   onChange: (value: boolean) => void;
   count: number;
 }) {
+  const t = useT();
   return (
     <div
       className="border-border/60 bg-surface inline-flex gap-1 rounded-xl border p-1"
       role="group"
-      aria-label="Whose devices to show"
+      aria-label={t("web.settings.device.household.label")}
     >
       <SwitchButton active={!household} onClick={() => onChange(false)}>
-        Just mine
+        {t("web.settings.device.household.mine")}
       </SwitchButton>
       <SwitchButton active={household} onClick={() => onChange(true)}>
         <Users className="h-3.5 w-3.5" />
-        Everyone{household && count > 0 ? ` (${count})` : ""}
+        {household && count > 0
+          ? t("web.settings.device.household.everyoneCount", { count: String(count) })
+          : t("web.settings.device.household.everyone")}
       </SwitchButton>
     </div>
   );
@@ -262,9 +265,13 @@ function DeviceDetail({
   /** Returns to the list below xl, where the two are separate screens. */
   onBack: () => void;
 }) {
+  const t = useT();
   // Acting for someone else changes the copy throughout: the banner, the reset
   // labels, and every mutation's identity.
   const forSomeoneElse = Boolean(device.profile_id) && device.profile_id !== actingProfileId;
+  // An English possessive ("Sam's"): DeviceSettingGroups builds its own
+  // sentences around it, and the messages below take it as {owner}, since the
+  // catalog rejects an ASCII apostrophe after a placeholder.
   const ownerLabel = forSomeoneElse ? `${device.profile_name}'s` : "your";
   const targetProfileId = forSomeoneElse ? device.profile_id : undefined;
 
@@ -329,6 +336,17 @@ function DeviceDetail({
   const displayName = deviceDisplayName(device);
   const canRename = capabilities.data?.supports_device_rename === true;
   const [renaming, setRenaming] = useState(false);
+  const scopeDetail = [
+    forSomeoneElse
+      ? t("web.settings.device.scopeDetailOther", { owner: ownerLabel })
+      : t("web.settings.device.scopeDetailOwn"),
+    device.is_current_device ? null : t("web.settings.device.scopeNextUse"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const scopeStrong = (chunks: React.ReactNode) => (
+    <strong className="text-foreground font-semibold">{chunks}</strong>
+  );
 
   return (
     <div className="space-y-4">
@@ -338,7 +356,7 @@ function DeviceDetail({
         className="text-muted-foreground hover:text-foreground -ml-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium xl:hidden"
       >
         <ChevronLeft className="h-4 w-4" />
-        All devices
+        {t("web.settings.device.allDevices")}
       </button>
 
       <section className="surface-panel rounded-[1.5rem] border-0 px-4 py-4 shadow-none sm:px-5">
@@ -364,16 +382,21 @@ function DeviceDetail({
               // The reported name still identifies the hardware, which is what
               // someone checks before forgetting a device.
               <p className="text-muted-foreground mt-0.5 text-[13px] leading-snug">
-                Reports itself as {device.device_name}
+                {t("web.settings.device.reportsItselfAs", { name: device.device_name })}
               </p>
             ) : null}
             <p className="text-muted-foreground mt-0.5 text-[13px] leading-snug">
               {[
                 platformKindLabel(kind),
-                device.is_current_device ? "using now" : lastSeenLabel(device.last_seen_at, now),
+                device.is_current_device
+                  ? t("web.settings.device.usingNow")
+                  : lastSeenLabel(device.last_seen_at, now),
                 changedCount > 0
-                  ? `${changedCount} ${changedCount === 1 ? "thing" : "things"} set differently`
-                  : "nothing changed here",
+                  ? t("web.settings.device.changedCount", {
+                      count: changedCount,
+                      count_text: String(changedCount),
+                    })
+                  : t("web.settings.device.nothingChanged"),
               ].join(" · ")}
             </p>
           </div>
@@ -386,7 +409,7 @@ function DeviceDetail({
               onClick={() => setRenaming(true)}
             >
               <Pencil className="h-3.5 w-3.5" />
-              Rename
+              {t("web.settings.device.rename")}
             </Button>
           ) : null}
           {changedCount > 0 ? (
@@ -397,7 +420,18 @@ function DeviceDetail({
               onClick={() => {
                 if (
                   !window.confirm(
-                    `Use ${ownerLabel} profile settings on ${displayName}? This removes the ${changedCount} ${changedCount === 1 ? "setting" : "settings"} changed on this device. Settings that only apply to devices go back to the app default.`,
+                    forSomeoneElse
+                      ? t("web.settings.device.resetConfirmOther", {
+                          count: changedCount,
+                          count_text: String(changedCount),
+                          owner: ownerLabel,
+                          device: displayName,
+                        })
+                      : t("web.settings.device.resetConfirm", {
+                          count: changedCount,
+                          count_text: String(changedCount),
+                          device: displayName,
+                        }),
                   )
                 ) {
                   return;
@@ -405,14 +439,18 @@ function DeviceDetail({
                 clearDevice.mutate(
                   { deviceId: device.device_id, profileId: targetProfileId },
                   {
-                    onSuccess: () => toast.success("Removed the changes on this device"),
+                    onSuccess: () => toast.success(t("web.settings.device.resetDone")),
                     onError: (error) =>
-                      toast.error(error instanceof Error ? error.message : "Couldn't clear"),
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : t("web.settings.device.resetFailed"),
+                      ),
                   },
                 );
               }}
             >
-              Use profile settings
+              {t("web.settings.device.useProfileSettings")}
             </Button>
           ) : null}
           {!device.is_current_device ? (
@@ -422,24 +460,26 @@ function DeviceDetail({
               disabled={forgetDevice.isPending}
               onClick={() => {
                 if (
-                  !window.confirm(
-                    `Forget ${displayName}? Its settings are removed and it disappears from this list until it's used again.`,
-                  )
+                  !window.confirm(t("web.settings.device.forgetConfirm", { device: displayName }))
                 ) {
                   return;
                 }
                 forgetDevice.mutate(
                   { deviceId: device.device_id, profileId: targetProfileId },
                   {
-                    onSuccess: () => toast.success("Device forgotten"),
+                    onSuccess: () => toast.success(t("web.settings.device.forgotten")),
                     onError: (error) =>
-                      toast.error(error instanceof Error ? error.message : "Couldn't forget"),
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : t("web.settings.device.forgetFailed"),
+                      ),
                   },
                 );
               }}
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Forget
+              {t("web.settings.device.forget")}
             </Button>
           ) : null}
         </div>
@@ -447,10 +487,11 @@ function DeviceDetail({
 
       {forSomeoneElse ? (
         <Callout tone="warning" icon={<Users className="h-4 w-4" />}>
-          <strong className="text-foreground font-semibold">
-            You&apos;re changing {device.profile_name}&apos;s settings, not your own.
-          </strong>{" "}
-          {device.profile_name} will see these change on this device.
+          {t("web.settings.device.otherProfileWarning", {
+            owner: ownerLabel,
+            name: device.profile_name,
+            strong: (chunks) => <strong className="text-foreground font-semibold">{chunks}</strong>,
+          })}
         </Callout>
       ) : null}
 
@@ -459,19 +500,11 @@ function DeviceDetail({
           leads; the elaboration is there for anyone who wants it. */}
       <Callout tone="info" icon={<Info className="h-4 w-4" />}>
         <span className="block">
-          These apply to{" "}
-          <strong className="text-foreground font-semibold">
-            this device, for {forSomeoneElse ? `${device.profile_name}'s` : "your"} profile only
-          </strong>
-          .
+          {forSomeoneElse
+            ? t("web.settings.device.scopeOther", { owner: ownerLabel, strong: scopeStrong })
+            : t("web.settings.device.scopeOwn", { strong: scopeStrong })}
         </span>
-        <span className="text-muted-foreground mt-1 block text-[13px]">
-          {forSomeoneElse ? `${device.profile_name}'s` : "Your"} other devices, and anyone else who
-          uses this one, are unaffected.
-          {!device.is_current_device
-            ? " This device picks up your changes the next time it's used."
-            : ""}
-        </span>
+        <span className="text-muted-foreground mt-1 block text-[13px]">{scopeDetail}</span>
       </Callout>
 
       {capabilitiesUnavailable ? (
@@ -480,10 +513,11 @@ function DeviceDetail({
           className="border-border/70 bg-surface space-y-3 rounded-[1.7rem] border p-5"
         >
           <div>
-            <p className="text-sm font-semibold">Couldn&apos;t check settings compatibility</p>
+            <p className="text-sm font-semibold">
+              {t("web.settings.device.capabilitiesFailed.title")}
+            </p>
             <p className="text-muted-foreground mt-1 text-[13px] leading-relaxed">
-              Device controls stay unavailable until Silo confirms which settings this server
-              supports.
+              {t("web.settings.device.capabilitiesFailed.body")}
             </p>
           </div>
           <Button
@@ -492,7 +526,9 @@ function DeviceDetail({
             disabled={capabilities.isFetching}
             onClick={() => void capabilities.refetch()}
           >
-            {capabilities.isFetching ? "Checking…" : "Retry compatibility check"}
+            {capabilities.isFetching
+              ? t("web.settings.device.capabilitiesFailed.checking")
+              : t("web.settings.device.capabilitiesFailed.retry")}
           </Button>
         </div>
       ) : isLoading ? (
@@ -510,7 +546,9 @@ function DeviceDetail({
               { key, value, identity },
               {
                 onError: (error) =>
-                  toast.error(error instanceof Error ? error.message : "Couldn't save"),
+                  toast.error(
+                    error instanceof Error ? error.message : t("web.settings.device.saveFailed"),
+                  ),
               },
             )
           }
@@ -519,7 +557,11 @@ function DeviceDetail({
               { key, identity },
               {
                 onError: (error) =>
-                  toast.error(error instanceof Error ? error.message : "Couldn't reset"),
+                  toast.error(
+                    error instanceof Error
+                      ? error.message
+                      : t("web.settings.device.settingResetFailed"),
+                  ),
               },
             )
           }
@@ -540,7 +582,9 @@ function DeviceDetail({
             { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, value: next, identity },
             {
               onError: (error) =>
-                toast.error(error instanceof Error ? error.message : "Couldn't save"),
+                toast.error(
+                  error instanceof Error ? error.message : t("web.settings.device.saveFailed"),
+                ),
             },
           );
         }}
@@ -551,21 +595,35 @@ function DeviceDetail({
             { key: SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE, identity },
             {
               onError: (error) =>
-                toast.error(error instanceof Error ? error.message : "Couldn't reset"),
+                toast.error(
+                  error instanceof Error
+                    ? error.message
+                    : t("web.settings.device.settingResetFailed"),
+                ),
             },
           );
           setAppearanceOpen(false);
         }}
-        resetLabel={`Use ${ownerLabel} style`}
-        eyebrow={device.custom_name || device.device_name || "This device"}
-        status={setValue.isPending ? "Saving…" : "Changes saved automatically"}
+        resetLabel={
+          forSomeoneElse
+            ? t("web.settings.device.appearance.resetOther", { owner: ownerLabel })
+            : t("web.settings.device.appearance.resetOwn")
+        }
+        eyebrow={
+          device.custom_name || device.device_name || t("web.settings.device.appearance.thisDevice")
+        }
+        status={
+          setValue.isPending
+            ? t("web.settings.device.saving")
+            : t("web.settings.device.appearance.savedAutomatically")
+        }
       />
 
       {forSomeoneElse ? (
         <Callout tone="muted" icon={<ShieldCheck className="h-4 w-4" />}>
-          <strong className="text-foreground font-semibold">What you can&apos;t see here.</strong>{" "}
-          This page shows how Silo is set up on each device — not what anyone watched. Viewing
-          history stays private to each profile.
+          {t("web.settings.device.privacyNote", {
+            strong: (chunks) => <strong className="text-foreground font-semibold">{chunks}</strong>,
+          })}
         </Callout>
       ) : null}
     </div>
@@ -585,6 +643,7 @@ function DeviceNameEditor({
   target: DeviceTarget;
   onDone: () => void;
 }) {
+  const t = useT();
   const rename = useRenameDevice();
   const [value, setValue] = useState(device.custom_name ?? "");
 
@@ -598,10 +657,15 @@ function DeviceNameEditor({
       { device: target, name },
       {
         onSuccess: () => {
-          toast.success(name ? "Device renamed" : "Device name reset");
+          toast.success(
+            name ? t("web.settings.device.renamed") : t("web.settings.device.nameReset"),
+          );
           onDone();
         },
-        onError: (error) => toast.error(error instanceof Error ? error.message : "Couldn't rename"),
+        onError: (error) =>
+          toast.error(
+            error instanceof Error ? error.message : t("web.settings.device.renameFailed"),
+          ),
       },
     );
   };
@@ -615,10 +679,10 @@ function DeviceNameEditor({
       }}
     >
       <Input
-        aria-label="Device name"
+        aria-label={t("web.settings.device.nameLabel")}
         autoFocus
         value={value}
-        placeholder={device.device_name || "Device name"}
+        placeholder={device.device_name || t("web.settings.device.nameLabel")}
         // The server counts code points, not the UTF-16 units maxLength
         // counts, so an emoji takes one of the 120 rather than two.
         onChange={(event) => setValue(Array.from(event.target.value).slice(0, 120).join(""))}
@@ -630,7 +694,7 @@ function DeviceNameEditor({
       />
       <div className="flex gap-2">
         <Button type="submit" className="min-h-11 sm:h-8 sm:min-h-0" disabled={rename.isPending}>
-          {rename.isPending ? "Saving…" : "Save"}
+          {rename.isPending ? t("web.settings.device.saving") : t("common.save")}
         </Button>
         <Button
           type="button"
@@ -639,7 +703,7 @@ function DeviceNameEditor({
           disabled={rename.isPending}
           onClick={onDone}
         >
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     </form>

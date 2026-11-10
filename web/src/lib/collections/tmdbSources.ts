@@ -4,6 +4,7 @@
  * editor never offers a combination the server refuses.
  */
 import type { ImportTMDBCollectionRequest } from "@/api/types";
+import { t, type MessageKey } from "@/i18n";
 import { parseTMDBListID } from "@/lib/tmdbList";
 
 export type TMDBChartPreset = ImportTMDBCollectionRequest["preset"];
@@ -17,27 +18,71 @@ export interface TMDBChart {
   timeWindow?: TMDBChartTimeWindow;
 }
 
-export const TMDB_CHARTS: ReadonlyArray<{ preset: TMDBChartPreset; label: string; hint: string }> =
-  [
-    { preset: "trending", label: "Trending", hint: "What's hot now" },
-    { preset: "popular", label: "Popular", hint: "Most viewed" },
-    { preset: "top_rated", label: "Top rated", hint: "Best scores" },
-    { preset: "now_playing", label: "Now playing", hint: "Movies in cinemas" },
-    { preset: "upcoming", label: "Upcoming", hint: "Movies coming soon" },
-    { preset: "airing_today", label: "Airing today", hint: "TV, today" },
-    { preset: "on_the_air", label: "On the air", hint: "TV, this week" },
-  ];
+/** The charts in the order the picker shows them; translate `labelKey` and `hintKey` at render. */
+export const TMDB_CHARTS: ReadonlyArray<{
+  preset: TMDBChartPreset;
+  labelKey: MessageKey;
+  hintKey: MessageKey;
+}> = [
+  {
+    preset: "trending",
+    labelKey: "web.collections.tmdbSources.chartTrending",
+    hintKey: "web.collections.tmdbSources.chartTrendingHint",
+  },
+  {
+    preset: "popular",
+    labelKey: "web.collections.tmdbSources.chartPopular",
+    hintKey: "web.collections.tmdbSources.chartPopularHint",
+  },
+  {
+    preset: "top_rated",
+    labelKey: "web.collections.tmdbSources.chartTopRated",
+    hintKey: "web.collections.tmdbSources.chartTopRatedHint",
+  },
+  {
+    preset: "now_playing",
+    labelKey: "web.collections.tmdbSources.chartNowPlaying",
+    hintKey: "web.collections.tmdbSources.chartNowPlayingHint",
+  },
+  {
+    preset: "upcoming",
+    labelKey: "web.collections.tmdbSources.chartUpcoming",
+    hintKey: "web.collections.tmdbSources.chartUpcomingHint",
+  },
+  {
+    preset: "airing_today",
+    labelKey: "web.collections.tmdbSources.chartAiringToday",
+    hintKey: "web.collections.tmdbSources.chartAiringTodayHint",
+  },
+  {
+    preset: "on_the_air",
+    labelKey: "web.collections.tmdbSources.chartOnTheAir",
+    hintKey: "web.collections.tmdbSources.chartOnTheAirHint",
+  },
+];
 
-export const CHART_MEDIA_LABEL: Readonly<Record<TMDBChartMediaType, string>> = {
-  movie: "Movies",
-  tv: "TV shows",
-  all: "Both",
+/** A chart's name on its card: "Trending", "Top rated". */
+export function chartLabel(preset: TMDBChartPreset): string {
+  return t(TMDB_CHARTS.find((entry) => entry.preset === preset)!.labelKey);
+}
+
+const CHART_MEDIA_LABEL: Readonly<Record<TMDBChartMediaType, MessageKey>> = {
+  movie: "web.collections.tmdbSources.mediaMovies",
+  tv: "web.collections.tmdbSources.mediaTv",
+  all: "web.collections.tmdbSources.mediaBoth",
 };
 
-export const CHART_WINDOW_LABEL: Readonly<Record<TMDBChartTimeWindow, string>> = {
-  day: "Today",
-  week: "This week",
-};
+/** Show's choices: "Movies", "TV shows", "Both". */
+export function chartMediaLabel(mediaType: TMDBChartMediaType): string {
+  return t(CHART_MEDIA_LABEL[mediaType]);
+}
+
+/** "Trending over"'s choices: "Today", "This week". */
+export function chartWindowLabel(timeWindow: TMDBChartTimeWindow): string {
+  return timeWindow === "week"
+    ? t("web.collections.tmdbSources.windowWeek")
+    : t("web.collections.tmdbSources.windowDay");
+}
 
 /** What Show offers for a chart; Both only for Trending. */
 export function chartMediaTypes(preset: TMDBChartPreset): TMDBChartMediaType[] {
@@ -65,7 +110,7 @@ export function chartHasTimeWindow(preset: TMDBChartPreset): boolean {
 export function chartLockReason(preset: TMDBChartPreset): string | null {
   const [only, ...more] = chartMediaTypes(preset);
   if (more.length > 0) return null;
-  return `TMDB has this chart for ${only === "movie" ? "movies" : "TV shows"} only`;
+  return t("web.collections.tmdbSources.chartLockReason", { kind: only ?? "tv" });
 }
 
 /**
@@ -94,15 +139,27 @@ export function sameChart(a: TMDBChart, b: TMDBChart): boolean {
   );
 }
 
-/** The name a chart gets when no ready-made pick matches it: "Trending Movies Today". */
+/**
+ * The name a chart gets when no ready-made pick matches it: "Trending Movies Today".
+ * It becomes the stored name of a synced list or Discover row, so it is data and stays
+ * English in every language; these words are not messages.
+ */
 export function chartName(chart: TMDBChart): string {
   const { preset, mediaType, timeWindow } = normalizeChart(chart);
-  const label = TMDB_CHARTS.find((entry) => entry.preset === preset)!.label;
-  const title = label.replace(/\b\w/g, (letter) => letter.toUpperCase());
   const media = { movie: "Movies", tv: "TV Shows", all: "" }[mediaType];
   const when = timeWindow === "week" ? "This Week" : timeWindow === "day" ? "Today" : "";
-  return [title, media, when].filter(Boolean).join(" ");
+  return [CHART_NAME_TITLE[preset], media, when].filter(Boolean).join(" ");
 }
+
+const CHART_NAME_TITLE: Readonly<Record<TMDBChartPreset, string>> = {
+  trending: "Trending",
+  popular: "Popular",
+  top_rated: "Top Rated",
+  now_playing: "Now Playing",
+  upcoming: "Upcoming",
+  airing_today: "Airing Today",
+  on_the_air: "On The Air",
+};
 
 /** The kind of titles a chart holds, for which libraries it can match into. */
 export function chartMediaKind(chart: TMDBChart): "movie" | "tv" | "mixed" {
@@ -167,16 +224,15 @@ export function franchiseSource(collectionId: number, limit?: number): StoredSou
   };
 }
 
-const CHART_MEDIA_WORDS: Readonly<Record<TMDBChartMediaType, string>> = {
-  movie: "movies",
-  tv: "TV shows",
-  all: "movies and TV shows",
-};
-
 /** "Trending movies, this week", "Top rated TV shows": what a chart follows, in words. */
 export function chartSummary(chart: TMDBChart): string {
   const { preset, mediaType, timeWindow } = normalizeChart(chart);
-  const label = TMDB_CHARTS.find((entry) => entry.preset === preset)!.label;
-  const when = timeWindow ? `, ${CHART_WINDOW_LABEL[timeWindow].toLowerCase()}` : "";
-  return `${label} ${CHART_MEDIA_WORDS[mediaType]}${when}`;
+  const label = chartLabel(preset);
+  return timeWindow
+    ? t("web.collections.tmdbSources.chartSummaryWindow", {
+        chart: label,
+        media: mediaType,
+        window: timeWindow,
+      })
+    : t("web.collections.tmdbSources.chartSummary", { chart: label, media: mediaType });
 }
