@@ -4,7 +4,7 @@
  * editor never offers a combination the server refuses.
  */
 import type { ImportTMDBCollectionRequest } from "@/api/types";
-import { t, type MessageKey } from "@/i18n";
+import { englishText, t, type MessageKey, type TextValues } from "@/i18n";
 import { parseTMDBListID } from "@/lib/tmdbList";
 
 export type TMDBChartPreset = ImportTMDBCollectionRequest["preset"];
@@ -139,27 +139,37 @@ export function sameChart(a: TMDBChart, b: TMDBChart): boolean {
   );
 }
 
+/** Formats a message: `englishText` for a name the client saves, `t` for one only shown. */
+type Text = (id: MessageKey, values?: TextValues) => string;
+
+/** Every chart's name, by its `preset/media[/window]` path (see `chartSource`). */
+const CHART_NAMES: Readonly<Record<string, MessageKey>> = {
+  "trending/movie/day": "web.common.collections.chartName.trendingMoviesToday",
+  "trending/movie/week": "web.common.collections.chartName.trendingMoviesThisWeek",
+  "trending/tv/day": "web.common.collections.chartName.trendingTvToday",
+  "trending/tv/week": "web.common.collections.chartName.trendingTvThisWeek",
+  "trending/all/day": "web.common.collections.chartName.trendingToday",
+  "trending/all/week": "web.common.collections.chartName.trendingThisWeek",
+  "popular/movie": "web.common.collections.chartName.popularMovies",
+  "popular/tv": "web.common.collections.chartName.popularTv",
+  "top_rated/movie": "web.common.collections.chartName.topRatedMovies",
+  "top_rated/tv": "web.common.collections.chartName.topRatedTv",
+  "now_playing/movie": "web.common.collections.chartName.nowPlayingMovies",
+  "upcoming/movie": "web.common.collections.chartName.upcomingMovies",
+  "airing_today/tv": "web.common.collections.chartName.airingTodayTv",
+  "on_the_air/tv": "web.common.collections.chartName.onTheAirTv",
+};
+
 /**
  * The name a chart gets when no ready-made pick matches it: "Trending Movies Today".
- * It becomes the stored name of a synced list or Discover row, so it is data and stays
- * English in every language; these words are not messages.
+ * It becomes the stored name of a synced list or Discover row, so it is data and is
+ * English in every language by default; pass `t` only for a name that is shown and
+ * never saved (a placeholder).
  */
-export function chartName(chart: TMDBChart): string {
+export function chartName(chart: TMDBChart, tx: Text = englishText): string {
   const { preset, mediaType, timeWindow } = normalizeChart(chart);
-  const media = { movie: "Movies", tv: "TV Shows", all: "" }[mediaType];
-  const when = timeWindow === "week" ? "This Week" : timeWindow === "day" ? "Today" : "";
-  return [CHART_NAME_TITLE[preset], media, when].filter(Boolean).join(" ");
+  return tx(CHART_NAMES[[preset, mediaType, timeWindow].filter(Boolean).join("/")]!);
 }
-
-const CHART_NAME_TITLE: Readonly<Record<TMDBChartPreset, string>> = {
-  trending: "Trending",
-  popular: "Popular",
-  top_rated: "Top Rated",
-  now_playing: "Now Playing",
-  upcoming: "Upcoming",
-  airing_today: "Airing Today",
-  on_the_air: "On The Air",
-};
 
 /** The kind of titles a chart holds, for which libraries it can match into. */
 export function chartMediaKind(chart: TMDBChart): "movie" | "tv" | "mixed" {

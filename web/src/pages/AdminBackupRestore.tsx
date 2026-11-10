@@ -135,13 +135,11 @@ function restoreHeading(
     let source = "other";
     if (!name) source = set?.same_server ? "this" : "another";
     return {
-      title: String(
-        t("web.admin.backups.restore.heading.upload", {
-          source,
-          date: takenDate(taken),
-          name: () => name ?? "",
-        }),
-      ),
+      title: t("web.admin.backups.restore.heading.upload", {
+        source,
+        date: takenDate(taken),
+        name: name ?? "",
+      }),
       subtitle: sentence([
         origin,
         t("web.admin.backups.restore.heading.takenAt", { time }),

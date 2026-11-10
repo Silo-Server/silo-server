@@ -1,19 +1,61 @@
-import type { ComponentProps } from "react";
+import { useMemo, type ComponentProps } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from "lucide-react";
-import { DayPicker } from "react-day-picker";
+import { DateLib, DayPicker, type Labels } from "react-day-picker";
 
 import { buttonVariants } from "@/components/ui/button";
+import { useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
+
+// The full date a screen reader says for a day ("Friday, November 6th, 2026"),
+// as react-day-picker formats it; dates still follow its English locale.
+function fullDate(
+  date: Date,
+  options?: ConstructorParameters<typeof DateLib>[0],
+  dateLib?: DateLib,
+) {
+  return (dateLib ?? new DateLib(options)).format(date, "PPPP");
+}
+
+// react-day-picker's built-in English labels, from the catalog. The grid,
+// weekday and navigation-bar labels are dates or empty and keep its defaults.
+function calendarLabels(t: Translate): Partial<Labels> {
+  return {
+    labelPrevious: () => t("web.common.ui.calendar.previousMonth"),
+    labelNext: () => t("web.common.ui.calendar.nextMonth"),
+    labelMonthDropdown: () => t("web.common.ui.calendar.monthDropdown"),
+    labelYearDropdown: () => t("web.common.ui.calendar.yearDropdown"),
+    labelWeekNumberHeader: () => t("web.common.ui.calendar.weekNumberHeader"),
+    labelWeekNumber: (weekNumber) =>
+      t("web.common.ui.calendar.weekNumber", { number: String(weekNumber) }),
+    labelDayButton: (date, modifiers, options, dateLib) => {
+      const full = fullDate(date, options, dateLib);
+      if (modifiers.today && modifiers.selected) {
+        return t("web.common.ui.calendar.dayTodaySelected", { date: full });
+      }
+      if (modifiers.today) return t("web.common.ui.calendar.dayToday", { date: full });
+      if (modifiers.selected) return t("web.common.ui.calendar.daySelected", { date: full });
+      return full;
+    },
+    labelGridcell: (date, modifiers, options, dateLib) => {
+      const full = fullDate(date, options, dateLib);
+      return modifiers?.today ? t("web.common.ui.calendar.dayToday", { date: full }) : full;
+    },
+  };
+}
 
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
+  labels,
   ...props
 }: ComponentProps<typeof DayPicker>) {
+  const t = useT();
+  const translatedLabels = useMemo(() => ({ ...calendarLabels(t), ...labels }), [t, labels]);
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      labels={translatedLabels}
       className={cn("p-3", className)}
       classNames={{
         months: "relative flex flex-col gap-4 sm:flex-row",

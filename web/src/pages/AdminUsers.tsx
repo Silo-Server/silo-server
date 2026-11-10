@@ -89,7 +89,7 @@ import {
 import { formatDateTime as formatDateTimePreferred } from "@/lib/datetime";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { formatLocale } from "@/lib/appLocale";
-import { useT } from "@/i18n";
+import { englishText, useT } from "@/i18n";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 type UserSortField = "username" | "email" | "role" | "enabled" | "created_at" | "last_active_at";
@@ -668,7 +668,7 @@ function sortAdminUsers(users: AdminUser[], field: UserSortField, dir: SortDirec
         result = compareText(a.email, b.email);
         break;
       case "role":
-        result = compareText(accountRoleLabel(a), accountRoleLabel(b));
+        result = compareText(accountRoleLabel(a, englishText), accountRoleLabel(b, englishText));
         break;
       case "enabled":
         result = compareText(a.enabled ? "active" : "disabled", b.enabled ? "active" : "disabled");

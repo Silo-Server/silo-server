@@ -256,12 +256,10 @@ function OverrideField({
         className="sm:col-span-2"
         hint={
           selected.length === 0 && options.length > 0
-            ? String(
-                t("web.admin.settings.requests.destination.noneChosen", {
-                  server: () => server.name,
-                  setting: label.toLowerCase(),
-                }),
-              )
+            ? t("web.admin.settings.requests.destination.noneChosen", {
+                server: server.name,
+                setting: label.toLowerCase(),
+              })
             : undefined
         }
         error={error}

@@ -224,20 +224,22 @@ export function fromTMDBChart(chart: TMDBChart): DiscoverChart {
   };
 }
 
-/** The name a row gets when none is typed; empty when it needs one. */
+/** The name a row shows when none is typed, in the interface language; empty when it needs one. */
 export function defaultTitle(row: DiscoverRowBody): string {
-  if (row.chart) return chartName(toTMDBChart(row.chart));
+  if (row.chart) return chartName(toTMDBChart(row.chart), t);
   if (isBrandRow(row)) return rowKindLabel(row.type);
   return "";
 }
 
 /**
- * The name the row is saved with. It is stored data, so an untyped brand row keeps the
- * server's English default ("Studios") in every interface language.
+ * The name the row is saved with. It is stored data, so an untyped chart row keeps its
+ * English chart name and an untyped brand row the server's English default ("Studios")
+ * in every interface language.
  */
 export function savedTitle(row: DiscoverRowBody): string {
   const typed = row.title.trim();
   if (typed) return typed;
+  if (row.chart) return chartName(toTMDBChart(row.chart));
   if (isBrandRow(row)) return BRAND_ROWS.find((brand) => brand.type === row.type)?.title ?? "";
   return defaultTitle(row);
 }

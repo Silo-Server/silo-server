@@ -33,7 +33,7 @@ function renderGroups(
   render(
     <DeviceSettingGroups
       settings={settings}
-      ownerLabel="your"
+      owner={{ self: true, name: "" }}
       onChange={onChange}
       onReset={onReset}
       {...props}

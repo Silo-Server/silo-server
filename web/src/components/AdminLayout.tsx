@@ -19,7 +19,7 @@ import { useAdminPluginInstallations } from "@/hooks/queries/admin/plugins";
 import { usePolicyCapability } from "@/hooks/queries/admin/policy";
 import { useAdminServerStatus } from "@/hooks/queries/admin/settings";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
-import { resolveAdminDocumentTitle } from "@/lib/documentTitle";
+import { resolveAdminDocumentTitle, resolveAdminHeaderTitle } from "@/lib/documentTitle";
 import { SEARCH_SHORTCUT_LABEL } from "@/lib/keyboardShortcut";
 import { Menu, Search, X } from "lucide-react";
 import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
@@ -60,13 +60,7 @@ function AdminLayoutContent() {
   const audiobookPlayback = useAudiobookPlaybackController();
   const hasBackgroundBar = isBackgroundBarVisible || audiobookPlayback?.isBackgroundBarVisible;
   const documentTitle = resolveAdminDocumentTitle(location.pathname);
-  // The admin root's own title marks the dashboard (and unknown pages). The
-  // "Admin " prefix strip still reads documentTitle's English; it needs a
-  // page-name resolver there before those titles translate.
-  const mobileTitle =
-    documentTitle === resolveAdminDocumentTitle("/admin")
-      ? t("web.admin.shell.mobileHeader.dashboardTitle")
-      : documentTitle.replace(/^Admin /, "");
+  const mobileTitle = resolveAdminHeaderTitle(location.pathname);
 
   useDocumentTitle(documentTitle);
 

@@ -1,7 +1,7 @@
 import { Fragment, useId, type ReactNode, type Ref } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useT } from "@/i18n";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { SelectCheckbox } from "./SelectCheckbox";
 
@@ -19,13 +19,31 @@ export interface SelectModeAction {
   explainedByNote?: boolean;
 }
 
-// English only: callers pass an English plural noun ("rows", "collections"),
-// so these lines convert with those callers.
-const nounText = {
-  group: (noun: string) => `Selected ${noun}`,
-  tooMany: (limit: number, noun: string) => `Select up to ${limit} ${noun} at a time.`,
-  limit: (limit: number, noun: string) => `Up to ${limit} ${noun} at a time`,
-};
+interface SelectModeText {
+  /** The bar's accessible name. */
+  group: MessageKey;
+  /** Shown when more than `limit` are picked; takes `limit`. */
+  tooMany: MessageKey;
+  /** Beside Select all; takes `limit`. */
+  limit: MessageKey;
+}
+
+/** The bar's messages for each kind of item a list selects. */
+const SELECT_MODE_TEXT = {
+  rows: {
+    group: "web.common.ui.selectMode.rows.group",
+    tooMany: "web.common.ui.selectMode.rows.tooMany",
+    limit: "web.common.ui.selectMode.rows.limit",
+  },
+  collections: {
+    group: "web.common.ui.selectMode.collections.group",
+    tooMany: "web.common.ui.selectMode.collections.tooMany",
+    limit: "web.common.ui.selectMode.collections.limit",
+  },
+} satisfies Record<string, SelectModeText>;
+
+/** What a list selects, which picks the bar's messages. */
+export type SelectModeNoun = keyof typeof SELECT_MODE_TEXT;
 
 /**
  * The floating bar of select mode: how many items are picked and what can be
@@ -46,8 +64,8 @@ export function SelectModeBar({
 }: {
   count: number;
   limit: number;
-  /** What is selected, plural: "rows", "collections". */
-  noun: string;
+  /** What is selected. */
+  noun: SelectModeNoun;
   actions: SelectModeAction[];
   busy?: boolean;
   /** One line under the bar about what the actions will pass over. */
@@ -55,19 +73,20 @@ export function SelectModeBar({
 }) {
   const t = useT();
   const noteId = useId();
+  const text = SELECT_MODE_TEXT[noun];
   const tooMany = count > limit;
   const disabled = busy || count === 0 || tooMany;
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col items-center gap-1.5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:left-[240px]">
       <div
         role="group"
-        aria-label={nounText.group(noun)}
+        aria-label={t(text.group)}
         className="bg-popover/95 border-border pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-2xl border py-[7px] pr-[7px] pl-4 shadow-[0_24px_60px_-20px_rgb(0_0_0/0.9)] backdrop-blur"
       >
         <span role="status" className="mr-2 text-sm font-semibold whitespace-nowrap">
           {t("web.ui.selectedCount", { count, shown: String(count) })}
           {tooMany ? (
-            <span className="text-warning ml-2 font-normal">{nounText.tooMany(limit, noun)}</span>
+            <span className="text-warning ml-2 font-normal">{t(text.tooMany, { limit })}</span>
           ) : null}
         </span>
         {actions.map((action) => (
@@ -118,8 +137,8 @@ export function SelectAllHeader({
   count: number;
   selectedCount: number;
   limit: number;
-  /** What is selected, plural: "rows", "collections". */
-  noun: string;
+  /** What is selected. */
+  noun: SelectModeNoun;
   onSelectAll: (checked: boolean) => void;
   onDone: () => void;
   ref?: Ref<HTMLButtonElement>;
@@ -142,7 +161,9 @@ export function SelectAllHeader({
       <span aria-hidden className="font-medium">
         {t("web.ui.selectMode.selectAll")}
       </span>
-      <span className="text-muted-foreground text-[13px]">{nounText.limit(limit, noun)}</span>
+      <span className="text-muted-foreground text-[13px]">
+        {t(SELECT_MODE_TEXT[noun].limit, { limit })}
+      </span>
       <Button size="sm" variant="ghost" className="ml-auto" onClick={onDone}>
         {t("common.done")}
       </Button>

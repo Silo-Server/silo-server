@@ -151,9 +151,7 @@ function SchemaFormSection({
         </div>
         {collapsible ? (
           <Button type="button" size="xs" variant="ghost" onClick={() => setUserOpen(!open)}>
-            {open
-              ? t("web.admin.plugins.schemaForm.hideSection")
-              : t("web.admin.plugins.schemaForm.showSection")}
+            {open ? t("web.common.schemaForm.hideSection") : t("web.common.schemaForm.showSection")}
           </Button>
         ) : null}
       </div>
@@ -257,7 +255,7 @@ export function SchemaForm({
         >
           <SelectTrigger id={id} className="w-full" aria-describedby={describedBy}>
             <SelectValue
-              placeholder={field.placeholder || t("web.admin.plugins.schemaForm.selectPlaceholder")}
+              placeholder={field.placeholder || t("web.common.schemaForm.selectPlaceholder")}
             />
           </SelectTrigger>
           <SelectContent>
@@ -281,7 +279,7 @@ export function SchemaForm({
       if (options.length === 0) {
         return (
           <p className="text-muted-foreground rounded-md border border-dashed px-3 py-2 text-xs">
-            {t("web.admin.plugins.schemaForm.noOptions")}
+            {t("web.common.schemaForm.noOptions")}
           </p>
         );
       }

@@ -497,7 +497,7 @@ function historyRowTitle(
     title:
       row.media_title ||
       row.media_item_id ||
-      t("web.admin.activity.title.file", { id: String(row.media_file_id) }),
+      t("web.common.activity.title.file", { id: String(row.media_file_id) }),
     detail: "",
   };
 }

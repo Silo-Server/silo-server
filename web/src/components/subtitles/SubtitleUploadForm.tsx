@@ -244,7 +244,7 @@ export function SubtitleUploadForm({
           {t("web.subtitles.upload.heading")}
         </p>
         <p className={cn("text-xs", isPlayer ? "text-white/50" : "text-muted-foreground")}>
-          {t("web.subtitles.upload.help")}
+          {t("web.subtitles.upload.help", { megabytes: 5 })}
         </p>
       </div>
 

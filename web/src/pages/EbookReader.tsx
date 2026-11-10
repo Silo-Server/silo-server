@@ -46,7 +46,7 @@ import { useViewTransitionNavigate } from "@/hooks/useViewTransition";
 import { hasEarlierEntry } from "@/lib/navigationHistory";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
 import { buildMangaList, flattenMangaList } from "@/lib/mangaChapters";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { useAppLanguage, useT, type MessageKey, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { TOCItem } from "@/reader/readest/libs/document";
 import FoliateBookReader, {
@@ -231,6 +231,7 @@ export default function EbookReader() {
   // list, which powers next-chapter navigation and the default back target.
   const mangaSeriesId = item?.type === "ebook" ? item.series_id : undefined;
   const { data: mangaSeries } = useCatalogItemDetail(mangaSeriesId || undefined);
+  const language = useAppLanguage();
   const nextChapter = useMemo(() => {
     const seriesChapters = mangaSeries?.manga?.chapters;
     if (!seriesChapters || seriesChapters.length === 0) {
@@ -242,7 +243,8 @@ export default function EbookReader() {
       return null;
     }
     return flat[index + 1];
-  }, [contentId, mangaSeries?.manga?.chapters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the chapter label follows the language
+  }, [contentId, mangaSeries?.manga?.chapters, language]);
   const selectedFile = useMemo(
     () =>
       chooseReaderFile(

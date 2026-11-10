@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import {
   captureProfileRequestContext,
   isCapturedProfileAuthorityActive,
@@ -200,10 +201,10 @@ export function useProfileHomeRows(): ProfileHomeRows {
       if (!isCapturedProfileAuthorityActive(entry.profile)) continue;
       try {
         await send(entry);
-        if (entry.kind === "reset") toast.success("Reset to the server's rows.");
+        if (entry.kind === "reset") toast.success(t("web.common.toast.homeRows.reset"));
       } catch (error) {
         if (entry.kind === "reset") {
-          toast.error("Could not reset your rows");
+          toast.error(t("web.common.toast.homeRows.resetFailed"));
         } else {
           toast.error(sectionSaveErrorMessage(error));
           // With no newer change to send, show the last saved state again. A

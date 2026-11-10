@@ -3,6 +3,7 @@
 // differences between surfaces (empty-string vs "—" fallback, GB vs GiB
 // labels) are expressed via parameters here instead of per-surface copies.
 
+import { t, type MessageKey } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 
 export const CODEC_LABELS: Record<string, string> = {
@@ -124,37 +125,44 @@ interface FormatFileSizeOptions {
   iecUnits?: boolean;
 }
 
+const SIZE_UNIT_KEYS: Record<"si" | "iec", [MessageKey, MessageKey, MessageKey]> = {
+  si: ["web.common.format.size.gb", "web.common.format.size.mb", "web.common.format.size.kb"],
+  iec: ["web.common.format.size.gib", "web.common.format.size.mib", "web.common.format.size.kib"],
+};
+
 export function formatFileSize(bytes?: number, options: FormatFileSizeOptions = {}): string {
   const { fallback = "", iecUnits = false } = options;
   if (!isPositive(bytes)) return fallback;
-  const [giga, mega, kilo] = iecUnits ? ["GiB", "MiB", "KiB"] : ["GB", "MB", "KB"];
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} ${giga}`;
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} ${mega}`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} ${kilo}`;
-  return `${bytes} B`;
+  const [giga, mega, kilo] = SIZE_UNIT_KEYS[iecUnits ? "iec" : "si"];
+  if (bytes >= 1024 ** 3) return t(giga, { size: (bytes / 1024 ** 3).toFixed(1) });
+  if (bytes >= 1024 ** 2) return t(mega, { size: (bytes / 1024 ** 2).toFixed(1) });
+  if (bytes >= 1024) return t(kilo, { size: (bytes / 1024).toFixed(1) });
+  return t("web.common.format.size.bytes", { size: String(bytes) });
 }
 
 export function formatBitrate(kbps?: number, fallback = ""): string {
   if (!isPositive(kbps)) return fallback;
-  return `${Math.round(kbps).toLocaleString(formatLocale())} kbps`;
+  return t("web.common.format.bitrate.kbps", {
+    rate: Math.round(kbps).toLocaleString(formatLocale()),
+  });
 }
 
 export function formatMbpsFromKbps(kbps?: number, fallback = "—"): string {
   if (!isPositive(kbps)) return fallback;
-  return `${(kbps / 1000).toFixed(1)} Mbps`;
+  return t("web.common.format.bitrate.mbps", { rate: (kbps / 1000).toFixed(1) });
 }
 
 export function formatSampleRate(sampleRate?: number, fallback = ""): string {
   if (!isPositive(sampleRate)) return fallback;
-  return `${sampleRate.toLocaleString(formatLocale())} Hz`;
+  return t("web.common.format.sampleRate", { rate: sampleRate.toLocaleString(formatLocale()) });
 }
 
 export function formatChannels(channels?: number): string {
   if (!channels || channels <= 0) return "";
   if (channels === 8) return "7.1";
   if (channels === 6) return "5.1";
-  if (channels === 2) return "stereo";
-  return `${channels} ch`;
+  if (channels === 2) return t("web.common.format.channels.stereo");
+  return t("web.common.format.channels.count", { count: channels, count_text: String(channels) });
 }
 
 /** Ensures a raw Dolby Vision label ("Profile 8.1") carries the "Dolby Vision" prefix. */
@@ -195,5 +203,7 @@ export function formatRuntimeMinutes(minutes: number): string {
   if (minutes <= 0) return "";
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return h > 0
+    ? t("web.common.format.runtime.hoursMinutes", { hours: String(h), minutes: String(m) })
+    : t("web.common.format.runtime.minutes", { count: m, count_text: String(m) });
 }

@@ -6,6 +6,7 @@ import { favoriteKeys, watchlistKeys, watchProviderKeys } from "./keys";
 import { invalidateAllRatingSurfaceQueries } from "./ratingsSurfaceRefresh";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { storage } from "@/utils/storage";
 import type { PluginConfigSchema } from "@/api/types";
 
@@ -323,7 +324,10 @@ export function useStartWatchProviderDeviceAuth(provider: string) {
   return useMutation({
     retry: false,
     mutationFn: () => startWatchProviderDeviceAuth(provider),
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to start auth"),
+    onError: (err) =>
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.watchProviders.startAuthFailed"),
+      ),
   });
 }
 
@@ -338,9 +342,12 @@ export function usePollWatchProviderDeviceAuth(provider: string) {
       queryClient.invalidateQueries({
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
-      toast.success("Watch provider connected");
+      toast.success(t("web.common.toast.watchProviders.connected"));
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : "Failed to finish auth"),
+    onError: (err) =>
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.watchProviders.finishAuthFailed"),
+      ),
   });
 }
 
@@ -361,10 +368,12 @@ export function useConnectWatchProviderAPIKey(provider: string) {
       queryClient.invalidateQueries({
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
-      toast.success("Watch provider connected");
+      toast.success(t("web.common.toast.watchProviders.connected"));
     },
     onError: (err) =>
-      toast.error(err instanceof Error ? err.message : "Failed to connect provider"),
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.watchProviders.connectFailed"),
+      ),
   });
 }
 
@@ -377,7 +386,7 @@ export function useUpdateWatchProviderConnection(provider: string) {
       const current = queryClient.getQueryData<WatchProviderConnection>(
         watchProviderKeys.connection(getActiveProfileId(), provider),
       );
-      if (!current?.etag) throw new Error("Reload provider settings before saving changes.");
+      if (!current?.etag) throw new Error(t("web.common.toast.watchProviders.reloadBeforeSaving"));
       return updateWatchProviderConnection(provider, body, current.etag);
     },
     onSuccess: (settings, _variables, context) => {
@@ -393,7 +402,9 @@ export function useUpdateWatchProviderConnection(provider: string) {
         });
         return;
       }
-      toast.error(err instanceof Error ? err.message : "Failed to update provider");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.watchProviders.updateFailed"),
+      );
     },
   });
 }
@@ -408,10 +419,12 @@ export function useDeleteWatchProviderConnection(provider: string) {
       queryClient.invalidateQueries({
         queryKey: watchProviderKeys.connection(profileId, provider),
       });
-      toast.success("Watch provider disconnected");
+      toast.success(t("web.common.toast.watchProviders.disconnected"));
     },
     onError: (err) =>
-      toast.error(err instanceof Error ? err.message : "Failed to disconnect provider"),
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.watchProviders.disconnectFailed"),
+      ),
   });
 }
 
@@ -431,26 +444,38 @@ export function useTriggerWatchProviderSync(provider: string) {
       });
       queryClient.invalidateQueries({ queryKey: favoriteKeys.all });
       queryClient.invalidateQueries({ queryKey: watchlistKeys.list() });
-      toast.success("Watch provider sync started");
+      toast.success(t("web.common.toast.watchProviders.syncStarted"));
     },
     onError: (err) => {
       if (err instanceof V2ProblemError && err.status === 429) {
         const retryAfter = err.retryAfterSeconds;
         toast.error(
-          retryAfter ? `Sync available in ${formatRetryAfter(retryAfter)}` : "Sync is cooling down",
+          retryAfter
+            ? syncAvailableIn(retryAfter)
+            : t("web.common.toast.watchProviders.syncCoolingDown"),
         );
         return;
       }
-      toast.error(err instanceof Error ? err.message : "Failed to start sync");
+      toast.error(
+        err instanceof Error ? err.message : t("web.common.toast.watchProviders.syncFailed"),
+      );
     },
   });
 }
 
-function formatRetryAfter(seconds: number) {
-  if (seconds < 60) return `${seconds}s`;
+function syncAvailableIn(seconds: number) {
+  if (seconds < 60)
+    return t("web.common.toast.watchProviders.syncAvailableSeconds", { count: seconds });
   const minutes = Math.ceil(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60)
+    return t("web.common.toast.watchProviders.syncAvailableMinutes", { count: minutes });
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
-  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  const values = { count: hours, count_text: String(hours) };
+  return remainingMinutes > 0
+    ? t("web.common.toast.watchProviders.syncAvailableHoursMinutes", {
+        ...values,
+        minutes: String(remainingMinutes),
+      })
+    : t("web.common.toast.watchProviders.syncAvailableHours", values);
 }

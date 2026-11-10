@@ -22,7 +22,7 @@ import type {
   SyncOutcome,
   WireCollection,
 } from "@/lib/collections/scope";
-import { useAppLanguage } from "@/i18n";
+import { t, useAppLanguage } from "@/i18n";
 
 /**
  * An editor read may carry no artwork URLs (they are presigned, and would move
@@ -204,16 +204,21 @@ export function useScopeSync<Raw extends WireCollection>(scope: CollectionScope<
     retry: false,
     mutationFn: (id: string) => scope.sync(id),
     onSuccess: (result, id) => {
-      const matched = `${result.itemsMatched} item${result.itemsMatched === 1 ? "" : "s"}`;
+      const matched = {
+        count: result.itemsMatched,
+        count_text: String(result.itemsMatched),
+      };
       toast.success(
         result.status === "warning"
-          ? `Synced with warnings — matched ${matched}`
-          : `Synced — matched ${matched}`,
+          ? t("web.common.toast.collections.syncedWithWarnings", matched)
+          : t("web.common.toast.collections.synced", matched),
       );
       void scope.invalidate(queryClient, id);
     },
     onError: (error, id) => {
-      toast.error(error instanceof Error ? error.message : "Sync failed");
+      toast.error(
+        error instanceof Error ? error.message : t("web.common.toast.collections.syncFailed"),
+      );
       // The server records a failed sync on the collection; show it.
       void scope.invalidate(queryClient, id);
     },
@@ -236,12 +241,12 @@ export function useScopeDelete<Raw extends WireCollection>(
     retry: false,
     mutationFn: (ref: { id: string; etag: string }) => scope.remove(ref),
     onSuccess: (_data, { id }) => {
-      toast.success("Collection deleted");
+      toast.success(t("web.common.toast.collections.deleted"));
       options.onDeleted?.(id);
       return scope.invalidate(queryClient, id);
     },
     onError: (error) => {
-      toast.error(scope.errorMessage(error, "Failed to delete"));
+      toast.error(scope.errorMessage(error, t("web.common.toast.collections.deleteFailed")));
       if (isPreconditionFailed(error)) {
         void scope.invalidate(queryClient);
         options.onStale?.();

@@ -7,6 +7,7 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import { V2ProblemError } from "@/api/v2/request";
 import {
@@ -303,15 +304,30 @@ export function useDeleteSections() {
     },
     onSuccess: async ({ requested, deleted, failed, firstError }) => {
       if (failed === 0) {
-        toast.success(`Deleted ${deleted} section${deleted === 1 ? "" : "s"}`);
+        toast.success(
+          t("web.admin.common.sections.deleted", { count: deleted, count_text: String(deleted) }),
+        );
       } else if (deleted > 0) {
-        toast.warning(`Deleted ${deleted} of ${requested} sections`, {
-          description: firstError,
-        });
+        toast.warning(
+          t("web.admin.common.sections.partiallyDeleted", {
+            count: requested,
+            count_text: String(requested),
+            deleted: String(deleted),
+          }),
+          {
+            description: firstError,
+          },
+        );
       } else {
-        toast.error(`Failed to delete ${failed} section${failed === 1 ? "" : "s"}`, {
-          description: firstError,
-        });
+        toast.error(
+          t("web.admin.common.sections.deleteFailed", {
+            count: failed,
+            count_text: String(failed),
+          }),
+          {
+            description: firstError,
+          },
+        );
       }
       await Promise.all([
         qc.invalidateQueries({ queryKey: sectionKeys.all }),

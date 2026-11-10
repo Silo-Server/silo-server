@@ -28,7 +28,7 @@ import {
   useValidateMarkerProvider,
 } from "@/hooks/queries/admin/markers";
 import { SETTINGS_NUMBER_WIDTH, SettingField, SettingFieldRow } from "./SettingField";
-import { MARKER_SHARING_DISCLOSURE } from "@/lib/markers";
+import { MARKER_SHARING_DISCLOSURE_KEY } from "@/lib/markers";
 import { providerMonogram } from "@/lib/monogram";
 import { pluginPagePath } from "@/lib/pluginPresentation";
 import { useT } from "@/i18n";
@@ -353,7 +353,7 @@ function MarkerProviderTile({
           !provider.is_submitter
             ? t("web.admin.settings.markers.provider.notSubmitter")
             : provider.default_contribute_enabled
-              ? MARKER_SHARING_DISCLOSURE
+              ? t(MARKER_SHARING_DISCLOSURE_KEY)
               : undefined
         }
       />

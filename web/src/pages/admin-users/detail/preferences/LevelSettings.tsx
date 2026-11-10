@@ -19,7 +19,7 @@ import {
   isStructuredSetting,
 } from "@/lib/settingsDisplay";
 
-import { formatLastSeen, possessiveText } from "../format";
+import { formatLastSeen } from "../format";
 import { DetailCard } from "../ui";
 import { AddSettingPicker } from "./AddSettingPicker";
 import {
@@ -60,18 +60,18 @@ function levelDescription(t: Translate, level: PreferenceLevel): string {
           : null,
       ].filter(Boolean);
       return meta.length > 0
-        ? possessiveText(t, "web.admin.users.detail.preferences.level.descDeviceWithMeta", {
+        ? t("web.admin.users.detail.preferences.level.descDeviceWithMeta", {
             meta: meta.join(" · "),
             profile,
           })
-        : possessiveText(t, "web.admin.users.detail.preferences.level.descDevice", { profile });
+        : t("web.admin.users.detail.preferences.level.descDevice", { profile });
     }
     case "client":
-      return possessiveText(t, "web.admin.users.detail.preferences.level.descClient", { profile });
+      return t("web.admin.users.detail.preferences.level.descClient", { profile });
     case "library":
-      return possessiveText(t, "web.admin.users.detail.preferences.level.descLibrary", { profile });
+      return t("web.admin.users.detail.preferences.level.descLibrary", { profile });
     case "series":
-      return possessiveText(t, "web.admin.users.detail.preferences.level.descSeries", { profile });
+      return t("web.admin.users.detail.preferences.level.descSeries", { profile });
   }
 }
 
@@ -108,7 +108,7 @@ function emptyText(t: Translate, level: PreferenceLevel): { title: string; detai
   }
   return {
     title: t(EMPTY_TITLE[level.kind]),
-    detail: possessiveText(t, "web.admin.users.detail.preferences.empty.detail", {
+    detail: t("web.admin.users.detail.preferences.empty.detail", {
       profile: level.profileName,
     }),
   };
@@ -257,7 +257,7 @@ export function LevelSettings({
   const fromProfile = removal?.profileName != null;
   const place = levelPlace(level, t);
   const removalTitle = fromProfile
-    ? possessiveText(t, "web.admin.users.detail.preferences.removal.titleProfile", {
+    ? t("web.admin.users.detail.preferences.removal.titleProfile", {
         profile: level.profileName,
         place,
       })
@@ -267,11 +267,11 @@ export function LevelSettings({
   if (fromProfile) {
     const values = { setting: removingLabel, profile: level.profileName, place };
     removalDescription = removalValue
-      ? possessiveText(t, "web.admin.users.detail.preferences.removal.toProfileWithValue", {
+      ? t("web.admin.users.detail.preferences.removal.toProfileWithValue", {
           ...values,
           value: removalValue,
         })
-      : possessiveText(t, "web.admin.users.detail.preferences.removal.toProfile", values);
+      : t("web.admin.users.detail.preferences.removal.toProfile", values);
   } else {
     const values = { setting: removingLabel, place };
     removalDescription = removalValue
@@ -356,7 +356,7 @@ export function LevelSettings({
         description={removalDescription}
         confirmLabel={
           fromProfile
-            ? possessiveText(t, "web.admin.users.detail.preferences.removal.confirmProfile", {
+            ? t("web.admin.users.detail.preferences.removal.confirmProfile", {
                 profile: level.profileName,
               })
             : t("web.admin.users.detail.preferences.removal.confirmDefault")
@@ -372,11 +372,11 @@ export function LevelSettings({
         <ConfirmDialog
           open={clearing}
           onOpenChange={setClearing}
-          title={possessiveText(t, "web.admin.users.detail.preferences.clear.title", {
+          title={t("web.admin.users.detail.preferences.clear.title", {
             profile: level.profileName,
             device: level.name,
           })}
-          description={possessiveText(t, "web.admin.users.detail.preferences.clear.description", {
+          description={t("web.admin.users.detail.preferences.clear.description", {
             profile: level.profileName,
           })}
           confirmLabel={t("web.admin.users.detail.preferences.clear.confirm")}

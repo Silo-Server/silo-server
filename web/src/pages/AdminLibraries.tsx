@@ -110,7 +110,7 @@ import {
   formatActiveScanMode,
   formatActiveScanProgress,
   formatActiveScanTarget,
-  formatActiveScanTime,
+  formatActiveScanStarted,
   formatActiveScanTrigger,
 } from "@/lib/scanRuns";
 import {
@@ -1067,7 +1067,7 @@ function ScanQueueGroup({
               <span className="text-border/50 shrink-0">{SEPARATOR}</span>
               <span className="shrink-0">
                 {scan.status === "running"
-                  ? formatActiveScanTime(scan.started_at, "Started")
+                  ? formatActiveScanStarted(scan.started_at)
                   : t("web.admin.libraries.scanQueue.waiting")}
               </span>
             </div>

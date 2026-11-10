@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useT } from "@/i18n";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_PAGE_SIZE_OPTIONS = [25, 50, 100];
@@ -26,32 +26,15 @@ export interface TablePaginationProps {
   onPageSizeChange?: (size: number) => void;
   pageSizeOptions?: number[];
   /**
-   * Singular English noun for the summary, e.g. "scan" → "Showing 1–25 of 240
-   * scans". English only; without it the summary counts translated "items".
+   * The summary message when the rows are not "items", e.g. "Showing 1–25 of
+   * 240 scans". It takes `count` (the total, choosing the plural), `from`,
+   * `to` and `total` (as text) and a `<num>` tag around each number.
    */
-  itemNoun?: string;
+  summaryKey?: MessageKey;
   /** Dims the summary while a background refetch is in flight. */
   isFetching?: boolean;
   className?: string;
 }
-
-/* eslint-disable formatjs/no-literal-string-in-jsx -- English-only itemNoun summary */
-/** The `itemNoun` summary, English only until its callers convert. */
-function legacySummary(
-  num: (chunks: ReactNode) => ReactNode,
-  from: number,
-  to: number,
-  total: number,
-  noun: string,
-): ReactNode {
-  return (
-    <>
-      Showing {num(from)}–{num(to)} of {num(total)} {total === 1 ? noun : `${noun}s`}
-    </>
-  );
-}
-
-/* eslint-enable formatjs/no-literal-string-in-jsx -- end of the itemNoun path */
 
 export function TablePagination({
   page,
@@ -60,7 +43,7 @@ export function TablePagination({
   onPageChange,
   onPageSizeChange,
   pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
-  itemNoun,
+  summaryKey = "web.ui.pagination.summary",
   isFetching = false,
   className,
 }: TablePaginationProps) {
@@ -76,9 +59,7 @@ export function TablePagination({
     <span className="text-foreground font-medium tabular-nums">{chunks}</span>
   );
   const range = { from: String(from), to: String(to), total: String(total), num };
-  const summaryText = itemNoun
-    ? legacySummary(num, from, to, total, itemNoun)
-    : t("web.ui.pagination.summary", { ...range, count: total });
+  const summaryText = t(summaryKey, { ...range, count: total });
 
   const goTo = (next: number) => {
     const clamped = Math.min(Math.max(next, 0), pageCount - 1);

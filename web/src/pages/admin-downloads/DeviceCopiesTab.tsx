@@ -500,7 +500,6 @@ function RevokeDialog({
         count,
         profile: device.profile_name,
         device: textDevice,
-        owner: (chunks) => chunks,
       })
     : t("web.admin.downloads.deviceCopies.revokeDialog.description", {
         count,

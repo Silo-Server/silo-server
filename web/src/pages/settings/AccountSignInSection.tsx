@@ -101,11 +101,7 @@ function connectIntro(t: Translate, provider: AuthProviderOption): ReactNode {
   if (provider.mode === "network") {
     const owner = networkIdentityName(provider);
     return owner
-      ? t("web.settings.accountSignIn.intro.networkOwner", {
-          ...name,
-          owner,
-          name: (chunks) => chunks,
-        })
+      ? t("web.settings.accountSignIn.intro.networkOwner", { ...name, owner })
       : t("web.settings.accountSignIn.intro.network", name);
   }
   if (provider.mode === "credentials") {

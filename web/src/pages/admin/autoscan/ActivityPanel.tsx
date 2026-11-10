@@ -62,7 +62,7 @@ import {
   compareActiveScans,
   formatActiveScanMode,
   formatActiveScanProgress,
-  formatActiveScanTime,
+  formatActiveScanStarted,
   formatActiveScanTrigger,
 } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
@@ -717,7 +717,7 @@ function QueueCard({
             <span>{formatActiveScanTrigger(scan.trigger)}</span>
             <span>
               {scan.status === "running"
-                ? formatActiveScanTime(scan.started_at, "Started")
+                ? formatActiveScanStarted(scan.started_at)
                 : t("web.admin.autoscan.activity.queue.waiting")}
             </span>
           </div>
@@ -836,7 +836,7 @@ function AutoscanQueue({
                 {libraryName(t, librariesByID, scan.library_id)}
                 <div className="text-muted-foreground mt-1 text-xs">
                   {scan.status === "running"
-                    ? formatActiveScanTime(scan.started_at, "Started")
+                    ? formatActiveScanStarted(scan.started_at)
                     : t("web.admin.autoscan.activity.queue.waiting")}
                 </div>
               </TableCell>
@@ -872,7 +872,7 @@ function AutoscanQueue({
           pageSize={QUEUE_PAGE_SIZE}
           total={scans.length}
           onPageChange={setPage}
-          itemNoun="scan"
+          summaryKey="web.admin.common.pagination.scans"
         />
       ) : null}
     </section>
@@ -1272,7 +1272,10 @@ export default function ActivityPanel() {
   const activeStatus = historyView === "scans" ? scanStatus : pollStatus;
   const hasHistoryFilters = debouncedHistoryQuery !== "" || activeStatus !== "all";
   const isRefreshing = status.isFetching || activeQuery.isFetching;
-  const itemNoun = historyView === "scans" ? "scan" : "poll";
+  const summaryKey =
+    historyView === "scans"
+      ? "web.admin.common.pagination.scans"
+      : "web.admin.common.pagination.polls";
 
   // If a background refresh shrinks the result set below the current page,
   // pull the viewer back to the last page that still has rows. Adjusting state
@@ -1531,7 +1534,7 @@ export default function ActivityPanel() {
                 setPage(0);
               }}
               pageSizeOptions={HISTORY_PAGE_SIZE_OPTIONS}
-              itemNoun={itemNoun}
+              summaryKey={summaryKey}
               isFetching={activeQuery.isFetching}
             />
           </div>

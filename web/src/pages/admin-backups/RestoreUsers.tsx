@@ -224,13 +224,11 @@ export const AccountRow = memo(function AccountRow({
           open={open}
           onOpenChange={setOpen}
           controls={detailsId}
-          label={String(
-            t(
-              open
-                ? "web.admin.backups.restore.users.hideProfiles"
-                : "web.admin.backups.restore.users.showProfiles",
-              { name: () => item.label },
-            ),
+          label={t(
+            open
+              ? "web.admin.backups.restore.users.hideProfiles"
+              : "web.admin.backups.restore.users.showProfiles",
+            { name: item.label },
           )}
         />
       </div>
