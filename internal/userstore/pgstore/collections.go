@@ -627,9 +627,11 @@ func (s *PostgresUserStore) UpdateCollectionSyncState(ctx context.Context, input
 		         WHEN sync_schedule IS NOT DISTINCT FROM $9 AND next_sync_at IS NOT DISTINCT FROM $10 THEN $5
 		         ELSE next_sync_at
 		     END
-		 WHERE user_id = $7 AND id = $8`,
+		 WHERE user_id = $7 AND id = $8
+		   AND (NOT $11::boolean OR last_sync_at IS NOT DISTINCT FROM $12)`,
 		input.LastSyncAt, input.Status, input.Message, input.ItemCount, input.NextSyncAt,
 		nowUTC(), s.userID, input.ID, input.ScheduleAtStart, input.NextSyncAtAtStart,
+		input.RequireLastSyncAt, input.LastSyncAtAtStart,
 	)
 	if err != nil {
 		return fmt.Errorf("updating collection sync state: %w", err)

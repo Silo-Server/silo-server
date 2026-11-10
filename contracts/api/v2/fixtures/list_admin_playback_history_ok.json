@@ -32,7 +32,8 @@
       "client_version": null,
       "video_decision": "direct",
       "audio_decision": null,
-      "end_reason": "stopped"
+      "end_reason": "stopped",
+      "lifecycle_seq": null
     }
   ],
   "page": {

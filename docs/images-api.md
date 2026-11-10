@@ -36,22 +36,27 @@ The parameter is accepted on:
 - catalog browse and query
 - item detail and watch detail
 - seasons, a single season, and episodes
-- home and library sections, including single-section items
+- home and library sections, including single-section items and the home
+  layout's included sections (`getHomeLayout` with `include_items`)
 - the personal lists: `/api/v2/favorites`, `/api/v2/watchlist`, and `/api/v2/history`
 - shuffles, the not-interested list, and notification series
 - the recommendation reads: discover, For You, a recommendation section,
   because-watched, popular, recently added, similar, similar users, the taste
   seed grid, Watch Tonight and Watch Tonight cards
 
-Other surfaces ignore it. The frozen `/api/v1` recommendation routes ignore it
-too.
+The item versions list and the beta manga-file and audiobook-group lists accept
+it as well. Other JSON `/api/v2` operations reject it as an unknown query
+parameter with `422 validation_failed`. The frozen `/api/v1` recommendation
+routes ignore it.
 
 Within item detail this covers cast and crew headshots too: they follow the
 `profile` ladder, which has no wide rung, so `large` and `medium` land on the
 same 500px image. Without the parameter they are that 500px image as well.
 
 Without the parameter, an episode still standing in for a backdrop in a section
-hero or Continue Watching uses the widest still rung that fits, 1280px.
+hero or Continue Watching uses the widest still rung that fits, 1280px. On
+`/api/v2` a Continue Watching or Next Up episode card shows a still only when
+its season and series have no backdrop (see below).
 
 The `/api/v2/catalog/people` operations do **not** take the parameter — their headshots are
 always the 500px variant. Browsing a person's filmography does honor it, because
@@ -153,7 +158,7 @@ GET /api/v2/images/capabilities
 
 ```json
 {
-  "revision": "1",
+  "revision": "opaque-capability-revision",
   "state": "available",
   "allowed": true,
   "param": "image_size",
@@ -180,7 +185,9 @@ GET /api/v2/images/capabilities
     "clearart": { "small": 500, "medium": 500, "large": 1000 },
     "disc": { "small": 300, "medium": 500, "large": 1000 }
   },
-  "original_max_width_px": 3840
+  "original_max_width_px": 3840,
+  "storage_backend": "s3",
+  "delivery": "direct"
 }
 ```
 
@@ -189,40 +196,25 @@ server will not honor the parameter, so keep using its per-context defaults.
 
 ## Publication and fallback
 
-Historical GC manifests are verified in the background before they become
-publication records; their listed keys alone do not prove upload completion.
-
-Catalog reads select cached artwork from durable publication and delivery
-records. They never issue storage HEAD requests or fetch artwork delivery URLs.
-The publisher records the exact variant keys after every upload succeeds;
-partially uploaded revisions are not advertised. The revision remains part of
-each key, so an old manifest cannot establish availability for new artwork.
-
-A bounded background task verifies both storage and the client-facing GET path.
-Publication makes a revision eligible for verification. Workers claim up to 100
-revisions per run, use at most 12 concurrent checks, and stop after one minute.
-Completed checks become eligible again after 15 minutes; a large backlog can
-extend that interval. A worker failure leaves a recoverable two-minute lease.
-Delivery verification is scoped to the storage and delivery configuration.
-Transport errors preserve the last completed verdict and are retried. Confirmed
-storage loss schedules image caching for regenerable provider artwork while
-retaining catalog pointers and surviving variants;
-delivery-only failures retain the catalog pointers and are checked again.
+Catalog reads select cached artwork from durable publication records. They
+never issue storage HEAD requests or fetch artwork delivery URLs. The publisher
+records the exact variant keys after every upload succeeds; a rung a ladder
+change added is advertised only once a publication includes it. The revision remains part of each key, so an old
+manifest cannot establish availability for new artwork. Silo is the only writer
+to the assets store and deletes a revision only after retiring it, so a
+published key is served as stored on every backend.
 
 On every storage backend, a size the artwork's revision did not publish, such as
 a rung a ladder change added that the ladder backfill has not generated yet,
 resolves to a smaller size it did publish. Legacy artwork without a
 publication manifest uses an established smaller size until the ladder backfill
-regenerates it. Before external delivery is verified, the server also avoids
-newly added wide rungs and selects a published smaller size or original. A
-completed delivery check restricts selection to working keys.
-If none remain, the URL is empty and the client should display its placeholder.
-Images can still fail at a particular client or CDN edge; this must not prevent
-rendering titles, episode counts, progress, or navigation.
+regenerates it. If none remain, the URL is empty and the client should display
+its placeholder. Images can still fail at a particular client or CDN edge; this
+must not prevent rendering titles, episode counts, progress, or navigation.
 
 `image_size=large` expresses the preferred size; the response may contain a
 smaller variant. The server caches resolved artwork URLs for at most five minutes
-so background recovery becomes visible without waiting for signature expiry.
+so regenerated artwork becomes visible without waiting for signature expiry.
 Cold resolver caches read the same durable records and never rediscover image
 availability through network probes.
 
@@ -259,7 +251,7 @@ cards. The URLs follow `image_size` like the other artwork on the detail; with n
 size they resolve at `medium`.
 
 Today the images come from local sidecar files next to the media (see
-[local NFO metadata](architecture/local-nfo-metadata.md#sidecar-artwork)). No
+[local NFO metadata](architecture/local-nfo-metadata.md#sidecar-artwork-copy-into-the-s3-image-cache)). No
 metadata plugin supplies them, so a library without such files has none. The
 frozen `/api/v1` detail and capability documents do not carry them.
 
@@ -281,14 +273,24 @@ and season's artwork next to their own: `series_poster_url`,
 `series_backdrop_url` and `season_poster_url`, each with a matching
 `*_thumbhash`. A client can draw an episode's hero from `series_backdrop_url`
 without fetching the episode's detail, since an episode card's `backdrop_url`
-is usually the episode still. The poster fields follow `poster_width` and the
-backdrop field follows `backdrop_width`, like `poster_url` and `backdrop_url`
-on the same card.
+is usually the episode still. In Continue Watching and Next Up rows,
+`/api/v2` episode cards instead carry the season backdrop as `backdrop_url`, or
+the series backdrop when the season has none, and keep the still only when
+neither exists. Frozen `/api/v1` cards keep the still. The poster fields follow
+`poster_width` and the backdrop field follows `backdrop_width`, like
+`poster_url` and `backdrop_url` on the same card.
+
+A season backdrop comes from a metadata provider that has one, or from an
+admin's pick, which locks the series' images. While they are unlocked,
+refreshing or identifying the series replaces the season backdrop with the
+provider's, or removes it when no provider has one. A pass that only fills
+missing metadata leaves a stored season backdrop alone.
 
 They appear on episode cards in Home and library sections (Continue Watching
 and Next Up included), catalog browse and search, Watch Tonight, and on episode
 detail (`getCatalogItem`). Each field is absent when the series or season has
-no such image. Seasons store no backdrop, so there is no season backdrop field.
+no such image. There is no season backdrop field; Continue Watching and Next Up
+rows show it as `backdrop_url`.
 The frozen `/api/v1` responses do not carry them.
 
 ## Jellyfin compatibility
@@ -322,9 +324,11 @@ The frozen alpha surface exposes the same ladder at `/api/v1/catalog`,
 `/api/v1/home/sections`, and the other v1 reads, and its capability document at
 `GET /api/v1/images/capability` (singular, with a numeric `schema_version` instead of
 `revision`/`state`). It rejects a bad size with `400 invalid_image_size` and a bad
-`include_artwork` with `400 invalid_include_artwork`. Those paths are frozen, and Silo
-1.0 answers the whole `/api/v1` namespace with `410 Gone` and the
-`client_upgrade_required` problem code. Build against `/api/v2`.
+`include_artwork` with `400 invalid_include_artwork`. Those paths are frozen. After the
+bridge window, and once a maintainer decides to retire it (#886), the main API listener
+answers the `/api/v1` business routes with `410 Gone` and the `client_upgrade_required`
+problem code; `/api/v1/health` and `/api/v1/ready` keep answering. Build against
+`/api/v2`.
 
 ### Marker thumbnail lifecycle
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -462,6 +463,12 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 		VALUES($1,$2,'p-1',0,'direct_play',$3,$4,100)`, legacy, account, started, started.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	// An expiring stale copy reads the recorded end to stay out of it.
+	for id, want := range map[string]PlaybackEndReason{stalled: PlaybackEndStopped, legacy: "", "missing-" + suffix: ""} {
+		if got, err := store.HistoryEndReason(ctx, id); err != nil || got != want {
+			t.Errorf("HistoryEndReason(%s) = %q, %v; want %q", id, got, err, want)
+		}
+	}
 
 	admin := &AdminHandler{pool: pool}
 	list := func(after, before time.Time) []AdminPlaybackHistoryRow {
@@ -506,5 +513,266 @@ func TestAdminPlaybackHistoryFactsDB(t *testing.T) {
 	}
 	if old := rows[0]; old.DeviceID != nil || old.ClientName != nil || old.VideoDecision != nil || old.EndReason != nil || old.Measured || old.StartPositionSeconds != nil || old.ClientIP != nil {
 		t.Errorf("legacy row = %+v, want unknown facts as nil", old)
+	}
+}
+
+// liveRowAdminStore is the admin log with one shared live row, which a
+// replica synced before the play ended somewhere without its copy.
+type liveRowAdminStore struct {
+	recordingPlaybackAdminStore
+	live *playback.Session
+}
+
+func (s *liveRowAdminStore) LiveSession(_ context.Context, sessionID string) (*playback.Session, error) {
+	if s.live == nil || s.live.ID != sessionID {
+		return nil, playback.ErrSessionNotFound
+	}
+	live := *s.live
+	return &live, nil
+}
+
+// TestEveryEndRecordsTheAdminLog covers ends that wrote no admin history: an
+// abort, a Jellyfin method switch, and a stop that reached a replica without
+// the session's copy. Each records one row with its reason; a replaced play
+// adds no watch history, since it continues under the session that replaced
+// it, and a detached snapshot takes its start and client from the live row.
+func TestEveryEndRecordsTheAdminLog(t *testing.T) {
+	started := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	live := compatFinishSession()
+	live.StartedAt, live.ClientName, live.DeviceID = started, "Jellyfin Web", "browser-1"
+	for _, tc := range []struct {
+		name        string
+		end         func(r finishHistoryReplica, held *playback.Session)
+		wantReason  PlaybackEndReason
+		wantWatched int
+		wantClient  string
+	}{{
+		name: "abort",
+		end: func(r finishHistoryReplica, held *playback.Session) {
+			if err := r.handler.abortPlaybackSession(context.Background(), held); err != nil {
+				t.Fatal(err)
+			}
+		},
+		wantReason: PlaybackEndAborted,
+	}, {
+		name: "method switch",
+		end: func(r finishHistoryReplica, held *playback.Session) {
+			_ = r.mgr.StopSession(held.ID)
+			r.mgr.FinishDetached(playback.WithEndReason(context.Background(), playback.EndReasonReplaced), *held)
+		},
+		wantReason: PlaybackEndReplaced,
+	}, {
+		name: "stop without the copy",
+		end: func(r finishHistoryReplica, held *playback.Session) {
+			_ = r.mgr.StopSession(held.ID)
+			// The stop's own snapshot: identity and the final position only.
+			r.mgr.FinishDetached(context.Background(), playback.Session{
+				ID: held.ID, UserID: held.UserID, ProfileID: held.ProfileID,
+				MediaFileID: held.MediaFileID, Position: held.Position, IsJellyfinCompat: true,
+			})
+		},
+		wantReason:  PlaybackEndStopped,
+		wantWatched: 1,
+		wantClient:  "Jellyfin Web",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newPlaybackTestStore(t)
+			admin := &liveRowAdminStore{live: &live}
+			replica := newFinishHistoryReplica(store, admin, finishHistoryFile())
+			held := replica.holdCopy(t, compatFinishSession(), 1800)
+			tc.end(replica, held)
+
+			if len(admin.history) != 1 {
+				t.Fatalf("admin history = %+v, want one row", admin.history)
+			}
+			row := admin.history[0]
+			if row.EndReason != tc.wantReason || row.WatchedSeconds != 1800 {
+				t.Fatalf("admin row = reason %q at %v, want %q at 1800", row.EndReason, row.WatchedSeconds, tc.wantReason)
+			}
+			if tc.wantClient != "" && (row.ClientName != tc.wantClient || row.DeviceID != "browser-1" || row.StartedAt != started.Format(time.RFC3339Nano)) {
+				t.Fatalf("admin row = client %q device %q started %s, want the live row's", row.ClientName, row.DeviceID, row.StartedAt)
+			}
+			if got := len(listFinishHistory(t, store)); got != tc.wantWatched {
+				t.Fatalf("watch history rows = %d, want %d", got, tc.wantWatched)
+			}
+		})
+	}
+	// A Jellyfin snapshot with no position never saw the play: it records
+	// nothing, whatever the reason.
+	store := newPlaybackTestStore(t)
+	admin := &liveRowAdminStore{}
+	replica := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	replica.mgr.FinishDetached(playback.WithEndReason(context.Background(), playback.EndReasonReplaced), compatFinishSession())
+	if len(admin.history) != 0 {
+		t.Fatalf("admin history = %+v, want none for a copy without progress", admin.history)
+	}
+	held := replica.holdCopy(t, compatFinishSession(), 0)
+	if err := replica.handler.abortPlaybackSession(context.Background(), held); err != nil {
+		t.Fatal(err)
+	}
+	if len(admin.history) != 0 {
+		t.Fatalf("admin history = %+v, want none for an aborted copy without progress", admin.history)
+	}
+}
+
+// TestLiveSessionReadsTheSyncedRowDB pins the columns a detached end reads
+// from the shared live row, including a row that never recorded a start.
+func TestLiveSessionReadsTheSyncedRowDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := uuid.NewString()
+	var account int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "live-row-"+suffix).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
+	started := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	synced, bare := "synced-"+suffix, "bare-"+suffix
+	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync
+		(session_id, user_id, profile_id, media_file_id, requested_media_file_id, play_method, started_at, client_ip,
+		 client_name, client_version, device_id, device_platform, transcode_audio, target_video_codec, position_seconds, compat_origin)
+		VALUES ($1, $2, 'p-1', 7, 8, 'transcode', $3, '203.0.113.9', 'Jellyfin Web', '10.9', 'browser-1', 'web', TRUE, 'h264', 1800, TRUE)`,
+		synced, account, started); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO playback_sessions_sync (session_id, user_id) VALUES ($1, $2)`, bare, account); err != nil {
+		t.Fatal(err)
+	}
+	store := NewPGPlaybackAdminStore(pool, nil)
+	live, err := store.LiveSession(ctx, synced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := playback.Session{ID: synced, UserID: account, ProfileID: "p-1", MediaFileID: 7, RequestedMediaFileID: 8,
+		PlayMethod: playback.PlayTranscode, StartedAt: started, ClientIP: "203.0.113.9", ClientName: "Jellyfin Web",
+		ClientVersion: "10.9", DeviceID: "browser-1", DevicePlatform: "web", TranscodeAudio: true,
+		TargetVideoCodec: "h264", Position: 1800, IsJellyfinCompat: true}
+	if live.StartedAt.Equal(started) {
+		live.StartedAt = started
+	}
+	if !reflect.DeepEqual(*live, want) {
+		t.Fatalf("live = %+v\nwant %+v", *live, want)
+	}
+	if live, err = store.LiveSession(ctx, bare); err != nil || !live.StartedAt.IsZero() || live.UserID != account {
+		t.Fatalf("bare row = %+v, %v; want the account and no start", live, err)
+	}
+	if _, err = store.LiveSession(ctx, "missing-"+suffix); !errors.Is(err, playback.ErrSessionNotFound) {
+		t.Fatalf("missing row: err = %v, want ErrSessionNotFound", err)
+	}
+}
+
+// TestDetachedSnapshotsKeepWhatTheyReported covers the position of a stop
+// recorded from a snapshot: one the stop did not report is taken from the
+// shared live row, along with the account a Jellyfin play row does not keep,
+// and a reported zero stays zero, so a Jellyfin copy that saw no progress
+// records nothing even when an older live row shows some.
+func TestDetachedSnapshotsKeepWhatTheyReported(t *testing.T) {
+	live := compatFinishSession()
+	live.StartedAt, live.Position, live.ClientName, live.DeviceID = time.Now().Add(-time.Hour), 1500, "Jellyfin Web", "browser-1"
+	for _, tc := range []struct {
+		name     string
+		position float64
+		wantRows int
+	}{
+		{"unreported", playback.PositionUnknown, 1},
+		{"reported zero", 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			admin := &liveRowAdminStore{live: &live}
+			replica := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile())
+			replica.mgr.FinishDetached(context.Background(), playback.Session{ID: live.ID, MediaFileID: 42, Position: tc.position, IsJellyfinCompat: true})
+			if len(admin.history) != tc.wantRows {
+				t.Fatalf("admin history = %+v, want %d rows", admin.history, tc.wantRows)
+			}
+			if tc.wantRows == 1 && (admin.history[0].WatchedSeconds != 1500 || admin.history[0].UserID != live.UserID) {
+				t.Fatalf("row = %+v, want the live row's account and position", admin.history[0])
+			}
+		})
+	}
+	// A snapshot that knows its start (an Audiobookshelf close) still takes
+	// the client and device only the live row has.
+	admin := &liveRowAdminStore{live: &live}
+	replica := newFinishHistoryReplica(newPlaybackTestStore(t), admin, finishHistoryFile())
+	replica.mgr.FinishDetached(context.Background(), playback.Session{ID: live.ID, UserID: live.UserID, ProfileID: live.ProfileID, MediaFileID: 42, Position: 600, StartedAt: live.StartedAt})
+	if len(admin.history) != 1 || admin.history[0].ClientName != "Jellyfin Web" || admin.history[0].DeviceID != "browser-1" || admin.history[0].WatchedSeconds != 600 {
+		t.Fatalf("admin history = %+v, want the live row's client and device at the reported 600", admin.history)
+	}
+}
+
+type missingFileResolver struct{}
+
+func (missingFileResolver) GetByID(context.Context, int) (*models.MediaFile, error) {
+	return nil, playback.ErrFileNotFound
+}
+
+// TestEndRecordsAPlayWhoseFileLeftTheCatalog covers an end recorded after
+// the play's media file was removed (a deleted library): the admin log
+// still gets its row, without the item and duration only the file gave.
+func TestEndRecordsAPlayWhoseFileLeftTheCatalog(t *testing.T) {
+	admin := &recordingPlaybackAdminStore{}
+	h := NewPlaybackHandler(playback.NewSessionManager(0, 0), missingFileResolver{})
+	h.AdminStore = admin
+	session := compatFinishSession()
+	session.IsJellyfinCompat, session.Position = false, 900
+	h.recordAdminStopHistory(context.Background(), &session, PlaybackEndExpired)
+	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndExpired || admin.history[0].MediaItemID != "" || admin.history[0].DurationSeconds != nil || admin.history[0].WatchedSeconds != 900 {
+		t.Fatalf("admin history = %+v, want one expired row without an item or duration", admin.history)
+	}
+}
+
+// endedAdminStore is the admin log that also answers which end it recorded.
+type endedAdminStore struct {
+	recordingPlaybackAdminStore
+}
+
+func (s *endedAdminStore) HistoryEndReason(_ context.Context, sessionID string) (PlaybackEndReason, error) {
+	for _, entry := range s.history {
+		if entry.SessionID == sessionID && entry.EndReason != "" {
+			return entry.EndReason, nil
+		}
+	}
+	return "", nil
+}
+
+// TestStaleJellyfinCopyKeepsAnotherReplicasEnd covers a Jellyfin play stopped
+// on one replica while another still holds an older copy: when that copy
+// expires, it records nothing over the stop.
+func TestStaleJellyfinCopyKeepsAnotherReplicasEnd(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	admin := &endedAdminStore{}
+	stopped := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	stale := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	session := compatFinishSession()
+	stopped.holdCopy(t, session, 3500)
+	staleCopy := stale.holdCopy(t, session, 1800)
+	if err := stopped.mgr.FinishSession(context.Background(), session.ID); err != nil {
+		t.Fatalf("FinishSession: %v", err)
+	}
+	stale.handler.expireSessionCopy(context.Background(), staleCopy)
+	if len(admin.history) != 1 || admin.history[0].EndReason != PlaybackEndStopped {
+		t.Fatalf("admin history = %+v, want only the stop", admin.history)
+	}
+
+	// An expiry is not a definite end: when an older copy expires first, the
+	// copy that saw further still records its progress over it.
+	admin = &endedAdminStore{}
+	older := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	newer := newFinishHistoryReplica(store, admin, finishHistoryFile())
+	session = compatFinishSession()
+	session.ID = "compat-upstream-2"
+	olderCopy := older.holdCopy(t, session, 1800)
+	newerCopy := newer.holdCopy(t, session, 3500)
+	older.handler.expireSessionCopy(context.Background(), olderCopy)
+	newer.handler.expireSessionCopy(context.Background(), newerCopy)
+	if len(admin.history) != 2 || admin.history[1].WatchedSeconds != 3500 {
+		t.Fatalf("admin history = %+v, want the newer copy's 3500 recorded after the older expiry", admin.history)
 	}
 }

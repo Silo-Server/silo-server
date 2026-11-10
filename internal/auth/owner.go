@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/jackc/pgx/v5"
 )
@@ -264,8 +267,21 @@ func (r *UserRepository) TransferOwnership(ctx context.Context, fromID, toID int
 	if err := moveOwnership(ctx, tx, fromID, toID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	audit, err := auditmutation.RecordMutation(ctx, tx, auditmutation.ActionOwnershipTransferred, auditmutation.TargetUser,
+		strconv.Itoa(toID), http.StatusNoContent,
+		auditmutation.Changes(map[string]any{auditFieldOwner: fromID}, map[string]any{auditFieldOwner: toID}))
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	auditmutation.CommitMutation(ctx, audit)
+	return nil
 }
+
+// auditFieldOwner names the server Owner's account in an ownership transfer.
+const auditFieldOwner = "owner_user_id"
 
 // moveOwnership clears the current Owner before marking the next: the
 // single-Owner index is checked row by row. The new Owner becomes a
@@ -325,7 +341,7 @@ func (r *UserRepository) SetOwner(ctx context.Context, username string) (*models
 	// Lock the named account and the current Owner in one statement, in id
 	// order, so concurrent recoveries serialize instead of deadlocking.
 	rows, err := tx.Query(ctx, `
-		SELECT id, username = $1, is_owner, role, enabled FROM users
+		SELECT id, COALESCE(username = $1, false), is_owner, role, enabled FROM users
 		WHERE username = $1 OR is_owner ORDER BY id FOR UPDATE`, NormalizeUsername(strings.TrimSpace(username)))
 	if err != nil {
 		return nil, 0, err

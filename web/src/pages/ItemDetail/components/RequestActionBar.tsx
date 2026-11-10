@@ -38,6 +38,7 @@ import {
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
 import { watchlistTitlesAvailable } from "@/lib/watchlistTitles";
+import { useT } from "@/i18n";
 import ActionBar, {
   type ActionBarLink,
   type ActionBarPrimaryAction,
@@ -73,6 +74,7 @@ interface RequestActionBarProps {
  * library items.
  */
 export default function RequestActionBar({ item, libraryHref }: RequestActionBarProps) {
+  const t = useT();
   const navigate = useViewTransitionNavigate();
   const createRequest = useCreateMediaRequest();
   const cancelRequest = useCancelMediaRequest();
@@ -100,7 +102,10 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   let primaryAction: ActionBarPrimaryAction;
   if (item.request.requestable) {
     primaryAction = {
-      label: item.media_type === "series" ? "Request series" : "Request movie",
+      label:
+        item.media_type === "series"
+          ? t("web.detail.request.requestSeries")
+          : t("web.detail.request.requestMovie"),
       icon: Plus,
       pending: createRequest.isPending,
       onClick: seasonPicker
@@ -109,12 +114,17 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
     };
   } else if (inLibrary) {
     primaryAction = libraryHref
-      ? { label: "Open in library", icon: Library, onClick: () => navigate(libraryHref) }
-      : { label: "In the library", icon: Library, disabled: true };
+      ? {
+          label: t("web.detail.request.openInLibrary"),
+          icon: Library,
+          onClick: () => navigate(libraryHref),
+        }
+      : { label: t("web.detail.request.inLibrary"), icon: Library, disabled: true };
   } else if (state) {
     primaryAction = {
       // The viewer's side of a pending request: they asked, nobody has answered.
-      label: state === "pending" ? "Requested" : formatRequestDisplayState(state),
+      label:
+        state === "pending" ? t("web.detail.request.requested") : formatRequestDisplayState(state),
       icon: STATE_ICONS[state],
       disabled: true,
     };
@@ -137,7 +147,9 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   if (watchlistSupported) {
     secondaryActions.push({
       id: "watchlist",
-      label: inWatchlist ? "On Watchlist" : "Add to Watchlist",
+      label: inWatchlist
+        ? t("web.detail.request.onWatchlist")
+        : t("web.detail.actions.addToWatchlist"),
       icon: inWatchlist ? BookmarkCheck : Bookmark,
       pressed: inWatchlist,
       pending: toggleWatchlist.isPending,
@@ -154,7 +166,7 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   if (ownRequest) {
     secondaryActions.push({
       id: "cancel",
-      label: "Cancel request",
+      label: t("web.detail.request.cancelRequest"),
       icon: X,
       pending: cancelRequest.isPending,
       onClick: () => setConfirmCancel(true),
@@ -163,7 +175,9 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
   if (canFollow) {
     secondaryActions.push({
       id: "follow",
-      label: following ? "Stop notifying me" : "Notify me when available",
+      label: following
+        ? t("web.detail.request.stopNotifying")
+        : t("web.detail.request.notifyWhenAvailable"),
       icon: following ? BellOff : Bell,
       pressed: following,
       pending: toggleFollow.isPending,
@@ -190,14 +204,16 @@ export default function RequestActionBar({ item, libraryHref }: RequestActionBar
       <ActionBar primaryAction={primaryAction} secondaryActions={secondaryActions} links={links} />
       {addAlsoRequests ? (
         <p className="text-muted-foreground mt-2.5 text-xs">
-          Adding it to your watchlist also requests it. You can turn this off in{" "}
-          <ViewTransitionLink
-            to="/settings/requests"
-            className="hover:text-foreground underline underline-offset-2"
-          >
-            Settings › Requests
-          </ViewTransitionLink>
-          .
+          {t("web.detail.request.watchlistAlsoRequests", {
+            link: (chunks) => (
+              <ViewTransitionLink
+                to="/settings/requests"
+                className="hover:text-foreground underline underline-offset-2"
+              >
+                {chunks}
+              </ViewTransitionLink>
+            ),
+          })}
         </p>
       ) : null}
       {item.request.download ? (

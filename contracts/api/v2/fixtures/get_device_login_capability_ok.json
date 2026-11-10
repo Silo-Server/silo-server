@@ -1,5 +1,5 @@
 {
-  "revision": "f7b8f864e1cda6340d501213eec94aad46ab2b27c63bebb0af0ca026c2678987",
+  "revision": "dbfb7e7442346e6afc2655125788af5a9af2a02fe6a6dadeb90ef93479326447",
   "state": "available",
   "remote_playback_handoff": true,
   "jellyfin_quick_connect": true,
@@ -7,5 +7,6 @@
     2
   ],
   "cancel": true,
-  "opened_signal": true
+  "opened_signal": true,
+  "session_binding": true
 }

@@ -20,9 +20,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useAdminCollectionCapabilities } from "@/hooks/queries/admin/collections";
+import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
 import { useDiscoverRowPreview } from "@/hooks/queries/admin/requestDiscover";
 import { RowRefusedError, type DiscoverRowsAdapter } from "@/hooks/queries/admin/useDiscoverRows";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useT, type Translate } from "@/i18n";
 import { RowChangedError } from "@/lib/homeRows/types";
 import { useCollectionTemplates } from "@/lib/collectionTemplates";
 import {
@@ -36,7 +38,7 @@ import { chartSummary } from "@/lib/collections/tmdbSources";
 import { isValidTMDBListURL } from "@/lib/tmdbList";
 import { cn } from "@/lib/utils";
 
-import { DiscoverFilterFields } from "./DiscoverFilterFields";
+import { DiscoverFilterFields, Field, OptionSelect } from "./DiscoverFilterFields";
 import {
   DEFAULT_ROW_LIMIT,
   defaultTitle,
@@ -44,6 +46,9 @@ import {
   isBrandRow,
   isBuiltInRow,
   MAX_ROW_LIMIT,
+  MDBLIST_ORDERS,
+  mdblistOrder,
+  type MDBListOrder,
   missingStockRows,
   moreFilterCount,
   NEW_ROW_TYPES,
@@ -51,6 +56,9 @@ import {
   rowBody,
   rowProblem,
   ROW_KINDS,
+  rowKindEnglishLabel,
+  rowKindLabel,
+  rowKindSentence,
   savedTitle,
   toTMDBChart,
 } from "./discoverLayoutModel";
@@ -60,10 +68,18 @@ function errorMessage(error: unknown, fallback: string) {
 }
 
 /** What a stock row shows, on its Bring back card. */
-function stockSentence(row: DiscoverRowBody) {
+function stockSentence(t: Translate, row: DiscoverRowBody) {
   return row.chart
-    ? `TMDB chart: ${chartSummary(toTMDBChart(row.chart))}.`
-    : ROW_KINDS[row.type].sentence;
+    ? t("web.admin.requests.rowDialog.stockChart", {
+        summary: chartSummary(toTMDBChart(row.chart)),
+      })
+    : rowKindSentence(row.type);
+}
+
+/** A row type's card text, for the picker's KindCard. */
+function kindCard(type: DiscoverRowBody["type"]) {
+  const { icon, group } = ROW_KINDS[type];
+  return { icon, group, label: rowKindLabel(type), sentence: rowKindSentence(type) };
 }
 
 /** Step 1: a new row of a type, or a built-in or brand row the page dropped. */
@@ -76,16 +92,17 @@ function KindPicker({
   narrow: boolean;
   onPick: (row: DiscoverRowBody) => void;
 }) {
+  const t = useT();
   const grid = cn("grid gap-2.5", !narrow && "grid-cols-2");
   return (
     <div className="grid content-start gap-6 overflow-y-auto px-5 pt-[18px] pb-6 sm:px-7">
       <section className="grid gap-3">
-        <h3 className="text-[13px] font-semibold">New row</h3>
+        <h3 className="text-[13px] font-semibold">{t("web.admin.requests.rowDialog.newRow")}</h3>
         <div className={grid}>
           {NEW_ROW_TYPES.map((type) => (
             <KindCard
               key={type}
-              {...ROW_KINDS[type]}
+              {...kindCard(type)}
               compact={narrow}
               onPick={() => onPick(newRow(type))}
             />
@@ -95,18 +112,18 @@ function KindPicker({
       {missing.length > 0 ? (
         <section className="grid gap-3">
           <h3 className="flex items-baseline gap-2.5 text-[13px] font-semibold">
-            Bring back
+            {t("web.admin.requests.rowDialog.bringBack")}
             <span className="text-muted-foreground font-normal">
-              Rows Discover starts with that this page no longer has
+              {t("web.admin.requests.rowDialog.bringBackHelp")}
             </span>
           </h3>
           <div className={grid}>
             {missing.map((row) => (
               <KindCard
                 key={row.id}
-                {...ROW_KINDS[row.type]}
+                {...kindCard(row.type)}
                 label={row.title}
-                sentence={stockSentence(row)}
+                sentence={stockSentence(t, row)}
                 compact={narrow}
                 onPick={() => onPick({ ...row })}
               />
@@ -134,6 +151,7 @@ function SourceControl({
   /** An MDBList pick, which also names the row. */
   onPick: (pick: SyncedPick) => void;
 }) {
+  const t = useT();
   const id = useId();
   const [changing, setChanging] = useState(!editing);
   const picker = useRef<HTMLDivElement>(null);
@@ -162,15 +180,17 @@ function SourceControl({
       })),
     [templates.data],
   );
-  const kind = ROW_KINDS[row.type];
+  const kindLabel = rowKindLabel(row.type);
 
-  if (isBrandRow(row)) return <SourceCard title={kind.label} detail={kind.sentence} />;
+  if (isBrandRow(row)) {
+    return <SourceCard title={kindLabel} detail={rowKindSentence(row.type)} />;
+  }
   if (row.chart && isBuiltInRow(row)) {
     return (
       <div className="grid gap-2">
-        <SourceCard title={kind.label} detail={chartSummary(toTMDBChart(row.chart))} />
+        <SourceCard title={kindLabel} detail={chartSummary(toTMDBChart(row.chart))} />
         <p className="text-muted-foreground text-[13px]">
-          A built-in row keeps its chart, so apps from before custom rows still show it.
+          {t("web.admin.requests.rowDialog.builtInKeepsChart")}
         </p>
       </div>
     );
@@ -182,9 +202,13 @@ function SourceControl({
       : shownLink(row.list?.url ?? "");
     return (
       <SourceCard
-        title={kind.label}
+        title={kindLabel}
         detail={detail}
-        action={row.chart ? "Change chart" : "Change list"}
+        action={
+          row.chart
+            ? t("web.admin.requests.rowDialog.changeChart")
+            : t("web.admin.requests.rowDialog.changeList")
+        }
         onChange={() => setChanging(true)}
       />
     );
@@ -201,8 +225,8 @@ function SourceControl({
     field = (
       <TMDBListURLField
         id={`${id}-tmdb-list`}
-        label="TMDB list link"
-        help="Paste a public list from themoviedb.org. Silo reads it again about every 12 hours."
+        label={t("web.admin.requests.rowDialog.tmdbListLink")}
+        help={t("web.admin.requests.rowDialog.tmdbListLinkHelp")}
         value={typedLink}
         onChange={(raw) => {
           setTypedLink(raw);
@@ -228,7 +252,7 @@ function SourceControl({
           const url = cleanMDBListLink(raw);
           setTypedLink(raw);
           setPickId(undefined);
-          onChange({ ...row, list: { url: isMDBListLink(url) ? url : "" } });
+          onChange({ ...row, list: { ...row.list, url: isMDBListLink(url) ? url : "" } });
         }}
       />
     );
@@ -258,17 +282,20 @@ function RowFields({
   onChange: (row: DiscoverRowBody, typedTitle?: boolean) => void;
   onPick: (pick: SyncedPick) => void;
 }) {
+  const t = useT();
   const nameId = useId();
   const hideId = useId();
+  // A server from before list orders refuses list.order, so the choice waits on its capability.
+  const listOrders = useAdminRequestCapabilities().data?.discover_list_order ?? false;
   const kind = ROW_KINDS[row.type];
   const brand = isBrandRow(row);
   // The server needs a name to preview a row, but the name doesn't change its
   // titles: a fixed one keeps typing a name from reading the source again.
-  const previewRow = { ...row, title: kind.label };
+  const previewRow = { ...row, title: rowKindEnglishLabel(row.type) };
   const preview = useDiscoverRowPreview(brand || rowProblem(previewRow) ? null : previewRow);
-  let offText = "Pick a chart to see its titles.";
-  if (row.list) offText = "Pick a list or paste its link to see its titles.";
-  if (row.discover) offText = "Choose the region the streaming services are in.";
+  let offText = t("web.admin.requests.rowDialog.previewOff.chart");
+  if (row.list) offText = t("web.admin.requests.rowDialog.previewOff.list");
+  if (row.discover) offText = t("web.admin.requests.rowDialog.previewOff.region");
   const previewStrip = brand ? null : (
     <RowPreview
       title={savedTitle(row)}
@@ -276,7 +303,11 @@ function RowFields({
       icon={kind.icon}
       group={kind.group}
       state={preview}
-      liveLabel={row.list ? "Live preview of the list" : "Live preview from TMDB"}
+      liveLabel={
+        row.list
+          ? t("web.admin.requests.rowDialog.livePreviewList")
+          : t("web.admin.requests.rowDialog.livePreviewTmdb")
+      }
       offText={offText}
     />
   );
@@ -284,14 +315,20 @@ function RowFields({
   const controlFirst = Boolean(row.list || row.discover);
   const moreCount = row.discover ? moreFilterCount(row.discover) : 0;
   const summary = [
-    moreCount ? `${moreCount} more ${moreCount === 1 ? "filter" : "filters"}` : null,
-    row.hide_available ? "Missing titles only" : null,
+    moreCount ? t("web.admin.requests.rowDialog.moreFilters", { count: moreCount }) : null,
+    row.hide_available ? t("web.admin.requests.discover.missingTitlesOnly") : null,
   ]
     .filter(Boolean)
     .join(" · ");
   let nameHelp: string | null = null;
-  if (!titleTyped && row.chart) nameHelp = "Follows the chart until you type your own name.";
-  else if (!titleTyped && row.type === "mdblist") nameHelp = "Starts as the list's name.";
+  if (!titleTyped && row.chart) nameHelp = t("web.admin.requests.rowDialog.nameFollowsChart");
+  else if (!titleTyped && row.type === "mdblist") {
+    nameHelp = t("web.admin.requests.rowDialog.nameFromList");
+  }
+  const mdblistOrders = MDBLIST_ORDERS.map((option) => ({
+    value: option.value,
+    label: t(option.label),
+  }));
 
   return (
     // minmax(0,1fr): a truncated line or a wide control can't widen the form past a phone screen.
@@ -306,6 +343,27 @@ function RowFields({
               onChange={(discover) => onChange({ ...row, discover })}
             />
           ) : null}
+          {row.type === "mdblist" && row.list && listOrders ? (
+            <Field
+              label={t("web.admin.requests.rowDialog.order")}
+              help={t("web.admin.requests.rowDialog.orderHelp")}
+            >
+              <OptionSelect
+                label={t("web.admin.requests.rowDialog.order")}
+                value={mdblistOrder(row)}
+                options={mdblistOrders}
+                onChange={(order) =>
+                  onChange({
+                    ...row,
+                    list: {
+                      url: row.list?.url ?? "",
+                      order: order === "list" ? undefined : (order as MDBListOrder),
+                    },
+                  })
+                }
+              />
+            </Field>
+          ) : null}
           {previewStrip}
         </>
       ) : (
@@ -315,13 +373,13 @@ function RowFields({
         </>
       )}
       <div className="grid gap-2">
-        <Label htmlFor={nameId}>Row name</Label>
+        <Label htmlFor={nameId}>{t("web.admin.requests.rowDialog.rowName")}</Label>
         <Input
           id={nameId}
           className="h-10 text-[15px]"
           maxLength={80}
           value={row.title}
-          placeholder={defaultTitle(row) || "Name this row"}
+          placeholder={defaultTitle(row) || t("web.admin.requests.rowDialog.rowNamePlaceholder")}
           onChange={(event) => onChange({ ...row, title: event.target.value }, true)}
         />
         {nameHelp ? <p className="text-muted-foreground text-[13px]">{nameHelp}</p> : null}
@@ -341,9 +399,9 @@ function RowFields({
           ) : null}
           <div className="flex items-center justify-between gap-4">
             <div>
-              <Label htmlFor={hideId}>Leave out titles the library has</Label>
+              <Label htmlFor={hideId}>{t("web.admin.requests.rowDialog.hideAvailable")}</Label>
               <p className="text-muted-foreground mt-1 text-[13px]">
-                Viewers see only titles they can still request.
+                {t("web.admin.requests.rowDialog.hideAvailableHelp")}
               </p>
             </div>
             <Switch
@@ -378,6 +436,7 @@ export function DiscoverRowDialog({
   onSaved: (newId: string | undefined) => void;
   onDelete: (row: DiscoverRow) => void;
 }) {
+  const t = useT();
   const editing = editRow !== null;
   const narrow = useMediaQuery("(max-width: 1023px)");
   const [step, setStep] = useState<"pick" | "form">(editing ? "form" : "pick");
@@ -428,7 +487,7 @@ export function DiscoverRowDialog({
     const limit = listPick.limit ? Math.min(listPick.limit, MAX_ROW_LIMIT) : row.limit;
     update({
       ...row,
-      list: { url: listPick.list.url },
+      list: { ...row.list, url: listPick.list.url },
       limit,
       title: titleTyped ? row.title : listPick.name,
     });
@@ -449,7 +508,12 @@ export function DiscoverRowDialog({
       else if (error instanceof RowRefusedError) setProblems(error.problems);
       else
         toast.error(
-          errorMessage(error, editing ? "Could not save this row" : "Could not add this row"),
+          errorMessage(
+            error,
+            editing
+              ? t("web.admin.requests.rowDialog.saveFailed")
+              : t("web.admin.requests.rowDialog.addFailed"),
+          ),
         );
     } finally {
       if (mounted.current) setBusy(false);
@@ -469,21 +533,22 @@ export function DiscoverRowDialog({
     }
   }
 
-  let title = "Add a row to Discover";
-  let description: ReactNode =
-    "Pick what the row shows. Next you'll see a preview and can name it.";
+  let title = t("web.admin.requests.rowDialog.addTitle");
+  let description: ReactNode = t("web.admin.requests.rowDialog.addDescription");
   if (step === "form" && editing) {
-    title = "Edit row";
-    description = "Changes apply to everyone's Discover page.";
+    title = t("web.admin.requests.rowDialog.editTitle");
+    description = t("web.admin.requests.rowDialog.editDescription");
   } else if (step === "form" && row) {
     // A row brought back is named by its own title.
-    title = row.id ? row.title : ROW_KINDS[row.type].label;
-    description = row.id ? stockSentence(row) : ROW_KINDS[row.type].sentence;
+    title = row.id ? row.title : rowKindLabel(row.type);
+    description = row.id ? stockSentence(t, row) : rowKindSentence(row.type);
   }
 
   let footerStart: ReactNode = (
     <StepCount step={step === "pick" ? 1 : 2}>
-      {step === "pick" ? "New rows go to the bottom of Discover" : "Goes to the bottom of Discover"}
+      {step === "pick"
+        ? t("web.admin.requests.rowDialog.newRowsGoToBottom")
+        : t("web.admin.requests.rowDialog.goesToBottom")}
     </StepCount>
   );
   if (editRow) {
@@ -491,12 +556,12 @@ export function DiscoverRowDialog({
       <Button
         type="button"
         variant="ghost"
-        className="text-destructive hover:text-destructive -ml-3"
+        className="text-destructive hover:text-destructive -ms-3"
         disabled={busy}
         onClick={() => onDelete(editRow)}
       >
         <Trash2 aria-hidden className="size-4" />
-        Delete row…
+        {t("web.admin.requests.rowDialog.deleteRow")}
       </Button>
     );
   }
@@ -511,9 +576,7 @@ export function DiscoverRowDialog({
         )}
       >
         <p className="min-w-0 flex-1">
-          {conflict
-            ? "The Discover page changed since you opened this row. Your changes are kept. Reload the rows, then save again."
-            : problems.join(" ")}
+          {conflict ? t("web.admin.requests.rowDialog.conflict") : problems.join(" ")}
         </p>
         {conflict ? (
           <Button
@@ -523,7 +586,7 @@ export function DiscoverRowDialog({
             disabled={busy}
             onClick={() => void reload()}
           >
-            Reload rows
+            {t("web.admin.requests.rowDialog.reloadRows")}
           </Button>
         ) : null}
       </div>
@@ -535,7 +598,9 @@ export function DiscoverRowDialog({
       onClose={onClose}
       onOpenFocus={() => headingRef.current?.focus()}
       back={
-        step === "form" && !editing ? { label: "All rows", onClick: () => setStep("pick") } : null
+        step === "form" && !editing
+          ? { label: t("web.admin.requests.rowDialog.allRows"), onClick: () => setStep("pick") }
+          : null
       }
       title={title}
       titleRef={headingRef}
@@ -550,11 +615,11 @@ export function DiscoverRowDialog({
             onClick={() => void submit()}
           >
             {editing ? (
-              "Save"
+              t("common.save")
             ) : (
               <>
                 <Plus aria-hidden className="size-4" />
-                Add row
+                {t("web.admin.requests.rowDialog.addRow")}
               </>
             )}
           </Button>

@@ -43,7 +43,7 @@ type AdminImageApplyInput struct {
 	}
 }
 type AdminImageUploadForm struct {
-	Type  string        `form:"type" enum:"poster,backdrop,logo" required:"true" doc:"The slot the image fills. Seasons take poster only."`
+	Type  string        `form:"type" enum:"poster,backdrop,logo" required:"true" doc:"The slot the image fills. Seasons take poster or backdrop."`
 	Image huma.FormFile `form:"image" contentType:"image/jpeg,image/png,image/webp,application/octet-stream" required:"true" doc:"The image: JPEG, PNG or WebP, at most 10 MiB. Its bytes decide the format, whatever type the part declares, so a part a browser sends as application/octet-stream is accepted when its bytes are a JPEG, PNG or WebP image."`
 }
 type AdminImageUploadInput struct {
@@ -63,6 +63,9 @@ type adminImagePosition struct {
 	Digest string `json:"digest"`
 }
 
+// registerAdminCatalogImages registers the admin item image operations: the
+// paged list of image choices, applying a provider or local choice, and
+// uploading an image.
 func registerAdminCatalogImages(reg *Registry) {
 	cursors := NewCursors(reg.deps.CursorSecret)
 	op := Operation{Operation: humaOp("GET", Prefix+"/admin/items/{id}/images", "listAdminItemImages", "admin-catalog", "Browse bounded image choices; refetches providers and rejects continuation when choices change."), Class: ClassActingAdmin, ServiceBacked: true}
@@ -100,9 +103,10 @@ func registerAdminCatalogImages(reg *Registry) {
 			choices = append(choices, choice{string(raw), row})
 		}
 		// Local sidecar artwork leads in discovery order, which puts the file a
-		// refresh would pick first. Provider choices follow, highest rated
-		// first; the stable identity breaks their ties without letting expiring
-		// display URLs affect pages.
+		// refresh would pick first. Provider choices follow: on a season list
+		// the season's own images come before the show fallbacks, and each group
+		// is highest rated first. The stable identity breaks ties without
+		// letting expiring display URLs affect pages.
 		slices.SortStableFunc(choices, func(a, b choice) int {
 			aLocal := a.row.ProviderID == metadata.LocalImageProviderID
 			bLocal := b.row.ProviderID == metadata.LocalImageProviderID
@@ -112,6 +116,12 @@ func registerAdminCatalogImages(reg *Registry) {
 			case aLocal:
 				return -1
 			case bLocal:
+				return 1
+			}
+			if a.row.Fallback != b.row.Fallback {
+				if b.row.Fallback {
+					return -1
+				}
 				return 1
 			}
 			if order := cmp.Compare(b.row.Rating, a.row.Rating); order != 0 {
@@ -131,7 +141,16 @@ func registerAdminCatalogImages(reg *Registry) {
 		end := min(pos.Offset+in.Limit, len(choices))
 		rows := make([]ItemImageEntry, 0, end-pos.Offset)
 		for _, c := range choices[pos.Offset:end] {
-			rows = append(rows, ItemImageEntry(c.row))
+			rows = append(rows, ItemImageEntry{
+				ProviderID:  c.row.ProviderID,
+				URL:         c.row.URL,
+				OriginalURL: c.row.OriginalURL,
+				Type:        c.row.Type,
+				Language:    c.row.Language,
+				Width:       c.row.Width,
+				Height:      c.row.Height,
+				Rating:      c.row.Rating,
+			})
 		}
 		next := ""
 		if end < len(choices) {
@@ -166,7 +185,7 @@ func registerAdminCatalogImages(reg *Registry) {
 		form := in.RawBody.Data()
 		if form == nil || !form.Image.IsSet {
 			return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-				WithErrors(ProblemError{Location: "body.image", Code: codeRequired, Detail: "an image file is required"})
+				WithErrors(ProblemError{Location: "body.image", Code: codeRequired, Detail: detailImageFileRequired})
 		}
 		defer func() { _ = form.Image.Close() }()
 		tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds 10 MiB.")

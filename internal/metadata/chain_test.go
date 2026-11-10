@@ -128,6 +128,27 @@ func TestExtractLookupProviderIDs(t *testing.T) {
 	}
 }
 
+func TestExtractLookupImages(t *testing.T) {
+	cases := []struct {
+		name         string
+		metadataJSON string
+		want         bool
+	}{
+		{"declared", `{"metadata":{"lookup_images":true}}`, true},
+
+		// Anything but JSON true keeps images gated on the provider's own ID.
+		{"absent", tmdbCapMetadata, false},
+		{"not a boolean", `{"metadata":{"lookup_images":"true"}}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractLookupImages([]byte(tc.metadataJSON)); got != tc.want {
+				t.Fatalf("extractLookupImages(%q) = %v, want %v", tc.metadataJSON, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExtractBulkLookupLimit(t *testing.T) {
 	cases := []struct {
 		name         string

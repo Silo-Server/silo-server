@@ -1,36 +1,44 @@
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 
 import { PosterTile } from "@/components/calm/PosterTile";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ScopePreview } from "@/hooks/queries/collectionScope";
 import {
-  PREVIEW_EMPTY,
-  PREVIEW_EMPTY_HELP,
-  PREVIEW_FAILED,
-  PREVIEW_LIVE,
+  previewEmpty,
+  previewEmptyHelp,
+  previewFailed,
+  previewLive,
+  PREVIEW_NEEDS_RULE,
+  PREVIEW_NEEDS_RULE_HELP,
   previewMatches,
 } from "@/lib/collections/copy";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 const GRID = "grid grid-cols-4 gap-2.5 sm:grid-cols-6 lg:grid-cols-8";
 const GHOSTS = 8;
+/** A separator, the same in every language. */
+const DOT = "·";
 
 /**
  * "● Live preview · 40 titles match · showing 24": the first titles the
- * Smart rules match across every chosen library, as posters. With nothing to
- * match it shows ghost posters and says saving still works.
+ * Smart rules match, from the libraries they name, as posters. With nothing to
+ * match it shows ghost posters and says saving still works. With no complete
+ * rule it previews nothing, since no rule would match every title, and asks
+ * for one.
  */
 export function CollectionPreviewPane({
   preview,
-  note,
+  needsRules = false,
 }: {
   preview: ScopePreview;
-  /** A muted line beside the count, such as where the matches come from. */
-  note?: string;
+  /** No rule is complete yet: show the prompt to add one, not the last result. */
+  needsRules?: boolean;
 }) {
+  const t = useT();
   const id = useId();
-  const ready = preview.status === "ready" ? preview : null;
-  const busy = preview.status === "loading" || Boolean(ready?.refreshing);
+  const ready = !needsRules && preview.status === "ready" ? preview : null;
+  const busy = !needsRules && (preview.status === "loading" || Boolean(ready?.refreshing));
 
   return (
     <section
@@ -47,44 +55,47 @@ export function CollectionPreviewPane({
             aria-hidden
             className="bg-success ring-success/20 size-1.5 rounded-full ring-[3px]"
           />
-          {PREVIEW_LIVE}
+          {previewLive()}
         </h2>
         {/* Read out once the debounced request answers, not on every keystroke. */}
         <p aria-live="polite" className="inline-flex flex-wrap items-center gap-x-2">
           {ready ? (
             <>
               <span aria-hidden className="text-muted-foreground">
-                ·
+                {DOT}
               </span>
               <b className="font-semibold">{previewMatches(ready.total)}</b>
               {ready.items.length > 0 && ready.total > ready.items.length ? (
                 <>
                   <span aria-hidden className="text-muted-foreground">
-                    ·
+                    {DOT}
                   </span>
-                  <span className="text-muted-foreground">{`showing ${ready.items.length}`}</span>
+                  <span className="text-muted-foreground">
+                    {t("web.collections.preview.showing", { shown: ready.items.length })}
+                  </span>
                 </>
               ) : null}
             </>
           ) : null}
         </p>
-        {note ? (
-          <>
-            <span aria-hidden className="text-muted-foreground">
-              ·
-            </span>
-            <span className="text-muted-foreground">{note}</span>
-          </>
-        ) : null}
       </div>
 
-      <PreviewBody preview={preview} />
+      <PreviewBody preview={preview} needsRules={needsRules} />
     </section>
   );
 }
 
 /** Posters, loading skeletons, or ghost posters with the reason there are none. */
-function PreviewBody({ preview }: { preview: ScopePreview }) {
+function PreviewBody({ preview, needsRules }: { preview: ScopePreview; needsRules: boolean }) {
+  const t = useT();
+  if (needsRules) {
+    return (
+      <PreviewGhosts announce>
+        <p className="text-[14.5px] font-semibold">{PREVIEW_NEEDS_RULE}</p>
+        <p className="text-muted-foreground mt-1 text-[13px]">{PREVIEW_NEEDS_RULE_HELP}</p>
+      </PreviewGhosts>
+    );
+  }
   if (preview.status === "loading") {
     return (
       <div className={GRID}>
@@ -97,7 +108,7 @@ function PreviewBody({ preview }: { preview: ScopePreview }) {
   if (preview.status === "ready" && preview.items.length > 0) {
     return (
       <ul
-        aria-label="Matching titles"
+        aria-label={t("web.collections.preview.matchingTitles")}
         className={cn(GRID, "transition-opacity", preview.refreshing && "opacity-60")}
       >
         {preview.items.map((item) => (
@@ -108,16 +119,21 @@ function PreviewBody({ preview }: { preview: ScopePreview }) {
       </ul>
     );
   }
-  let message = <p className="text-muted-foreground text-[13px]">{PREVIEW_FAILED}</p>;
+  let message = <p className="text-muted-foreground text-[13px]">{previewFailed()}</p>;
   if (preview.status === "ready") {
     message = (
       <>
-        <p className="text-[14.5px] font-semibold">{PREVIEW_EMPTY}</p>
-        <p className="text-muted-foreground mt-1 text-[13px]">{PREVIEW_EMPTY_HELP}</p>
+        <p className="text-[14.5px] font-semibold">{previewEmpty()}</p>
+        <p className="text-muted-foreground mt-1 text-[13px]">{previewEmptyHelp()}</p>
       </>
     );
   }
   // The count above already reads out "0 titles match"; announce only the other reasons.
+  return <PreviewGhosts announce={preview.status !== "ready"}>{message}</PreviewGhosts>;
+}
+
+/** Ghost posters over the reason the preview shows no titles, read out when `announce`. */
+function PreviewGhosts({ announce, children }: { announce: boolean; children: ReactNode }) {
   return (
     <div className="grid gap-4">
       <div aria-hidden className={GRID}>
@@ -128,8 +144,8 @@ function PreviewBody({ preview }: { preview: ScopePreview }) {
           />
         ))}
       </div>
-      <div className="text-center" role={preview.status === "ready" ? undefined : "status"}>
-        {message}
+      <div className="text-center" role={announce ? "status" : undefined}>
+        {children}
       </div>
     </div>
   );

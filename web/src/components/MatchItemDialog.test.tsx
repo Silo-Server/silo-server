@@ -1,17 +1,58 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 
 const mocks = vi.hoisted(() => ({
   useSearchItemMatchCandidates: vi.fn(),
   useApplyItemMatch: vi.fn(),
   useCatalogItemDetail: vi.fn(),
+  useItemFiles: vi.fn(),
+  useItemMatchHints: vi.fn(),
+  useIsActingAdmin: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
   useSearchItemMatchCandidates: (...args: unknown[]) => mocks.useSearchItemMatchCandidates(...args),
   useApplyItemMatch: (...args: unknown[]) => mocks.useApplyItemMatch(...args),
+  useItemFiles: (...args: unknown[]) => mocks.useItemFiles(...args),
+  useItemMatchHints: (...args: unknown[]) => mocks.useItemMatchHints(...args),
+}));
+
+vi.mock("@/hooks/useIsActingAdmin", () => ({
+  useIsActingAdmin: () => mocks.useIsActingAdmin(),
+}));
+
+vi.mock("@/hooks/queries/admin/libraries", () => ({
+  useAdminLibraries: () => ({
+    data: [
+      { id: 2, name: "TV Shows" },
+      { id: 5, name: "Sports" },
+    ],
+  }),
+}));
+
+// Radix Select needs layout APIs jsdom lacks; render each option as a button.
+const SelectChange = createContext<(value: string) => void>(() => {});
+vi.mock("@/components/ui/select", () => ({
+  Select: ({
+    children,
+    onValueChange,
+  }: {
+    children: ReactNode;
+    onValueChange: (value: string) => void;
+  }) => <SelectChange.Provider value={onValueChange}>{children}</SelectChange.Provider>,
+  SelectContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SelectItem: ({ children, value }: { children: ReactNode; value: string }) => {
+    const onValueChange = useContext(SelectChange);
+    return (
+      <button type="button" onClick={() => onValueChange(value)}>
+        {children}
+      </button>
+    );
+  },
+  SelectTrigger: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  SelectValue: () => null,
 }));
 
 vi.mock("@/hooks/queries/catalogRead", () => ({
@@ -28,6 +69,10 @@ vi.mock("@/components/ui/dialog", () => ({
 }));
 
 import MatchItemDialog from "./MatchItemDialog";
+
+beforeEach(() => {
+  mocks.useItemMatchHints.mockReturnValue({ data: undefined, isLoading: false });
+});
 
 const baseItem = {
   content_id: "movie-1",
@@ -69,6 +114,8 @@ describe("MatchItemDialog", () => {
       data: undefined,
       isLoading: false,
     });
+    mocks.useItemFiles.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.useIsActingAdmin.mockReturnValue(true);
   });
 
   it("renders candidate list when search returns results", () => {
@@ -162,6 +209,127 @@ describe("MatchItemDialog", () => {
   });
 });
 
+describe("MatchItemDialog suggested search", () => {
+  // Matched to Parasite (1982), but the folder says
+  // "Parasite (2019) {imdb-tt6751668} {tmdb-496243}".
+  const wrongMatch = {
+    content_id: "movie-1",
+    title: "Parasite",
+    year: 1982,
+    type: "movie" as const,
+  };
+  const searchMutate = vi.fn();
+
+  beforeEach(() => {
+    searchMutate.mockReset();
+    mocks.useSearchItemMatchCandidates.mockReturnValue({
+      mutate: searchMutate,
+      isPending: false,
+      isSuccess: false,
+      data: null,
+    });
+    mocks.useApplyItemMatch.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    mocks.useCatalogItemDetail.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.useItemFiles.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.useIsActingAdmin.mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("searches what the folder name says instead of the current match", () => {
+    mocks.useItemMatchHints.mockReturnValue({
+      data: {
+        title: "Parasite",
+        year: 2019,
+        provider_ids: { tmdb: "496243", imdb: "tt6751668" },
+      },
+      isLoading: false,
+    });
+    render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    expect(screen.getByLabelText("Year")).toHaveValue(2019);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Parasite",
+        year: 2019,
+        tmdb_id: "496243",
+        imdb_id: "tt6751668",
+      }),
+    );
+  });
+
+  it("falls back to the item's title and year when the scanner read nothing", () => {
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "", year: 0, provider_ids: {} },
+      isLoading: false,
+    });
+    render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Parasite", year: 1982, tmdb_id: undefined }),
+    );
+  });
+
+  it("fills in tagged provider IDs even without a parsed title", () => {
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "", year: 0, provider_ids: { tmdb: "496243" } },
+      isLoading: false,
+    });
+    render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Parasite", year: 1982, tmdb_id: "496243" }),
+    );
+  });
+
+  it("drops another library's suggestion when the new one has none", () => {
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "Parasite", year: 2019, provider_ids: { tmdb: "496243" } },
+      isLoading: false,
+    });
+    const { rerender } = render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "", year: 0, provider_ids: {} },
+      isLoading: false,
+    });
+    rerender(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Parasite", year: 1982, tmdb_id: undefined }),
+    );
+  });
+
+  it("keeps a field the admin edited and still fills the others", () => {
+    mocks.useItemMatchHints.mockReturnValue({ data: undefined, isLoading: true });
+    const { rerender } = render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Gisaengchung" } });
+
+    mocks.useItemMatchHints.mockReturnValue({
+      data: { title: "Parasite", year: 2019, provider_ids: { tmdb: "496243" } },
+      isLoading: false,
+    });
+    rerender(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Gisaengchung", year: 2019, tmdb_id: "496243" }),
+    );
+  });
+
+  it("waits for the suggestion before searching", () => {
+    mocks.useItemMatchHints.mockReturnValue({ data: undefined, isLoading: true });
+    render(<MatchItemDialog item={wrongMatch} open onOpenChange={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled();
+  });
+});
+
 describe("MatchItemDialog apply", () => {
   const item = { content_id: "local-abc", title: "The Office", year: 0, type: "series" as const };
   const applyMutate = vi.fn();
@@ -181,6 +349,8 @@ describe("MatchItemDialog apply", () => {
       },
     ]);
     mocks.useApplyItemMatch.mockReturnValue({ mutate: applyMutate, isPending: false });
+    mocks.useItemFiles.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.useIsActingAdmin.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -226,5 +396,156 @@ describe("MatchItemDialog apply", () => {
     const [variables] = applyMutate.mock.calls[0] as [{ onReplaced: (contentID: string) => void }];
     variables.onReplaced("series-tvdb-78107");
     expect(calls).toEqual(["open:false", "replaced:series-tvdb-78107"]);
+  });
+});
+
+describe("MatchItemDialog library scope", () => {
+  const series = {
+    content_id: "series-tvdb-359913",
+    title: "Formula 1: Drive to Survive",
+    year: 2019,
+    type: "series" as const,
+  };
+  const searchMutate = vi.fn();
+  const applyMutate = vi.fn();
+  const filesIn = (...libraryIds: string[]) => ({
+    data: {
+      files: libraryIds.map((library_id, index) => ({
+        id: String(index + 1),
+        library_id,
+        file_path: `/media/${library_id}/S01E0${index + 1}.mkv`,
+        observed_root_path: `/media/${library_id}`,
+      })),
+    },
+    isLoading: false,
+  });
+
+  beforeEach(() => {
+    searchMutate.mockReset();
+    applyMutate.mockReset();
+    mocks.useSearchItemMatchCandidates.mockReturnValue({
+      mutate: searchMutate,
+      reset: vi.fn(),
+      isPending: false,
+      isSuccess: true,
+      data: {
+        candidates: [
+          {
+            title: "Formula 1: Drive to Survive",
+            year: 2019,
+            content_type: "series",
+            overview: "",
+            image_url: "",
+            provider_ids: { tvdb: "359913" },
+            sources: ["tvdb"],
+            agreement_hints: [],
+          },
+        ],
+      },
+    });
+    mocks.useApplyItemMatch.mockReturnValue({ mutate: applyMutate, isPending: false });
+    mocks.useCatalogItemDetail.mockReturnValue({ data: undefined, isLoading: false });
+    mocks.useIsActingAdmin.mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("asks which of the item's libraries to search when none is in scope", () => {
+    mocks.useItemFiles.mockReturnValue(filesIn("2", "5", "5"));
+    render(<MatchItemDialog item={series} open onOpenChange={() => {}} />);
+
+    expect(mocks.useItemFiles).toHaveBeenCalledWith(series.content_id);
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "TV Shows" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Sports" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(expect.objectContaining({ library_id: 5 }));
+
+    fireEvent.click(screen.getByTestId("match-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Match" }));
+    const [variables] = applyMutate.mock.calls[0] as [{ item: { library_id?: number } }];
+    expect(variables.item.library_id).toBe(5);
+  });
+
+  it("asks again when the picked library is no longer one of the item's", () => {
+    mocks.useItemFiles.mockReturnValue(filesIn("2", "5", "7"));
+    const { rerender } = render(<MatchItemDialog item={series} open onOpenChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sports" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.click(screen.getByTestId("match-candidate"));
+
+    mocks.useItemFiles.mockReturnValue(filesIn("2", "7"));
+    rerender(<MatchItemDialog item={series} open onOpenChange={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled();
+    // A candidate picked for the old library must not apply unscoped.
+    expect(screen.queryByRole("button", { name: "Apply Match" })).not.toBeInTheDocument();
+  });
+
+  it("drops a candidate searched in a library the item has left", () => {
+    mocks.useItemFiles.mockReturnValue(filesIn("2", "5"));
+    const { rerender } = render(<MatchItemDialog item={series} open onOpenChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sports" }));
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    fireEvent.click(screen.getByTestId("match-candidate"));
+
+    // Now only in library 2: an unscoped apply would land there with a
+    // candidate found under library 5's settings.
+    mocks.useItemFiles.mockReturnValue(filesIn("2"));
+    rerender(<MatchItemDialog item={series} open onOpenChange={() => {}} />);
+    expect(screen.queryByTestId("match-candidate")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply Match" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ library_id: undefined }),
+    );
+    fireEvent.click(screen.getByTestId("match-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Match" }));
+    expect(applyMutate).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the caller's library scope without asking", () => {
+    mocks.useItemFiles.mockReturnValue(filesIn("2", "5"));
+    render(<MatchItemDialog item={{ ...series, library_id: 2 }} open onOpenChange={() => {}} />);
+
+    expect(mocks.useItemFiles).toHaveBeenCalledWith(undefined);
+    expect(screen.queryByRole("button", { name: "Sports" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(expect.objectContaining({ library_id: 2 }));
+
+    fireEvent.click(screen.getByTestId("match-candidate"));
+    fireEvent.click(screen.getByRole("button", { name: "Apply Match" }));
+    const [variables] = applyMutate.mock.calls[0] as [{ item: { library_id?: number } }];
+    expect(variables.item.library_id).toBe(2);
+  });
+
+  it("searches a single-library item unscoped, as before", () => {
+    mocks.useItemFiles.mockReturnValue(filesIn("2", "2"));
+    render(<MatchItemDialog item={series} open onOpenChange={() => {}} />);
+
+    expect(screen.queryByRole("button", { name: "TV Shows" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(searchMutate).toHaveBeenCalledWith(expect.objectContaining({ library_id: undefined }));
+  });
+
+  it("waits for the library lookup before searching", () => {
+    mocks.useItemFiles.mockReturnValue({ data: undefined, isLoading: true });
+    render(<MatchItemDialog item={series} open onOpenChange={() => {}} />);
+
+    expect(screen.getByRole("button", { name: "Search" })).toBeDisabled();
+  });
+
+  it("skips the admin-only library lookup for other curators", () => {
+    mocks.useIsActingAdmin.mockReturnValue(false);
+    mocks.useItemFiles.mockReturnValue({ data: undefined, isLoading: false });
+    render(<MatchItemDialog item={series} open onOpenChange={() => {}} />);
+
+    expect(mocks.useItemFiles).toHaveBeenCalledWith(undefined);
+    expect(screen.getByRole("button", { name: "Search" })).toBeEnabled();
   });
 });

@@ -223,6 +223,7 @@ func (f *fakeIntroRepository) UpsertArtifact(_ context.Context, artifact mediaar
 	if f.artifacts == nil {
 		f.artifacts = map[artifactSlot]mediaartifact.Artifact{}
 	}
+	artifact.UpdatedAt = time.Now()
 	f.artifacts[artifactSlot{artifact.MediaFileID, artifact.Kind}] = artifact
 	return nil
 }
@@ -897,5 +898,62 @@ func TestAnalyzeEpisodeComparesOnlyOwnDetectionFiles(t *testing.T) {
 	if summary.SeasonGroupsConsidered != 0 || len(repo.patches) != 0 {
 		t.Fatalf("groups=%d patches=%d, want the manual sibling excluded as in the scheduled run",
 			summary.SeasonGroupsConsidered, len(repo.patches))
+	}
+}
+
+// A rematch or a touched file clears the file's markers in the database
+// without changing what the season analysis reads, so the time of that
+// invalidation is part of the season's input signature. An invalidation
+// that lands while a run analyzes the group still differs from the
+// signature that run stored.
+func TestAnalyzeGroupReanalyzesFilesInvalidatedSinceItsAnalysis(t *testing.T) {
+	cfg := DefaultConfig("ffmpeg")
+	first := time.Date(2026, 10, 25, 20, 12, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	for _, tc := range []struct {
+		name              string
+		analyzed, current *time.Time
+		wantSkipped       bool
+	}{
+		{name: "never invalidated", wantSkipped: true},
+		{name: "invalidated since the analysis", current: &first, wantSkipped: false},
+		{name: "invalidated again during the analysis", analyzed: &first, current: &second, wantSkipped: false},
+		{name: "analyzed after the invalidation", analyzed: &first, current: &first, wantSkipped: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidates := func(invalidatedAt *time.Time) []Candidate {
+				return []Candidate{
+					{FileID: 1, EpisodeID: "ep1", SeasonID: "season1", MediaFolderID: 7, FileHash: "hash1", FileSize: 100, DurationSeconds: 1200, MarkersInvalidatedAt: invalidatedAt},
+					{FileID: 2, EpisodeID: "ep2", SeasonID: "season1", MediaFolderID: 7, FileHash: "hash2", FileSize: 200, DurationSeconds: 1200},
+				}
+			}
+			current := candidates(tc.current)
+			group := candidateGroup{MediaFolderID: 7, SeasonID: "season1", AnalysisGroupKey: current[0].AnalysisGroupKey(), Candidates: current}
+			repo := &fakeIntroRepository{
+				fingerprints: map[int]*Fingerprint{
+					1: cachedFingerprint(current[0], cfg, sharedIntroPoints(1000)),
+					2: cachedFingerprint(current[1], cfg, sharedIntroPoints(5000)),
+				},
+				seasonState: &SeasonState{
+					SeasonID:         "season1",
+					MediaFolderID:    7,
+					AnalysisGroupKey: group.AnalysisGroupKey,
+					InputSignature:   InputSignature(candidates(tc.analyzed)),
+					Status:           "complete",
+				},
+			}
+			analyzer := &Analyzer{repo: repo, extractor: &fakeFingerprintExtractor{}, config: cfg, logger: slog.New(slog.DiscardHandler)}
+
+			summary, err := analyzer.analyzeGroup(context.Background(), group, analyzeGroupOptions{persistState: true})
+			if err != nil {
+				t.Fatalf("analyzeGroup returned error: %v", err)
+			}
+			if skipped := summary.GroupsSkipped == 1; skipped != tc.wantSkipped {
+				t.Fatalf("skipped = %v (patches %d), want %v", skipped, len(repo.patches), tc.wantSkipped)
+			}
+			if !tc.wantSkipped && len(repo.patches) == 0 {
+				t.Fatal("re-analysis wrote no markers")
+			}
+		})
 	}
 }

@@ -29,10 +29,10 @@ const (
 
 	// ScopeAdminMonitorRead covers read-only server monitoring for an outside
 	// tool: live sessions, playback history, activity stats, accounts and their
-	// devices, downloads, node and host health. It never reaches filesystem
-	// paths, node addresses, storage keys, setting values or credentials; the
-	// few monitored operations that carry such details withhold them from
-	// scoped keys.
+	// devices, downloads, node and host health, and the catalog listing. It
+	// never reaches filesystem paths, node addresses, storage keys, setting
+	// values or credentials; the few monitored operations that carry such
+	// details withhold them from scoped keys.
 	ScopeAdminMonitorRead = "admin:monitor:read"
 	// ScopeAdminSessionsControl covers the administrator playback commands:
 	// pause, resume, stop, message and terminate a live session.
@@ -65,7 +65,7 @@ func APIKeyScopeCatalog() []APIKeyScope {
 		{
 			Name: ScopeAdminMonitorRead,
 			Description: "Monitor the server read-only: live sessions, playback history, activity stats, " +
-				"accounts, devices, downloads, and node and host health. Never exposes filesystem paths, " +
+				"accounts, devices, downloads, node and host health, and the catalog listing. Never exposes filesystem paths, " +
 				"node addresses, storage keys, setting values or credentials.",
 		},
 		{

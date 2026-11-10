@@ -161,14 +161,14 @@ Reprocessing an event is idempotent.
 
 A profile ID is unique only within its account: every account from before
 profiles has a profile named `default`. Interest rows, preferences, mutes,
-the delivery dedupe keys, and every inbox read, count, and mark-read are
-therefore keyed by account and profile, and profile deletion removes those
-for the deleted profile's account only. The email channel reads a profile's
-deliveries on the account that owns its email settings. Still keyed by
+the delivery dedupe keys, the email settings, and every inbox read, count,
+and mark-read are therefore keyed by account and profile, and profile
+deletion removes those for the deleted profile's account only. A verified
+email address still serves one profile on the whole server. Still keyed by
 profile ID alone: the inbox clock (`notification_inbox_clocks`), which only
 orders inserts, so two accounts' same-ID profiles share it and serialize
-their inserts without changing either inbox's order; and the email settings,
-push devices, web push subscriptions, and webhooks.
+their inserts without changing either inbox's order; and push devices, web
+push subscriptions, and webhooks.
 
 The notified-series list (`GET /api/v2/notifications/series`) shows a profile
 the same index fanout evaluates, plus the series it muted. `ActiveReasons` is

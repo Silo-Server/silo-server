@@ -17,6 +17,7 @@ import { useWatchPlaybackController } from "@/playback/watchPlaybackContext";
 import { useWatchTogetherRoomConnection } from "../hooks/useWatchTogetherRoomConnection";
 import { useTrackChoicePersistence } from "../hooks/useTrackChoicePersistence";
 import { toast } from "sonner";
+import { useT } from "@/i18n";
 
 function patchChapterThumbnail(
   versions: PlayerFileVersion[],
@@ -74,6 +75,7 @@ export function WatchPage(props: WatchPageProps) {
 }
 
 function WatchPartyPlaybackGate(props: WatchPageProps) {
+  const t = useT();
   const config = usePlayerConfig();
   const [status, setStatus] = useState<"checking" | "supported" | "unsupported" | "failed">(
     "checking",
@@ -105,13 +107,15 @@ function WatchPartyPlaybackGate(props: WatchPageProps) {
     <div className="bg-background fixed inset-0 z-50 flex items-center justify-center px-6">
       <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
         <p className="text-base font-semibold text-white">
-          {status === "checking" ? "Checking Watch Party support..." : "Watch Party unavailable"}
+          {status === "checking"
+            ? t("web.player.watchTogether.checkingSupport")
+            : t("web.player.watchTogether.unavailable")}
         </p>
         {status !== "checking" && (
           <p className="text-sm text-white/60">
             {status === "unsupported"
-              ? "This server needs an update to support Watch Party."
-              : "Unable to check Watch Party support. Please try again."}
+              ? t("web.player.watchTogether.unsupported")
+              : t("web.player.watchTogether.checkFailed")}
           </p>
         )}
         {status === "failed" && (
@@ -123,7 +127,7 @@ function WatchPartyPlaybackGate(props: WatchPageProps) {
               setAttempt((value) => value + 1);
             }}
           >
-            Try Again
+            {t("web.player.watch.tryAgain")}
           </button>
         )}
         <button
@@ -133,7 +137,7 @@ function WatchPartyPlaybackGate(props: WatchPageProps) {
             void props.onExit();
           }}
         >
-          Go Back
+          {t("player.goBack")}
         </button>
       </div>
     </div>
@@ -163,6 +167,8 @@ function WatchPagePlayer({
   subtitleMode,
   showForcedSubtitles,
   introSkipMode,
+  showMarkerConfidence = false,
+  showMarkerSource = false,
   bufferingMode = "always",
   autoSkipRecap,
   autoPlayNextPreview,
@@ -183,6 +189,7 @@ function WatchPagePlayer({
   watchTogetherRoomId,
   watchTogetherRoomToken,
 }: WatchPageProps) {
+  const t = useT();
   const config = usePlayerConfig();
   const queryClient = useQueryClient();
   const playbackController = useWatchPlaybackController();
@@ -280,10 +287,15 @@ function WatchPagePlayer({
     const key = `${session.playbackAttemptId}:${session.initialSubtitleError}`;
     if (initialSubtitleErrorKeyRef.current === key) return;
     initialSubtitleErrorKeyRef.current = key;
-    toast.error(session.initialSubtitleErrorTitle ?? "That subtitle track can't be used", {
+    toast.error(session.initialSubtitleErrorTitle ?? t("web.player.watch.subtitleTrackUnusable"), {
       description: session.initialSubtitleError,
     });
-  }, [session.initialSubtitleError, session.initialSubtitleErrorTitle, session.playbackAttemptId]);
+  }, [
+    session.initialSubtitleError,
+    session.initialSubtitleErrorTitle,
+    session.playbackAttemptId,
+    t,
+  ]);
 
   const audioTracks = useMemo(
     () => playbackVersions.find((v) => v.file_id === session.mediaFileId)?.audio_tracks ?? [],
@@ -603,7 +615,9 @@ function WatchPagePlayer({
           <div className="flex flex-col items-center gap-3">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
             <span className="text-sm text-white/60">
-              {fallingBack ? "Finding a compatible version for everyone..." : "Loading player..."}
+              {fallingBack
+                ? t("web.player.watch.findingCompatibleVersion")
+                : t("web.player.watch.loadingPlayer")}
             </span>
           </div>
         </div>
@@ -615,10 +629,10 @@ function WatchPagePlayer({
         <div className="surface-panel-subtle flex max-w-md flex-col items-center gap-4 rounded-[1.8rem] px-8 py-8 text-center">
           <div className="space-y-2">
             <p className="text-base font-semibold text-white">
-              {session.errorTitle ?? "Playback unavailable"}
+              {session.errorTitle ?? t("web.player.watch.playbackUnavailable")}
             </p>
             <p className="text-sm text-white/60">
-              {session.error ?? "Silo could not start playback."}
+              {session.error ?? t("web.player.watch.startFailed")}
             </p>
           </div>
           <button
@@ -628,7 +642,7 @@ function WatchPagePlayer({
             type="button"
             className="rounded-[0.95rem] bg-white/10 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/20"
           >
-            Go Back
+            {t("player.goBack")}
           </button>
         </div>
       </div>
@@ -690,6 +704,8 @@ function WatchPagePlayer({
       showForcedSubtitles={session.initialSubtitleError ? false : showForcedSubtitles}
       intro={activeMarkers.intro}
       introSkipMode={introSkipMode}
+      showMarkerConfidence={showMarkerConfidence}
+      showMarkerSource={showMarkerSource}
       bufferingMode={bufferingMode}
       bandwidthCapKbps={maxBitrateKbps}
       bufferingTitleId={contentId}

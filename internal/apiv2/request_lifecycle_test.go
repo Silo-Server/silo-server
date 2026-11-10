@@ -28,6 +28,11 @@ func (f *fakeLifecycle) Cancel(_ context.Context, v mediarequests.Viewer, id, re
 	f.reason = reason
 	return fixtureMediaRequest(id, 949), f.err
 }
+func (f *fakeLifecycle) RemoveFailed(_ context.Context, v mediarequests.Viewer, id string) error {
+	f.viewer = v
+	f.id = id
+	return f.err
+}
 func (f *fakeLifecycle) GetFeatureStatus(_ context.Context, v mediarequests.Viewer) (mediarequests.FeatureStatus, error) {
 	f.viewer = v
 	return mediarequests.FeatureStatus{RequestsEnabled: !f.requestsDisabled, RatingRestrictionsEnforced: true}, f.err
@@ -172,6 +177,18 @@ func TestRequestLifecycleViewerAndCancel(t *testing.T) {
 	requireProblem(t, rec, TypePermissionDenied)
 }
 
+func TestRemoveFailedRequestViewer(t *testing.T) {
+	r := &fakeLifecycle{}
+	h := lifecycleHandler(r, &fakeWatchLifecycle{})
+	rec := do(t, h, http.MethodDelete, Prefix+"/requests/r-1", "", requestOwner)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("remove: %d %s", rec.Code, rec.Body.String())
+	}
+	if r.viewer.UserID != 1 || r.viewer.ProfileID != "p-owner" || r.viewer.IsAdmin || r.id != "r-1" {
+		t.Fatalf("wrong viewer or input: %+v", r)
+	}
+}
+
 func (f *fakeWatchLifecycle) UpdateConnection(ctx context.Context, u int, p, key string, update watchsync.ConnectionUpdate) (watchsync.ConnectionStatus, error) {
 	return f.GetConnectionStatus(ctx, u, p, key)
 }
@@ -192,6 +209,7 @@ func requestLifecycleFixtureCases() []fixtureCase {
 		{name: "watch_provider_sync_ok", operationID: "triggerWatchProviderSync", method: http.MethodPost, path: Prefix + "/watch-providers/trakt/sync", schema: "WatchProviderSyncOutputBody", status: http.StatusAccepted},
 		{name: "watch_provider_delete_ok", operationID: "deleteWatchProviderConnection", method: http.MethodDelete, path: Prefix + "/watch-providers/trakt/connection", status: http.StatusNoContent},
 		{name: "request_status_ok", operationID: "getRequestStatus", method: http.MethodGet, path: Prefix + "/requests/status", schema: "FeatureStatus"},
+		{name: "remove_failed_request_ok", operationID: "removeFailedRequest", method: http.MethodDelete, path: Prefix + "/requests/r-1", status: http.StatusNoContent},
 		{name: "cancel_request_ok", operationID: "cancelRequest", method: http.MethodPost, path: Prefix + "/requests/r-1/cancel", body: `{"reason":"No longer needed"}`, schema: "MediaRequest"},
 		{name: "watch_provider_connection_ok", operationID: opGetWatchProviderConnection, method: http.MethodGet, path: Prefix + "/watch-providers/trakt/connection", schema: "WatchProviderConnection"},
 		{name: "watch_provider_device_auth_ok", operationID: "startWatchProviderDeviceAuth", method: http.MethodPost, path: Prefix + "/watch-providers/trakt/auth/device-code", schema: "WatchProviderDeviceAuth"},

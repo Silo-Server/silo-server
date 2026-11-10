@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -115,6 +116,52 @@ func TestAdminMatchSearch_FallsBackToItemMetadata(t *testing.T) {
 	}
 	if capturedQuery.Year != 2010 {
 		t.Errorf("expected year fallback to 2010, got %d", capturedQuery.Year)
+	}
+}
+
+// The stored year belongs to the current match, which is usually the wrong
+// one when an admin opens Match Item, so a search without a year must not
+// quietly reuse it. Only the frozen /api/v1 route keeps that fallback.
+func TestSearchAdminItemMatches_SearchesWithoutYearWhenNoneGiven(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"item-2": {ContentID: "item-2", Title: "Parasite", Year: 1982, Type: "movie"},
+		},
+	}
+	captureSvc := &capturingMetadataService{inner: &fakeMatchMetadataService{}}
+	h := NewAdminMatchHandler(items, nil, captureSvc)
+
+	for _, req := range []AdminMatchSearchRequest{{Title: "Parasite"}, {}} {
+		if _, err := h.SearchAdminItemMatches(context.Background(), "item-2", req); err != nil {
+			t.Fatalf("search %+v: %v", req, err)
+		}
+		if captureSvc.lastQuery.Year != 0 || captureSvc.lastQuery.Title != "Parasite" {
+			t.Fatalf("search %+v queried %q (%d), want Parasite with no year", req, captureSvc.lastQuery.Title, captureSvc.lastQuery.Year)
+		}
+	}
+}
+
+// The frozen /api/v1 routes keep answering a failed folder lookup as an invalid
+// library_id. /api/v2 answers it as a 500; its tests cover the other library
+// failures, which both versions share.
+func TestAdminMatchV1_FolderLookupFailureIsInvalidLibrary(t *testing.T) {
+	for _, library := range []string{"", `,"library_id":7`} {
+		for _, action := range []string{"search", "apply"} {
+			t.Run(action+library, func(t *testing.T) {
+				items := &fakeMatchItemLookup{items: map[string]*models.MediaItem{"item-2": {ContentID: "item-2", Title: "Parasite", Type: "movie"}}}
+				h := NewAdminMatchHandler(items, &fakeMatchFolderLookup{}, &fakeMatchMetadataService{})
+				body := `{"provider_ids":{"tmdb":"496243"}` + library + `}`
+				req := httptest.NewRequest(http.MethodPost, "/admin/items/item-2/match/"+action, strings.NewReader(body))
+				rec := httptest.NewRecorder()
+
+				buildMatchRouter(h).ServeHTTP(rec, req)
+
+				const want = `{"error":"bad_request","message":"Invalid library_id"}`
+				if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != want {
+					t.Fatalf("got %d %s, want 400 %s", rec.Code, rec.Body, want)
+				}
+			})
+		}
 	}
 }
 

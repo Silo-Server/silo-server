@@ -138,7 +138,7 @@ func (p *Provider) Search(ctx context.Context, req subtitles.SearchRequest) ([]s
 	return results, nil
 }
 
-func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.SubtitleFormat, error) {
+func (p *Provider) Download(ctx context.Context, id string, target subtitles.DownloadTarget) ([]byte, subtitles.SubtitleFormat, error) {
 	downloadURL, err := p.downloadURL(id)
 	if err != nil {
 		return nil, "", err
@@ -167,7 +167,7 @@ func (p *Provider) Download(ctx context.Context, id string) ([]byte, subtitles.S
 		return nil, "", fmt.Errorf("subdl: read zip: %w", err)
 	}
 
-	content, format, err := subtitles.ExtractSubtitleFromZip(zipData)
+	content, format, err := subtitles.ExtractSubtitleFromZip(zipData, target)
 	if err != nil {
 		return nil, "", fmt.Errorf("subdl: %w", err)
 	}

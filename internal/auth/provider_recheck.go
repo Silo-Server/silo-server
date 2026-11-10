@@ -698,7 +698,7 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 			}
 			// A Jellyfin-compatible session does not record the identity it
 			// signed in through, so every one the account holds ends.
-			if err := deleteJellyfinSessionsInTransaction(ctx, tx, []int{identity.UserID}); err != nil {
+			if _, err := deleteJellyfinSessionsInTransaction(ctx, tx, []int{identity.UserID}); err != nil {
 				return err
 			}
 			out.revoked = true

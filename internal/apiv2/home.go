@@ -44,7 +44,7 @@ type CalendarEvent struct {
 	PosterURL       string   `json:"poster_url,omitempty" format:"uri-reference" example:"https://s3.example.test/poster.jpg"`
 	PosterThumbhash string   `json:"poster_thumbhash,omitempty"`
 	Watched         bool     `json:"watched" example:"false"`
-	Badges          []string `json:"badges" doc:"series_premiere, season_premiere, finale; empty, never null"`
+	Badges          []string `json:"badges" doc:"series_premiere, season_premiere, finale; on a movie, digital or physical: the home release it is listed on. Empty, never null"`
 }
 
 // CalendarDay is one local day with its events in airing order.
@@ -86,7 +86,12 @@ type HomeLayoutInput struct {
 	// The maximum must equal handlers.MaxHomeLayoutIncludedSections, which
 	// getHomeCapabilities advertises; TestHomeCapabilities pins the two.
 	IncludeItems int `query:"include_items" default:"0" minimum:"0" maximum:"4" doc:"Also answer the cards of the first N sections in display order (featured sections count where they appear) in included_sections, saving a getHomeSectionItems call per row. 0 answers the layout alone. Send it only when getHomeCapabilities reports include_items_max; an older server rejects the parameter" example:"2"`
+	// The maximum must equal handlers.MaxSectionItemLimitCap, which
+	// getHomeCapabilities advertises as row_item_limit_max;
+	// TestHomeCapabilities pins the two.
+	ItemLimit int `query:"item_limit" minimum:"1" maximum:"100" doc:"Answer at most this many cards in each included section, exactly as getHomeSectionItems answers it with the same item_limit. The entries in sections keep each section's own item_limit. Absent keeps each section's own limit. Send it only when getHomeCapabilities reports row_item_limit_max; an older server rejects the parameter" example:"20"`
 	ArtworkQuery
+	SectionClient
 }
 
 // HomeLayout is the home page's sections in display order and, on request,
@@ -104,8 +109,10 @@ type HomeLayoutOutput struct {
 // HomeCapabilities is the getHomeCapabilities body.
 type HomeCapabilities struct {
 	Capability
-	IncludeItemsMax     int `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
-	SectionItemLimitMax int `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
+	IncludeItemsMax     int  `json:"include_items_max,omitzero" doc:"The largest include_items getHomeLayout accepts: the layout then also answers that many first sections with their cards in included_sections. Absent when the home sections service is not configured" example:"4"`
+	SectionItemLimitMax int  `json:"section_item_limit_max,omitzero" doc:"The largest item_limit listHomeSections and listLibrarySections accept: each section then answers at most that many cards. Absent when the home sections service is not configured" example:"100"`
+	RowItemLimitMax     int  `json:"row_item_limit_max,omitzero" doc:"The largest item_limit getHomeSectionItems and getHomeLayout accept: the section, or each section the layout includes, then answers at most that many cards. Absent when the home sections service is not configured, and on a server whose Home row reads take no item_limit" example:"100"`
+	SectionTitleKeys    bool `json:"section_title_keys,omitzero" doc:"Sections, profile section settings, admin section definitions and recommendation rows carry title_key, with title_args when its message has placeholders, for titles the server writes, so a client can translate them (a few, such as a seasonal row's in-season title, have none; a client shows title whenever the key is absent or unknown), and profile section settings carry default_title_key and default_title_args the same way for default_title. Informational: clients act on title_key whenever it is present. Absent when the home sections service is not configured, and on a server that predates the fields" example:"true"`
 }
 
 // HomeCapabilitiesOutput is the getHomeCapabilities response.
@@ -120,12 +127,18 @@ type HomeCapabilitiesOutput struct {
 type HomeSectionsInput struct {
 	SectionItemLimitQuery
 	ArtworkQuery
+	SectionClient
 }
 
 // HomeSectionItemsInput is the getHomeSectionItems query.
 type HomeSectionItemsInput struct {
 	ID string `path:"id" minLength:"1" doc:"Section identifier from the home layout" example:"continue_watching"`
+	// The maximum must equal handlers.MaxSectionItemLimitCap, which
+	// getHomeCapabilities advertises as row_item_limit_max;
+	// TestHomeCapabilities pins the two.
+	ItemLimit int `query:"item_limit" minimum:"1" maximum:"100" doc:"Answer at most this many cards: the section's item_limit becomes the smaller of its own and this value; total_count keeps its meaning. Absent keeps the section's own limit. Send it only when getHomeCapabilities reports row_item_limit_max; an older server rejects the parameter" example:"20"`
 	ArtworkQuery
+	SectionClient
 }
 
 // RecipePreset is one gallery preset: a recipe plus the config it starts from.
@@ -257,7 +270,7 @@ func registerHome(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/layout", opGetHomeLayout, "home",
 		"The home page's section layout for the acting profile; include_items also answers the cards of the first sections.")), reg.getHomeLayout)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections", opListHomeSections, "home",
-		"The home page's sections with their cards, as the acting profile sees them.")), reg.listHomeSections)
+		"The home page's sections that have cards for the acting profile, with those cards.")), reg.listHomeSections)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/home/sections/{id}/items", opGetHomeSectionItems, "home",
 		"One section of the home page with its cards.")), reg.getHomeSectionItems)
 	// The recipe gallery is profile scoped without a required header, as
@@ -435,6 +448,8 @@ func (reg *Registry) getHomeCapabilities(_ context.Context, _ *CapabilityInput) 
 		Capability:          Capability{State: StateAvailable},
 		IncludeItemsMax:     handlers.MaxHomeLayoutIncludedSections,
 		SectionItemLimitMax: handlers.MaxSectionItemLimitCap,
+		RowItemLimitMax:     handlers.MaxSectionItemLimitCap,
+		SectionTitleKeys:    true,
 	}}, nil
 }
 
@@ -446,7 +461,7 @@ func (reg *Registry) getHomeLayout(ctx context.Context, in *HomeLayoutInput) (*H
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeLayoutWithItems(ctx, sectionViewer(ctx, in.Artwork()), in.IncludeItems)
+	view, err := svc.HomeLayoutWithItems(ctx, sectionViewerCapped(ctx, in.Artwork(), in.SectionClient, in.ItemLimit), in.IncludeItems)
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -468,7 +483,7 @@ func (reg *Registry) listHomeSections(ctx context.Context, in *HomeSectionsInput
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSections(ctx, sectionViewerCapped(ctx, in.Artwork(), in.ItemLimit))
+	view, err := svc.HomeSections(ctx, sectionViewerCapped(ctx, in.Artwork(), in.SectionClient, in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
@@ -488,7 +503,7 @@ func (reg *Registry) getHomeSectionItems(ctx context.Context, in *HomeSectionIte
 	if _, _, p := viewerIdentity(ctx); p != nil {
 		return nil, p
 	}
-	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewer(ctx, in.Artwork()))
+	view, err := svc.HomeSectionItems(ctx, in.ID, sectionViewerCapped(ctx, in.Artwork(), in.SectionClient, in.ItemLimit))
 	if err != nil {
 		return nil, serviceProblem(err)
 	}

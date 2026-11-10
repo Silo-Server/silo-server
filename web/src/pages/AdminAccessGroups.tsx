@@ -54,6 +54,7 @@ import {
   useUpdateRequestGroupLimit,
 } from "@/hooks/queries/admin/requests";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useT, type MessageKey } from "@/i18n";
 import { PERMISSION_MARKER_EDIT, PERMISSION_METADATA_CURATION } from "@/lib/permissions";
 import {
   describeInheritedValue,
@@ -78,22 +79,22 @@ import {
 
 // The two assignable permissions (mirrors auth.assignablePermissions). A group
 // mask of `null` means "all assignable"; a list narrows to those named.
-const ASSIGNABLE_PERMISSIONS: Array<{ value: string; label: string; description: string }> = [
+const ASSIGNABLE_PERMISSIONS: Array<{
+  value: string;
+  label: MessageKey;
+  description: MessageKey;
+}> = [
   {
     value: PERMISSION_METADATA_CURATION,
-    label: "Metadata curation",
-    description: "Edit metadata for items in the member's libraries.",
+    label: "web.admin.access.groups.permissions.metadataCuration",
+    description: "web.admin.access.groups.permissions.metadataCurationDescription",
   },
   {
     value: PERMISSION_MARKER_EDIT,
-    label: "Marker editing",
-    description: "Create and adjust intro / credit markers.",
+    label: "web.admin.access.groups.permissions.markerEdit",
+    description: "web.admin.access.groups.permissions.markerEditDescription",
   },
 ];
-
-function limitLabel(value: number) {
-  return value > 0 ? String(value) : "Unlimited";
-}
 
 /**
  * The body a save would send for the group as stored, built with the same
@@ -134,7 +135,8 @@ export default function AdminAccessGroups() {
   return <AccessGroupsPage key={accessGroupScope()} />;
 }
 function AccessGroupsPage() {
-  useDocumentTitle("Access Groups");
+  const t = useT();
+  useDocumentTitle(t("web.admin.access.groups.title"));
   const groups = useAccessGroups();
   const capabilities = useAccessGroupCapabilities();
   const available = capabilities.data?.access_groups === true;
@@ -145,7 +147,14 @@ function AccessGroupsPage() {
   const [selected, setSelected] = useState<GroupEditor | null>(null);
   const [authority] = useState(captureAccessGroupAuthority);
   const busy = useRef(false);
-  const [error, setError] = useState("");
+  // The failure and the message to show when it carries none; text is resolved
+  // at render so the load effect does not depend on the language.
+  const [error, setError] = useState<{ cause: unknown; fallback: MessageKey } | null>(null);
+  const errorText = error
+    ? error.cause instanceof Error
+      ? error.cause.message
+      : t(error.fallback)
+    : "";
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -178,18 +187,19 @@ function AccessGroupsPage() {
     if (!selectedId || !available) {
       // A load cancelled by leaving the group must not leave its status behind.
       setLoading(false);
-      setError("");
+      setError(null);
       return;
     }
     let cancelled = false;
     setLoading(true);
-    setError("");
+    setError(null);
     getAccessGroup(Number(selectedId), authority)
       .then((editor) => {
         if (!cancelled) setSelected(editor);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Could not load group.");
+        if (!cancelled)
+          setError({ cause: err, fallback: "web.admin.access.groups.groupLoadFailed" });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -212,7 +222,7 @@ function AccessGroupsPage() {
     if (!name || busy.current || !available) return;
     busy.current = true;
     const startedAt = locationKey.current;
-    setError("");
+    setError(null);
     try {
       const group = await createGroup.mutateAsync({ body: { name }, profileContext: authority });
       setNewName("");
@@ -221,7 +231,7 @@ function AccessGroupsPage() {
       // while the group was created.
       if (stillOn(startedAt)) select(group.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create group.");
+      setError({ cause: err, fallback: "web.admin.access.groups.createFailed" });
     } finally {
       busy.current = false;
     }
@@ -234,17 +244,17 @@ function AccessGroupsPage() {
           type="button"
           variant="ghost"
           size="sm"
-          className="text-muted-foreground -ml-2 w-fit"
+          className="text-muted-foreground -ms-2 w-fit"
           onClick={() => navigate("/admin/access-groups")}
         >
           <ArrowLeft className="size-4" />
-          All groups
+          {t("web.admin.access.groups.allGroups")}
         </Button>
         <AccessGroupEditor
           key={selected.group.id}
           initialEditor={selected}
           onSaved={() => {
-            toast.success("Group saved");
+            toast.success(t("web.admin.access.groups.saved"));
             // Replace the group's entry so Back and "All groups" reach the same list.
             if (stillOn(location.key)) navigate("/admin/access-groups", { replace: true });
           }}
@@ -259,26 +269,27 @@ function AccessGroupsPage() {
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
-        title="Access Groups"
-        subtitle="The shared policy layer for a set of users. A group supplies the value for every field its members leave on Inherit; a per-user override replaces the group value in either direction."
+        title={t("web.admin.access.groups.title")}
+        subtitle={t("web.admin.access.groups.subtitle")}
         actions={
           !creating &&
           available && (
             <Button type="button" onClick={() => setCreating(true)}>
               <Plus className="size-4" />
-              New group
+              {t("web.admin.access.groups.newGroup")}
             </Button>
           )
         }
       />
 
-      {!available && <p role="status">Access group editing is unavailable.</p>}
-      {error && <p role="alert">{error}</p>}
-      {loading && <p>Loading group editor...</p>}
+      {!available && <p role="status">{t("web.admin.access.groups.unavailable")}</p>}
+      {errorText && <p role="alert">{errorText}</p>}
+      {loading && <p>{t("web.admin.access.groups.loadingEditor")}</p>}
       {groups.isError && (
         <div role="alert">
-          Could not load access groups.{" "}
-          <Button onClick={() => void groups.refetch()}>Reload groups</Button>
+          {t("web.admin.access.groups.loadFailed", {
+            reload: (chunks) => <Button onClick={() => void groups.refetch()}>{chunks}</Button>,
+          })}
         </div>
       )}
       {creating && available && (
@@ -289,13 +300,13 @@ function AccessGroupsPage() {
             onKeyDown={(event) => {
               if (event.key === "Enter") void create();
             }}
-            placeholder="Group name (e.g. Kids, Guests)"
-            aria-label="New group name"
+            placeholder={t("web.admin.access.groups.create.placeholder")}
+            aria-label={t("web.admin.access.groups.create.nameLabel")}
             className="max-w-xs"
             autoFocus
           />
           <Button type="button" onClick={create} disabled={createGroup.isPending}>
-            Create
+            {t("web.admin.access.groups.create.submit")}
           </Button>
           <Button
             type="button"
@@ -306,22 +317,21 @@ function AccessGroupsPage() {
               setNewName("");
             }}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       )}
 
       {groups.isLoading && (
-        <p className="text-muted-foreground text-sm">Loading access groups...</p>
+        <p className="text-muted-foreground text-sm">{t("web.admin.access.groups.loadingList")}</p>
       )}
 
       {!groups.isLoading && groups.data?.length === 0 && !creating && (
         <div className="surface-panel-subtle rounded-2xl p-8 text-center">
           <UsersRound className="text-muted-foreground mx-auto size-8" />
-          <h2 className="mt-3 text-lg font-semibold">No access groups yet</h2>
+          <h2 className="mt-3 text-lg font-semibold">{t("web.admin.access.groups.empty.title")}</h2>
           <p className="text-muted-foreground mx-auto mt-1 max-w-md text-sm">
-            Create a group to manage libraries, downloads, streams, and permissions for many users
-            at once, then assign users to it from their profile.
+            {t("web.admin.access.groups.empty.body")}
           </p>
         </div>
       )}
@@ -338,6 +348,7 @@ function AccessGroupsPage() {
 }
 
 function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () => void }) {
+  const t = useT();
   const requestLimit = useRequestGroupLimit(Number(group.id));
   // The group's own request approval and limit, when it sets any; a group
   // that only follows the server-wide defaults says nothing more.
@@ -345,18 +356,28 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
     group.requests_allowed && requestLimit.data ? requestGroupLimitSummary(requestLimit.data) : "";
   const facts = [
     group.library_ids === null
-      ? "All libraries"
-      : `${group.library_ids.length} librar${group.library_ids.length === 1 ? "y" : "ies"}`,
-    group.download_allowed ? "Downloads on" : "No downloads",
-    `${limitLabel(group.max_streams)} stream${group.max_streams === 1 ? "" : "s"}`,
-    group.requests_allowed ? "Requests on" : "No requests",
+      ? t("web.admin.access.groups.card.allLibraries")
+      : t("web.admin.access.groups.card.libraryCount", {
+          count: group.library_ids.length,
+          count_text: group.library_ids.length,
+        }),
+    group.download_allowed
+      ? t("web.admin.access.groups.card.downloadsOn")
+      : t("web.admin.access.groups.card.downloadsOff"),
+    t("web.admin.access.groups.card.streams", {
+      count: Math.max(group.max_streams, 0),
+      count_text: Math.max(group.max_streams, 0),
+    }),
+    group.requests_allowed
+      ? t("web.admin.access.groups.card.requestsOn")
+      : t("web.admin.access.groups.card.requestsOff"),
     ...(requestTerms ? [requestTerms] : []),
   ];
   return (
     <button
       type="button"
       onClick={onClick}
-      className="surface-panel hover:border-ring/40 focus-visible:ring-ring/60 flex flex-col gap-3 rounded-2xl border border-transparent p-5 text-left transition-colors outline-none focus-visible:ring-2"
+      className="surface-panel hover:border-ring/40 focus-visible:ring-ring/60 flex flex-col gap-3 rounded-2xl border border-transparent p-5 text-start transition-colors outline-none focus-visible:ring-2"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -364,7 +385,7 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
             <h2 className="truncate text-base font-semibold tracking-tight">{group.name}</h2>
             {group.is_default && (
               <span className="border-border text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-                Default
+                {t("web.admin.access.groups.card.default")}
               </span>
             )}
           </div>
@@ -373,7 +394,10 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
           )}
         </div>
         <span className="bg-secondary text-secondary-foreground shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium">
-          {group.member_count} {group.member_count === 1 ? "member" : "members"}
+          {t("web.admin.access.groups.card.memberCount", {
+            count: group.member_count,
+            count_text: group.member_count,
+          })}
         </span>
       </div>
       <div className="flex flex-wrap gap-1.5">
@@ -397,6 +421,7 @@ interface AccessGroupEditorProps {
 }
 
 function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEditorProps) {
+  const t = useT();
   const [editor, setEditor] = useState(initialEditor);
   const group = editor.group;
   const busy = useRef(false);
@@ -404,7 +429,7 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
   const [conflict, setConflict] = useState(false);
   const [reloading, setReloading] = useState(false);
   function failed(err: unknown) {
-    setError(err instanceof Error ? err.message : "Group action failed.");
+    setError(err instanceof Error ? err.message : t("web.admin.access.groups.actionFailed"));
     if (err instanceof V2ProblemError && err.status === 412) setConflict(true);
   }
   async function reload() {
@@ -437,18 +462,15 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
   const memberCount = (allGroups.data ?? []).find(
     (candidate) => String(candidate.id) === String(group.id),
   )?.member_count;
-  const destination = defaultGroupName
-    ? `the default group, ${defaultGroupName},`
-    : "the default group";
   // The count is cached and can be stale (an account may have joined since the
   // list loaded), so a zero never drops the move warning.
-  const movers =
-    memberCount === undefined
-      ? "Its members"
-      : memberCount === 0
-        ? "Any members (none when this list last loaded)"
-        : `${memberCount} ${memberCount === 1 ? "member" : "members"}`;
-  const deleteDescription = `${movers} will move to ${destination} and get its access right away, without being signed out. Settings they override on their own account are unchanged. This can't be undone.`;
+  const deleteDescription = t("web.admin.access.groups.delete.description", {
+    members: memberCount === undefined ? "unknown" : memberCount === 0 ? "none" : "some",
+    count: memberCount ?? 0,
+    count_text: memberCount ?? 0,
+    destination: defaultGroupName ? "named" : "unnamed",
+    default_group: defaultGroupName ?? "",
+  });
 
   // Draft state, keyed by group id via the parent's selection so switching
   // groups remounts this component with fresh initial values.
@@ -502,7 +524,7 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       setLimitConflict(false);
       setLimitError("");
     } else {
-      toast.error("Couldn't reload the group's request settings.");
+      toast.error(t("web.admin.access.groups.reloadLimitFailed"));
     }
   }
 
@@ -574,11 +596,11 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       onSaved();
     } catch (err) {
       if (isRequestEditorConflict(err)) setLimitConflict(true);
-      const reason = err instanceof Error ? err.message : "The save failed.";
+      const reason = err instanceof Error ? err.message : t("web.admin.access.groups.saveFailed");
       setLimitError(
         groupChanged
-          ? `The group was saved, but its request approval and limit were not. ${reason}`
-          : `The request approval and limit were not saved. ${reason}`,
+          ? t("web.admin.access.groups.limitNotSavedAfterGroup", { reason })
+          : t("web.admin.access.groups.limitNotSaved", { reason }),
       );
     } finally {
       busy.current = false;
@@ -605,34 +627,39 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       {error && <p role="alert">{error}</p>}
       {conflict && (
         <div>
-          Your draft is preserved. Reload the current group before submitting again.{" "}
-          <Button disabled={reloading} onClick={() => void reload()}>
-            Reload current group
-          </Button>
+          {t("web.admin.access.groups.conflict.message", {
+            reload: (chunks) => (
+              <Button disabled={reloading} onClick={() => void reload()}>
+                {chunks}
+              </Button>
+            ),
+          })}
         </div>
       )}
       <div className="surface-panel space-y-4 rounded-2xl border-0 p-5">
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="group-name">Name</Label>
+            <Label htmlFor="group-name">{t("web.admin.access.groups.field.name")}</Label>
             <Input id="group-name" value={name} onChange={(event) => setName(event.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="group-description">Description</Label>
+            <Label htmlFor="group-description">
+              {t("web.admin.access.groups.field.description")}
+            </Label>
             <Input
               id="group-description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="Optional"
+              placeholder={t("web.admin.access.groups.field.descriptionPlaceholder")}
             />
           </div>
         </div>
         <ToggleRow
-          label="Default for new users"
+          label={t("web.admin.access.groups.default.label")}
           description={
             group.is_default
-              ? "Newly created accounts are placed in this group automatically. To change this, make another group the default."
-              : "Newly created accounts are placed in this group automatically. Existing users are never moved."
+              ? t("web.admin.access.groups.default.descriptionLocked")
+              : t("web.admin.access.groups.default.description")
           }
           checked={isDefault}
           onCheckedChange={setIsDefault}
@@ -641,14 +668,14 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       </div>
 
       <section className="surface-panel space-y-4 rounded-2xl border-0 p-5">
-        <h2 className="text-sm font-semibold">Libraries &amp; playback</h2>
+        <h2 className="text-sm font-semibold">{t("web.admin.access.groups.playback.heading")}</h2>
         <LibraryAccessSelector
           libraries={libraries.data ?? []}
           value={libraryIds}
           onChange={setLibraryIds}
         />
         <div className="space-y-2">
-          <Label htmlFor="group-quality">Maximum playback quality</Label>
+          <Label htmlFor="group-quality">{t("web.admin.access.groups.playback.quality")}</Label>
           <Select
             value={qualityPreset}
             onValueChange={(value) => setQualityPreset(value as PlaybackQualityPreset)}
@@ -659,7 +686,10 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
             <SelectContent>
               {PLAYBACK_QUALITY_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  {option.label} — {option.description}
+                  {t("web.admin.access.groups.playback.qualityOption", {
+                    label: option.label,
+                    description: option.description,
+                  })}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -668,15 +698,15 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
         <div className="grid gap-4 sm:grid-cols-2">
           <StreamBitrateLimitField
             id="group-stream-bitrate"
-            label="Max remote stream bitrate"
-            hint="Applies to new remote streams."
+            label={t("web.admin.access.groups.playback.remoteBitrate")}
+            hint={t("web.admin.access.groups.playback.remoteBitrateHint")}
             value={maxRemoteStreamBitrateKbps}
             onChange={setMaxRemoteStreamBitrateKbps}
           />
           <StreamBitrateLimitField
             id="group-local-stream-bitrate"
-            label="Max local stream bitrate"
-            hint="Applies to new local streams."
+            label={t("web.admin.access.groups.playback.localBitrate")}
+            hint={t("web.admin.access.groups.playback.localBitrateHint")}
             value={maxLocalStreamBitrateKbps}
             onChange={setMaxLocalStreamBitrateKbps}
           />
@@ -684,16 +714,16 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       </section>
 
       <section className="surface-panel space-y-3 rounded-2xl border-0 p-5">
-        <h2 className="text-sm font-semibold">Downloads</h2>
+        <h2 className="text-sm font-semibold">{t("web.admin.access.groups.downloads.heading")}</h2>
         <ToggleRow
-          label="Allow downloads"
-          description="Members may download items to their devices."
+          label={t("web.admin.access.groups.downloads.allow")}
+          description={t("web.admin.access.groups.downloads.allowDescription")}
           checked={downloadAllowed}
           onCheckedChange={setDownloadAllowed}
         />
         <ToggleRow
-          label="Allow transcoded downloads"
-          description="Members may download converted versions, not just the original file."
+          label={t("web.admin.access.groups.downloads.transcoded")}
+          description={t("web.admin.access.groups.downloads.transcodedDescription")}
           checked={transcodeAllowed}
           onCheckedChange={setTranscodeAllowed}
           disabled={!downloadAllowed}
@@ -706,36 +736,44 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       >
         <div>
           <h2 id="group-requests-heading" className="text-sm font-semibold">
-            Requests
+            {t("web.admin.access.groups.requests.heading")}
           </h2>
           <p className="text-muted-foreground mt-0.5 text-xs">
-            A member&apos;s own approval and limit win over the group&apos;s, and admin accounts
-            don&apos;t use a group. Server defaults are in{" "}
-            <Link to="/admin/settings/requests" className="text-foreground underline">
-              Settings › Requests
-            </Link>
-            .
+            {t("web.admin.access.groups.requests.intro", {
+              link: (chunks) => (
+                <Link to="/admin/settings/requests" className="text-foreground underline">
+                  {chunks}
+                </Link>
+              ),
+            })}
           </p>
         </div>
         <ToggleRow
-          label="Allow media requests"
-          description="Members may request titles that aren't in the library yet."
+          label={t("web.admin.access.groups.requests.allow")}
+          description={t("web.admin.access.groups.requests.allowDescription")}
           checked={requestsAllowed}
           onCheckedChange={setRequestsAllowed}
         />
         {groupLimit.isError ? (
           <p role="alert" className="text-sm">
-            Couldn&apos;t load the group&apos;s request approval and limit.{" "}
-            <Button variant="link" className="h-auto p-0" onClick={() => void groupLimit.refetch()}>
-              Retry
-            </Button>
+            {t("web.admin.access.groups.requests.loadFailed", {
+              retry: (chunks) => (
+                <Button
+                  variant="link"
+                  className="h-auto p-0"
+                  onClick={() => void groupLimit.refetch()}
+                >
+                  {chunks}
+                </Button>
+              ),
+            })}
           </p>
         ) : requestLimit.draft ? (
           <RequestLimitFields
             draft={requestLimit.draft}
             onChange={(next) => requestLimit.update(() => next)}
             subject="group"
-            inheritLabel="Use server default"
+            inheritLabel={t("web.admin.access.groups.requests.inheritLabel")}
             inherited={
               serverTerms
                 ? {
@@ -764,7 +802,9 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
             disabled={updateGroupLimit.isPending}
           />
         ) : (
-          <p className="text-muted-foreground text-sm">Loading request approval and limit...</p>
+          <p className="text-muted-foreground text-sm">
+            {t("web.admin.access.groups.requests.loading")}
+          </p>
         )}
         {limitError && (
           <p role="alert" className="text-destructive text-sm">
@@ -775,44 +815,46 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       </section>
 
       <section className="surface-panel space-y-4 rounded-2xl border-0 p-5">
-        <h2 className="text-sm font-semibold">Concurrent streams</h2>
+        <h2 className="text-sm font-semibold">{t("web.admin.access.groups.streams.heading")}</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <LimitField
             id="group-streams"
-            label="Max streams"
-            hint="0 = unlimited"
+            label={t("web.admin.access.groups.streams.max")}
+            hint={t("web.admin.access.groups.streams.zeroUnlimited")}
             value={maxStreams}
             onChange={setMaxStreams}
           />
           <LimitField
             id="group-transcodes"
-            label="Max transcodes"
-            hint="0 = unlimited"
+            label={t("web.admin.access.groups.streams.maxTranscodes")}
+            hint={t("web.admin.access.groups.streams.zeroUnlimited")}
             value={maxTranscodes}
             onChange={setMaxTranscodes}
           />
         </div>
         <ToggleRow
-          label="Allow video transcoding"
-          description="Members may play items that need server-side video conversion."
+          label={t("web.admin.access.groups.streams.videoTranscode")}
+          description={t("web.admin.access.groups.streams.videoTranscodeDescription")}
           checked={videoTranscodeAllowed}
           onCheckedChange={setVideoTranscodeAllowed}
         />
         <ToggleRow
-          label="Allow audio transcoding"
-          description="Members may play items that need audio conversion without video encoding."
+          label={t("web.admin.access.groups.streams.audioTranscode")}
+          description={t("web.admin.access.groups.streams.audioTranscodeDescription")}
           checked={audioTranscodeAllowed}
           onCheckedChange={setAudioTranscodeAllowed}
         />
       </section>
 
       <section className="surface-panel space-y-2 rounded-2xl border-0 p-5">
-        <h2 className="text-sm font-semibold">Profiles</h2>
+        <h2 className="text-sm font-semibold">{t("web.admin.access.groups.profiles.heading")}</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <div className="flex items-baseline justify-between">
-              <Label htmlFor="group-profiles">Max profiles</Label>
-              <span className="text-muted-foreground text-xs">At least 1</span>
+              <Label htmlFor="group-profiles">{t("web.admin.access.groups.profiles.max")}</Label>
+              <span className="text-muted-foreground text-xs">
+                {t("web.admin.access.groups.profiles.atLeastOne")}
+              </span>
             </div>
             <Input
               id="group-profiles"
@@ -827,27 +869,30 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
           </div>
         </div>
         <p className="text-muted-foreground text-xs">
-          Each member account can have up to this many profiles, unless the account sets its own
-          limit. Existing profiles over a lowered limit are kept.
+          {t("web.admin.access.groups.profiles.help")}
         </p>
       </section>
 
       <section className="surface-panel space-y-3 rounded-2xl border-0 p-5">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold">Permissions</h2>
+            <h2 className="text-sm font-semibold">
+              {t("web.admin.access.groups.permissions.heading")}
+            </h2>
             <p className="text-muted-foreground mt-0.5 text-xs">
-              A member also needs the permission granted on their own account.
+              {t("web.admin.access.groups.permissions.help")}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs">Allow all</span>
+            <span className="text-muted-foreground text-xs">
+              {t("web.admin.access.groups.permissions.allowAll")}
+            </span>
             <Switch
               checked={allPermissions}
               onCheckedChange={(checked) =>
                 setPermissions(checked ? null : ASSIGNABLE_PERMISSIONS.map((entry) => entry.value))
               }
-              aria-label="Allow all permissions"
+              aria-label={t("web.admin.access.groups.permissions.allowAllLabel")}
             />
           </div>
         </div>
@@ -856,8 +901,8 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
             {ASSIGNABLE_PERMISSIONS.map((permission) => (
               <ToggleRow
                 key={permission.value}
-                label={permission.label}
-                description={permission.description}
+                label={t(permission.label)}
+                description={t(permission.description)}
                 checked={permissions?.includes(permission.value) ?? false}
                 onCheckedChange={(checked) => setPermissionAllowed(permission.value, checked)}
               />
@@ -878,11 +923,11 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
             disabled={group.is_default}
           >
             <Trash2 className="size-4" />
-            Delete group
+            {t("web.admin.access.groups.delete.button")}
           </Button>
           {group.is_default && (
             <p className="text-muted-foreground text-xs">
-              The default group can’t be deleted. Make another group the default first.
+              {t("web.admin.access.groups.delete.defaultLocked")}
             </p>
           )}
         </div>
@@ -900,7 +945,9 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
             limitBlocksSave
           }
         >
-          {updateGroup.isPending || updateGroupLimit.isPending ? "Saving..." : "Save changes"}
+          {updateGroup.isPending || updateGroupLimit.isPending
+            ? t("web.admin.access.groups.saving")
+            : t("web.admin.access.groups.save")}
         </Button>
       </div>
 
@@ -912,18 +959,20 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{group.name}”?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t("web.admin.access.groups.delete.title", { name: group.name })}
+            </AlertDialogTitle>
             <AlertDialogDescription>{deleteDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           {error && <p role="alert">{error}</p>}
           {conflict && (
             <Button disabled={reloading} onClick={() => void reload()}>
-              Reload current group
+              {t("web.admin.access.groups.conflict.reload")}
             </Button>
           )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleteGroup.isPending || reloading}>
-              Cancel
+              {t("common.cancel")}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={(event) => {
@@ -933,7 +982,7 @@ function AccessGroupEditor({ initialEditor, onSaved, onDeleted }: AccessGroupEdi
               disabled={deleteGroup.isPending || conflict || reloading}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              {t("web.admin.access.groups.delete.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -952,29 +1001,42 @@ interface ToggleRowProps {
 
 /** Read-only list of a group's members, each linking to their user page. */
 function AccessGroupMembers({ groupId }: { groupId: number | string }) {
+  const t = useT();
   const users = useAdminUsers();
   const members = (users.data ?? [])
     .filter((user) => user.role !== "admin" && String(user.access_group_id) === String(groupId))
     .sort((a, b) => a.username.localeCompare(b.username));
   return (
-    <section className="surface-panel space-y-3 rounded-2xl border-0 p-5" aria-label="Members">
+    <section
+      className="surface-panel space-y-3 rounded-2xl border-0 p-5"
+      aria-label={t("web.admin.access.groups.members.heading")}
+    >
       <div>
-        <h2 className="text-sm font-semibold">Members</h2>
+        <h2 className="text-sm font-semibold">{t("web.admin.access.groups.members.heading")}</h2>
         <p className="text-muted-foreground mt-0.5 text-xs">
-          Change a member&apos;s group from their user page.
+          {t("web.admin.access.groups.members.help")}
         </p>
       </div>
-      {users.isPending && <p className="text-muted-foreground text-sm">Loading members...</p>}
+      {users.isPending && (
+        <p className="text-muted-foreground text-sm">
+          {t("web.admin.access.groups.members.loading")}
+        </p>
+      )}
       {users.isError && (
         <p role="alert" className="text-sm">
-          Could not load members.{" "}
-          <Button variant="link" className="h-auto p-0" onClick={() => void users.refetch()}>
-            Retry
-          </Button>
+          {t("web.admin.access.groups.members.loadFailed", {
+            retry: (chunks) => (
+              <Button variant="link" className="h-auto p-0" onClick={() => void users.refetch()}>
+                {chunks}
+              </Button>
+            ),
+          })}
         </p>
       )}
       {users.isSuccess && members.length === 0 && (
-        <p className="text-muted-foreground text-sm">No members yet.</p>
+        <p className="text-muted-foreground text-sm">
+          {t("web.admin.access.groups.members.empty")}
+        </p>
       )}
       {members.length > 0 && (
         <ul className="divide-border divide-y text-sm">

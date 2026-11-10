@@ -56,9 +56,6 @@ func (d *themeDiscovery) scan(ctx context.Context, repo *themesongs.Repository, 
 		return err
 	}
 	for _, directory := range directories {
-		if scope != "" && !pathWithinAnyRoot(directory, []string{scope}) && !pathWithinAnyRoot(scope, []string{directory}) {
-			continue
-		}
 		root := scopeLibraryRoot(directory, d.roots)
 		if root == "" {
 			continue
@@ -132,7 +129,7 @@ func (d *themeDiscovery) ancestorRules(directory, root string) themeIgnoreState 
 			entries, state.err = d.readDir(directory)
 			if state.err == nil {
 				inherited := append([]ignoreRules(nil), state.rules...)
-				state.rules, state.ignored = dirIgnoreRules(inherited, directory, directory, entries)
+				state.rules, state.ignored, state.err = dirIgnoreRules(inherited, directory, directory, entries)
 			}
 		}
 	}
@@ -167,7 +164,10 @@ func (d *themeDiscovery) discover(ctx context.Context, directory string, cached 
 	if err != nil {
 		return nil, err
 	}
-	rules, ignored = dirIgnoreRules(append([]ignoreRules(nil), rules...), directory, directory, entries)
+	rules, ignored, err = dirIgnoreRules(append([]ignoreRules(nil), rules...), directory, directory, entries)
+	if err != nil {
+		return nil, err
+	}
 	if ignored {
 		return []themesongs.File{}, nil
 	}
@@ -239,7 +239,10 @@ func (d *themeDiscovery) discover(ctx context.Context, directory string, cached 
 		if err != nil {
 			return nil, err
 		}
-		childRules, skip := dirIgnoreRules(rules, path, path, children)
+		childRules, skip, err := dirIgnoreRules(rules, path, path, children)
+		if err != nil {
+			return nil, err
+		}
 		if skip {
 			continue
 		}

@@ -122,5 +122,5 @@ it("hands the stored subtitle, including its pending sync, to the player", async
   await act(async () => {
     fireEvent.click(result);
   });
-  expect(onSubtitleDownloaded).toHaveBeenCalledExactlyOnceWith(subtitle);
+  expect(onSubtitleDownloaded).toHaveBeenCalledExactlyOnceWith(subtitle, "download");
 });

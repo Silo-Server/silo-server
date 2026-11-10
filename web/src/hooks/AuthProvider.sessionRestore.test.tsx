@@ -1,8 +1,16 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import authenticationRequired from "../../../contracts/api/v2/fixtures/authentication_required.json";
+
 import { getAccessToken, setAccessToken } from "@/api/client";
+import {
+  clearStoredImpersonationAdminSession,
+  loadStoredImpersonationAdminSession,
+  saveStoredImpersonationAdminSession,
+} from "@/lib/impersonationSession";
 import { queryClient } from "@/lib/query-client";
 import OAuthComplete from "@/pages/OAuthComplete";
 import { storage } from "@/utils/storage";
@@ -35,7 +43,7 @@ function createHeldServer() {
         respond: (status, body) => {
           request.answered = true;
           resolve(
-            new Response(JSON.stringify(body), {
+            new Response(status === 204 ? null : JSON.stringify(body), {
               status,
               headers: {
                 "Content-Type": status >= 400 ? "application/problem+json" : "application/json",
@@ -73,7 +81,7 @@ function createHeldServer() {
     });
   }
 
-  return { fetch: fetchImpl, held, answer };
+  return { fetch: fetchImpl, requests, held, answer };
 }
 
 function AuthProbe() {
@@ -303,5 +311,290 @@ describe("AuthProvider session restore", () => {
     });
     await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("restored:none"));
     expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+  });
+});
+
+describe("AuthProvider returning to the preserved administrator session", () => {
+  let server: ReturnType<typeof createHeldServer>;
+
+  const admin = { id: "9", username: "admin", email: "", role: "admin", permissions: [] };
+  const viewedAsSam = {
+    ...sam,
+    impersonation: { active: true, impersonator_user_id: "9", impersonator_username: "admin" },
+  };
+  const internalError = {
+    type: "https://siloserver.org/docs/api/v2/problems/internal_error",
+    title: "Internal error",
+    status: 500,
+  };
+
+  function ImpersonationProbe() {
+    const { user, loading, endImpersonation, login, logout } = useAuth();
+    const [outcome, setOutcome] = useState("pending");
+    return (
+      <>
+        <div data-testid="auth">{`${loading ? "restoring" : "restored"}:${user?.username ?? "none"}`}</div>
+        <div data-testid="outcome">{outcome}</div>
+        <button
+          type="button"
+          onClick={() => {
+            endImpersonation().then(
+              (ended) => setOutcome(ended ? "ended" : "overtaken"),
+              () => setOutcome("failed"),
+            );
+          }}
+        >
+          end
+        </button>
+        <button type="button" onClick={() => void login("laura", "pw").catch(() => {})}>
+          login
+        </button>
+        <button type="button" onClick={logout}>
+          logout
+        </button>
+      </>
+    );
+  }
+
+  function click(name: string) {
+    return act(async () => {
+      screen.getByRole("button", { name }).click();
+    });
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    queryClient.clear();
+    setAccessToken(null);
+    server = createHeldServer();
+    vi.stubGlobal("fetch", server.fetch);
+    saveStoredImpersonationAdminSession({
+      accessToken: "access-admin",
+      refreshToken: "refresh-admin",
+      returnPath: "/admin/users/2",
+    });
+  });
+
+  afterEach(() => {
+    queryClient.clear();
+    setAccessToken(null);
+    vi.unstubAllGlobals();
+  });
+
+  /** Boots signed in as sam, whom the administrator is viewing as. */
+  async function startViewingAsSam() {
+    storage.set(storage.KEYS.REFRESH_TOKEN, "refresh-sam");
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AuthProvider>
+          <ImpersonationProbe />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await server.answer(await server.held("POST /api/v2/auth/refresh"), 200, {
+      access_token: "access-sam",
+      refresh_token: "refresh-sam",
+      expires_in: 3600,
+    });
+    await server.answer(
+      await server.held("GET /api/v2/account/me", "Bearer access-sam"),
+      200,
+      viewedAsSam,
+    );
+    await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("restored:sam"));
+  }
+
+  const overtakers = {
+    "a sign-out": {
+      outcome: "overtaken",
+      overtake: () => click("logout"),
+      expectSession: () => {
+        expect(screen.getByTestId("auth")).toHaveTextContent("restored:none");
+        expect(getAccessToken()).toBeNull();
+        expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+      },
+    },
+    "another sign-in": {
+      outcome: "overtaken",
+      overtake: async () => {
+        await click("login");
+        await server.answer(await server.held("POST /api/v2/auth/login"), 200, {
+          access_token: "access-laura",
+          refresh_token: "refresh-laura",
+          expires_in: 3600,
+          user: laura,
+        });
+        await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent(":laura"));
+      },
+      expectSession: () => {
+        expect(screen.getByTestId("auth")).toHaveTextContent("restored:laura");
+        expect(getAccessToken()).toBe("access-laura");
+        expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe("refresh-laura");
+      },
+    },
+    // In the cases below another tab finished the impersonation first. This
+    // tab's own session is still current, so it follows the browser's stored
+    // session, as a reload would, and leaves that session in place.
+    "a sign-out in another tab": {
+      outcome: "ended",
+      overtake: async () => {
+        storage.remove(storage.KEYS.REFRESH_TOKEN);
+        clearStoredImpersonationAdminSession();
+      },
+      expectSession: () => {
+        expect(screen.getByTestId("auth")).toHaveTextContent("restored:none");
+        expect(getAccessToken()).toBeNull();
+        expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBeNull();
+      },
+    },
+    "another tab restoring the administrator": {
+      outcome: "ended",
+      overtake: async () => {
+        storage.set(storage.KEYS.REFRESH_TOKEN, "refresh-admin-tab-2");
+        clearStoredImpersonationAdminSession();
+      },
+      settle: async () => {
+        const refresh = await server.held("POST /api/v2/auth/refresh");
+        expect(refresh.body).toEqual({ refresh_token: "refresh-admin-tab-2" });
+        await server.answer(refresh, 200, {
+          access_token: "access-admin-tab-2",
+          refresh_token: "refresh-admin-tab-2",
+          expires_in: 3600,
+        });
+        await server.answer(
+          await server.held("GET /api/v2/account/me", "Bearer access-admin-tab-2"),
+          200,
+          admin,
+        );
+        await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent("restored:admin"));
+      },
+      expectSession: () => {
+        expect(getAccessToken()).toBe("access-admin-tab-2");
+        expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe("refresh-admin-tab-2");
+      },
+    },
+  } satisfies Record<
+    string,
+    {
+      outcome: string;
+      overtake: () => Promise<void>;
+      settle?: () => Promise<void>;
+      expectSession: () => void;
+    }
+  >;
+
+  it.each([
+    ["a sign-out", "the administrator's account read", 200, admin],
+    ["another sign-in", "the administrator's account read", 500, internalError],
+    ["another sign-in", "the end request", 204, null],
+    ["a sign-out in another tab", "the administrator's account read", 200, admin],
+    ["another tab restoring the administrator", "the administrator's account read", 200, admin],
+    [
+      "another tab restoring the administrator",
+      "the administrator's account read",
+      500,
+      internalError,
+    ],
+    ["another tab restoring the administrator", "the end request", 204, null],
+  ] as const)(
+    "leaves %s alone when %s answers %i late",
+    async (overtaker, lateRequest, status, body) => {
+      await startViewingAsSam();
+      await click("end");
+      const end = await server.held("POST /api/v2/auth/impersonation/end", "Bearer access-sam");
+      let late = end;
+      if (lateRequest === "the administrator's account read") {
+        await server.answer(end, 204, null);
+        late = await server.held("GET /api/v2/account/me", "Bearer access-admin");
+      }
+
+      await overtakers[overtaker].overtake();
+      await server.answer(late, status, body);
+      const expected: { outcome: string; settle?: () => Promise<void>; expectSession: () => void } =
+        overtakers[overtaker];
+      await waitFor(() =>
+        expect(screen.getByTestId("outcome")).toHaveTextContent(expected.outcome),
+      );
+      await expected.settle?.();
+
+      expected.expectSession();
+      expect(loadStoredImpersonationAdminSession()).toBeNull();
+    },
+  );
+
+  it("returns to the administrator once when the end request's session was revoked", async () => {
+    await startViewingAsSam();
+    await click("end");
+    await server.answer(
+      await server.held("POST /api/v2/auth/impersonation/end", "Bearer access-sam"),
+      401,
+      authenticationRequired,
+    );
+    // The refused refresh ends sam's session, which starts the session
+    // rejection's own return to the administrator.
+    await server.answer(await server.held("POST /api/v2/auth/refresh"), 401, {
+      type: "https://siloserver.org/problems/session_expired",
+      title: "Session expired",
+      status: 401,
+    });
+    await server.answer(
+      await server.held("GET /api/v2/account/me", "Bearer access-admin"),
+      200,
+      admin,
+    );
+    await waitFor(() => expect(screen.getByTestId("outcome")).toHaveTextContent("ended"));
+
+    expect(screen.getByTestId("auth")).toHaveTextContent("restored:admin");
+    expect(getAccessToken()).toBe("access-admin");
+    expect(storage.get(storage.KEYS.REFRESH_TOKEN)).toBe("refresh-admin");
+    const adminReads = server.requests.filter(
+      (request) =>
+        request.operation === "GET /api/v2/account/me" &&
+        request.authorization === "Bearer access-admin",
+    );
+    expect(adminReads).toHaveLength(1);
+  });
+
+  it("keeps another tab's restored administrator when the boot recovery reads late", async () => {
+    // This tab boots on the impersonated session, which the server has ended.
+    storage.set(storage.KEYS.REFRESH_TOKEN, "refresh-sam");
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AuthProvider>
+          <ImpersonationProbe />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await server.answer(await server.held("POST /api/v2/auth/refresh"), 401, {
+      type: "https://siloserver.org/problems/session_expired",
+      title: "Session expired",
+      status: 401,
+    });
+    const adminRead = await server.held("GET /api/v2/account/me", "Bearer access-admin");
+
+    await overtakers["another tab restoring the administrator"].overtake();
+    await server.answer(adminRead, 200, admin);
+    await overtakers["another tab restoring the administrator"].settle();
+
+    overtakers["another tab restoring the administrator"].expectSession();
+  });
+
+  it("keeps a sign-in that lands while the boot recovery reads the administrator's account", async () => {
+    render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AuthProvider>
+          <ImpersonationProbe />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    const adminRead = await server.held("GET /api/v2/account/me", "Bearer access-admin");
+
+    await overtakers["another sign-in"].overtake();
+    await server.answer(adminRead, 200, admin);
+    await waitFor(() => expect(screen.getByTestId("auth")).toHaveTextContent(/^restored:/));
+
+    overtakers["another sign-in"].expectSession();
+    expect(loadStoredImpersonationAdminSession()).toBeNull();
   });
 });

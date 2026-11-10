@@ -292,7 +292,7 @@ case "$sonarr_eventtype" in
     # On rename, rescan the entire series folder
     SCAN_PATH="$sonarr_series_path"
     ;;
-  SeriesDelete|EpisodeFileDelete)
+  EpisodeFileDelete)
     # On deletion, rescan to mark files as missing
     SCAN_PATH="$sonarr_series_path"
     ;;
@@ -348,7 +348,7 @@ case "$radarr_eventtype" in
   Rename)
     SCAN_PATH="$radarr_movie_path"
     ;;
-  MovieDelete|MovieFileDelete)
+  MovieFileDelete)
     # On deletion, rescan to mark files as missing
     SCAN_PATH="$radarr_movie_path"
     ;;
@@ -370,6 +370,10 @@ curl -s -S --fail -X POST "${SILO_URL}/api/v2/scan" \
   -H "Content-Type: application/json" \
   -d "$BODY" || echo "Silo scan failed for: $SCAN_PATH" >&2
 ```
+
+Neither script handles `SeriesDelete` or `MovieDelete`. Sonarr and Radarr run the script before
+they delete the series or movie folder, so a scan started from it still finds the files. The
+built-in receiver waits for the folder to disappear before it scans.
 
 ## How scanning works
 
@@ -427,5 +431,7 @@ that folder. Scans running on different servers in a cluster are not serialized.
 
 The frozen alpha surface serves the same two commands at `POST /api/v1/scan` and
 `POST /api/v1/scan/cancel`, with integer `library_id` values, a flat `{error, message}` error
-envelope, and no problem-document `type`. Those routes are frozen: no feature work lands on them, and Silo 1.0 answers the whole `/api/v1` namespace with
-`410 Gone` and the `client_upgrade_required` problem code. Point new integrations at `/api/v2`.
+envelope, and no problem-document `type`. Those routes are frozen: no feature work lands on them.
+After the bridge window, and once a maintainer decides to retire it (#886), the main API listener
+answers the `/api/v1` business routes with `410 Gone` and the `client_upgrade_required` problem
+code; `/api/v1/health` and `/api/v1/ready` keep answering. Point new integrations at `/api/v2`.

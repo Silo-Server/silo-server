@@ -1,3 +1,8 @@
+import { useT } from "@/i18n";
+
+/** Shown in the avatar when a narrator name has no letters to take initials from. */
+const NO_INITIALS = "?";
+
 interface NarratorCardProps {
   narrator: string;
 }
@@ -12,12 +17,15 @@ function initials(name: string): string {
 }
 
 export function NarratorCard({ narrator }: NarratorCardProps) {
+  const t = useT();
   return (
     <section>
-      <h2 className="mb-4 text-xl font-semibold tracking-tight">Narrator</h2>
+      <h2 className="mb-4 text-xl font-semibold tracking-tight">
+        {t("web.audiobooks.narrator.heading")}
+      </h2>
       <div className="bg-muted/30 flex items-center gap-4 rounded-xl border p-4">
         <div className="bg-muted text-muted-foreground flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-lg font-medium">
-          {initials(narrator) || "?"}
+          {initials(narrator) || NO_INITIALS}
         </div>
         <div className="min-w-0">
           <p className="truncate text-base font-medium">{narrator}</p>

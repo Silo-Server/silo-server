@@ -608,7 +608,7 @@ func TestTargetRefreshMarksLocalArtworkSearchOnlyWhenTheLocalProviderAnswered(t 
 				"0:episode": {providers: []Provider{local}, expiresAt: time.Now().Add(time.Hour)},
 			}}
 			ctx := context.Background()
-			_, seasonSearched, err := service.fetchTargetSeasonResults(ctx, nil, 0, "en", 1, seriesChildLocalContext{}, false)
+			_, seasonSearched, _, err := service.fetchTargetSeasonResults(ctx, nil, 0, "en", 1, seriesChildLocalContext{}, false)
 			if err != nil {
 				t.Fatalf("fetch seasons: %v", err)
 			}

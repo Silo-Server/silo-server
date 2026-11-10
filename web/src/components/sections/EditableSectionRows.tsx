@@ -10,6 +10,7 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { BulkSelectionCheckbox } from "@/components/BulkSelectionCheckbox";
+import { useT, type MessageKey } from "@/i18n";
 
 export interface EditableSectionViewModel {
   id: string;
@@ -38,16 +39,25 @@ export function recipeLabel(
   return rowKindLabel(type);
 }
 
-function continueTypeLabel(config?: Record<string, unknown>): string | null {
+function continueTypeLabel(config?: Record<string, unknown>): MessageKey | null {
   const value = config?.continue_type;
-  if (value === "listening") return "Listening";
-  if (value === "watching") return "Watching";
-  if (value === "reading") return "Reading";
+  if (value === "listening") return "web.home.rows.sections.listening";
+  if (value === "watching") return "web.home.rows.sections.watching";
+  if (value === "reading") return "web.home.rows.sections.reading";
   if (config?.filter_type === "audiobook" || config?.media_scope === "audiobook") {
-    return "Listening";
+    return "web.home.rows.sections.listening";
   }
   return null;
 }
+
+/** Badges for a section that holds one kind of media. */
+const MEDIA_SCOPE_LABELS: Partial<Record<string, MessageKey>> = {
+  movie: "web.home.rows.sections.movies",
+  series: "web.home.rows.sections.series",
+  episode: "web.home.rows.sections.episodes",
+  audiobook: "web.home.rows.sections.audiobooks",
+  ebook: "web.home.rows.sections.ebooks",
+};
 
 export function SectionSummaryBadges({
   section,
@@ -64,6 +74,7 @@ export function SectionSummaryBadges({
   showVisibility?: boolean;
   showEnabled?: boolean;
 }) {
+  const t = useT();
   const queryDefinition = queryDefinitionFromSectionConfig(section.config);
   const collectionId =
     typeof section.config?.library_collection_id === "string"
@@ -74,18 +85,15 @@ export function SectionSummaryBadges({
   const collectionLabel = collectionId ? collectionLabels?.get(collectionId) : undefined;
   const resumeLabel =
     section.sectionType === "continue_watching" ? continueTypeLabel(section.config) : null;
+  const scopeLabel = queryDefinition.media_scope
+    ? MEDIA_SCOPE_LABELS[queryDefinition.media_scope]
+    : undefined;
 
   return (
     <div className="flex flex-wrap gap-1">
       <Badge variant="secondary">{recipeLabel(catalog, section.sectionType, section.config)}</Badge>
-      {resumeLabel ? <Badge variant="outline">{resumeLabel}</Badge> : null}
-      {queryDefinition.media_scope === "movie" ? <Badge variant="outline">Movies</Badge> : null}
-      {queryDefinition.media_scope === "series" ? <Badge variant="outline">Series</Badge> : null}
-      {queryDefinition.media_scope === "episode" ? <Badge variant="outline">Episodes</Badge> : null}
-      {queryDefinition.media_scope === "audiobook" ? (
-        <Badge variant="outline">Audiobooks</Badge>
-      ) : null}
-      {queryDefinition.media_scope === "ebook" ? <Badge variant="outline">Ebooks</Badge> : null}
+      {resumeLabel ? <Badge variant="outline">{t(resumeLabel)}</Badge> : null}
+      {scopeLabel ? <Badge variant="outline">{t(scopeLabel)}</Badge> : null}
       {libraries
         ? queryDefinition.library_ids.map((libraryId) => {
             const library = libraries.find((entry) => entry.id === libraryId);
@@ -97,15 +105,19 @@ export function SectionSummaryBadges({
           })
         : null}
       {collectionLabel ? <Badge variant="outline">{collectionLabel}</Badge> : null}
-      {section.featured ? <Badge variant="default">Featured</Badge> : null}
+      {section.featured ? (
+        <Badge variant="default">{t("web.home.rows.sections.featured")}</Badge>
+      ) : null}
       {showVisibility ? (
         <Badge variant={section.hidden ? "secondary" : "outline"}>
-          {section.hidden ? "Hidden" : "Visible"}
+          {section.hidden
+            ? t("web.home.rows.sections.hidden")
+            : t("web.home.rows.sections.visible")}
         </Badge>
       ) : null}
       {showEnabled ? (
         <Badge variant={section.enabled ? "default" : "secondary"}>
-          {section.enabled ? "On" : "Off"}
+          {section.enabled ? t("web.home.rows.sections.on") : t("web.home.rows.sections.off")}
         </Badge>
       ) : null}
     </div>
@@ -123,7 +135,7 @@ export function SectionDragOverlay({
     <div className="surface-panel flex items-center gap-2 rounded-xl border-0 px-3 py-2 shadow-lg">
       <GripVertical className="text-muted-foreground h-4 w-4" />
       <span className="font-medium">{section.title}</span>
-      <Badge variant="secondary" className="ml-2">
+      <Badge variant="secondary" className="ms-2">
         {recipeLabel(catalog, section.sectionType, section.config)}
       </Badge>
     </div>
@@ -153,6 +165,7 @@ export function SortableSectionTableRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
     disabled: !canReorder,
@@ -177,7 +190,7 @@ export function SortableSectionTableRow({
           <button
             type="button"
             className="cursor-grab touch-none"
-            aria-label={`Drag ${section.title}`}
+            aria-label={t("web.home.rows.sections.drag", { section: section.title })}
             {...attributes}
             {...listeners}
           >
@@ -202,7 +215,7 @@ export function SortableSectionTableRow({
       </TableCell>
       <TableCell>
         <Badge variant={section.enabled ? "default" : "secondary"}>
-          {section.enabled ? "On" : "Off"}
+          {section.enabled ? t("web.home.rows.sections.on") : t("web.home.rows.sections.off")}
         </Badge>
       </TableCell>
       <TableCell>
@@ -212,7 +225,7 @@ export function SortableSectionTableRow({
             size="sm"
             className="h-7 w-7 p-0"
             onClick={onEdit}
-            aria-label={`Edit ${section.title}`}
+            aria-label={t("web.home.rows.sections.edit", { section: section.title })}
           >
             <Pencil className="h-3.5 w-3.5" />
           </Button>
@@ -221,7 +234,7 @@ export function SortableSectionTableRow({
             size="sm"
             className="text-destructive h-7 w-7 p-0"
             onClick={onDelete}
-            aria-label={`Delete ${section.title}`}
+            aria-label={t("web.home.rows.sections.delete", { section: section.title })}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
@@ -250,6 +263,7 @@ export function SortableSectionCardRow({
   onDelete?: () => void;
   actions?: ReactNode;
 }) {
+  const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: section.id,
   });
@@ -267,7 +281,7 @@ export function SortableSectionCardRow({
     >
       <button
         type="button"
-        aria-label={`Drag ${section.title}`}
+        aria-label={t("web.home.rows.sections.drag", { section: section.title })}
         className="hover:bg-surface-hover mt-0.5 cursor-grab touch-none rounded-md p-1 transition-colors"
         disabled={disabled}
         {...attributes}
@@ -277,7 +291,10 @@ export function SortableSectionCardRow({
       </button>
       <button
         type="button"
-        aria-label={`${section.hidden ? "Show" : "Hide"} ${section.title}`}
+        aria-label={t(
+          section.hidden ? "web.home.rows.sections.show" : "web.home.rows.sections.hide",
+          { section: section.title },
+        )}
         aria-pressed={!section.hidden}
         className="hover:bg-surface-hover mt-0.5 rounded-md p-1 transition-colors"
         disabled={disabled}
@@ -299,7 +316,11 @@ export function SortableSectionCardRow({
           <SectionSummaryBadges section={section} catalog={catalog} showVisibility />
         </div>
         <div className="text-muted-foreground text-[13px]">
-          {rowKindLabel(section.sectionType)} . {section.itemLimit} items
+          {t("web.home.rows.sections.kindAndLimit", {
+            item_count: section.itemLimit,
+            kind: rowKindLabel(section.sectionType),
+            items: section.itemLimit,
+          })}
         </div>
       </div>
       {actions}
@@ -308,7 +329,7 @@ export function SortableSectionCardRow({
           variant="ghost"
           size="sm"
           className="h-8 w-8 p-0"
-          aria-label={`Edit ${section.title}`}
+          aria-label={t("web.home.rows.sections.edit", { section: section.title })}
           disabled={disabled}
           onClick={onEdit}
         >
@@ -320,7 +341,7 @@ export function SortableSectionCardRow({
           variant="ghost"
           size="sm"
           className="text-destructive hover:bg-destructive/10 hover:text-destructive h-8 w-8 p-0"
-          aria-label={`Delete ${section.title}`}
+          aria-label={t("web.home.rows.sections.delete", { section: section.title })}
           disabled={disabled}
           onClick={onDelete}
         >

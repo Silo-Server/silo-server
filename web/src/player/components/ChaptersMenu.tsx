@@ -4,6 +4,7 @@ import type { PlayerChapter } from "../types";
 import { formatTime } from "../utils/formatTime";
 import { PreviewImage } from "./PreviewImage";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
+import { useT } from "@/i18n";
 
 interface ChaptersMenuProps {
   chapters: PlayerChapter[];
@@ -28,6 +29,7 @@ export function ChaptersMenu({
   onOpenChange,
   hideTrigger = false,
 }: ChaptersMenuProps) {
+  const t = useT();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = useCallback(
@@ -101,7 +103,7 @@ export function ChaptersMenu({
           type="button"
           className="player-utility-btn"
           onClick={() => setOpen((value) => !value)}
-          aria-label="Chapters"
+          aria-label={t("web.player.chaptersMenu.trigger")}
           aria-expanded={open}
           aria-haspopup="menu"
         >
@@ -112,12 +114,12 @@ export function ChaptersMenu({
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 flex max-h-[60vh] min-w-[280px] flex-col overflow-y-auto rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+          className="absolute end-0 bottom-full z-30 mb-2 flex max-h-[60vh] min-w-[280px] flex-col overflow-y-auto rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           <div className="px-3 py-1.5 text-xs font-medium tracking-wide text-white/50 uppercase">
-            Chapters
+            {t("web.player.chaptersMenu.heading")}
           </div>
           {chapters.map((chapter, index) => (
             <button
@@ -127,7 +129,7 @@ export function ChaptersMenu({
               }}
               role="menuitem"
               type="button"
-              className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+              className={`flex w-full items-center gap-3 px-3 py-2 text-start transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                 index === activeIndex ? "bg-white/5 text-white" : "text-white/75"
               }`}
               onClick={() => {

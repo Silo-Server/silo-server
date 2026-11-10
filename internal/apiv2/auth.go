@@ -17,6 +17,7 @@ import (
 
 // LoginInput is a password login.
 type LoginInput struct {
+	SignInDeviceHeaders
 	RawBody []byte
 	Body    struct {
 		Username string `json:"username" minLength:"1" maxLength:"254" doc:"Login name or, for providers that accept it, email" example:"alice"`
@@ -34,6 +35,7 @@ type LoginOutput struct {
 // an empty JSON object: requiring it makes a cross-site form post fail the
 // media-type check, so a page the person visits cannot sign their device in.
 type NetworkSignInInput struct {
+	SignInDeviceHeaders
 	ID      ID `path:"id" pattern:"^[1-9][0-9]*$" doc:"The network provider's plugin installation, as listAuthProviders shows it" example:"5"`
 	RawBody []byte
 	Body    struct{}
@@ -48,6 +50,7 @@ func networkSignInPath(installationID int) string {
 // CompleteOAuthLoginInput redeems the one-time code the OAuth callback
 // redirected the browser with.
 type CompleteOAuthLoginInput struct {
+	SignInDeviceHeaders
 	Body struct {
 		Code         string `json:"code" minLength:"1" maxLength:"128" doc:"Completion code from the callback redirect; single use" example:"3f2b47eb7b36dd2d"`
 		CodeVerifier string `json:"code_verifier,omitempty" maxLength:"128" doc:"PKCE code verifier of the challenge a native start sent (RFC 7636: 43 to 128 unreserved characters). Required for a code from startNativeOAuthLogin, refused for a web code; either mismatch is 400 invalid_grant and leaves the code redeemable" example:"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"`
@@ -81,7 +84,7 @@ func registerAuth(reg *Registry) {
 	// anyone; on v2 that is a 409 conflict with the session's state, and a
 	// refused return is 403.
 	end.Errors = []int{http.StatusForbidden, http.StatusConflict}
-	Register(reg, Operation{Operation: end, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true}, reg.endImpersonation)
+	Register(reg, Operation{Operation: end, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.endImpersonation)
 	login := humaOp(http.MethodPost, Prefix+"/auth/login", "login", "auth",
 		"Authenticate with a username and password and open a login session.")
 	// Wrong credentials are 401 invalid_token; a disabled account, turned-off

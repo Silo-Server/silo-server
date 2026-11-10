@@ -3,8 +3,10 @@ package apiv2
 import (
 	"context"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -31,14 +33,35 @@ type EventsSocketTicket struct {
 }
 type EventsSocketTicketOutput struct{ Body EventsSocketTicket }
 
+// eventsSocketIdentity is socketIdentity, or for an API key the key itself:
+// only a key holding admin:monitor:read, sent with no profile, may open the
+// events socket, and its ticket names the key rather than a login session.
+func eventsSocketIdentity(ctx context.Context) (evt.SocketIdentity, *Problem) {
+	claims := claimsFrom(ctx)
+	if claims == nil || claims.TokenType != auth.TokenTypeAPIKey {
+		return socketIdentity(ctx)
+	}
+	if claims.APIKeyID <= 0 || !slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) {
+		return evt.SocketIdentity{}, NewProblem(TypePermissionDenied, "Only an API key with the admin:monitor:read scope may open the realtime socket.")
+	}
+	if profileFrom(ctx) != "" {
+		return evt.SocketIdentity{}, NewProblem(TypePermissionDenied, "An API key opens the realtime socket without a profile.")
+	}
+	identity := evt.SocketIdentity{UserID: claims.UserID, Role: claims.Role, APIKeyID: claims.APIKeyID, AccessExpiresAt: time.Now().Add(evt.APIKeySocketMaxLifetime)}
+	if r := requestFrom(ctx); r != nil {
+		identity.DeviceID = socketDeviceID(r)
+	}
+	return identity, nil
+}
+
 func registerEventsSocket(reg *Registry) {
-	mint := Operation{Operation: humaOp(http.MethodPost, Prefix+"/events/ws-ticket", "createEventsSocketTicket", "realtime", "Delegate the current login session for one realtime handshake."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
+	mint := Operation{Operation: humaOp(http.MethodPost, Prefix+"/events/ws-ticket", "createEventsSocketTicket", "realtime", "Delegate the current login session, or an admin:monitor:read API key, for one realtime handshake."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	Register(reg, mint, func(ctx context.Context, _ *struct{}) (*EventsSocketTicketOutput, error) {
 		svc := reg.deps.EventsSocket
 		if svc == nil {
 			return nil, unavailable("realtime events")
 		}
-		identity, p := socketIdentity(ctx)
+		identity, p := eventsSocketIdentity(ctx)
 		if p != nil {
 			return nil, p
 		}
@@ -47,7 +70,7 @@ func registerEventsSocket(reg *Registry) {
 		if err != nil {
 			return nil, NewProblem(TypePermissionDenied, "Realtime authority could not be delegated.")
 		}
-		return &EventsSocketTicketOutput{Body: EventsSocketTicket{Ticket: ticket, ExpiresIn: int(min(evt.SocketTicketTTL, time.Until(identity.AccessExpiresAt)).Seconds()), MaxConnectionSeconds: int(evt.SocketMaxLifetime.Seconds()), Protocol: "silo.events.v2"}}, nil
+		return &EventsSocketTicketOutput{Body: EventsSocketTicket{Ticket: ticket, ExpiresIn: int(min(evt.SocketTicketTTL, time.Until(identity.AccessExpiresAt)).Seconds()), MaxConnectionSeconds: int(identity.MaxLifetime().Seconds()), Protocol: "silo.events.v2"}}, nil
 	})
 	responses := socketResponses([]string{"400", "401", "403", "503"}, "Handshake refused.", "Realtime connection established.", "WebSocket handshake header.")
 	op := Operation{Operation: huma.Operation{Method: http.MethodGet, Path: Prefix + "/events/ws", OperationID: "connectEventsSocket", Tags: []string{"realtime"}, Summary: "Connect using one session-bound ticket in Sec-WebSocket-Protocol.", Responses: responses}, Class: ClassPublic, ServiceBacked: true}

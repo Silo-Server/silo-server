@@ -1,8 +1,8 @@
 # Dropped shows
 
 A profile can drop a series to take it off its Next Up and Continue Watching rows
-without touching its watch history. Drops sync both ways with watch providers that
-support them: Simkl and watch-sync plugins that advertise `sync_dropped`.
+without touching its watch history. Drops sync both ways with watch-sync plugins that
+advertise `sync_dropped`, including the first-party Simkl plugin.
 
 ## Local drops
 
@@ -86,10 +86,8 @@ undrop a show that is watched.
 
 ## Providers
 
-- Simkl: `GET /sync/all-items/{shows,anime}/dropped`, skipped while the lists' `all`
-  activity stamps are unchanged. Dropping moves a show to the `dropped` list with
-  `POST /sync/add-to-list`; undropping moves it to `watching`. Simkl records no drop
-  time, so an imported Simkl drop is stamped with the sync time.
+- Simkl: the first-party plugin `silo.watchprovider.simkl` sets `sync_dropped` and
+  follows the watch-sync plugin rules below. Silo has no built-in Simkl client.
 - Watch-sync plugins: a plugin that sets `sync_dropped` (and lists `SERIES` in
   `supported_media_types`) answers `ListRemoteState` for the `DROPPED` state kind, with
   its cursor saved under `plugin.remote.dropped`. `complete_snapshot` means the rows are

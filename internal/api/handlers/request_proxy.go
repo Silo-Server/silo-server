@@ -11,8 +11,8 @@ import (
 //
 // Behind a TLS-terminating CDN/proxy, r.Host is the internal origin host the
 // proxy dialed, while the public host the browser actually used arrives here.
-// Callers that need to reason about the client-facing host (origin checks,
-// absolute URL construction) must prefer this over r.Host.
+// It reads the header from any peer, so build absolute URLs with
+// clientip.RequestOrigin instead, which takes it only from a trusted proxy.
 func forwardedHost(r *http.Request) string {
 	forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
 	if forwarded == "" {
@@ -29,6 +29,6 @@ func forwardedHost(r *http.Request) string {
 }
 
 // RequestBaseURL is the client-facing origin (scheme and host) of a request,
-// honoring the forwarded headers a reverse proxy sets. The v2 listener uses
+// reading forwarded headers only from a trusted proxy. The v2 listener uses
 // it to build the same absolute URLs the v1 handlers build.
 func RequestBaseURL(r *http.Request) string { return requestBaseURL(r) }

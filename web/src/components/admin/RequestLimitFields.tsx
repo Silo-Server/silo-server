@@ -17,6 +17,7 @@ import {
   type RequestLimitErrors,
 } from "@/lib/requestAccess";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 export interface RequestLimitFieldsProps {
   draft: RequestLimitDraft;
@@ -55,6 +56,7 @@ export function RequestLimitFields({
   disabled,
   stacked = false,
 }: RequestLimitFieldsProps) {
+  const t = useT();
   const approvalId = useId();
   const approvalHintId = useId();
   const limitId = useId();
@@ -89,7 +91,7 @@ export function RequestLimitFields({
   return (
     <div className={cn("grid gap-4", !stacked && "sm:grid-cols-2")}>
       <div className="min-w-0 space-y-2">
-        <Label htmlFor={approvalId}>Approval</Label>
+        <Label htmlFor={approvalId}>{t("web.admin.common.requestLimits.approval")}</Label>
         <Select
           value={draft.approval}
           onValueChange={(approval) =>
@@ -106,8 +108,10 @@ export function RequestLimitFields({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="inherit">{inheritLabel}</SelectItem>
-            <SelectItem value="manual">An admin approves</SelectItem>
-            <SelectItem value="auto">Approve automatically</SelectItem>
+            <SelectItem value="manual">
+              {t("web.admin.common.requestLimits.approvalManual")}
+            </SelectItem>
+            <SelectItem value="auto">{t("web.admin.common.requestLimits.approvalAuto")}</SelectItem>
           </SelectContent>
         </Select>
         {approvalHint !== undefined ? (
@@ -118,7 +122,7 @@ export function RequestLimitFields({
       </div>
 
       <div className="min-w-0 space-y-2">
-        <Label htmlFor={limitId}>Limit</Label>
+        <Label htmlFor={limitId}>{t("web.admin.common.requestLimits.limit")}</Label>
         <Select
           value={draft.limit}
           onValueChange={(limit) => setLimit(limit as RequestLimitChoice)}
@@ -133,49 +137,62 @@ export function RequestLimitFields({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="inherit">{inheritLabel}</SelectItem>
-            <SelectItem value="custom">Custom limit</SelectItem>
-            <SelectItem value="unlimited">No limit</SelectItem>
+            <SelectItem value="custom">
+              {t("web.admin.common.requestLimits.limitCustom")}
+            </SelectItem>
+            <SelectItem value="unlimited">
+              {t("web.admin.common.requestLimits.limitNone")}
+            </SelectItem>
           </SelectContent>
         </Select>
         {custom ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Label htmlFor={maxId} className="sr-only">
-              Requests allowed
-            </Label>
-            <Input
-              id={maxId}
-              type="number"
-              inputMode="numeric"
-              min={0}
-              step={1}
-              className="w-20"
-              value={draft.maxRequests}
-              onChange={(event) => editNumbers({ maxRequests: event.target.value })}
-              aria-invalid={errors.maxRequests ? true : undefined}
-              aria-describedby={describedBy(
-                Boolean(errors.maxRequests) && maxErrorId,
-                zero && zeroHintId,
-              )}
-              disabled={disabled}
-            />
-            <span className="text-muted-foreground">requests per</span>
-            <Label htmlFor={windowId} className="sr-only">
-              Days in the limit window
-            </Label>
-            <Input
-              id={windowId}
-              type="number"
-              inputMode="numeric"
-              min={1}
-              step={1}
-              className="w-20"
-              value={draft.windowDays}
-              onChange={(event) => editNumbers({ windowDays: event.target.value })}
-              aria-invalid={errors.windowDays ? true : undefined}
-              aria-describedby={describedBy(Boolean(errors.windowDays) && windowErrorId)}
-              disabled={disabled}
-            />
-            <span className="text-muted-foreground">days</span>
+            {t("web.admin.common.requestLimits.customLimit", {
+              max: () => (
+                <>
+                  <Label htmlFor={maxId} className="sr-only">
+                    {t("web.admin.common.requestLimits.maxRequestsLabel")}
+                  </Label>
+                  <Input
+                    id={maxId}
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    step={1}
+                    className="w-20"
+                    value={draft.maxRequests}
+                    onChange={(event) => editNumbers({ maxRequests: event.target.value })}
+                    aria-invalid={errors.maxRequests ? true : undefined}
+                    aria-describedby={describedBy(
+                      Boolean(errors.maxRequests) && maxErrorId,
+                      zero && zeroHintId,
+                    )}
+                    disabled={disabled}
+                  />
+                </>
+              ),
+              window: () => (
+                <>
+                  <Label htmlFor={windowId} className="sr-only">
+                    {t("web.admin.common.requestLimits.windowDaysLabel")}
+                  </Label>
+                  <Input
+                    id={windowId}
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    step={1}
+                    className="w-20"
+                    value={draft.windowDays}
+                    onChange={(event) => editNumbers({ windowDays: event.target.value })}
+                    aria-invalid={errors.windowDays ? true : undefined}
+                    aria-describedby={describedBy(Boolean(errors.windowDays) && windowErrorId)}
+                    disabled={disabled}
+                  />
+                </>
+              ),
+              unit: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+            })}
           </div>
         ) : null}
         {limitHint !== undefined ? (
@@ -185,7 +202,7 @@ export function RequestLimitFields({
         ) : null}
         {zero ? (
           <p id={zeroHintId} className="text-muted-foreground text-xs">
-            0 stops new requests; to block this {subject}, turn off Media requests instead.
+            {t("web.admin.common.requestLimits.zeroHint", { subject })}
           </p>
         ) : null}
         {custom && errors.maxRequests ? (

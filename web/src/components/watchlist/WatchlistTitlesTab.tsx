@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import WatchlistTitleCard from "@/components/watchlist/WatchlistTitleCard";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
+import { useT } from "@/i18n";
 import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { cardGridClasses } from "@/lib/uiCustomization";
@@ -36,6 +37,7 @@ export default function WatchlistTitlesTab({
   /** Adding a title requests it for this viewer (FeatureStatus.watchlist_requests). */
   watchlistRequests: boolean;
 }) {
+  const t = useT();
   const { prefs: overlayPrefs } = useOverlayPrefs();
   const { submit, isSubmitting } = useSubmitMediaRequest();
   const watchlist = useWatchlistTitleToggle();
@@ -53,10 +55,10 @@ export default function WatchlistTitlesTab({
         className="search-paint-surface flex flex-col items-center justify-center gap-3 rounded-2xl border px-4 py-16 text-center"
         role="alert"
       >
-        <p className="font-medium">Could not load these titles.</p>
+        <p className="font-medium">{t("web.library.watchlist.loadFailed")}</p>
         <Button variant="outline" size="sm" onClick={onRetry}>
           <RefreshCw className="size-4" />
-          Retry
+          {t("common.retry")}
         </Button>
       </div>
     );
@@ -76,15 +78,14 @@ export default function WatchlistTitlesTab({
     return (
       <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed px-4 py-16 text-center">
         <Bookmark className="text-muted-foreground size-8" strokeWidth={1.5} aria-hidden />
-        <p className="font-medium">Nothing waiting for the library</p>
+        <p className="font-medium">{t("web.library.watchlist.emptyTitle")}</p>
         <p className="text-muted-foreground max-w-md text-sm">
-          Add movies and series from Discover to your watchlist. The ones the library doesn&rsquo;t
-          have yet wait here until they arrive.
+          {t("web.library.watchlist.emptyBody")}
         </p>
         <Button asChild variant="outline" size="sm">
           <ViewTransitionLink to={DISCOVER_HREF}>
             <Compass className="size-4" />
-            Browse Discover
+            {t("web.library.watchlist.browseDiscover")}
           </ViewTransitionLink>
         </Button>
       </div>
@@ -99,7 +100,7 @@ export default function WatchlistTitlesTab({
           to={DISCOVER_HREF}
           className="text-primary hover:text-primary/80 shrink-0 text-sm font-medium"
         >
-          Find more in Discover
+          {t("web.library.watchlist.findMore")}
         </ViewTransitionLink>
       </section>
       <div className={cardGridClasses("large")}>

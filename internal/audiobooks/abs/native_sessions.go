@@ -104,6 +104,11 @@ func (h *Handler) startNativePlaybackSession(
 	}
 
 	h.syncNativeSessionsNow(r.Context(), "abs_start")
+	if announcer, ok := h.deps.NativeSessions.(interface {
+		AnnounceStart(ctx context.Context, sessionID, frontend string)
+	}); ok {
+		announcer.AnnounceStart(r.Context(), session.ID, "abs")
+	}
 	return session, nil
 }
 
@@ -121,18 +126,47 @@ func (h *Handler) updateNativePlaybackProgress(ctx context.Context, sessionID st
 	h.syncNativeSessionsNow(ctx, "abs_progress")
 }
 
-func (h *Handler) stopNativePlaybackSession(ctx context.Context, sessionID string) {
-	if h == nil || h.deps.NativeSessions == nil || sessionID == "" {
+func (h *Handler) stopNativePlaybackSession(ctx context.Context, sess *ABSPlaybackSession) {
+	if h == nil || h.deps.NativeSessions == nil || sess == nil || sess.ID == "" {
 		return
 	}
-	if err := h.deps.NativeSessions.FinishSession(ctx, sessionID); err != nil {
-		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "abs session close: finish native session failed", "component", "audiobooks",
-				"session_id", sessionID, "error", err)
+	err := h.deps.NativeSessions.FinishSession(ctx, sess.ID)
+	switch {
+	case err == nil:
+		h.syncNativeSessionsNow(ctx, "abs_close")
+	case errors.Is(err, playback.ErrSessionNotFound):
+		// The close reached a replica without the native copy: record the
+		// play from the durable ABS row instead.
+		finisher, ok := h.deps.NativeSessions.(interface {
+			FinishDetached(context.Context, playback.Session)
+		})
+		if snapshot, known := absDetachedSession(sess); ok && known {
+			finisher.FinishDetached(ctx, snapshot)
 		}
-		return
+	default:
+		slog.WarnContext(ctx, "abs session close: finish native session failed", "component", "audiobooks",
+			"session_id", sess.ID, "error", err)
 	}
-	h.syncNativeSessionsNow(ctx, "abs_close")
+}
+
+// absDetachedSession is the native session an ABS row describes, for a
+// close that finds no native copy on this replica.
+func absDetachedSession(sess *ABSPlaybackSession) (playback.Session, bool) {
+	userID, err := strconv.Atoi(sess.UserID)
+	if err != nil || sess.MediaFileID == nil {
+		return playback.Session{}, false
+	}
+	return playback.Session{
+		ID:                         sess.ID,
+		UserID:                     userID,
+		ProfileID:                  sess.ProfileID,
+		MediaFileID:                *sess.MediaFileID,
+		RequestedMediaFileID:       *sess.MediaFileID,
+		PlayMethod:                 playback.PlayDirect,
+		Position:                   sess.CurrentPositionSeconds,
+		StartedAt:                  sess.StartedAt,
+		DisableProgressPersistence: true,
+	}, true
 }
 
 func (h *Handler) beginNativePlaybackTransport(sessionID string) bool {

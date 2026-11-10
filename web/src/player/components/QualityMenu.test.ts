@@ -5,7 +5,8 @@ import { createElement, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { qualityOptionsFromPlanV3 } from "../playback-info";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
-import { buildVersionStatusLabels, QualityMenu, type VersionInfo } from "./QualityMenu";
+import { buildVersionStatusLabels } from "../playback-info";
+import { QualityMenu, type VersionInfo } from "./QualityMenu";
 
 function makeVersionInfo(overrides: Partial<VersionInfo> = {}): VersionInfo {
   return {

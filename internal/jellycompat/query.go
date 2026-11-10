@@ -687,6 +687,17 @@ func mapSortBy(raw string) string {
 	return sort
 }
 
+// sortsBySortName reports whether the SortBy key parseSort selects is SortName
+// rather than Name; both map to the title sort.
+func sortsBySortName(sortBy string) bool {
+	for _, key := range strings.Split(sortBy, ",") {
+		if _, ok := sortKey(key); ok {
+			return strings.EqualFold(strings.TrimSpace(key), "SortName")
+		}
+	}
+	return false
+}
+
 // sortKey maps one Jellyfin SortBy key. Episode-order keys map to "" — the
 // natural season/episode order episode browses already use — rather than to
 // created_at.
@@ -912,11 +923,7 @@ func parsePremiereDateBound(raw string, isMin bool) string {
 	if raw == "" {
 		return ""
 	}
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999Z0700", "2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
-		t, err := time.Parse(layout, raw)
-		if err != nil {
-			continue
-		}
+	if t, err := parseJellyfinDate(raw); err == nil {
 		t = t.UTC()
 		day := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 		if isMin && t.After(day) {

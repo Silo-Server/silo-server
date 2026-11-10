@@ -7,7 +7,11 @@ import {
   compactAudioMeta,
   formatLanguageName,
 } from "@/pages/ItemDetail/components/versionFormatUtils";
+import { useT, type Translate } from "@/i18n";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
+
+/** Mark on the selected row; the row is announced as checked, so not translated. */
+const CHECK_MARK = "\u2713";
 
 interface AudioTrackMenuProps {
   tracks: PlayerAudioTrack[];
@@ -37,8 +41,8 @@ interface TrackDescriptor {
   isDefault: boolean;
 }
 
-function describeTrack(track: PlayerAudioTrack, index: number): TrackDescriptor {
-  const title = audioTitle(track) || `Track ${index + 1}`;
+function describeTrack(t: Translate, track: PlayerAudioTrack, index: number): TrackDescriptor {
+  const title = audioTitle(track) || t("web.player.audioMenu.trackFallback", { number: index + 1 });
   const language = formatLanguageName(track.language ?? "");
   const metaParts = [
     language && language.toLowerCase() !== title.toLowerCase() ? language : "",
@@ -62,6 +66,7 @@ export function AudioTrackMenu({
   onOpenChange,
   hideTrigger = false,
 }: AudioTrackMenuProps) {
+  const t = useT();
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = useCallback(
@@ -142,7 +147,7 @@ export function AudioTrackMenu({
           type="button"
           className={`player-utility-btn ${disabled ? "cursor-default opacity-40" : ""}`}
           onClick={disabled ? undefined : () => setOpen((v) => !v)}
-          aria-label="Audio tracks"
+          aria-label={t("web.player.audioMenu.trigger")}
           aria-expanded={open}
           aria-disabled={disabled}
           aria-haspopup="menu"
@@ -154,15 +159,15 @@ export function AudioTrackMenu({
       {open && (
         <PlayerMenuSurface
           anchorRef={menuRef}
-          className="absolute right-0 bottom-full z-30 mb-2 max-w-[min(360px,calc(100vw-1rem))] min-w-[280px] rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
+          className="absolute end-0 bottom-full z-30 mb-2 max-w-[min(360px,calc(100vw-1rem))] min-w-[280px] rounded-lg bg-black/90 py-1.5 shadow-xl backdrop-blur-sm"
           onClose={() => setOpen(false)}
           onKeyDown={handleMenuKeyDown}
         >
           <div className="px-3 py-1.5 text-xs font-medium tracking-wide text-white/50 uppercase">
-            Audio
+            {t("web.player.audioMenu.heading")}
           </div>
           {tracks.map((track, index) => {
-            const descriptor = describeTrack(track, index);
+            const descriptor = describeTrack(t, track, index);
             const isActive = index === activeIndex;
             return (
               <button
@@ -172,13 +177,13 @@ export function AudioTrackMenu({
                 }}
                 role="menuitem"
                 type="button"
-                className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+                className={`flex w-full items-start gap-2 px-3 py-2 text-start transition-colors hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
                   isActive ? "text-blue-400" : "text-white/85"
                 }`}
                 onClick={() => handleSelect(index)}
               >
                 <span className="mt-[3px] w-4 shrink-0 text-center text-sm leading-none">
-                  {isActive ? "\u2713" : ""}
+                  {isActive ? CHECK_MARK : ""}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="flex flex-wrap items-center gap-1.5">
@@ -187,7 +192,11 @@ export function AudioTrackMenu({
                     {descriptor.channelsLabel && (
                       <TrackBadge>{descriptor.channelsLabel}</TrackBadge>
                     )}
-                    {descriptor.isDefault && <TrackBadge variant="outline">Default</TrackBadge>}
+                    {descriptor.isDefault && (
+                      <TrackBadge variant="outline">
+                        {t("web.player.audioMenu.defaultBadge")}
+                      </TrackBadge>
+                    )}
                   </span>
                   {descriptor.meta && (
                     <span className="truncate text-[11px] leading-snug text-white/55">

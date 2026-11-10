@@ -1,4 +1,5 @@
 import type { SettingDefinition } from "@/lib/settingsContract";
+import { formatDecimal } from "@/lib/numberFormat";
 
 /**
  * Bandwidth choices for `playback.max_bitrate_kbps`, shared by every surface
@@ -24,7 +25,7 @@ export const BITRATE_CHOICES_KBPS = [
 export function formatBitrateKbps(kbps: number): string {
   if (kbps >= 1000) {
     const mbps = kbps / 1000;
-    return mbps % 1 === 0 ? `${mbps} Mbps` : `${mbps.toFixed(1)} Mbps`;
+    return mbps % 1 === 0 ? `${mbps} Mbps` : `${formatDecimal(mbps, 1)} Mbps`;
   }
   return `${kbps} kbps`;
 }
@@ -38,7 +39,7 @@ export function formatBitrateKbps(kbps: number): string {
 export function formatConnectionRateKbps(kbps: number): string {
   const value = Math.max(0, Math.floor(kbps));
   if (value < 1000) return `${value} kbps`;
-  if (value < 10_000) return `${(Math.floor(value / 100) / 10).toFixed(1)} Mbps`;
+  if (value < 10_000) return `${formatDecimal(Math.floor(value / 100) / 10, 1)} Mbps`;
   return `${Math.floor(value / 1000)} Mbps`;
 }
 

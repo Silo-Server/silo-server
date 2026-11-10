@@ -106,22 +106,25 @@ test-go: embed-stub
 	go test ./...
 	go test -race -count=1 ./internal/database/queryattr/
 
-# Run the DB-backed query-budget pins listed in $(DB_PINS), then the database
-# contracts, against the migrated, disposable database named by
-# SILO_TEST_DATABASE_URL. Unlike test-go, a listed test that skips (no URL,
-# unmigrated schema) or is missing fails the run. Migrate a fresh database first with
+# Run the DB-backed query-budget pins listed in $(DB_PINS) and the database
+# contracts in $(DB_CONTRACTS), in one pass, against the migrated, disposable
+# database named by SILO_TEST_DATABASE_URL. Each package gets its own copy of
+# that database, so nothing else may be connected to it. Unlike test-go, a
+# listed test that skips (no URL, unmigrated schema) or is missing fails the
+# run. Migrate a fresh database first with
 # DATABASE_URL=<url> SECRET_KEY=<32+ chars> go run ./cmd/silo/ --migrate-only.
 DB_PINS := scripts/ci/db-pins.txt
+DB_CONTRACTS := scripts/ci/db-contracts.txt
 test-db-pins: embed-stub
-	go run ./scripts/ci/dbpins -list $(DB_PINS)
-	$(MAKE) test-db-contracts
+	SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL="$${SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL:-$$SILO_TEST_DATABASE_URL}" \
+		go run ./scripts/ci/dbpins -list $(DB_PINS) -list $(DB_CONTRACTS)
 
 .PHONY: test-db-contracts
 # Existing database boundary tests own assertions retired from unit tests.
 # Use the same runner so a missing or skipped keeper fails validation.
 test-db-contracts: embed-stub
 	SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL="$${SILO_SUBTITLE_STORAGE_TEST_DATABASE_URL:-$$SILO_TEST_DATABASE_URL}" \
-		go run ./scripts/ci/dbpins -list scripts/ci/db-contracts.txt
+		go run ./scripts/ci/dbpins -list $(DB_CONTRACTS)
 
 # WEBTEST_ARGS passes extra vitest flags through; CI uses it to shard the
 # suite across runners (--shard=N/M).
@@ -200,7 +203,7 @@ verify-settings-bindings-all: verify-settings-bindings verify-settings-bindings-
 # this would let the contract and the implementation drift apart in silence.
 PLAYBACK_FIXTURE_DIR := internal/playback/testdata/protocol_v3
 PLAYBACK_SCHEMA_FIXTURE_DIR := docs/design/schemas/playback-v3/v3/fixtures/valid
-PLAYBACK_WIRE_FIXTURES := start_request.json replan_request.json decision_response.json native-decision_response.json hls-subtitle-rendition-decision_response.json capability_response.json error_response.json route_event.json buffering-start_request.json buffering-replan_request.json learned-limit-decision_response.json plan-summary-route_event.json
+PLAYBACK_WIRE_FIXTURES := start_request.json replan_request.json decision_response.json native-decision_response.json hls-subtitle-rendition-decision_response.json hls-subtitle-renditions-all-decision_response.json capability_response.json error_response.json route_event.json buffering-start_request.json buffering-replan_request.json learned-limit-decision_response.json plan-summary-route_event.json
 
 playback-fixtures:
 	go run ./cmd/playbackfixtures -out $(PLAYBACK_FIXTURE_DIR)

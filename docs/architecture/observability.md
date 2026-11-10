@@ -97,6 +97,13 @@ writers never block and never log. Neither Redis nor Postgres is on that path.
   class 22, for example a client address that is not an `inet`), the consumer inserts
   that batch one row at a time, so only the rejected rows are dropped. Any other batch
   the server rejects is dropped at once, so it cannot hold up the stream.
+- Audit User-Agent metadata is an owned prefix of at most 512 UTF-8 bytes, bounded
+  before queue admission and in transactional audit capture. The raw prefix is
+  bounded before invalid-text replacement, and the result is bounded again because
+  replacement can expand it. A valid rune crossing the boundary is omitted. The
+  consumer enforces the same bound for alternate inputs; retained history bounds
+  the returned database projection and normalizes its byte length without changing
+  stored rows. This diagnostic policy does not change request headers or identities.
 - `opslog.Handler` encodes non-scalar attribute values (maps, slices, structs,
   pointers) to JSON when the record is logged. The consumer builds the row on its own
   goroutine later, and a caller may change a map once the log call returns.
@@ -143,25 +150,30 @@ Rules, enforced by `sloglint` in `make lint` (`.golangci.yml`):
 ### Component classification
 
 Every direct `slog.*Context` call carries a `component` attribute. `opslog` classifies
-records by that attribute first, falling back to `opslog.InferComponent` (the `subsystem:`
-prefix in the message) when no attribute is present — bound loggers that already set
-`component` via `.With(...)` are left as-is.
+records by that attribute first, falling back to `inferComponent` in `internal/opslog` (the
+`subsystem:` prefix in the message, else `app`) when no attribute is present; bound loggers
+that already set `component` via `.With(...)` are left as-is.
 
 **Limitation:** `sloglint` enforces the *shape* (context variant, snake keys, static
 message) but **cannot** enforce that a `component` attribute is present. That convention
 rests on this doc, the canonical list below, and review.
 
-Canonical component values (first path segment under `internal/`; `app` for `cmd/silo`):
+Canonical component values (usually the first path segment under `internal/`; `app` for `cmd/silo`):
 
-`access`, `activitylog`, `adminjob`, `ai`, `api`, `app`, `audiobooks`, `auth`, `autoscan`,
-`catalog`, `chapterthumbs`, `diagnostics`, `downloads`, `ebooks`, `historyimport`,
-`jellycompat`, `libraryingest`, `manga`, `metadata`, `nodeconfig`, `nodepool`, `noderecipe`,
-`nodesessions`, `notifications`, `opslog`, `playback`, `plugins`, `policy`, `proxy`, `ratelimit`,
-`recommendations`, `requests`, `scanner`, `scanqueue`, `sections`, `taskmanager`,
-`telemetry`, `transcodenode`, `watchlist`, `watchsync`, `webhooksync`, `worker`.
+`access`, `activitylog`, `adminjob`, `ai`, `api`, `apiv2`, `app`, `audiobooks`, `auth`,
+`autoscan`, `boxsets`, `catalog`, `chapterthumbs`, `collections`, `config`, `dashmetrics`,
+`database`, `diagnostics`, `downloads`, `ebooks`, `extrastills`, `historyimport`,
+`jellycompat`, `keptsub`, `libraryingest`, `librarymonitor`, `logstream`, `manga`, `metadata`,
+`netadmin`, `nodeauth`, `nodeconfig`, `nodemetrics`, `nodepool`, `noderecipe`, `noderouting`,
+`nodesessions`, `notifications`, `opslog`, `passwordreset`, `playback`, `plugins`, `policy`,
+`progresssync`, `proxy`, `ratelimit`, `recommendations`, `requests`, `s3client`, `scanner`,
+`scanqueue`, `sections`, `settingsresolve`, `stream_telemetry`, `subsync`, `subtitles`,
+`taskmanager`, `tcpcongestion`, `telemetry`, `themedelivery`, `tonemap`, `transcodenode`,
+`trickplay`, `tuning`, `uploads`, `userdb`, `watchlist`, `watchsync`, `watchtogether`,
+`webhooksync`, `worker`.
 
 Two API-handler surfaces predate this rule and log a domain component instead of `api`:
-`settings` (`internal/api/handlers/settings_values.go`) and `webhook_sync`
+`settings` (`internal/api/handlers/settings_values_http.go`) and `webhook_sync`
 (`internal/api/handlers/webhook_sync.go`). Treat those two values as grandfathered —
 dashboards filter on them — but do not add new exceptions.
 
@@ -181,7 +193,7 @@ the OTel metrics SDK is out of scope.
 ## Local collector (example)
 
 ```yaml
-# docker-compose.yml (dev)
+# dev/compose.yml
 otel-collector:
   image: otel/opentelemetry-collector:latest
   command: ["--config=/etc/otelcol/config.yaml"]
@@ -593,16 +605,68 @@ nothing timed the start: a deep link, a reload, or a start the viewer did not
 ask for, such as a Watch Party selection, an autoplay countdown, or the next
 part of a multi-part file. Android sends `first_frame_ms` measured from plan adoption, which leaves
 out the start request. Apple sends `first_frame` through the v2 route-event
-endpoint without `first_frame_ms`. Apple's rebuffer counter and Android's buffering callbacks
-remain local. Neither native app consumes administrator resource DTOs, so the
-additive resource response needs no native model migration.
+endpoint without `first_frame_ms`. Rebuffering reaches the server through the `plan_summary`
+route event (feature `playback_plan_summary_v1`), which the web, Apple and Android players
+send. Each newly inserted summary with a known buffering mode and action counts
+`silo_playback_buffering_actions_total{mode,action}`, and when it also reports valid played and
+stall times it observes `silo_playback_stall_ratio{client,delivery}` (see
+[buffering quality](playback-protocol-v3.md#buffering-quality-native-v2)). Neither native app
+consumes administrator resource DTOs, so the additive resource response needs no native model
+migration.
 
-The API v2 program must coordinate capability-gated first-frame and rebuffer
+The API v2 program must coordinate capability-gated first-frame
 reporting with both native apps, including v2 route-event migration and retry/
 deduplication semantics. Third-party Jellyfin/ABS player experience remains
 unknown unless their protocol supplies evidence. The plugin SDK owns trace
 extraction and internal plugin spans; the host's Go heap cannot profile a plugin
 process. These boundaries are recorded in the PR follow-up checklist.
+
+## Stream telemetry text bounds
+
+Stream telemetry retains display copies at the common registry boundary for
+native, Jellyfin-compatible and other enrolled media routes. Client name,
+version, build, channel and user-agent copies use the native API's character
+limits (128, 64, 64, 32 and 512). Invalid UTF-8 and controls are scrubbed.
+Retained strings are detached from request allocations, including short
+substrings such as an HTTP method. Device display IDs up to 256 bytes remain
+verbatim when valid; longer or malformed values, and raw values beginning with
+the reserved `sha256:` prefix, become a SHA-256 display digest. These copies
+never supply authentication, device ownership, session lookup or routing.
+
+Canonical telemetry attachment keys are kept exact and must fit their internal
+256-byte identity ceiling. An unsupported attachment is omitted from telemetry
+and recorded through its existing dropped/completeness reporting; serving the
+media does not depend on telemetry admission. Route patterns have a 1,024-byte
+ceiling, tags and map keys 64 bytes, and composite transfer IDs 2,048 bytes.
+Outcome/source maps retain at most 32 keys locally. Existing set overflow flags
+still describe collection saturation; normalizing display text does not mark
+the session or publisher incomplete.
+
+The configured per-session count products must fit a 256 KiB retained-string
+ceiling, including route map keys and identity conflicts. Invalid programmatic
+configurations disable telemetry rather than silently reducing their count
+limits. Default display-set products alone permit 66 KiB per session; route,
+identity and conflict strings add to that. A normalized request capture holds
+less than 5 KiB of string bytes, separately bounded by the existing observation
+counts. Local snapshots clone containers and share bounded string references;
+they do not serialize each record or multiply its string backing storage.
+
+The codec validates per-field and aggregate decoded string limits on both
+encode and decode: 256 KiB per session and 16 KiB per transfer. Encoded limits
+are separate: 2 MiB per session, 128 KiB per transfer and 4 KiB for publisher
+metadata. They include room for JSON escaping and structure. Redis values are
+checked before conversion to byte slices. A bad record is omitted without
+discarding its publisher's good records; metadata counts describe emitted
+records and `Truncated` reports the whole-record omission. Delta publication
+deletes a formerly published record that no longer passes validation.
+
+These are per-record bounds, not a node memory quota or a tested capacity
+claim. Local retention scales with configured session, transfer and observation
+counts. A merged view also retains publisher references and capped unions of
+decoded fields. Redis serialization and publication buffers have their own byte
+cost, and unchanged records are still encoded before digest comparison even
+when the delta needs no record write. Changing those aggregate count policies
+requires a separate decision.
 
 ## Deployment and retention
 
@@ -625,8 +689,9 @@ upload. Dashmetrics retains its existing bounded summary behavior.
 
 ### Validating observability changes
 
-Commands assume the repository root is the current directory. CI does not run
-them; run them when changing the examples or rules:
+Commands assume the repository root is the current directory. CI runs the rule
+tests (the second command, as `make verify-prometheus-rules`) but not the config
+check, so run the first command when changing `prometheus.yml`:
 
 ```sh
 docker run --rm --entrypoint promtool -v "$PWD/deploy/observability:/etc/prometheus:ro" prom/prometheus:v3.5.0 check config /etc/prometheus/prometheus.yml

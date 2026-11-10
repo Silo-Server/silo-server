@@ -1,3 +1,4 @@
+import { t } from "@/i18n";
 import type { OverlayDef } from "../types";
 
 // "Ribbon" overlays — status badges that sit in the visual register of corner
@@ -33,21 +34,32 @@ export const RIBBON_OVERLAYS: readonly OverlayDef[] = [
   {
     id: "show_status",
     category: "ribbons",
-    label: "Show Status",
-    description: "Series lifecycle: Returning, Ended, Cancelled",
-    defaultPosition: "top-right",
+    get label() {
+      return t("web.settings.overlays.badge.showStatus.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.showStatus.description");
+    },
+    defaultPosition: "right-edge",
     defaultEnabled: false,
     iconId: "tv",
     iconCapable: true,
-    availabilityNote: "Populated by metadata plugins (TMDB/TVDB updates pending)",
+    get availabilityNote() {
+      return t("web.settings.overlays.badge.showStatus.availabilityNote");
+    },
     getValue: (d) => formatShowStatus(d.show_status),
+    getValueKey: (d) => formatShowStatus(d.show_status),
+    valueKeySuggestions: ["Returning", "Ended", "Cancelled", "Upcoming"],
   },
   {
     id: "request_status",
     category: "ribbons",
-    label: "Request Status",
-    description:
-      "Where a watchlist title the library doesn't have yet stands: downloading, release date, awaiting approval",
+    get label() {
+      return t("web.settings.overlays.badge.requestStatus.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.requestStatus.description");
+    },
     defaultPosition: "top-left",
     defaultEnabled: true,
     iconCapable: true,

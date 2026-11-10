@@ -239,8 +239,8 @@ func TestHandleUsers_ReturnsCallerAsSingleElement(t *testing.T) {
 	if len(users) != 1 {
 		t.Fatalf("len = %d, want 1 (current profile only)", len(users))
 	}
-	if users[0]["Id"] != session.PseudoUserID.String() {
-		t.Errorf("Id = %v, want %s", users[0]["Id"], session.PseudoUserID.String())
+	if users[0]["Id"] != compatUserID(session.PseudoUserID) {
+		t.Errorf("Id = %v, want %s", users[0]["Id"], compatUserID(session.PseudoUserID))
 	}
 	if users[0]["Name"] != "admin" {
 		t.Errorf("Name = %v, want admin", users[0]["Name"])

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,12 +77,14 @@ type TranscodeStartRequest struct {
 	TargetResolution           string                 `json:"target_resolution"`
 	TargetCodecVideo           string                 `json:"target_codec_video"`
 	TargetCodecAudio           string                 `json:"target_codec_audio"`
+	CopyAudioCodec             string                 `json:"copy_audio_codec,omitempty"`
 	TargetAudioChannels        int                    `json:"target_audio_channels,omitempty"`
 	TargetAudioBitrateKbps     int                    `json:"target_audio_bitrate_kbps,omitempty"`
 	TargetBitrateKbps          int                    `json:"target_bitrate_kbps"`
 	SegmentDuration            int                    `json:"segment_duration"`
 	HWAccel                    string                 `json:"hw_accel"`
 	AudioTrackIndex            int                    `json:"audio_track_index"`
+	RequireAudioTrack          bool                   `json:"require_audio_track,omitempty"`
 	SubtitleTrackIndex         int                    `json:"subtitle_track_index"`
 	SubtitleBurnIn             bool                   `json:"subtitle_burn_in"`
 	SubtitleCodec              string                 `json:"subtitle_codec,omitempty"`
@@ -92,6 +95,13 @@ type TranscodeStartRequest struct {
 	SubtitleRendition bool    `json:"subtitle_rendition,omitempty"`
 	TotalDuration     float64 `json:"total_duration"`
 	RequireReady      bool    `json:"require_ready,omitempty"`
+	// SubtitleRenditionTracks asks for every listed embedded text track as an
+	// on-demand rendition. Only nodes advertising
+	// playback.TransportFeatureHLSOnDemandSubtitleRenditionsV1 receive it.
+	SubtitleRenditionTracks []playback.SubtitleRenditionTrack `json:"subtitle_rendition_tracks,omitempty"`
+	// SubtitleRenditionSource is the source version the tracks were planned
+	// from; segments are read from it only.
+	SubtitleRenditionSource playback.SubtitleRenditionSource `json:"subtitle_rendition_source,omitzero"`
 	// AutoFallbackReady asks the node to wait for the first manifest only when
 	// its own hw_accel=auto fallback is enabled for this start, so an early
 	// hardware failure can move to a safer path. The node decides from its
@@ -114,6 +124,8 @@ type TranscodeStartResponse struct {
 	// understood. An old node omits it, allowing current callers to stop the job
 	// before publishing bytes from a silently ignored SourceAudioChannels field.
 	AudioRecipeVersion string `json:"audio_recipe_version,omitempty"`
+	// RequireAudioTrack confirms that the executor made the selected audio mandatory.
+	RequireAudioTrack bool `json:"require_audio_track,omitempty"`
 	// CopyFMP4RecipeVersion attests the copy-video HLS timestamp and bitstream
 	// recipe. Old nodes omit it and are rejected before their bytes are exposed.
 	CopyFMP4RecipeVersion string `json:"copy_fmp4_recipe_version,omitempty"`
@@ -135,10 +147,18 @@ type TranscodeStartResponse struct {
 	// promises a rendition their playlist does not carry; nodes that predate
 	// remux renditions omit it for a copy remux.
 	SubtitleRendition bool `json:"subtitle_rendition,omitempty"`
+	// SubtitleRenditionTracks attests how many on-demand renditions the
+	// executor serves. Older nodes omit it and are rejected before the plan
+	// lists renditions their playlist does not carry.
+	SubtitleRenditionTracks int `json:"subtitle_rendition_tracks,omitempty"`
 	// CopyVideoMPEGTS attests that the executor packages the requested copy
 	// remux as MPEG-TS. Older nodes omit it and are rejected before an fMP4
 	// stream is published under a plan that promises MPEG-TS.
 	CopyVideoMPEGTS bool `json:"copy_video_mpegts,omitempty"`
+	// CopyAudioCodec attests the copied audio codec the executor applies.
+	// Older nodes omit it and are rejected before they copy AAC into fMP4
+	// segments without aac_adtstoasc.
+	CopyAudioCodec string `json:"copy_audio_codec,omitempty"`
 }
 
 var ErrAudioRecipeAttestationMismatch = errors.New("transcode node audio recipe attestation mismatch")
@@ -162,10 +182,12 @@ func validateAudioRecipeRequest(req TranscodeStartRequest) error {
 	return nil
 }
 
-// ValidateAudioRecipeAttestation checks the start response only when the
-// request carries the v2 stereo-downmix recipe. Ordinary legacy starts keep
-// accepting the empty responses returned by older nodes.
+// ValidateAudioRecipeAttestation requires confirmation of mandatory audio and
+// the v2 stereo-downmix recipe. Optional legacy starts accept empty responses.
 func ValidateAudioRecipeAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	if req.RequireAudioTrack && !response.RequireAudioTrack {
+		return fmt.Errorf("%w: required audio track was not confirmed", ErrAudioRecipeAttestationMismatch)
+	}
 	if err := validateAudioRecipeRequest(req); err != nil {
 		return err
 	}
@@ -225,6 +247,27 @@ func ValidateCopyVideoMPEGTSAttestation(req TranscodeStartRequest, response Tran
 	return nil
 }
 
+// ErrCopyAudioCodecAttestationMismatch reports an executor that ignored the
+// copied audio codec of a run that needs aac_adtstoasc.
+var ErrCopyAudioCodecAttestationMismatch = errors.New("transcode node copied audio codec attestation mismatch")
+
+// ValidateCopyAudioCodecAttestation rejects an executor that did not confirm
+// the copied codec of a run that copies AAC into fMP4 segments. Other requests
+// stay compatible with older nodes, which omit the field.
+func ValidateCopyAudioCodecAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
+	opts := playback.TranscodeOpts{
+		SourceVideoCodec: req.SourceVideoCodec,
+		TargetCodecVideo: req.TargetCodecVideo,
+		TargetCodecAudio: req.TargetCodecAudio,
+		CopyAudioCodec:   req.CopyAudioCodec,
+		CopyVideoMPEGTS:  req.CopyVideoMPEGTS,
+	}
+	if playback.HLSCopiesAACIntoFMP4(opts) && response.CopyAudioCodec != req.CopyAudioCodec {
+		return fmt.Errorf("%w: got %q, want %q", ErrCopyAudioCodecAttestationMismatch, response.CopyAudioCodec, req.CopyAudioCodec)
+	}
+	return nil
+}
+
 // ErrSubtitleRenditionAttestationMismatch reports an executor that ignored a
 // requested subtitle rendition.
 var ErrSubtitleRenditionAttestationMismatch = errors.New("transcode node subtitle rendition attestation mismatch")
@@ -233,7 +276,7 @@ var ErrSubtitleRenditionAttestationMismatch = errors.New("transcode node subtitl
 // ignored a requested subtitle rendition. Requests without one stay compatible
 // with older nodes, which omit the field.
 func ValidateSubtitleRenditionAttestation(req TranscodeStartRequest, response TranscodeStartResponse) error {
-	if req.SubtitleRendition && !response.SubtitleRendition {
+	if req.SubtitleRendition && !response.SubtitleRendition || response.SubtitleRenditionTracks != len(req.SubtitleRenditionTracks) {
 		return ErrSubtitleRenditionAttestationMismatch
 	}
 	return nil
@@ -403,7 +446,7 @@ type Server struct {
 	// against work admission. See healthStatus.
 	drainFence      sync.Mutex
 	drainedReported atomic.Bool
-	// trickplay admits one trickplay run at a time.
+	// trickplay admits up to playback.trickplay_node_capacity runs at once.
 	trickplay trickplayWork
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
 	// session may register after the shutdown drain has taken its snapshot.
@@ -1551,7 +1594,8 @@ func (s *Server) buildCapabilitySnapshotLocked(ctx context.Context) (playback.HW
 	}
 	info.TransportFeatures = append(info.TransportFeatures, playback.TransportFeaturePreparedTracksV1,
 		playback.TransportFeatureTrickplayExtractV1, playback.TransportFeatureTrickplayExtractV2,
-		playback.TransportFeatureHLSSubtitleRenditionV1, playback.TransportFeatureHLSRemuxSubtitleRenditionV1)
+		playback.TransportFeatureHLSSubtitleRenditionV1, playback.TransportFeatureHLSRemuxSubtitleRenditionV1,
+		playback.TransportFeatureHLSOnDemandSubtitleRenditionsV1)
 	info.CapabilityHash = playback.ComputeCapabilityHash(info)
 	return info, nil
 }
@@ -1794,6 +1838,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		TargetResolution:           req.TargetResolution,
 		TargetCodecVideo:           req.TargetCodecVideo,
 		TargetCodecAudio:           req.TargetCodecAudio,
+		CopyAudioCodec:             req.CopyAudioCodec,
 		TargetAudioChannels:        req.TargetAudioChannels,
 		TargetAudioBitrateKbps:     req.TargetAudioBitrateKbps,
 		TargetBitrateKbps:          req.TargetBitrateKbps,
@@ -1806,6 +1851,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		// and reconstructed sessions balance identically.
 		HWDevice:           cfg.Playback.HWDevice,
 		AudioTrackIndex:    req.AudioTrackIndex,
+		RequireAudioTrack:  req.RequireAudioTrack,
 		SubtitleTrackIndex: req.SubtitleTrackIndex,
 		SubtitleBurnIn:     req.SubtitleBurnIn,
 		SubtitleCodec:      req.SubtitleCodec,
@@ -1816,6 +1862,7 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 		ExecutionMode:      "transcode_node",
 		FFmpegLogSink:      s.ffmpegSink,
 	}
+	opts.SubtitleRenditionTracks, opts.SubtitleRenditionSource = req.SubtitleRenditionTracks, req.SubtitleRenditionSource
 
 	if opts.HWAccel == "" && cfg.Playback.HWAccel != "" {
 		opts.HWAccel = cfg.Playback.HWAccel
@@ -1960,20 +2007,26 @@ func (s *Server) handleStart(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.WriteHeader(http.StatusAccepted)
-	json.NewEncoder(w).Encode(TranscodeStartResponse{
+	response := TranscodeStartResponse{
 		SessionID:             req.SessionID,
 		Status:                "started",
 		HWAccel:               effectiveHWAccel,
 		EncoderHWAccel:        encoderHWAccel,
 		ToneMapMode:           session.Opts().ToneMapMode,
 		AudioRecipeVersion:    req.AudioRecipeVersion,
+		RequireAudioTrack:     session.Opts().RequireAudioTrack,
 		CopyFMP4RecipeVersion: req.CopyFMP4RecipeVersion,
 		ThrottleSeconds:       req.ThrottleSeconds,
 		SoftwareVideoDecode:   session.Opts().SoftwareVideoDecode,
 		KeyframePlaylist:      session.Opts().KeyframePlaylist,
 		SubtitleRendition:     session.HasSubtitleRendition(),
 		CopyVideoMPEGTS:       session.Opts().CopyVideoMPEGTS,
-	})
+		CopyAudioCodec:        session.Opts().CopyAudioCodec,
+	}
+	response.SubtitleRenditionTracks = session.SubtitleRenditionTrackCount()
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.WarnContext(r.Context(), "write transcode start response", "component", "transcodenode", "session", req.SessionID, "error", err)
+	}
 }
 
 func (s *Server) requireApprovedInputPath(w http.ResponseWriter, r *http.Request, path string) bool {
@@ -2072,6 +2125,23 @@ func (s *Server) reconstructFromToken(r *http.Request, sessionID string, request
 				return (*playback.TranscodeSession)(nil), nil
 			}
 			resolved = *fetched
+		} else if s.recipeStore != nil && len(resolved.SubtitleRenditionTracks) > 0 {
+			// Tokens carry track identity and selection; the stored card supplies
+			// presentation metadata only, without changing token authority.
+			fetched, ok := s.recipeStore.Get(r.Context(), sessionID)
+			if ok && fetched != nil && recipeServesTransport(*fetched, sessionID) &&
+				fetched.SessionID == resolved.SessionID && fetched.UserID == resolved.UserID &&
+				fetched.ProfileID == resolved.ProfileID && fetched.MediaFileID == resolved.MediaFileID &&
+				fetched.InputPath == resolved.InputPath && fetched.SubtitleRenditionSource == resolved.SubtitleRenditionSource &&
+				slices.EqualFunc(fetched.SubtitleRenditionTracks, resolved.SubtitleRenditionTracks, func(a, b playback.SubtitleRenditionTrack) bool {
+					return a.TrackNumber == b.TrackNumber
+				}) {
+				tracks := slices.Clone(fetched.SubtitleRenditionTracks)
+				for i := range tracks {
+					tracks[i].Default = resolved.SubtitleRenditionTracks[i].Default
+				}
+				resolved.SubtitleRenditionTracks = tracks
+			}
 		}
 		return s.spawnReconstruct(r, sessionID, requestedSegment, resolved)
 	})
@@ -2727,22 +2797,23 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 
 	durableProgressive := false
 	authorityFound := false
-	playbackSessionID := sessionID
 	if s.recipeStore != nil {
 		card, ok := s.recipeStore.Get(r.Context(), sessionID)
 		authorityFound = ok && card != nil
 		durableProgressive = authorityFound && card.PlayMethod == playback.PlayRemux
-		if authorityFound && card.SessionID != "" {
-			playbackSessionID = card.SessionID
-		}
 	}
 
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStopFencesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
+	// An HLS job is tracked under the transport id it started with, which for a
+	// native v3 transcode is not its card's SessionID. Only a progressive remux
+	// still running here is tracked under the viewer's playback session id; one
+	// that has ended already removed its own record.
+	trackerSessionID := sessionID
 	if progressiveFound && progressive.playbackSessionID != "" {
-		playbackSessionID = progressive.playbackSessionID
+		trackerSessionID = progressive.playbackSessionID
 	}
 	if progressiveFound || durableProgressive {
 		if s.stoppedProgressiveRemuxes == nil {
@@ -2799,7 +2870,11 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.tracker != nil {
-		s.tracker.Remove(r.Context(), playbackSessionID)
+		// The job has already been stopped, so its record goes even if the
+		// caller gave up on this request.
+		removeCtx, cancelRemove := context.WithTimeout(context.WithoutCancel(r.Context()), sessionTrackingOperationTimeout)
+		s.tracker.Remove(removeCtx, trackerSessionID)
+		cancelRemove()
 	}
 	var shutdownErr error
 	if progressiveFound {
@@ -2870,6 +2945,10 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "playlist request query too long", http.StatusBadRequest)
 		return
 	}
+	if errors.Is(err, playback.ErrSubtitleRenditionNotFound) {
+		http.Error(w, "subtitle rendition not found", http.StatusNotFound)
+		return
+	}
 	if err != nil {
 		slog.ErrorContext(r.Context(), "get manifest", "component", "transcodenode", "error", err, "session", sessionID, "playback_session_id", sessionID)
 		http.Error(w, "manifest not ready", http.StatusServiceUnavailable)
@@ -2930,10 +3009,11 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	}
 	s.attachTelemetrySession(r, sessionID)
 
-	if subtitleSegment, ok := playback.ParseSubtitleSegmentNumber(name); ok {
+	if _, ok := playback.ParseSubtitleSegmentNumber(name); ok {
 		// Subtitle rendition segments never wait out or restart the video
-		// pipeline: they are answered from the cues already on disk.
-		session.ServeSubtitleSegment(w, r, subtitleSegment)
+		// pipeline: they are answered from the cues already on disk, or read
+		// through the source's index.
+		session.ServeSubtitleSegment(w, r, name)
 		return
 	}
 	segmentLease, err := session.OpenSegment(name)
@@ -2971,7 +3051,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					"session", sessionID,
 					"playback_session_id", sessionID,
 				)
-				segmentLease, err = session.WaitForOpenSegment(name, decision.WaitTimeout)
+				segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, decision.WaitTimeout)
 				if errors.Is(err, playback.ErrSegmentNotFound) {
 					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "transcodenode",
 						"segment", name,
@@ -2995,7 +3075,8 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					session,
 					segNum,
 				)
-				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) {
+				// A restart skipped because the request ended is not a failure.
+				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
 					slog.ErrorContext(r.Context(), "restart transcode node at missing segment", "component", "transcodenode", "error", restartErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)
 				}
 
@@ -3018,7 +3099,7 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 						"playback_session_id", sessionID,
 					)
 
-					segmentLease, err = session.WaitForOpenSegment(name, 30*time.Second)
+					segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, 30*time.Second)
 				}
 				if !ok && restartErr == nil && session.IsCopyVideo() {
 					err = playback.ErrSegmentNotFound
@@ -3027,10 +3108,16 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		} else if session.IsRunning() {
 			// Non-numbered segment (e.g., init.mp4 for fMP4 HLS).
 			// Wait briefly — the init segment is written almost immediately.
-			segmentLease, err = session.WaitForOpenSegment(name, 10*time.Second)
+			segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, 10*time.Second)
 		}
 	}
 	if err != nil {
+		if r.Context().Err() != nil {
+			// net/http also ends the context of a client that only
+			// half-closed and is still reading. Answer it as a timed-out
+			// wait would: writing nothing reaches it as an empty 200.
+			err = playback.ErrSegmentNotFound
+		}
 		if isToneMapRecipeError(err) {
 			writeToneMapRecipeError(w, err)
 			return

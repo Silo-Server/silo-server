@@ -1,4 +1,5 @@
 import { useId, useRef, type PointerEvent } from "react";
+import { useT } from "@/i18n";
 import { PLAYBACK_SPEEDS, formatPlaybackSpeed } from "../utils/playbackSpeed";
 
 const LAST_STOP = PLAYBACK_SPEEDS.length - 1;
@@ -27,6 +28,7 @@ interface PlaybackSpeedTrackProps {
  * Each stop is a menu item, so the menu's keyboard model still applies.
  */
 export function PlaybackSpeedTrack({ value, onChange, itemRef }: PlaybackSpeedTrackProps) {
+  const t = useT();
   const labelId = useId();
   const trackRef = useRef<HTMLDivElement>(null);
   const current = Math.max(
@@ -64,7 +66,7 @@ export function PlaybackSpeedTrack({ value, onChange, itemRef }: PlaybackSpeedTr
     <div role="group" aria-labelledby={labelId} className="px-3 pt-1 pb-2">
       <div className="flex items-baseline justify-between py-1">
         <span id={labelId} className="text-xs tracking-wider text-white/40 uppercase">
-          Speed
+          {t("web.player.speed.heading")}
         </span>
         <span className="text-sm font-medium text-white tabular-nums" aria-hidden="true">
           {formatPlaybackSpeed(value)}

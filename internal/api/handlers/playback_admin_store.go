@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -26,13 +27,15 @@ const (
 	// went quiet.
 	PlaybackEndExpired PlaybackEndReason = "expired"
 	// PlaybackEndAborted: the server abandoned the play, because its media
-	// went missing or a replacement transport failed to commit. Aborts do not
-	// record history yet.
+	// went missing or a replacement transport failed to commit.
 	PlaybackEndAborted PlaybackEndReason = "aborted"
+	// PlaybackEndReplaced: a Jellyfin client switched play method, and the
+	// play continues under a new session.
+	PlaybackEndReplaced PlaybackEndReason = playback.EndReasonReplaced
 )
 
 // PlaybackEndReasons lists every reason in its published order.
-var PlaybackEndReasons = []PlaybackEndReason{PlaybackEndStopped, PlaybackEndTerminated, PlaybackEndExpired, PlaybackEndAborted}
+var PlaybackEndReasons = []PlaybackEndReason{PlaybackEndStopped, PlaybackEndTerminated, PlaybackEndExpired, PlaybackEndAborted, PlaybackEndReplaced}
 
 // userInitiated reports a stop someone asked for, the viewer or an
 // administrator. It retires the session for good: its recovery card is
@@ -111,7 +114,14 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 	if s == nil || s.pool == nil {
 		return nil
 	}
+	if err := s.pool.SendBatch(ctx, historyBatch(entry)).Close(); err != nil {
+		return fmt.Errorf("recording playback history: %w", err)
+	}
+	return nil
+}
 
+// historyBatch is RecordHistory's statements, which run as one transaction.
+func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 	var duration any
 	if entry.DurationSeconds != nil {
 		duration = *entry.DurationSeconds
@@ -185,45 +195,79 @@ func (s *PGPlaybackAdminStore) RecordHistory(ctx context.Context, entry AdminPla
 		nullableString(entry.AudioDecision),
 		nullableString(string(entry.EndReason)),
 	)
-	// The upsert above only touches a row this finalization advances. This
-	// one runs whether or not it did, so a copy that knows a fact the row
-	// lacks still records it. It runs in the batch's implicit transaction,
-	// after the upsert.
-	const laterReason = `$8::text IS NOT NULL AND (end_reason_at IS NULL OR $9::timestamptz >= end_reason_at)`
-	batch.Queue(`
-		UPDATE admin_playback_history SET
-			device_id = COALESCE(device_id, $2),
-			device_platform = COALESCE(device_platform, $3),
-			client_name = COALESCE(client_name, $4),
-			client_version = COALESCE(client_version, $5),
-			video_decision = COALESCE(video_decision, $6),
-			audio_decision = COALESCE(audio_decision, $7),
-			end_reason = CASE WHEN `+laterReason+` THEN $8 ELSE end_reason END,
-			end_reason_at = CASE WHEN `+laterReason+` THEN $9::timestamptz ELSE end_reason_at END
-		WHERE session_id = $1 AND (
-			(device_id IS NULL AND $2::text IS NOT NULL)
-			OR (device_platform IS NULL AND $3::text IS NOT NULL)
-			OR (client_name IS NULL AND $4::text IS NOT NULL)
-			OR (client_version IS NULL AND $5::text IS NOT NULL)
-			OR (video_decision IS NULL AND $6::text IS NOT NULL)
-			OR (audio_decision IS NULL AND $7::text IS NOT NULL)
-			OR (`+laterReason+` AND (end_reason IS DISTINCT FROM $8 OR end_reason_at IS DISTINCT FROM $9::timestamptz)))
-	`,
-		entry.SessionID,
-		nullableString(entry.DeviceID),
-		nullableString(entry.DevicePlatform),
-		nullableString(entry.ClientName),
-		nullableString(entry.ClientVersion),
-		nullableString(entry.VideoDecision),
-		nullableString(entry.AudioDecision),
-		nullableString(string(entry.EndReason)),
-		entry.EndedAt,
-	)
-	if err := s.pool.SendBatch(ctx, batch).Close(); err != nil {
-		return fmt.Errorf("recording playback history: %w", err)
-	}
+	queueHistoryFacts(batch, entry)
+	return batch
+}
 
-	return nil
+// LiveSession reads the shared live row for sessionID: the facts the replica
+// holding the session last synced, or, once no live row is left, the row
+// the session recorded when it started. ErrSessionNotFound when there is
+// neither.
+func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string) (*playback.Session, error) {
+	if s == nil || s.pool == nil {
+		return nil, playback.ErrSessionNotFound
+	}
+	var live playback.Session
+	var playMethod string
+	var startedAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT user_id, COALESCE(profile_id, ''), COALESCE(media_file_id, 0), COALESCE(requested_media_file_id, media_file_id, 0),
+			COALESCE(play_method, ''), started_at, COALESCE(HOST(client_ip), ''),
+			COALESCE(client_name, ''), COALESCE(client_version, ''), COALESCE(client_build, ''),
+			COALESCE(client_channel, ''), COALESCE(client_user_agent, ''),
+			COALESCE(device_id, ''), COALESCE(device_platform, ''),
+			COALESCE(transcode_audio, FALSE), COALESCE(target_video_codec, ''),
+			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE)
+		FROM (
+			SELECT 0 AS source, live.* FROM playback_sessions_sync live WHERE live.session_id = $1
+			UNION ALL
+			-- No live row left: the row the session recorded when it started.
+			SELECT 1, (jsonb_populate_record(NULL::playback_sessions_sync, jsonb_build_object(
+				'session_id', lc.session_id, 'user_id', lc.user_id, 'profile_id', lc.profile_id,
+				'media_file_id', lc.media_file_id, 'requested_media_file_id', lc.requested_media_file_id,
+				'started_at', lc.started_at) || lc.start_facts)).*
+			FROM playback_session_lifecycle lc WHERE lc.session_id = $2::uuid
+		) s ORDER BY source LIMIT 1`, sessionID, lifecycleIDParam(sessionID)).Scan(
+		&live.UserID, &live.ProfileID, &live.MediaFileID, &live.RequestedMediaFileID,
+		&playMethod, &startedAt, &live.ClientIP,
+		&live.ClientName, &live.ClientVersion, &live.ClientBuild,
+		&live.ClientChannel, &live.ClientUserAgent,
+		&live.DeviceID, &live.DevicePlatform,
+		&live.TranscodeAudio, &live.TargetVideoCodec,
+		&live.Position, &live.IsJellyfinCompat,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, playback.ErrSessionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading live playback session: %w", err)
+	}
+	live.ID = sessionID
+	live.PlayMethod = playback.PlayMethod(playMethod)
+	if startedAt != nil {
+		live.StartedAt = *startedAt
+	}
+	return &live, nil
+}
+
+// HistoryEndReason is the end reason the admin log holds for sessionID, or
+// "" when it holds no row or a row without one.
+func (s *PGPlaybackAdminStore) HistoryEndReason(ctx context.Context, sessionID string) (PlaybackEndReason, error) {
+	if s == nil || s.pool == nil {
+		return "", nil
+	}
+	var reason *string
+	err := s.pool.QueryRow(ctx, `SELECT end_reason FROM admin_playback_history WHERE session_id = $1`, sessionID).Scan(&reason)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading playback history end reason: %w", err)
+	}
+	if reason == nil {
+		return "", nil
+	}
+	return PlaybackEndReason(*reason), nil
 }
 
 func (s *PGPlaybackAdminStore) DeleteSession(ctx context.Context, sessionID string) error {
@@ -283,4 +327,43 @@ func nullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+// queueHistoryFacts queues the statement that records the facts a
+// finalization knows and the row lacks, and its end reason.
+func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
+	// The upsert above only touches a row this finalization advances. This
+	// one runs whether or not it did, so a copy that knows a fact the row
+	// lacks still records it. It runs in the batch's implicit transaction,
+	// after the upsert.
+	const laterReason = `$8::text IS NOT NULL AND (end_reason_at IS NULL OR $9::timestamptz >= end_reason_at)`
+	batch.Queue(`
+		UPDATE admin_playback_history SET
+			device_id = COALESCE(device_id, $2),
+			device_platform = COALESCE(device_platform, $3),
+			client_name = COALESCE(client_name, $4),
+			client_version = COALESCE(client_version, $5),
+			video_decision = COALESCE(video_decision, $6),
+			audio_decision = COALESCE(audio_decision, $7),
+			end_reason = CASE WHEN `+laterReason+` THEN $8 ELSE end_reason END,
+			end_reason_at = CASE WHEN `+laterReason+` THEN $9::timestamptz ELSE end_reason_at END
+		WHERE session_id = $1 AND (
+			(device_id IS NULL AND $2::text IS NOT NULL)
+			OR (device_platform IS NULL AND $3::text IS NOT NULL)
+			OR (client_name IS NULL AND $4::text IS NOT NULL)
+			OR (client_version IS NULL AND $5::text IS NOT NULL)
+			OR (video_decision IS NULL AND $6::text IS NOT NULL)
+			OR (audio_decision IS NULL AND $7::text IS NOT NULL)
+			OR (`+laterReason+` AND (end_reason IS DISTINCT FROM $8 OR end_reason_at IS DISTINCT FROM $9::timestamptz)))
+	`,
+		entry.SessionID,
+		nullableString(entry.DeviceID),
+		nullableString(entry.DevicePlatform),
+		nullableString(entry.ClientName),
+		nullableString(entry.ClientVersion),
+		nullableString(entry.VideoDecision),
+		nullableString(entry.AudioDecision),
+		nullableString(string(entry.EndReason)),
+		entry.EndedAt,
+	)
 }

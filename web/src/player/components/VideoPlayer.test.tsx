@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
 import { PlayerFullscreenRootContext } from "../context/PlayerFullscreenContext";
+import { INTRO_PROMPT_SECONDS } from "../hooks/useIntroSkipPrompt";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import type { WatchTogetherRoomConnectionResult } from "../hooks/useWatchTogetherRoomConnection";
-import { fixturePlanV3 } from "../protocol-v3.fixtures";
+import { fixturePlanV3, fixtureSubtitleInventoryItemV3 } from "../protocol-v3.fixtures";
 import type { AvailableQualityV3, PlanV3 } from "../protocol-v3";
 import type {
   PlaybackRealtimeCommandEnvelope,
@@ -484,6 +485,71 @@ describe("VideoPlayer room catch-up", () => {
       },
     };
   }
+
+  it("shows the sync panel while a seek reloads the transport for a waiting room", async () => {
+    const { connection, command, video, rerenderPlayer } = setup(100);
+    // The replanned transport has no media yet.
+    Object.defineProperty(video, "readyState", {
+      configurable: true,
+      value: HTMLMediaElement.HAVE_NOTHING,
+    });
+    rerenderPlayer({ watchTogetherConnection: waitingSeek(connection, command), planRevision: 2 });
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Syncing playback" })).toBeInTheDocument();
+  });
+
+  it("leaves a held room seek to the room while a native HLS transport reloads", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockImplementation((mime) =>
+      mime === "application/vnd.apple.mpegurl" ? "probably" : "",
+    );
+    const connection = roomConnection();
+    const host = {
+      ...connection,
+      room: { ...connection.room!, self_can_manage_room: true, self_can_control_transport: true },
+    };
+    const plan = fixturePlanV3({
+      delivery: "server_remux_hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: {
+        source_start_seconds: 0,
+        player_start_seconds: 100,
+        stream_origin_seconds: 0,
+        timeline_offset_seconds: 0,
+        can_seek_anywhere: true,
+        seek_restoration: "player_position",
+      },
+    });
+    const { container, rerenderPlayer } = renderPlayer({
+      plan,
+      shouldAutoPlay: false,
+      watchTogetherRoomId: "room-1",
+      watchTogetherConnection: host,
+    });
+    const video = container.querySelector("video")!;
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.loadedMetadata(video);
+    fireFrameTimeUpdate(video);
+    markReady(video);
+
+    // A quality change reloads the transport, and the host seeks the room
+    // before the new transport's metadata arrives.
+    rerenderPlayer({ planRevision: 2, streamUrl: "/api/v1/stream/session-1?revision=2" });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(video.src).toContain("revision=2");
+    act(() => {
+      controls.current!.onSeek(300);
+    });
+    expect(controls.current!.currentTime).toBe(300);
+    fireEvent.loadedMetadata(video);
+
+    // The element waits for the room's seek command.
+    expect(video.currentTime).toBe(100);
+  });
 
   it("pauses displaced playback and offers an explicit room rejoin", async () => {
     const { connection, video, rerenderPlayer } = setup(100);
@@ -3775,17 +3841,44 @@ describe("VideoPlayer first frame", () => {
 
     // Switching transports empties the element with load(), which resets the
     // position and queues a timeupdate while no source has data. It is not the
-    // new transport's first frame, and the loading overlay stays up for it.
+    // new transport's first frame, and the spinner stays up for it.
     rerenderPlayer({ planRevision: 2 });
     fireEvent.timeUpdate(video);
     fireEvent.seeked(video);
     expect(onFirstFrame).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("status", { name: "Loading video" })).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Buffering" })).toBeInTheDocument();
 
     fireEvent.playing(video);
     expect(onFirstFrame).toHaveBeenCalledTimes(2);
     fireFrameTimeUpdate(video);
     expect(onFirstFrame).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the controls uncovered while a replan reloads a session that has played", async () => {
+    const { container, rerenderPlayer } = renderPlayer();
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    expect(screen.getByRole("status", { name: "Loading video" })).toBeInTheDocument();
+    fireEvent.playing(video);
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+
+    // A seek outside the buffer replans the same session. Its new transport
+    // shows the buffering spinner over the controls, not the startup cover.
+    rerenderPlayer({ planRevision: 2 });
+    expect(screen.queryByRole("status", { name: "Loading video" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Buffering" })).toBeInTheDocument();
+    fireEvent.playing(video);
+    expect(screen.queryByRole("status", { name: "Buffering" })).not.toBeInTheDocument();
+
+    // A new session, such as the next episode, starts behind the cover again.
+    rerenderPlayer({
+      sessionId: "session-2",
+      streamUrl: "/api/v1/stream/session-2",
+      planRevision: 3,
+    });
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-2"));
+    expect(screen.getByRole("status", { name: "Loading video" })).toBeInTheDocument();
   });
 });
 
@@ -3858,6 +3951,65 @@ describe("VideoPlayer intro skip prompt", () => {
     expect(prompt).toBeInTheDocument();
   });
 
+  // The offer that returns with the controls after the timer ran out must not
+  // take Space or Escape from the rest of the player, only answer them when
+  // the viewer focused it.
+  it("brings a timed-out ask back without claiming unfocused keys", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const rendered = await enterIntro("ask");
+      const video = rendered.container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      fireEvent.play(video);
+      expect(screen.getByRole("button", { name: "Skip Intro" })).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(INTRO_PROMPT_SECONDS * 1_000));
+      fireEvent.mouseMove(rendered.container.firstElementChild ?? rendered.container);
+      const offer = screen.getByRole("button", { name: "Skip Intro" });
+
+      expect(fireEvent.keyDown(document.body, { key: "Escape" })).toBe(true);
+      expect(offer).toBeInTheDocument();
+      fireEvent.keyDown(document.body, { key: " " });
+      expect(offer).toBeInTheDocument();
+      expect(video.currentTime).toBe(12);
+
+      offer.focus();
+      expect(fireEvent.keyDown(offer, { key: " " })).toBe(false);
+      await act(async () => Promise.resolve());
+      expect(offer).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The timed pill takes focus for keyboard viewers. When it runs out with the
+  // controls up, the offer that replaces it must not inherit that focus, or
+  // the next Space skips the intro instead of pausing.
+  it("does not hand the expired pill's focus to the returning offer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      const rendered = await enterIntro("ask");
+      const video = rendered.container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      fireEvent.play(video);
+      screen.getByRole("button", { name: "Skip Intro" }).focus();
+
+      fireEvent.mouseMove(rendered.container.firstElementChild ?? rendered.container);
+      act(() => vi.advanceTimersByTime(INTRO_PROMPT_SECONDS * 1_000));
+      fireEvent.mouseMove(rendered.container.firstElementChild ?? rendered.container);
+      const offer = screen.getByRole("button", { name: "Skip Intro" });
+      expect(offer).not.toHaveFocus();
+
+      const focused = document.activeElement ?? document.body;
+      fireEvent.keyDown(focused, { key: " " });
+      await act(async () => Promise.resolve());
+      expect(video.currentTime).toBe(12);
+      expect(offer).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("acts on Select while the pill itself is focused", async () => {
     await enterIntro("ask");
     const prompt = await screen.findByRole("button", { name: "Skip Intro" });
@@ -3919,6 +4071,43 @@ describe("VideoPlayer source timeline", () => {
     expect(video.currentTime).toBe(7);
     expect(subtitleTimeline.textOffsetSeconds).toBe(0);
     expect(subtitleTimeline.assOffsetSeconds).toBe(0);
+  });
+
+  it("keeps a seek made while a native HLS transport reloads", async () => {
+    const plan = fixturePlanV3({
+      delivery: "server_remux_hls",
+      stream: {
+        url: "/playback/transcode/session-1/master.m3u8",
+        protocol: "hls",
+        headers: {},
+        header_refresh: "none",
+      },
+      timeline: {
+        source_start_seconds: 42,
+        player_start_seconds: 7,
+        stream_origin_seconds: 35,
+        timeline_offset_seconds: 0,
+        can_seek_anywhere: true,
+        seek_restoration: "player_position",
+      },
+    });
+    const { container, rerenderPlayer } = renderPlayer({ plan, initialPosition: 42 });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    await waitFor(() => expect(video.src).toContain("/api/v1/stream/session-1"));
+    fireEvent.loadedMetadata(video);
+    fireEvent.playing(video);
+
+    // A quality change replans the session; the controls stay usable while the
+    // new transport loads, and the viewer seeks before its metadata arrives.
+    rerenderPlayer({ plan, planRevision: 2, streamUrl: "/api/v1/stream/session-1?revision=2" });
+    await waitFor(() => expect(video.src).toContain("revision=2"));
+    act(() => {
+      controls.current!.onSeek(300);
+    });
+    fireEvent.loadedMetadata(video);
+
+    expect(video.currentTime).toBe(300);
   });
 
   // Chrome keeps a Matroska file's container start time on its clock, so a
@@ -4664,9 +4853,9 @@ describe("VideoPlayer translation handoff", () => {
         },
       }),
     );
-    expect(toastError).toHaveBeenCalledExactlyOnceWith(
-      "Subtitle processing failed: Source subtitle unavailable",
-    );
+    expect(toastError).toHaveBeenCalledExactlyOnceWith("Subtitle processing failed", {
+      description: "Source subtitle unavailable",
+    });
     expect(controls.current?.activeSubtitleIndex).toBeNull();
     expect(subtitleTimeline.liveKey).toBeNull();
   });
@@ -5015,9 +5204,9 @@ describe("VideoPlayer translation handoff", () => {
     expect(subtitleTimeline.liveKey).toBeNull();
     expect(subtitleTimeline.liveCues).toEqual([]);
     expect(controls.current?.activeSubtitleIndex).toBeNull();
-    expect(toastError).toHaveBeenCalledWith(
-      "Subtitle processing failed: Transcription unavailable",
-    );
+    expect(toastError).toHaveBeenCalledWith("Subtitle processing failed", {
+      description: "Transcription unavailable",
+    });
   });
 
   it("selects the refreshed downloaded track and clears the live overlay", async () => {
@@ -5095,6 +5284,111 @@ describe("VideoPlayer translation handoff", () => {
     expect(controls.current?.activeSubtitleIndex).toBe(4);
     expect(controls.current?.subtitleTracks).toEqual([downloadedTrack]);
   });
+
+  // Someone else's download or upload reaches every viewer of the file. The
+  // new track is offered, never chosen for this viewer.
+  it.each([
+    { selection: "no subtitle", initial: [], expected: null, withTrack: true },
+    {
+      selection: "a new session receiving an old session event",
+      initial: [],
+      expected: null,
+      withTrack: true,
+      staleSession: true,
+    },
+    {
+      selection: "no subtitle for a track without a URL",
+      initial: [],
+      expected: null,
+      withTrack: true,
+      withoutUrl: true,
+    },
+    {
+      selection: "no subtitle after a refresh without a URL",
+      initial: [],
+      expected: null,
+      withTrack: false,
+      withoutUrl: true,
+    },
+    {
+      selection: "an SDH track",
+      initial: [
+        {
+          index: 0,
+          media_file_id: 7,
+          language: "en",
+          label: "English SDH",
+          hearing_impaired: true,
+          source: "embedded" as const,
+          url: "/sdh.vtt",
+        },
+      ],
+      expected: 0,
+      withTrack: false,
+    },
+  ])(
+    "preserves automatic subtitle selection for $selection",
+    async ({ initial, expected, withTrack, withoutUrl, staleSession }) => {
+      const onSubtitleTrackChange = vi.fn();
+      const onApplySubtitleTrack = vi.fn();
+      const onRefreshSubtitles = vi.fn();
+      const { rerenderPlayer } = renderPlayer({
+        subtitleUrls: initial,
+        subtitleMode: "always",
+        preferredSubtitleLanguage: "en",
+        onSubtitleTrackChange,
+        onApplySubtitleTrack,
+        onRefreshSubtitles,
+      });
+      await waitFor(() => expect(controls.current?.activeSubtitleIndex).toBe(expected));
+
+      const added: PlayerSubtitleInfo = {
+        index: initial.length,
+        media_file_id: 7,
+        language: "en",
+        label: "English",
+        source: "downloaded",
+        stored_subtitle_id: withoutUrl ? 44 : undefined,
+        codec: withoutUrl ? "sub" : "srt",
+        burn_in_only: withoutUrl,
+        sync_key: withoutUrl ? undefined : "stored-44",
+        url: withoutUrl ? "" : "/en.vtt",
+      };
+      act(() => {
+        realtimeOptions.current?.onEvent?.({
+          type: "event",
+          session_id: staleSession ? "previous-session" : "session-1",
+          name: "subtitle_ready",
+          payload: {
+            session_id: staleSession ? "previous-session" : "session-1",
+            file_id: 7,
+            subtitle_id: 44,
+            language: "en",
+            label: "Movie.EN",
+            ...(withTrack && {
+              track: fixtureSubtitleInventoryItemV3({
+                combined_index: added.index,
+                source: "downloaded",
+                language: "en",
+              }),
+            }),
+          },
+        });
+      });
+      rerenderPlayer({ subtitleUrls: [...initial, added] });
+
+      await act(async () => Promise.resolve());
+      expect(controls.current?.subtitleTracks).toContainEqual(added);
+      expect(controls.current?.activeSubtitleIndex).toBe(staleSession ? added.index : expected);
+      if (staleSession) {
+        expect(onApplySubtitleTrack).not.toHaveBeenCalled();
+        expect(onRefreshSubtitles).not.toHaveBeenCalled();
+      } else {
+        expect(withTrack ? onApplySubtitleTrack : onRefreshSubtitles).toHaveBeenCalledOnce();
+        expect(onSubtitleTrackChange).not.toHaveBeenCalledWith(added.index, expect.any(Number));
+      }
+    },
+  );
 
   it.each(["missing", "rejecting"])(
     "falls back to webkitEnterFullscreen when requestFullscreen is %s",
@@ -5510,11 +5804,15 @@ describe("VideoPlayer lost connection", () => {
     if (!video) throw new Error("expected video element");
 
     fireFrameTimeUpdate(video);
-    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    fireEvent.play(video);
     // The viewer seeks past the buffered range while the server is down.
     act(() => controls.current?.onSeek(1_200));
+    // Chromium pauses the element before it reports the network error, and
+    // fires that pause after the error.
+    Object.defineProperty(video, "paused", { configurable: true, value: true });
     setNetworkError(video);
     fireEvent.error(video);
+    fireEvent.pause(video);
 
     expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(1_200, true);
     expect(onPlanFailure).not.toHaveBeenCalled();
@@ -5567,6 +5865,24 @@ describe("VideoPlayer lost connection", () => {
 
     expect(onConnectionLost).not.toHaveBeenCalled();
     expect(onPlanFailure).toHaveBeenCalledOnce();
+  });
+
+  it("hands a network error on a transport settled paused on its first frame to the reconnect", () => {
+    const onConnectionLost = vi.fn();
+    const onPlanFailure = vi.fn();
+    const { container } = renderPlayer({ onConnectionLost, onPlanFailure, shouldAutoPlay: false });
+    const video = container.querySelector("video");
+    if (!video) throw new Error("expected video element");
+    markReady(video);
+    fireEvent.canPlay(video);
+
+    // Chromium refetches the paused progressive stream and the server refuses
+    // the range: the route works, so the stream reopens, still paused.
+    setNetworkError(video);
+    fireEvent.error(video);
+
+    expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(expect.any(Number), false);
+    expect(onPlanFailure).not.toHaveBeenCalled();
   });
 
   it("pauses behind a reconnecting notice the viewer can leave", async () => {

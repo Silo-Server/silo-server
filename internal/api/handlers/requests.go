@@ -32,6 +32,7 @@ type RequestService interface {
 	Approve(ctx context.Context, viewer mediarequests.Viewer, id string) (*mediarequests.Request, error)
 	Decline(ctx context.Context, viewer mediarequests.Viewer, id, reason string) (*mediarequests.Request, error)
 	Cancel(ctx context.Context, viewer mediarequests.Viewer, id, reason string) (*mediarequests.Request, error)
+	RemoveFailed(ctx context.Context, viewer mediarequests.Viewer, id string) error
 	Retry(ctx context.Context, viewer mediarequests.Viewer, id string) (*mediarequests.Request, error)
 	GetFeatureStatus(ctx context.Context, viewer mediarequests.Viewer) (mediarequests.FeatureStatus, error)
 	RequestCapabilityAllowed(ctx context.Context, viewer mediarequests.Viewer) (bool, error)

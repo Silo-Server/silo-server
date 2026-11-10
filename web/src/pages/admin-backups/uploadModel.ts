@@ -1,0 +1,356 @@
+import type { AdminBackupUpload, UploadRejectionReason } from "@/api/v2/adminBackupUpload";
+import { StaleApiRequestContextError } from "@/api/client";
+import { V2ProblemError } from "@/api/v2/request";
+import { t, type MessageKey } from "@/i18n";
+
+import { backupDateTime, knownSiloVersion, sourceServerName } from "./backupPresentation";
+import { formatDecimal } from "@/lib/numberFormat";
+
+/** How many times one part is sent before the upload stops and offers a retry. */
+const UPLOAD_PART_ATTEMPTS = 3;
+
+/**
+ * The command that removes another server's encryption, shown when an upload
+ * is encrypted. It reads SECRET_KEY from the environment.
+ */
+const DECRYPT_COMMAND = "silo backup decrypt restore-set.tar.age -o restore-set.tar";
+
+const KB = 1024;
+const MB = KB * 1024;
+const GB = MB * 1024;
+
+/** The byte range of `part` (counting from 0): every part but the last is `partSize` long. */
+export function partRange(part: number, partSize: number, size: number): [number, number] {
+  const start = part * partSize;
+  return [start, Math.min(start + partSize, size)];
+}
+
+/** "41 of 63 MB": both sizes in the unit the total reads best in. */
+export function progressLabel(sent: number, total: number): string {
+  const [unit, label, digits] =
+    total >= GB ? [GB, "GB", 1] : total >= MB ? [MB, "MB", 0] : [KB, "KB", 0];
+  const show = (bytes: number, round: (n: number) => number) => {
+    const scale = 10 ** digits;
+    return formatDecimal(round((bytes / unit) * scale) / scale, digits);
+  };
+  const totalText = show(total, Math.round);
+  // Never show the total before the last byte arrived.
+  const sentText = sent >= total ? totalText : show(sent, Math.floor);
+  return t("web.admin.backups.upload.progress", { sent: sentText, total: totalText, unit: label });
+}
+
+export function progressPercent(sent: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.min(100, Math.max(0, Math.floor((sent / total) * 100)));
+}
+
+/** A size limit as a person says it: "2 GB". */
+export function limitLabel(bytes: number): string {
+  if (bytes >= GB) return `${formatDecimal(bytes / GB, 1, 0)} GB`;
+  return `${formatDecimal(bytes / MB, 1, 0)} MB`;
+}
+
+export type SniffResult = "restore_set" | "encrypted" | "not_a_restore_set";
+
+const AGE_HEADERS = ["age-encryption.org/", "-----BEGIN AGE ENCRYPTED FILE-----"];
+
+function ascii(bytes: Uint8Array, start: number, end: number): string {
+  let out = "";
+  for (const code of bytes.subarray(start, end)) {
+    if (code === 0) break;
+    out += String.fromCharCode(code);
+  }
+  return out;
+}
+
+/**
+ * What the first bytes of a file say it is, before uploading it: an age
+ * encrypted file, or a tar whose first entry is restore-set.json (directly,
+ * or behind the PAX header Silo's writer puts first). The server checks the
+ * whole file again; this only saves uploading something it would refuse.
+ */
+export function sniffRestoreSet(head: Uint8Array): SniffResult {
+  const start = ascii(head, 0, 64);
+  if (AGE_HEADERS.some((header) => start.startsWith(header))) return "encrypted";
+  if (head.length < 512 || ascii(head, 257, 262) !== "ustar") return "not_a_restore_set";
+  const name = ascii(head, 0, 100);
+  return name === "restore-set.json" || name.endsWith("/restore-set.json")
+    ? "restore_set"
+    : "not_a_restore_set";
+}
+
+/**
+ * Shown while an encrypted file uploads. Only the server can tell whose
+ * SECRET_KEY encrypted it: an age file's header names no key, only a salt.
+ */
+export const ENCRYPTED_NOTICE: MessageKey = "web.admin.backups.upload.encryptedNotice";
+
+/**
+ * What the dialog does with a sniffed file before uploading it: refuse what
+ * is not a restore set, and upload the rest. An encrypted file goes to the
+ * server, which reads one made with its own SECRET_KEY and refuses any other
+ * with the decrypt command; the notice says so while it uploads.
+ */
+export function sniffDecision(
+  sniffed: SniffResult,
+): { upload: false } | { upload: true; notice: MessageKey | null } {
+  if (sniffed === "not_a_restore_set") return { upload: false };
+  return { upload: true, notice: sniffed === "encrypted" ? ENCRYPTED_NOTICE : null };
+}
+
+/** Why an upload stopped, in the cases the dialog tells apart. */
+export type UploadFailure =
+  | { kind: "too_large"; sizeBytes: number; limitBytes: number }
+  | { kind: "too_many" }
+  | { kind: "busy" }
+  | { kind: "part_failed"; part: number; partCount: number }
+  | { kind: "rejected"; reason: UploadRejectionReason; message: string }
+  | { kind: "signed_out"; part: number; partCount: number }
+  | { kind: "check_failed"; detail: string }
+  | { kind: "error"; detail: string };
+
+export type UploadStage = "create" | "part" | "complete";
+
+/** Maps a failed request to what the dialog shows. */
+export function failureOfError(
+  error: unknown,
+  stage: UploadStage,
+  { sizeBytes, limitBytes }: { sizeBytes: number; limitBytes: number },
+): UploadFailure {
+  if (stage === "complete" && retryable(error) && !(error instanceof StaleApiRequestContextError)) {
+    // The file arrived; checking it again needs nothing sent.
+    if (
+      !(error instanceof V2ProblemError) ||
+      error.status !== 409 ||
+      error.problemType !== "conflict"
+    )
+      return {
+        kind: "check_failed",
+        detail:
+          error instanceof V2ProblemError
+            ? error.message
+            : t("web.admin.backups.upload.noAnswerShort"),
+      };
+  }
+  if (error instanceof V2ProblemError) {
+    if (error.status === 413 && stage === "create")
+      return { kind: "too_large", sizeBytes, limitBytes };
+    if (error.problemType === "upload_limit_reached") return { kind: "too_many" };
+    if (stage === "complete" && error.status === 409 && error.problemType === "conflict")
+      return { kind: "busy" };
+    return { kind: "error", detail: error.message };
+  }
+  return { kind: "error", detail: t("web.admin.backups.upload.noAnswer") };
+}
+
+export interface FailureCopy {
+  title: string;
+  body: string;
+  /** A command to show in a code block. */
+  command?: string;
+  /** Whether "Try again" continues the same upload. */
+  resumable: boolean;
+  /** The server's own explanation, shown under the body; absent when the body is it. */
+  detail?: string;
+}
+
+const REJECTION_COPY: Record<
+  UploadRejectionReason,
+  { title: MessageKey; body: MessageKey; command?: string }
+> = {
+  not_a_restore_set: {
+    title: "web.admin.backups.upload.rejected.notRestoreSetTitle",
+    body: "web.admin.backups.upload.rejected.notRestoreSetBody",
+  },
+  newer_silo: {
+    title: "web.admin.backups.upload.rejected.newerSiloTitle",
+    body: "web.admin.backups.upload.rejected.newerSiloBody",
+  },
+  encrypted: {
+    title: "web.admin.backups.upload.rejected.encryptedTitle",
+    body: "web.admin.backups.upload.rejected.encryptedBody",
+    command: DECRYPT_COMMAND,
+  },
+  checksum_mismatch: {
+    title: "web.admin.backups.upload.rejected.checksumTitle",
+    body: "web.admin.backups.upload.rejected.checksumBody",
+  },
+};
+
+export function failureCopy(failure: UploadFailure): FailureCopy {
+  switch (failure.kind) {
+    case "too_large":
+      return {
+        title: t("web.admin.backups.upload.failure.tooLargeTitle"),
+        body: t("web.admin.backups.upload.failure.tooLargeBody", {
+          limit: limitLabel(failure.limitBytes),
+          size: limitLabel(failure.sizeBytes),
+        }),
+        resumable: false,
+      };
+    case "too_many":
+      return {
+        title: t("web.admin.backups.upload.failure.tooManyTitle"),
+        body: t("web.admin.backups.upload.failure.tooManyBody"),
+        resumable: false,
+      };
+    case "busy":
+      return {
+        title: t("web.admin.backups.upload.failure.busyTitle"),
+        body: t("web.admin.backups.upload.failure.busyBody"),
+        resumable: true,
+      };
+    case "part_failed":
+      return {
+        title: t("web.admin.backups.upload.failure.stoppedTitle"),
+        body: t("web.admin.backups.upload.failure.partFailedBody", {
+          part: failure.part + 1,
+          part_count: failure.partCount,
+        }),
+        resumable: true,
+      };
+    case "rejected": {
+      const keys = REJECTION_COPY[failure.reason] as
+        | (typeof REJECTION_COPY)[keyof typeof REJECTION_COPY]
+        | undefined;
+      // A reason this build doesn't list shows the server's detail alone.
+      const copy = keys
+        ? { ...keys, title: t(keys.title), body: t(keys.body) }
+        : { title: "", body: "" };
+      // An upload encrypted with another key is explained by the server's
+      // message, decrypt command included: show it once, in place of the
+      // page's own advice. The other reasons keep the page's line and add
+      // the server's detail under it.
+      if (failure.reason === "encrypted" && failure.message)
+        return { title: copy.title, body: failure.message, resumable: false };
+      return { ...copy, detail: failure.message || undefined, resumable: false };
+    }
+    case "signed_out":
+      return {
+        title: t("web.admin.backups.upload.failure.signedOutTitle"),
+        body: t("web.admin.backups.upload.failure.signedOutBody", {
+          part_count: failure.partCount,
+          sent: failure.part,
+          part_count_text: failure.partCount,
+        }),
+        resumable: true,
+      };
+    case "check_failed":
+      return {
+        title: t("web.admin.backups.upload.failure.checkStoppedTitle"),
+        body: t("web.admin.backups.upload.failure.checkStoppedBody", { detail: failure.detail }),
+        resumable: true,
+      };
+    case "error":
+      return {
+        title: t("web.admin.backups.upload.failure.stoppedTitle"),
+        body: failure.detail,
+        resumable: false,
+      };
+  }
+}
+
+/** "Opened. Backup from Living room, Oct 30, 2026, 4:00 AM, Silo 0.9.1." */
+export function openedSentence(upload: AdminBackupUpload): string {
+  const source = upload.source;
+  if (!source) return t("web.admin.backups.upload.opened");
+  const server = sourceServerName(source) ?? t("web.admin.backups.upload.anotherServer");
+  const taken = backupDateTime(source.created_at);
+  const version = knownSiloVersion(source.silo_version);
+  return version
+    ? t("web.admin.backups.upload.openedFromWithVersion", { server, taken, version })
+    : t("web.admin.backups.upload.openedFrom", { server, taken });
+}
+
+/** A part that failed after its retries; the parts before it arrived. */
+export class PartFailedError extends Error {
+  readonly part: number;
+  readonly failure: unknown;
+
+  constructor(part: number, failure: unknown) {
+    super(`part ${part} failed`);
+    this.name = "PartFailedError";
+    this.part = part;
+    this.failure = failure;
+  }
+}
+
+/**
+ * Whether sending a part again could help: no answer, a timeout, a server
+ * error, or a conflict, which for a part means an earlier send of it is
+ * still being received.
+ */
+export function retryable(error: unknown): boolean {
+  // The session the upload started with is gone (signed out, another
+  // profile): every retry would fail the same way.
+  if (error instanceof StaleApiRequestContextError) return false;
+  if (!(error instanceof V2ProblemError)) return true;
+  return error.status === 408 || error.status === 409 || error.status >= 500;
+}
+
+/** How long to wait before sending a part the `attempt`th time again. */
+export function retryDelayMs(attempt: number): number {
+  return 1_000 * 2 ** (attempt - 1);
+}
+
+function waitMs(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
+export interface SendPartsOptions {
+  upload: AdminBackupUpload;
+  file: Blob;
+  /** The first part to send; earlier parts arrived. */
+  from: number;
+  put: (part: number, bytes: Blob) => Promise<AdminBackupUpload>;
+  onProgress?: (upload: AdminBackupUpload) => void;
+  signal?: AbortSignal;
+  attempts?: number;
+  /** Waits between sends of a part; tests pass one that does not. */
+  wait?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}
+
+/**
+ * Sends parts `from` to the last in order, each up to `attempts` times. A
+ * part that still fails throws PartFailedError naming it, so the caller can
+ * continue from there: the server keeps every part that arrived, and a part
+ * sent again replaces the earlier copy.
+ */
+export async function sendParts({
+  upload,
+  file,
+  from,
+  put,
+  onProgress,
+  signal,
+  attempts = UPLOAD_PART_ATTEMPTS,
+  wait = waitMs,
+}: SendPartsOptions): Promise<AdminBackupUpload> {
+  let current = upload;
+  for (let part = from; part < upload.part_count; part += 1) {
+    const [start, end] = partRange(part, upload.part_size, upload.size_bytes);
+    for (let attempt = 1; ; attempt += 1) {
+      signal?.throwIfAborted();
+      try {
+        current = await put(part, file.slice(start, end));
+        break;
+      } catch (error) {
+        if (signal?.aborted) throw signal.reason;
+        if (attempt >= attempts || !retryable(error)) throw new PartFailedError(part, error);
+        await wait(retryDelayMs(attempt), signal);
+      }
+    }
+    onProgress?.(current);
+  }
+  return current;
+}

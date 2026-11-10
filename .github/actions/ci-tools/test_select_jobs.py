@@ -132,6 +132,7 @@ class GitSelectionTests(unittest.TestCase):
             (".github/actions/README.md", False, False),
             (".github/evidence.yml", False, False),
             (".github/ISSUE_TEMPLATE/bug-report.yml", False, False),
+            (".github/DISCUSSION_TEMPLATE/ideas.yml", False, False),
         ]
         for number, (path, go, web) in enumerate(cases):
             with self.subTest(path=path):

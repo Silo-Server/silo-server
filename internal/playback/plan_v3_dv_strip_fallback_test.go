@@ -240,3 +240,105 @@ func TestPlanPlaybackV3DV81StripFallbackSurvivesMissingHLSAudioConversion(t *tes
 		t.Fatalf("terminal = %#v, want the audio conversion cause once every recipe is exhausted", terminal)
 	}
 }
+
+// A single-track Profile 7 source goes to an output that takes Profile 8.1 as
+// the server's HLS 8.1 conversion (fMP4 only) before the HDR10 strip. A
+// dual-track source keeps its RPUs on the enhancement-layer track, which a
+// remux does not copy, so it goes straight to the strip, as does a client that
+// needs MPEG-TS copies. Without the strip, a failed 8.1 plan falls through to a
+// transcode, not to a raw Profile 7 copy.
+func TestPlanPlaybackV3Profile7ConvertsToDV81BeforeStrip(t *testing.T) {
+	registry := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: true},
+		{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
+		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+	})
+	stripless := NewTransformationRegistryV3([]TransformationSpecV3{
+		{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: true},
+		{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+	})
+	for _, tc := range []struct {
+		singleTrack, mpegts bool
+		registry            *TransformationRegistryV3
+	}{{true, false, registry}, {false, false, registry}, {true, false, stripless}, {true, true, registry}} {
+		singleTrack := tc.singleTrack
+		file, req := dv81NativeAndHDR10FixtureV3()
+		track := &file.VideoTracks[0]
+		track.DVProfile, track.DVBLCompatID, track.VideoRangeType = 7, 6, "DOVIWithEL"
+		track.DVConfigPresent, track.DVRPUPresent, track.DVBLPresent, track.DVELPresent = true, true, true, singleTrack
+		track.DVEnhancementLayer = string(EnhancementFELV3)
+		hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+		// A delivery's own HDR details must accept the 8.1 output, not reject
+		// the Profile 7 source.
+		hls.HDRDetails = &HDRCapabilitiesV3{HDR10: true, DolbyVisionProfiles: []int{8}}
+		if tc.mpegts {
+			hls.Features = append(hls.Features, FeatureHLSCopyMPEGTSV3) // the conversion is fMP4-only
+		}
+		req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+
+		plans, _ := replanChainV3(t, PlannerInputV3{
+			Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+			Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+			Registry: tc.registry,
+		})
+		dv81, firstStrip := 0, -1
+		for i, plan := range plans {
+			for _, tr := range plan.Transformations {
+				if tr.Name != TransformationServerDV7DV81V3 {
+					continue
+				}
+				dv81++
+				if i != 0 || plan.Delivery != DeliveryRemuxHLSV3 || plan.EffectiveRecipe.SegmentContainer != "" ||
+					!plan.Claims.Video.DolbyVision || plan.EffectiveRecipe.DynamicRange != DynamicRangeDolbyVisionV3 {
+					t.Fatalf("8.1 plan %d = %s %s %#v", i, plan.Delivery, plan.EffectiveRecipe.SegmentContainer, plan.Claims.Video)
+				}
+			}
+			if firstStrip < 0 && planStripsDVToHDR10V3(plan) {
+				firstStrip = i
+			}
+			// Without the strip, the 8.1 plan must fall through to a
+			// transcode, never to a copy of the raw Profile 7 stream.
+			if plan.Delivery != DeliveryOriginalHTTPV3 && plan.Delivery != DeliveryTranscodeHLSV3 && len(plan.Transformations) == 0 {
+				t.Fatalf("plan %d copies Profile 7 unconverted: %s", i, plan.Delivery)
+			}
+		}
+		wantStrip := dv81
+		if tc.registry == stripless {
+			wantStrip = -1
+		}
+		want := 0
+		if singleTrack && !tc.mpegts {
+			want = 1
+		}
+		if dv81 != want || firstStrip != wantStrip {
+			t.Fatalf("single track %v, mpegts %v: %d 8.1 plans, first strip at %d", singleTrack, tc.mpegts, dv81, firstStrip)
+		}
+	}
+}
+
+// A client whose HLS delivery cannot take Dolby Vision never gets the server
+// 8.1 plan, so offering it must not hide the precise terminal for a Profile 7
+// source whose RPUs cannot be stripped.
+func TestPlanPlaybackV3DV81IneligibleWhenHLSDeliveryRejectsDV(t *testing.T) {
+	file, req := dv81NativeAndHDR10FixtureV3()
+	track := &file.VideoTracks[0]
+	track.DVProfile, track.DVBLCompatID, track.VideoRangeType = 7, 6, "DOVIWithEL"
+	track.DVConfigPresent, track.DVRPUPresent, track.DVBLPresent, track.DVELPresent = true, true, true, true
+	track.DVEnhancementLayer = string(EnhancementFELV3)
+	hls := req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3]
+	hls.HDRDetails = &HDRCapabilitiesV3{HDR10: true} // e.g. hls.js: no Dolby Vision over MSE
+	req.ClientPlaybackContext.Deliveries[DeliveryClassHLSV3] = hls
+	_, terminal := replanChainV3(t, PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true},
+		Registry: NewTransformationRegistryV3([]TransformationSpecV3{
+			{Name: TransformationServerDV7DV81V3, RecipeVersion: TransformationServerDV7DV81RecipeVersionV3, Available: true},
+			{Name: TransformationServerDV7HDR10V3, RecipeVersion: TransformationServerDV7HDR10RecipeVersionV3, Available: true},
+			{Name: TransformationAudioToAACV3, RecipeVersion: TransformationAudioToAACRecipeVersionV3, Available: true},
+		}),
+		DVRPUStrippable: func() bool { return false },
+	})
+	if terminal == nil || terminal.Reason != TerminalDVConversionUnsupportedV3 {
+		t.Fatalf("terminal = %+v, want %s", terminal, TerminalDVConversionUnsupportedV3)
+	}
+}

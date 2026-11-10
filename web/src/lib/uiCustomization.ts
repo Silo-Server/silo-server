@@ -229,6 +229,27 @@ export function cardGridClasses(size: PosterSize): string {
   }
 }
 
+const GRID_COLUMNS: Record<PosterSize, readonly number[]> = {
+  compact: [3, 5, 6, 8, 10],
+  standard: [3, 4, 5, 7, 8],
+  large: [2, 3, 4, 5, 6],
+};
+
+/**
+ * The card width cardGridClasses resolves to at a viewport width, in a grid
+ * `gridWidth` wide. Keep the two in step: artwork widths are requested from it.
+ */
+export function gridCardWidthPx(
+  size: PosterSize,
+  viewportWidth: number,
+  gridWidth: number,
+): number {
+  const breakpoint = [640, 768, 1024, 1280].filter((width) => viewportWidth >= width).length;
+  const columns = GRID_COLUMNS[size][breakpoint]!;
+  const gap = size === "large" ? 16 : 12;
+  return (gridWidth - gap * (columns - 1)) / columns;
+}
+
 export function carouselCardWidthClasses(size: PosterSize): string {
   switch (size) {
     case "compact":

@@ -9,8 +9,8 @@ import { useSyncExternalStore } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  SHOW_TO_OTHER_PROFILES_HELP,
-  SHOW_TO_OTHER_PROFILES_LABEL,
+  showToOtherProfilesHelp,
+  showToOtherProfilesLabel,
   unshareWarning,
 } from "@/lib/collections/copy";
 import { chooseArtwork, uploadArtwork } from "@/test/collectionArtwork";
@@ -482,15 +482,15 @@ describe("the save bar and Where it shows", () => {
     });
     v2Recorder.answer("GET /api/v2/collections/{id}", { ...getCollectionOk, is_shared: true });
     showEditorPage("/collections/c1/edit");
-    const sharing = await screen.findAllByRole("switch", { name: SHOW_TO_OTHER_PROFILES_LABEL });
+    const sharing = await screen.findAllByRole("switch", { name: showToOtherProfilesLabel() });
     expect(sharing).toHaveLength(1);
     // The same switch, and words, as every other place a personal collection is shared.
-    expect(sharing[0]).toHaveAccessibleDescription(SHOW_TO_OTHER_PROFILES_HELP);
-    expect(SHOW_TO_OTHER_PROFILES_HELP).toContain("Nobody else on the server can see it.");
+    expect(sharing[0]).toHaveAccessibleDescription(showToOtherProfilesHelp());
+    expect(showToOtherProfilesHelp()).toContain("Nobody else on the server can see it.");
     fireEvent.click(sharing[0]!);
     expect(await screen.findByText(unshareWarning(["Maya", "Leo"]))).toBeTruthy();
     expect(within(saveBar()).getByRole("status")).toHaveTextContent(
-      `${SHOW_TO_OTHER_PROFILES_LABEL} not saved`,
+      `${showToOtherProfilesLabel()} not saved`,
     );
   });
 });

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { type MarkerDetectionKinds, useMarkerDetectionKinds } from "@/hooks/queries/admin/markers";
 import type { RedetectMarkersKind } from "@/hooks/queries/items";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 
 interface RedetectMarkersDialogProps {
   open: boolean;
@@ -21,26 +22,26 @@ interface RedetectMarkersDialogProps {
 
 const options: {
   kind: RedetectMarkersKind;
-  label: string;
-  description: string;
+  label: MessageKey;
+  description: MessageKey;
   Icon: ComponentType<{ className?: string }>;
 }[] = [
   {
     kind: "intro",
-    label: "Intro",
-    description: "Find the opening again from chapters and the season's shared audio.",
+    label: "web.markers.redetect.intro",
+    description: "web.markers.redetect.introDescription",
     Icon: SkipForward,
   },
   {
     kind: "credits",
-    label: "Credits",
-    description: "Find the end credits again from chapters, audio, and the picture.",
+    label: "web.markers.redetect.credits",
+    description: "web.markers.redetect.creditsDescription",
     Icon: ListEnd,
   },
   {
     kind: "all",
-    label: "Intro and credits",
-    description: "Run both.",
+    label: "web.markers.redetect.all",
+    description: "web.markers.redetect.allDescription",
     Icon: RefreshCw,
   },
 ];
@@ -48,14 +49,17 @@ const options: {
 // offReason explains why the server would not run kind, or returns null
 // when it would. An "all" request with one kind off would quietly run only the
 // other, which its own option already offers.
-function offReason(kind: RedetectMarkersKind, enabled: MarkerDetectionKinds | undefined) {
+function offReason(
+  t: Translate,
+  kind: RedetectMarkersKind,
+  enabled: MarkerDetectionKinds | undefined,
+) {
   if (!enabled) return null;
   const introOff = !enabled.intro && kind !== "credits";
   const creditsOff = !enabled.credits && kind !== "intro";
-  if (introOff && creditsOff)
-    return "Intro and credits detection are turned off in marker settings.";
-  if (introOff) return "Intro detection is turned off in marker settings.";
-  if (creditsOff) return "Credits detection is turned off in marker settings.";
+  if (introOff && creditsOff) return t("web.markers.redetect.bothOff");
+  if (introOff) return t("web.markers.redetect.introOff");
+  if (creditsOff) return t("web.markers.redetect.creditsOff");
   return null;
 }
 
@@ -69,6 +73,7 @@ export default function RedetectMarkersDialog({
   onConfirm,
   isPending = false,
 }: RedetectMarkersDialogProps) {
+  const t = useT();
   const id = useId();
   // Read on open, not with the page: most visits never re-detect.
   const enabled = useMarkerDetectionKinds(open);
@@ -77,16 +82,13 @@ export default function RedetectMarkersDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Re-detect Markers</DialogTitle>
-          <DialogDescription>
-            Run local detection again on this server. Manual markers and markers from
-            higher-priority sources stay as they are.
-          </DialogDescription>
+          <DialogTitle>{t("web.markers.redetect.title")}</DialogTitle>
+          <DialogDescription>{t("web.markers.redetect.description")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
           {options.map(({ kind, label, description, Icon }) => {
-            const reason = offReason(kind, enabled);
+            const reason = offReason(t, kind, enabled);
             return (
               <button
                 key={kind}
@@ -95,7 +97,7 @@ export default function RedetectMarkersDialog({
                 aria-describedby={`${id}-${kind}-description`}
                 disabled={isPending || reason !== null}
                 onClick={() => onConfirm(kind)}
-                className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                className="border-border bg-surface hover:bg-surface/80 flex w-full items-start gap-3 rounded-xl border p-4 text-start transition-colors disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isPending ? (
                   <Loader2 className="text-muted-foreground mt-0.5 size-5 animate-spin" />
@@ -104,10 +106,10 @@ export default function RedetectMarkersDialog({
                 )}
                 <div className="space-y-1">
                   <div id={`${id}-${kind}-label`} className="text-sm font-semibold">
-                    {label}
+                    {t(label)}
                   </div>
                   <div id={`${id}-${kind}-description`} className="text-muted-foreground text-sm">
-                    {reason ?? description}
+                    {reason ?? t(description)}
                   </div>
                 </div>
               </button>
@@ -119,13 +121,13 @@ export default function RedetectMarkersDialog({
           {anyOff && (
             <Link
               to="/admin/settings/playback"
-              className="text-muted-foreground hover:text-foreground mr-auto text-sm underline underline-offset-4 transition-colors"
+              className="text-muted-foreground hover:text-foreground me-auto text-sm underline underline-offset-4 transition-colors"
             >
-              Change marker settings
+              {t("web.markers.redetect.settingsLink")}
             </Link>
           )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </div>
       </DialogContent>

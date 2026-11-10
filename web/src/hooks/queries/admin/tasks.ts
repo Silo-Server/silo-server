@@ -5,6 +5,7 @@ import type { components } from "@/api/v2/schema";
 import type { TriggerConfig } from "@/api/types";
 import { adminKeys } from "@/hooks/queries/keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
+import { t } from "@/i18n";
 
 export type MetadataRefreshMetrics = components["schemas"]["AdminTaskMetrics"];
 export type TaskSchedule = components["schemas"]["AdminTaskSchedule"] & { etag: string };
@@ -22,9 +23,9 @@ export async function fetchTaskSchedule(key: string): Promise<TaskSchedule> {
 }
 export function taskMutationMessage(error: unknown) {
   if (error instanceof V2ProblemError && error.status === 412)
-    return "The schedule changed. Your draft is kept. Review the current schedule before submitting a new edit.";
+    return t("web.admin.tasks.hooks.tasks.scheduleChanged");
   if (error instanceof V2ProblemError) return error.message;
-  return "The outcome is unknown. Check current task state before trying again.";
+  return t("web.admin.tasks.hooks.tasks.outcomeUnknown");
 }
 export function useTasks() {
   return useQuery({
@@ -88,7 +89,7 @@ export function useRunTask() {
     onSuccess: (_, key) => {
       void client.invalidateQueries({ queryKey: adminKeys.tasks() });
       void client.invalidateQueries({ queryKey: adminKeys.task(key) });
-      toast.success("Task started on this server");
+      toast.success(t("web.admin.tasks.hooks.tasks.started"));
     },
     onError: (error) => toast.error(taskMutationMessage(error)),
   });
@@ -102,7 +103,7 @@ export function useCancelTask() {
     onSuccess: (_, key) => {
       void client.invalidateQueries({ queryKey: adminKeys.tasks() });
       void client.invalidateQueries({ queryKey: adminKeys.task(key) });
-      toast.success("Cancellation requested on this server");
+      toast.success(t("web.admin.tasks.hooks.tasks.cancelRequested"));
     },
     onError: (error) => toast.error(taskMutationMessage(error)),
   });
@@ -129,7 +130,7 @@ export function useUpdateTriggers() {
     onSuccess: (_, { key }) => {
       void client.invalidateQueries({ queryKey: adminKeys.task(key) });
       void client.invalidateQueries({ queryKey: adminKeys.tasks() });
-      toast.success("Schedule saved and applied on this server. Other servers load it on restart.");
+      toast.success(t("web.admin.tasks.hooks.tasks.scheduleSaved"));
     },
     onError: (error) => toast.error(taskMutationMessage(error)),
   });

@@ -22,13 +22,23 @@ type fakeConverter struct {
 	lookupOK   bool
 }
 
-func (f *fakeConverter) GetOrConvert(_ context.Context, _ string, _ ebookconvert.SourceKey) (string, error) {
+func (f *fakeConverter) GetOrConvert(_ context.Context, _ string, _ ebookconvert.SourceKey) (*os.File, error) {
 	f.calls++
-	return f.epubPath, f.err
+	if f.err != nil {
+		return nil, f.err
+	}
+	return os.Open(f.epubPath)
 }
 
-func (f *fakeConverter) Lookup(_ ebookconvert.SourceKey) (string, error, bool) {
-	return f.lookupPath, f.lookupErr, f.lookupOK
+func (f *fakeConverter) Lookup(_ ebookconvert.SourceKey) (*os.File, error, bool) {
+	if !f.lookupOK {
+		return nil, f.lookupErr, false
+	}
+	epub, err := os.Open(f.lookupPath)
+	if err != nil {
+		return nil, err, false
+	}
+	return epub, nil, true
 }
 
 func writeTemp(t *testing.T, name, content string) string {

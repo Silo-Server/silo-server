@@ -361,6 +361,7 @@ func (a *Analyzer) storeCreditsTail(ctx context.Context, candidate Candidate, sp
 		SampleDurationSeconds: window.duration(),
 		ItemCount:             len(tail.Frames),
 		Payload:               payload,
+		MarkersInvalidatedAt:  candidate.MarkersInvalidatedAt,
 	})
 }
 

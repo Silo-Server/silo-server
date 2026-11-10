@@ -466,6 +466,40 @@ func TestHandleGetCalendar_MarksWatchedItems(t *testing.T) {
 	}
 }
 
+func TestCalendar_BadgesHomeReleases(t *testing.T) {
+	day := time.Date(2026, time.April, 8, 0, 0, 0, 0, time.UTC)
+	repo := &stubCalendarRepo{events: []catalog.CalendarEvent{
+		{ContentID: "movie-digital", Type: "movie", Title: "Digital", AirDate: day, HomeRelease: catalog.HomeReleaseDigital},
+		{ContentID: "movie-physical", Type: "movie", Title: "Physical", AirDate: day, HomeRelease: catalog.HomeReleasePhysical},
+		{ContentID: "episode", Type: "episode", Title: "Show", AirDate: day},
+	}}
+	handler := &CalendarHandler{repo: repo}
+
+	view, err := handler.Calendar(context.Background(), CalendarQuery{
+		Start:    time.Date(2026, time.April, 6, 0, 0, 0, 0, time.UTC),
+		End:      time.Date(2026, time.April, 12, 0, 0, 0, 0, time.UTC),
+		Filter:   calendarFilterAll,
+		Location: time.UTC,
+	}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatalf("Calendar() error = %v", err)
+	}
+	badges := map[string][]string{}
+	for _, d := range view.Events {
+		for _, item := range d.Items {
+			badges[item.ContentID] = item.Badges
+		}
+	}
+	for id, want := range map[string]string{"movie-digital": "digital", "movie-physical": "physical"} {
+		if got := badges[id]; len(got) != 1 || got[0] != want {
+			t.Fatalf("%s badges = %v, want [%s]", id, got, want)
+		}
+	}
+	if got, ok := badges["episode"]; !ok || len(got) != 0 {
+		t.Fatalf("episode badges = %v (listed %v), want []", got, ok)
+	}
+}
+
 func TestHandleGetCalendar_EmptyRestrictionAnswersBeforeLibraryIDValidation(t *testing.T) {
 	repo := &stubCalendarRepo{}
 	handler := &CalendarHandler{repo: repo, personal: &stubCalendarPersonal{watchlist: nil}}

@@ -2,6 +2,8 @@
 // that created it. Other profiles on the login see it read-only when it is
 // shared. Lists, pickers and editors decide what to offer from these helpers.
 
+import { t } from "@/i18n";
+
 interface OwnedCollection {
   creator_profile_id: string;
 }
@@ -23,7 +25,10 @@ export function isOwnCollection(collection: OwnedCollection, profileId?: string 
 
 /** The owner's display name, or a neutral label for a profile no longer listed. */
 export function ownerName(profiles: readonly ProfileName[], ownerId: string): string {
-  return profiles.find((profile) => profile.id === ownerId)?.name ?? "Another profile";
+  return (
+    profiles.find((profile) => profile.id === ownerId)?.name ??
+    t("web.collections.personalOwnership.anotherProfile")
+  );
 }
 
 /**

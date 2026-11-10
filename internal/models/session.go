@@ -37,7 +37,8 @@ type AuthSession struct {
 	// DeviceID and DevicePlatform are the device the session was opened from,
 	// as the client reported it in X-Silo-Device-Id and
 	// X-Silo-Device-Platform; empty when it sent none. Client-reported audit
-	// data: never authorize with them.
+	// data: never authorize with them. Native push retention also reads DeviceID
+	// as evidence of which of an account's registrations has no live login.
 	DeviceID       string
 	DevicePlatform string
 	// Purpose is SessionPurposeAccount or SessionPurposeRemotePlayback; empty

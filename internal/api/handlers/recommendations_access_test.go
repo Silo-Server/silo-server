@@ -36,6 +36,10 @@ func (f *fakeRecsEngine) SimilarItems(context.Context, int, string, string, int,
 	return f.items, nil
 }
 
+func (f *fakeRecsEngine) SimilarItemsWithReasons(ctx context.Context, userID int, profileID, itemID string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
+	return f.SimilarItems(ctx, userID, profileID, itemID, limit, filter)
+}
+
 func (f *fakeRecsEngine) BecauseYouWatched(_ context.Context, _ int, _, _ string, limit int, filter catalog.AccessFilter) ([]recommendations.ScoredItem, error) {
 	f.becauseCalls++
 	f.becauseLimit = limit

@@ -1,9 +1,38 @@
 package streamtoken
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
+
+// An empty HMAC key is public: anyone can sign a token naming any media path
+// with it. A node whose loaded config lost its secret must refuse such tokens,
+// and nothing may mint them.
+func TestSignAndVerifyRefuseEmptySecret(t *testing.T) {
+	for _, secret := range []string{"", " ", "\t\n"} {
+		if _, err := Sign(Claims{MediaPath: "/etc/passwd"}, secret, time.Hour); !errors.Is(err, ErrNoSecret) {
+			t.Errorf("Sign(secret=%q) error = %v, want ErrNoSecret", secret, err)
+		}
+
+		// Forge the token the way an attacker would, without Sign's guard.
+		forged, err := jwt.NewWithClaims(jwt.SigningMethodHS256, Claims{
+			MediaPath:  "/etc/passwd",
+			PlayMethod: PlayMethodDownload,
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			},
+		}).SignedString([]byte(secret))
+		if err != nil {
+			t.Fatalf("forge token with secret %q: %v", secret, err)
+		}
+		if claims, err := Verify(forged, secret); !errors.Is(err, ErrNoSecret) {
+			t.Errorf("Verify(secret=%q) error = %v (accepted: %t), want ErrNoSecret", secret, err, claims != nil)
+		}
+	}
+}
 
 func TestStartedAtRoundTrip(t *testing.T) {
 	started := time.Date(2026, 8, 16, 12, 34, 56, 987654321, time.UTC)

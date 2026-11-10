@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -257,6 +257,8 @@ func (failingSessionManager) UpdateStreamState(string, playback.SessionStreamSta
 	return nil
 }
 
+func (failingSessionManager) MarkPlanCommitted(string) error { return nil }
+
 func (failingSessionManager) TouchActivity(string) error { return nil }
 
 func (failingSessionManager) BeginTransport(string) error { return nil }
@@ -465,87 +467,51 @@ func TestV1ProgressAndStopRequireTheOwningProfile(t *testing.T) {
 	}
 }
 
-func TestGetTranscodeSegment_CopyMPEGTSRecoveryUsesResolvedManifestNumberWithoutLookaheadDelay(t *testing.T) {
-	outputDir := t.TempDir()
-	ffmpegPath := filepath.Join(outputDir, "ffmpeg")
-	launchMarker := filepath.Join(outputDir, "launched")
-	manifest := "#EXTM3U\\n#EXT-X-VERSION:3\\n#EXT-X-TARGETDURATION:3\\n#EXT-X-MEDIA-SEQUENCE:9\\n#EXTINF:2.669000,\\nseg_00009.ts\\n#EXTINF:1.669000,\\nseg_00010.ts\\n#EXTINF:1.668000,\\nseg_00011.ts\\n"
-	ffmpeg := `#!/bin/sh
-for arg in "$@"; do
-  if [ "$arg" = "framecrc" ]; then
-    printf '%s\n' '#tb 0: 1/1000'
-    printf '%s\n' '0, 18000, 18000, 41, 1024, 0x12345678'
-    exit 0
-  fi
-done
-printf '%b' '` + manifest + `' > '` + filepath.Join(outputDir, "stream.m3u8") + `'
-if [ ! -e '` + launchMarker + `' ]; then
-  : > '` + launchMarker + `'
-  printf ahead > '` + filepath.Join(outputDir, "seg_00011.ts") + `'
-else
-  printf recovered > '` + filepath.Join(outputDir, "seg_00010.ts") + `'
-  printf ahead > '` + filepath.Join(outputDir, "seg_00011.ts") + `'
-fi
-exec sleep 30
-`
-	if err := os.WriteFile(ffmpegPath, []byte(ffmpeg), 0o755); err != nil {
-		t.Fatalf("write fake ffmpeg: %v", err)
-	}
-
-	const sessionID = "copy-recovery-session"
+// A segment request whose context ends while it waits for FFmpeg stops waiting
+// at once, instead of holding the request until the wait times out. It still
+// answers 404: net/http also ends the context of a client that only
+// half-closed, and writing nothing would reach it as an empty 200.
+func TestGetTranscodeSegment_StopsWaitingWhenRequestEnds(t *testing.T) {
+	const sessionID = "departed-segment"
 	transcodeSession, err := playback.StartTranscode(context.Background(), playback.TranscodeOpts{
-		SessionID:              sessionID,
-		InputPath:              "/media/movie.mkv",
-		OutputDir:              outputDir,
-		FFmpegPath:             ffmpegPath,
-		SeekSeconds:            18.261,
-		StreamOriginSeconds:    18,
-		CopySeekAnchorResolved: true,
-		TargetCodecVideo:       "copy",
-		TargetCodecAudio:       "copy",
-		CopyVideoMPEGTS:        true,
-		SegmentDuration:        2,
-		StartSegmentNumber:     9,
+		SessionID:          sessionID,
+		InputPath:          "/media/slow.mkv",
+		OutputDir:          t.TempDir(),
+		TargetCodecVideo:   "h264",
+		TargetCodecAudio:   "aac",
+		SegmentDuration:    2,
+		FFmpegPath:         writePlaybackTestFFmpegNeverReady(t),
+		HWAccel:            "none",
+		AudioTrackIndex:    -1,
+		SubtitleTrackIndex: -1,
 	})
 	if err != nil {
 		t.Fatalf("StartTranscode: %v", err)
 	}
 	t.Cleanup(func() { _ = transcodeSession.Close() })
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if _, statErr := os.Stat(filepath.Join(outputDir, "seg_00011.ts")); statErr == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("initial fake transcode did not become observable")
-		}
-		time.Sleep(time.Millisecond)
-	}
 
 	sessions := playback.NewSessionManager(0, 0)
 	sessions.RegisterReconstructed(&playback.Session{ID: sessionID, UserID: 1, PlayMethod: playback.PlayTranscode})
 	handler := NewPlaybackHandler(sessions)
 	handler.TranscodeManager().RegisterTranscodeSession(sessionID, transcodeSession)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/playback/transcode/"+sessionID+"/segment/seg_00010.ts", nil)
+	// No playlist yet, so the first segment would wait for FFmpeg's startup.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v2/playback/transcode/"+sessionID+"/segment/seg_00000.ts", nil)
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("session_id", sessionID)
-	routeCtx.URLParams.Add("name", "seg_00010.ts")
+	routeCtx.URLParams.Add("name", "seg_00000.ts")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 	rr := httptest.NewRecorder()
+
 	started := time.Now()
 	handler.HandleGetTranscodeSegment(rr, req)
-	elapsed := time.Since(started)
-
-	if rr.Code != http.StatusOK || rr.Body.String() != "recovered" {
-		t.Fatalf("segment response = %d %q, want 200 recovered", rr.Code, rr.Body.String())
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("segment request waited %v after it ended", elapsed)
 	}
-	if elapsed >= time.Second {
-		t.Fatalf("MPEG-TS recovery took %v, want no wait for a nonexistent fMP4 lookahead", elapsed)
-	}
-	opts := transcodeSession.Opts()
-	if opts.StartSegmentNumber != 9 || !opts.CopySeekAnchorResolved || math.Abs(opts.StreamOriginSeconds-18) > 0.0001 {
-		t.Fatalf("recovery opts = %+v, want start=9 origin=18 resolved=true", opts)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d %q, want 404", rr.Code, rr.Body.String())
 	}
 }
 
@@ -603,10 +569,12 @@ func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 	// Discovery and one-frame smoke commands finish immediately. Only a
 	// transport stays alive; exec keeps it one process so cancellation closes
 	// its pipes without waiting for an orphaned shell child.
+	// The playlist is the HLS output's, which a subtitle rendition's outputs
+	// may follow.
 	script := "#!/bin/sh\n" +
 		"last=\"\"\n" +
-		"for arg in \"$@\"; do last=\"$arg\"; done\n" +
-		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
+		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) last=\"$arg\" ;; esac; done\n" +
+		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -filters \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
@@ -819,12 +787,14 @@ func TestFinalizeSessionStop_UsesProviderLifecycleSemantics(t *testing.T) {
 
 // Expiry and abort retire the session id, so their pause tells providers the
 // session ended. A session that keeps no progress is not scrobbled on abort.
-// A Jellyfin play's upstream session can be revived under the same id, and
-// jellycompat sends that play's own stop, so its expiry stays a plain pause.
+// A Jellyfin play's own stop still reaches providers from its client's
+// Stopped report after the expiry, so its expiry stays a plain pause.
 func TestRetiredSessionsReportEndedPause(t *testing.T) {
-	expire := func(h *PlaybackHandler, s *playback.Session) { h.finalizeExpiredSession(context.Background(), s) }
+	expire := func(h *PlaybackHandler, s *playback.Session) {
+		h.finalizeSessionStopWithResult(context.Background(), s, false, "", PlaybackEndExpired)
+	}
 	abort := func(h *PlaybackHandler, s *playback.Session) {
-		h.finalizeSessionAbort(context.Background(), s, false, "")
+		h.finalizeSessionAbort(context.Background(), s, false, "", nativeEndClaim{owned: true})
 	}
 	tests := []struct {
 		name               string
@@ -1495,5 +1465,62 @@ func TestNativeTranscodeHandlersRejectCommittedProxyEgress(t *testing.T) {
 				t.Fatalf("response = %d %s, want proxy-egress refusal", recorder.Code, recorder.Body.String())
 			}
 		})
+	}
+}
+
+type testSeasonEpisodeLookup struct {
+	testEpisodeLookup
+	season []*models.Episode
+}
+
+func (l testSeasonEpisodeLookup) ListBySeason(context.Context, string, int) ([]*models.Episode, error) {
+	return l.season, nil
+}
+
+// A completed multi-episode file marks the episodes of its range it serves
+// watched, so the next episode offered is not the same file again (issue
+// #739). Episodes past the lookup bound don't resolve to the file and stay
+// unwatched.
+func TestPersistStopAndHistory_MarksSpannedEpisodesWatched(t *testing.T) {
+	store := newPlaybackTestStore(t)
+	file := &models.MediaFile{
+		ID:                42,
+		ContentID:         "series-1",
+		EpisodeID:         "episode-1",
+		FilePath:          "/media/Show/Season 01/Show - S01E01-E12.mkv",
+		Duration:          3600,
+		MultiEpisodeStart: 1,
+		MultiEpisodeEnd:   12,
+	}
+	episode := func(number int) *models.Episode {
+		return &models.Episode{ContentID: "episode-" + strconv.Itoa(number), SeriesID: "series-1", SeasonNumber: 1, EpisodeNumber: number}
+	}
+	handler := NewPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.StoreProvider = testUserStoreProvider{store: store}
+	season := make([]*models.Episode, 0, 12)
+	for number := 1; number <= 12; number++ {
+		season = append(season, episode(number))
+	}
+	handler.EpisodeLookup = testSeasonEpisodeLookup{
+		testEpisodeLookup: testEpisodeLookup{episode: episode(1)},
+		season:            season,
+	}
+
+	handler.persistStopAndHistory(context.Background(), &playback.Session{
+		ID:          "session-1",
+		UserID:      1,
+		ProfileID:   "profile-1",
+		MediaFileID: 42,
+		Position:    3590,
+	})
+
+	progress, err := store.ListProgressByMediaItems(context.Background(), "profile-1", []string{"episode-1", "episode-2", "episode-11", "episode-12"})
+	if err != nil {
+		t.Fatalf("list progress: %v", err)
+	}
+	for id, want := range map[string]bool{"episode-1": true, "episode-2": true, "episode-11": true, "episode-12": false} {
+		if got := progress[id].Completed; got != want {
+			t.Errorf("%s completed = %v, want %v", id, got, want)
+		}
 	}
 }

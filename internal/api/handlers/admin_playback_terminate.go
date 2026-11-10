@@ -27,7 +27,8 @@ import (
 //     never promises that buffered media stops instantly.
 //
 // Repeating terminate on a session this replica no longer holds is unknown
-// (404), as on the bridge.
+// (404), as on the bridge. In a cluster the terminate runs on the replica
+// holding the session's control lane (see Terminate).
 
 const (
 	AdminTerminateDeliveryDispatched  = "dispatched"
@@ -68,8 +69,26 @@ func (h *AdminPlaybackControlHandler) AdminTerminateAvailable() bool {
 	return h != nil && h.playback != nil && h.playback.sessionMgr != nil
 }
 
-// Terminate stops first, then notifies best effort.
+// Terminate stops first, then notifies best effort. It runs on the replica
+// holding the session's control lane, so that replica ends its live session
+// and the player is told; a request that lands elsewhere is relayed there
+// (admin_playback_relay.go). Without a reachable lane owner it revokes from
+// here.
 func (h *AdminPlaybackControlHandler) Terminate(ctx context.Context, in AdminTerminateInput) (AdminTerminateView, error) {
+	if !h.AdminTerminateAvailable() {
+		return AdminTerminateView{}, ErrAdminTerminateUnavailable
+	}
+	if in.SessionID == "" || in.ActorID <= 0 {
+		return AdminTerminateView{}, ErrAdminPlaybackCommandInvalid
+	}
+	if view, relayed, err := h.relayTerminate(ctx, in); relayed {
+		return view, err
+	}
+	return h.terminateLocal(ctx, in)
+}
+
+// terminateLocal terminates the session from this replica.
+func (h *AdminPlaybackControlHandler) terminateLocal(ctx context.Context, in AdminTerminateInput) (AdminTerminateView, error) {
 	if !h.AdminTerminateAvailable() {
 		return AdminTerminateView{}, ErrAdminTerminateUnavailable
 	}
@@ -83,21 +102,16 @@ func (h *AdminPlaybackControlHandler) Terminate(ctx context.Context, in AdminTer
 	unlock := h.terminateLock(in.SessionID)
 	defer unlock()
 
-	// 1. Stop the session (user-initiated: the recipe card is deleted, the
-	// stop/history writer runs) and deny its tokens everywhere. The attempt
-	// row is stopped too, under the administrator stop id, so progress and
-	// replan after a terminate answer 410 and a start replay reports
-	// session_expired on every replica, not just the one that held the live
-	// session.
-	if err := h.playback.stopPlaybackSessionByID(ctx, in.SessionID, PlaybackEndTerminated); err != nil {
-		if !errors.Is(err, playback.ErrSessionNotFound) || !h.playback.attemptLive(ctx, in.SessionID) {
-			return AdminTerminateView{}, err
-		}
-		// No live copy here, but the attempt row is live: another replica
-		// holds the session. Revoke durably; that replica's copy is reaped
-		// by the deny marker and the stopped row.
+	// 1. End the session and deny its tokens everywhere. The attempt row is
+	// stopped under the administrator stop id first, so progress and replan
+	// after a terminate answer 410 and a start replay reports
+	// session_expired on every replica. The play is recorded from this
+	// replica's copy, or from the attempt row when another replica holds the
+	// copy; that replica's copy is then reaped by the deny marker and the
+	// stopped row.
+	if err := h.playback.endSessionAsAdmin(ctx, in.SessionID); err != nil {
+		return AdminTerminateView{}, err
 	}
-	h.playback.markAttemptStoppedByAdmin(ctx, in.SessionID)
 	view.AuthorityRevoked = true
 	// The session is gone on this replica; its sequenced command ledger
 	// goes with it (a later command finds no session and answers 404).

@@ -71,9 +71,7 @@ func (t *ArtworkRevisionTracker) TrackArtworkRevision(ctx context.Context, origi
 	notBefore := time.Now().Add(t.gracePeriod)
 	// deleted_at is cleared because this upsert precedes a re-upload of the
 	// exact manifest: the objects exist again once the cacher finishes.
-	// Exact keys arrive only after every upload succeeded, so they make the
-	// previous delivery verdict stale. It loses its authority but keeps its
-	// keys, which still prove which variants delivered before.
+	// Exact keys arrive only after every upload succeeded.
 	_, err := t.pool.Exec(ctx, `
 		INSERT INTO artwork_revision_gc_candidates (
 			original_path, image_type, object_keys, published_keys, not_before, next_attempt_at
@@ -84,16 +82,6 @@ func (t *ArtworkRevisionTracker) TrackArtworkRevision(ctx context.Context, origi
                 WHEN cardinality(EXCLUDED.object_keys) > 0 THEN EXCLUDED.object_keys
                 WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL THEN '{}'::text[]
                 ELSE coalesce(artwork_revision_gc_candidates.published_keys, '{}'::text[]) END,
-            delivery_next_check = NOW(),
-            delivery_lease = '',
-            delivery_keys = CASE WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL
-                THEN '{}'::text[] ELSE artwork_revision_gc_candidates.delivery_keys END,
-            delivery_checked_at = CASE WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL
-                    OR cardinality(EXCLUDED.object_keys) > 0
-                THEN NULL ELSE artwork_revision_gc_candidates.delivery_checked_at END,
-            delivery_failures = CASE WHEN artwork_revision_gc_candidates.deleted_at IS NOT NULL
-                    OR cardinality(EXCLUDED.object_keys) > 0
-                THEN 0 ELSE artwork_revision_gc_candidates.delivery_failures END,
 			image_type = CASE
 				WHEN artwork_revision_gc_candidates.image_type = '' THEN EXCLUDED.image_type
 				ELSE artwork_revision_gc_candidates.image_type
@@ -150,6 +138,23 @@ func (s *DetailService) PublishArtworkSelection(ctx context.Context, selection A
 	if s == nil || s.itemRepo == nil || s.itemRepo.pool == nil {
 		return fmt.Errorf("catalog: artwork persistence is not configured")
 	}
+	tx, err := s.itemRepo.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("catalog: begin artwork publication: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := PublishArtworkSelectionInTx(ctx, tx, selection); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("catalog: commit artwork publication: %w", err)
+	}
+	return nil
+}
+
+// PublishArtworkSelectionInTx is PublishArtworkSelection in the caller's
+// transaction.
+func PublishArtworkSelectionInTx(ctx context.Context, tx pgx.Tx, selection ArtworkSelection) error {
 	selection.TargetType = strings.ToLower(strings.TrimSpace(selection.TargetType))
 	selection.ImageType = strings.ToLower(strings.TrimSpace(selection.ImageType))
 	selection.TargetContentID = strings.TrimSpace(selection.TargetContentID)
@@ -163,12 +168,6 @@ func (s *DetailService) PublishArtworkSelection(ctx context.Context, selection A
 	if err != nil {
 		return err
 	}
-
-	tx, err := s.itemRepo.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("catalog: begin artwork publication: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 
 	var previousPath string
 	selectSQL := fmt.Sprintf("SELECT COALESCE(%s, '') FROM %s WHERE content_id = $1 FOR UPDATE", pathColumn, table)
@@ -225,10 +224,6 @@ func (s *DetailService) PublishArtworkSelection(ctx context.Context, selection A
 		if err := queueArtworkRevisionGC(ctx, tx, previousPath, selection.ImageType, time.Now().Add(defaultArtworkGCGracePeriod)); err != nil {
 			return err
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("catalog: commit artwork publication: %w", err)
 	}
 	return nil
 }
@@ -410,8 +405,11 @@ func compactArtworkObjectKeys(keys []string) []string {
 func artworkTargetColumns(targetType, imageType string) (table, pathColumn, sourceColumn, thumbhashColumn string, notFound error, err error) {
 	switch targetType {
 	case artworkTargetSeason:
-		if imageType == artworkImagePoster {
+		switch imageType {
+		case artworkImagePoster:
 			return "seasons", artworkPosterPathColumn, artworkPosterSourceColumn, artworkPosterThumbColumn, ErrSeasonNotFound, nil
+		case artworkImageBackdrop:
+			return "seasons", artworkBackdropPathColumn, artworkBackdropSourceColumn, artworkBackdropThumbColumn, ErrSeasonNotFound, nil
 		}
 	case artworkTargetEpisode:
 		if imageType == artworkImageStill {

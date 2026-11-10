@@ -1,9 +1,10 @@
 import { useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import type { CatalogLetter } from "@/hooks/queries/catalog";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-import { LETTER_BAR_LETTERS, spokenLetter, titleCount } from "./letterIndex";
+import { LETTER_BAR_LETTERS } from "./letterIndex";
 
 export interface LetterBarProps {
   /**
@@ -25,6 +26,9 @@ export interface LetterBarProps {
  * it doesn't pop in after the grid.
  */
 export default function LetterBar({ letters, activeLetter, onJump }: LetterBarProps) {
+  const t = useT();
+  const spokenLetter = (letter: string) =>
+    letter === "#" ? t("web.catalog.letters.numbersAndSymbols") : letter;
   const loading = letters === undefined;
   const byLetter = useMemo(
     () => new Map((letters ?? []).map((letter) => [letter.letter, letter])),
@@ -51,7 +55,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
     const target = byLetter.get(letter);
     if (!target) return;
     onJump(target);
-    setAnnouncement(`Showing titles under ${spokenLetter(letter)}`);
+    setAnnouncement(t("web.catalog.letters.showing", { letter: spokenLetter(letter) }));
   };
 
   const focusLetter = (letter: string | undefined) => {
@@ -112,7 +116,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
   return (
     <div
       role="toolbar"
-      aria-label="Jump to letter"
+      aria-label={t("web.catalog.letters.toolbar")}
       aria-orientation="vertical"
       aria-busy={loading || undefined}
       onKeyDown={onKeyDown}
@@ -128,7 +132,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
       onPointerUp={endScrub}
       onPointerCancel={endScrub}
       className={cn(
-        "surface-panel fixed right-1 z-30 flex -translate-y-1/2 touch-none flex-col items-stretch rounded-full border py-1.5 select-none sm:right-2",
+        "surface-panel fixed end-1 z-30 flex -translate-y-1/2 touch-none flex-col items-stretch rounded-full border py-1.5 select-none sm:end-2",
         // Centered a little low and short of the viewport, so it clears the
         // page tabs at the top and the scroll-to-top button at the bottom.
         "top-[calc(50%+2rem)] h-[min(42rem,calc(100dvh-14rem))]",
@@ -155,7 +159,13 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
             aria-label={
               loading
                 ? spokenLetter(letter)
-                : `${spokenLetter(letter)}, ${entry ? titleCount(entry.count) : "no titles"}`
+                : entry
+                  ? t("web.catalog.letters.letterTitles", {
+                      letter: spokenLetter(letter),
+                      count: entry.count,
+                      shown: entry.count,
+                    })
+                  : t("web.catalog.letters.letterNoTitles", { letter: spokenLetter(letter) })
             }
             onFocus={() => setFocused(letter)}
             onClick={() => jump(letter)}
@@ -173,7 +183,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
       {scrubbing ? (
         <span
           aria-hidden="true"
-          className="bg-primary text-primary-foreground pointer-events-none absolute top-1/2 right-full mr-3 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-2xl text-2xl font-semibold shadow-lg"
+          className="bg-primary text-primary-foreground pointer-events-none absolute end-full top-1/2 me-3 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-2xl text-2xl font-semibold shadow-lg"
         >
           {scrubbing}
         </span>

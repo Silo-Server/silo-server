@@ -262,6 +262,7 @@ const (
 var householdGateExemptOperations = map[string]string{
 	"createPersonalAPIKey":             exemptAccount,
 	"applyAdminItemMatch":              exemptAdminCuration,
+	"getAdminItemMatchHints":           exemptAdminCuration,
 	"cancelAdminMetadataTranslation":   exemptAdminCuration,
 	"listAdminMetadataTranslationJobs": exemptAdminCuration,
 	"refreshAdminItemMetadata":         exemptAdminCuration,

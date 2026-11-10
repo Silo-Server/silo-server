@@ -387,6 +387,7 @@ func (h *PlaybackHandler) ApplyProgressV2(ctx context.Context, caller PlaybackCa
 	case err != nil:
 		return PlaybackMutationView{}, playbackStoreOperationError()
 	}
+	h.publishSequencedPause(ctx, sessionID, receipt.Lifecycle)
 	view := PlaybackMutationView{Outcome: receipt.Outcome, Accepted: acceptedProgressV2(receipt.Accepted)}
 	// An applied sample persists. A replayed one (the exact latest sample
 	// again) persists too: the client retried because the first reply was
@@ -541,6 +542,11 @@ func (h *PlaybackHandler) StopPlaybackV2(ctx context.Context, caller PlaybackCal
 	if id, err := uuid.Parse(command.StopID); err != nil || id == uuid.Nil || id.String() != command.StopID {
 		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "A canonical stop_id is required")
 	}
+	if serverStopID(sessionID, command.StopID) {
+		// The server's own stop ids say who ended the attempt; a client
+		// stop must not claim one.
+		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "The stop_id is reserved")
+	}
 	if command.Sequence < 0 || (command.Position == nil) != (command.Sequence == 0) ||
 		(command.Position != nil && (*command.Position < 0 || math.IsNaN(*command.Position) || math.IsInf(*command.Position, 0))) {
 		return PlaybackMutationView{}, playbackOperationError(http.StatusBadRequest, "bad_request", "Invalid stop identity or final sample")
@@ -622,7 +628,7 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 			}
 		}
 	}
-	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted)
+	receipt.HistoryID = h.finishStopV2(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID))
 	receipt.Finalized = true
 	if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
 		slog.WarnContext(ctx, "failed to record playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
@@ -635,7 +641,19 @@ func (h *PlaybackHandler) finalizeStopV2(ctx context.Context, store playback.Pro
 // finalizer runs the history writer), the history writer directly from a
 // session synthesized from the attempt row otherwise. The deny marker is
 // written in both cases. It returns the watch-history id when one was made.
-func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3) string {
+// reason is the end reason of the stop that won the row: a replayed stop can
+// finish an administrator's or an expiry's.
+func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3, reason PlaybackEndReason) string {
+	historyID, err := h.finishStop(ctx, record, sessionID, accepted, reason)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to stop playback session", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
+	}
+	return historyID
+}
+
+// finishStop is finishStopV2 reporting a failure to stop the live copy here,
+// for callers that answer with it.
+func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.AttemptRecordV3, sessionID string, accepted *playback.ProgressSampleV3, reason PlaybackEndReason) (string, error) {
 	h.StreamDeny.Deny(ctx, sessionID)
 	position, paused := 0.0, false
 	if accepted != nil {
@@ -647,18 +665,31 @@ func (h *PlaybackHandler) finishStopV2(ctx context.Context, record *playback.Att
 				slog.WarnContext(ctx, "failed to apply final playback position", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
 			}
 		}
-		result, err := h.stopPlaybackSessionWithResult(ctx, session, PlaybackEndStopped)
+		result, err := h.stopPlaybackSessionWithResult(ctx, session, reason)
 		if err == nil {
-			return result.HistoryID
+			return result.HistoryID, nil
 		}
 		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to stop playback session", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-			return ""
+			return "", err
 		}
 		// Lost the race with another stop of the live session; fall through to
 		// the row-synthesized writer so the final sample is still recorded.
 	}
-	return h.persistStopAndHistory(ctx, h.attemptSessionV2(ctx, record, position, paused)).HistoryID
+	// No copy here to finalize: the copy on another replica, if any, finds
+	// the attempt stopped and is dropped without history, so the admin log
+	// is written from the attempt row and the live row that copy synced.
+	if accepted == nil {
+		position = playback.PositionUnknown
+	}
+	session := h.attemptSessionV2(ctx, record, position, paused)
+	h.fillDetachedSession(ctx, session, record.CreatedAt)
+	result := h.recordStopHistory(ctx, session, reason)
+	// The copy on another replica is dropped without telling providers, so
+	// the end recorded here does, unless its caller tells them itself.
+	if !leaveProviderNotice(ctx) {
+		h.notifyStoppedSession(ctx, session, result, reason)
+	}
+	return result.HistoryID, nil
 }
 
 // attemptSessionV2 synthesizes the session the v1 writers read when this
@@ -810,21 +841,15 @@ func validatePlaybackSessionID(sessionID string) error {
 }
 
 // expiredStopID is the server-minted stop identity recorded on the attempt
-// row when a session ends without a client stop (expiry, abort).
+// row when the liveness reaper ends a session.
 func expiredStopID(sessionID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-expired:"+sessionID)).String()
 }
 
-// markAttemptStoppedServerSide stops the attempt row under the server-minted
-// stop id and writes the deny marker, so a stopped or expired session cannot
-// be replayed from its start attempt or served from a valid token on another
-// replica. Best effort: the local teardown has already happened.
-func (h *PlaybackHandler) markAttemptStoppedServerSide(ctx context.Context, sessionID string) {
-	if h == nil {
-		return
-	}
-	markAttemptStoppedServerSide(ctx, h.PlanStoreV3, h.StreamDeny, sessionID)
-	h.forgetProgressSideEffectLock(sessionID)
+// abortStopID is the server-minted stop id of an attempt the server
+// abandoned: its media went missing, or a replacement transport failed.
+func abortStopID(sessionID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-abort:"+sessionID)).String()
 }
 
 // adminStopID is the server-minted stop id of an attempt an administrator
@@ -835,16 +860,26 @@ func adminStopID(sessionID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-admin-stop:"+sessionID)).String()
 }
 
-// markAttemptStoppedByAdmin is markAttemptStoppedServerSide for a session an
-// administrator ended: stop, terminate, or the fallback of a command the
-// player never confirmed. An attempt the client already stopped keeps its
-// own receipt.
-func (h *PlaybackHandler) markAttemptStoppedByAdmin(ctx context.Context, sessionID string) {
-	if h == nil {
-		return
+// endReasonForStop is the end reason a winning stop id records: the
+// server-minted ids name who ended the attempt, and any other id is the
+// client's own stop.
+func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
+	switch stopID {
+	case adminStopID(sessionID):
+		return PlaybackEndTerminated
+	case expiredStopID(sessionID):
+		return PlaybackEndExpired
+	case abortStopID(sessionID):
+		return PlaybackEndAborted
+	default:
+		return PlaybackEndStopped
 	}
-	stopAttemptServerSide(ctx, h.PlanStoreV3, h.StreamDeny, sessionID, adminStopID(sessionID))
-	h.forgetProgressSideEffectLock(sessionID)
+}
+
+// serverStopID reports whether stopID is one the server mints for an end it
+// makes itself.
+func serverStopID(sessionID, stopID string) bool {
+	return stopID == adminStopID(sessionID) || stopID == expiredStopID(sessionID) || stopID == abortStopID(sessionID)
 }
 
 func attemptEndedByAdmin(record *playback.AttemptRecordV3) bool {
@@ -866,44 +901,6 @@ func (h *PlaybackHandler) stoppedAttemptError(ctx context.Context, sessionID str
 		return playbackSessionEndedByAdminError()
 	}
 	return playbackSessionNotFoundOperationError()
-}
-
-func markAttemptStoppedServerSide(ctx context.Context, planStore playback.PlanStoreV3, deny *playback.StreamDeny, sessionID string) {
-	stopAttemptServerSide(ctx, planStore, deny, sessionID, expiredStopID(sessionID))
-}
-
-func stopAttemptServerSide(ctx context.Context, planStore playback.PlanStoreV3, deny *playback.StreamDeny, sessionID, stopID string) {
-	if sessionID == "" {
-		return
-	}
-	deny.Deny(ctx, sessionID)
-	store, ok := planStore.(playback.ProgressStoreV3)
-	if !ok {
-		return
-	}
-	receipt, first, err := store.StopAttempt(ctx, sessionID, stopID, nil)
-	if err != nil {
-		if !errors.Is(err, playback.ErrSessionNotFound) {
-			slog.WarnContext(ctx, "failed to stop playback attempt server-side", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-		}
-		return
-	}
-	if first {
-		// The local teardown already ran; the receipt is complete.
-		receipt.Finalized = true
-		if err := store.RecordStopReceipt(ctx, sessionID, receipt); err != nil {
-			slog.WarnContext(ctx, "failed to record server-side playback stop receipt", "component", "api", "session", sessionID, "playback_session_id", sessionID, "error", err)
-		}
-	}
-}
-
-// attemptLive reports whether the attempt row exists and is not stopped.
-func (h *PlaybackHandler) attemptLive(ctx context.Context, sessionID string) bool {
-	if h == nil || h.PlanStoreV3 == nil || sessionID == "" {
-		return false
-	}
-	record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID)
-	return err == nil && record != nil && record.StoppedAt == nil
 }
 
 // attemptStoppedElsewhere reports whether the attempt row is already stopped,

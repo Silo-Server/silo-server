@@ -5,6 +5,7 @@ import { SettingsPageHeader } from "@/components/settings/SettingsPageHeader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useRestartKeys } from "@/hooks/useRestartKeys";
 import { useSettingsForm } from "@/hooks/useSettingsForm";
+import { useT } from "@/i18n";
 
 import { FieldGroup } from "./FieldGroup";
 import { SettingField } from "./SettingField";
@@ -20,6 +21,9 @@ const EMAIL_KEYS = [
   "email.smtp_password",
 ];
 
+/** A protocol name; it reads the same in every language. */
+const STARTTLS_LABEL = "STARTTLS";
+
 /**
  * Outbound mail. It used to sit inside the Email channel card on Notifications,
  * but invitations and password resets send through the same server, so it has
@@ -27,6 +31,7 @@ const EMAIL_KEYS = [
  * here.
  */
 export default function EmailSettings() {
+  const t = useT();
   const form = useSettingsForm({ keys: EMAIL_KEYS });
   const restartKeys = useRestartKeys();
 
@@ -35,7 +40,7 @@ export default function EmailSettings() {
 
   if (form.isLoading)
     return (
-      <div className="space-y-6" role="status" aria-label="Loading settings">
+      <div className="space-y-6" role="status" aria-label={t("web.admin.settings.email.loading")}>
         <Skeleton className="h-8 w-48" />
         <div className="space-y-4">
           <Skeleton className="h-10 w-full" />
@@ -43,23 +48,23 @@ export default function EmailSettings() {
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
-        <span className="sr-only">Loading settings</span>
+        <span className="sr-only">{t("web.admin.settings.email.loading")}</span>
       </div>
     );
 
   return (
     <div className="flex h-full flex-col">
-      <SettingsPageHeader title="Email" />
+      <SettingsPageHeader title={t("web.admin.settings.email.title")} />
 
       <div className="flex-1 space-y-5">
         <FieldGroup
-          label="Mail server"
-          description="Silo sends invitations, password resets, and notification emails through it."
+          label={t("web.admin.settings.email.mailServer")}
+          description={t("web.admin.settings.email.mailServerDescription")}
           restartAll={allRestart}
           dirty={anyDirty}
         >
           <SettingField
-            label="Send email from this server"
+            label={t("web.admin.settings.email.enabled")}
             dirty={form.isDirty("email.enabled")}
             type="toggle"
             value={form.getValue("email.enabled")}
@@ -67,7 +72,7 @@ export default function EmailSettings() {
             restartRequired={restartKeys.has("email.enabled")}
           />
           <SettingField
-            label="From address"
+            label={t("web.admin.settings.email.fromAddress")}
             dirty={form.isDirty("email.from_address")}
             hint="silo@example.com"
             value={form.getValue("email.from_address")}
@@ -75,7 +80,7 @@ export default function EmailSettings() {
             restartRequired={restartKeys.has("email.from_address")}
           />
           <SettingField
-            label="From name"
+            label={t("web.admin.settings.email.fromName")}
             dirty={form.isDirty("email.from_name")}
             hint="Silo"
             value={form.getValue("email.from_name")}
@@ -83,7 +88,7 @@ export default function EmailSettings() {
             restartRequired={restartKeys.has("email.from_name")}
           />
           <SettingField
-            label="Mail server address"
+            label={t("web.admin.settings.email.host")}
             dirty={form.isDirty("email.smtp_host")}
             hint="smtp.example.com"
             value={form.getValue("email.smtp_host")}
@@ -91,38 +96,38 @@ export default function EmailSettings() {
             restartRequired={restartKeys.has("email.smtp_host")}
           />
           <SettingField
-            label="Port"
+            label={t("web.admin.settings.email.port")}
             dirty={form.isDirty("email.smtp_port")}
-            description="587 for STARTTLS (typical), 465 for implicit TLS"
+            description={t("web.admin.settings.email.portDescription")}
             type="number"
             value={form.getValue("email.smtp_port")}
             onChange={(v) => form.setValue("email.smtp_port", v)}
             restartRequired={restartKeys.has("email.smtp_port")}
           />
           <SettingField
-            label="Encryption"
+            label={t("web.admin.settings.email.encryption")}
             dirty={form.isDirty("email.smtp_security")}
-            description="Use whatever your mail provider documents."
+            description={t("web.admin.settings.email.encryptionDescription")}
             type="select"
             options={[
-              { value: "starttls", label: "STARTTLS" },
-              { value: "tls", label: "TLS (implicit)" },
-              { value: "none", label: "None (insecure)" },
+              { value: "starttls", label: STARTTLS_LABEL },
+              { value: "tls", label: t("web.admin.settings.email.encryptionTls") },
+              { value: "none", label: t("web.admin.settings.email.encryptionNone") },
             ]}
             value={form.getValue("email.smtp_security") || "starttls"}
             onChange={(v) => form.setValue("email.smtp_security", v)}
             restartRequired={restartKeys.has("email.smtp_security")}
           />
           <SettingField
-            label="Username"
+            label={t("web.admin.settings.email.username")}
             dirty={form.isDirty("email.smtp_username")}
-            description="Leave empty if the mail server needs no sign-in."
+            description={t("web.admin.settings.email.usernameDescription")}
             value={form.getValue("email.smtp_username")}
             onChange={(v) => form.setValue("email.smtp_username", v)}
             restartRequired={restartKeys.has("email.smtp_username")}
           />
           <SecretField
-            label="Password"
+            label={t("web.admin.settings.email.password")}
             value={form.getValue("email.smtp_password")}
             configured={form.sensitiveConfigured.includes("email.smtp_password")}
             onKeep={() => form.resetValue("email.smtp_password")}
