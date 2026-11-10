@@ -31,7 +31,7 @@ const (
 
 	// defaultPostgresTuneSharedBuffersMaxBytes is the ceiling on the tuned
 	// shared_buffers. A quarter of the memory budget suits a database that is
-	// the only tenant of its host, but a media catalogue's hot set (indexes
+	// the only tenant of its host, but a media catalog's hot set (indexes
 	// and recently read rows) is far smaller than a large host's quarter, and
 	// the operating system's page cache still holds whatever falls outside it.
 	// The ceiling is fixed, not sized from the database: shared_buffers
@@ -45,7 +45,7 @@ const (
 
 	// maxPostgresTuneDetectedCPUs bounds a detected CPU count. A container
 	// without a CPU limit sees every core of its host, and one worker slot per
-	// core is far more than a catalogue database can use: a query runs at most
+	// core is far more than a catalog database can use: a query runs at most
 	// four parallel workers. POSTGRES_TUNE_CPUS is not bounded.
 	maxPostgresTuneDetectedCPUs = 16
 
@@ -224,7 +224,7 @@ func LoadPostgresTuneOptionsFromEnv(appMaxConnections int) (PostgresTuneOptions,
 }
 
 // RecommendPostgresOLTPSettings returns pgtune-style OLTP recommendations,
-// with shared_buffers and autovacuum_work_mem bounded for a catalogue database.
+// with shared_buffers and autovacuum_work_mem bounded for a catalog database.
 func RecommendPostgresOLTPSettings(opts PostgresTuneOptions, postgresMajorVersion int) []PostgresTuneSetting {
 	memoryBudgetKB := opts.MemoryBudgetBytes / sizeKB
 	if memoryBudgetKB <= 0 {
