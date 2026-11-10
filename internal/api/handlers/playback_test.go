@@ -659,7 +659,7 @@ func writePlaybackTestFFmpegSleep(t *testing.T, sleepSeconds string) string {
 	script := "#!/bin/sh\n" +
 		"last=\"\"\n" +
 		"for arg in \"$@\"; do case \"$arg\" in *.m3u8) last=\"$arg\" ;; esac; done\n" +
-		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
+		"case \" $* \" in *\" -bsfs \"*|*\" -encoders \"*|*\" -filters \"*|*\" -f null - \"*) exit 0 ;; esac\n" +
 		"case \"$last\" in\n" +
 		"  *.m3u8) out=\"$(dirname \"$last\")\"; mkdir -p \"$out\"; " +
 		"printf x > \"$out/init.mp4\"; printf x > \"$out/seg_0.m4s\"; " +
