@@ -50,10 +50,11 @@ key has no way to carry a PIN proof. An administrator viewing as an account
 can already reset its profiles' PINs, so the PIN guards nothing from them. Every
 gate that resolves the acting profile for a request applies the same rule: the
 HTTP viewer gate, the events sockets, watch-together, progress bootstrap and
-plugin pages. The profile's own limits still apply. Such a scope is marked
-`access.Scope.PINVerificationSkipped`, so the household writes below still
-refuse it; managing the household while viewing as an account needs the
-primary profile's PIN.
+plugin pages. The profile's own limits still apply. Without a valid token
+such a scope is marked `access.Scope.PINVerificationSkipped`, so the household
+writes below refuse it. A valid token still counts as a real proof, so an
+administrator viewing as an account manages its household by entering the
+primary profile's PIN, as the account holder would.
 
 ## Household writes
 

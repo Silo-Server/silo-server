@@ -454,8 +454,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if identity.AccessFingerprint != "" && identity.EffectiveRole != role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		claims := &base
-		claims.Role = role
+		final := base
+		final.Role = role
+		claims := &final
 		authority.Narrow(claims)
 		ctx = apimw.SetClaims(ctx, claims)
 		ctx = apimw.SetProfileID(ctx, identity.ProfileID)
