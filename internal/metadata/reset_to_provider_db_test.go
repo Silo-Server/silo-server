@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // Reset to Provider on a season or episode (#3581) clears that row's locks and
@@ -129,6 +130,17 @@ func TestResetToProvider_ItemRowClearsStoredLocks(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, seriesID)
 	})
+	// A stored credit the provider no longer lists.
+	personID := 820_000_000 + time.Now().UnixNano()%100_000_000
+	if _, err := pool.Exec(t.Context(), `INSERT INTO people (id, name) VALUES ($1, 'Typed Actor')`, personID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM people WHERE id = $1`, personID)
+	})
+	if _, err := pool.Exec(t.Context(), `INSERT INTO item_people (id, content_id, person_id, kind, character, sort_order) VALUES ($1, $2, $1, $3, 'Lead', 0)`, personID, seriesID, models.PersonKindActor); err != nil {
+		t.Fatal(err)
+	}
 	tagline := "Typed tagline"
 	locks := []int{int(FieldOverview), int(FieldImages)}
 	if err := f.items.UpdateMetadata(t.Context(), seriesID, &catalog.MetadataUpdate{Tagline: &tagline, LockedFields: &locks}); err != nil {
@@ -151,6 +163,13 @@ func TestResetToProvider_ItemRowClearsStoredLocks(t *testing.T) {
 	}
 	if item.Tagline != "" || item.Overview != "Provider overview" || len(item.LockedFields) != 0 {
 		t.Errorf("tagline=%q overview=%q locked_fields=%v, want no tagline, the provider's overview and no locks", item.Tagline, item.Overview, item.LockedFields)
+	}
+	var credits int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM item_people WHERE content_id = $1`, seriesID).Scan(&credits); err != nil {
+		t.Fatal(err)
+	}
+	if credits != 0 {
+		t.Errorf("%d stored credits kept, want none: the provider lists no people", credits)
 	}
 	// The series' own reset leaves its seasons' and episodes' edits alone.
 	f.assertLocksKept(t, seriesID)

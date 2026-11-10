@@ -2755,6 +2755,19 @@ func (r *ItemRepository) ReplacePeople(ctx context.Context, contentID string, pe
 	return tx.Commit(ctx)
 }
 
+// ClearPeopleTx removes every credit on a media item in the caller's
+// transaction, so the change commits or fails with the item write it belongs
+// to.
+func (r *ItemRepository) ClearPeopleTx(ctx context.Context, tx pgx.Tx, contentID string) error {
+	if _, err := tx.Exec(ctx, "DELETE FROM item_people WHERE content_id = $1", contentID); err != nil {
+		return fmt.Errorf("delete existing people: %w", err)
+	}
+	if err := r.searchIndexEvents.EnqueueUpsert(ctx, tx, contentID); err != nil {
+		return fmt.Errorf("enqueueing catalog search people update: %w", err)
+	}
+	return nil
+}
+
 // GetPeople returns all people credited on a media item via the item_people + people JOIN.
 func (r *ItemRepository) GetPeople(ctx context.Context, contentID string) ([]models.ItemPerson, error) {
 	rows, err := r.pool.Query(ctx, `

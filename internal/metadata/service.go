@@ -3143,6 +3143,7 @@ func (s *MetadataService) mergeAndPersist(
 			identityChosen:  req.Mode == ModeIdentify,
 			clearChildEdits: replacesShow,
 			resetLocks:      req.resetToProvider,
+			clearCredits:    req.resetToProvider && creditsUnlisted(item, mergeLocked),
 		},
 	)
 	if err != nil {
@@ -3152,14 +3153,6 @@ func (s *MetadataService) mergeAndPersist(
 	item.ContentID = contentID
 	unlockProviderDedup()
 	providerDedupReleased = true
-	// A reset's item write committed, so the credits the providers no longer
-	// list can go: before it, a failed write would have lost them for nothing.
-	// Credits the providers do list replace the stored ones below.
-	if req.resetToProvider {
-		if err := s.clearUnlistedCredits(ctx, contentID, item, mergeLocked); err != nil {
-			return nil, err
-		}
-	}
 	if handleArtwork {
 		// The failure is logged; a local re-apply also fails on it, so its
 		// fingerprint does not advance past artwork that was never queued.
@@ -3338,12 +3331,18 @@ func (s *MetadataService) clearPreviousMatchRows(ctx context.Context, contentID 
 	return s.clearUnlistedCredits(ctx, contentID, item, creditLocks)
 }
 
+// creditsUnlisted reports whether the merged item lists no credits and a lock
+// holds neither group, so the stored credits have to go.
+func creditsUnlisted(item *models.MediaItem, creditLocks []MetadataField) bool {
+	return len(item.People) == 0 && !(isFieldLocked(creditLocks, FieldCast) && isFieldLocked(creditLocks, FieldCrew))
+}
+
 // clearUnlistedCredits removes the stored credits when the merged item lists
 // none and a lock holds neither group. A refresh writes credits only when the
 // providers list some, so a correction or a reset has to clear the ones they
 // no longer list. Credits the providers do list replace the stored ones later.
 func (s *MetadataService) clearUnlistedCredits(ctx context.Context, contentID string, item *models.MediaItem, creditLocks []MetadataField) error {
-	if len(item.People) > 0 || (isFieldLocked(creditLocks, FieldCast) && isFieldLocked(creditLocks, FieldCrew)) {
+	if !creditsUnlisted(item, creditLocks) {
 		return nil
 	}
 	if err := s.itemRepo.ReplacePeople(ctx, contentID, nil); err != nil {
@@ -3354,11 +3353,13 @@ func (s *MetadataService) clearUnlistedCredits(ctx context.Context, contentID st
 
 // itemWriteSteps are the extra writes that commit with an item's identity
 // write: an Identify's choice, clearing a replaced show's season and episode
-// edits, and a Reset to Provider dropping the item's locks.
+// edits, and a Reset to Provider dropping the item's locks and the credits its
+// providers no longer list.
 type itemWriteSteps struct {
 	identityChosen  bool
 	clearChildEdits bool
 	resetLocks      bool
+	clearCredits    bool
 }
 
 // forRetry is the steps for the write retried after conflict recovery. A row
@@ -3367,6 +3368,7 @@ type itemWriteSteps struct {
 func (w itemWriteSteps) forRetry(sameRow bool) itemWriteSteps {
 	w.clearChildEdits = w.clearChildEdits && sameRow
 	w.resetLocks = w.resetLocks && sameRow
+	w.clearCredits = w.clearCredits && sameRow
 	return w
 }
 
@@ -3391,6 +3393,9 @@ func (s *MetadataService) persistItemAndProviderIDs(
 	contentID, err := s.persistItemAndProviderIDsLegacy(ctx, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType)
 	if err == nil && steps.identityChosen {
 		err = s.recordIdentityChoice(ctx, contentID)
+	}
+	if err == nil && steps.clearCredits {
+		err = s.itemRepo.ReplacePeople(ctx, contentID, nil)
 	}
 	return contentID, err
 }
@@ -3489,6 +3494,11 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	// (identify_sticky.go).
 	if steps.identityChosen {
 		if err := catalog.MarkIdentityChosenTx(ctx, tx, item.ContentID); err != nil {
+			return err
+		}
+	}
+	if steps.clearCredits {
+		if err := itemRepo.ClearPeopleTx(ctx, tx, item.ContentID); err != nil {
 			return err
 		}
 	}
