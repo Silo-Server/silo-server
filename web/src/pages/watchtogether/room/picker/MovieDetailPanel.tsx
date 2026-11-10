@@ -20,7 +20,7 @@ function stateLabel(state: MemberWatchState | undefined, t: Translate) {
   if (state.state === "watched") return t("watchParty.whoSeen.watched");
   if (state.position_seconds !== undefined && state.duration_seconds) {
     const pct = Math.round((state.position_seconds / state.duration_seconds) * 100);
-    return t("web.watchTogether.movie.percentIn", { percent: String(pct) });
+    return t("web.watchTogether.movie.percentIn", { percent: pct });
   }
   return t("watchParty.whoSeen.inProgress");
 }
@@ -61,12 +61,12 @@ export function MemberWatchList({
                 ? t("web.watchTogether.movie.rewatchForEveryone")
                 : seen === 0
                   ? t("web.watchTogether.movie.startedOf", {
-                      started: String(started),
-                      total: String(members.length),
+                      started: started,
+                      total: members.length,
                     })
                   : t("web.watchTogether.movie.seenOf", {
-                      seen: String(seen),
-                      total: String(members.length),
+                      seen: seen,
+                      total: members.length,
                     })}
           </span>
         ) : null}

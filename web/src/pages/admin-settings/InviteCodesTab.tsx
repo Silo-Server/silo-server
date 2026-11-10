@@ -218,8 +218,8 @@ export default function InviteCodesTab() {
               <TableCell>
                 <span className={code.use_count >= code.max_uses ? "text-destructive" : ""}>
                   {t("web.admin.settings.inviteCodes.usageCount", {
-                    used: String(code.use_count),
-                    max: String(code.max_uses),
+                    used: code.use_count,
+                    max: code.max_uses,
                   })}
                 </span>
               </TableCell>

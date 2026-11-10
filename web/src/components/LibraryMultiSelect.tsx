@@ -44,7 +44,7 @@ function formatLibraryFilterSummary(
   if (names.length === 0) {
     return t("web.profiles.libraries.count", {
       count: libraryIds.length,
-      count_text: String(libraryIds.length),
+      count_text: libraryIds.length,
     });
   }
   const fallback = t("web.profiles.librarySelect.libraryFallback");
@@ -58,7 +58,7 @@ function formatLibraryFilterSummary(
   const more = libraryIds.length - 1;
   return t("web.profiles.librarySelect.more", {
     count: more,
-    count_text: String(more),
+    count_text: more,
     name: names[0] ?? fallback,
   });
 }

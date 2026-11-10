@@ -424,7 +424,7 @@ function AdminLogsPage() {
               {t("web.admin.logs.history.newer")}
             </Button>
             <span className="text-muted-foreground text-sm">
-              {t("web.admin.logs.history.page", { page: String(historyCursors.length) })}
+              {t("web.admin.logs.history.page", { page: historyCursors.length })}
             </span>
             <Button
               variant="outline"
@@ -728,11 +728,11 @@ const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry 
       <TableCell>
         {entry.impersonator_user_id
           ? t("web.admin.logs.audit.impersonatedActor", {
-              impersonator: String(entry.impersonator_user_id),
-              user: String(entry.user_id),
+              impersonator: entry.impersonator_user_id,
+              user: entry.user_id ?? NO_VALUE,
             })
           : entry.user_id
-            ? t("web.admin.logs.audit.actor", { user: String(entry.user_id) })
+            ? t("web.admin.logs.audit.actor", { user: entry.user_id })
             : NO_VALUE}
       </TableCell>
       <TableCell className="font-mono text-xs">{entry.session_id || NO_VALUE}</TableCell>
@@ -744,7 +744,7 @@ const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry 
 
 function durationAttr(t: Translate, entry: OperationalLogEntry) {
   const value = entry.attrs?.duration_ms;
-  if (typeof value === "number") return t("web.admin.logs.durationMs", { value: String(value) });
+  if (typeof value === "number") return t("web.admin.logs.durationMs", { value: value });
   if (typeof value === "string" && value.length > 0) {
     return t("web.admin.logs.durationMs", { value });
   }

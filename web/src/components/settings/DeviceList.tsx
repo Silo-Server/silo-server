@@ -176,7 +176,7 @@ export function DeviceList({
           onChange={(event) => onSearchChange(event.target.value)}
           placeholder={t("web.settings.deviceList.searchPlaceholder", {
             count: devices.length,
-            count_text: String(devices.length),
+            count_text: devices.length,
           })}
           aria-label={t("web.settings.deviceList.searchLabel")}
           // text-base on mobile: iOS Safari zooms the viewport when a focused
@@ -263,7 +263,7 @@ export function DeviceList({
             ? t("web.settings.deviceList.hideUnused")
             : t("web.settings.deviceList.showUnused", {
                 count: dormantCount,
-                count_text: String(dormantCount),
+                count_text: dormantCount,
               })}
         </button>
       ) : null}
@@ -332,7 +332,7 @@ function ProfileChip({
       aria-label={t("web.settings.deviceList.profileChipLabel", {
         label,
         count,
-        count_text: String(count),
+        count_text: count,
       })}
       className={cn(
         "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium whitespace-nowrap transition-colors xl:min-h-0 xl:px-2.5 xl:py-1 xl:text-[12px]",
@@ -414,7 +414,7 @@ function ChangedCount({ count }: { count: number }) {
   return (
     <span
       className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 text-xs font-semibold text-amber-300"
-      aria-label={t("web.settings.deviceList.changedCount", { count, count_text: String(count) })}
+      aria-label={t("web.settings.deviceList.changedCount", { count, count_text: count })}
     >
       {count}
     </span>

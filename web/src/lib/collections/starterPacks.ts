@@ -228,24 +228,24 @@ export function packResultSummary(
   const heroesFailed = result.featured_failed.length;
   return [
     added > 0
-      ? t("web.collections.starterPacks.summaryAdded", { count: added, count_text: String(added) })
+      ? t("web.collections.starterPacks.summaryAdded", { count: added, count_text: added })
       : t("web.collections.starterPacks.nothingNewAdded"),
     failed > 0
       ? t("web.collections.starterPacks.summaryFailed", {
           count: failed,
-          count_text: String(failed),
+          count_text: failed,
         })
       : "",
     heroes > 0
       ? t("web.collections.starterPacks.summaryHeroes", {
           count: heroes,
-          count_text: String(heroes),
+          count_text: heroes,
         })
       : "",
     heroesFailed > 0
       ? t("web.collections.starterPacks.summaryHeroesFailed", {
           count: heroesFailed,
-          count_text: String(heroesFailed),
+          count_text: heroesFailed,
         })
       : "",
   ]
@@ -259,7 +259,7 @@ function listCount(kinds: readonly (string | undefined)[]): string {
   return t("web.collections.starterPacks.listCount", {
     kind: kind === "movie" || kind === "tv" ? kind : "any",
     count: kinds.length,
-    count_text: String(kinds.length),
+    count_text: kinds.length,
   });
 }
 

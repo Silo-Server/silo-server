@@ -13,9 +13,8 @@ function relativeTime(at: number, now: number, t: Translate) {
   const seconds = Math.max(0, Math.round((now - at) / 1000));
   if (seconds < 45) return t("web.watchTogether.activity.timeNow");
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60)
-    return t("web.watchTogether.activity.timeMinutes", { minutes: String(minutes) });
-  return t("web.watchTogether.activity.timeHours", { hours: String(Math.round(minutes / 60)) });
+  if (minutes < 60) return t("web.watchTogether.activity.timeMinutes", { minutes: minutes });
+  return t("web.watchTogether.activity.timeHours", { hours: Math.round(minutes / 60) });
 }
 
 const modeText: Record<string, MessageKey> = {
@@ -264,7 +263,7 @@ export function RoomRail(props: {
         >
           <span className="font-semibold">
             {t("web.watchTogether.rail.peopleCount", {
-              count: String(props.room?.member_count ?? 0),
+              count: props.room?.member_count ?? 0,
             })}
           </span>
           <span className="text-muted-foreground truncate text-xs">

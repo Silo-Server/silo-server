@@ -172,7 +172,7 @@ export function requestGroupLabel(name: string): string {
 
 /** "per day", "per 7 days". */
 function perWindow(days: number): string {
-  return t("web.admin.common.requestAccess.perWindow", { days, days_text: String(days) });
+  return t("web.admin.common.requestAccess.perWindow", { days, days_text: days });
 }
 
 /**
@@ -196,7 +196,7 @@ function formatQuotaFrom(quota: RequestQuota, source?: string): string {
       ? t("web.admin.common.requestAccess.noNewRequestsFrom", { per_window, source })
       : t("web.admin.common.requestAccess.noNewRequests", { per_window });
   }
-  const count = { count: quota.max, count_text: String(quota.max), per_window };
+  const count = { count: quota.max, count_text: quota.max, per_window };
   return source
     ? t("web.admin.common.requestAccess.quotaFrom", { ...count, source })
     : t("web.admin.common.requestAccess.quota", count);
@@ -297,11 +297,11 @@ export function requestGroupLimitSummary(layer: RequestLimitLayer): string {
     const max = layer.max_requests;
     parts.push(
       days == null || days <= 0
-        ? t("web.admin.common.requestAccess.summaryCount", { count: max, count_text: String(max) })
+        ? t("web.admin.common.requestAccess.summaryCount", { count: max, count_text: max })
         : t("web.admin.common.requestAccess.summaryPerWindow", {
             days,
-            days_text: String(days),
-            max: String(max),
+            days_text: days,
+            max: max,
           }),
     );
   }

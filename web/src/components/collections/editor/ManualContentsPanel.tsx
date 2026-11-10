@@ -665,8 +665,8 @@ export function ManualContentsPanel({
       rows.find((row) => row.id === id)?.info?.title ?? t("web.collections.dnd.unknownTitle");
     const positionOf = (id: UniqueIdentifier) =>
       t("web.collections.dnd.position", {
-        position: String(rows.findIndex((row) => row.id === id) + 1),
-        total: String(rows.length),
+        position: rows.findIndex((row) => row.id === id) + 1,
+        total: rows.length,
       });
     return {
       onDragStart: ({ active }) => {
@@ -874,7 +874,7 @@ export function ManualContentsPanel({
             >
               {expanded
                 ? t("web.collections.manual.showFewer")
-                : t("web.collections.manual.showAll", { count: String(rows.length) })}
+                : t("web.collections.manual.showAll", { count: rows.length })}
             </Button>
           ) : (
             <span />

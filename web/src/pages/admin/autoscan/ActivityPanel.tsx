@@ -46,7 +46,7 @@ import {
 } from "@/components/ui/table";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import {
   useAutoscanConnections,
   useAutoscanEvents,
@@ -96,8 +96,7 @@ function formatTimestamp(value: string | undefined): string {
 }
 
 function formatDuration(t: Translate, ms: number): string {
-  if (ms < 1000)
-    return t("web.admin.autoscan.activity.duration.milliseconds", { value: String(ms) });
+  if (ms < 1000) return t("web.admin.autoscan.activity.duration.milliseconds", { value: ms });
   if (ms < 60_000)
     return t("web.admin.autoscan.activity.duration.seconds", {
       value: formatDecimal(Math.round(ms / 100) / 10, 1, 0),
@@ -105,8 +104,8 @@ function formatDuration(t: Translate, ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);
   return t("web.admin.autoscan.activity.duration.minutesSeconds", {
-    minutes: String(minutes),
-    seconds: String(seconds),
+    minutes: minutes,
+    seconds: seconds,
   });
 }
 
@@ -203,7 +202,7 @@ function scanSourceName(t: Translate, scan: AutoscanScan, lookups: SourceLabelLo
 function libraryName(t: Translate, librariesByID: Map<number, Library>, libraryID: number): string {
   return (
     librariesByID.get(libraryID)?.name ??
-    t("web.admin.autoscan.activity.libraryFallback", { id: String(libraryID) })
+    t("web.admin.autoscan.activity.libraryFallback", { id: libraryID })
   );
 }
 
@@ -656,14 +655,14 @@ function eventDetailsSummary(t: Translate, event: AutoscanEvent): string {
   );
   const linkedText = t("web.admin.autoscan.activity.details.linkedCount", {
     count: linked,
-    count_text: `${linked}${event.changes_truncated ? "+" : ""}`,
+    count_text: `${numberText(linked)}${event.changes_truncated ? "+" : ""}`,
   });
   return [paths, linkedText].join(SEPARATOR);
 }
 
 /** Plural values for a count printed without digit grouping. */
 function rawCountValues(count: number) {
-  return { count, count_text: String(count) };
+  return { count, count_text: count };
 }
 
 function PollMetricStrip({ event }: { event: AutoscanEvent }) {

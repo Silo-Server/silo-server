@@ -78,7 +78,7 @@ export function ActiveStreamsStatWidget() {
       value={String(sessionCount)}
       sub={t("web.admin.dashboard.widgets.activeStreams.sessions", {
         count: sessionCount,
-        count_text: String(sessionCount),
+        count_text: sessionCount,
       })}
       icon={<Activity className="h-4 w-4" />}
       isLoading={sessionsQuery.isLoading}
@@ -231,7 +231,7 @@ export function UsersStatWidget() {
       value={stats ? String(stats.total_users) : "—"}
       sub={t("web.admin.dashboard.widgets.usersStat.registered", {
         count: stats?.total_users ?? 0,
-        count_text: String(stats?.total_users ?? 0),
+        count_text: stats?.total_users ?? 0,
       })}
       icon={<Users className="h-4 w-4" />}
       isLoading={statsQuery.isLoading || (!stats && !statsQuery.error)}

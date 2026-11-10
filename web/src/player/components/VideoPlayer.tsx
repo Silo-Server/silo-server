@@ -143,7 +143,7 @@ import {
   setWatchTogetherGuestControl,
 } from "@/lib/watchTogetherActions";
 import { toast } from "sonner";
-import { useT, type Translate } from "@/i18n";
+import { codeNumber, numberText, useT, type Translate } from "@/i18n";
 import { MediaDataMeter } from "../media-data-meter";
 import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
@@ -2465,9 +2465,9 @@ export function VideoPlayer({
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
   const hudSubtitle = seriesContext
-    ? `S${seriesContext.currentSeason} · E${seriesContext.currentEpisode}${title ? ` — ${title}` : ""}`
+    ? `S${codeNumber(seriesContext.currentSeason)} · E${codeNumber(seriesContext.currentEpisode)}${title ? ` — ${title}` : ""}`
     : year
-      ? String(year)
+      ? numberText(year)
       : undefined;
   const cancelNextEpisodeAutoPlay = nextEpisode.cancelAutoPlay;
   const cancelNextEpisodeAutoPlayRef = useRef(cancelNextEpisodeAutoPlay);
@@ -5296,27 +5296,25 @@ export function VideoPlayer({
                   {year
                     ? t("web.player.titleWithYear", {
                         title: seriesContext.seriesTitle ?? title,
-                        year: String(year),
+                        year: year,
                       })
                     : (seriesContext.seriesTitle ?? title)}
                 </span>
                 <span>
                   {title
                     ? t("web.player.episode.codeWithTitle", {
-                        season: String(seriesContext.currentSeason),
-                        episode: String(seriesContext.currentEpisode),
+                        season: codeNumber(seriesContext.currentSeason),
+                        episode: codeNumber(seriesContext.currentEpisode),
                         title,
                       })
                     : t("web.player.episode.code", {
-                        season: String(seriesContext.currentSeason),
-                        episode: String(seriesContext.currentEpisode),
+                        season: codeNumber(seriesContext.currentSeason),
+                        episode: codeNumber(seriesContext.currentEpisode),
                       })}
                 </span>
               </>
             ) : (
-              <span>
-                {year ? t("web.player.titleWithYear", { title, year: String(year) }) : title}
-              </span>
+              <span>{year ? t("web.player.titleWithYear", { title, year: year }) : title}</span>
             )}
           </div>
         </div>

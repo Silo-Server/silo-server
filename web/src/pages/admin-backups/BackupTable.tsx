@@ -115,7 +115,7 @@ function BackupStatus({
           {active?.operation === "backup"
             ? t("web.admin.backups.table.statusWithProgress", {
                 status: label,
-                percent: String(Math.round(active.progress)),
+                percent: Math.round(active.progress),
               })
             : label}
         </SettingFieldStatus>
@@ -518,7 +518,7 @@ export function BackupTable({
             ? t("web.admin.backups.table.showFewer")
             : t("web.admin.backups.table.showAll", {
                 count: items.length,
-                count_text: String(items.length),
+                count_text: items.length,
               })}
         </Button>
       ) : null}

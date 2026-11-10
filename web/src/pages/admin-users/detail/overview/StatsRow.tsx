@@ -120,7 +120,7 @@ export function StatsRow({
     const label = data
       ? t("web.admin.users.detail.overview.stats.requestsWindow", {
           days: data.window_days,
-          days_text: String(data.window_days),
+          days_text: data.window_days,
         })
       : t("web.admin.users.detail.overview.stats.requests");
     if (usage.isError) {
@@ -167,7 +167,7 @@ export function StatsRow({
           data
             ? t("web.admin.users.detail.overview.stats.plays", {
                 count: data.plays,
-                count_text: String(data.plays),
+                count_text: data.plays,
               })
             : undefined
         }

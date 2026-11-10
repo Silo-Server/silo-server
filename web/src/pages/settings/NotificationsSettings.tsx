@@ -762,7 +762,7 @@ function WebPushSection() {
         <div className="space-y-2">
           <div className="text-muted-foreground text-xs font-medium">
             {t("web.settings.notifications.push.otherDevices", {
-              count: String(otherSubscriptions.length),
+              count: otherSubscriptions.length,
             })}
           </div>
           {otherSubscriptions.map((sub) => {
@@ -998,7 +998,7 @@ function WebhookCard({
     webhook.last_failure_message ||
     (webhook.last_failure_status != null
       ? t("web.settings.notifications.webhooks.httpStatus", {
-          status: String(webhook.last_failure_status),
+          status: webhook.last_failure_status,
         })
       : t("web.settings.notifications.webhooks.httpError"));
   const testResultText = testResult
@@ -1009,7 +1009,7 @@ function WebhookCard({
         {
           outcome: testResult.ok ? "ok" : "failed",
           status: String(testResult.http_status),
-          duration: String(testResult.duration_ms),
+          duration: testResult.duration_ms,
         },
       )
     : "";
@@ -1213,7 +1213,7 @@ function WebhooksSection() {
                 <span className="text-muted-foreground ms-2 text-xs">
                   {t("web.settings.notifications.webhooks.limit", {
                     count: maxPerProfile,
-                    count_text: String(maxPerProfile),
+                    count_text: maxPerProfile,
                   })}
                 </span>
               )}

@@ -140,7 +140,7 @@ export function PolicyVersionHistory({ documentId, activeVersionId }: PolicyVers
                 >
                   <TableCell className="font-medium">
                     {t("web.admin.access.policy.versionNumber", {
-                      version: String(version.version_number),
+                      version: version.version_number,
                     })}
                     {isActive && (
                       <Badge variant="secondary" className="ms-2">

@@ -149,7 +149,7 @@ function GroupSummary({ group, libraries }: { group: AccessGroup; libraries: Lib
     formatQuality(group.max_playback_quality),
     t("web.admin.users.detail.access.library.summaryStreams", {
       count: group.max_streams,
-      count_text: String(group.max_streams),
+      count_text: group.max_streams,
     }),
     approval === undefined ? undefined : t(approval),
   ].filter(Boolean);

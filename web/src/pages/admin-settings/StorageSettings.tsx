@@ -171,7 +171,7 @@ function transitionFailureLabel(
 }
 
 function verifiedObjectsLabel(t: Translate, count: number): string {
-  return t("web.admin.settings.storage.verifiedObjects", { count, count_text: String(count) });
+  return t("web.admin.settings.storage.verifiedObjects", { count, count_text: count });
 }
 
 function recoveryStateTitle(t: Translate, state: string | undefined): string {

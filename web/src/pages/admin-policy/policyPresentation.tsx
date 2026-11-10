@@ -131,7 +131,7 @@ export function PolicyStatusPill({ status, versionNumber, className }: PolicySta
       {t(presentation.label)}
       {status === "live" && versionNumber !== undefined && (
         <span className="text-muted-foreground">
-          {t("web.admin.access.policy.versionNumber", { version: String(versionNumber) })}
+          {t("web.admin.access.policy.versionNumber", { version: versionNumber })}
         </span>
       )}
     </span>

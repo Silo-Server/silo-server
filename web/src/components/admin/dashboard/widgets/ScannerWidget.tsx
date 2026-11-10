@@ -158,7 +158,7 @@ export function ScannerWidget() {
                       <div className="truncate text-[13px] font-semibold">
                         {libraryNames.get(group.libraryID) ??
                           t("web.admin.dashboard.widgets.scanner.libraryFallback", {
-                            id: String(group.libraryID),
+                            id: group.libraryID,
                           })}
                       </div>
                       <div className="text-muted-foreground mt-0.5 truncate text-[11px] tabular-nums">
@@ -170,7 +170,7 @@ export function ScannerWidget() {
                     <div className="text-muted-foreground text-[11px]">
                       {t("web.admin.dashboard.widgets.scanner.moreLibraries", {
                         count: hiddenGroups,
-                        count_text: String(hiddenGroups),
+                        count_text: hiddenGroups,
                       })}
                     </div>
                   ) : null}

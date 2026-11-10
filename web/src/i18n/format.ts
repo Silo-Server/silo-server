@@ -39,10 +39,20 @@ function onError(error: { code?: string }): void {
  * The formatter for a language (or pseudo-locale) tag and its translations.
  * `messages` holds only translations: a message the language lacks formats
  * from the English AST with English plural rules, never with the language's.
+ *
+ * Arabic prints numbers in the digits of `formatLocale` (the browser's default
+ * when it is undefined), as its dates and `Intl` numbers do: Arabic-Indic on
+ * ar-EG, Latin on ar-AE. The formatter's locale names them (`ar-u-nu-arab`),
+ * so the plural `#` follows, and `formatWith` converts printed numbers. Every
+ * other language keeps its plain tag and its output.
  */
-export function createAppIntl(tag: string, messages: Messages): IntlShape {
+export function createAppIntl(tag: string, messages: Messages, formatLocale?: string): IntlShape {
+  const locale =
+    tag === "ar"
+      ? `ar-u-nu-${new Intl.NumberFormat(formatLocale).resolvedOptions().numberingSystem}`
+      : tag;
   return createIntl(
-    { locale: tag, defaultLocale: "en", messages: messages as IntlShape["messages"], onError },
+    { locale, defaultLocale: "en", messages: messages as IntlShape["messages"], onError },
     cache,
   );
 }
@@ -125,32 +135,109 @@ function translation(intl: IntlShape, id: string): MessageFormatElement[] | unde
   return Array.isArray(translated) ? translated : undefined;
 }
 
+// --- Digits -------------------------------------------------------------------
+
+interface LocalDigits {
+  system: string;
+  /** "0" to "9" in this system. */
+  digits: string[];
+  /** Numbers without grouping, as `String(n)` prints them. */
+  numbers: Intl.NumberFormat;
+}
+
+const digitsByLocale = new Map<string, LocalDigits | null>();
+
+/** The formatter's digits when they aren't Latin (Arabic on ar-EG), else null. */
+function nonLatinDigits(intl: IntlShape): LocalDigits | null {
+  let entry = digitsByLocale.get(intl.locale);
+  if (entry === undefined) {
+    const system = new Intl.Locale(intl.locale).numberingSystem;
+    if (system && system !== "latn") {
+      const numbers = new Intl.NumberFormat(intl.locale, {
+        useGrouping: false,
+        maximumFractionDigits: 20,
+      });
+      const digits = Array.from({ length: 10 }, (_, digit) => numbers.format(digit));
+      entry = { system, digits, numbers };
+    } else {
+      entry = null;
+    }
+    digitsByLocale.set(intl.locale, entry);
+  }
+  return entry;
+}
+
+/**
+ * The numbering system the formatter names (Arabic's `latn` or `arab`), for
+ * an `Intl` formatter keyed by the interface language, such as relative times;
+ * undefined for a language that keeps its own.
+ */
+export function messageNumberingSystem(intl: IntlShape = current): string | undefined {
+  return new Intl.Locale(intl.locale).numberingSystem;
+}
+
+/**
+ * A number shown outside a message (a year, a year range), in the digits
+ * messages use: unchanged except in Arabic on a format locale with
+ * Arabic-Indic digits. Never pass a value that is sent, matched, compared or
+ * put in a URL; those keep their Latin digits.
+ */
+export function numberText(value: number | string, intl: IntlShape = current): string {
+  const local = nonLatinDigits(intl);
+  if (!local) return String(value);
+  if (typeof value === "number") return local.numbers.format(value);
+  return value.replace(/[0-9]/g, (digit) => local.digits[Number(digit)] ?? digit);
+}
+
+/**
+ * A season or episode number inside a code ("S2", "E05", "S2021E01"), padded
+ * with zeros to `width`: ASCII digits in every language, because codes are
+ * technical. Pass it where a message prints a code; a phrase ("Season 2",
+ * "5 episodes") passes the number itself and follows the screen's digits.
+ */
+export function codeNumber(value: number, width = 0): string {
+  return String(value).padStart(width, "0");
+}
+
 /** A bare number ("01"), which takes its direction from the letters around it. */
 const DIGITS = /^\p{Nd}+$/u;
 
 /**
- * In a right-to-left interface, wraps each printed string value in Unicode
- * isolates so a left-to-right title keeps its punctuation in place. Selector
- * values and left-to-right output are left alone, so English keeps its bytes.
- * So are bare numbers ("01" in "S{season}E{episode}"): an isolate would cut a
- * number off the letters it belongs to and reorder it. A range or a signed
- * number ("2-3", "8+") keeps its isolate, or Arabic text would reorder it.
+ * Prepares the printed values of a message (selector values are left alone,
+ * or no branch would match):
+ *
+ * - When the formatter's digits aren't Latin, a number value prints in those
+ *   digits, as the plural `#` does. Only in the language's own translation:
+ *   an English fallback prints `#` in Latin, so its values stay Latin too.
+ *   Strings are never changed; pass a number shown as a number.
+ * - In a right-to-left interface, every value printed as text is wrapped in
+ *   Unicode isolates so a left-to-right title keeps its punctuation in place. Bare
+ *   numbers ("01" in "S{season}E{episode}") are not: an isolate would cut a
+ *   number off the letters it belongs to and reorder it. A range or a signed
+ *   number ("2-3", "8+") keeps its isolate, or Arabic text would reorder it.
+ *
+ * Left-to-right output in Latin digits is unchanged, so English keeps its bytes.
  */
-function isolateValues<V extends RichValues>(
+function prepareValues<V extends RichValues>(
   intl: IntlShape,
   ast: MessageFormatElement[],
   values: V | undefined,
+  translated: boolean,
 ): V | undefined {
-  if (!values || interfaceDirection(intl.locale) !== "rtl") return values;
+  if (!values) return values;
+  const rtl = interfaceDirection(intl.locale) === "rtl";
+  const localDigits = translated && nonLatinDigits(intl) !== null;
+  if (!rtl && !localDigits) return values;
   const { printed, selectors } = argumentUse(ast);
-  const isolated: RichValues = { ...values };
+  const prepared: RichValues = { ...values };
   for (const name of printed) {
-    const value = values[name];
-    if (typeof value === "string" && !selectors.has(name) && !DIGITS.test(value)) {
-      isolated[name] = FSI + value + PDI;
-    }
+    if (selectors.has(name)) continue;
+    let value = values[name];
+    if (typeof value === "number") value = localDigits ? numberText(value, intl) : String(value);
+    if (rtl && typeof value === "string" && !DIGITS.test(value)) value = FSI + value + PDI;
+    prepared[name] = value;
   }
-  return isolated as V;
+  return prepared as V;
 }
 
 // --- Formatting -------------------------------------------------------------
@@ -174,10 +261,13 @@ export function formatWith(intl: IntlShape, id: MessageKey, values?: RichValues)
     if (id.startsWith(ADMIN_MESSAGE_PREFIX)) queueMicrotask(requestAdminMessages);
     return "";
   }
-  const ast = translation(intl, id) ?? english;
+  const translated = translation(intl, id);
   return intl.formatMessage(
     { id, defaultMessage: english },
-    isolateValues(intl, ast, values) as Record<string, PrimitiveType>,
+    prepareValues(intl, translated ?? english, values, translated !== undefined) as Record<
+      string,
+      PrimitiveType
+    >,
   );
 }
 
@@ -220,7 +310,7 @@ export function serverTextWith(
   for (const name of [...printed, ...selectors]) {
     if (typeof args?.[name] !== "string") return serverEnglish;
   }
-  return intl.formatMessage({ id: key }, isolateValues(intl, ast, args));
+  return intl.formatMessage({ id: key }, prepareValues(intl, ast, args, true));
 }
 
 /** `serverTextWith` in the current language, for code outside components. */

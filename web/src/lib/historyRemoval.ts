@@ -47,7 +47,7 @@ export function historyRemovalDialogDescription(
   if (targets.length > 1) {
     return t("web.catalog.history.dialogBodySelected", {
       count: targets.length,
-      selected: String(targets.length),
+      selected: targets.length,
     });
   }
   return targets[0]?.scope === "show"

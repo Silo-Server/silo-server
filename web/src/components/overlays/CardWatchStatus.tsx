@@ -2,7 +2,7 @@ import { Check } from "lucide-react";
 import type { CSSProperties } from "react";
 
 import type { MediaItemUserState } from "@/api/types";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 
 import {
   EDGE_INSET,
@@ -64,13 +64,13 @@ export default function CardWatchStatus({ userState }: CardWatchStatusProps) {
           role="img"
           aria-label={t("web.common.overlays.episodesLeft", {
             count: left,
-            count_text: String(left),
+            count_text: left,
           })}
           data-watch-status-remaining={left}
           className="absolute grid place-items-center rounded-full border border-white/20 bg-black/65 px-[0.4em] leading-none font-bold text-white tabular-nums shadow-sm backdrop-blur-sm"
           style={style}
         >
-          {left}
+          {numberText(left ?? 0)}
         </span>
       )}
     </div>

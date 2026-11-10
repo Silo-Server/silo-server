@@ -219,7 +219,7 @@ function ConnectionTestResult({
           : failed > 0
             ? t("web.admin.settings.signIn.provider.test.someFailed", {
                 total: result.steps.length,
-                failed: String(failed),
+                failed: failed,
               })
             : t("web.admin.settings.signIn.provider.test.didNotPass")}
       </h4>
@@ -289,7 +289,7 @@ function Step({
         </span>
         <h4 id={headingId} className="text-sm font-semibold">
           {t("web.admin.settings.signIn.provider.step.heading", {
-            number: String(number),
+            number: number,
             title,
             hidden: (chunks) => <span className="sr-only">{chunks}</span>,
           })}

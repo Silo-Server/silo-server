@@ -36,7 +36,7 @@ function statusVariant(status: string) {
 }
 
 function countValues(count: number) {
-  return { count, count_text: String(count) };
+  return { count, count_text: count };
 }
 
 function jobDescription(job: AdminJob, t: Translate) {
@@ -108,13 +108,13 @@ function jobResult(job: AdminJob, t: Translate) {
         return t("web.admin.common.jobHistory.result.nothingToRefresh");
       }
       return t("web.admin.common.jobHistory.result.refreshSummary", {
-        total: String(total),
-        with_ids: String(withIDs),
-        without_ids: String(withoutIDs),
-        refreshed_ok: String(refreshedOK),
-        refreshed_failed: String(refreshedFailed),
-        pipeline_ok: String(pipelineOK),
-        pipeline_failed: String(pipelineFailed),
+        total: Number(total),
+        with_ids: Number(withIDs),
+        without_ids: Number(withoutIDs),
+        refreshed_ok: Number(refreshedOK),
+        refreshed_failed: Number(refreshedFailed),
+        pipeline_ok: Number(pipelineOK),
+        pipeline_failed: Number(pipelineFailed),
       });
     }
     case "delete_library": {

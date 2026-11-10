@@ -22,14 +22,17 @@ describe("LocaleProvider", () => {
       load: "resolve",
       lang: "ar",
       dir: "rtl",
+      // The formatter names the digits of the format locale, the chosen `ar`.
+      intlLocale: `ar-u-nu-${new Intl.NumberFormat("ar").resolvedOptions().numberingSystem}`,
     },
     {
       name: "falls back to English when its catalog fails",
       load: "reject",
       lang: "en",
       dir: "ltr",
+      intlLocale: "en",
     },
-  ] as const)("$name", async ({ load, lang, dir }) => {
+  ] as const)("$name", async ({ load, lang, dir, intlLocale }) => {
     vi.mocked(loadTranslations).mockImplementation(() =>
       load === "resolve" ? Promise.resolve({}) : Promise.reject(new Error("chunk gone")),
     );
@@ -45,6 +48,6 @@ describe("LocaleProvider", () => {
     await waitFor(() => expect(document.documentElement.lang).not.toBe(""));
     expect(document.documentElement).toHaveAttribute("lang", lang);
     expect(document.documentElement).toHaveAttribute("dir", dir);
-    expect(appIntl().locale).toBe(lang);
+    expect(appIntl().locale).toBe(intlLocale);
   });
 });

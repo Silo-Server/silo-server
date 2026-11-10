@@ -367,13 +367,13 @@ export function SubtitleTranslateModal({
                   {quotaExhausted
                     ? t("web.subtitles.translate.quotaExhausted", {
                         limit: quota.limit,
-                        limit_text: String(quota.limit),
+                        limit_text: quota.limit,
                         period: quotaPeriodLabel,
                       })
                     : t("web.subtitles.translate.quotaRemaining", {
                         limit: quota.limit,
-                        limit_text: String(quota.limit),
-                        remaining: String(quota.remaining),
+                        limit_text: quota.limit,
+                        remaining: quota.remaining,
                         period: quotaPeriodLabel,
                       })}
                 </p>

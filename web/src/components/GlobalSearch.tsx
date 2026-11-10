@@ -189,7 +189,7 @@ function GlobalSearchResultRow({
           <div className="truncate text-sm font-medium">{item.title}</div>
           <div className="text-muted-foreground text-xs">
             {item.year > 0
-              ? t("web.search.yearAndType", { year: String(item.year), type: typeLabel })
+              ? t("web.search.yearAndType", { year: item.year, type: typeLabel })
               : typeLabel}
           </div>
         </div>

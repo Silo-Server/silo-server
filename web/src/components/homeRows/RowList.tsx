@@ -98,8 +98,8 @@ export function RowList({
       return rowTitle(row);
     };
     const at = (id: UniqueIdentifier) => ({
-      position: String(shownRows.findIndex((row) => row.id === id) + 1),
-      total: String(shownRows.length),
+      position: shownRows.findIndex((row) => row.id === id) + 1,
+      total: shownRows.length,
     });
     return {
       onDragStart: ({ active }) => {

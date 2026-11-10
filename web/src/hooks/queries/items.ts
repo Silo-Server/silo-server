@@ -134,7 +134,7 @@ export function useRefreshItemMetadata() {
         toast.success(
           t("web.item.toast.refreshedNewFiles", {
             count: newFiles,
-            new_files: String(newFiles),
+            new_files: newFiles,
           }),
           { id: context?.toastID },
         );
@@ -615,7 +615,7 @@ export function useSplitItem() {
       toast.success(
         t("web.item.toast.splitMoved", {
           count: result.files_moved,
-          files_moved: String(result.files_moved),
+          files_moved: result.files_moved,
         }),
       );
       await Promise.all([

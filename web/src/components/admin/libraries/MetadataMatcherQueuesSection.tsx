@@ -176,7 +176,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                     <TableCell className="font-medium">
                       {library?.name ??
                         t("web.admin.common.libraryEditor.matcher.libraryFallback", {
-                          id: String(queue.library_id),
+                          id: queue.library_id,
                         })}
                     </TableCell>
                     <TableCell className="text-end tabular-nums">{queue.pending_count}</TableCell>
@@ -255,7 +255,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                                 "web.admin.common.libraryEditor.matcher.scoreOfBar",
                                                 {
                                                   score: formatDecimal(candidate.score, 1),
-                                                  bar: String(bar),
+                                                  bar: bar,
                                                 },
                                               )}
                                         </span>
@@ -296,7 +296,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                             <div className="flex items-center justify-between pt-1">
                               <span className="text-muted-foreground text-xs">
                                 {t("web.admin.common.libraryEditor.matcher.page", {
-                                  page: String(detailPageIndex + 1),
+                                  page: detailPageIndex + 1,
                                 })}
                               </span>
                               <div className="flex gap-2">

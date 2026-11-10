@@ -101,7 +101,7 @@ function TitleSeasons({ seasons }: { seasons: RequestMediaSeason[] }) {
   return (
     <SeasonRail count={seasons.length}>
       {seasons.map((season) => {
-        const name = t("web.detail.seasons.numbered", { season: String(season.season_number) });
+        const name = t("web.detail.seasons.numbered", { season: season.season_number });
         const poster = tmdbImageURL(season.poster_path);
         return (
           <li key={season.season_number} className="embla__slide w-[160px] shrink-0 sm:w-[170px]">

@@ -49,7 +49,7 @@ import type {
 } from "@/api/types";
 import { notificationKeys } from "./keys";
 import { toast } from "sonner";
-import { t } from "@/i18n";
+import { codeNumber, t } from "@/i18n";
 
 const NOTIFICATIONS_PAGE_SIZE = 25;
 
@@ -613,7 +613,7 @@ export function formatEpisodeCode(
     return null;
   }
   return t("web.notifications.queries.episodeCode", {
-    season: String(notification.season_number),
-    episode: String(notification.episode_number),
+    season: codeNumber(notification.season_number),
+    episode: codeNumber(notification.episode_number),
   });
 }

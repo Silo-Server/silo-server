@@ -340,7 +340,7 @@ export default function AdminPlaybackHistory() {
                               className="hover:text-primary font-medium transition-colors hover:underline"
                             >
                               {row.username ||
-                                t("web.admin.activity.userFallback", { id: String(row.user_id) })}
+                                t("web.admin.activity.userFallback", { id: row.user_id })}
                             </Link>
                           </TableCell>
                           <TableCell>
@@ -425,9 +425,9 @@ export default function AdminPlaybackHistory() {
                   <div className="flex items-center gap-4">
                     <span className="text-muted-foreground text-sm">
                       {t("web.admin.history.pagination.range", {
-                        from: String(page * pageSize + 1),
-                        to: String(Math.min((page + 1) * pageSize, total)),
-                        total: String(total),
+                        from: page * pageSize + 1,
+                        to: Math.min((page + 1) * pageSize, total),
+                        total: total,
                       })}
                     </span>
                     <Select
@@ -497,7 +497,7 @@ function historyRowTitle(
     title:
       row.media_title ||
       row.media_item_id ||
-      t("web.common.activity.title.file", { id: String(row.media_file_id) }),
+      t("web.common.activity.title.file", { id: row.media_file_id }),
     detail: "",
   };
 }
@@ -542,17 +542,17 @@ function formatDuration(seconds: number | null, t: Translate) {
 
   if (hours > 0) {
     return t("web.admin.history.duration.hoursMinutes", {
-      hours: String(hours),
-      minutes: String(minutes),
+      hours: hours,
+      minutes: minutes,
     });
   }
   if (minutes > 0) {
     return t("web.admin.history.duration.minutesSeconds", {
-      minutes: String(minutes),
-      seconds: String(secs),
+      minutes: minutes,
+      seconds: secs,
     });
   }
-  return t("web.admin.history.duration.seconds", { seconds: String(secs) });
+  return t("web.admin.history.duration.seconds", { seconds: secs });
 }
 
 function formatDateTime(value: string) {

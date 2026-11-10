@@ -561,8 +561,8 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
           throw new Error(
             t("web.admin.common.users.resetAllStopped", {
               count: keys.length,
-              count_text: String(keys.length),
-              completed: String(completed),
+              count_text: keys.length,
+              completed: completed,
               reason:
                 err instanceof Error
                   ? err.message

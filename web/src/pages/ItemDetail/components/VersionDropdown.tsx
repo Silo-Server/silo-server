@@ -154,7 +154,7 @@ function VersionDropdown({
                     <div className="flex items-center gap-2">
                       <span className="truncate text-sm font-medium">
                         {summary ||
-                          t("web.detail.versions.fileIdFallback", { id: String(version.file_id) })}
+                          t("web.detail.versions.fileIdFallback", { id: version.file_id })}
                       </span>
                       {rangeLabel ? (
                         <Badge
@@ -186,7 +186,7 @@ function buildVersionTriggerSummary(t: Translate, version: FileVersion): string 
   return (
     buildQualitySummary(version) ||
     buildDetailLine(version) ||
-    t("web.detail.versions.fileIdFallback", { id: String(version.file_id) })
+    t("web.detail.versions.fileIdFallback", { id: version.file_id })
   );
 }
 
@@ -286,7 +286,7 @@ function buildEditionDetail(t: Translate, option: EditionOption): string {
     parts.push(
       t("web.detail.versions.versionCount", {
         count: option.versions.length,
-        count_text: String(option.versions.length),
+        count_text: option.versions.length,
       }),
     );
   }

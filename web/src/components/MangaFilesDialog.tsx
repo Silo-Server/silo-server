@@ -19,7 +19,7 @@ function fileRowLabel(file: MangaChapterFile, t: Translate): string {
     return prettifyVolumeLabel(file.volume);
   }
   if (typeof file.chapter_index === "number") {
-    return t("web.item.mangaFiles.chapterNumber", { number: String(file.chapter_index) });
+    return t("web.item.mangaFiles.chapterNumber", { number: file.chapter_index });
   }
   return file.title?.trim() || t("web.item.mangaFiles.chapter");
 }
@@ -56,7 +56,7 @@ export default function MangaFilesDialog({
             {files.length > 0
               ? t("web.item.mangaFiles.summary", {
                   count: files.length,
-                  file_count: String(files.length),
+                  file_count: files.length,
                   size: formatFileSize(totalBytes),
                 })
               : t("web.item.mangaFiles.description")}

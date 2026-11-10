@@ -97,7 +97,7 @@ export function AdvancedSection({
       ? t("web.settings.advancedSection.accessibleLabel", {
           title,
           count,
-          count_text: String(count),
+          count_text: count,
         })
       : title;
 

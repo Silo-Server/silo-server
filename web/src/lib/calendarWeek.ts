@@ -41,7 +41,7 @@ export function formatDayHeading(dateStr: string): string {
   const d = parseDate(dateStr);
   const weekday = d.toLocaleDateString(formatLocale(), { weekday: "long" });
   const month = d.toLocaleDateString(formatLocale(), { month: "long" });
-  const heading = t("web.calendar.dayHeading", { weekday, month, day: String(d.getDate()) });
+  const heading = t("web.calendar.dayHeading", { weekday, month, day: d.getDate() });
   // Languages that write weekdays in lower case ("miércoles, 4 de noviembre")
   // still start a heading with a capital; skip any leading isolate marks.
   // English keeps its bytes, even with a browser that names days in another
@@ -79,9 +79,9 @@ export function formatWeekRangeLabel(weekStart: string): string {
     const month = start.toLocaleDateString(formatLocale(), { month: "short" });
     return t("web.calendar.weekRangeSameMonth", {
       month,
-      start_day: String(start.getDate()),
-      end_day: String(end.getDate()),
-      year: String(start.getFullYear()),
+      start_day: start.getDate(),
+      end_day: end.getDate(),
+      year: start.getFullYear(),
     });
   }
   return t("web.calendar.weekRange", {

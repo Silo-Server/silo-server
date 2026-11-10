@@ -638,10 +638,7 @@ export function getPlaybackSessionTitle(session: AdminSession): string {
   if (session.series_name && session.season_number != null && session.episode_number != null) {
     return session.episode_name || `S${session.season_number}E${session.episode_number}`;
   }
-  return (
-    session.media_title ||
-    t("web.common.activity.title.file", { id: String(session.media_file_id) })
-  );
+  return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
 export function getPlaybackSessionSubtitle(session: AdminSession): string | null {

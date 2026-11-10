@@ -234,7 +234,7 @@ const SEEK_ROW_TEXT: Record<
 };
 
 function formatSeconds(t: Translate, seconds: number) {
-  return t("web.settings.playback.seek.seconds", { count: seconds, count_text: String(seconds) });
+  return t("web.settings.playback.seek.seconds", { count: seconds, count_text: seconds });
 }
 
 /**

@@ -109,23 +109,23 @@ export function effectivePollIntervalSeconds(
 /** "45 s", "10 min", "2 h", "1 h 30 min", "1 day". */
 export function formatInterval(seconds: number): string {
   if (seconds < 60) {
-    return t("web.admin.autoscan.sources.interval.seconds", { seconds: String(seconds) });
+    return t("web.admin.autoscan.sources.interval.seconds", { seconds: seconds });
   }
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) {
-    return t("web.admin.autoscan.sources.interval.minutes", { minutes: String(minutes) });
+    return t("web.admin.autoscan.sources.interval.minutes", { minutes: minutes });
   }
   const days = Math.floor(minutes / 1440);
   if (days >= 1 && minutes % 1440 === 0) {
-    return t("web.admin.autoscan.sources.interval.days", { count: days, count_text: String(days) });
+    return t("web.admin.autoscan.sources.interval.days", { count: days, count_text: days });
   }
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest === 0
-    ? t("web.admin.autoscan.sources.interval.hours", { hours: String(hours) })
+    ? t("web.admin.autoscan.sources.interval.hours", { hours: hours })
     : t("web.admin.autoscan.sources.interval.hoursMinutes", {
-        hours: String(hours),
-        minutes: String(rest),
+        hours: hours,
+        minutes: rest,
       });
 }
 

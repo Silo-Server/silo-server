@@ -57,9 +57,9 @@ export function VotingStage({
           eyebrow={
             leader.vote_count > 0
               ? t("web.watchTogether.voting.leading", {
-                  votes: String(leader.vote_count),
+                  votes: leader.vote_count,
                   total: totalVotes,
-                  total_text: String(totalVotes),
+                  total_text: totalVotes,
                 })
               : t("web.watchTogether.voting.firstSuggestion")
           }

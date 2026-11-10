@@ -78,13 +78,13 @@ export function validateSchemaValues(
         errors[field.key] = t("web.common.schemaForm.minLength", {
           label,
           count: v.min_length,
-          count_text: String(v.min_length),
+          count_text: v.min_length,
         });
       } else if (v?.max_length && raw.length > v.max_length) {
         errors[field.key] = t("web.common.schemaForm.maxLength", {
           label,
           count: v.max_length,
-          count_text: String(v.max_length),
+          count_text: v.max_length,
         });
       }
     }
@@ -92,9 +92,9 @@ export function validateSchemaValues(
       const n = Number(raw);
       if (Number.isNaN(n)) errors[field.key] = t("web.common.schemaForm.notNumber", { label });
       else if (v?.has_min && n < (v.min ?? 0))
-        errors[field.key] = t("web.common.schemaForm.min", { label, min: String(v.min) });
+        errors[field.key] = t("web.common.schemaForm.min", { label, min: v.min ?? 0 });
       else if (v?.has_max && n > (v.max ?? 0))
-        errors[field.key] = t("web.common.schemaForm.max", { label, max: String(v.max) });
+        errors[field.key] = t("web.common.schemaForm.max", { label, max: v.max ?? 0 });
     }
   }
   return errors;

@@ -750,7 +750,7 @@ function SubtitleOffsetControl({
         variant="outline"
         size="icon"
         aria-label={t("web.settings.subtitleAppearance.timing.earlier", {
-          ms: String(SUBTITLE_OFFSET_STEP_MS),
+          ms: SUBTITLE_OFFSET_STEP_MS,
         })}
         disabled={disabled || valueMs <= -SUBTITLE_SYNC_MAX_MS}
         onClick={() => onChange(valueMs - SUBTITLE_OFFSET_STEP_MS)}
@@ -769,7 +769,7 @@ function SubtitleOffsetControl({
         variant="outline"
         size="icon"
         aria-label={t("web.settings.subtitleAppearance.timing.later", {
-          ms: String(SUBTITLE_OFFSET_STEP_MS),
+          ms: SUBTITLE_OFFSET_STEP_MS,
         })}
         disabled={disabled || valueMs >= SUBTITLE_SYNC_MAX_MS}
         onClick={() => onChange(valueMs + SUBTITLE_OFFSET_STEP_MS)}

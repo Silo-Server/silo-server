@@ -88,7 +88,7 @@ export function ScanActivityWidget() {
                   <TableCell className="max-w-[14rem] truncate text-[13px] font-semibold">
                     {libraryNames.get(scan.library_id) ??
                       t("web.admin.dashboard.widgets.scanActivity.libraryFallback", {
-                        id: String(scan.library_id),
+                        id: scan.library_id,
                       })}
                   </TableCell>
                   <TableCell className="text-muted-foreground hidden text-[11px] sm:table-cell">

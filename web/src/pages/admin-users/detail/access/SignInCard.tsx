@@ -201,7 +201,7 @@ export function SignInCard({
     used !== undefined ? (
       <span className="text-muted-foreground text-xs font-normal">
         {SPACE}
-        {t("web.admin.users.detail.access.signIn.profilesUsedSuffix", { used: String(used) })}
+        {t("web.admin.users.detail.access.signIn.profilesUsedSuffix", { used: used })}
       </span>
     ) : null;
 
@@ -308,7 +308,7 @@ export function SignInCard({
             }
             description={
               used !== undefined
-                ? t("web.admin.users.detail.access.signIn.profilesUsed", { used: String(used) })
+                ? t("web.admin.users.detail.access.signIn.profilesUsed", { used: used })
                 : undefined
             }
             changed={changed.has(PROFILES_ROW)}

@@ -41,16 +41,16 @@ export function formatRelativeTime(
   if (diffMinutes < 60) {
     return t("web.common.date.minutesAgo", {
       count: diffMinutes,
-      count_text: String(diffMinutes),
+      count_text: diffMinutes,
     });
   }
   const diffHours = toUnit(diffMs / 3_600_000);
   if (diffHours < 24) {
-    return t("web.common.date.hoursAgo", { count: diffHours, count_text: String(diffHours) });
+    return t("web.common.date.hoursAgo", { count: diffHours, count_text: diffHours });
   }
   const diffDays = toUnit(diffMs / 86_400_000);
   if (diffDays < (options?.absoluteAfterDays ?? Number.POSITIVE_INFINITY)) {
-    return t("web.common.date.daysAgo", { count: diffDays, count_text: String(diffDays) });
+    return t("web.common.date.daysAgo", { count: diffDays, count_text: diffDays });
   }
   return (options?.absolute ?? formatDate)(date);
 }

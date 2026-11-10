@@ -418,8 +418,8 @@ export function RequestRoutingList({
     t("web.admin.settings.requests.list.dragUnknownRule");
   const at = (id: UniqueIdentifier, position: UniqueIdentifier = id) => ({
     rule: nameOf(id),
-    position: String(ids.indexOf(String(position)) + 1),
-    total: String(ids.length),
+    position: ids.indexOf(String(position)) + 1,
+    total: ids.length,
   });
   const announcements: Announcements = {
     onDragStart: ({ active }) => t("web.admin.settings.requests.list.dragStart", at(active.id)),

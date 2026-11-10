@@ -302,7 +302,7 @@ export function SubtitlesStep() {
     enabledProviders > 0
       ? t("web.setup.subtitles.summary", {
           count: enabledProviders,
-          shown: String(enabledProviders),
+          shown: enabledProviders,
         })
       : undefined,
   );

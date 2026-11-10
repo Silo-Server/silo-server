@@ -185,7 +185,7 @@ export function VolumeControl({
         aria-valuemax={100}
         aria-valuenow={Math.round(displayVolume * 100)}
         aria-valuetext={t("web.player.volume.valueText", {
-          percent: String(Math.round(displayVolume * 100)),
+          percent: Math.round(displayVolume * 100),
         })}
         className={`group/vol-slider relative flex h-6 w-24 cursor-pointer touch-none items-center rounded-full focus-visible:ring-2 focus-visible:outline-none ${sliderFocusClass}`}
         onMouseDown={handleMouseDown}

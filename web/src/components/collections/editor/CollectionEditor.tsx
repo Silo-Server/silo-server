@@ -176,7 +176,7 @@ function useUntickWarning(
   const shown = titles.slice(0, 3).join(", ") + (titles.length > 3 ? "…" : "");
   return t("web.collections.editor.untickWarning", {
     count: titles.length,
-    count_text: String(titles.length),
+    count_text: titles.length,
     libraries: joinNames(names.filter(Boolean)),
     titles: shown,
   });

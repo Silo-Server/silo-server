@@ -373,8 +373,8 @@ export default function PreparationTab() {
         <div className="text-muted-foreground text-[11px]">
           {t(`${K}.showing`, {
             total: items.length,
-            shown: String(filtered.length),
-            total_text: String(items.length),
+            shown: filtered.length,
+            total_text: items.length,
           })}
         </div>
       )}
@@ -760,7 +760,7 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2 text-[11px]">
             <span className="font-semibold tabular-nums">
-              {t(`${K}.progress.percent`, { percent: String(Math.floor(percent)) })}
+              {t(`${K}.progress.percent`, { percent: Math.floor(percent) })}
             </span>
             <span className="text-muted-foreground truncate tabular-nums">{detail}</span>
           </div>
@@ -803,8 +803,8 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
           <div className="text-muted-foreground line-clamp-2 text-[10px]">
             {[
               t(`${K}.progress.attempt`, {
-                attempt: String(prep.attempts + 1),
-                max: String(prep.max_attempts),
+                attempt: prep.attempts + 1,
+                max: prep.max_attempts,
                 retry_in: formatRetryIn(prep.next_retry_at),
               }),
               prep.error,
@@ -880,7 +880,7 @@ function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
         {rest.length > 0
           ? t(`${K}.requesters.deviceMore`, {
               count: rest.length,
-              count_text: String(rest.length),
+              count_text: rest.length,
               device: requesterDevice(first),
             })
           : requesterDevice(first)}
@@ -998,7 +998,7 @@ function PreparationDetails({
                     ? t(`${K}.details.encodedOfPercent`, {
                         encoded: formatClock(prep.progress.encoded_seconds),
                         duration: formatClock(prep.progress.duration_seconds),
-                        percent: String(Math.floor(percent)),
+                        percent: Math.floor(percent),
                       })
                     : t(`${K}.details.encodedOf`, {
                         encoded: formatClock(prep.progress.encoded_seconds),
@@ -1087,18 +1087,18 @@ function jobStatus(t: Translate, prep: AdminDownloadPreparation): string {
     case "running":
       return t(`${K}.status.running`, {
         label: preparationRunningLabel(prep),
-        attempt: String(Math.max(prep.attempts, 1)),
-        max: String(prep.max_attempts),
+        attempt: Math.max(prep.attempts, 1),
+        max: prep.max_attempts,
       });
     case "queued":
       return prep.queue_position
-        ? t(`${K}.status.queuedPosition`, { position: String(prep.queue_position) })
+        ? t(`${K}.status.queuedPosition`, { position: prep.queue_position })
         : t(`${K}.status.queued`);
     case "retrying":
       return t(`${K}.status.retrying`, {
         retry_in: formatRetryIn(prep.next_retry_at),
-        attempt: String(prep.attempts + 1),
-        max: String(prep.max_attempts),
+        attempt: prep.attempts + 1,
+        max: prep.max_attempts,
       });
     case "paused": {
       const ago = formatAgo(prep.paused_at);

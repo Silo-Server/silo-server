@@ -43,7 +43,7 @@ export function ItemLibraryPicker({ libraryIds, value, onChange }: ItemLibraryPi
         <SelectContent>
           {libraryIds.map((id) => (
             <SelectItem key={id} value={String(id)}>
-              {names.get(id) ?? t("web.item.libraryPicker.fallbackName", { id: String(id) })}
+              {names.get(id) ?? t("web.item.libraryPicker.fallbackName", { id: id })}
             </SelectItem>
           ))}
         </SelectContent>

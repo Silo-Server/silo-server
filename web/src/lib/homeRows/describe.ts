@@ -282,7 +282,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
       return [describeRecentlyAdded(config, onHome)];
     case "new_to_library": {
       const days = num(config.lookback_days) ?? 30;
-      return [t("web.home.rows.describe.newToLibrary", { count: days, days: String(days) })];
+      return [t("web.home.rows.describe.newToLibrary", { count: days, days: days })];
     }
     case "trending_on_server": {
       const window = SERVER_WINDOWS[str(config.window) ?? ""];
@@ -346,7 +346,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
           votes: MIN_VOTES,
           plays,
           // The count as typed: `#` would group it (1,234).
-          plays_text: String(plays),
+          plays_text: plays,
         }),
       ];
     }
@@ -364,7 +364,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
           rating: formatDecimal(7, 1),
           votes: MIN_VOTES,
           count: days,
-          days: String(days),
+          days: days,
         }),
       ];
     }
@@ -381,7 +381,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
       return [
         t("web.home.rows.describe.shortWatches", {
           count: minutes,
-          minutes: String(minutes),
+          minutes: minutes,
           rating: rating(config.min_rating, 6),
           votes: MIN_VOTES,
         }),
@@ -397,7 +397,7 @@ function describeKind(row: HomeRow, context: DescribeContext): DescriptionPart[]
 }
 
 export function titleCount(count: number): string {
-  return t("web.home.rows.describe.titleCount", { count, count_text: String(count) });
+  return t("web.home.rows.describe.titleCount", { count, count_text: count });
 }
 
 /**

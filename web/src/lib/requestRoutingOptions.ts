@@ -118,7 +118,7 @@ export const ROUTING_DECADES: readonly { readonly label: string; from: number; t
   1970, 1980, 1990, 2000, 2010, 2020,
 ].map((from) => ({
   get label() {
-    return t("web.admin.common.requests.decade", { decade: String(from) });
+    return t("web.admin.common.requests.decade", { decade: from });
   },
   from,
   to: from + 9,

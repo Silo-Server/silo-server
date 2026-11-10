@@ -39,8 +39,8 @@ export function policyMutationMessage(error: unknown, fallback: string) {
   return t("web.admin.common.policy.outcomeUnknown", { fallback });
 }
 export function policyApplyMessage(result: PolicyApplyResult) {
-  const generation = String(result.persisted_generation);
-  const loaded = String(result.application.loaded_generation);
+  const generation = result.persisted_generation;
+  const loaded = result.application.loaded_generation;
   if (!result.application.local_applied)
     return t("web.admin.common.policy.savedNotReloaded", { generation });
   if (result.application.publication_failed)

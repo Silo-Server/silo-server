@@ -108,11 +108,11 @@ export interface ProviderTestState {
 
 function testedLabel(t: Translate, test: ProviderTestState): string {
   const seconds = Math.max(0, Math.round((Date.now() - test.at) / 1000));
-  const duration = String(test.durationMs);
+  const duration = test.durationMs;
   return seconds < 60
-    ? t("web.settings.providerTile.testedSeconds", { seconds: String(seconds), duration })
+    ? t("web.settings.providerTile.testedSeconds", { seconds, duration })
     : t("web.settings.providerTile.testedMinutes", {
-        minutes: String(Math.round(seconds / 60)),
+        minutes: Math.round(seconds / 60),
         duration,
       });
 }

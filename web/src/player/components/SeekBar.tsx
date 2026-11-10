@@ -293,12 +293,12 @@ export function SeekBar({
       const sec = s % 60;
       if (m > 0 && sec > 0) {
         return t("web.player.seekBar.positionMinutesSeconds", {
-          minutes: t("web.player.seekBar.positionMinutes", { minutes: m, minutes_text: String(m) }),
+          minutes: t("web.player.seekBar.positionMinutes", { minutes: m, minutes_text: m }),
           seconds: t("web.player.seekBar.positionSeconds", { seconds: sec }),
         });
       }
       if (m > 0) {
-        return t("web.player.seekBar.positionMinutes", { minutes: m, minutes_text: String(m) });
+        return t("web.player.seekBar.positionMinutes", { minutes: m, minutes_text: m });
       }
       return t("web.player.seekBar.positionSeconds", { seconds: sec });
     },

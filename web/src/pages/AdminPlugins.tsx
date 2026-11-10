@@ -95,11 +95,11 @@ function ResultCount({ shown, total }: { shown: number; total: number }) {
   return (
     <span className="text-muted-foreground ms-auto text-xs tabular-nums" aria-live="polite">
       {shown === total
-        ? t("web.admin.plugins.list.resultCount", { count: total, count_text: String(total) })
+        ? t("web.admin.plugins.list.resultCount", { count: total, count_text: total })
         : t("web.admin.plugins.list.resultCountFiltered", {
             count: total,
-            count_text: String(total),
-            shown: String(shown),
+            count_text: total,
+            shown: shown,
           })}
     </span>
   );

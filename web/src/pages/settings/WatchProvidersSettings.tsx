@@ -59,19 +59,17 @@ function formatRelativeTime(t: Translate, value?: string) {
 
 function formatRetryAfter(t: Translate, seconds?: number) {
   if (!seconds || seconds <= 0) return "";
-  if (seconds < 60)
-    return t("web.settings.watchProviders.duration.seconds", { seconds: String(seconds) });
+  if (seconds < 60) return t("web.settings.watchProviders.duration.seconds", { seconds: seconds });
   const minutes = Math.ceil(seconds / 60);
-  if (minutes < 60)
-    return t("web.settings.watchProviders.duration.minutes", { minutes: String(minutes) });
+  if (minutes < 60) return t("web.settings.watchProviders.duration.minutes", { minutes: minutes });
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return remainingMinutes > 0
     ? t("web.settings.watchProviders.duration.hoursMinutes", {
-        hours: String(hours),
-        minutes: String(remainingMinutes),
+        hours: hours,
+        minutes: remainingMinutes,
       })
-    : t("web.settings.watchProviders.duration.hours", { hours: String(hours) });
+    : t("web.settings.watchProviders.duration.hours", { hours: hours });
 }
 
 type StatusVariant = "connected" | "disconnected" | "pending" | "error";

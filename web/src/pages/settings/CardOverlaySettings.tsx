@@ -420,8 +420,8 @@ export function CardOverlaySettings({ onShortcutsPicked }: { onShortcutsPicked?:
                         {onCount === 0
                           ? t("web.settings.cardOverlay.noneOn")
                           : t("web.settings.cardOverlay.someOn", {
-                              on: String(onCount),
-                              total: String(overlays.length),
+                              on: onCount,
+                              total: overlays.length,
                             })}
                       </span>
                     </AccordionTrigger>

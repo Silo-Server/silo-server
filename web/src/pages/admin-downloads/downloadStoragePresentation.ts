@@ -150,10 +150,10 @@ export function storageWarnings(storage: AdminDownloadStorage): StorageWarning[]
         }),
         body: usage?.shares_scratch
           ? t("web.admin.downloads.presentation.warning.fill.bodyScratch", {
-              ceiling: String(ceiling),
-              scratch: String(SCRATCH_ADMISSION_PERCENT),
+              ceiling: ceiling,
+              scratch: SCRATCH_ADMISSION_PERCENT,
             })
-          : t("web.admin.downloads.presentation.warning.fill.body", { ceiling: String(ceiling) }),
+          : t("web.admin.downloads.presentation.warning.fill.body", { ceiling: ceiling }),
         location: location.key,
         action: "edit_location",
       });
@@ -224,7 +224,7 @@ export function storageWarnings(storage: AdminDownloadStorage): StorageWarning[]
       title: t("web.admin.downloads.presentation.warning.stale.title", {
         size: formatStorageBytes(stale),
         days: storage.stale_device_days,
-        days_text: String(storage.stale_device_days),
+        days_text: storage.stale_device_days,
       }),
       body: t("web.admin.downloads.presentation.warning.stale.body"),
       action: "review_devices",
@@ -297,7 +297,7 @@ export function storageFileTitle(file: AdminDownloadStorageFile): string {
 
 export function storageFileSubtitle(file: AdminDownloadStorageFile): string {
   if (file.season_number != null && file.episode_number != null) {
-    const values = { season: String(file.season_number), episode: String(file.episode_number) };
+    const values = { season: file.season_number, episode: file.episode_number };
     return file.episode_title
       ? t("web.admin.downloads.presentation.file.episodeWithTitle", {
           ...values,
@@ -322,7 +322,7 @@ export function storageFileRecipe(file: AdminDownloadStorageFile): {
   const main = [file.resolution, codec].filter(Boolean).join(" ");
   const detail = file.bitrate_kbps
     ? t("web.admin.downloads.presentation.recipe.bitrate", {
-        mbps: String(Math.round(file.bitrate_kbps / 1000)),
+        mbps: Math.round(file.bitrate_kbps / 1000),
       })
     : "";
   return { main: main || t("web.admin.downloads.presentation.recipe.transcode"), detail };

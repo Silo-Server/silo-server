@@ -253,7 +253,7 @@ export function buildPreferenceLevels({
 
     const libraryName = (id: number) =>
       libraryNames.get(id) ||
-      t("web.admin.users.detail.preferences.levels.libraryById", { id: String(id) });
+      t("web.admin.users.detail.preferences.levels.libraryById", { id: id });
     for (const [libraryId, libraryRows] of [...rows.libraries].sort(([a], [b]) =>
       libraryName(a).localeCompare(libraryName(b)),
     )) {

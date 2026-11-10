@@ -87,7 +87,7 @@ export default function DeviceCopiesTab({ initialStale = false }: { initialStale
         >
           {t("web.admin.downloads.deviceCopies.staleFilter", {
             days: staleDays,
-            days_text: String(staleDays),
+            days_text: staleDays,
           })}
         </Button>
         <Select value={sort} onValueChange={(value) => setSort(value as Sort)}>
@@ -192,7 +192,7 @@ export default function DeviceCopiesTab({ initialStale = false }: { initialStale
                       <TableCell className="hidden sm:table-cell">
                         <div>
                           {t("web.admin.downloads.deviceCopies.copiesSummary", {
-                            copies: String(device.copies),
+                            copies: device.copies,
                             summary:
                               [
                                 device.finished &&
@@ -285,8 +285,8 @@ function entryTitle(t: Translate, entry: AdminDownloadEntry) {
   if (entry.episode) {
     return t("web.admin.downloads.deviceCopies.episodeTitle", {
       series: entry.title || t("web.admin.downloads.deviceCopies.unknownSeries"),
-      season: String(entry.episode.season_number),
-      episode: String(entry.episode.episode_number),
+      season: entry.episode.season_number,
+      episode: entry.episode.episode_number,
     });
   }
   return entry.title || t("web.admin.downloads.deviceCopies.unknownTitle");

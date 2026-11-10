@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { MessageFormatElement } from "react-intl";
 
+import { ENGLISH_APP_LOCALE, setAppLocale } from "@/lib/appLocale";
+import { formatDate } from "@/lib/datetime";
+import { formatEpisodeCode } from "@/lib/episodeCardLabels";
+
 import { createAppIntl, formatWith, serverTextWith, setAppIntl } from "./format";
 
 const FSI = "\u2068";
@@ -26,7 +30,10 @@ const translated = {
   ],
 };
 
-afterEach(() => setAppIntl(createAppIntl("en", {})));
+afterEach(() => {
+  setAppIntl(createAppIntl("en", {}));
+  setAppLocale(ENGLISH_APP_LOCALE);
+});
 
 describe("serverTextWith", () => {
   const spanish = createAppIntl("es", translated);
@@ -121,4 +128,96 @@ describe("formatWith", () => {
       expect(formatWith(arabic, "web.detail.episodeCode", { season, episode })).toBe(expected);
     },
   );
+});
+
+describe("Arabic digits follow the format locale", () => {
+  const plural = (forms: Record<string, MessageFormatElement[]>): MessageFormatElement =>
+    ({
+      type: 6,
+      value: "count",
+      options: Object.fromEntries(Object.entries(forms).map(([form, value]) => [form, { value }])),
+      offset: 0,
+      pluralType: "cardinal",
+    }) as MessageFormatElement;
+  const pound = { type: 7 } as MessageFormatElement;
+  // One message on screen: a plural count, a date, two counts passed as
+  // numbers, and a title that is only digits (a string, so never changed).
+  const arabic = {
+    "web.home.rows.addToOtherLibraries.confirm": [
+      plural({
+        few: [text("أضف إلى "), pound, text(" صفحات")],
+        other: [text("أضف إلى "), pound, text(" صفحة")],
+      }),
+      text(" · "),
+      arg("date"),
+      text(" · "),
+      arg("count_text"),
+      text(" · "),
+      arg("minutes"),
+      text(" · "),
+      arg("title"),
+    ],
+    "web.item.dialog.yearInParens": [text("("), arg("year"), text(")")],
+  };
+  const values = { count: 3, count_text: 12, minutes: 45, title: "1917" };
+  const ARABIC_INDIC = /^[^0-9]*[٠-٩][^0-9]*$/;
+  const LATIN = /^[^٠-٩]*[0-9][^٠-٩]*$/;
+
+  it.each([
+    {
+      name: "ar on ar-EG uses Arabic-Indic digits, as its dates do",
+      tag: "ar",
+      formatLocale: "ar-EG",
+      dateDigits: ARABIC_INDIC,
+      message: (date: string) => `أضف إلى ٣ صفحات · ${FSI}${date}${PDI} · ١٢ · ٤٥ · 1917`,
+      year: "(١٩٩٩)",
+    },
+    {
+      name: "ar on a Latin-default locale uses Latin digits",
+      tag: "ar",
+      formatLocale: "ar-AE",
+      dateDigits: LATIN,
+      message: (date: string) => `أضف إلى 3 صفحات · ${FSI}${date}${PDI} · 12 · 45 · 1917`,
+      year: "(1999)",
+    },
+    {
+      name: "English keeps its bytes on an Arabic-region format locale",
+      tag: "en",
+      formatLocale: "ar-EG",
+      dateDigits: ARABIC_INDIC,
+      message: () => "Add to 3 pages",
+      year: "(1999)",
+    },
+  ])("$name", ({ tag, formatLocale, dateDigits, message, year }) => {
+    const intl = createAppIntl(tag, tag === "en" ? {} : arabic, formatLocale);
+    setAppLocale({ ...ENGLISH_APP_LOCALE, formatLocale });
+    const date = formatDate(new Date(2026, 10, 7));
+    expect(date).toMatch(dateDigits);
+    expect(formatWith(intl, "web.home.rows.addToOtherLibraries.confirm", { ...values, date })).toBe(
+      message(date),
+    );
+    expect(formatWith(intl, "web.item.dialog.yearInParens", { year: 1999 })).toBe(year);
+  });
+
+  it("keeps Latin digits in an English fallback, whose plural # is Latin", () => {
+    const intl = createAppIntl("ar", {}, "ar-EG");
+    expect(formatWith(intl, "web.home.rows.addToOtherLibraries.confirm", { count: 3 })).toBe(
+      "Add to 3 pages",
+    );
+    expect(formatWith(intl, "web.item.dialog.yearInParens", { year: 1999 })).toBe("(1999)");
+  });
+
+  it("keeps an episode code Latin beside a year in Arabic-Indic digits", () => {
+    const intl = createAppIntl(
+      "ar",
+      {
+        ...arabic,
+        "web.detail.episodeCode": [text("م"), arg("season"), text("ح"), arg("episode")],
+      },
+      "ar-EG",
+    );
+    setAppIntl(intl);
+    expect(formatEpisodeCode(1, 5)).toBe("م01ح05");
+    expect(formatWith(intl, "web.item.dialog.yearInParens", { year: 1999 })).toBe("(١٩٩٩)");
+  });
 });

@@ -318,7 +318,7 @@ export default function CompatibilityProxiesSettings() {
                         {progress !== null && (
                           <span className="text-muted-foreground text-xs font-medium">
                             {t("web.admin.settings.compatibilityProxies.operation.percent", {
-                              percent: String(progress),
+                              percent: progress,
                             })}
                           </span>
                         )}

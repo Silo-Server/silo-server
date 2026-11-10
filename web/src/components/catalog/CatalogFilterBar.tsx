@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/select";
 import { getCollectionSortOptions } from "@/components/collections/collectionBuilderFields";
 import { useShownRatingSources } from "@/hooks/queries/ratingsCapability";
-import { useT, type MessageKey } from "@/i18n";
+import { numberText, useT, type MessageKey } from "@/i18n";
 import {
   getDefaultQuerySortOrder,
   getQuerySortOptions,
@@ -202,7 +202,7 @@ export default function CatalogFilterBar({
         {t("web.catalog.filters.open")}
         {activeFilterCount > 0 && (
           <Badge variant="default" className="ms-1 px-1.5 py-0 text-[0.625rem]">
-            {activeFilterCount}
+            {numberText(activeFilterCount)}
           </Badge>
         )}
       </Button>

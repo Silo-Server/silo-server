@@ -144,7 +144,7 @@ function decadeOptions(): Array<{ value: string; label: string }> {
     options.push({
       value: String(decade),
       get label() {
-        return t("web.collections.guidedRules.decadeOption", { decade: String(decade) });
+        return t("web.collections.guidedRules.decadeOption", { decade: decade });
       },
     });
   }

@@ -85,7 +85,7 @@ export default function MediaInfoDialog({
                 const summary =
                   buildQualitySummary(version) ||
                   version.file_name ||
-                  t("web.detail.versions.numbered", { number: String(index + 1) });
+                  t("web.detail.versions.numbered", { number: index + 1 });
                 const detail = buildDetailLine(version);
 
                 return (

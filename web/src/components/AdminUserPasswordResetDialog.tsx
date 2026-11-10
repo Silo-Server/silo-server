@@ -292,8 +292,8 @@ export function AdminUserPasswordResetDialog({
                 />
                 <p className="text-muted-foreground text-xs">
                   {t("web.admin.users.passwordResetDialog.passwordRules", {
-                    min: String(MIN_PASSWORD_CHARS),
-                    max: String(MAX_PASSWORD_BYTES),
+                    min: MIN_PASSWORD_CHARS,
+                    max: MAX_PASSWORD_BYTES,
                   })}
                 </p>
                 <div className="flex items-center gap-2">

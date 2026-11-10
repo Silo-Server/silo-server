@@ -39,15 +39,15 @@ function formatNotificationTime(t: Translate, value: string): string {
     return t("web.notifications.inbox.justNow");
   }
   if (diffMinutes < 60) {
-    return t("web.notifications.inbox.minutesAgo", { minutes: String(diffMinutes) });
+    return t("web.notifications.inbox.minutesAgo", { minutes: diffMinutes });
   }
   const diffHours = Math.round(diffMinutes / 60);
   if (diffHours < 24) {
-    return t("web.notifications.inbox.hoursAgo", { hours: String(diffHours) });
+    return t("web.notifications.inbox.hoursAgo", { hours: diffHours });
   }
   const diffDays = Math.round(diffHours / 24);
   if (diffDays < 7) {
-    return t("web.notifications.inbox.daysAgo", { days: String(diffDays) });
+    return t("web.notifications.inbox.daysAgo", { days: diffDays });
   }
   return date.toLocaleDateString(preferredDateLocale(), { month: "short", day: "numeric" });
 }
@@ -407,7 +407,7 @@ function NotificationsInbox() {
             {status === "all"
               ? t("web.notifications.inbox.filterAll")
               : unreadCount
-                ? t("web.notifications.inbox.filterUnreadCount", { count: String(unreadCount) })
+                ? t("web.notifications.inbox.filterUnreadCount", { count: unreadCount })
                 : t("web.notifications.inbox.filterUnread")}
           </Button>
         ))}

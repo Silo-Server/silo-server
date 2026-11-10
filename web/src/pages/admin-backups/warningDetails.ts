@@ -87,7 +87,7 @@ export function omissionGroupTitle(group: OmissionGroup, text: Text = t): string
   const count = group.labels.length;
   return text("web.admin.backups.warnings.groupTitle", {
     count,
-    count_text: String(count),
+    count_text: count,
     summary: group.summary,
   });
 }
@@ -99,9 +99,7 @@ export const NAMES_SHOWN = 5;
 export function nameSampleText(names: readonly string[], shown = NAMES_SHOWN): string {
   const list = names.slice(0, shown).join(", ");
   const more = names.length - shown;
-  return more > 0
-    ? t("web.admin.backups.warnings.nameSample", { names: list, more: String(more) })
-    : list;
+  return more > 0 ? t("web.admin.backups.warnings.nameSample", { names: list, more: more }) : list;
 }
 
 export interface MissingFileGroup {
@@ -124,7 +122,7 @@ export function groupMissingBlobs(blobs: readonly MissingBlob[]): MissingFileGro
 /** "98 downloaded subtitles", "2 uploaded artwork files". */
 export function missingGroupTitle(group: MissingFileGroup, text: Text = t): string {
   const count = group.keys.length;
-  const values = { count, count_text: String(count), source: group.source };
+  const values = { count, count_text: count, source: group.source };
   if (/artwork$/.test(group.source))
     return text("web.admin.backups.warnings.missingArtwork", values);
   return text("web.admin.backups.warnings.missingGroup", values);
@@ -132,7 +130,7 @@ export function missingGroupTitle(group: MissingFileGroup, text: Text = t): stri
 
 /** "182 accounts weren't included in this backup's restore set." */
 function omittedHeadline(count: number, text: Text = t): string {
-  return text("web.admin.backups.warnings.omittedHeadline", { count, count_text: String(count) });
+  return text("web.admin.backups.warnings.omittedHeadline", { count, count_text: count });
 }
 
 /** "101 files were missing when the backup copied them." */

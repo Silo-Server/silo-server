@@ -163,7 +163,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
                   ? t("web.catalog.letters.letterTitles", {
                       letter: spokenLetter(letter),
                       count: entry.count,
-                      shown: String(entry.count),
+                      shown: entry.count,
                     })
                   : t("web.catalog.letters.letterNoTitles", { letter: spokenLetter(letter) })
             }

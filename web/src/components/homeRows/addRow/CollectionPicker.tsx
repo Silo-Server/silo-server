@@ -87,7 +87,7 @@ export function CollectionPicker({
               aria-label={t("web.home.addRow.collection.search")}
               placeholder={t("web.home.addRow.collection.searchPlaceholder", {
                 count: options.length,
-                count_text: String(options.length),
+                count_text: options.length,
               })}
               className="h-9 border-0 bg-transparent ps-9 shadow-none focus-visible:ring-0"
               value={query}

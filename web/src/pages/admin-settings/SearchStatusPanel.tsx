@@ -90,8 +90,8 @@ export function SearchStatusPanel() {
           status.index.rebuild_required
             ? t("web.admin.settings.search.status.rebuildRequired")
             : t("web.admin.settings.search.status.schema", {
-                version: String(status.index.schema_version),
-                expected: String(status.index.expected_schema_version),
+                version: status.index.schema_version,
+                expected: status.index.expected_schema_version,
               })
         }
       />
@@ -171,8 +171,8 @@ export function SearchStatusPanel() {
                     <span className="text-muted-foreground min-w-0 truncate text-sm">
                       {t("web.admin.settings.search.status.typeCoverage", {
                         type: entry.type,
-                        vectorized: String(entry.vectorized),
-                        eligible: String(entry.eligible),
+                        vectorized: entry.vectorized,
+                        eligible: entry.eligible,
                         percent: formatPercent(entry.vector_coverage_ratio),
                       })}
                     </span>

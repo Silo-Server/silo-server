@@ -105,7 +105,7 @@ export default function AdminSidebar({
       <span className="live-badge">
         {t("web.admin.shell.sidebar.liveSessions", {
           count: sessionCount,
-          count_text: String(sessionCount),
+          count_text: sessionCount,
         })}
       </span>
     ) : undefined;
@@ -117,7 +117,7 @@ export default function AdminSidebar({
         <span className="sr-only">
           {t("web.admin.shell.sidebar.pendingRequests", {
             count: pendingRequests,
-            count_text: String(pendingRequests),
+            count_text: pendingRequests,
           })}
         </span>
       </span>

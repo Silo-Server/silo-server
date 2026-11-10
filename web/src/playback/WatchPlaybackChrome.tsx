@@ -30,7 +30,7 @@ import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useT, type Translate } from "@/i18n";
+import { codeNumber, numberText, useT, type Translate } from "@/i18n";
 import { fetchCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useContinueWatching } from "@/hooks/queries/progress";
 import {
@@ -137,18 +137,21 @@ function buildPlaybackSubtitle(
   }
 
   if (item.series_title && item.season_number != null && item.episode_number != null) {
-    const code = { season: String(item.season_number), episode: String(item.episode_number) };
+    const code = {
+      season: codeNumber(item.season_number),
+      episode: codeNumber(item.episode_number),
+    };
     return item.title
       ? t("web.player.episode.codeWithTitle", { ...code, title: item.title })
       : t("web.player.episode.code", code);
   }
 
   if (item.year) {
-    return String(item.year);
+    return numberText(item.year);
   }
 
   if (request.libraryId != null) {
-    return t("web.player.bar.library", { id: String(request.libraryId) });
+    return t("web.player.bar.library", { id: request.libraryId });
   }
 
   return undefined;

@@ -65,8 +65,8 @@ export function WatchingNowCard({ sessions }: { sessions: AdminSession[] }) {
             trailing={
               duration
                 ? t("web.admin.users.detail.overview.watching.position", {
-                    position: String(minutes(session.position_seconds)),
-                    duration: String(Math.round(duration / 60)),
+                    position: minutes(session.position_seconds),
+                    duration: Math.round(duration / 60),
                   })
                 : undefined
             }

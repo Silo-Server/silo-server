@@ -12,7 +12,7 @@ import {
   formatSampleRate,
 } from "@/lib/mediaFormat";
 import { formatLocale, pinnedLocaleUnlessLocalized } from "@/lib/appLocale";
-import { t } from "@/i18n";
+import { numberText, t } from "@/i18n";
 
 /**
  * Atmos evidence for the audio stream a version's codec_audio describes. The
@@ -124,9 +124,11 @@ export function compactVideoMeta(track: VersionVideoTrack): string {
   return metadataLine([
     track.profile,
     track.aspect_ratio,
-    track.frame_rate ? t("web.detail.mediaInfo.frameRate", { rate: String(track.frame_rate) }) : "",
+    track.frame_rate
+      ? t("web.detail.mediaInfo.frameRate", { rate: numberText(track.frame_rate) })
+      : "",
     formatBitrate(track.bitrate),
-    track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: String(track.bit_depth) }) : "",
+    track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: track.bit_depth }) : "",
     track.video_range,
     track.dolby_vision,
     track.color_space,
@@ -139,7 +141,7 @@ export function compactAudioMeta(track: VersionAudioTrack): string {
     track.layout,
     formatBitrate(track.bitrate),
     formatSampleRate(track.sample_rate),
-    track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: String(track.bit_depth) }) : "",
+    track.bit_depth ? t("web.detail.mediaInfo.bitDepth", { depth: track.bit_depth }) : "",
   ]);
 }
 

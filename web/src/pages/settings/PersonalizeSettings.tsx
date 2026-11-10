@@ -85,7 +85,7 @@ export default function PersonalizeSettings() {
             ? t("web.settings.personalize.noFavorites")
             : t("web.settings.personalize.favoriteCount", {
                 count: favoriteCount,
-                count_text: String(favoriteCount),
+                count_text: favoriteCount,
               })}
         </span>
       </div>

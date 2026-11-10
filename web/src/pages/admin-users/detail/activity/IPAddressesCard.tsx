@@ -47,7 +47,7 @@ export function IPAddressesCard({ userId }: { userId: number }) {
           <Button variant="ghost" size="sm" onClick={() => setExpanded(true)}>
             {history.hasNextPage
               ? t("web.admin.users.detail.activity.ips.showAll")
-              : t("web.admin.users.detail.activity.showAllCount", { count: String(ips.length) })}
+              : t("web.admin.users.detail.activity.showAllCount", { count: ips.length })}
           </Button>
         ) : undefined
       }

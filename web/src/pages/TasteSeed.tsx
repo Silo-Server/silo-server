@@ -160,7 +160,7 @@ export default function TasteSeed() {
                 : selected.size < MIN_PICKS
                   ? t("web.home.tasteSeed.selectedCountMore", {
                       remaining: MIN_PICKS - selected.size,
-                      count: String(selected.size),
+                      count: selected.size,
                     })
                   : t("web.home.tasteSeed.selectedCount", { count: selected.size })}
             </p>

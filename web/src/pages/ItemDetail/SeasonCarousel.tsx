@@ -129,7 +129,7 @@ export function SeasonRail({ count, children }: { count: number; children: React
       <div className="mb-5 flex items-end justify-between gap-4">
         <h2 className="text-xl font-semibold">{t("web.detail.seasons.heading")}</h2>
         <span className="text-muted-foreground text-sm">
-          {t("web.detail.seasons.totalCount", { count: String(count) })}
+          {t("web.detail.seasons.totalCount", { count: count })}
         </span>
       </div>
 

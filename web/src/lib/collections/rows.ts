@@ -72,8 +72,8 @@ export function rowPlaceInSentence(
 export function rowMeta(row: CollectionRow, names: LibraryNames): string {
   const where = t("web.collections.rows.rowMeta", {
     place: rowPlace(row.page, names, row.surface),
-    position: String(row.position),
-    total: String(row.pageRowCount),
+    position: row.position,
+    total: row.pageRowCount,
   });
   if (row.enabled) return where;
   const state =

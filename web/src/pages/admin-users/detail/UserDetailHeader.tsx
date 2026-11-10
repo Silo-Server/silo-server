@@ -91,7 +91,7 @@ export function UserDetailHeader({
               name:
                 groupName ??
                 t("web.admin.users.detail.header.groupIdFallback", {
-                  id: String(user.access_group_id),
+                  id: user.access_group_id,
                 }),
               b: (chunks) => <span className="text-foreground font-medium">{chunks}</span>,
             }),

@@ -204,8 +204,8 @@ export function failureCopy(failure: UploadFailure): FailureCopy {
       return {
         title: t("web.admin.backups.upload.failure.stoppedTitle"),
         body: t("web.admin.backups.upload.failure.partFailedBody", {
-          part: String(failure.part + 1),
-          part_count: String(failure.partCount),
+          part: failure.part + 1,
+          part_count: failure.partCount,
         }),
         resumable: true,
       };
@@ -230,8 +230,8 @@ export function failureCopy(failure: UploadFailure): FailureCopy {
         title: t("web.admin.backups.upload.failure.signedOutTitle"),
         body: t("web.admin.backups.upload.failure.signedOutBody", {
           part_count: failure.partCount,
-          sent: String(failure.part),
-          part_count_text: String(failure.partCount),
+          sent: failure.part,
+          part_count_text: failure.partCount,
         }),
         resumable: true,
       };

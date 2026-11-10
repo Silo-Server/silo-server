@@ -100,7 +100,7 @@ export default function RecommendationsSection() {
           <p className="text-muted-foreground text-sm">
             {t("web.recommendations.sectionCount", {
               count: data.items.length,
-              count_text: String(data.items.length),
+              count_text: data.items.length,
             })}
           </p>
         )}

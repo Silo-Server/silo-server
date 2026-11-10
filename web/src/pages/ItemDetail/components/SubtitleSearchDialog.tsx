@@ -337,7 +337,7 @@ export default function SubtitleSearchDialog({
                           tone.ring,
                         )}
                         aria-label={t("web.detail.subtitleSearch.matchScore", {
-                          score: String(score),
+                          score: score,
                         })}
                       >
                         <span

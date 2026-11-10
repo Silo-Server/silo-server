@@ -62,8 +62,7 @@ export function SaveBar({
   className,
 }: SaveBarProps) {
   const t = useT();
-  const text =
-    message ?? t("web.shell.saveBar.count", { count: dirtyCount, shown: String(dirtyCount) });
+  const text = message ?? t("web.shell.saveBar.count", { count: dirtyCount, shown: dirtyCount });
   const saveDisabled = isSaving || !canSave;
   const saveText = isSaving ? t("web.ui.saving") : (saveLabel ?? t("common.save"));
   const discardText = discardLabel ?? t("web.shell.unsavedChanges.discard");

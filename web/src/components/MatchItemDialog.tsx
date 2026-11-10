@@ -289,7 +289,7 @@ export default function MatchItemDialog({
             <span className="font-medium">{item.title}</span>
             {item.year ? (
               <span className="text-muted-foreground ms-2">
-                {t("web.item.dialog.yearInParens", { year: String(item.year) })}
+                {t("web.item.dialog.yearInParens", { year: item.year })}
               </span>
             ) : null}
             <Badge variant="secondary" className="ms-2 text-[10px]">

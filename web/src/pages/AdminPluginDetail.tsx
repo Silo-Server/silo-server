@@ -474,21 +474,21 @@ function InstalledPluginPage({
                 ? t("web.admin.plugins.detail.runtimeFailed", {
                     name,
                     count: runtime.restart_count,
-                    count_text: String(runtime.restart_count),
+                    count_text: runtime.restart_count,
                     b: bold,
                   })
                 : runtime.state === "backoff" && runtime.next_restart_at
                   ? t("web.admin.plugins.detail.runtimeBackoffNext", {
                       name,
                       count: runtime.restart_count,
-                      count_text: String(runtime.restart_count),
+                      count_text: runtime.restart_count,
                       time: formatDateTime(runtime.next_restart_at),
                       b: bold,
                     })
                   : t("web.admin.plugins.detail.runtimeBackoff", {
                       name,
                       count: runtime.restart_count,
-                      count_text: String(runtime.restart_count),
+                      count_text: runtime.restart_count,
                       b: bold,
                     })}
             </p>

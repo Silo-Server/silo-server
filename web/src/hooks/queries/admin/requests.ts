@@ -322,7 +322,7 @@ export function useBulkRequestAction() {
       const approved = action === "approve";
       const succeeded = total - failures.length;
       if (failures.length === 0) {
-        const values = { count: succeeded, count_text: String(succeeded) };
+        const values = { count: succeeded, count_text: succeeded };
         toast.success(
           approved
             ? t("web.admin.requests.toast.bulkApproved", values)
@@ -331,8 +331,8 @@ export function useBulkRequestAction() {
       } else {
         const values = {
           count: total,
-          count_text: String(total),
-          failed: String(failures.length),
+          count_text: total,
+          failed: failures.length,
         };
         toast.error(
           approved

@@ -149,7 +149,7 @@ export function WatchHistoryCard({
           ? t("web.admin.users.detail.activity.history.summary", {
               count: plays,
               count_text: plays.toLocaleString(formatLocale()),
-              days: String(days),
+              days: days,
             })
           : undefined
       }
@@ -197,10 +197,10 @@ export function WatchHistoryCard({
           <span className="text-muted-foreground me-auto text-xs">
             {plays !== undefined
               ? t("web.admin.users.detail.activity.history.showingOf", {
-                  shown: String(shown),
-                  total: String(plays),
+                  shown: shown,
+                  total: plays,
                 })
-              : t("web.admin.users.detail.activity.history.showing", { shown: String(shown) })}
+              : t("web.admin.users.detail.activity.history.showing", { shown: shown })}
           </span>
           <Button variant="ghost" size="sm" asChild>
             <Link to={historyLink}>

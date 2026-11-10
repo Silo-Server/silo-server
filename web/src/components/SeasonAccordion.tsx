@@ -33,7 +33,7 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
           <span className="text-muted-foreground text-base">
             {t("web.detail.seasons.episodesCountTitle", {
               count: current.episode_count,
-              count_text: String(current.episode_count),
+              count_text: current.episode_count,
             })}
           </span>
         </div>
@@ -82,20 +82,20 @@ export default function SeasonAccordion({ seasons }: SeasonAccordionProps) {
                 <span>
                   {t("web.detail.seasons.watchedCount", {
                     count: current.user_data.watched_count,
-                    count_text: String(current.user_data.watched_count),
+                    count_text: current.user_data.watched_count,
                   })}
                 </span>
                 <span>
                   {t("web.detail.seasons.leftCount", {
                     count: current.user_data.unplayed_count,
-                    count_text: String(current.user_data.unplayed_count),
+                    count_text: current.user_data.unplayed_count,
                   })}
                 </span>
                 {current.user_data.in_progress_count > 0 && (
                   <span>
                     {t("web.detail.seasons.inProgressCount", {
                       count: current.user_data.in_progress_count,
-                      count_text: String(current.user_data.in_progress_count),
+                      count_text: current.user_data.in_progress_count,
                     })}
                   </span>
                 )}

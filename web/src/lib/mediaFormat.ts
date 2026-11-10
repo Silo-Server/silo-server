@@ -141,7 +141,7 @@ export function formatFileSize(bytes?: number, options: FormatFileSizeOptions = 
   if (bytes >= 1024 ** 3) return t(giga, { size: size(bytes / 1024 ** 3) });
   if (bytes >= 1024 ** 2) return t(mega, { size: size(bytes / 1024 ** 2) });
   if (bytes >= 1024) return t(kilo, { size: size(bytes / 1024) });
-  return t("web.common.format.size.bytes", { size: String(bytes) });
+  return t("web.common.format.size.bytes", { size: bytes });
 }
 
 export function formatBitrate(kbps?: number, fallback = ""): string {
@@ -166,7 +166,7 @@ export function formatChannels(channels?: number): string {
   if (channels === 8) return "7.1";
   if (channels === 6) return "5.1";
   if (channels === 2) return t("web.common.format.channels.stereo");
-  return t("web.common.format.channels.count", { count: channels, count_text: String(channels) });
+  return t("web.common.format.channels.count", { count: channels, count_text: channels });
 }
 
 /** Ensures a raw Dolby Vision label ("Profile 8.1") carries the "Dolby Vision" prefix. */
@@ -208,6 +208,6 @@ export function formatRuntimeMinutes(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return h > 0
-    ? t("web.common.format.runtime.hoursMinutes", { hours: String(h), minutes: String(m) })
-    : t("web.common.format.runtime.minutes", { count: m, count_text: String(m) });
+    ? t("web.common.format.runtime.hoursMinutes", { hours: h, minutes: m })
+    : t("web.common.format.runtime.minutes", { count: m, count_text: m });
 }

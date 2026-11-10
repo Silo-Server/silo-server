@@ -289,7 +289,7 @@ export function retentionNote({
   /** The component's formatter: the copy names use a rich-text tag for the weekday. */
   t: Translate;
 }): string {
-  const sentences = [t("web.admin.backups.retention.keeps", { keep, keep_text: String(keep) })];
+  const sentences = [t("web.admin.backups.retention.keeps", { keep, keep_text: keep })];
   let when = "other";
   if (running) when = "running";
   else if (next) {
@@ -308,7 +308,7 @@ export function retentionNote({
           })
         : t("web.admin.backups.retention.manyDeleted", {
             count: doomed.length,
-            count_text: String(doomed.length),
+            count_text: doomed.length,
             when,
           }),
     );

@@ -67,7 +67,7 @@ function videoTranscodingText(t: Translate, video: VideoTranscoding): string {
     case "limit":
       return t("web.admin.users.detail.overview.access.videoTranscodeLimit", {
         count: video.max,
-        count_text: String(video.max),
+        count_text: video.max,
       });
   }
 }
@@ -104,11 +104,11 @@ function formatQuota(t: Translate, quota: ResolvedRequestTerms["quota"]): string
       ? t("web.admin.users.detail.overview.access.quotaDay")
       : t("web.admin.users.detail.overview.access.quotaDays", {
           days: quota.days,
-          days_text: String(quota.days),
+          days_text: quota.days,
         });
   return t("web.admin.users.detail.overview.access.quota", {
     count: quota.max,
-    count_text: String(quota.max),
+    count_text: quota.max,
     period,
   });
 }
@@ -155,11 +155,11 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
       ? [
           t("web.admin.users.detail.overview.access.downloadsConfirmed", {
             count: summary.completed,
-            count_text: String(summary.completed),
+            count_text: summary.completed,
           }),
           t("web.admin.users.detail.overview.access.seriesMonitored", {
             count: summary.monitored_series,
-            count_text: String(summary.monitored_series),
+            count_text: summary.monitored_series,
           }),
         ]
       : []),
@@ -207,7 +207,7 @@ export function AccessSummaryCard({ user }: { user: AdminUser }) {
               ? t("web.admin.users.detail.overview.access.unlimitedStreams")
               : t("web.admin.users.detail.overview.access.streams", {
                   count: effective.max_streams,
-                  count_text: String(effective.max_streams),
+                  count_text: effective.max_streams,
                 })}
             {user.max_streams !== null ? CUSTOM : null}
           </>

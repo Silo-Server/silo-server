@@ -71,7 +71,7 @@ export function CollectionPreviewPane({
                     {DOT}
                   </span>
                   <span className="text-muted-foreground">
-                    {t("web.collections.preview.showing", { shown: String(ready.items.length) })}
+                    {t("web.collections.preview.showing", { shown: ready.items.length })}
                   </span>
                 </>
               ) : null}

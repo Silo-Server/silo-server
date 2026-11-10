@@ -186,7 +186,7 @@ function MangaRow({
         {progressPct != null && (
           <span
             className="flex flex-shrink-0 items-center gap-1.5"
-            title={t("web.detail.manga.percentRead", { percent: String(progressPct) })}
+            title={t("web.detail.manga.percentRead", { percent: progressPct })}
           >
             <span className="bg-muted block h-1 w-16 overflow-hidden rounded-full">
               <span
@@ -195,7 +195,7 @@ function MangaRow({
               />
             </span>
             <span className="text-muted-foreground text-[11px] tabular-nums">
-              {t("web.detail.manga.percent", { percent: String(progressPct) })}
+              {t("web.detail.manga.percent", { percent: progressPct })}
             </span>
           </span>
         )}
@@ -499,7 +499,7 @@ function MangaSection({
           )}
           {t("web.detail.manga.chapterCount", {
             count: entry.chapters.length,
-            count_text: String(entry.chapters.length),
+            count_text: entry.chapters.length,
           })}
           <ChevronDown
             className={cn("size-4 transition-transform", !open && "-rotate-90 rtl:rotate-90")}

@@ -1,5 +1,5 @@
 import type { AdminUserDownload, AdminUserDownloadSubscription } from "@/api/v2/adminUserActivity";
-import { t, type MessageKey } from "@/i18n";
+import { codeNumber, t, type MessageKey } from "@/i18n";
 import { episodeCode } from "../format";
 import { formatDecimal } from "@/lib/numberFormat";
 
@@ -149,7 +149,7 @@ export function groupDeviceDownloads(
 
 /** A count message whose number prints as typed, without grouping. */
 function counted(key: MessageKey, n: number): string {
-  return t(key, { count: n, count_text: String(n) });
+  return t(key, { count: n, count_text: n });
 }
 
 /** "Season 3", "Seasons 1, 2". */
@@ -178,9 +178,9 @@ export function seriesGroupSubtitle(group: DownloadGroup): string {
   const consecutive = last - first + 1 === numbers.length && known.length === group.episodes.length;
   if (consecutive) {
     const range = t("web.admin.users.detail.downloads.episodeRange", {
-      season: String(seasons[0]).padStart(2, "0"),
-      first: String(first).padStart(2, "0"),
-      last: String(last).padStart(2, "0"),
+      season: codeNumber(seasons[0]!, 2),
+      first: codeNumber(first, 2),
+      last: codeNumber(last, 2),
     });
     return `${count} · ${range}`;
   }
@@ -258,7 +258,7 @@ export function monitorKeepsLabel(s: AdminUserDownloadSubscription): string {
     case "latest_season":
       return s.target_season !== null
         ? t("web.admin.users.detail.downloads.monitor.latestSeasonNumber", {
-            season: String(s.target_season).padStart(2, "0"),
+            season: codeNumber(s.target_season, 2),
           })
         : t("web.admin.users.detail.downloads.monitor.latestSeason");
     case "specific_seasons": {

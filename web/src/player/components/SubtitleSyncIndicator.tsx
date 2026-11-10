@@ -61,7 +61,7 @@ export function SubtitleSyncIndicator({ notice, onDismiss }: SubtitleSyncIndicat
                 />
               </span>
               <span className="w-9 text-end text-[11px] text-white/60 tabular-nums">
-                {t("web.subtitles.sync.percent", { percent: String(notice.percent) })}
+                {t("web.subtitles.sync.percent", { percent: notice.percent })}
               </span>
             </span>
           )}

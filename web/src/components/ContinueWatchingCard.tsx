@@ -155,7 +155,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
   // Detail-page link target for the card's image and meta lines: manga
   // chapters head to the series page like the heading does.
   const detailHref = isMangaChapter ? headingHref : card.itemHref;
-  const episodeNumbers = { season: String(card.seasonNumber), episode: String(card.episodeNumber) };
+  const episodeNumbers = { season: card.seasonNumber, episode: card.episodeNumber };
   const episodeMeta = hasEpisodeMeta
     ? card.seriesTitle && card.title
       ? t("web.home.continueWatching.episodeLabelWithTitle", {
@@ -176,13 +176,13 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       : t("web.home.continueWatching.nextEpisode")
     : card.type === "ebook"
       ? t("web.home.continueWatching.percentRead", {
-          percent: String(Math.round(Math.min(Math.max(progressPercent, 0), 100))),
+          percent: Math.round(Math.min(Math.max(progressPercent, 0), 100)),
         })
       : card.durationSeconds > 0
         ? card.type === "audiobook"
           ? formatListeningTimeLeft(card.positionSeconds, card.durationSeconds)
           : t("web.home.continueWatching.minutesLeft", {
-              minutes: String(Math.round((card.durationSeconds - card.positionSeconds) / 60)),
+              minutes: Math.round((card.durationSeconds - card.positionSeconds) / 60),
             })
         : "\u00A0";
   const handleWatchClick = useCallback(

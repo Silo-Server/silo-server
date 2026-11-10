@@ -53,14 +53,14 @@ export function holidayDatesLabel(dates: HolidayDates): string {
   return sameMonth
     ? t("web.home.rows.seasonal.datesSameMonth", {
         month: startMonth,
-        start_day: String(startDay),
-        end_day: String(endDay),
+        start_day: startDay,
+        end_day: endDay,
       })
     : t("web.home.rows.seasonal.datesSpan", {
         start_month: startMonth,
-        start_day: String(startDay),
+        start_day: startDay,
         end_month: monthName(dates.end),
-        end_day: String(endDay),
+        end_day: endDay,
       });
 }
 

@@ -43,7 +43,7 @@ export default function AccountSettings() {
       setFormError(
         t("web.settings.account.password.error.tooShort", {
           minimum: limits.minimum_password_length,
-          minimum_text: String(limits.minimum_password_length),
+          minimum_text: limits.minimum_password_length,
         }),
       );
       return;
@@ -51,7 +51,7 @@ export default function AccountSettings() {
     if (passwordByteLength(newPassword) > limits.maximum_password_bytes) {
       setFormError(
         t("web.settings.account.password.error.tooLong", {
-          maximum: String(limits.maximum_password_bytes),
+          maximum: limits.maximum_password_bytes,
         }),
       );
       return;
@@ -144,8 +144,8 @@ export default function AccountSettings() {
               <p id="account-password-requirements" className="text-muted-foreground text-xs">
                 {t("web.settings.account.password.requirements", {
                   minimum: capability.data.minimum_password_length,
-                  minimum_text: String(capability.data.minimum_password_length),
-                  maximum: String(capability.data.maximum_password_bytes),
+                  minimum_text: capability.data.minimum_password_length,
+                  maximum: capability.data.maximum_password_bytes,
                 })}
               </p>
             </div>

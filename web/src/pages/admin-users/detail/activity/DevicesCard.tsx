@@ -55,7 +55,7 @@ export function DevicesCard({ userId }: { userId: number }) {
             <Button variant="ghost" size="sm" onClick={() => setShowAll((value) => !value)}>
               {showAll
                 ? t("web.admin.users.detail.activity.devices.showRecent")
-                : t("web.admin.users.detail.activity.showAllCount", { count: String(all.length) })}
+                : t("web.admin.users.detail.activity.showAllCount", { count: all.length })}
             </Button>
           )}
           <Button variant="ghost" size="sm" asChild>
@@ -103,7 +103,7 @@ export function DevicesCard({ userId }: { userId: number }) {
                       >
                         {t("web.admin.users.detail.activity.devices.savedSettings", {
                           count: device.override_count,
-                          count_text: String(device.override_count),
+                          count_text: device.override_count,
                         })}
                       </Link>
                     </>

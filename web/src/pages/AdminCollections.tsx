@@ -1207,7 +1207,7 @@ function ListFilters({
           aria-label={t("web.admin.collections.list.searchLabel")}
           placeholder={t("web.admin.collections.list.searchPlaceholder", {
             count: total,
-            count_text: String(total),
+            count_text: total,
           })}
           value={state.q}
           onChange={(event) => onChange({ q: event.target.value })}
@@ -1235,7 +1235,7 @@ function ListFilters({
           <span aria-hidden className="bg-destructive size-2 rounded-full" />
           {t("web.admin.collections.list.syncsFailed", {
             count: failedCount,
-            count_text: String(failedCount),
+            count_text: failedCount,
           })}
         </button>
       ) : null}
@@ -1475,8 +1475,8 @@ function CollectionApplyJobBanner({ job }: { job: AdminJob | null }) {
 function deleteProgressLabel(t: Translate, completed: number, total: number) {
   return t("web.admin.collections.more.deleting", {
     count: total,
-    done_text: String(completed),
-    count_text: String(total),
+    done_text: completed,
+    count_text: total,
   });
 }
 

@@ -287,7 +287,7 @@ function testResultValues(result: NotificationWebhookTestResult) {
   return {
     outcome: result.ok ? "ok" : "failed",
     status: result.http_status ? String(result.http_status) : "none",
-    duration_ms: String(result.duration_ms),
+    duration_ms: result.duration_ms,
   };
 }
 
@@ -321,7 +321,7 @@ function ChannelCard({
     channel.last_failure_message ||
     (channel.last_failure_status != null
       ? t("web.admin.settings.notifications.serverChannels.httpStatus", {
-          status: String(channel.last_failure_status),
+          status: channel.last_failure_status,
         })
       : t("web.admin.settings.notifications.serverChannels.httpError"));
 

@@ -220,7 +220,7 @@ function HouseholdSwitch({
       <SwitchButton active={household} onClick={() => onChange(true)}>
         <Users className="h-3.5 w-3.5" />
         {household && count > 0
-          ? t("web.settings.device.household.everyoneCount", { count: String(count) })
+          ? t("web.settings.device.household.everyoneCount", { count: count })
           : t("web.settings.device.household.everyone")}
       </SwitchButton>
     </div>
@@ -393,7 +393,7 @@ function DeviceDetail({
                 changedCount > 0
                   ? t("web.settings.device.changedCount", {
                       count: changedCount,
-                      count_text: String(changedCount),
+                      count_text: changedCount,
                     })
                   : t("web.settings.device.nothingChanged"),
               ].join(" · ")}
@@ -422,13 +422,13 @@ function DeviceDetail({
                     forSomeoneElse
                       ? t("web.settings.device.resetConfirmOther", {
                           count: changedCount,
-                          count_text: String(changedCount),
+                          count_text: changedCount,
                           name: ownerName,
                           device: displayName,
                         })
                       : t("web.settings.device.resetConfirm", {
                           count: changedCount,
-                          count_text: String(changedCount),
+                          count_text: changedCount,
                           device: displayName,
                         }),
                   )

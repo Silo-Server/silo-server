@@ -471,11 +471,11 @@ function syncAvailableIn(seconds: number) {
     return t("web.common.toast.watchProviders.syncAvailableMinutes", { count: minutes });
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
-  const values = { count: hours, count_text: String(hours) };
+  const values = { count: hours, count_text: hours };
   return remainingMinutes > 0
     ? t("web.common.toast.watchProviders.syncAvailableHoursMinutes", {
         ...values,
-        minutes: String(remainingMinutes),
+        minutes: remainingMinutes,
       })
     : t("web.common.toast.watchProviders.syncAvailableHours", values);
 }

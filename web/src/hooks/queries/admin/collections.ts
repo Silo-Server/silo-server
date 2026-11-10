@@ -224,11 +224,11 @@ export function useDeleteAdminCollections() {
     onSuccess: async ({ requested, deleted, kept, failed, firstError }) => {
       const keptDescription = t("web.admin.collections.bulkDelete.kept", {
         count: kept,
-        count_text: String(kept),
+        count_text: kept,
       });
       const deletedTitle = t("web.admin.collections.bulkDelete.deleted", {
         count: deleted,
-        count_text: String(deleted),
+        count_text: deleted,
       });
 
       if (failed === 0 && kept === 0) {
@@ -239,8 +239,8 @@ export function useDeleteAdminCollections() {
         toast.warning(
           t("web.admin.collections.bulkDelete.partial", {
             count: requested,
-            done_text: String(deleted),
-            count_text: String(requested),
+            done_text: deleted,
+            count_text: requested,
           }),
           {
             description: [kept > 0 ? keptDescription : "", firstError].filter(Boolean).join(". "),
@@ -250,7 +250,7 @@ export function useDeleteAdminCollections() {
         toast.error(
           t("web.admin.collections.bulkDelete.failed", {
             count: failed,
-            count_text: String(failed),
+            count_text: failed,
           }),
           { description: firstError },
         );

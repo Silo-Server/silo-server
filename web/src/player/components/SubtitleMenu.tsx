@@ -376,7 +376,7 @@ export function SubtitleMenu({
                   className="flex h-7 w-7 items-center justify-center rounded text-white/80 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={() => nudgeDelay(-DELAY_STEP_MS)}
                   disabled={delayDisabled || delayMs <= -DELAY_MAX_MS}
-                  aria-label={t("web.subtitles.menu.delayEarlier", { step: String(DELAY_STEP_MS) })}
+                  aria-label={t("web.subtitles.menu.delayEarlier", { step: DELAY_STEP_MS })}
                 >
                   <Minus className="h-3.5 w-3.5" />
                 </button>
@@ -388,7 +388,7 @@ export function SubtitleMenu({
                   className="flex h-7 w-7 items-center justify-center rounded text-white/80 hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
                   onClick={() => nudgeDelay(DELAY_STEP_MS)}
                   disabled={delayDisabled || delayMs >= DELAY_MAX_MS}
-                  aria-label={t("web.subtitles.menu.delayLater", { step: String(DELAY_STEP_MS) })}
+                  aria-label={t("web.subtitles.menu.delayLater", { step: DELAY_STEP_MS })}
                 >
                   <Plus className="h-3.5 w-3.5" />
                 </button>
@@ -614,7 +614,7 @@ function TimingControls({ sync, entry }: { sync: SubtitleSync; entry: SubtitleSy
           <span className="flex justify-between text-xs text-white/50">
             <span>{syncPhaseLabel(job)}</span>
             <span className="tabular-nums">
-              {t("web.subtitles.sync.percent", { percent: String(percent ?? 0) })}
+              {t("web.subtitles.sync.percent", { percent: percent ?? 0 })}
             </span>
           </span>
         </div>

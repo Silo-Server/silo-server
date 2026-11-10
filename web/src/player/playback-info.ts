@@ -323,7 +323,7 @@ function formatQualityBitrate(translate: Translate, kbps?: number): string {
       mbps: formatDecimal(mbps, mbps % 1 === 0 ? 0 : 1),
     });
   }
-  return translate("web.player.quality.bitrateKbps", { kbps: String(kbps) });
+  return translate("web.player.quality.bitrateKbps", { kbps: kbps });
 }
 
 function formatRequestedSourceVersion(version: PlayerFileVersion): string {

@@ -9,7 +9,7 @@ export function clampTaskProgress(progress: number): number {
 export function formatTaskProgress(progress: number): string {
   const clamped = clampTaskProgress(progress);
   if (Number.isInteger(clamped))
-    return t("web.admin.tasks.lib.taskProgress.percent", { percent: String(clamped) });
+    return t("web.admin.tasks.lib.taskProgress.percent", { percent: clamped });
   // A task that is still running reports just under 100 on purpose; one-decimal
   // rounding must not turn that back into a finished-looking "100.0%".
   const shown = Number(clamped.toFixed(1)) >= 100 ? 99.9 : clamped;

@@ -9,23 +9,23 @@ import { t } from "@/i18n";
 /** "27 hr 14 min", "3 hr", "45 min"; durations under a minute round up. */
 export function formatHoursMinutes(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) {
-    return t("web.audiobooks.duration.minutes", { minutes: "0" });
+    return t("web.audiobooks.duration.minutes", { minutes: 0 });
   }
   const totalMinutes = Math.round(totalSeconds / 60);
   if (totalMinutes < 1) {
-    return t("web.audiobooks.duration.minutes", { minutes: "1" });
+    return t("web.audiobooks.duration.minutes", { minutes: 1 });
   }
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   if (hours <= 0) {
-    return t("web.audiobooks.duration.minutes", { minutes: String(minutes) });
+    return t("web.audiobooks.duration.minutes", { minutes: minutes });
   }
   if (minutes === 0) {
-    return t("web.audiobooks.duration.hours", { hours: String(hours) });
+    return t("web.audiobooks.duration.hours", { hours: hours });
   }
   return t("web.audiobooks.duration.hoursMinutes", {
-    hours: String(hours),
-    minutes: String(minutes),
+    hours: hours,
+    minutes: minutes,
   });
 }
 

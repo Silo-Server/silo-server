@@ -22,7 +22,7 @@ import {
   useRetryMediaRequest,
 } from "@/hooks/queries/admin/requests";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type MessageKey, type Translate } from "@/i18n";
+import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDateTime } from "@/lib/datetime";
 import { formatMediaType, formatSeasonList, requestDetailHref } from "@/lib/mediaRequests";
@@ -332,13 +332,13 @@ function newerRequest(a: MediaRequest | undefined, b: MediaRequest | undefined) 
 
 /** An account's name when its username isn't known: "User 7". */
 function accountFallback(t: Translate, id: number) {
-  return t("web.admin.requests.userFallback", { id: String(id) });
+  return t("web.admin.requests.userFallback", { id: id });
 }
 
 function reasonDialogText(t: Translate, prompt: ReasonPrompt | null) {
   if (prompt?.action === "bulk-decline") {
     const n = prompt.requests.length;
-    const values = { count: n, count_text: String(n) };
+    const values = { count: n, count_text: n };
     return {
       title: t("web.admin.requests.reasonDialog.bulkDecline.title", values),
       description: t("web.admin.requests.reasonDialog.bulkDecline.description", values),
@@ -569,7 +569,7 @@ function BulkBar({
 }) {
   const t = useT();
   const count = selectedRows.length;
-  const countValues = { count, count_text: String(count) };
+  const countValues = { count, count_text: count };
   const someSelected = count > 0 && !allSelected;
   return (
     <div className="space-y-2">
@@ -589,7 +589,7 @@ function BulkBar({
             ? t("web.admin.requests.bulk.selected", countValues)
             : t("web.admin.requests.bulk.selectAll", {
                 count: rows.length,
-                count_text: String(rows.length),
+                count_text: rows.length,
               })}
         </label>
         {count > 0 ? (
@@ -675,7 +675,7 @@ function QueueRow({
           </Link>
           <p className="text-muted-foreground text-xs">
             {[
-              request.year,
+              request.year ? numberText(request.year) : null,
               formatMediaType(request.media_type),
               request.seasons?.length ? formatSeasonList(request.seasons) : null,
             ]

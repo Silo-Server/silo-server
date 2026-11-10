@@ -179,7 +179,7 @@ export function RequestSeasonsDialog({
                           disabled={!choosable}
                           onCheckedChange={(on) => toggle(season.season_number, on)}
                           aria-label={t("web.requests.seasons.season", {
-                            number: String(season.season_number),
+                            number: season.season_number,
                           })}
                           aria-describedby={`${metaID} ${statusID}`}
                         />
@@ -231,10 +231,10 @@ export function RequestSeasonsDialog({
 
 function seasonName(t: Translate, season: RequestMediaSeason): string {
   const numberText = String(season.season_number);
-  const number = t("web.requests.seasons.season", { number: numberText });
+  const number = t("web.requests.seasons.season", { number: season.season_number });
   // TMDB's generic name is English ("Season 2"); compare with that, not the translation.
   return season.name && season.name !== `Season ${numberText}` && season.name !== number
-    ? t("web.requests.seasons.seasonNamed", { number: numberText, name: season.name })
+    ? t("web.requests.seasons.seasonNamed", { number: season.season_number, name: season.name })
     : number;
 }
 

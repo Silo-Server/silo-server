@@ -23,7 +23,7 @@ import {
 function droppedLibraries(t: Translate, count: number): string {
   return t("web.admin.backups.restore.users.droppedLibraries", {
     count,
-    count_text: String(count),
+    count_text: count,
   });
 }
 
@@ -210,7 +210,7 @@ export const AccountRow = memo(function AccountRow({
           <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap md:inline">
             {t("web.admin.backups.restore.users.profileCount", {
               count: account.profiles.length,
-              count_text: String(account.profiles.length),
+              count_text: account.profiles.length,
             })}
           </span>
         ) : null}
@@ -265,7 +265,7 @@ export const AccountRow = memo(function AccountRow({
                 ? t("web.admin.backups.restore.users.noRoom")
                 : t("web.admin.backups.restore.users.room", {
                     count: account.profile_room,
-                    count_text: String(account.profile_room),
+                    count_text: account.profile_room,
                   })}
             </SettingFieldStatus>
           ) : null}
@@ -329,7 +329,7 @@ export function DataTypesPanel({
                   {count > 0
                     ? t("web.admin.backups.restore.users.dataTypeCount", {
                         label: DATA_TYPE_LABELS[id],
-                        count: String(count),
+                        count: count,
                         muted: (chunks) => (
                           <span className="text-muted-foreground tabular-nums">{chunks}</span>
                         ),

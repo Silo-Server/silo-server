@@ -14,12 +14,12 @@ export function libraryTrickplayLabel(library: AdminTrickplayLibrary): string {
   if (total > 0 && done && library.unusable === 0)
     return t("web.admin.common.trickplay.badge.ready");
   return t("web.admin.common.trickplay.badge.percent", {
-    percent: String(total === 0 ? 0 : Math.floor((ready * 100) / total)),
+    percent: total === 0 ? 0 : Math.floor((ready * 100) / total),
   });
 }
 
 function countValues(count: number) {
-  return { count, count_text: String(count) };
+  return { count, count_text: count };
 }
 
 /** The badge's tooltip: every count, then the storage the sheets take. */
@@ -58,8 +58,8 @@ export function trickplayFileSummary(file: AdminTrickplayFile): string {
   if (file.thumbnail_width && file.interval_ms) {
     parts.push(
       t("web.admin.common.trickplay.file.sampling", {
-        width: String(file.thumbnail_width),
-        seconds: String(file.interval_ms / 1000),
+        width: file.thumbnail_width,
+        seconds: file.interval_ms / 1000,
       }),
     );
   }

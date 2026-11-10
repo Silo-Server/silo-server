@@ -153,7 +153,7 @@ export function StandardRoutingSummary({
         <p className="text-muted-foreground text-xs">
           {t("web.admin.settings.requests.routingMode.pausedRules", {
             count: pausedRules,
-            count_text: String(pausedRules),
+            count_text: pausedRules,
           })}
         </p>
       ) : null}

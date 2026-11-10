@@ -294,7 +294,7 @@ export default function EpisodeContent({
       : seasonNum === 0
         ? t("web.detail.seasons.specials")
         : seasonNum != null
-          ? t("web.detail.seasons.numbered", { season: String(seasonNum) })
+          ? t("web.detail.seasons.numbered", { season: seasonNum })
           : t("web.detail.seasons.seasonFallback"));
   const seasonHref =
     navigationState?.parentSeasonHref ??
@@ -319,7 +319,7 @@ export default function EpisodeContent({
   }
   if (episodeNum != null) {
     breadcrumbSegments.push({
-      label: t("web.detail.episodes.numbered", { episode: String(episodeNum) }),
+      label: t("web.detail.episodes.numbered", { episode: episodeNum }),
     });
   }
 

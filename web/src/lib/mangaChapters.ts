@@ -24,16 +24,14 @@ const VOLUME_TOKEN_PATTERN = /^v?(\d+)$/i;
 // through unchanged so unusual volume schemes still render sensibly.
 export function prettifyVolumeLabel(volume: string): string {
   const match = volume.trim().match(VOLUME_TOKEN_PATTERN);
-  return match
-    ? t("web.common.format.manga.volume", { number: String(Number(match[1])) })
-    : volume.trim();
+  return match ? t("web.common.format.manga.volume", { number: Number(match[1]) }) : volume.trim();
 }
 
 // chapterLabel prefers a "Chapter <n>" form derived from the index, falling
 // back to the chapter's own trimmed title when no index is available.
 export function chapterLabel(chapter: MangaChapter): string {
   if (typeof chapter.chapter_index === "number") {
-    return t("web.common.format.manga.chapter", { number: String(chapter.chapter_index) });
+    return t("web.common.format.manga.chapter", { number: chapter.chapter_index });
   }
   return chapter.title?.trim() || t("web.common.format.manga.chapterFallback");
 }

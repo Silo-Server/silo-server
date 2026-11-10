@@ -561,9 +561,9 @@ function AdminUsersPage() {
                 <div className="flex items-center gap-4">
                   <span className="text-muted-foreground text-sm">
                     {t("web.admin.users.list.pageRange", {
-                      from: String(page * pageSize + 1),
-                      to: String(Math.min((page + 1) * pageSize, total)),
-                      total: String(total),
+                      from: page * pageSize + 1,
+                      to: Math.min((page + 1) * pageSize, total),
+                      total: total,
                     })}
                   </span>
                   <Select
@@ -995,7 +995,7 @@ function CreateUserForm({
                   {selectedGroupMissing && (
                     <SelectItem value={String(selectedGroupID)}>
                       {t("web.admin.users.list.create.missingGroup", {
-                        id: String(selectedGroupID),
+                        id: selectedGroupID,
                       })}
                     </SelectItem>
                   )}

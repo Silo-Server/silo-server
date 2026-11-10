@@ -86,16 +86,16 @@ export function LobbyStagedStage({
           isHost
             ? total > 0
               ? t("web.watchTogether.presence.ready", {
-                  ready: String(ready),
+                  ready: ready,
                   total,
-                  total_text: String(total),
+                  total_text: total,
                 })
               : t("web.watchTogether.lobby.waitingGuest")
             : t("web.watchTogether.lobby.guestCaption", {
                 host,
-                ready: String(ready),
+                ready: ready,
                 total,
-                total_text: String(total),
+                total_text: total,
               })
         }
       >
@@ -105,9 +105,9 @@ export function LobbyStagedStage({
               <Play className="size-3.5" />
               {total > 0
                 ? t("web.watchTogether.lobby.startEveryone", {
-                    ready: String(ready),
+                    ready: ready,
                     total,
-                    total_text: String(total),
+                    total_text: total,
                   })
                 : t("web.watchTogether.lobby.startAlone")}
             </Button>
@@ -177,7 +177,7 @@ export function LobbySuggestions({
     >
       <div className="flex items-baseline justify-between gap-3 px-2 pb-2">
         <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
-          {t("web.watchTogether.lobby.suggestionsCount", { count: String(suggestions.length) })}
+          {t("web.watchTogether.lobby.suggestionsCount", { count: suggestions.length })}
         </h3>
         <span className="text-muted-foreground text-xs">
           {isHost ? t("watchParty.strip.manager") : t("watchParty.strip.guest")}

@@ -109,7 +109,7 @@ function ServerLocationInfo({
           </dt>
           <dd>
             {t("web.admin.downloads.location.percent", {
-              percent: String(storage.disk_ceiling_percent),
+              percent: storage.disk_ceiling_percent,
             })}
           </dd>
         </div>
@@ -335,7 +335,7 @@ function NodeLocationFields({
         </div>
         <p className="text-muted-foreground text-xs">
           {t("web.admin.downloads.location.ceilingNote", {
-            percent: String(storage.disk_ceiling_percent),
+            percent: storage.disk_ceiling_percent,
             link: (chunks) => (
               <Link to="/admin/settings/downloads" className="underline underline-offset-3">
                 {chunks}

@@ -98,7 +98,7 @@ function RequestDetail({
   const requester =
     requesterName ??
     (request.requested_by_user_id
-      ? t("web.admin.requests.userFallback", { id: String(request.requested_by_user_id) })
+      ? t("web.admin.requests.userFallback", { id: request.requested_by_user_id })
       : t("web.admin.requests.unknownAccount"));
   const requestedAgo = formatRelativeTime(request.created_at, { absoluteAfterDays: 30 });
   return (
@@ -188,15 +188,15 @@ function RequestDetail({
                         <li key={season.season_number}>
                           {season.episodes_aired > 0
                             ? t("web.admin.requests.detail.seasonProgressOfAired", {
-                                season: String(season.season_number),
-                                available: String(season.episodes_available),
+                                season: season.season_number,
+                                available: season.episodes_available,
                                 count: season.episodes_aired,
-                                count_text: String(season.episodes_aired),
+                                count_text: season.episodes_aired,
                               })
                             : t("web.admin.requests.detail.seasonProgress", {
-                                season: String(season.season_number),
+                                season: season.season_number,
                                 count: season.episodes_available,
-                                count_text: String(season.episodes_available),
+                                count_text: season.episodes_available,
                               })}
                         </li>
                       ))}

@@ -227,7 +227,7 @@ export function BrowseShelf({
             </h3>
             {!search.isFetching ? (
               <span className="text-muted-foreground text-[11px]">
-                {t("web.watchTogether.browse.resultCount", { count: String(searchItems.length) })}
+                {t("web.watchTogether.browse.resultCount", { count: searchItems.length })}
               </span>
             ) : null}
           </div>

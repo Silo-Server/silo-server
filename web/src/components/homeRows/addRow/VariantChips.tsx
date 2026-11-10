@@ -34,7 +34,7 @@ export function VariantChips({
       ))}
       {hidden > 0 ? (
         <span className="border-border text-muted-foreground inline-flex h-[26px] items-center rounded-full border border-dashed px-2.5 text-[13px] font-medium">
-          {t("web.home.addRow.chips.more", { count: String(hidden) })}
+          {t("web.home.addRow.chips.more", { count: hidden })}
         </span>
       ) : null}
     </span>

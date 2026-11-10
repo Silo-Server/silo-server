@@ -63,7 +63,7 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale } from "@/lib/appLocale";
-import { englishText, useT, type TextValues, type Translate } from "@/i18n";
+import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "node" | "started";
@@ -289,9 +289,9 @@ export default function AdminActivity() {
             ? t("web.admin.activity.page.noStreams")
             : t("web.admin.activity.page.subtitle", {
                 count: sessions.length,
-                count_text: String(sessions.length),
+                count_text: sessions.length,
                 nodes: routeNodes.length,
-                nodes_text: String(routeNodes.length),
+                nodes_text: routeNodes.length,
               })
         }
         actions={
@@ -301,7 +301,7 @@ export default function AdminActivity() {
                 <Radio className="h-3 w-3" />
                 {t("web.admin.activity.page.liveCount", {
                   count: sessions.length,
-                  count_text: String(sessions.length),
+                  count_text: sessions.length,
                 })}
               </span>
             )}
@@ -396,7 +396,7 @@ export default function AdminActivity() {
                             className="text-primary font-medium hover:underline"
                           >
                             {entry.username ||
-                              t("web.admin.activity.userFallback", { id: String(entry.user_id) })}
+                              t("web.admin.activity.userFallback", { id: entry.user_id })}
                           </Link>
                         </TableCell>
                         <TableCell className="text-sm">
@@ -449,7 +449,7 @@ export default function AdminActivity() {
                     key={method}
                     title={t("web.admin.activity.summary.methodSegment", {
                       method: activityMethodMeta(method).label,
-                      count: String(count),
+                      count: count,
                     })}
                     className={`transition-all duration-500 ${activityMethodMeta(method).swatchClass}`}
                     style={{ width: `${(count / sessions.length) * 100}%` }}
@@ -466,7 +466,7 @@ export default function AdminActivity() {
                     title={activityMethodMeta(method).description}
                     aria-label={t("web.admin.activity.summary.methodFilter", {
                       method: activityMethodMeta(method).label,
-                      count: String(count),
+                      count: count,
                     })}
                     aria-pressed={methodFilter === method}
                     onClick={() => setMethodFilter(methodFilter === method ? null : method)}
@@ -574,8 +574,8 @@ export default function AdminActivity() {
         <div className="text-muted-foreground text-[11px]">
           {t("web.admin.activity.filter.showing", {
             total: sessions.length,
-            shown: String(filtered.length),
-            total_text: String(sessions.length),
+            shown: filtered.length,
+            total_text: sessions.length,
           })}
         </div>
       )}
@@ -671,7 +671,7 @@ function StreamRow({
   const title = getDisplayTitle(session, t);
   const subtitle = getDisplaySubtitle(session, t);
   const username =
-    session.username || t("web.admin.activity.userFallback", { id: String(session.user_id) });
+    session.username || t("web.admin.activity.userFallback", { id: session.user_id });
   const elapsed = getElapsed(session.started_at);
   const profileDisplay = session.profile_name || session.profile_id || "";
   const userHref = `/admin/users/${session.user_id}`;
@@ -1491,10 +1491,7 @@ function getDisplayTitle(
   if (session.series_name && session.season_number != null && session.episode_number != null) {
     return session.episode_name || `S${session.season_number}E${session.episode_number}`;
   }
-  return (
-    session.media_title ||
-    t("web.common.activity.title.file", { id: String(session.media_file_id) })
-  );
+  return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
 function getDisplaySubtitle(session: AdminSession, t: Translate): string | null {
@@ -1513,8 +1510,8 @@ function getElapsed(dateStr: string): string {
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
+  if (h > 0) return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 function formatPlaybackPosition(session: AdminSession): string {
@@ -1531,9 +1528,9 @@ function formatClockTime(seconds: number): string {
   const m = Math.floor((safeSeconds % 3600) / 60);
   const s = safeSeconds % 60;
   if (h > 0) {
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    return numberText(`${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
   }
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return numberText(`${m}:${String(s).padStart(2, "0")}`);
 }
 
 function stringAttr(entry: OperationalLogEntry, key: string) {
