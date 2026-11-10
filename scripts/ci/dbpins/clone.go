@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Every package's tests run against their own copy of the migrated database.
@@ -136,35 +137,30 @@ func cloneEnv(environ []string, template, cloneURL string) []string {
 	return env
 }
 
-// sameDatabase reports whether two URLs name one database on one server,
-// however their options are spelled. The loopback names count as one host:
-// this assumes one test server answers on loopback at a port. Separate servers
-// on 127.0.0.1 and ::1 at the same port would make a URL for the other server
-// look like the template's, and its tests would run against the copy.
+// sameDatabase reports whether two URLs connect to one database on one
+// server, as pgx resolves them: query parameters such as host, port, dbname
+// and database override the rest of the URL. The loopback names count as one
+// host: this assumes one test server answers on loopback at a port. Separate
+// servers on 127.0.0.1 and ::1 at the same port would make a URL for the other
+// server look like the template's, and its tests would run against the copy.
 func sameDatabase(a, b string) bool {
 	if a == b {
 		return true
 	}
-	ua, errA := parseDatabaseURL(a)
-	ub, errB := parseDatabaseURL(b)
+	ca, errA := pgconn.ParseConfig(a)
+	cb, errB := pgconn.ParseConfig(b)
 	if errA != nil || errB != nil {
 		return false
 	}
-	host := func(u *url.URL) string {
-		switch h := u.Hostname(); h {
-		case "", "localhost", "127.0.0.1", "::1":
+	host := func(h string) string {
+		switch h {
+		case "localhost", "127.0.0.1", "::1":
 			return "localhost"
 		default:
 			return h
 		}
 	}
-	port := func(u *url.URL) string {
-		if p := u.Port(); p != "" {
-			return p
-		}
-		return "5432"
-	}
-	return host(ua) == host(ub) && port(ua) == port(ub) && effectiveDatabase(ua) == effectiveDatabase(ub)
+	return host(ca.Host) == host(cb.Host) && ca.Port == cb.Port && ca.Database == cb.Database
 }
 
 var unsafeName = regexp.MustCompile(`[^a-z0-9]+`)
@@ -276,29 +272,25 @@ func connectMaintenance(ctx context.Context, template string) (*pgx.Conn, error)
 	return conn, nil
 }
 
+// databaseName is the database the URL connects to, as pgx resolves it.
 func databaseName(dsn string) (string, error) {
-	u, err := parseDatabaseURL(dsn)
+	if _, err := parseDatabaseURL(dsn); err != nil {
+		return "", err
+	}
+	cfg, err := pgconn.ParseConfig(dsn)
 	if err != nil {
 		return "", err
 	}
-	name := effectiveDatabase(u)
+	name := cfg.Database
 	if name == "" || name == "postgres" {
 		return "", fmt.Errorf("SILO_TEST_DATABASE_URL must name a disposable database, not %q", name)
 	}
 	return name, nil
 }
 
-// effectiveDatabase is the database a URL connects to: a dbname query
-// parameter overrides the path, in pgx as in libpq.
-func effectiveDatabase(u *url.URL) string {
-	if name := u.Query().Get("dbname"); name != "" {
-		return name
-	}
-	return strings.TrimPrefix(u.Path, "/")
-}
-
 // withDatabase points the URL at another database on the same server,
-// dropping a dbname query parameter that would override the path.
+// dropping the dbname and database query parameters, either of which would
+// override the path.
 func withDatabase(dsn, name string) (string, error) {
 	u, err := parseDatabaseURL(dsn)
 	if err != nil {
@@ -306,6 +298,7 @@ func withDatabase(dsn, name string) (string, error) {
 	}
 	query := u.Query()
 	query.Del("dbname")
+	query.Del("database")
 	u.RawQuery = query.Encode()
 	u.Path, u.RawPath = "/"+name, ""
 	return u.String(), nil
