@@ -710,7 +710,14 @@ func UpdateLibraryCollectionColumnsInTx(ctx context.Context, tx pgx.Tx, input Up
 
 //nolint:funlen,gocyclo // the scope and group writes of one transaction; its column assignments moved to libraryCollectionColumnSets
 func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLibraryCollectionInput) error {
-	sets, args, argIdx := libraryCollectionColumnSets(input)
+	// A slug that comes with a scope change is checked in the library the
+	// collection ends up in, so it is written after the move.
+	slugAfterMove := input.Slug != nil && input.LibraryIDs != nil
+	columns := input
+	if slugAfterMove {
+		columns.Slug = nil
+	}
+	sets, args, argIdx := libraryCollectionColumnSets(columns)
 
 	if len(sets) == 0 && input.LibraryIDs == nil && input.SetGroupID == nil && input.ExpectedRevision == nil {
 		_, err := r.GetByID(ctx, input.ID)
@@ -790,6 +797,11 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 			if legacyLibraryID > 0 {
 				if err := keepLegacyLibraryInScope(ctx, tx, input.ID, legacyLibraryID, updatedLibraryIDs); err != nil {
 					return fmt.Errorf("updating legacy library_id: %w", err)
+				}
+			}
+			if slugAfterMove {
+				if _, err := tx.Exec(ctx, `UPDATE library_collections SET slug = $2, updated_at = NOW() WHERE id = $1`, input.ID, *input.Slug); err != nil {
+					return fmt.Errorf("updating library collection slug: %w", err)
 				}
 			}
 		}

@@ -52,11 +52,14 @@ func TestLibraryCollectionNamesDB(t *testing.T) {
 	}{
 		{key: "picks", title: "Server Picks", slug: "server-picks", libraries: []int{movies}, unique: true, wantSlug: "server-picks"},
 		{title: "\t server   PICKS\n", slug: "server-picks", libraries: []int{movies}, unique: true, wantTakenIn: moviesName},
+		// No-break and ideographic spaces read as spaces, as the service compares titles.
+		{title: "Server\u00a0Picks", libraries: []int{movies}, unique: true, wantTakenIn: moviesName},
+		{title: "Server\u3000Picks", libraries: []int{movies}, unique: true, wantTakenIn: moviesName},
 		// Shares Movies, though its first library (the slug's) is Shows.
 		{title: "Server Picks", slug: "server-picks", libraries: []int{shows, movies}, unique: true, wantTakenIn: moviesName},
 		{title: "Server Picks", slug: "server-picks", libraries: []int{shows}, unique: true, wantSlug: "server-picks"},
 		// Imports, templates and restores keep their own rules for titles.
-		{title: "Server Picks", slug: "server-picks", libraries: []int{movies}, wantSlug: "server-picks-2"},
+		{key: "import", title: "Server Picks", slug: "server-picks", libraries: []int{movies}, wantSlug: "server-picks-2"},
 		{key: "scifi", title: "Sci-Fi", slug: "sci-fi", libraries: []int{movies}, unique: true, wantSlug: "sci-fi"},
 		{key: "scifi2", title: "Sci Fi", slug: "sci-fi", libraries: []int{movies}, unique: true, wantSlug: "sci-fi-2"},
 		{title: "日本映画", libraries: []int{movies}, unique: true, wantSlug: "collection"},
@@ -102,5 +105,21 @@ func TestLibraryCollectionNamesDB(t *testing.T) {
 	}
 	if got.LibraryID != shows || got.Slug != "sci-fi-2" {
 		t.Fatalf("move Sci-Fi to Shows: library %d slug %q, want %d %q", got.LibraryID, got.Slug, shows, "sci-fi-2")
+	}
+
+	// A slug sent with a scope change is checked where the collection lands:
+	// one taken only in Movies is free in Shows, one taken in Shows is refused
+	// rather than suffixed.
+	takenInMovies := "server-picks-2"
+	if err := repo.Update(ctx, UpdateLibraryCollectionInput{ID: created["scifi2"], LibraryIDs: &scope, Slug: &takenInMovies}); err != nil {
+		t.Fatalf("move Sci Fi to Shows as %q: %v", takenInMovies, err)
+	}
+	if got, err := repo.GetByID(ctx, created["scifi2"]); err != nil || got.LibraryID != shows || got.Slug != takenInMovies {
+		t.Fatalf("move Sci Fi to Shows as %q: got %+v, %v", takenInMovies, got, err)
+	}
+	takenInShows := "sci-fi"
+	err = repo.Update(ctx, UpdateLibraryCollectionInput{ID: created["import"], LibraryIDs: &scope, Slug: &takenInShows})
+	if !IsLibraryCollectionSlugConflict(err) {
+		t.Fatalf("move the import to Shows as %q: err = %v, want a slug conflict", takenInShows, err)
 	}
 }

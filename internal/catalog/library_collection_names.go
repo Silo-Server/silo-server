@@ -17,6 +17,12 @@ const libraryCollectionSlugConstraint = "library_collections_library_slug_unique
 // as a title written only in a non-Latin script.
 const emptyLibraryCollectionSlug = "collection"
 
+// titleSpacePattern matches a run of the characters Go's unicode.IsSpace
+// treats as spaces, which the admin service's title comparison drops. Postgres
+// [[:space:]] alone leaves out the no-break and ideographic spaces in a C
+// locale database.
+const titleSpacePattern = `[[:space:]\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+`
+
 // LibraryCollectionTitleTakenError refuses a collection title that another
 // admin collection already has in one of the collection's libraries.
 type LibraryCollectionTitleTakenError struct {
@@ -74,7 +80,7 @@ func checkLibraryCollectionTitleFree(ctx context.Context, tx pgx.Tx, collectionI
 	var libraryName string
 	err := tx.QueryRow(ctx, `
 		WITH self AS (
-			SELECT id, library_id, lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) AS title
+			SELECT id, library_id, lower(btrim(regexp_replace(title, $3, ' ', 'g'))) AS title
 			FROM library_collections
 			WHERE id = $1
 		), self_libraries AS (
@@ -86,7 +92,7 @@ func checkLibraryCollectionTitleFree(ctx context.Context, tx pgx.Tx, collectionI
 		SELECT mf.name
 		FROM self
 		JOIN library_collections other
-			ON other.id <> self.id AND lower(btrim(regexp_replace(other.title, '[[:space:]]+', ' ', 'g'))) = self.title
+			ON other.id <> self.id AND lower(btrim(regexp_replace(other.title, $3, ' ', 'g'))) = self.title
 		JOIN self_libraries sl ON (
 			EXISTS (SELECT 1 FROM library_collection_libraries lcl WHERE lcl.collection_id = other.id AND lcl.library_id = sl.library_id)
 			OR (other.library_id = sl.library_id
@@ -95,7 +101,7 @@ func checkLibraryCollectionTitleFree(ctx context.Context, tx pgx.Tx, collectionI
 		JOIN media_folders mf ON mf.id = sl.library_id
 		WHERE coalesce(cardinality($2::int[]), 0) = 0 OR sl.library_id = ANY($2::int[])
 		ORDER BY mf.name, mf.id
-		LIMIT 1`, collectionID, within).Scan(&libraryName)
+		LIMIT 1`, collectionID, within, titleSpacePattern).Scan(&libraryName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
