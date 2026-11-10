@@ -69,7 +69,7 @@ function recoversImmediately(escaped: Uint8Array): boolean {
     payloadSize += sei[pos++]!;
     if (payloadType === SEI_RECOVERY_POINT) {
       // recovery_frame_cnt is ue(v), and ue(v) is 0 exactly when its first bit is set.
-      return pos < sei.length && (sei[pos]! & 0x80) !== 0;
+      return payloadSize > 0 && pos < sei.length && (sei[pos]! & 0x80) !== 0;
     }
     pos += payloadSize;
   }

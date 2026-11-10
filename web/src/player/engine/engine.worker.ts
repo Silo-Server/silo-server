@@ -427,10 +427,10 @@ async function decodeVideo(
 ): Promise<"done" | "rejected"> {
   const config = videoConfig!;
   const startPacket = start.packet;
-  // Leading pictures come right after a recovery point in decode order and
-  // show before it. They reference the GOP before, which was not decoded,
-  // and are never shown; the first picture that shows after it ends them.
-  let skippingLeading = start.recoveryPoint;
+  // Leading pictures follow a recovery point in decode order and show before
+  // it. They reference the GOP before, which was not decoded, and show
+  // before the position, so none is decoded.
+  const skipBefore = start.recoveryPoint ? startPacket.timestamp : -Infinity;
   let decodedPicture = false;
   let rejected = false;
 
@@ -504,10 +504,7 @@ async function decodeVideo(
     }
     if (run !== generation) return "done";
     if (decoder.state === "closed") return rejected ? "rejected" : "done";
-    if (skippingLeading && packet !== startPacket) {
-      if (packet.timestamp < startPacket.timestamp) continue;
-      skippingLeading = false;
-    }
+    if (packet.timestamp < skipBefore) continue;
     const data = nalLengthSize ? stripDolbyVisionNalUnits(packet.data, nalLengthSize) : packet.data;
     decoder.decode(
       new EncodedVideoChunk({

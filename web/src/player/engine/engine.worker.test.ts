@@ -39,9 +39,9 @@ const AVCC = new Uint8Array([1, 0x64, 0, 0x28, 0xff, 0xe0, 0]);
 
 /**
  * A Blu-ray-style open-GOP stream: an IDR only at the start, then I-frames
- * with a recovery point that the container marks as keys. The pictures right
- * after each I-frame in decode order show before it and reference the GOP
- * before it.
+ * with a recovery point that the container marks as keys. A picture after
+ * each I-frame in decode order, behind one that shows after it, shows before
+ * the I-frame and references the GOP before it.
  */
 const openGop: Packet[] = (() => {
   const out: Packet[] = [];
@@ -51,8 +51,9 @@ const openGop: Packet[] = (() => {
   for (let t = 0.5; t < 3; t += 0.5) add(t, "delta", accessUnit(NON_IDR_SLICE));
   for (const gop of [3, 6]) {
     add(gop, "key", accessUnit(RECOVERY_POINT_SEI, NON_IDR_SLICE));
+    add(gop + 0.5, "delta", accessUnit(NON_IDR_SLICE));
     add(gop - 0.5, "delta", accessUnit(NON_IDR_SLICE));
-    for (let t = gop + 0.5; t < gop + 3; t += 0.5) add(t, "delta", accessUnit(NON_IDR_SLICE));
+    for (let t = gop + 1; t < gop + 3; t += 0.5) add(t, "delta", accessUnit(NON_IDR_SLICE));
   }
   return out;
 })();
@@ -219,10 +220,10 @@ describe("engine worker", () => {
       expect(posted.some((m) => m.type === "video-ended" && m.generation === 1)).toBe(true),
     );
     // Not walked back to the IDR at 0: the I-frame at 3 s is where decoding
-    // starts. The picture at 2.5 s that follows it references the GOP before
-    // and is never shown, so it is not decoded; the one at 5.5 s belongs to a
-    // GOP that is being decoded and is.
-    expect(decoded).toEqual([[3, 3.5, 4, 4.5, 5, 5.5, 6, 5.5, 6.5, 7, 7.5, 8, 8.5]]);
+    // starts. The picture at 2.5 s that follows it, even behind the one at
+    // 3.5 s, references the GOP before and is never shown, so it is not
+    // decoded; the one at 5.5 s belongs to a GOP that is being decoded and is.
+    expect(decoded).toEqual([[3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 5.5, 7, 7.5, 8, 8.5]]);
   });
 
   it("starts at the recovery point before when the decoder rejects the stream from one", async () => {
@@ -238,7 +239,7 @@ describe("engine worker", () => {
     expect(posted.some((m) => m.type === "error")).toBe(false);
     expect(decoded).toEqual([
       [6, 6.5],
-      [3, 3.5, 4, 4.5, 5, 5.5, 6, 5.5, 6.5, 7, 7.5, 8, 8.5],
+      [3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 5.5, 7, 7.5, 8, 8.5],
     ]);
   });
 

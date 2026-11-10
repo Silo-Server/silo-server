@@ -45,6 +45,7 @@ describe("h264RandomAccess", () => {
       accessUnit(sei([6, RECOVERY_LATER]), NON_IDR_SLICE),
       null,
     ],
+    ["an empty recovery point payload", accessUnit(sei([6, []]), NON_IDR_SLICE), null],
     ["a non-IDR slice without a recovery point", accessUnit(sei([5, [0x01]]), NON_IDR_SLICE), null],
     ["a recovery point with no slice after it", accessUnit(sei([6, RECOVERY_NOW])), null],
     ["a length field that runs past the data", new Uint8Array([0, 0, 0, 9, 0x65, 0x88]), null],
