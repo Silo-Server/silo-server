@@ -1226,3 +1226,6 @@ A household parent sets it for another profile on the account with the usual
 `PUT /api/v2/settings/values/ui.app_language?scope=profile&profile_id=<id>`, and an administrator
 uses `setAdminUserSettingValue`. Jellyfin clients choose their own interface language; this does
 not extend the Jellyfin protocol.
+
+How each client matches, loads and applies the language is in
+[the client translation architecture](architecture/i18n.md).
