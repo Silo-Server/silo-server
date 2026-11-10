@@ -362,7 +362,41 @@ cat <<'JSON'
 {"format":{"format_name":"mov,mp4,m4a","duration":"3600.0","size":"1","bit_rate":"64000","tags":{"title":"Present Book","artist":"Present Author","date":"2020"}},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":2}],"chapters":[]}
 JSON
 `)
-	for _, kind := range []string{"audiobooks", "ebooks"} {
+	// Root A holds a readable book, so the scan is not wholly empty; root B is
+	// an empty directory with a cataloged book under it. Paths are relative to
+	// those roots.
+	for _, bk := range []struct {
+		kind, itemType         string
+		presentFile            string
+		lostFile, lostObserved string
+		presentContent         func(*testing.T) []byte
+		scan                   func(context.Context, *Scanner, *models.MediaFolder) error
+	}{
+		{
+			kind: "audiobooks", itemType: "audiobook",
+			presentFile: "Present Author/Present Book/part.m4b",
+			lostFile:    "Lost Book/part.m4b", lostObserved: "Lost Book",
+			presentContent: func(*testing.T) []byte { return []byte("x") },
+			scan: func(ctx context.Context, s *Scanner, f *models.MediaFolder) error {
+				return s.ScanAudiobookFolder(ctx, f, true)
+			},
+		},
+		{
+			kind: "ebooks", itemType: "ebook",
+			presentFile: "Present Book.epub",
+			lostFile:    "Lost Book.epub", lostObserved: "Lost Book.epub",
+			presentContent: func(t *testing.T) []byte {
+				data, err := os.ReadFile(writeTestEPUB(t, nil))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return data
+			},
+			scan: func(ctx context.Context, s *Scanner, f *models.MediaFolder) error {
+				return s.ScanEbookFolder(ctx, f)
+			},
+		},
+	} {
 		for _, tc := range []struct {
 			name        string
 			confirmed   bool
@@ -372,36 +406,23 @@ JSON
 			{"cleanup not confirmed", false, true, "dead_root"},
 			{"cleanup confirmed", true, false, ""},
 		} {
-			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+			t.Run(bk.kind+"/"+tc.name, func(t *testing.T) {
 				ctx := t.Context()
 				rootA, rootB := t.TempDir(), t.TempDir()
-				folderID := seedDeadRootTestFolder(t, pool, kind, fmt.Sprintf("empty-root-full-%d", time.Now().UnixNano()))
-				folder := &models.MediaFolder{ID: folderID, Type: kind, Paths: []string{rootA, rootB}}
+				folderID := seedDeadRootTestFolder(t, pool, bk.kind, fmt.Sprintf("empty-root-full-%d", time.Now().UnixNano()))
+				folder := &models.MediaFolder{ID: folderID, Type: bk.kind, Paths: []string{rootA, rootB}}
 				s := NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
 
-				// Root A holds a readable book, so the scan is not wholly empty;
-				// root B is an empty directory with a cataloged book under it.
-				itemType := "audiobook"
-				bookFile := filepath.Join(rootB, "Lost Book", "part.m4b")
-				observedRoot := filepath.Dir(bookFile)
-				scan := func() error { return s.ScanAudiobookFolder(ctx, folder, true) }
-				if kind == "ebooks" {
-					itemType = "ebook"
-					bookFile = filepath.Join(rootB, "Lost Book.epub")
-					observedRoot = bookFile
-					scan = func() error { return s.ScanEbookFolder(ctx, folder) }
-					if err := os.Rename(writeTestEPUB(t, nil), filepath.Join(rootA, "Present Book.epub")); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					presentDir := filepath.Join(rootA, "Present Author", "Present Book")
-					if err := os.MkdirAll(presentDir, 0o755); err != nil {
-						t.Fatal(err)
-					}
-					if err := os.WriteFile(filepath.Join(presentDir, "part.m4b"), []byte("x"), 0o644); err != nil {
-						t.Fatal(err)
-					}
+				presentFile := filepath.Join(rootA, bk.presentFile)
+				if err := os.MkdirAll(filepath.Dir(presentFile), 0o755); err != nil {
+					t.Fatal(err)
 				}
+				if err := os.WriteFile(presentFile, bk.presentContent(t), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				itemType := bk.itemType
+				bookFile := filepath.Join(rootB, bk.lostFile)
+				observedRoot := filepath.Join(rootB, bk.lostObserved)
 				contentID := fmt.Sprintf("%s-empty-root-%d", itemType, folderID)
 				t.Cleanup(func() {
 					_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, folderID)
@@ -422,7 +443,7 @@ JSON
 					}
 				}
 
-				if err := scan(); err != nil {
+				if err := bk.scan(ctx, s, folder); err != nil {
 					t.Fatalf("full scan: %v", err)
 				}
 
