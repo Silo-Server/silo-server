@@ -295,6 +295,7 @@ function TrendingShowField({ config, onChange }: FieldProps) {
     config.filter_type === "movie" || config.filter_type === "series" ? config.filter_type : "all";
   return (
     <Segmented<TrendingShow>
+      // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- new on main; its catalog key is a follow-up
       label="Show"
       value={value}
       options={TRENDING_SHOWS}
