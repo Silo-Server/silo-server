@@ -216,14 +216,13 @@ func (p *checkingDirectory) Authenticate(ctx context.Context, req *pluginv1.Auth
 	return p.directoryPlugin.Authenticate(ctx, req)
 }
 
-// TestPasswordSignInOverlappingSignOutDB: a sign-out everywhere that
-// commits after a password sign-in began checking the password refuses the
-// sign-in. For a directory sign-in it may land during the directory's answer
-// or after account resolution commits (#2920); a local sign-in is refused by
-// one that was still in progress when it began. A sign-out that committed
-// before the sign-in began, the revocation a sign-in's own role change
-// makes, and a sign-out mark from another cluster's transaction ids do not.
-func TestPasswordSignInOverlappingSignOutDB(t *testing.T) {
+// TestDirectorySignInOverlappingSignOutDB: a sign-out everywhere that
+// commits after a directory sign-in began checking the password refuses the
+// sign-in, whether it lands during the directory's answer or after account
+// resolution commits (#2920). A sign-out that committed before the sign-in
+// began, the revocation a sign-in's own role change makes, and a sign-out
+// mark from another cluster's transaction ids do not.
+func TestDirectorySignInOverlappingSignOutDB(t *testing.T) {
 	env := newExternalSignInEnv(t)
 	ctx := t.Context()
 	users := NewUserRepository(env.pool)
@@ -315,10 +314,18 @@ func TestPasswordSignInOverlappingSignOutDB(t *testing.T) {
 			t.Errorf("%s: %d live sessions, want %d", tc.name, n, wantLive)
 		}
 	}
+}
 
-	// A local sign-in that begins while a sign-out everywhere holds the
-	// account and has not committed waits for the account lock, then finds
-	// the sign-out committed after it began.
+// TestLocalSignInOverlappingSignOutDB: a local sign-in that begins while a
+// sign-out everywhere holds the account and has not committed waits for the
+// account lock, then finds the sign-out committed after it began, and is
+// refused.
+func TestLocalSignInOverlappingSignOutDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	users := NewUserRepository(env.pool)
+	sessions := NewSessionRepository(env.pool)
+	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-jwt-secret-synthetic-jwt-secret", time.Minute, time.Hour), sessions, users, nil, nil, nil)
 	env.setSetting(t, config.AuthLocalPasswordLoginSettingKey, "true")
 	local := env.localAccount(t, "fern", models.RoleUser)
 	tx, err := env.pool.Begin(ctx)

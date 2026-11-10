@@ -74,7 +74,7 @@ func scopedRecoveryDB(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	for _, table := range []string{"users", "access_groups", "auth_sessions", "api_keys", "password_reset_tokens", "abs_sessions", "jellycompat_sessions", "device_login_requests", "user_profiles", "activity_log"} {
+	for _, table := range []string{"users", "access_groups", "auth_sessions", "account_sign_outs", "api_keys", "password_reset_tokens", "abs_sessions", "jellycompat_sessions", "device_login_requests", "user_profiles", "activity_log"} {
 		if _, err := pool.Exec(t.Context(), "CREATE TABLE "+table+" (LIKE public."+table+" INCLUDING ALL)"); err != nil {
 			t.Fatal(err)
 		}
