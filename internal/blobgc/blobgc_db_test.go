@@ -2,6 +2,7 @@ package blobgc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"slices"
@@ -216,5 +217,85 @@ func TestCollectRetryDelay(t *testing.T) {
 		if got := collectRetryDelay(attempts); got != want {
 			t.Errorf("attempts %d: delay %s, want %s", attempts, got, want)
 		}
+	}
+}
+
+// TestDeletedFileQueueLookupSeeksChapterFileIndexDB pins the plan of the
+// lookup queue_deleted_media_file_blobs runs for every deleted media file
+// (migration 20261010180000_add_marker_thumbnails.sql holds its current body).
+// Without blob_gc_queue_chapter_file_not_before_idx (migration 20261110144816),
+// which orders a file's queued images by not_before, the planner can answer
+// max(not_before) by walking blob_gc_queue_due_idx backwards, reading the
+// whole queue for each deleted file that has nothing queued.
+func TestDeletedFileQueueLookupSeeksChapterFileIndexDB(t *testing.T) {
+	ctx := t.Context()
+	pool := testPool(t)
+	// The rolled-back seed leaves dead rows, and ANALYZE's row count survives
+	// the rollback; leave the shared queue as other tests expect it.
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `VACUUM ANALYZE public.blob_gc_queue`); err != nil {
+			t.Errorf("vacuum queue: %v", err)
+		}
+	})
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	// Ten replaced chapter images queued for each of 2,000 files.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO public.blob_gc_queue (prefix, not_before)
+		SELECT 'chapter-images/' || ($1::bigint + g / 10) || '/' || (g % 10) || '/w300.webp',
+		       now() + interval '1 day' + make_interval(secs => g)
+		FROM generate_series(0, 19999) AS g`, testIDBase); err != nil {
+		t.Fatalf("seed queue: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ANALYZE public.blob_gc_queue`); err != nil {
+		t.Fatalf("analyze queue: %v", err)
+	}
+	// The trigger's lookup, joined to a deleted file.
+	var raw []byte
+	if err := tx.QueryRow(ctx, fmt.Sprintf(`
+		EXPLAIN (FORMAT JSON)
+		SELECT protected.until
+		FROM (VALUES (%d::bigint)) AS old_rows(id)
+		CROSS JOIN LATERAL (
+			SELECT max(q.not_before) AS until
+			FROM public.blob_gc_queue q
+			WHERE q.prefix LIKE 'chapter-images/%%'
+			  AND split_part(q.prefix, '/', 2) = old_rows.id::text
+		) protected`, testIDBase+99_999)).Scan(&raw); err != nil {
+		t.Fatalf("explain lookup: %v", err)
+	}
+	var plans []struct {
+		Plan queuePlanNode `json:"Plan"`
+	}
+	if err := json.Unmarshal(raw, &plans); err != nil || len(plans) != 1 {
+		t.Fatalf("decode plan %s: %v", raw, err)
+	}
+	var scans []string
+	plans[0].Plan.walk(func(node queuePlanNode) {
+		if node.RelationName == "blob_gc_queue" {
+			scans = append(scans, node.NodeType+" "+node.IndexName)
+		}
+	})
+	if len(scans) == 0 || slices.ContainsFunc(scans, func(scan string) bool {
+		return !strings.HasSuffix(scan, " blob_gc_queue_chapter_file_not_before_idx")
+	}) {
+		t.Fatalf("lookup scans blob_gc_queue with %q, want only blob_gc_queue_chapter_file_not_before_idx", scans)
+	}
+}
+
+type queuePlanNode struct {
+	NodeType     string          `json:"Node Type"`
+	RelationName string          `json:"Relation Name"`
+	IndexName    string          `json:"Index Name"`
+	Plans        []queuePlanNode `json:"Plans"`
+}
+
+func (n queuePlanNode) walk(visit func(queuePlanNode)) {
+	visit(n)
+	for _, child := range n.Plans {
+		child.walk(visit)
 	}
 }
