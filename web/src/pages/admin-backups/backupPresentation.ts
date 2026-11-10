@@ -9,6 +9,7 @@ import type {
 } from "@/api/v2/adminBackups";
 import { V2ProblemError } from "@/api/v2/request";
 import { formatDateTime, formatTime, preferredDateLocale } from "@/lib/datetime";
+import { formatLocale } from "@/lib/appLocale";
 
 export const BACKUP_ENABLED_KEY = "backup.enabled";
 export const BACKUP_TIME_KEY = "backup.time";
@@ -175,7 +176,7 @@ function calendarDays(from: Date, to: Date): number {
 }
 
 function weekday(date: Date): string {
-  return date.toLocaleDateString(undefined, { weekday: "long" });
+  return date.toLocaleDateString(formatLocale(), { weekday: "long" });
 }
 
 /** "Oct 30, 2026, 4:00 AM": a moment as the backup pages print it. */

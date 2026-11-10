@@ -67,6 +67,7 @@ import {
   summarizePreparationAction,
   type PreparationState,
 } from "@/pages/adminDownloadPreparationPresentation";
+import { formatLocale } from "@/lib/appLocale";
 
 const GRID =
   "grid-cols-[16px_minmax(180px,1.6fr)_minmax(190px,1.5fr)_minmax(100px,0.8fr)_minmax(200px,1.5fr)_minmax(150px,1fr)_112px]";
@@ -216,7 +217,7 @@ export default function PreparationTab() {
                 />
                 <span className="font-medium">{preparationStateMeta(state).label}</span>
                 <span className="text-muted-foreground tabular-nums">
-                  {counts[state].toLocaleString()}
+                  {counts[state].toLocaleString(formatLocale())}
                 </span>
               </button>
             ))}
@@ -296,7 +297,7 @@ export default function PreparationTab() {
           className="bg-surface/60 border-border flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2"
         >
           <span className="text-[12px] font-medium tabular-nums">
-            {selectedItems.length.toLocaleString()} selected
+            {selectedItems.length.toLocaleString(formatLocale())} selected
           </span>
           <div className="ml-auto flex flex-wrap gap-1.5">
             <Button
@@ -307,7 +308,7 @@ export default function PreparationTab() {
               onClick={() => actions.run("pause", pausable)}
             >
               <Pause className="h-3.5 w-3.5" />
-              Pause{pausable.length > 0 && ` ${pausable.length.toLocaleString()}`}
+              Pause{pausable.length > 0 && ` ${pausable.length.toLocaleString(formatLocale())}`}
             </Button>
             <Button
               size="sm"
@@ -317,7 +318,7 @@ export default function PreparationTab() {
               onClick={() => actions.run("resume", resumable)}
             >
               <Play className="h-3.5 w-3.5" />
-              Resume{resumable.length > 0 && ` ${resumable.length.toLocaleString()}`}
+              Resume{resumable.length > 0 && ` ${resumable.length.toLocaleString(formatLocale())}`}
             </Button>
             <Button
               size="sm"
@@ -327,7 +328,7 @@ export default function PreparationTab() {
               onClick={() => setCancelTargets(selectedItems)}
             >
               <X className="h-3.5 w-3.5" />
-              Cancel {selectedItems.length.toLocaleString()}
+              Cancel {selectedItems.length.toLocaleString(formatLocale())}
             </Button>
             <Button
               size="sm"
@@ -349,8 +350,8 @@ export default function PreparationTab() {
       )}
       {items.length < total && (
         <div className="text-muted-foreground text-[11px]">
-          Listing the first {items.length.toLocaleString()} of {total.toLocaleString()} jobs.
-          Running jobs are always listed first.
+          Listing the first {items.length.toLocaleString(formatLocale())} of{" "}
+          {total.toLocaleString(formatLocale())} jobs. Running jobs are always listed first.
         </div>
       )}
 
@@ -735,7 +736,7 @@ function ProgressCell({ prep }: { prep: AdminDownloadPreparation }) {
           {prep.queue_position === 1
             ? "next in line"
             : prep.queue_position
-              ? `#${prep.queue_position.toLocaleString()} in line`
+              ? `#${prep.queue_position.toLocaleString(formatLocale())} in line`
               : "waiting"}
         </div>
       );

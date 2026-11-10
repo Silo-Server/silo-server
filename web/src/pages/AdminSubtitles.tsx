@@ -17,6 +17,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminDownloadedSubtitles } from "@/hooks/queries/admin/subtitles";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
+import { formatLocale } from "@/lib/appLocale";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 
@@ -200,7 +201,9 @@ function StatBlock({ label, value }: { label: string; value: number }) {
       <div className="text-muted-foreground text-xs font-medium tracking-[0.18em] uppercase">
         {label}
       </div>
-      <div className="text-2xl font-semibold tracking-tight">{value.toLocaleString()}</div>
+      <div className="text-2xl font-semibold tracking-tight">
+        {value.toLocaleString(formatLocale())}
+      </div>
     </div>
   );
 }

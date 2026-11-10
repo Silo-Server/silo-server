@@ -11,6 +11,7 @@ import { rangeDays, rangePhrase, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
 import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
+import { formatLocale } from "@/lib/appLocale";
 
 const ROW_LIMIT = 8;
 
@@ -56,7 +57,9 @@ export function TopTitlesWidget() {
         ) : (
           <BarList
             items={items}
-            formatValue={(plays) => `${plays.toLocaleString()} ${plays === 1 ? "play" : "plays"}`}
+            formatValue={(plays) =>
+              `${plays.toLocaleString(formatLocale())} ${plays === 1 ? "play" : "plays"}`
+            }
             emptyLabel={`No plays in ${rangePhrase(range)}`}
           />
         )}

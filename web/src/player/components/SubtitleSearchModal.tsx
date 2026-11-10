@@ -4,9 +4,10 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2 } from "../player-v2";
 import type { SubtitleLanguageDetection, SubtitleResult } from "@/api/types";
 import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
-import { LANGUAGES } from "../utils/languageNames";
+import { languageOptions } from "../utils/languageNames";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 import type { StoredSubtitle } from "../utils/subtitleSync";
+import { formatLocale } from "@/lib/appLocale";
 
 interface SubtitleSearchModalProps {
   mediaFileId: number;
@@ -318,7 +319,7 @@ export function SubtitleSearchModal({
               value={selectedLang}
               onChange={(e) => setSelectedLang(e.target.value)}
             >
-              {LANGUAGES.map((lang) => (
+              {languageOptions().map((lang) => (
                 <option key={lang.code} value={lang.code}>
                   {lang.label}
                 </option>
@@ -402,7 +403,7 @@ export function SubtitleSearchModal({
 
                   {/* Download count */}
                   <span className="shrink-0 text-[10px] text-white/40">
-                    ↓{result.downloads.toLocaleString()}
+                    ↓{result.downloads.toLocaleString(formatLocale())}
                   </span>
 
                   {/* Provider badge */}

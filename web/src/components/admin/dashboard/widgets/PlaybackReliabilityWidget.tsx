@@ -8,6 +8,7 @@ import { rangeHours, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
 import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
+import { formatLocale } from "@/lib/appLocale";
 
 /**
  * Coarse playback health for the chosen window.
@@ -40,10 +41,13 @@ export function PlaybackReliabilityWidget() {
           <SectionError message="Failed to load playback reliability." />
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MiniStat label="Started" value={reliability.sessions_started.toLocaleString()} />
+            <MiniStat
+              label="Started"
+              value={reliability.sessions_started.toLocaleString(formatLocale())}
+            />
             <MiniStat
               label="Transcode starts"
-              value={reliability.transcode_starts.toLocaleString()}
+              value={reliability.transcode_starts.toLocaleString(formatLocale())}
             />
             <MiniStat
               label="Completed"
@@ -53,11 +57,14 @@ export function PlaybackReliabilityWidget() {
               )}
               detail={
                 reliability.finalized_sessions > 0
-                  ? `${reliability.completed_sessions.toLocaleString()} of ${reliability.finalized_sessions.toLocaleString()} finished`
+                  ? `${reliability.completed_sessions.toLocaleString(formatLocale())} of ${reliability.finalized_sessions.toLocaleString(formatLocale())} finished`
                   : "No finished sessions yet"
               }
             />
-            <MiniStat label="Profiles" value={reliability.unique_profiles.toLocaleString()} />
+            <MiniStat
+              label="Profiles"
+              value={reliability.unique_profiles.toLocaleString(formatLocale())}
+            />
           </div>
         )}
       </CardContent>

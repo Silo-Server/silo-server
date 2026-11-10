@@ -7,6 +7,7 @@ import { useCatalogSearchStatus } from "@/hooks/queries/admin/settings";
 import { formatDateTime } from "@/lib/datetime";
 
 import { SettingFieldStatus } from "./SettingField";
+import { formatLocale } from "@/lib/appLocale";
 
 /**
  * Read-only view of the catalog search index: which provider is answering
@@ -164,7 +165,7 @@ export function SearchStatusSummary() {
   const lastSync = formatStatusDate(status.index.last_sync_at) || "never";
   return (
     <SettingFieldStatus tone="muted">
-      {`Last sync ${lastSync} · ${status.index.document_count.toLocaleString()} items indexed`}
+      {`Last sync ${lastSync} · ${status.index.document_count.toLocaleString(formatLocale())} items indexed`}
     </SettingFieldStatus>
   );
 }

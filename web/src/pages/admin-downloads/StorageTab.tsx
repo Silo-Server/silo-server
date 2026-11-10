@@ -34,6 +34,7 @@ import {
   type StorageWarning,
 } from "./downloadStoragePresentation";
 import EditLocationDialog from "./EditLocationDialog";
+import { formatLocale } from "@/lib/appLocale";
 
 const SEGMENT_CLASS: Record<MeterSegmentKind, string> = {
   in_use: "bg-chart-1",
@@ -127,7 +128,7 @@ export default function StorageTab({
         <StatTile
           label="On disk"
           value={formatStorageBytes(totals.onDisk)}
-          detail={`${data.locations.length} ${data.locations.length === 1 ? "location" : "locations"} · ${totals.files.toLocaleString()} files`}
+          detail={`${data.locations.length} ${data.locations.length === 1 ? "location" : "locations"} · ${totals.files.toLocaleString(formatLocale())} files`}
         />
         <StatTile
           label="In use"
@@ -441,7 +442,7 @@ function LocationCard({
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-muted-foreground text-xs">
-          {(location.in_use_files + location.cached_files).toLocaleString()} files
+          {(location.in_use_files + location.cached_files).toLocaleString(formatLocale())} files
           {location.waiting_downloads > 0 ? ` · ${location.waiting_downloads} waiting` : ""}
           {location.cleanup_backlog > 0 ? ` · ${location.cleanup_backlog} queued for deletion` : ""}
         </span>

@@ -1,0 +1,143 @@
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
+import { IntlProvider } from "react-intl";
+
+import {
+  settingsCapabilitiesSupportKey,
+  useEffectiveSettings,
+  useSettingsCapabilities,
+} from "@/hooks/queries/settingValues";
+import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
+import {
+  browserLocaleInputs,
+  getAppLocale,
+  resolveAppLocale,
+  setAppLocale,
+  type AppLanguage,
+} from "@/lib/appLocale";
+import { hasCatalog, loadMessages, type Messages } from "@/lib/i18nMessages";
+import { SETTING_KEYS } from "@/lib/settingsContract";
+import { appearanceCache, storage } from "@/utils/storage";
+
+const APP_LANGUAGE_KEYS = [SETTING_KEYS.UI_APP_LANGUAGE] as const;
+const CACHE_KEY = storage.KEYS.UI_APP_LANGUAGE;
+const SIGNED_OUT_KEY = storage.KEYS.UI_APP_LANGUAGE_SIGNED_OUT;
+/** Stored for a signed-out "Match device", which must override the cached language. */
+const FOLLOW_DEVICE = "device";
+
+/**
+ * The language to use before a profile's settings arrive: the one chosen on
+ * the signed-out screens, else the one this browser last applied. With no
+ * owner yet (signed out, or auth still loading) that is whoever last used the
+ * browser.
+ */
+function languageBeforeSettings(owner: string | null): string | null {
+  const signedOut = storage.get(SIGNED_OUT_KEY);
+  if (signedOut !== null) return signedOut === FOLLOW_DEVICE ? null : signedOut;
+  return appearanceCache.get(CACHE_KEY, owner);
+}
+
+function resolve(stored: string | null) {
+  return resolveAppLocale({ stored, ...browserLocaleInputs(), hasCatalog });
+}
+
+// Seed the app locale before the first render, so a page doesn't paint in one
+// language and switch once the settings request lands.
+setAppLocale(resolve(languageBeforeSettings(null)));
+
+const signedOutListeners = new Set<() => void>();
+
+function subscribeSignedOutLanguage(listener: () => void): () => void {
+  signedOutListeners.add(listener);
+  return () => signedOutListeners.delete(listener);
+}
+
+function signedOutLanguage(): string | null {
+  return languageBeforeSettings(null);
+}
+
+/** The language the signed-out screens use; null follows the browser. */
+export function useSignedOutLanguage(): string | null {
+  return useSyncExternalStore(subscribeSignedOutLanguage, signedOutLanguage, signedOutLanguage);
+}
+
+/**
+ * Choose the signed-out screens' language; null follows the browser. It
+ * applies until a profile's own setting loads, which then clears it.
+ */
+export function setSignedOutLanguage(tag: string | null): void {
+  storage.set(SIGNED_OUT_KEY, tag ?? FOLLOW_DEVICE);
+  for (const listener of signedOutListeners) listener();
+}
+
+/**
+ * Applies the app language: the active profile's effective `ui.app_language`
+ * (the request carries this browser's device id, so a per-device value wins),
+ * else the browser's languages, else English. Before the settings load, and on
+ * the signed-out screens, it uses the signed-out choice or the language this
+ * browser last applied.
+ *
+ * It loads the language's messages and name data first, then switches the
+ * formatting locale, `<html lang dir>` and react-intl together.
+ */
+export function LocaleProvider({ children }: { children: ReactNode }) {
+  const cacheOwner = useAppearanceCacheOwner();
+  const { data: capabilities } = useSettingsCapabilities({ enabled: cacheOwner !== null });
+  const supported = settingsCapabilitiesSupportKey(capabilities, SETTING_KEYS.UI_APP_LANGUAGE);
+  const { data: effectiveSettings } = useEffectiveSettings({
+    keys: APP_LANGUAGE_KEYS,
+    enabled: cacheOwner !== null && supported,
+  });
+  // Re-render when the signed-out picker changes its choice.
+  useSignedOutLanguage();
+
+  const apiLoaded = cacheOwner !== null && effectiveSettings !== undefined;
+  const apiValue = effectiveSettings?.[SETTING_KEYS.UI_APP_LANGUAGE]?.value;
+  const apiLanguage = typeof apiValue === "string" ? apiValue : null;
+  // Once loaded the server's answer is authoritative, null included.
+  const stored = apiLoaded ? apiLanguage : languageBeforeSettings(cacheOwner);
+  const { language, formatLocale, localizedFormats, dir } = useMemo(
+    () => resolve(stored),
+    [stored],
+  );
+
+  useEffect(() => {
+    if (!apiLoaded) return;
+    if (apiLanguage) appearanceCache.set(CACHE_KEY, apiLanguage, cacheOwner);
+    else appearanceCache.remove(CACHE_KEY, cacheOwner);
+    // A profile's own setting replaces whatever was picked while signed out.
+    storage.remove(SIGNED_OUT_KEY);
+  }, [apiLoaded, apiLanguage, cacheOwner]);
+
+  const [intl, setIntl] = useState<{ language: AppLanguage; messages: Messages }>(() => ({
+    language: getAppLocale().language,
+    messages: {},
+  }));
+
+  useEffect(() => {
+    let cancelled = false;
+    const names =
+      language === "en"
+        ? undefined
+        : import("@/lib/languageNames").then((module) => module.loadLanguageNames(language));
+    void Promise.all([
+      // Without its catalog a language still renders, in the English defaults.
+      loadMessages(language).catch((): Messages => ({})),
+      // Without name data, language names stay English.
+      names?.catch(() => undefined),
+    ]).then(([messages]) => {
+      if (cancelled) return;
+      setAppLocale({ language, formatLocale, localizedFormats, dir });
+      setIntl({ language, messages });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [language, formatLocale, localizedFormats, dir]);
+
+  return (
+    <IntlProvider locale={intl.language} defaultLocale="en" messages={intl.messages}>
+      {children}
+    </IntlProvider>
+  );
+}

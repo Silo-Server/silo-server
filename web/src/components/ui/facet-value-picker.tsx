@@ -7,6 +7,7 @@ import { useFacetValues, type FacetValueScope } from "@/hooks/queries/facetValue
 import { useDebounce } from "@/hooks/useDebounce";
 import { cn } from "@/lib/utils";
 import { PortalContainerContext } from "./portal-container-context";
+import { formatLocale } from "@/lib/appLocale";
 
 interface FacetValuePickerProps {
   facet: CatalogFacetName;
@@ -26,8 +27,6 @@ interface FacetValuePickerProps {
 type PickerOption =
   | { kind: "value"; value: string; count?: number }
   | { kind: "typed"; value: string };
-
-const titleCount = new Intl.NumberFormat();
 
 /**
  * A value for an exact-match rule, picked from the values titles carry. It
@@ -254,7 +253,7 @@ function FacetValueList({
               aria-label={
                 count === undefined
                   ? undefined
-                  : `${option.value}, ${titleCount.format(count)} ${count === 1 ? "title" : "titles"}`
+                  : `${option.value}, ${count.toLocaleString(formatLocale())} ${count === 1 ? "title" : "titles"}`
               }
               className={cn(
                 "flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm select-none",
@@ -282,7 +281,7 @@ function FacetValueList({
                   <span className="min-w-0 flex-1 truncate">{option.value}</span>
                   {count !== undefined ? (
                     <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-                      {titleCount.format(count)}
+                      {count.toLocaleString(formatLocale())}
                     </span>
                   ) : null}
                 </>

@@ -5,7 +5,7 @@ import type { PlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerAudioTrack, PlayerSubtitleInfo } from "../types";
 import { playerV2 } from "../player-v2";
 import { PlayerFetchError } from "../player-fetch";
-import { LANGUAGES, getLanguageName, normalizeLanguageCode } from "../utils/languageNames";
+import { languageOptions, getLanguageName, normalizeLanguageCode } from "../utils/languageNames";
 import { isSubtitleFormatLabel } from "../utils/subtitleCodecs";
 import {
   buildSubtitleTranslateRequest,
@@ -126,7 +126,7 @@ export function SubtitleTranslateModal({
   const [audioIndex, setAudioIndex] = useState(0);
   const [targetLang, setTargetLang] = useState(() => {
     const preferred = normalizeLanguageCode(preferredSubtitleLanguage);
-    return LANGUAGES.some((language) => language.code === preferred) ? preferred : "en";
+    return languageOptions().some((language) => language.code === preferred) ? preferred : "en";
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -396,7 +396,7 @@ export function SubtitleTranslateModal({
                     onChange={(e) => setTargetLang(e.target.value)}
                     disabled={submitting}
                   >
-                    {LANGUAGES.map((lang) => (
+                    {languageOptions().map((lang) => (
                       <option key={lang.code} value={lang.code}>
                         {lang.label}
                       </option>

@@ -6,6 +6,7 @@ import { useUserIPs } from "@/hooks/queries/admin/ips";
 
 import { formatLastSeen, formatShortDate } from "../format";
 import { DetailCard } from "../ui";
+import { formatLocale } from "@/lib/appLocale";
 
 const WINDOW_DAYS = 30;
 const NEW_ADDRESS_DAYS = 7;
@@ -97,7 +98,7 @@ export function IPAddressesCard({ userId }: { userId: number }) {
                 ) : null}
               </span>
               <span className="text-muted-foreground col-span-2 text-xs tabular-nums sm:col-span-1 sm:text-right">
-                {entry.request_count.toLocaleString()}{" "}
+                {entry.request_count.toLocaleString(formatLocale())}{" "}
                 {entry.request_count === 1 ? "request" : "requests"} ·{" "}
                 {formatLastSeen(entry.last_seen)}
               </span>

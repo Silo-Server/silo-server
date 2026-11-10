@@ -22,6 +22,7 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
 import { SettingsAttention } from "@/components/admin/SettingsAttention";
 import { useSettingsAttentionDismissals } from "@/hooks/admin/useSettingsAttentionDismissals";
+import { formatLocale } from "@/lib/appLocale";
 
 // Query prefixes the dashboard's stats/sessions/libraries/users refetch does
 // not already cover. Widgets fetch these themselves, so Refresh only has to
@@ -346,7 +347,7 @@ function formatRelativeUpdatedLabel(now: number, updatedAt: number) {
   if (elapsedMinutes === 1) {
     return "1 minute ago";
   }
-  return `${elapsedMinutes.toLocaleString()} minutes ago`;
+  return `${elapsedMinutes.toLocaleString(formatLocale())} minutes ago`;
 }
 
 function delay(ms: number) {

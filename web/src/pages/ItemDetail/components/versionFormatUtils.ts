@@ -4,13 +4,14 @@ import type {
   VersionSubtitleTrack,
   VersionVideoTrack,
 } from "@/api/types";
-import { englishLanguageName, getLanguageName } from "@/lib/languageNames";
+import { displayLanguageName, getLanguageName } from "@/lib/languageNames";
 import {
   audioTrackAtmosEvidence,
   formatBitrate,
   formatChannels,
   formatSampleRate,
 } from "@/lib/mediaFormat";
+import { formatLocale, pinnedLocaleUnlessLocalized } from "@/lib/appLocale";
 
 /**
  * Atmos evidence for the audio stream a version's codec_audio describes. The
@@ -27,14 +28,14 @@ export function versionAudioAtmosEvidence(version: FileVersion): string | undefi
 
 export function formatPageCount(pages?: number): string {
   if (!pages || pages <= 0) return "";
-  return `${pages.toLocaleString()} ${pages === 1 ? "page" : "pages"}`;
+  return `${pages.toLocaleString(formatLocale())} ${pages === 1 ? "page" : "pages"}`;
 }
 
 export function formatAddedAt(value?: string): string {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(pinnedLocaleUnlessLocalized("en-US"), {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -47,7 +48,7 @@ export function formatLanguageName(language?: string): string {
   const normalized = trimmed.toLowerCase();
   if (!normalized) return "";
 
-  const standardizedName = englishLanguageName(trimmed);
+  const standardizedName = displayLanguageName(trimmed);
   if (standardizedName) return standardizedName;
 
   if (normalized.length > 3) {

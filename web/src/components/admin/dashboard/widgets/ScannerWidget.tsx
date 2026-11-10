@@ -14,6 +14,7 @@ import { compareActiveScans } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
 import { SectionError } from "../feedback";
 import { formatDashboardLibraryScanProgress } from "../format";
+import { formatLocale } from "@/lib/appLocale";
 
 const VISIBLE_LIBRARIES = 4;
 
@@ -164,7 +165,7 @@ function QueueCount({ label, value }: { label: string; value: number | undefined
   return (
     <div>
       <div className="text-foreground text-[18px] leading-none font-extrabold tabular-nums">
-        {value === undefined ? "—" : value.toLocaleString()}
+        {value === undefined ? "—" : value.toLocaleString(formatLocale())}
       </div>
       <div className="mt-1 font-medium">{label}</div>
     </div>

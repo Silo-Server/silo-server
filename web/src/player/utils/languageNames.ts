@@ -1,4 +1,4 @@
-import { getLanguageName } from "@/lib/languageNames";
+import { getLanguageName, namesLanguage } from "@/lib/languageNames";
 
 export { canonicalLanguageTag, getLanguageName, normalizeLanguageCode } from "@/lib/languageNames";
 
@@ -50,8 +50,21 @@ export interface LanguageOption {
   label: string;
 }
 
-/** Sorted common-language list; labels come from the shared English CLDR resolver. */
-export const LANGUAGES: LanguageOption[] = COMMON_LANGUAGE_CODES.map((code) => ({
-  code,
-  label: getLanguageName(code),
-})).sort((a, b) => a.label.localeCompare(b.label));
+let cachedOptions: { language: string; options: LanguageOption[] } | null = null;
+
+/**
+ * Sorted common-language list, named and sorted in the language names come out
+ * in. Built per names language, so a language change, or that language's name
+ * data arriving, relabels it.
+ */
+export function languageOptions(): LanguageOption[] {
+  const language = namesLanguage();
+  if (cachedOptions?.language !== language) {
+    const options = COMMON_LANGUAGE_CODES.map((code) => ({
+      code,
+      label: getLanguageName(code),
+    })).sort((a, b) => a.label.localeCompare(b.label));
+    cachedOptions = { language, options };
+  }
+  return cachedOptions.options;
+}

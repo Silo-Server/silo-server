@@ -7,6 +7,7 @@ import { BarList, BarListSkeleton } from "../charts";
 import type { BarListItem } from "../charts";
 import { SectionError } from "../feedback";
 import { WidgetHeader } from "../WidgetHeader";
+import { formatLocale } from "@/lib/appLocale";
 
 const ROW_LIMIT = 8;
 
@@ -42,8 +43,8 @@ export function DownloadsWidget() {
       <WidgetHeader title="Offline downloads">
         {stats && hasDownloads ? (
           <span className="text-muted-foreground text-[11px] tabular-nums">
-            {stats.downloads_started_24h.toLocaleString()} started ·{" "}
-            {stats.downloads_completed_24h.toLocaleString()} finished (24h)
+            {stats.downloads_started_24h.toLocaleString(formatLocale())} started ·{" "}
+            {stats.downloads_completed_24h.toLocaleString(formatLocale())} finished (24h)
           </span>
         ) : null}
       </WidgetHeader>
@@ -57,8 +58,14 @@ export function DownloadsWidget() {
         ) : (
           <>
             <dl className="grid shrink-0 grid-cols-3 gap-2">
-              <DownloadsStat label="Users" value={stats.users_with_downloads.toLocaleString()} />
-              <DownloadsStat label="Items" value={stats.active_downloads.toLocaleString()} />
+              <DownloadsStat
+                label="Users"
+                value={stats.users_with_downloads.toLocaleString(formatLocale())}
+              />
+              <DownloadsStat
+                label="Items"
+                value={stats.active_downloads.toLocaleString(formatLocale())}
+              />
               <DownloadsStat
                 label="On devices"
                 value={formatFileSize(stats.total_bytes, { fallback: "0 B" })}
@@ -66,7 +73,9 @@ export function DownloadsWidget() {
             </dl>
             <BarList
               items={items}
-              formatValue={(count) => `${count.toLocaleString()} ${count === 1 ? "item" : "items"}`}
+              formatValue={(count) =>
+                `${count.toLocaleString(formatLocale())} ${count === 1 ? "item" : "items"}`
+              }
               emptyLabel="No offline downloads"
             />
           </>

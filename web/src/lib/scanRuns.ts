@@ -1,4 +1,5 @@
 import type { ScanRun } from "@/api/types";
+import { formatLocale } from "@/lib/appLocale";
 
 export function compareActiveScans(left: ScanRun, right: ScanRun) {
   const leftRank = left.status === "running" ? 0 : 1;
@@ -92,7 +93,7 @@ export function formatActiveScanProgress(scan: ScanRun) {
       0,
       Math.min(100, Math.round((result.files_processed / result.total_files) * 100)),
     );
-    return `${result.message ?? "Processing files"} · ${result.files_processed.toLocaleString()} / ${result.total_files.toLocaleString()} (${percent}%)`;
+    return `${result.message ?? "Processing files"} · ${result.files_processed.toLocaleString(formatLocale())} / ${result.total_files.toLocaleString(formatLocale())} (${percent}%)`;
   }
   return result.message ?? "";
 }

@@ -1,3 +1,5 @@
+import { formatLocale } from "@/lib/appLocale";
+
 /** Returns the ISO date string (YYYY-MM-DD) of the Monday for the week containing `date`. */
 export function getWeekStart(date: Date): string {
   const d = new Date(date);
@@ -36,8 +38,8 @@ export function getWeekDays(weekStart: string): string[] {
 /** Returns a human-readable heading like "Monday, April 7th". */
 export function formatDayHeading(dateStr: string): string {
   const d = parseDate(dateStr);
-  const weekday = d.toLocaleDateString(undefined, { weekday: "long" });
-  const month = d.toLocaleDateString(undefined, { month: "long" });
+  const weekday = d.toLocaleDateString(formatLocale(), { weekday: "long" });
+  const month = d.toLocaleDateString(formatLocale(), { month: "long" });
   const day = d.getDate();
   return `${weekday}, ${month} ${ordinal(day)}`;
 }
@@ -46,7 +48,7 @@ export function formatDayHeading(dateStr: string): string {
 export function formatShortDay(dateStr: string): { label: string; day: number } {
   const d = parseDate(dateStr);
   return {
-    label: d.toLocaleDateString(undefined, { weekday: "short" }),
+    label: d.toLocaleDateString(formatLocale(), { weekday: "short" }),
     day: d.getDate(),
   };
 }
@@ -54,7 +56,7 @@ export function formatShortDay(dateStr: string): { label: string; day: number } 
 /** Returns the month + year label like "April 2026". */
 export function formatMonthYear(dateStr: string): string {
   const d = parseDate(dateStr);
-  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  return d.toLocaleDateString(formatLocale(), { month: "long", year: "numeric" });
 }
 
 /** Compact range for a Mon–Sun week, e.g. "Apr 6 – 12, 2026" or spanning two months. */
@@ -65,10 +67,10 @@ export function formatWeekRangeLabel(weekStart: string): string {
   const sameMonth =
     start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
   if (sameMonth) {
-    const month = start.toLocaleDateString(undefined, { month: "short" });
+    const month = start.toLocaleDateString(formatLocale(), { month: "short" });
     return `${month} ${start.getDate()} – ${end.getDate()}, ${start.getFullYear()}`;
   }
-  return `${start.toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${end.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  return `${start.toLocaleDateString(formatLocale(), { month: "short", day: "numeric" })} – ${end.toLocaleDateString(formatLocale(), { month: "short", day: "numeric", year: "numeric" })}`;
 }
 
 /** Checks if a date string is today. */

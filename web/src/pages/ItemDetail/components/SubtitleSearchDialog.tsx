@@ -28,9 +28,10 @@ import {
   useUploadSubtitle,
 } from "@/hooks/queries/subtitles";
 import { cn } from "@/lib/utils";
-import { LANGUAGES, getLanguageName } from "@/player/utils/languageNames";
+import { languageOptions, getLanguageName } from "@/player/utils/languageNames";
 import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { buildQualitySummary } from "./VersionFlyout";
+import { formatLocale } from "@/lib/appLocale";
 
 interface SubtitleSearchDialogProps {
   open: boolean;
@@ -261,7 +262,7 @@ export default function SubtitleSearchDialog({
                       <SelectValue placeholder="Language" />
                     </SelectTrigger>
                     <SelectContent>
-                      {LANGUAGES.map((language) => (
+                      {languageOptions().map((language) => (
                         <SelectItem key={language.code} value={language.code}>
                           {language.label}
                         </SelectItem>
@@ -364,7 +365,7 @@ export default function SubtitleSearchDialog({
                           )}
                           {result.downloads > 0 && (
                             <span className="text-muted-foreground ml-0.5 text-[11px] tabular-nums">
-                              {result.downloads.toLocaleString()}{" "}
+                              {result.downloads.toLocaleString(formatLocale())}{" "}
                               {result.downloads === 1 ? "download" : "downloads"}
                             </span>
                           )}

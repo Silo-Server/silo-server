@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { useAdminUpdateDownloadedSubtitle } from "@/hooks/queries/admin/subtitles";
-import { LANGUAGES, getLanguageName } from "@/player/utils/languageNames";
+import { languageOptions, getLanguageName } from "@/player/utils/languageNames";
 import { cn } from "@/lib/utils";
 import { languageChipClass, providerBadgeClass, providerLabel } from "./subtitleAdminStyles";
 
@@ -187,7 +187,7 @@ function AdminSubtitleEditForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {LANGUAGES.map((lang) => (
+              {languageOptions().map((lang) => (
                 <SelectItem key={lang.code} value={lang.code}>
                   {lang.code.toUpperCase()} · {lang.label}
                 </SelectItem>

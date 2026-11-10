@@ -1,11 +1,28 @@
 import { useId } from "react";
+import { toast } from "sonner";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  settingsCapabilitiesSupportKey,
+  useSetSettingValue,
+  useSettingsCapabilities,
+  useStoredSettingValues,
+} from "@/hooks/queries/settingValues";
 import { useDateTimeFormat, useDateTimeFormatSettings } from "@/hooks/useDateTimeFormat";
 import { useTheme } from "@/hooks/useTheme";
+import { matchShippedLanguage, SHIPPED_LANGUAGES } from "@/lib/appLocale";
 import { formatDate, formatTime } from "@/lib/datetime";
 import type { DateFormatPreference, TimeFormatPreference } from "@/lib/datetime";
+import { getLanguageName } from "@/lib/languageNames";
+import { SETTING_KEYS } from "@/lib/settingsContract";
 
 const DATE_FORMAT_CHOICES: ReadonlyArray<{ value: DateFormatPreference; label: string }> = [
   { value: "auto", label: "Auto (browser)" },
@@ -19,6 +36,86 @@ const TIME_FORMAT_CHOICES: ReadonlyArray<{ value: TimeFormatPreference; label: s
   { value: "12h", label: "12-hour" },
   { value: "24h", label: "24-hour" },
 ];
+
+const APP_LANGUAGE_KEYS = [SETTING_KEYS.UI_APP_LANGUAGE] as const;
+const PROFILE_SCOPE = { scope: "profile" } as const;
+const MATCH_DEVICE = "device";
+
+/**
+ * The profile's app language. It edits the profile's own value, which a
+ * per-device value set elsewhere can override on that device. A stored tag the
+ * web app doesn't ship stays selected under its name, so saving here never
+ * clears what another app chose.
+ */
+function AppLanguageSetting() {
+  const labelId = useId();
+  const { data: stored } = useStoredSettingValues({
+    keys: APP_LANGUAGE_KEYS,
+    identity: PROFILE_SCOPE,
+  });
+  const mutation = useSetSettingValue();
+  const savedValue = stored?.[SETTING_KEYS.UI_APP_LANGUAGE];
+  const shownValue = mutation.isPending ? mutation.variables.value : savedValue;
+  const tag = typeof shownValue === "string" ? shownValue : null;
+  const offered = tag !== null && SHIPPED_LANGUAGES.some((language) => language.tag === tag);
+
+  return (
+    <div className="space-y-2">
+      <p id={labelId} className="text-sm font-medium">
+        App language
+      </p>
+      <Select
+        value={tag ?? MATCH_DEVICE}
+        disabled={stored === undefined}
+        onValueChange={(next) => {
+          // One save at a time: two in flight could land in either order and
+          // leave the earlier choice stored. The select shows the pending one.
+          if (mutation.isPending) return;
+          mutation.mutate(
+            {
+              key: SETTING_KEYS.UI_APP_LANGUAGE,
+              value: next === MATCH_DEVICE ? null : next,
+              identity: PROFILE_SCOPE,
+            },
+            { onError: () => toast.error("Couldn’t save the app language") },
+          );
+        }}
+      >
+        <SelectTrigger aria-labelledby={labelId} className="w-full sm:w-64">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={MATCH_DEVICE}>Match device</SelectItem>
+          {tag !== null && !offered && <SelectItem value={tag}>{getLanguageName(tag)}</SelectItem>}
+          {SHIPPED_LANGUAGES.map((language) => (
+            <SelectItem key={language.tag} value={language.tag} lang={language.tag}>
+              {language.endonym}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {tag !== null && matchShippedLanguage(tag) === null && (
+        <p className="text-muted-foreground text-[13px]">
+          This language isn’t available on the web yet, so the web app follows your device here.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Shown once the server knows the setting; an older server has nowhere to save it. */
+function AppLanguageGroup() {
+  const { data: capabilities } = useSettingsCapabilities();
+  if (!settingsCapabilitiesSupportKey(capabilities, SETTING_KEYS.UI_APP_LANGUAGE)) return null;
+  return (
+    <SettingsGroup
+      title="Language"
+      description="The language this app uses, saved for the active profile. Match device follows your browser’s language."
+    >
+      <AppLanguageSetting />
+    </SettingsGroup>
+  );
+}
 
 export default function AccessibilitySettings() {
   const { textScale, setTextScale, textWeight, setTextWeight, highContrast, setHighContrast } =
@@ -37,8 +134,10 @@ export default function AccessibilitySettings() {
     <div className="space-y-6">
       <PageHeader
         title="Accessibility"
-        subtitle="Text size, weight, contrast, and date and time formats."
+        subtitle="Text size, weight, contrast, language, and date and time formats."
       />
+
+      <AppLanguageGroup />
 
       <SettingsGroup
         title="Readability"

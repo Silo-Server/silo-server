@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminStats } from "@/hooks/queries/admin/stats";
 import { formatRelativeTime } from "@/lib/date";
 import { SectionError } from "../feedback";
+import { formatLocale } from "@/lib/appLocale";
 
 /**
  * Connection and 24h sync status for every watch provider.
@@ -68,7 +69,7 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
       </span>
       {errors > 0 ? (
         <span className="bg-destructive/10 text-destructive flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
-          {errors.toLocaleString()} {errors === 1 ? "error" : "errors"}
+          {errors.toLocaleString(formatLocale())} {errors === 1 ? "error" : "errors"}
         </span>
       ) : null}
       <Link
@@ -97,20 +98,20 @@ function ProviderActivity({ provider }: { provider: WatchProviderStats }) {
   return (
     <>
       {" · "}
-      {profiles.toLocaleString()} {profiles === 1 ? "profile" : "profiles"}
+      {profiles.toLocaleString(formatLocale())} {profiles === 1 ? "profile" : "profiles"}
       {" · synced "}
       {lastSync}
       <span className="text-border/70 mx-1.5">|</span>
       {"24h: "}
       <span className="text-foreground font-medium">
-        {provider.imported_watched_24h.toLocaleString()}
+        {provider.imported_watched_24h.toLocaleString(formatLocale())}
       </span>
       {" in"}
       {provider.exporting ? (
         <>
           {" / "}
           <span className="text-foreground font-medium">
-            {provider.exported_watched_24h.toLocaleString()}
+            {provider.exported_watched_24h.toLocaleString(formatLocale())}
           </span>
           {" out"}
         </>
@@ -119,7 +120,7 @@ function ProviderActivity({ provider }: { provider: WatchProviderStats }) {
         <>
           {" · "}
           <span className="text-foreground font-medium">
-            {provider.open_scrobbles.toLocaleString()}
+            {provider.open_scrobbles.toLocaleString(formatLocale())}
           </span>
           {" scrobbling"}
         </>
