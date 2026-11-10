@@ -576,7 +576,10 @@ function ActiveCount({ node }: { node: StreamNode }) {
       <span className={describeNodeJobs(node).warning ? "text-warning font-semibold" : undefined}>
         {active}
         {cap !== null ? (
-          <span className="text-muted-foreground font-normal"> / {cap.toLocaleString(formatLocale())}</span>
+          <span className="text-muted-foreground font-normal">
+            {" "}
+            / {cap.toLocaleString(formatLocale())}
+          </span>
         ) : null}
       </span>{" "}
       <abbr
