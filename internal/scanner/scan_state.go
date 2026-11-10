@@ -91,7 +91,22 @@ const scanStateColumns = `id, content_id, episode_id, extra_id,
 		) subtitle_paths
 	), '[]'::jsonb) AS external_subtitle_paths`
 
-func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
+// sharedStrings hands out one copy of each distinct string it is given. A scan
+// holds the scan state of every file under a root at once, and the files of
+// one show or folder repeat the same roots, group key, title and codec names,
+// so the rows of one load keep one copy of those between them instead of one
+// each.
+type sharedStrings map[string]string
+
+func (shared sharedStrings) get(s string) string {
+	if existing, ok := shared[s]; ok {
+		return existing
+	}
+	shared[s] = s
+	return s
+}
+
+func scanScanStateRow(row pgx.Row, shared sharedStrings) (*scanStateFile, error) {
 	var state scanStateFile
 	var contentID, episodeID *string
 	var extraID *string
@@ -157,7 +172,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 	}
 
 	if contentID != nil {
-		state.ContentID = *contentID
+		state.ContentID = shared.get(*contentID)
 	}
 	if episodeID != nil {
 		state.EpisodeID = *episodeID
@@ -166,28 +181,28 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		state.ExtraID = *extraID
 	}
 	if canonicalRootPath != nil {
-		state.CanonicalRootPath = *canonicalRootPath
+		state.CanonicalRootPath = shared.get(*canonicalRootPath)
 	}
 	if observedRootPath != nil {
-		state.ObservedRootPath = *observedRootPath
+		state.ObservedRootPath = shared.get(*observedRootPath)
 	}
 	if contentGroupKey != nil {
-		state.ContentGroupKey = *contentGroupKey
+		state.ContentGroupKey = shared.get(*contentGroupKey)
 	}
 	if groupKeyVersion != nil {
 		state.GroupKeyVersion = *groupKeyVersion
 	}
 	if baseTitle != nil {
-		state.BaseTitle = *baseTitle
+		state.BaseTitle = shared.get(*baseTitle)
 	}
 	if baseYear != nil {
 		state.BaseYear = *baseYear
 	}
 	if baseType != nil {
-		state.BaseType = *baseType
+		state.BaseType = shared.get(*baseType)
 	}
 	if identityConfidence != nil {
-		state.IdentityConfidence = *identityConfidence
+		state.IdentityConfidence = shared.get(*identityConfidence)
 	}
 	if len(identityJSON) > 0 {
 		state.IdentityJSON = append([]byte(nil), identityJSON...)
@@ -198,16 +213,16 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		state.FileHash = *fileHash
 	}
 	if codecVideo != nil {
-		state.CodecVideo = *codecVideo
+		state.CodecVideo = shared.get(*codecVideo)
 	}
 	if codecAudio != nil {
-		state.CodecAudio = *codecAudio
+		state.CodecAudio = shared.get(*codecAudio)
 	}
 	if resolution != nil {
-		state.Resolution = *resolution
+		state.Resolution = shared.get(*resolution)
 	}
 	if container != nil {
-		state.Container = *container
+		state.Container = shared.get(*container)
 	}
 	if duration != nil {
 		state.Duration = *duration
@@ -219,10 +234,10 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		state.EditionKey = *editionKey
 	}
 	if editionSource != nil {
-		state.EditionSource = *editionSource
+		state.EditionSource = shared.get(*editionSource)
 	}
 	if presentationKind != nil {
-		state.PresentationKind = *presentationKind
+		state.PresentationKind = shared.get(*presentationKind)
 	}
 	if presentationGroupKey != nil {
 		state.PresentationGroupKey = *presentationGroupKey
@@ -237,7 +252,7 @@ func scanScanStateRow(row pgx.Row) (*scanStateFile, error) {
 		state.MultiEpisodeEnd = *multiEpisodeEnd
 	}
 	if probeSource != nil {
-		state.ProbeSource = *probeSource
+		state.ProbeSource = shared.get(*probeSource)
 	}
 	if len(externalSubtitlePathsJSON) > 0 {
 		if err := json.Unmarshal(externalSubtitlePathsJSON, &state.ExternalSubtitlePaths); err != nil {
@@ -252,8 +267,9 @@ func scanScanStateRows(rows pgx.Rows) ([]*scanStateFile, error) {
 	defer rows.Close()
 
 	files := make([]*scanStateFile, 0)
+	shared := sharedStrings{}
 	for rows.Next() {
-		file, err := scanScanStateRow(rows)
+		file, err := scanScanStateRow(rows, shared)
 		if err != nil {
 			return nil, err
 		}

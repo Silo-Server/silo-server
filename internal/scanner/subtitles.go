@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"container/list"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -57,14 +58,31 @@ func SubtitleFolderOwner(dir string) (string, bool) {
 	return "", false
 }
 
-// externalSubtitleDirCache lists each directory once per scan. Every video
-// in a directory reads the same listings, so a season of episodes costs one
-// read of the season folder and of each subtitle folder in it.
+// externalSubtitleDirCacheSize is how many directory listings a scan keeps.
+// A scan processes files in walk order, so a video's lookups stay in its own
+// directory, the subtitle folders under it and, after a subfolder, the
+// directories above it. A few hundred listings cover that; keeping every
+// directory of a large library for the whole scan does not help.
+const externalSubtitleDirCacheSize = 512
+
+// externalSubtitleDirCache keeps the listings of the directories a scan read
+// most recently. Every video in a directory reads the same listings, so a
+// season of episodes costs one read of the season folder and of each subtitle
+// folder in it. A directory that has dropped out is read again when asked for.
 type externalSubtitleDirCache struct {
 	folderType string
+	size       int
 
 	mu   sync.Mutex
-	dirs map[string]externalSubtitleDirListing
+	dirs map[string]*list.Element
+	// recent holds an externalSubtitleDirEntry per cached directory, the most
+	// recently used first.
+	recent *list.List
+}
+
+type externalSubtitleDirEntry struct {
+	dir     string
+	listing externalSubtitleDirListing
 }
 
 type externalSubtitleDirListing struct {
@@ -88,23 +106,41 @@ type externalSubtitleCandidate struct {
 func newExternalSubtitleDirCache(folderType string) *externalSubtitleDirCache {
 	return &externalSubtitleDirCache{
 		folderType: folderType,
-		dirs:       make(map[string]externalSubtitleDirListing),
+		size:       externalSubtitleDirCacheSize,
+		dirs:       make(map[string]*list.Element),
+		recent:     list.New(),
 	}
+}
+
+// cached returns the listing held for dir and marks it as just used. The
+// caller holds c.mu.
+func (c *externalSubtitleDirCache) cached(dir string) (externalSubtitleDirListing, bool) {
+	element, ok := c.dirs[dir]
+	if !ok {
+		return externalSubtitleDirListing{}, false
+	}
+	c.recent.MoveToFront(element)
+	return element.Value.(externalSubtitleDirEntry).listing, true
 }
 
 func (c *externalSubtitleDirCache) listing(dir string) (externalSubtitleDirListing, error) {
 	c.mu.Lock()
-	listing, ok := c.dirs[dir]
+	listing, ok := c.cached(dir)
 	c.mu.Unlock()
 	if !ok {
 		entries, err := fspath.ReadDir(dir)
 		listing = newExternalSubtitleDirListing(dir, entries, librarykind.IsMovie(c.folderType))
 		listing.err = err
 		c.mu.Lock()
-		if existing, found := c.dirs[dir]; found {
+		if existing, found := c.cached(dir); found {
 			listing = existing
 		} else {
-			c.dirs[dir] = listing
+			c.dirs[dir] = c.recent.PushFront(externalSubtitleDirEntry{dir: dir, listing: listing})
+			for c.recent.Len() > c.size {
+				oldest := c.recent.Back()
+				delete(c.dirs, oldest.Value.(externalSubtitleDirEntry).dir)
+				c.recent.Remove(oldest)
+			}
 		}
 		c.mu.Unlock()
 	}

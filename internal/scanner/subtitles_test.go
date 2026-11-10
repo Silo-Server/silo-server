@@ -68,6 +68,40 @@ func TestExternalSubtitleDirCacheConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+// A directory that has dropped out of the cache is read again, so its videos
+// get the same sidecars as they would from a cache that kept it.
+func TestExternalSubtitleDirCacheReadsADroppedDirectoryAgain(t *testing.T) {
+	root := t.TempDir()
+	var media []string
+	for _, name := range []string{"One/One.mkv", "One/One.en.srt", "One/Subs/One.fr.srt", "Two/Two.mkv", "Two/Two.de.srt", "One/One.part2.mkv"} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Ext(name) == ".mkv" {
+			media = append(media, path)
+		}
+	}
+	cache := newExternalSubtitleDirCache("movies")
+	cache.size = 1
+	for _, path := range append(media, media...) {
+		got, err := cache.Detect(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := newExternalSubtitleDirCache("movies").Detect(path)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: bounded cache = %#v, fresh cache = %#v, error = %v", path, got, want, err)
+		}
+		if len(cache.dirs) > 1 || cache.recent.Len() != len(cache.dirs) {
+			t.Fatalf("cache holds %d directories (%d in order), want at most 1", len(cache.dirs), cache.recent.Len())
+		}
+	}
+}
+
 func TestParseSuffixCanonicalizesCompatibleLanguageTags(t *testing.T) {
 	tests := []struct {
 		name, suffix, want string

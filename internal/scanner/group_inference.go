@@ -71,6 +71,104 @@ type groupInferenceResult struct {
 	GroupLocations []models.MediaGroupLocation
 }
 
+const (
+	overrideSourceNone   = "none"
+	overrideSourceManual = "manual"
+)
+
+// groupBucket collects one content group's files. A full scan holds a bucket
+// entry for every file under the root at once, so it keeps the whole identity
+// of the first file only and, for the rest, just the fields the snapshot reads.
+type groupBucket struct {
+	first      fileGroupAssignment
+	files      []groupBucketFile
+	ambiguous  bool
+	overridden bool
+}
+
+type groupBucketFile struct {
+	observedRootPath string
+	contentGroupKey  string
+	groupKeyVersion  int
+}
+
+func (b *groupBucket) add(identity fileGroupAssignment) {
+	if len(b.files) == 0 {
+		b.first = identity
+	}
+	b.files = append(b.files, groupBucketFile{
+		observedRootPath: identity.ObservedRootPath,
+		contentGroupKey:  identity.ContentGroupKey,
+		groupKeyVersion:  identity.GroupKeyVersion,
+	})
+	b.ambiguous = b.ambiguous || identity.State == "ambiguous"
+	b.overridden = b.overridden || identity.Overridden
+}
+
+func (b *groupBucket) state() string {
+	if b.ambiguous {
+		return "ambiguous"
+	}
+	return "resolved"
+}
+
+func (b *groupBucket) overrideSource() string {
+	if b.overridden {
+		return overrideSourceManual
+	}
+	return overrideSourceNone
+}
+
+func (b *groupBucket) evidence() []byte {
+	observedRoots := make([]string, 0, len(b.files))
+	for _, file := range b.files {
+		observedRoots = append(observedRoots, file.observedRootPath)
+	}
+	evidence, _ := json.Marshal(map[string]any{
+		"observed_roots": observedRoots,
+		"file_count":     len(b.files),
+	})
+	return evidence
+}
+
+// locationBucket collects the files observed under one root, kept as lightly
+// as groupBucket keeps a group's.
+type locationBucket struct {
+	first fileGroupAssignment
+	files []locationBucketFile
+}
+
+type locationBucketFile struct {
+	group      *groupBucket
+	overridden bool
+	ambiguous  bool
+}
+
+// groupCountAndState returns how many groups the location's files fall into
+// and the location's state.
+func (b *locationBucket) groupCountAndState() (int, string) {
+	state := "resolved"
+	seenGroups := map[*groupBucket]struct{}{}
+	nonOverriddenGroups := map[*groupBucket]struct{}{}
+	for _, file := range b.files {
+		seenGroups[file.group] = struct{}{}
+		if !file.overridden {
+			nonOverriddenGroups[file.group] = struct{}{}
+		}
+		if file.ambiguous {
+			state = "ambiguous"
+		}
+	}
+	// A location split across groups is ambiguous only when the split was not
+	// operator-directed: identity overrides deliberately place files from one
+	// folder into different groups, and flagging that forever would make every
+	// resolved split look broken.
+	if len(seenGroups) > 1 && len(nonOverriddenGroups) > 1 {
+		state = "ambiguous"
+	}
+	return len(seenGroups), state
+}
+
 func inferGroupAssignments(
 	filePaths []string,
 	libraryType string,
@@ -79,8 +177,8 @@ func inferGroupAssignments(
 	identityOverrides *identityOverrideSet,
 ) groupInferenceResult {
 	assignments := make(map[string]fileGroupAssignment, len(filePaths))
-	groupBuckets := make(map[string][]fileGroupAssignment)
-	locationBuckets := make(map[string][]fileGroupAssignment)
+	groupBuckets := make(map[string]*groupBucket)
+	locationBuckets := make(map[string]*locationBucket)
 
 	for _, rawPath := range filePaths {
 		cleanPath := filepath.Clean(rawPath)
@@ -104,8 +202,25 @@ func inferGroupAssignments(
 			})
 		}
 		assignments[cleanPath] = identity
-		groupBuckets[groupBucketKey(identity)] = append(groupBuckets[groupBucketKey(identity)], identity)
-		locationBuckets[identity.ObservedRootPath] = append(locationBuckets[identity.ObservedRootPath], identity)
+
+		groupKey := groupBucketKey(identity)
+		group := groupBuckets[groupKey]
+		if group == nil {
+			group = &groupBucket{}
+			groupBuckets[groupKey] = group
+		}
+		group.add(identity)
+
+		location := locationBuckets[identity.ObservedRootPath]
+		if location == nil {
+			location = &locationBucket{first: identity}
+			locationBuckets[identity.ObservedRootPath] = location
+		}
+		location.files = append(location.files, locationBucketFile{
+			group:      group,
+			overridden: identity.Overridden,
+			ambiguous:  identity.State == "ambiguous",
+		})
 	}
 
 	groupKeys := make([]string, 0, len(groupBuckets))
@@ -117,16 +232,13 @@ func inferGroupAssignments(
 	scannedGroups := make([]models.ScannedMediaGroup, 0, len(groupKeys))
 	groupLocations := make([]models.MediaGroupLocation, 0, len(groupKeys))
 	for _, key := range groupKeys {
-		entries := groupBuckets[key]
-		if len(entries) == 0 {
-			continue
-		}
-		first := entries[0]
+		group := groupBuckets[key]
+		first := group.first
 		scannedGroups = append(scannedGroups, models.ScannedMediaGroup{
 			MediaFolderID:          folderID,
 			GroupKeyVersion:        first.GroupKeyVersion,
 			ContentGroupKey:        first.ContentGroupKey,
-			State:                  aggregateGroupState(entries),
+			State:                  group.state(),
 			InferredType:           first.BaseType,
 			TypeConfidence:         first.Confidence,
 			BaseTitle:              first.BaseTitle,
@@ -134,24 +246,24 @@ func inferGroupAssignments(
 			TmdbID:                 first.TmdbID,
 			ImdbID:                 first.ImdbID,
 			TvdbID:                 first.TvdbID,
-			ObservedFileCount:      len(entries),
+			ObservedFileCount:      len(group.files),
 			SampleFilePath:         first.RepresentativePath,
 			SampleObservedRootPath: first.ObservedRootPath,
-			EvidenceJSON:           aggregateGroupEvidence(entries),
-			OverrideSource:         aggregateGroupOverrideSource(entries),
+			EvidenceJSON:           group.evidence(),
+			OverrideSource:         group.overrideSource(),
 		})
 
 		seenLocations := map[string]bool{}
-		for i, entry := range entries {
-			if seenLocations[entry.ObservedRootPath] {
+		for i, file := range group.files {
+			if seenLocations[file.observedRootPath] {
 				continue
 			}
-			seenLocations[entry.ObservedRootPath] = true
+			seenLocations[file.observedRootPath] = true
 			groupLocations = append(groupLocations, models.MediaGroupLocation{
 				MediaFolderID:    folderID,
-				GroupKeyVersion:  entry.GroupKeyVersion,
-				ContentGroupKey:  entry.ContentGroupKey,
-				ObservedRootPath: entry.ObservedRootPath,
+				GroupKeyVersion:  file.groupKeyVersion,
+				ContentGroupKey:  file.contentGroupKey,
+				ObservedRootPath: file.observedRootPath,
 				IsPrimary:        i == 0,
 			})
 		}
@@ -165,35 +277,29 @@ func inferGroupAssignments(
 
 	locations := make([]models.ObservedMediaLocation, 0, len(locationKeys))
 	for _, observedRoot := range locationKeys {
-		entries := locationBuckets[observedRoot]
-		if len(entries) == 0 {
-			continue
-		}
-		groupCounts := make(map[string]fileGroupAssignment)
-		for _, entry := range entries {
-			groupCounts[groupBucketKey(entry)] = entry
-		}
+		location := locationBuckets[observedRoot]
+		groupCount, state := location.groupCountAndState()
 		primaryGroupVersion := 0
 		primaryGroupKey := ""
-		primary := entries[0]
-		if len(groupCounts) == 1 {
+		primary := location.first
+		if groupCount == 1 {
 			primaryGroupVersion = primary.GroupKeyVersion
 			primaryGroupKey = primary.ContentGroupKey
 		}
 		locationEvidence, _ := json.Marshal(map[string]any{
 			"observed_root_path": observedRoot,
-			"group_count":        len(groupCounts),
+			"group_count":        groupCount,
 		})
 		locations = append(locations, models.ObservedMediaLocation{
 			MediaFolderID:          folderID,
 			ObservedRootPath:       observedRoot,
 			LocationType:           primary.BaseType,
 			SampleFilePath:         primary.RepresentativePath,
-			ObservedFileCount:      len(entries),
-			ContentGroupCount:      len(groupCounts),
+			ObservedFileCount:      len(location.files),
+			ContentGroupCount:      groupCount,
 			PrimaryGroupKeyVersion: primaryGroupVersion,
 			PrimaryContentGroupKey: primaryGroupKey,
-			State:                  aggregateLocationState(entries),
+			State:                  state,
 			EvidenceJSON:           locationEvidence,
 		})
 	}
@@ -208,64 +314,6 @@ func inferGroupAssignments(
 
 func groupBucketKey(identity naming.GroupIdentity) string {
 	return identity.ContentGroupKey + "|" + identity.BaseType
-}
-
-func aggregateGroupState(entries []fileGroupAssignment) string {
-	for _, entry := range entries {
-		if entry.State == "ambiguous" {
-			return "ambiguous"
-		}
-	}
-	return "resolved"
-}
-
-func aggregateLocationState(entries []fileGroupAssignment) string {
-	state := "resolved"
-	seenGroups := map[string]struct{}{}
-	nonOverriddenGroups := map[string]struct{}{}
-	for _, entry := range entries {
-		seenGroups[groupBucketKey(entry)] = struct{}{}
-		if !entry.Overridden {
-			nonOverriddenGroups[groupBucketKey(entry)] = struct{}{}
-		}
-		if entry.State == "ambiguous" {
-			state = "ambiguous"
-		}
-	}
-	// A location split across groups is ambiguous only when the split was not
-	// operator-directed: identity overrides deliberately place files from one
-	// folder into different groups, and flagging that forever would make every
-	// resolved split look broken.
-	if len(seenGroups) > 1 && len(nonOverriddenGroups) > 1 {
-		state = "ambiguous"
-	}
-	return state
-}
-
-const (
-	overrideSourceNone   = "none"
-	overrideSourceManual = "manual"
-)
-
-func aggregateGroupOverrideSource(entries []fileGroupAssignment) string {
-	for _, entry := range entries {
-		if entry.Overridden {
-			return overrideSourceManual
-		}
-	}
-	return overrideSourceNone
-}
-
-func aggregateGroupEvidence(entries []fileGroupAssignment) []byte {
-	observedRoots := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		observedRoots = append(observedRoots, entry.ObservedRootPath)
-	}
-	evidence, _ := json.Marshal(map[string]any{
-		"observed_roots": observedRoots,
-		"file_count":     len(entries),
-	})
-	return evidence
 }
 
 func applyGroupOverrides(result *groupInferenceResult, overridesByKey map[string]models.MediaGroupOverride) {
