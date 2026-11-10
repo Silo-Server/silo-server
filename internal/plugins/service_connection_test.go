@@ -59,7 +59,7 @@ func TestPreserveStoredSecretsMergesNestedObjectsWithoutMutatingInputs(t *testin
 	}}
 	service := &Service{configs: store}
 
-	merged, err := service.preserveStoredSecrets(
+	merged, _, err := service.preserveStoredSecrets(
 		context.Background(),
 		7,
 		"account",
@@ -94,7 +94,7 @@ func TestPreserveStoredSecretsMergesNestedObjectsWithoutMutatingInputs(t *testin
 		t.Fatalf("incoming input mutated: got %#v want %#v", incomingConnection, wantIncoming)
 	}
 
-	replacement, err := service.preserveStoredSecrets(
+	replacement, _, err := service.preserveStoredSecrets(
 		context.Background(),
 		7,
 		"account",
@@ -292,10 +292,14 @@ func TestSetGlobalConfigClearsEmptiedNonSecretFields(t *testing.T) {
 		"client_secret": "stored-secret",
 		"plugin_owned":  "retained",
 	}
-	for name, got := range map[string]map[string]any{"saved": store.puts[0].value, "staged": staged} {
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s config = %#v, want %#v", name, got, want)
-		}
+	if !reflect.DeepEqual(store.puts[0].value, want) {
+		t.Fatalf("saved config = %#v, want %#v", store.puts[0].value, want)
+	}
+	// The staged entry changed settings, so the test runs without the
+	// saved secret (TestStagedConfigReusesSecretsOnlyWithSavedSettings).
+	delete(want, "client_secret")
+	if !reflect.DeepEqual(staged, want) {
+		t.Fatalf("staged config = %#v, want %#v", staged, want)
 	}
 
 	// Clearing an undeclared field is not a clear: it is validated (and
@@ -304,6 +308,152 @@ func TestSetGlobalConfigClearsEmptiedNonSecretFields(t *testing.T) {
 	var validationErr *ConfigValidationError
 	if !errors.As(err, &validationErr) || len(store.puts) != 1 {
 		t.Fatalf("undeclared clear: err = %v, puts = %d", err, len(store.puts))
+	}
+}
+
+// TestStagedConfigReusesSecretsOnlyWithSavedSettings: a connection test
+// fills a blank secret from the stored entry only while every other setting
+// matches what was saved, so a staged destination never receives a saved
+// credential (issue #2796).
+func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
+	const savedPassword = "saved-bind-password"
+	stored := map[string]any{
+		"urls":            "ldaps://directory.example.invalid",
+		"bind_dn":         "cn=silo,dc=example,dc=invalid",
+		"bind_password":   savedPassword,
+		"ca_pem":          "",
+		"connect_timeout": float64(10),
+		"plugin_owned":    "retained",
+		"service": map[string]any{
+			"endpoint": "https://api.example.invalid",
+			"token":    "saved-token",
+		},
+	}
+	unchanged := func(edit func(map[string]any)) map[string]any {
+		value := map[string]any{
+			"urls":            "ldaps://directory.example.invalid",
+			"bind_dn":         "cn=silo,dc=example,dc=invalid",
+			"ca_pem":          "",
+			"connect_timeout": 10,
+			"service":         map[string]any{"endpoint": "https://api.example.invalid"},
+		}
+		if edit != nil {
+			edit(value)
+		}
+		return value
+	}
+	for _, tc := range []struct {
+		name         string
+		submitted    map[string]any
+		clearSecrets []string
+		requireToken bool
+		wantPassword any // nil: absent
+		wantToken    any
+		wantErr      bool
+	}{
+		{
+			name:         "saved settings with the secret left out",
+			submitted:    unchanged(nil),
+			wantPassword: savedPassword,
+			wantToken:    "saved-token",
+		},
+		{
+			name:         "saved settings with a blank secret and the form default",
+			submitted:    unchanged(func(v map[string]any) { v["bind_password"] = ""; v["start_tls"] = false }),
+			wantPassword: savedPassword,
+			wantToken:    "saved-token",
+		},
+		{
+			name:      "changed server",
+			submitted: unchanged(func(v map[string]any) { v["urls"] = "ldap://elsewhere.example.invalid:389" }),
+		},
+		{
+			name:      "changed server with a blank secret",
+			submitted: unchanged(func(v map[string]any) { v["urls"] = "ldap://elsewhere.example.invalid"; v["bind_password"] = " " }),
+		},
+		{
+			name:      "changed CA",
+			submitted: unchanged(func(v map[string]any) { v["ca_pem"] = "-----BEGIN CERTIFICATE-----" }),
+		},
+		{
+			name:      "default replaced by another value",
+			submitted: unchanged(func(v map[string]any) { v["start_tls"] = true }),
+		},
+		{
+			name:      "changed nested endpoint",
+			submitted: unchanged(func(v map[string]any) { v["service"] = map[string]any{"endpoint": "https://elsewhere.example.invalid"} }),
+		},
+		{
+			name: "changed server with typed secrets",
+			submitted: unchanged(func(v map[string]any) {
+				v["urls"] = "ldap://elsewhere.example.invalid"
+				v["bind_password"] = "typed-password"
+				v["service"] = map[string]any{"endpoint": "https://api.example.invalid", "token": "typed-token"}
+			}),
+			wantPassword: "typed-password",
+			wantToken:    "typed-token",
+		},
+		{
+			name:         "saved settings with a cleared secret",
+			submitted:    unchanged(nil),
+			clearSecrets: []string{"bind_password"},
+			wantToken:    "saved-token",
+		},
+		{
+			name:         "changed server with a required secret left out",
+			submitted:    unchanged(func(v map[string]any) { v["urls"] = "ldap://elsewhere.example.invalid" }),
+			requireToken: true,
+			wantErr:      true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := connectionTestManifest(t, "silo.auth.ldap", "0.1.0")
+			required := ""
+			if tc.requireToken {
+				required = `,"required":["token"]`
+			}
+			manifest.GlobalConfigSchema[0].JsonSchema = `{
+				"type":"object",
+				"properties":{
+					"urls":{"type":"string"},
+					"bind_dn":{"type":"string"},
+					"bind_password":{"type":"string","writeOnly":true},
+					"ca_pem":{"type":"string"},
+					"start_tls":{"type":"boolean","default":false},
+					"connect_timeout":{"type":"number"},
+					"service":{
+						"type":"object",
+						"properties":{
+							"endpoint":{"type":"string"},
+							"token":{"type":"string","writeOnly":true}
+						}` + required + `
+					}
+				}
+			}`
+			manifest.GlobalConfigSchema[0].AdminForm = nil
+			service, _ := connectionConfigService(t, manifest, cloneConfigValue(stored).(map[string]any))
+
+			staged, err := service.prepareStagedGlobalConfig(t.Context(), 7, manifest, "connection", tc.submitted, tc.clearSecrets, func(err error) error { return err })
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("staged = %#v, want a validation error", staged)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, present := staged["bind_password"]; (tc.wantPassword == nil && present) || (tc.wantPassword != nil && got != tc.wantPassword) {
+				t.Fatalf("bind_password = %#v (present %v), want %#v", got, present, tc.wantPassword)
+			}
+			serviceValue, _ := staged["service"].(map[string]any)
+			if got, present := serviceValue["token"]; (tc.wantToken == nil && present) || (tc.wantToken != nil && got != tc.wantToken) {
+				t.Fatalf("service.token = %#v (present %v), want %#v", got, present, tc.wantToken)
+			}
+			if staged["plugin_owned"] != "retained" {
+				t.Fatalf("plugin-owned field = %#v, want it kept", staged["plugin_owned"])
+			}
+		})
 	}
 }
 

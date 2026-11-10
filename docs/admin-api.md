@@ -3501,7 +3501,12 @@ are kept. Manifest-declared secret fields left blank keep their stored value, an
 removed only when named in `clear_secrets`. The frozen v1 `PUT .../config` shares the
 clearing rule as a bridge bug fix: before it, an emptied field kept its stored value. The
 connection test (`.../config/test` and the auth connection test) merges a staged entry the
-same way without storing it. The server validates the merged entry against the
+same way without storing it, with one difference: a blank secret reuses the stored secret
+only while every other field of the entry, after clears and with absent fields read as
+their declared defaults, matches the stored entry. A staged entry that changes a server
+URL, issuer, CA or any other setting is tested with the secrets the administrator typed,
+or without them, so a test never sends a saved credential to a destination it was not
+saved for. The server validates the merged entry against the
 plugin's schema and returns 422 with the plugin's own message on failure, then persists
 under a compare-and-swap on the stored revision and stops the running plugin so it rebinds.
 Success is 204. Repeating the same request converges on one stored entry, so the row is

@@ -26,10 +26,12 @@ type AdminPluginConfigurationService interface {
 // value. A declared non-secret top-level field sent as null or a blank string
 // is removed, so the plugin's default applies; undeclared fields are never
 // cleared that way. Manifest-declared secret fields left blank keep their
-// stored value; a secret is removed only when named in clear_secrets.
+// stored value; a secret is removed only when named in clear_secrets. A
+// connection test keeps a stored secret only while the rest of the entry
+// matches what was saved with it.
 type AdminPluginConfigWrite struct {
 	Key          string          `json:"key" minLength:"1" maxLength:"256" doc:"The manifest global_config_schema key"`
-	Value        PluginJSONValue `json:"value" doc:"The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret"`
+	Value        PluginJSONValue `json:"value" doc:"The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret. A connection test reuses a stored secret only while every other field of the entry matches the stored entry"`
 	ClearSecrets []string        `json:"clear_secrets,omitempty" maxItems:"64" doc:"Secret fields to remove; each must be a manifest-declared secret of this key"`
 }
 type AdminPluginConfigInput struct {

@@ -562,7 +562,7 @@ func registerExternalSignIn(reg *Registry) {
 
 	test := Operation{Operation: humaOp(http.MethodPost, Prefix+"/admin/plugins/installations/{id}/auth-binding/test", "testAdminPluginAuthBinding", "admin-plugins",
 		"Test an auth plugin's connection with staged, unsaved settings."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, RetrySafety: RetrySafetyNonRetryable}
-	test.Description = "The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically."
+	test.Description = "The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A blank secret field reuses the stored secret only while every other field of that entry matches the stored entry; otherwise the test runs with the secret entered, or none. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically."
 	test.Errors = []int{http.StatusNotFound, http.StatusConflict}
 	Register(reg, test, func(ctx context.Context, in *AdminPluginAuthBindingTestInput) (*AuthConnectionTestOutput, error) {
 		if reg.deps.ExternalSignIn == nil || !reg.deps.ExternalSignIn.ConnectionTestAvailable() {
