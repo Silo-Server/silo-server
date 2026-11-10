@@ -3,6 +3,8 @@ package metadata
 import (
 	"context"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // seedEditedMovie stores a matched movie the way Edit Metadata leaves it: an
@@ -93,5 +95,66 @@ func TestProcess_ResetToProviderKeepsTheItemWhenProvidersDoNotAnswer(t *testing.
 				t.Errorf("locked_fields = %v, want the stored locks kept", item.LockedFields)
 			}
 		})
+	}
+}
+
+// A reset through a library in another language writes that language's text
+// to the localization rows, as any refresh does, so the base row's text is the
+// item's own language, which the reset did not fetch. Emptying it would lose
+// text the provider has.
+func TestProcess_ResetToProviderInAnotherLanguageKeepsBaseText(t *testing.T) {
+	const contentID = "146000000000000100"
+	h := newTestHarness()
+	seedEditedMovie(t, h, contentID)
+	item, err := h.itemRepo.GetByID(context.Background(), contentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item.DefaultMetadataLanguage = "en"
+	if err := h.itemRepo.Upsert(context.Background(), item); err != nil {
+		t.Fatal(err)
+	}
+	provider := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: "Provider Titel", Year: 2006, Overview: "Provider Übersicht",
+		ProviderIDs: map[string]string{"tmdb": "100"},
+	}}
+
+	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		ContentID: contentID, Language: "de", Mode: ModeManualRefresh, resetToProvider: true,
+	}, []Provider{provider}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+
+	item, err = h.itemRepo.GetByID(context.Background(), contentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Title != "Typed Title" || item.Overview != "Typed overview" || item.Tagline != "Typed tagline" {
+		t.Errorf("base title=%q overview=%q tagline=%q, want the item's own-language text kept", item.Title, item.Overview, item.Tagline)
+	}
+}
+
+// Credits follow the reset too: when the providers list none, the stored ones
+// go (#3581).
+func TestProcess_ResetToProviderClearsCreditsTheProvidersLack(t *testing.T) {
+	const contentID = "146000000000000100"
+	h, repo := newLocalPipelineHarness()
+	h.service.personRepo = stubPersonRepo{ids: []int64{1, 2}}
+	seedEditedMovie(t, h, contentID)
+	repo.people[contentID] = []models.ItemPerson{actor("Typed Actor", "Lead")}
+	provider := &capturingMetadataProvider{response: &MetadataResult{
+		HasMetadata: true, Title: "Provider Title", Year: 2006,
+		ProviderIDs: map[string]string{"tmdb": "100"},
+	}}
+
+	if _, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
+		ContentID: contentID, Language: "en", Mode: ModeManualRefresh, resetToProvider: true,
+	}, []Provider{provider}); err != nil {
+		t.Fatalf("ProcessWithProviders: %v", err)
+	}
+
+	people, replaced := h.itemRepo.replacedPeople[contentID]
+	if !replaced || len(people) != 0 {
+		t.Errorf("ReplacePeople called = %v with %v, want the stored credits cleared", replaced, personNames(people))
 	}
 }

@@ -135,9 +135,9 @@ carries those changes, `item_match_hints`, true when
 `GET /api/v2/admin/items/{id}/match/hints` is served, `item_metadata`, true
 when items carry the stored metadata above and the listing accepts
 `include_people`, and `item_metadata_reset`, true when
-`POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "reset"`. The listing and the events have no Apple, Android, or
-Jellyfin compatibility callers; Jellyfin clients read the catalog through their
-own item queries.
+`POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "reset"`. The
+listing and the events have no Apple, Android, or Jellyfin compatibility
+callers; Jellyfin clients read the catalog through their own item queries.
 
 ## Export and import
 
@@ -344,19 +344,24 @@ library deleted while it ran can still be stopped.
 `POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "quick"` (the
 default), `mode: "complete"` or `mode: "reset"`. The existing resolver chooses
 the refresh scope, then a job is persisted with the requesting account ID.
+Success is `202` with the typed administrator job, a job `Location`, and
+`Retry-After: 5`. Delegated curators receive the permitted job projection and
+can poll their own item jobs. The web waits on that job; it does not equate
+submission with completion.
 
 `reset` is Reset to Provider: a quick refresh of the movie, series, season or
-episode that also removes its `locked_fields` and gives every lockable field the
-providers' value, empty when no provider has one. A refresh keeps a stored
-value a provider sends empty, because it can't tell a value the provider lacks
-from one it failed to send; a reset clears it. So a reset fails, and the target
-keeps its values and locks, when a provider in the chain fails to answer. A
-not-found answer, or an enrichment provider that isn't configured, doesn't fail
-it. A series reset leaves its seasons' and episodes' locks alone, and artwork
-and localized text follow the ordinary refresh rules. Success is `202` with
-the typed administrator job, a job `Location`, and `Retry-After: 5`. Delegated
-curators receive the permitted job projection and can poll their own item jobs.
-The web waits on that job; it does not equate submission with completion.
+episode that also removes its `locked_fields` and gives every lockable field,
+the credits and the rating sources the providers' values, empty when no
+provider has one. A season or episode the providers don't list is emptied too.
+A refresh keeps a stored value a provider sends empty, because it can't tell a
+value the provider lacks from one it failed to send; a reset clears it. So a
+reset fails, and the target keeps its values and locks, when a provider in the
+chain fails to answer. A not-found answer, or an enrichment provider that isn't
+configured, doesn't fail it. A reset through a library whose metadata language
+isn't the item's own writes that language's text to the localization rows, as
+any refresh does, and keeps the base row's title, overview and tagline. A
+series reset leaves its seasons' and episodes' locks alone, and artwork follows
+the ordinary refresh rules.
 
 `PATCH /api/v2/admin/items/{id}/metadata` retains the existing partial metadata
 fields, including descriptions, dates, ratings, provider IDs, numbering and

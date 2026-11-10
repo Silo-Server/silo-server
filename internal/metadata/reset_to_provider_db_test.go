@@ -20,13 +20,21 @@ func TestResetToProvider_SeasonAndEpisodeRows(t *testing.T) {
 	nonce := time.Now().UnixNano() % 100_000_000
 
 	for i, tc := range []struct {
-		name        string
-		target      string
-		episodesErr error
-		wantErr     bool
+		name          string
+		target        string
+		episodesErr   error
+		unlisted      bool
+		otherLanguage bool
+		wantErr       bool
+		providerTitle string
 	}{
-		{name: "episode", target: RefreshTargetEpisode},
-		{name: "season", target: RefreshTargetSeason},
+		{name: "episode", target: RefreshTargetEpisode, providerTitle: "Provider episode"},
+		{name: "season", target: RefreshTargetSeason, providerTitle: "Provider season"},
+		// The provider answered and has no such episode, so nothing of it stays.
+		{name: "episode the provider doesn't list", target: RefreshTargetEpisode, unlisted: true, providerTitle: "Episode 1"},
+		// A refresh in another language than the series' own leaves the base
+		// row's text alone, so the reset keeps it too.
+		{name: "episode in another language", target: RefreshTargetEpisode, otherLanguage: true},
 		{name: "provider outage", target: RefreshTargetEpisode, episodesErr: errors.New("tvdb: HTTP 503: service unavailable"), wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,11 +49,22 @@ func TestResetToProvider_SeasonAndEpisodeRows(t *testing.T) {
 				episodesBySeason: map[int][]EpisodeResult{1: {{SeasonNumber: 1, EpisodeNumber: 1, Title: "Provider episode"}}},
 				episodesErr:      tc.episodesErr,
 			}
+			if tc.unlisted {
+				provider.episodesBySeason = nil
+			}
+			// A German series refreshed through an English library is a write
+			// in another language.
+			folderID := 0
+			if tc.otherLanguage {
+				folderID = insertTestFolder(t, pool, "series")
+				if _, err := pool.Exec(t.Context(), `UPDATE media_items SET default_metadata_language = 'de' WHERE content_id = $1`, seriesID); err != nil {
+					t.Fatal(err)
+				}
+			}
 			expiresAt := time.Now().Add(time.Hour)
-			f.service.chainCache = map[string]chainCacheEntry{
-				"0:series":  {providers: []Provider{provider}, expiresAt: expiresAt},
-				"0:season":  {providers: []Provider{provider}, expiresAt: expiresAt},
-				"0:episode": {providers: []Provider{provider}, expiresAt: expiresAt},
+			f.service.chainCache = map[string]chainCacheEntry{}
+			for _, kind := range []string{"series", "season", "episode"} {
+				f.service.chainCache[strconv.Itoa(folderID)+":"+kind] = chainCacheEntry{providers: []Provider{provider}, expiresAt: expiresAt}
 			}
 			season, episode := f.read(t, seriesID)
 			targetID := episode.ContentID
@@ -53,15 +72,23 @@ func TestResetToProvider_SeasonAndEpisodeRows(t *testing.T) {
 				targetID = season.ContentID
 			}
 
-			err := f.service.ResetTargetForLibrary(t.Context(), tc.target, targetID, 0)
+			err := f.service.ResetTargetForLibrary(t.Context(), tc.target, targetID, folderID)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("ResetTargetForLibrary error = %v, want error %v", err, tc.wantErr)
 			}
 
 			season, episode = f.read(t, seriesID)
-			assertChildRow(t, "season", tc.target == RefreshTargetSeason && !tc.wantErr, "Provider season",
+			if tc.otherLanguage {
+				if episode.Title != identifyEditTitle || episode.Overview != identifyEditOverview || episode.AirDate != nil || episode.Runtime != 0 || len(episode.LockedFields) != 0 {
+					t.Errorf("episode = title %q overview %q air_date %v runtime %d locks %v, want the text kept, nothing else and no locks",
+						episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.LockedFields)
+				}
+				assertChildRow(t, "season", false, "", childRow{season.Title, season.Overview, season.AirDate, 0, season.LockedFields}, identifySeasonLocks)
+				return
+			}
+			assertChildRow(t, "season", tc.target == RefreshTargetSeason && !tc.wantErr, tc.providerTitle,
 				childRow{season.Title, season.Overview, season.AirDate, 0, season.LockedFields}, identifySeasonLocks)
-			assertChildRow(t, "episode", tc.target == RefreshTargetEpisode && !tc.wantErr, "Provider episode",
+			assertChildRow(t, "episode", tc.target == RefreshTargetEpisode && !tc.wantErr, tc.providerTitle,
 				childRow{episode.Title, episode.Overview, episode.AirDate, episode.Runtime, episode.LockedFields}, identifyEpisodeLocks)
 		})
 	}

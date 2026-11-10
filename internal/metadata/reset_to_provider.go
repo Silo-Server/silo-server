@@ -20,20 +20,16 @@ type childReset struct {
 	contentID string
 }
 
-// apply empties the reset row's lockable fields and drops its locks once its
-// providers answered for it, so the refresh's write gives each field the
-// provider's value or none. It reports whether it emptied the row.
-func (r *childReset) apply(ctx context.Context, s *MetadataService, seasons []SeasonResult, episodes []EpisodeResult) (bool, error) {
-	switch {
-	case r == nil:
-		return false, nil
-	case r.episode && len(episodes) > 0:
-		return true, s.episodeRepo.ResetEdits(ctx, r.contentID)
-	case !r.episode && len(seasons) > 0:
-		return true, s.seasonRepo.ResetEdits(ctx, r.contentID)
-	default:
-		return false, nil
+// apply empties the reset row's lockable fields and drops its locks. The
+// refresh calls it once its providers answered, listing the row or not, so
+// the write that follows gives each field the provider's value or none. A
+// write in another language than the series' own keeps the row's title and
+// overview, which that write doesn't replace.
+func (r *childReset) apply(ctx context.Context, s *MetadataService, keepText bool) error {
+	if r.episode {
+		return s.episodeRepo.ResetEdits(ctx, r.contentID, keepText)
 	}
+	return s.seasonRepo.ResetEdits(ctx, r.contentID, keepText)
 }
 
 // resetProviderFailure is the error that fails a Reset to Provider when a

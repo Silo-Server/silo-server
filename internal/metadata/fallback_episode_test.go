@@ -1514,12 +1514,15 @@ func TestRefreshSeriesEpisodeMetadataState_KeepsSeriesDebtWhenByDateCheckFails(t
 
 // ResetEdits empties a stored season's lockable fields and locks, as
 // catalog.SeasonRepository.ResetEdits does.
-func (r *fakeSeasonRepo) ResetEdits(_ context.Context, contentID string) error {
+func (r *fakeSeasonRepo) ResetEdits(_ context.Context, contentID string, keepText bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, s := range r.seasons {
 		if s.ContentID == contentID {
-			s.Title, s.Overview, s.AirDate, s.LockedFields = "", "", nil, []int{}
+			if !keepText {
+				s.Title, s.Overview = "", ""
+			}
+			s.AirDate, s.LockedFields = nil, []int{}
 			return nil
 		}
 	}
@@ -1528,12 +1531,15 @@ func (r *fakeSeasonRepo) ResetEdits(_ context.Context, contentID string) error {
 
 // ResetEdits empties a stored episode's lockable fields and locks, as
 // catalog.EpisodeRepository.ResetEdits does.
-func (r *fakeEpisodeRepo) ResetEdits(_ context.Context, contentID string) error {
+func (r *fakeEpisodeRepo) ResetEdits(_ context.Context, contentID string, keepText bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, ep := range r.episodes {
 		if ep.ContentID == contentID {
-			ep.Title, ep.Overview, ep.AirDate, ep.Runtime, ep.LockedFields = "", "", nil, 0, []int{}
+			if !keepText {
+				ep.Title, ep.Overview = "", ""
+			}
+			ep.AirDate, ep.Runtime, ep.LockedFields = nil, 0, []int{}
 			return nil
 		}
 	}

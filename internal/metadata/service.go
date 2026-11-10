@@ -197,7 +197,7 @@ type metadataEpisodeRepo interface {
 	ListBySeasonID(ctx context.Context, seasonID string) ([]*models.Episode, error)
 	Upsert(ctx context.Context, ep *models.Episode) error
 	BulkUpsert(ctx context.Context, seriesID string, episodes []*models.Episode) error
-	ResetEdits(ctx context.Context, contentID string) error
+	ResetEdits(ctx context.Context, contentID string, keepText bool) error
 }
 
 // metadataSeasonRepo defines season repository methods used by MetadataService.
@@ -209,7 +209,7 @@ type metadataSeasonRepo interface {
 	Upsert(ctx context.Context, s *models.Season) error
 	BulkUpsert(ctx context.Context, seasons []*models.Season) error
 	ClearBackdropsExcept(ctx context.Context, seriesID string, keep []int32) error
-	ResetEdits(ctx context.Context, contentID string) error
+	ResetEdits(ctx context.Context, contentID string, keepText bool) error
 }
 
 type metadataItemLocalizationRepo interface {
@@ -2996,7 +2996,13 @@ func (s *MetadataService) mergeAndPersist(
 		// are what the admin asked to replace: either way a value the
 		// providers lack must not stay behind.
 		if corrected || req.resetToProvider {
+			sortTitle, overview, tagline := existingResult.SortTitle, existingResult.Overview, existingResult.Tagline
 			clearPreviousMatch(existingResult, mergeLocked)
+			// A reset in another language fetched that language's text for
+			// the localization rows, not the base row's, which keeps its own.
+			if !corrected && !isCanonicalWrite {
+				existingResult.SortTitle, existingResult.Overview, existingResult.Tagline = sortTitle, overview, tagline
+			}
 		}
 		if isCanonicalWrite {
 			MergeMetadata(accumulator, existingResult, mergeLocked, mergeMode)
@@ -3122,6 +3128,10 @@ func (s *MetadataService) mergeAndPersist(
 	item.ContentID = contentID
 	if corrected {
 		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
+			return nil, err
+		}
+	} else if req.resetToProvider {
+		if err := s.clearUnlistedCredits(ctx, contentID, item, mergeLocked); err != nil {
 			return nil, err
 		}
 	}
@@ -3256,14 +3266,15 @@ func (s *MetadataService) mergeAndPersist(
 	// and never overwrites the chain's choice. Identify and a corrected NFO replace
 	// the whole set, even with an empty one, because they keep the content_id
 	// while changing the title: a source only the previous match reported would
-	// otherwise stay on the item for good. Like the rating columns, they are
+	// otherwise stay on the item for good. A reset replaces it too, to leave
+	// only the sources the providers still report. Like the rating columns, they are
 	// provider-invariant and written for every language.
 	if s.ratingSourceRepo != nil && !isFieldLocked(locked, FieldRating) {
 		sources := itemRatingSourcesFromResult(contentID, accumulator.RatingSources)
 		replace := mergeMode == MergeReplaceUnlocked || (req.Mode == ModeScheduledRefresh && !req.enrichmentOnly)
 		var err error
 		switch {
-		case req.Mode == ModeIdentify || corrected:
+		case req.Mode == ModeIdentify || corrected || req.resetToProvider:
 			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
 		case len(sources) > 0:
 			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, replace)
@@ -3320,11 +3331,19 @@ func (s *MetadataService) clearPreviousMatchRows(ctx context.Context, contentID 
 			return err
 		}
 	}
+	return s.clearUnlistedCredits(ctx, contentID, item, creditLocks)
+}
+
+// clearUnlistedCredits removes the stored credits when the merged item lists
+// none and a lock holds neither group. A refresh writes credits only when the
+// providers list some, so a correction or a reset has to clear the ones they
+// no longer list. Credits the providers do list replace the stored ones later.
+func (s *MetadataService) clearUnlistedCredits(ctx context.Context, contentID string, item *models.MediaItem, creditLocks []MetadataField) error {
 	if len(item.People) > 0 || (isFieldLocked(creditLocks, FieldCast) && isFieldLocked(creditLocks, FieldCrew)) {
 		return nil
 	}
 	if err := s.itemRepo.ReplacePeople(ctx, contentID, nil); err != nil {
-		return fmt.Errorf("clearing the previous match's people: %w", err)
+		return fmt.Errorf("clearing credits the providers no longer list: %w", err)
 	}
 	return nil
 }
@@ -4692,9 +4711,11 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	if err != nil {
 		return err
 	}
-	// childReset records that a Reset to Provider emptied its target row, which
-	// happens once, after the providers first answered for it.
-	childReset := false
+	// A Reset to Provider empties its target row once, after the providers
+	// answered, and in the series' own language when the refresh fetches it.
+	seriesLanguage := strings.TrimSpace(series.DefaultMetadataLanguage)
+	resetLanguageListed := seriesLanguage == "" || slices.ContainsFunc(languages, func(l string) bool { return strings.EqualFold(l, seriesLanguage) })
+	resetApplied := false
 	for _, language := range languages {
 		canonicalLanguage := strings.TrimSpace(series.DefaultMetadataLanguage)
 		if canonicalLanguage == "" {
@@ -4719,12 +4740,14 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
 		}
-		if !childReset {
-			if childReset, err = reset.apply(ctx, s, seasons, episodes); err != nil {
+		canonical := strings.EqualFold(language, canonicalLanguage)
+		if reset != nil && !resetApplied && (canonical || !resetLanguageListed) {
+			if err := reset.apply(ctx, s, !canonical); err != nil {
 				return err
 			}
+			resetApplied = true
 		}
-		if strings.EqualFold(language, canonicalLanguage) {
+		if canonical {
 			s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode)
 		} else if s.configuredFallbackLanguage() != "" {
 			// Text a provider marked as another language is no translation.

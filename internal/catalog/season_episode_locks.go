@@ -131,9 +131,11 @@ func clearChildEditsSQL(table string, columns []childLockedColumn, onlyLocked bo
 
 // ResetEdits empties a season's lockable fields and removes its locks, for
 // Reset to Provider. The refresh that follows writes the provider's values over
-// the empty ones, so a field the provider has no value for stays empty.
-func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string) error {
-	if _, err := r.pool.Exec(ctx, clearChildEditsSQL(seasonsTable, seasonLockedColumns, false)+` WHERE content_id = $1`, contentID); err != nil {
+// the empty ones, so a field the provider has no value for stays empty. With
+// keepText the title and overview stay: a refresh in another language than the
+// series' own writes neither.
+func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string, keepText bool) error {
+	if _, err := r.pool.Exec(ctx, clearChildEditsSQL(seasonsTable, resetColumns(seasonLockedColumns, keepText), false)+` WHERE content_id = $1`, contentID); err != nil {
 		return fmt.Errorf("resetting season %s: %w", contentID, err)
 	}
 	return nil
@@ -141,10 +143,10 @@ func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string) err
 
 // ResetEdits is SeasonRepository.ResetEdits for an episode. The series' air
 // dates may come from the cleared date, so they are recomputed with it.
-func (r *EpisodeRepository) ResetEdits(ctx context.Context, contentID string) error {
+func (r *EpisodeRepository) ResetEdits(ctx context.Context, contentID string, keepText bool) error {
 	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		var seriesID string
-		query := clearChildEditsSQL(episodesTable, episodeLockedColumns, false) + ` WHERE content_id = $1 RETURNING series_id`
+		query := clearChildEditsSQL(episodesTable, resetColumns(episodeLockedColumns, keepText), false) + ` WHERE content_id = $1 RETURNING series_id`
 		if err := tx.QueryRow(ctx, query, contentID).Scan(&seriesID); err != nil {
 			return err
 		}
@@ -154,4 +156,15 @@ func (r *EpisodeRepository) ResetEdits(ctx context.Context, contentID string) er
 		return fmt.Errorf("resetting episode %s: %w", contentID, err)
 	}
 	return nil
+}
+
+// resetColumns is the lockable columns a reset empties: all of them, or all
+// but the title and overview.
+func resetColumns(columns []childLockedColumn, keepText bool) []childLockedColumn {
+	if !keepText {
+		return columns
+	}
+	return slices.DeleteFunc(slices.Clone(columns), func(c childLockedColumn) bool {
+		return c.column == childColumnTitle || c.column == childColumnOverview
+	})
 }
