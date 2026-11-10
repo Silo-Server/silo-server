@@ -188,6 +188,13 @@ func metadataCurationIdentityOwners(ctx context.Context, tx pgx.Tx, itemType, an
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
+// The media_items provider ID columns a metadata edit can set or clear.
+const (
+	tmdbIDColumn = "tmdb_id"
+	imdbIDColumn = "imdb_id"
+	tvdbIDColumn = "tvdb_id"
+)
+
 // lockCuratedProviderIDs applies LockMetadataCurationIdentity to an edit that
 // changes a media item's provider IDs: the anchor the item's resulting
 // identity derives, and any item already holding a newly chosen ID.
@@ -195,14 +202,14 @@ func lockCuratedProviderIDs(ctx context.Context, tx pgx.Tx, contentID string, up
 	if upd == nil || !access.HasMetadataCurationAuthorizer(ctx) {
 		return nil
 	}
-	edits := map[string]*string{"tmdb_id": upd.TmdbID, "imdb_id": upd.ImdbID, "tvdb_id": upd.TvdbID}
+	edits := map[string]*string{tmdbIDColumn: upd.TmdbID, imdbIDColumn: upd.ImdbID, tvdbIDColumn: upd.TvdbID}
 	empty := ""
 	for _, field := range upd.Clear {
 		if _, ok := edits[field]; ok {
 			edits[field] = &empty
 		}
 	}
-	if edits["tmdb_id"] == nil && edits["imdb_id"] == nil && edits["tvdb_id"] == nil {
+	if edits[tmdbIDColumn] == nil && edits[imdbIDColumn] == nil && edits[tvdbIDColumn] == nil {
 		return nil
 	}
 	var itemType string
@@ -219,9 +226,9 @@ func lockCuratedProviderIDs(ctx context.Context, tx pgx.Tx, contentID string, up
 	resulting, chosen := stored, contentid.ProviderIDs{}
 	changed := false
 	for field, dst := range map[string][2]*string{
-		"tmdb_id": {&resulting.Tmdb, &chosen.Tmdb},
-		"imdb_id": {&resulting.Imdb, &chosen.Imdb},
-		"tvdb_id": {&resulting.Tvdb, &chosen.Tvdb},
+		tmdbIDColumn: {&resulting.Tmdb, &chosen.Tmdb},
+		imdbIDColumn: {&resulting.Imdb, &chosen.Imdb},
+		tvdbIDColumn: {&resulting.Tvdb, &chosen.Tvdb},
 	} {
 		edit := edits[field]
 		if edit == nil {
@@ -240,9 +247,9 @@ func lockCuratedProviderIDs(ctx context.Context, tx pgx.Tx, contentID string, up
 	}
 	var anchor string
 	switch strings.ToLower(itemType) {
-	case "movie":
+	case AdminCatalogTypeMovie:
 		anchor, _ = contentid.ForMovie(resulting)
-	case "series":
+	case AdminCatalogTypeSeries:
 		anchor, _ = contentid.ForSeries(resulting)
 	}
 	return LockMetadataCurationIdentity(ctx, tx, itemType, anchor, chosen, contentID)
