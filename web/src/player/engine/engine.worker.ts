@@ -40,19 +40,20 @@ import {
   loadFFmpegAudioDecoders,
   type DecodedAudioFrame,
 } from "./ffmpegAudioDecoder";
-import { avcLengthSize, h264RandomAccess } from "./h264";
+import { avcLengthSize } from "./h264";
 import { hevcLengthSize, stripDolbyVisionNalUnits } from "./hevc";
 import { IMPORT_COLOR_TAG, pictureColorOf } from "./pictureColor";
 import {
   ENGINE_READ_FAILED,
   ENGINE_VIDEO_DECODE_FAILED,
-  type EnginePlaneFrame,
   type PageToWorkerMessage,
   type WorkerToPageMessage,
   type WorkerToWorkletMessage,
   type WorkletToWorkerMessage,
 } from "./protocol";
 import { redactStreamUrls, type EngineSourceSpec } from "./source";
+import { copyPlanes, planePool, RAW_PLANE_FORMATS } from "./planeCopy";
+import { videoStarts, type VideoStart } from "./videoStart";
 
 const scope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -141,7 +142,6 @@ let framesInFlight = 0;
 let audioPostedSeconds = 0;
 let audioConsumedSeconds = 0;
 const waker = new Waker();
-const planePool: ArrayBuffer[] = [];
 let activeVideoDecoder: VideoDecoder | null = null;
 let activeAudioDecoder: AudioDecoderAdapter | null = null;
 
@@ -349,57 +349,6 @@ function start(run: number, position: number): void {
   }
 }
 
-const RAW_PLANE_FORMATS = /^I4(20|22|44)P1[02]$/;
-
-function planeBuffer(size: number): ArrayBuffer {
-  const index = planePool.findIndex((buffer) => buffer.byteLength >= size);
-  if (index >= 0) return planePool.splice(index, 1)[0]!;
-  return new ArrayBuffer(size);
-}
-
-/**
- * Copies a high-bit-depth software frame out as planes. GPU paths quantize an
- * imported frame to 8 bits; HDR needs the 10-bit codes for clean gradients.
- */
-async function copyPlanes(frame: VideoFrame): Promise<EnginePlaneFrame> {
-  const format = frame.format!;
-  const rect = frame.visibleRect!;
-  const bitDepth = format.endsWith("P12") ? 12 : 10;
-  const chromaWidth = format.startsWith("I444") ? rect.width : Math.ceil(rect.width / 2);
-  const chromaHeight = format.startsWith("I420") ? Math.ceil(rect.height / 2) : rect.height;
-  const lumaBytes = rect.width * rect.height * 2;
-  const chromaBytes = chromaWidth * chromaHeight * 2;
-  const buffer = planeBuffer(lumaBytes + chromaBytes * 2);
-  const offsets: [number, number, number] = [0, lumaBytes, lumaBytes + chromaBytes];
-  const strides: [number, number, number] = [rect.width * 2, chromaWidth * 2, chromaWidth * 2];
-  try {
-    await frame.copyTo(buffer, {
-      rect,
-      layout: [
-        { offset: offsets[0], stride: strides[0] },
-        { offset: offsets[1], stride: strides[1] },
-        { offset: offsets[2], stride: strides[2] },
-      ],
-    });
-  } catch (error) {
-    // The caller falls back to handing the frame over; keep the buffer for the next copy.
-    planePool.push(buffer);
-    throw error;
-  }
-  return {
-    timestamp: frame.timestamp / 1e6,
-    duration: (frame.duration ?? 0) / 1e6,
-    bitDepth,
-    width: rect.width,
-    height: rect.height,
-    chromaWidth,
-    chromaHeight,
-    buffer,
-    offsets,
-    strides,
-  };
-}
-
 function readFailure(kind: "video" | "audio", error: unknown): EngineFailure {
   return new EngineFailure(ENGINE_FAILURES.read, `Reading ${kind} failed: ${String(error)}`);
 }
@@ -447,87 +396,22 @@ async function* readPackets(
   }
 }
 
-interface VideoStart {
-  packet: EncodedPacket;
-  /** An H.264 I-frame with a recovery point rather than an IDR. */
-  recoveryPoint: boolean;
-}
-
-/** A start at the key packet Mediabunny verifies for `timestamp`. */
-async function findVerifiedStart(
-  sink: EncodedPacketSink,
-  timestamp: number,
-): Promise<VideoStart | null> {
-  const packet =
-    (await sink.getKeyPacket(timestamp, { verifyKeyPackets: true })) ??
-    (await sink.getFirstKeyPacket({ verifyKeyPackets: true }));
-  return packet ? { packet, recoveryPoint: false } : null;
-}
-
-/**
- * Bounds on where an H.264 start looks for a key packet the decoder can start
- * on before the run fails over: how many starts it decodes from, and how far
- * behind the position it steps past key packets it cannot start on. A start
- * it can decode from is tried however far back it is.
- *
- * On Chromium, Mediabunny verifies an H.264 key packet only when it holds an
- * IDR slice, and walks back one key packet at a time, without limit, until it
- * finds one. In an open-GOP stream, as on Blu-ray, the only IDR can be at the
- * very start, so a resume would read most of the file before showing
- * anything. H.264 instead starts at the container's key packet when it is an
- * IDR or an I-frame with a recovery point, and steps back past one that is
- * neither (some containers mark every frame as a key) or that the decoder
- * rejects: some encoders let the pictures after a recovery point reference
- * the GOP before it, and decoding from an earlier key packet gives them those
- * references.
- */
-const MAX_H264_START_ATTEMPTS = 8;
-const MAX_H264_START_LOOKBACK_SECONDS = 20;
-
 async function runVideo(run: number, position: number): Promise<void> {
   const sink = new EncodedPacketSink(videoTrack!);
-  const target = position + timelineOrigin;
-  if (h264LengthSize === null) {
-    const start = await findStartPacket("video", () => findVerifiedStart(sink, target));
+  const starts = videoStarts(sink, position + timelineOrigin, h264LengthSize);
+  for (;;) {
+    const next = (await findStartPacket("video", () => starts.next()))!;
     if (run !== generation) return;
-    if (start) await decodeVideo(run, position, sink, start);
-    else post({ type: "video-ended", generation: run });
-    return;
-  }
-  let before = target;
-  let attempts = 0;
-  for (let first = true; attempts < MAX_H264_START_ATTEMPTS; first = false) {
-    const packet = await findStartPacket(
-      "video",
-      async () =>
-        (await sink.getKeyPacket(before)) ?? (first ? await sink.getFirstKeyPacket() : null),
-    );
-    if (run !== generation) return;
-    if (!packet) {
-      if (first) {
-        post({ type: "video-ended", generation: run });
-        return;
+    if (next.done) {
+      if (next.value === "no-keys") post({ type: "video-ended", generation: run });
+      else {
+        const message = "The browser cannot start decoding this video near the position.";
+        fail(run, new EngineFailure(ENGINE_FAILURES.videoUnsupported, message), "");
       }
-      break;
+      return;
     }
-    const access = h264RandomAccess(packet.data, h264LengthSize);
-    if (access) {
-      attempts += 1;
-      const start = { packet, recoveryPoint: access === "recovery-point" };
-      if ((await decodeVideo(run, position, sink, start)) === "done") return;
-    } else if (packet.timestamp < target - MAX_H264_START_LOOKBACK_SECONDS) {
-      break;
-    }
-    before = packet.timestamp - 0.001;
+    if ((await decodeVideo(run, position, sink, next.value)) === "done") return;
   }
-  fail(
-    run,
-    new EngineFailure(
-      ENGINE_FAILURES.videoUnsupported,
-      "The browser cannot start decoding this H.264 stream near the position.",
-    ),
-    ENGINE_FAILURES.videoUnsupported,
-  );
 }
 
 /**

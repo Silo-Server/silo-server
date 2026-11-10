@@ -212,7 +212,7 @@ source gamut to BT.709, sRGB encode. These match the server's tone-map recipes i
   only at an IDR slice and walks back key by key, and an open-GOP stream (as
   on Blu-ray) may have its only IDR at the start of the file. So for H.264
   the worker takes the container's key packet when it is an IDR or an I-frame
-  with a recovery point (`engine/h264.ts`), and leaves out the leading
+  with a recovery point (`engine/videoStart.ts`), and leaves out the leading
   pictures after a recovery point, which reference the GOP before and show
   before it. It steps back past a key packet that is neither (some containers
   mark every frame as a key) and from a recovery point the decoder rejects
