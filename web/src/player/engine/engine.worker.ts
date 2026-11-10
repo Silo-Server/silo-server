@@ -40,6 +40,7 @@ import {
   loadFFmpegAudioDecoders,
   type DecodedAudioFrame,
 } from "./ffmpegAudioDecoder";
+import { avcLengthSize, h264RandomAccess } from "./h264";
 import { hevcLengthSize, stripDolbyVisionNalUnits } from "./hevc";
 import { IMPORT_COLOR_TAG, pictureColorOf } from "./pictureColor";
 import {
@@ -131,6 +132,8 @@ let videoConfig: VideoDecoderConfig | null = null;
  */
 let timelineOrigin = 0;
 let nalLengthSize: number | null = null;
+/** NAL length-field size of an H.264 track, or null for any other video. */
+let h264LengthSize: number | null = null;
 let audioOutput: { port: MessagePort; channels: number; sampleRate: number } | null = null;
 
 let generation = -1;
@@ -279,10 +282,11 @@ async function open(spec: EngineSourceSpec): Promise<void> {
     );
   }
   videoConfig = config;
+  const videoCodec = await videoTrack.getCodec();
+  const description = config.description ? toBytes(config.description) : null;
   nalLengthSize =
-    spec.video.stripDolbyVision && (await videoTrack.getCodec()) === "hevc"
-      ? hevcLengthSize(config.description ? toBytes(config.description) : null)
-      : null;
+    spec.video.stripDolbyVision && videoCodec === "hevc" ? hevcLengthSize(description) : null;
+  h264LengthSize = videoCodec === "avc" ? avcLengthSize(description) : null;
 
   let duration = spec.durationSeconds ?? 0;
   if (!(duration > 0)) duration = (await input.computeDuration()) - timelineOrigin;
@@ -404,10 +408,10 @@ function readFailure(kind: "video" | "audio", error: unknown): EngineFailure {
  * Finds where a run starts. The lookup reads the file, so its failure is a
  * read failure like any other, not a decoder one.
  */
-async function findStartPacket(
+async function findStartPacket<T>(
   kind: "video" | "audio",
-  lookup: () => Promise<EncodedPacket | null>,
-): Promise<EncodedPacket | null> {
+  lookup: () => Promise<T | null>,
+): Promise<T | null> {
   try {
     return await lookup();
   } catch (error) {
@@ -443,27 +447,115 @@ async function* readPackets(
   }
 }
 
+interface VideoStart {
+  packet: EncodedPacket;
+  /** An H.264 I-frame with a recovery point rather than an IDR. */
+  recoveryPoint: boolean;
+}
+
+/** A start at the key packet Mediabunny verifies for `timestamp`. */
+async function findVerifiedStart(
+  sink: EncodedPacketSink,
+  timestamp: number,
+): Promise<VideoStart | null> {
+  const packet =
+    (await sink.getKeyPacket(timestamp, { verifyKeyPackets: true })) ??
+    (await sink.getFirstKeyPacket({ verifyKeyPackets: true }));
+  return packet ? { packet, recoveryPoint: false } : null;
+}
+
+/**
+ * Bounds on where an H.264 start looks for a key packet the decoder can start
+ * on before the run fails over: how many starts it decodes from, and how far
+ * behind the position it steps past key packets it cannot start on. A start
+ * it can decode from is tried however far back it is.
+ *
+ * On Chromium, Mediabunny verifies an H.264 key packet only when it holds an
+ * IDR slice, and walks back one key packet at a time, without limit, until it
+ * finds one. In an open-GOP stream, as on Blu-ray, the only IDR can be at the
+ * very start, so a resume would read most of the file before showing
+ * anything. H.264 instead starts at the container's key packet when it is an
+ * IDR or an I-frame with a recovery point, and steps back past one that is
+ * neither (some containers mark every frame as a key) or that the decoder
+ * rejects: some encoders let the pictures after a recovery point reference
+ * the GOP before it, and decoding from an earlier key packet gives them those
+ * references.
+ */
+const MAX_H264_START_ATTEMPTS = 8;
+const MAX_H264_START_LOOKBACK_SECONDS = 20;
+
 async function runVideo(run: number, position: number): Promise<void> {
-  const track = videoTrack!;
-  const config = videoConfig!;
-  const sink = new EncodedPacketSink(track);
-  const startPacket = await findStartPacket(
-    "video",
-    async () =>
-      (await sink.getKeyPacket(position + timelineOrigin, { verifyKeyPackets: true })) ??
-      (await sink.getFirstKeyPacket({ verifyKeyPackets: true })),
-  );
-  if (run !== generation) return;
-  if (!startPacket) {
-    post({ type: "video-ended", generation: run });
+  const sink = new EncodedPacketSink(videoTrack!);
+  const target = position + timelineOrigin;
+  if (h264LengthSize === null) {
+    const start = await findStartPacket("video", () => findVerifiedStart(sink, target));
+    if (run !== generation) return;
+    if (start) await decodeVideo(run, position, sink, start);
+    else post({ type: "video-ended", generation: run });
     return;
   }
+  let before = target;
+  let attempts = 0;
+  for (let first = true; attempts < MAX_H264_START_ATTEMPTS; first = false) {
+    const packet = await findStartPacket(
+      "video",
+      async () =>
+        (await sink.getKeyPacket(before)) ?? (first ? await sink.getFirstKeyPacket() : null),
+    );
+    if (run !== generation) return;
+    if (!packet) {
+      if (first) {
+        post({ type: "video-ended", generation: run });
+        return;
+      }
+      break;
+    }
+    const access = h264RandomAccess(packet.data, h264LengthSize);
+    if (access) {
+      attempts += 1;
+      const start = { packet, recoveryPoint: access === "recovery-point" };
+      if ((await decodeVideo(run, position, sink, start)) === "done") return;
+    } else if (packet.timestamp < target - MAX_H264_START_LOOKBACK_SECONDS) {
+      break;
+    }
+    before = packet.timestamp - 0.001;
+  }
+  fail(
+    run,
+    new EngineFailure(
+      ENGINE_FAILURES.videoUnsupported,
+      "The browser cannot start decoding this H.264 stream near the position.",
+    ),
+    ENGINE_FAILURES.videoUnsupported,
+  );
+}
+
+/**
+ * Decodes video from `start` until the end of the run. Resolves "rejected"
+ * when the decoder failed on the stream from a recovery point before it
+ * decoded any picture, so the caller can start earlier instead of failing.
+ */
+async function decodeVideo(
+  run: number,
+  position: number,
+  sink: EncodedPacketSink,
+  start: VideoStart,
+): Promise<"done" | "rejected"> {
+  const config = videoConfig!;
+  const startPacket = start.packet;
+  // Leading pictures come right after a recovery point in decode order and
+  // show before it. They reference the GOP before, which was not decoded,
+  // and are never shown; the first picture that shows after it ends them.
+  let skippingLeading = start.recoveryPoint;
+  let decodedPicture = false;
+  let rejected = false;
 
   // Frames are handed over strictly in output order; copying planes is async.
   let delivery = Promise.resolve();
   const usePlanes = source!.video.transfer !== "sdr";
   const decoder = new VideoDecoder({
     output: (frame) => {
+      decodedPicture = true;
       if (run !== generation) {
         frame.close();
         return;
@@ -505,7 +597,14 @@ async function runVideo(run: number, position: number): Promise<void> {
         post({ type: "frame", generation: run, frame }, [frame]);
       });
     },
-    error: (error) => fail(run, error, ENGINE_FAILURES.videoDecode),
+    error: (error) => {
+      if (start.recoveryPoint && !decodedPicture && run === generation) {
+        rejected = true;
+        waker.wake();
+        return;
+      }
+      fail(run, error, ENGINE_FAILURES.videoDecode);
+    },
   });
   activeVideoDecoder = decoder;
   decoder.addEventListener("dequeue", () => waker.wake());
@@ -514,11 +613,17 @@ async function runVideo(run: number, position: number): Promise<void> {
   for await (const packet of readPackets("video", sink, startPacket)) {
     while (
       run === generation &&
+      decoder.state !== "closed" &&
       (framesInFlight >= MAX_FRAMES_IN_FLIGHT || decoder.decodeQueueSize >= MAX_VIDEO_DECODE_QUEUE)
     ) {
       await waker.wait();
     }
-    if (run !== generation || decoder.state === "closed") return;
+    if (run !== generation) return "done";
+    if (decoder.state === "closed") return rejected ? "rejected" : "done";
+    if (skippingLeading && packet !== startPacket) {
+      if (packet.timestamp < startPacket.timestamp) continue;
+      skippingLeading = false;
+    }
     const data = nalLengthSize ? stripDolbyVisionNalUnits(packet.data, nalLengthSize) : packet.data;
     decoder.decode(
       new EncodedVideoChunk({
@@ -529,10 +634,17 @@ async function runVideo(run: number, position: number): Promise<void> {
       }),
     );
   }
-  if (run !== generation || decoder.state === "closed") return;
-  await decoder.flush();
+  if (run !== generation) return "done";
+  if (decoder.state === "closed") return rejected ? "rejected" : "done";
+  try {
+    await decoder.flush();
+  } catch (error) {
+    if (rejected) return "rejected";
+    throw error;
+  }
   await delivery;
   if (run === generation) post({ type: "video-ended", generation: run });
+  return "done";
 }
 
 function webCodecsAudioDecoder(config: AudioDecoderConfig, run: number): AudioDecoderAdapter {

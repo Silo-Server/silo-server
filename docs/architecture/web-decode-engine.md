@@ -207,6 +207,21 @@ source gamut to BT.709, sRGB encode. These match the server's tone-map recipes i
   failure.
 - **Layers.** Each session draws in its own box, which replaces whatever an
   earlier session left in the surface.
+- **Start position.** A decode run starts at the key packet at or before its
+  position. On Chromium, Mediabunny's verified lookup accepts an H.264 key
+  only at an IDR slice and walks back key by key, and an open-GOP stream (as
+  on Blu-ray) may have its only IDR at the start of the file. So for H.264
+  the worker takes the container's key packet when it is an IDR or an I-frame
+  with a recovery point (`engine/h264.ts`), and leaves out the leading
+  pictures after a recovery point, which reference the GOP before and show
+  before it. It steps back past a key packet that is neither (some containers
+  mark every frame as a key) and from a recovery point the decoder rejects
+  before decoding any picture; a decoder that decoded a picture and then
+  failed is a decode failure. After `MAX_H264_START_ATTEMPTS` starts, or once
+  the keys it steps past are `MAX_H264_START_LOOKBACK_SECONDS` behind the
+  position (a start it can decode from is tried however far back), the run
+  fails over as `browser_engine_video_unsupported` instead of walking back to
+  the start of the file. Other codecs use the verified lookup.
 - **Dolby Vision.** RPU (NAL 62) and enhancement-layer (NAL 63 or
   `nuh_layer_id > 0`) units are removed before decode (`engine/hevc.ts`).
 
