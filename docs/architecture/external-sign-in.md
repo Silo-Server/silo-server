@@ -179,6 +179,19 @@ the session's transaction locks the account, rechecks that it is enabled, and
 locks the enabled installation and the linked identity. A disable or unlink
 that commits in between refuses the sign-in instead of missing its session.
 
+A plain sign-out everywhere (an administrator's **Sign out everywhere**, a
+password reset, a provider re-check that refuses the person) changes nothing
+those rechecks read, so it is recorded instead: each one stores its
+transaction id in `account_sign_outs` under the account row lock. Every
+password sign-in, local or directory, takes a database snapshot
+(`pg_current_snapshot()`) before it checks the credentials. Under the account
+lock, before it inserts the session, it refuses as wrong credentials when that
+snapshot cannot see the account's last sign-out, which therefore committed
+after the check began and revoked sessions without this one. The revocations a
+directory sign-in makes itself in account resolution (a provider role change,
+an email auto-match link) are not recorded, or the sign-in would refuse itself.
+OAuth completion and network sign-in do not take a snapshot yet.
+
 Jellyfin's `password#PIN` convention (a profile PIN after the last `#`)
 applies to local accounts only: a name routed to the directory gets one
 attempt with the password as typed, so a PIN is never sent to the directory

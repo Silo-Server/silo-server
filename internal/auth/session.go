@@ -391,8 +391,9 @@ func (r *SessionRepository) UpdateLastSeen(ctx context.Context, id string, obser
 // RevokeAsAdmin locks the actor and target in the same order as ownership
 // transfers, so a transfer cannot race the owner-protection check. A nil
 // sessionID revokes all live login sessions held by or impersonated from the
-// target account and its Audiobookshelf- and Jellyfin-compatible sessions, and
-// withdraws its uncollected device sign-in approvals.
+// target account and its Audiobookshelf- and Jellyfin-compatible sessions,
+// withdraws its uncollected device sign-in approvals, and marks the account
+// signed out for password sign-ins in flight (signedOutSince).
 func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID int, sessionID *string) (int, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -466,6 +467,9 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	// of them is worth a domain row, even with no login session left.
 	ended := tag.RowsAffected()
 	if sessionID == nil {
+		if err := markSignedOutInTransaction(ctx, tx, []int{userID}); err != nil {
+			return 0, err
+		}
 		for _, revoke := range []func(context.Context, pgx.Tx, []int) (int64, error){
 			revokeAudiobookshelfSessionsInTransaction, deleteJellyfinSessionsInTransaction, withdrawDeviceSignInApprovalsInTransaction,
 		} {

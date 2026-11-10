@@ -502,6 +502,10 @@ type IdentitySession struct {
 	// password change (CompatLogin), so an account holding a temporary
 	// password is refused.
 	RefusePasswordChange bool
+	// SignInSnapshot, when set, is the snapshot a password sign-in took
+	// before checking its credentials (signInSnapshot): an account signed
+	// out everywhere since is refused. Empty skips the check.
+	SignInSnapshot string
 }
 
 // OpenIdentitySession opens the login session of an account that signed in
@@ -533,6 +537,15 @@ func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c 
 	}
 	if c.RefusePasswordChange && user.PasswordChangeRequired {
 		return nil, ErrPasswordChangeRequired
+	}
+	if c.SignInSnapshot != "" {
+		since, err := signedOutSince(ctx, db, user.ID, c.SignInSnapshot)
+		if err != nil {
+			return nil, err
+		}
+		if since {
+			return nil, ErrInvalidCredentials
+		}
 	}
 	installationID, err := lockOAuthIdentity(ctx, db, user.ID, c.IdentityID)
 	if err != nil {
@@ -748,11 +761,16 @@ func (s *Service) loginWithProvider(
 		return nil, nil, ErrInvalidCredentials
 	}
 
+	// Taken before the credential check: a sign-out everywhere that commits
+	// after this point refuses the sign-in below (signedOutSince).
+	snapshot, err := signInSnapshot(ctx, s.users.pool)
+	if err != nil {
+		return nil, nil, err
+	}
 	creds := Credentials{Username: username, Password: password}
 	var (
 		user       *models.User
 		identityID int64
-		err        error
 	)
 	if plugin, ok := provider.(*PluginProvider); ok {
 		// A name without a local account goes to the directory and costs no
@@ -806,6 +824,13 @@ func (s *Service) loginWithProvider(
 			if refusePasswordChange && current.PasswordChangeRequired {
 				return ErrPasswordChangeRequired
 			}
+			since, err := signedOutSince(ctx, tx, current.ID, snapshot)
+			if err != nil {
+				return err
+			}
+			if since {
+				return ErrInvalidCredentials
+			}
 			if !current.BreakGlass {
 				if err := lockServerSettings(ctx, tx); err != nil {
 					return err
@@ -836,14 +861,15 @@ func (s *Service) loginWithProvider(
 	} else {
 		// Account resolution committed in its own transaction. Open the
 		// session as an OAuth sign-in does, under the account lock, so a
-		// disable or unlink that committed meanwhile refuses the sign-in
-		// instead of missing its session.
+		// disable, unlink or sign-out everywhere that committed meanwhile
+		// refuses the sign-in instead of missing its session.
 		pair, err := s.OpenIdentitySession(ctx, nil, IdentitySession{
 			UserID:               user.ID,
 			IdentityID:           identityID,
 			DeviceName:           deviceName,
 			IP:                   ip,
 			RefusePasswordChange: refusePasswordChange,
+			SignInSnapshot:       snapshot,
 		})
 		if err != nil {
 			return nil, nil, err

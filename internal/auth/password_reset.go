@@ -62,11 +62,27 @@ func RevokeSignInsForUsersInTransaction(ctx context.Context, tx pgx.Tx, userIDs 
 }
 
 // revokeSignInsInTransaction revokes every login session except
-// keepSessionID; nil keeps none.
+// keepSessionID; nil keeps none. It also marks the accounts signed out, so
+// a password sign-in whose credential check began before this commits opens
+// no session afterwards (signedOutSince).
 func revokeSignInsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int, keepSessionID *string) error {
 	if len(userIDs) == 0 {
 		return nil
 	}
+	if err := markSignedOutInTransaction(ctx, tx, userIDs); err != nil {
+		return err
+	}
+	return revokeHeldSignInsInTransaction(ctx, tx, userIDs, keepSessionID)
+}
+
+// revokeHeldSignInsInTransaction is revokeSignInsInTransaction without the
+// sign-out mark: it ends what the accounts hold and leaves sign-ins in
+// flight alone. Account resolution uses it for the revocations a sign-in
+// makes itself (a provider role change, an email auto-match link), which
+// would otherwise refuse that same sign-in. A sign-in in flight reads the
+// account again under its lock, so it opens its session with the new role
+// or meets the turned-off local password.
+func revokeHeldSignInsInTransaction(ctx context.Context, tx pgx.Tx, userIDs []int, keepSessionID *string) error {
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE (user_id = ANY($1::int[]) OR impersonator_user_id = ANY($1::int[])) AND revoked_at IS NULL

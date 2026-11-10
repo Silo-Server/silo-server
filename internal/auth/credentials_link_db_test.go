@@ -7,6 +7,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -197,5 +198,119 @@ func TestExternalSignInCredentialsSessionLocksAccountDB(t *testing.T) {
 	}
 	if n := liveSessions(user.ID); n != 0 {
 		t.Fatalf("a disabled account kept %d live sessions", n)
+	}
+}
+
+// checkingDirectory is a directoryPlugin that runs during, when set, while
+// it checks a password: what commits there commits after the sign-in began.
+type checkingDirectory struct {
+	*directoryPlugin
+	during func()
+}
+
+func (p *checkingDirectory) Authenticate(ctx context.Context, req *pluginv1.AuthenticateRequest) (*pluginv1.AuthenticateResponse, error) {
+	if p.during != nil {
+		p.during()
+	}
+	return p.directoryPlugin.Authenticate(ctx, req)
+}
+
+// TestDirectorySignInOverlappingSignOutDB: a sign-out everywhere that
+// commits after a directory sign-in began checking the password refuses the
+// sign-in, whether it lands during the directory's answer or after account
+// resolution commits (#2920). A sign-out that committed before the sign-in
+// began, the revocation a sign-in's own role change makes, and a sign-out
+// mark from another cluster's transaction ids do not.
+func TestDirectorySignInOverlappingSignOutDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	users := NewUserRepository(env.pool)
+	sessions := NewSessionRepository(env.pool)
+	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-jwt-secret-synthetic-jwt-secret", time.Minute, time.Hour), sessions, users, nil, nil, nil)
+	admin := env.localAccount(t, "admin", models.RoleAdmin)
+	identity := env.identity("erin")
+	answer := &pluginv1.AuthenticateResponse{ExternalSubject: identity.Subject, Issuer: "ldaps://ldap.example.test",
+		Username: identity.Username, Email: identity.Email, DisplayName: identity.DisplayName,
+		ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER}
+	directory := &checkingDirectory{directoryPlugin: &directoryPlugin{users: map[string]*pluginv1.AuthenticateResponse{identity.Username + "\x00dir-pass": answer}}}
+	// The resolver reports a role change after its transaction commits,
+	// before the sign-in opens its session.
+	var afterResolve func()
+	resolver := NewAccountResolver(env.pool, NewAccountProvisioner(users, pgstore.NewPostgresProvider(env.pool)), func(context.Context, int) {
+		if afterResolve != nil {
+			afterResolve()
+		}
+	})
+	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: env.installationID, CapabilityID: "ldap", DisplayName: "Directory", AutoProvision: true},
+		sessions, resolver, func(context.Context) (pluginAuthClient, error) { return directory, nil })
+	providerID := PluginProviderID(env.installationID, "ldap")
+	svc.SetPluginProviderSource(staticProviderSource{{
+		Info:     LoginProviderInfo{ID: providerID, DisplayName: "Directory", Mode: ProviderModeCredentials, InstallationID: env.installationID},
+		Provider: provider,
+	}})
+
+	_, user, err := svc.LoginWithProvider(ctx, providerID, identity.Username, "dir-pass", "test", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both ways an account is signed out everywhere: an administrator's
+	// Sign out everywhere, and the transaction helper behind password
+	// resets, disables and provider re-check refusals.
+	adminSignOut := func() {
+		if _, err := sessions.RevokeAsAdmin(ctx, admin.ID, user.ID, nil); err != nil {
+			t.Error(err)
+		}
+	}
+	signOut := func() {
+		if err := pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
+			if _, err := lockUser(ctx, tx, user.ID); err != nil {
+				return err
+			}
+			return RevokeSignInsInTransaction(ctx, tx, user.ID)
+		}); err != nil {
+			t.Error(err)
+		}
+	}
+
+	for _, tc := range []struct {
+		name         string
+		role         pluginv1.AuthManagedRole
+		before       func()
+		during       func()
+		afterResolve func()
+		wantErr      error
+	}{
+		{name: "signed out while the directory answers", role: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER,
+			during: adminSignOut, wantErr: ErrInvalidCredentials},
+		{name: "signed out after resolution commits", role: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_ADMIN,
+			afterResolve: signOut, wantErr: ErrInvalidCredentials},
+		{name: "own role change only", role: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER},
+		{name: "signed out before the sign-in", role: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER, before: adminSignOut},
+		{name: "mark from another cluster", role: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER, before: func() {
+			if _, err := env.pool.Exec(ctx, `UPDATE account_sign_outs SET xid = '1000000000000000'::xid8 WHERE user_id = $1`, user.ID); err != nil {
+				t.Error(err)
+			}
+		}},
+	} {
+		if _, err := env.pool.Exec(ctx, `UPDATE auth_sessions SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL`, user.ID); err != nil {
+			t.Fatal(err)
+		}
+		answer.ManagedRole = tc.role
+		if tc.before != nil {
+			tc.before()
+		}
+		directory.during, afterResolve = tc.during, tc.afterResolve
+		_, _, err := svc.LoginWithProvider(ctx, providerID, identity.Username, "dir-pass", "test", "")
+		directory.during, afterResolve = nil, nil
+		wantLive := 1
+		if tc.wantErr != nil {
+			wantLive = 0
+		}
+		if !errors.Is(err, tc.wantErr) {
+			t.Errorf("%s: sign-in = %v, want %v", tc.name, err, tc.wantErr)
+		}
+		if n := env.activeSessions(t, user.ID); n != wantLive {
+			t.Errorf("%s: %d live sessions, want %d", tc.name, n, wantLive)
+		}
 	}
 }

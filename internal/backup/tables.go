@@ -35,7 +35,10 @@ var liveTables = []string{"policy_documents", "policy_document_versions"}
 // unless backup.include_intro_fingerprints (excludedTableData).
 var loggedTables = []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", tableIntroFingerprints,
 	// Upload sessions: their parts live outside the backup.
-	"backup_uploads", "backup_upload_parts", "backup_upload_attempts"}
+	"backup_uploads", "backup_upload_parts", "backup_upload_attempts",
+	// Sign-out marks name this database's transaction ids, and guard login
+	// sessions, which a restore never brings back.
+	"account_sign_outs"}
 
 const tableIntroFingerprints = "media_intro_fingerprints"
 

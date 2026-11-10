@@ -205,7 +205,7 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 					if err != nil {
 						return err
 					}
-					if err := RevokeSignInsInTransaction(ctx, tx, user.ID); err != nil {
+					if err := revokeHeldSignInsInTransaction(ctx, tx, []int{user.ID}, nil); err != nil {
 						return err
 					}
 					keys, err := deleteAPIKeys(ctx, tx, user.ID)
@@ -550,7 +550,7 @@ func syncManagedRole(ctx context.Context, tx pgx.Tx, user *models.User, managed 
 	if err := updateUser(ctx, tx, user.ID, models.UpdateUserInput{Role: &target}, nil); err != nil {
 		return nil, nil, fmt.Errorf("applying provider role: %w", err)
 	}
-	if err := RevokeSignInsInTransaction(ctx, tx, user.ID); err != nil {
+	if err := revokeHeldSignInsInTransaction(ctx, tx, []int{user.ID}, nil); err != nil {
 		return nil, nil, err
 	}
 	updated, err := userByID(ctx, tx, user.ID)
