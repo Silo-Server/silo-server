@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/select";
 import { setSignedOutLanguage, useSignedOutLanguage } from "@/hooks/useAppLocale";
 import { useAuth } from "@/hooks/useAuth";
-import { PSEUDO_LOCALES_ENABLED } from "@/i18n";
+import { PSEUDO_LOCALES_ENABLED, useT } from "@/i18n";
 import { getLanguageName } from "@/lib/languageNames";
 import { matchAppLanguage, pickerLanguages } from "@/lib/appLocale";
 
@@ -22,6 +22,7 @@ const MATCH_DEVICE = "device";
  */
 export function AuthLanguagePicker() {
   const signedOutLanguage = useSignedOutLanguage();
+  const t = useT();
   // With a profile active, its own setting decides; this picker would do nothing.
   const { user, profile } = useAuth();
   if (user && profile) return null;
@@ -36,12 +37,16 @@ export function AuthLanguagePicker() {
         value={value}
         onValueChange={(next) => setSignedOutLanguage(next === MATCH_DEVICE ? null : next)}
       >
-        <SelectTrigger size="sm" aria-label="Language" className="glass panel-border border-0">
+        <SelectTrigger
+          size="sm"
+          aria-label={t("web.auth.languagePicker.label")}
+          className="glass panel-border border-0"
+        >
           <Languages aria-hidden="true" className="size-4" />
           <SelectValue />
         </SelectTrigger>
         <SelectContent position="popper" align="end">
-          <SelectItem value={MATCH_DEVICE}>Match device</SelectItem>
+          <SelectItem value={MATCH_DEVICE}>{t("web.auth.languagePicker.matchDevice")}</SelectItem>
           {!offered && <SelectItem value={value}>{getLanguageName(value)}</SelectItem>}
           {languages.map((language) => (
             <SelectItem key={language.tag} value={language.tag} lang={language.tag}>

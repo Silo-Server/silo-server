@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AuthBackground } from "@/components/auth/AuthBackground";
 import { AuthLanguagePicker } from "@/components/auth/AuthLanguagePicker";
+import { useT } from "@/i18n";
 
 /** The signed-out account screens' card (password reset and its request). */
 export function AuthCard({
@@ -39,12 +40,16 @@ export function AuthCard({
 }
 
 export function SignInHint() {
+  const t = useT();
   return (
     <p className="text-muted-foreground mt-4 text-center text-sm">
-      Remembered it?{" "}
-      <Link to="/login" className="text-foreground underline hover:no-underline">
-        Sign in
-      </Link>
+      {t("web.auth.card.rememberedIt", {
+        link: (chunks) => (
+          <Link to="/login" className="text-foreground underline hover:no-underline">
+            {chunks}
+          </Link>
+        ),
+      })}
     </p>
   );
 }

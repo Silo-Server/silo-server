@@ -16,7 +16,7 @@ import { useAccessGroups } from "@/hooks/queries/admin/accessGroups";
 import { useAdminUserProfiles } from "@/hooks/queries/admin/history";
 import { useAdminPolicyDefaults, useViewerIsOwner } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
-import { INVALID_EMAIL_MESSAGE, isValidEmail } from "@/lib/email";
+import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 
 import { KeyValueRow } from "../ui";
 import { EditableCard, type AccessCardProps } from "./EditableCard";
@@ -113,7 +113,7 @@ function profilesIncomplete(draft: SignInDraft, saved: SignInDraft): boolean {
 
 function validate(draft: SignInDraft, base: AdminUser): string | null {
   if (draft.username.trim() === "") return "Enter a username.";
-  if (!isValidEmail(draft.email)) return INVALID_EMAIL_MESSAGE;
+  if (!isValidEmail(draft.email)) return invalidEmailMessage();
   if (profilesIncomplete(draft, toDraft(base)))
     return "Allow at least 1 profile, or choose Default.";
   return null;

@@ -40,8 +40,38 @@ const PLAIN_TEXT_IMPORT = {
 // Files and directories whose text is extracted to the message catalog. An
 // extraction PR adds its area here, one glob per line, sorted.
 const I18N_CONVERTED = [
+  "src/components/AppSidebar*.{ts,tsx}",
+  "src/components/auth/**",
   "src/components/calendar/DayGroup.tsx",
+  "src/components/calm/**",
+  "src/components/ConfirmDialog.tsx",
+  "src/components/ErrorBoundary.tsx",
   "src/components/homeRows/AddToOtherLibrariesDialog.tsx",
+  "src/components/ImpersonationBanner.tsx",
+  "src/components/Layout.tsx",
+  "src/components/LocalErrorBoundary.tsx",
+  "src/components/onboarding/**",
+  "src/components/page/**",
+  "src/components/PageBack.tsx",
+  "src/components/PageUnavailable.tsx",
+  "src/components/PasswordInput.tsx",
+  "src/components/SaveBar.tsx",
+  "src/components/ScrollToTopButton.tsx",
+  "src/components/SideNav.tsx",
+  "src/components/SiloBrand.tsx",
+  "src/components/ui/**",
+  "src/components/UnsavedChangesGuard.tsx",
+  "src/pages/ActivateDevice.tsx",
+  "src/pages/ChoosePassword.tsx",
+  "src/pages/ForgotPassword.tsx",
+  "src/pages/HouseholdSetup.tsx",
+  "src/pages/InviteClaim.tsx",
+  "src/pages/Login.tsx",
+  "src/pages/OAuthComplete.tsx",
+  "src/pages/PasswordReset.tsx",
+  "src/pages/setup-wizard/**",
+  "src/pages/SetupWizard.tsx",
+  "src/pages/Signup.tsx",
 ];
 
 export default tseslint.config(
@@ -131,6 +161,8 @@ export default tseslint.config(
   },
   {
     files: I18N_CONVERTED,
+    // Tests render fixtures with literal text; the guard is for shipped UI.
+    ignores: ["**/*.test.{ts,tsx}"],
     plugins: { formatjs },
     rules: {
       "formatjs/no-literal-string-in-jsx": [

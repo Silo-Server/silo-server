@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react";
 import { EyeOff, GripVertical } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { SelectCheckbox } from "./SelectCheckbox";
 
@@ -43,7 +44,8 @@ export interface ListRowProps {
 export function MetaDot() {
   return (
     <span aria-hidden className="mx-[7px] inline-block opacity-55">
-      ·
+      {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a decorative separator, hidden from assistive tech */}
+      {"·"}
     </span>
   );
 }
@@ -57,12 +59,13 @@ export function Grip({
   collapsed: boolean;
   handleProps: NonNullable<ListRowProps["handleProps"]>;
 }) {
+  const t = useT();
   const { ref, className, ...rest } = handleProps;
   return (
     <button
       ref={ref}
       type="button"
-      aria-label={`Move ${title}`}
+      aria-label={t("web.ui.listRow.move", { title })}
       className={cn(
         "text-muted-foreground/70 hover:text-foreground focus-visible:ring-ring/50 grid w-7 cursor-grab touch-none place-items-center rounded-lg outline-none focus-visible:ring-[3px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
         collapsed ? "h-[30px]" : "h-9",
