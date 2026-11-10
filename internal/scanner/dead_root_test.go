@@ -349,6 +349,113 @@ func TestScanSubtreeAudiobookVanishedBookUnderEmptyRootDB(t *testing.T) {
 	}
 }
 
+// TestScanBookFolderKeepsBooksUnderEmptyRootDB covers a full scan of a
+// two-root audiobook or ebook library where one root is reachable but empty (a
+// lost mount leaving its mountpoint) while the catalog still has a book there.
+// The scan must keep that book until the operator confirms the cleanup, as its
+// dead_root warning says, and remove it once they have.
+func TestScanBookFolderKeepsBooksUnderEmptyRootDB(t *testing.T) {
+	pool := newScannerTestPool(t)
+	ffprobe := filepath.Join(t.TempDir(), "ffprobe")
+	writeFakeTool(t, ffprobe, `#!/bin/sh
+cat <<'JSON'
+{"format":{"format_name":"mov,mp4,m4a","duration":"3600.0","size":"1","bit_rate":"64000","tags":{"title":"Present Book","artist":"Present Author","date":"2020"}},"streams":[{"index":0,"codec_type":"audio","codec_name":"aac","channels":2}],"chapters":[]}
+JSON
+`)
+	for _, kind := range []string{"audiobooks", "ebooks"} {
+		for _, tc := range []struct {
+			name        string
+			confirmed   bool
+			wantKept    bool
+			wantWarning string
+		}{
+			{"cleanup not confirmed", false, true, "dead_root"},
+			{"cleanup confirmed", true, false, ""},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				ctx := t.Context()
+				rootA, rootB := t.TempDir(), t.TempDir()
+				folderID := seedDeadRootTestFolder(t, pool, kind, fmt.Sprintf("empty-root-full-%d", time.Now().UnixNano()))
+				folder := &models.MediaFolder{ID: folderID, Type: kind, Paths: []string{rootA, rootB}}
+				s := NewScanner(NewFileRepository(pool), ffprobe, nil, 2, false, time.Hour)
+
+				// Root A holds a readable book, so the scan is not wholly empty;
+				// root B is an empty directory with a cataloged book under it.
+				itemType := "audiobook"
+				bookFile := filepath.Join(rootB, "Lost Book", "part.m4b")
+				observedRoot := filepath.Dir(bookFile)
+				scan := func() error { return s.ScanAudiobookFolder(ctx, folder, true) }
+				if kind == "ebooks" {
+					itemType = "ebook"
+					bookFile = filepath.Join(rootB, "Lost Book.epub")
+					observedRoot = bookFile
+					scan = func() error { return s.ScanEbookFolder(ctx, folder) }
+					if err := os.Rename(writeTestEPUB(t, nil), filepath.Join(rootA, "Present Book.epub")); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					presentDir := filepath.Join(rootA, "Present Author", "Present Book")
+					if err := os.MkdirAll(presentDir, 0o755); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(presentDir, "part.m4b"), []byte("x"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				contentID := fmt.Sprintf("%s-empty-root-%d", itemType, folderID)
+				t.Cleanup(func() {
+					_, _ = pool.Exec(context.Background(), `DELETE FROM media_item_libraries WHERE media_folder_id = $1`, folderID)
+					_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id IN (SELECT content_id FROM media_files WHERE media_folder_id = $1) OR content_id = $2`, folderID, contentID)
+				})
+				for _, stmt := range []struct {
+					sql  string
+					args []any
+				}{
+					{`INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, $2, 'Lost Book', 'local', '{}'::text[])`, []any{contentID, itemType}},
+					{`INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, []any{contentID, folderID}},
+					{`INSERT INTO media_files (content_id, media_folder_id, file_path, observed_root_path, canonical_root_path, file_size, file_modified_at)
+					  VALUES ($1, $2, $3, $4, $4, 4, now())`, []any{contentID, folderID, bookFile, observedRoot}},
+					{`UPDATE media_folders SET allow_empty_cleanup_once = $2 WHERE id = $1`, []any{folderID, tc.confirmed}},
+				} {
+					if _, err := pool.Exec(ctx, stmt.sql, stmt.args...); err != nil {
+						t.Fatalf("seed: %v", err)
+					}
+				}
+
+				if err := scan(); err != nil {
+					t.Fatalf("full scan: %v", err)
+				}
+
+				var missing bool
+				if err := pool.QueryRow(ctx, `SELECT missing_since IS NOT NULL FROM media_files WHERE file_path = $1`, bookFile).Scan(&missing); err != nil {
+					t.Fatalf("read file row: %v", err)
+				}
+				if missing == tc.wantKept {
+					t.Fatalf("file marked missing = %v, want %v", missing, !tc.wantKept)
+				}
+				var memberships int
+				if err := pool.QueryRow(ctx, `SELECT count(*) FROM media_item_libraries WHERE content_id = $1`, contentID).Scan(&memberships); err != nil {
+					t.Fatalf("count memberships: %v", err)
+				}
+				if kept := memberships > 0; kept != tc.wantKept {
+					t.Fatalf("library memberships = %d, want kept = %v", memberships, tc.wantKept)
+				}
+				warning, err := catalog.NewFolderRepository(pool).GetScanWarning(ctx, folderID)
+				if err != nil {
+					t.Fatalf("read scan warning: %v", err)
+				}
+				got := ""
+				if warning.Code != nil {
+					got = *warning.Code
+				}
+				if got != tc.wantWarning {
+					t.Fatalf("scan warning = %q, want %q", got, tc.wantWarning)
+				}
+			})
+		}
+	}
+}
+
 // TestScanSubtreeAudiobookRenameKeepsBookDB covers a monitored rename of a
 // tagged book folder to a name that sorts later, so the old path is scanned
 // first and reconciled as deleted. The removal grace must hold the book until

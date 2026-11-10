@@ -468,6 +468,14 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 		return nil
 	}
 
+	// Protect unreachable and suspect-empty configured roots before marking,
+	// as the audiobook and movie/series pipelines do, so a lost mount cannot
+	// remove its books through membership reconciliation.
+	protectedRoots, err := s.sweepProtectedRoots(ctx, folder, confirmedCleanup, protectedRoots)
+	if err != nil {
+		return err
+	}
+
 	now := time.Now().UTC()
 	missing := 0
 	for _, root := range roots {
@@ -495,7 +503,7 @@ func (s *Scanner) reconcileMissingEbookFiles(ctx context.Context, folder *models
 
 	// The folder-wide sweep must retain the same protection as the marking
 	// pass, including rows already marked missing before this failed walk.
-	trashed, removedMemberships, deletedItems, err := s.sweepMissingAndReconcile(ctx, folder, confirmedCleanup, protectedRoots...)
+	trashed, removedMemberships, deletedItems, err := s.sweepMissingWithProtectedRoots(ctx, folder, protectedRoots)
 	if trashed > 0 {
 		slog.InfoContext(ctx, "ebook scan: emptied trash", "component", "scanner", "folder_id", folder.ID, "deleted", trashed)
 	}
