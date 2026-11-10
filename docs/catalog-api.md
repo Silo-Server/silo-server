@@ -66,9 +66,14 @@ require it to use a key.
 
 The fields are absent when an administrator or the profile typed the title, and when the
 server replaced the stored title with one of an item or season (a seasonal row's in-season
-title, an editorial subject). The server records the key with the row it writes, and an update that changes a row's title without changing its key clears it,
-so a rename never depends on comparing text. A library rename re-keys the generated rows that still carry their own
-key, with the new name in `title_args`. Upgrading keyed the existing rows whose title is
+title, an editorial subject). That replacement happens when the row's items are read: the
+`Section` from that read carries the title to show, while the layout entry and the profile's
+section settings keep the stored title and its key, so a client heads a loaded row with the
+fetched `Section`'s title fields. The server records the key with the row it writes, and an
+update that changes a row's title without changing its key clears it, so whether a row keeps
+its key never depends on comparing text. A library rename re-keys the generated rows that
+still carry their own key, with the new name in `title_args`; a generated row without a key
+is renamed only while its title still reads as the old library name. Upgrading keyed the existing rows whose title is
 exactly a built-in name, because stored rows don't record who wrote them, so a typed title
 identical to a built-in name shows that name's translation. A profile
 title override equal to the administrator's title keeps the key. `getHomeCapabilities`
