@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect -- section state resets when the layout or cache changes, and the reveal gates follow sidebar transitions */
 import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
@@ -47,6 +48,7 @@ export default function Home() {
   const { data, isLoading, isError, refetch } = useHomeLayout();
   const { data: homeRefreshSignal = 0 } = useSectionRefreshSignal();
   const { cardPresentation } = useUICustomization();
+  const sectionTitle = useSectionTitle();
   const [rowRestorationReady, setRowRestorationReady] = useState(
     () => !shouldWaitForSidebarReturn(),
   );
@@ -336,7 +338,7 @@ export default function Home() {
       return next;
     });
   };
-  const heroSlot = renderHeroSlot(viewModel.hero, retrySection, refreshSection);
+  const heroSlot = renderHeroSlot(viewModel.hero, retrySection, refreshSection, sectionTitle);
   const hasHeroSlot = heroSlot !== null;
   const rowPlaceholderHeight = carouselIntrinsicHeight(cardPresentation.poster_size);
   // Rows count toward the eager budget by layout position: a loading or
@@ -403,12 +405,12 @@ export default function Home() {
             return (
               <SectionErrorRow
                 key={slot.layout.id}
-                title={slot.layout.title}
+                title={sectionTitle(slot.layout)}
                 onRetry={() => retrySection(slot.layout.id)}
               />
             );
           }
-          return <SectionLoadingRow key={slot.layout.id} title={slot.layout.title} />;
+          return <SectionLoadingRow key={slot.layout.id} title={sectionTitle(slot.layout)} />;
         })}
 
         {layout.length === 0 && !isLoading && (
@@ -611,6 +613,7 @@ function renderHeroSlot(
   hero: HomeSectionSlot | null,
   retrySection: (sectionId: string) => void,
   refreshSection: (sectionId: string) => void,
+  sectionTitle: (section: ResolvedSectionLayout) => string,
 ) {
   if (!hero) return null;
 
@@ -632,7 +635,7 @@ function renderHeroSlot(
         <div className="from-background via-background/70 absolute inset-0 bg-gradient-to-t to-transparent" />
         <div className="relative flex h-full items-end px-4 pb-10 sm:px-6 sm:pb-12 lg:px-12 lg:pb-16">
           <div className="max-w-xl space-y-3">
-            <p className="text-3xl font-bold">{hero.layout.title}</p>
+            <p className="text-3xl font-bold">{sectionTitle(hero.layout)}</p>
             <p className="text-muted-foreground text-sm">
               This featured section could not be loaded right now.
             </p>

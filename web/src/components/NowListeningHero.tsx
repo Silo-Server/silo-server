@@ -12,6 +12,7 @@ import { buildChapterList, findChapterAt, totalAudiobookDuration } from "@/lib/a
 import { formatHoursMinutes, formatListeningTimeLeft } from "@/lib/audiobooks/duration";
 import { audiobookFilesFromVersions } from "@/lib/audiobooks/files";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import { useAudiobookPlaybackController } from "@/pages/audiobooks/player/audiobookPlaybackContext";
 
@@ -40,6 +41,7 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
   const deck = section.items[0];
   const rest = section.items.slice(1);
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
+  const sectionTitle = useSectionTitle();
   const audiobookPlayback = useAudiobookPlaybackController();
   // The section payload has no chapters or credits; the item detail fills in
   // author/narrator, chapter marks, and the files needed for one-click resume.
@@ -231,7 +233,7 @@ export default function NowListeningHero({ section, libraryId }: NowListeningHer
       </section>
 
       {rest.length > 0 && (
-        <MediaCarousel title={section.title}>
+        <MediaCarousel title={sectionTitle(section)}>
           {rest.map((item) => (
             <ContinueWatchingCard
               key={item.content_id}

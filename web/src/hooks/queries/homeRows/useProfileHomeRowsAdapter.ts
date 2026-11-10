@@ -57,6 +57,9 @@ function toHomeRow(section: SettingsSectionEntry): HomeRow {
     shown: !section.hidden,
     own: section.is_custom,
     renamedFrom: renamed ? section.default_title : undefined,
+    titleKey: section.title_key
+      ? { title: section.title, key: section.title_key, args: section.title_args }
+      : undefined,
   };
 }
 

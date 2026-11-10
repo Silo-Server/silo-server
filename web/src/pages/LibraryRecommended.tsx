@@ -1,5 +1,6 @@
 import { buildLibraryCollectionCatalogHref } from "./catalogSearchParams";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
@@ -61,6 +62,7 @@ export default function LibraryRecommended({
     isFetching: layoutFetching,
   } = useLibraryLayout(libraryId);
   const { data: sectionRefreshSignal = 0 } = useSectionRefreshSignal();
+  const sectionTitle = useSectionTitle();
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());
   const [failedIds, setFailedIds] = useState<Set<string>>(new Set());
   const [inFlightIds, setInFlightIds] = useState<Set<string>>(new Set());
@@ -299,12 +301,12 @@ export default function LibraryRecommended({
           return (
             <SectionErrorRow
               key={slot.layout.id}
-              title={slot.layout.title}
+              title={sectionTitle(slot.layout)}
               onRetry={() => retrySection(slot.layout.id)}
             />
           );
         }
-        return <SectionLoadingRow key={slot.layout.id} title={slot.layout.title} />;
+        return <SectionLoadingRow key={slot.layout.id} title={sectionTitle(slot.layout)} />;
       })}
 
       {/* Pinned Collections */}
