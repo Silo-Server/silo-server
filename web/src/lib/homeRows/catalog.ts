@@ -3,7 +3,12 @@
  * values never change; this is display only.
  */
 import { t, type MessageKey } from "@/i18n";
-import type { RecipeCatalogResponse, RecipeDefinition } from "@/lib/recipes";
+import {
+  presetLabel,
+  presetShortText,
+  type RecipeCatalogResponse,
+  type RecipeDefinition,
+} from "@/lib/recipes";
 
 export type RowGroup = "keep" | "new" | "popular" | "picked" | "moods" | "collections";
 
@@ -344,8 +349,8 @@ function cardFor(def: RecipeDefinition): PickerCard {
   return {
     type: def.type,
     group: "moods",
-    label: preset?.display_name ?? t("web.home.rows.kinds.unknown"),
-    sentence: preset?.description_short ?? rowKindSentence(def.type),
+    label: preset ? presetLabel(preset) : t("web.home.rows.kinds.unknown"),
+    sentence: preset ? presetShortText(preset) : rowKindSentence(def.type),
     def,
   };
 }

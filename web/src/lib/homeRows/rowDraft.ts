@@ -46,6 +46,8 @@ export function findRecipe(
   return undefined;
 }
 
+// The preset's English `display_name`, never its translated label: it becomes
+// the row's saved title, which is data and stays English.
 function presetName(def: RecipeDefinition | undefined, presetKey: string | null) {
   return presetKey
     ? def?.presets.find((preset) => preset.key === presetKey)?.display_name

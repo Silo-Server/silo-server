@@ -44,6 +44,7 @@ import {
   tmdbImageURL,
   type RequestDisplayState,
 } from "@/lib/mediaRequests";
+import { useSectionTitle } from "@/lib/sectionTitle";
 import { carouselCardWidthClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
 import { numberText, useT, type MessageKey } from "@/i18n";
@@ -173,6 +174,7 @@ function RequestsHub() {
 
 function DiscoverTab() {
   const t = useT();
+  const sectionTitle = useSectionTitle();
   const discovery = useRequestDiscovery();
   const watchlist = useWatchlistTitleToggle();
 
@@ -201,7 +203,7 @@ function DiscoverTab() {
     <div className="space-y-10">
       {(discovery.data?.rows ?? []).map((row) => {
         if (isBrandSourceType(row.type)) {
-          return <BrandRow key={row.key} type={row.type} title={row.title} />;
+          return <BrandRow key={row.key} type={row.type} title={sectionTitle(row)} />;
         }
         const section = sections.get(row.key);
         return section ? (
@@ -247,10 +249,11 @@ function DiscoverRow({
   section: RequestDiscoverySection;
   watchlist: ReturnType<typeof useWatchlistTitleToggle>;
 }) {
+  const sectionTitle = useSectionTitle();
   if (section.results.length === 0) return null;
   return (
     <MediaCarousel
-      title={section.title}
+      title={sectionTitle(section)}
       // A row trimmed to its size has more titles even on a one-page source.
       viewAllHref={
         section.total_pages > 1 || section.total_results > section.results.length
