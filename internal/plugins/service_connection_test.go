@@ -296,8 +296,10 @@ func TestSetGlobalConfigClearsEmptiedNonSecretFields(t *testing.T) {
 		t.Fatalf("saved config = %#v, want %#v", store.puts[0].value, want)
 	}
 	// The staged entry changed settings, so the test runs without the
-	// saved secret (TestStagedConfigReusesSecretsOnlyWithSavedSettings).
+	// saved secret or undeclared stored fields
+	// (TestStagedConfigReusesSecretsOnlyWithSavedSettings).
 	delete(want, "client_secret")
+	delete(want, "plugin_owned")
 	if !reflect.DeepEqual(staged, want) {
 		t.Fatalf("staged config = %#v, want %#v", staged, want)
 	}
@@ -322,6 +324,7 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 		"bind_dn":         "cn=silo,dc=example,dc=invalid",
 		"bind_password":   savedPassword,
 		"ca_pem":          "",
+		"start_tls":       false,
 		"connect_timeout": float64(10),
 		"plugin_owned":    "retained",
 		"service": map[string]any{
@@ -356,18 +359,33 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 		// not checked, because the row leaves servers out.
 		wantServerKey any
 		wantErr       bool
+		// sameSettings rows keep undeclared stored fields.
+		sameSettings bool
 	}{
 		{
 			name:         "saved settings with the secret left out",
+			sameSettings: true,
 			submitted:    unchanged(nil),
 			wantPassword: savedPassword,
 			wantToken:    "saved-token",
 		},
 		{
 			name:         "saved settings with a blank secret and the form default",
-			submitted:    unchanged(func(v map[string]any) { v["bind_password"] = ""; v["start_tls"] = false }),
+			sameSettings: true,
+			submitted:    unchanged(func(v map[string]any) { v["bind_password"] = ""; v["page_size"] = 100 }),
 			wantPassword: savedPassword,
 			wantToken:    "saved-token",
+		},
+		{
+			name:      "stored value removed in favour of its default",
+			submitted: unchanged(func(v map[string]any) { v["start_tls"] = nil }),
+		},
+		{
+			name:      "one secret typed, another left out",
+			submitted: unchanged(func(v map[string]any) { v["bind_password"] = "typed-password" }),
+			// The typed secret may itself be a destination, so the
+			// other stored secrets stay behind.
+			wantPassword: "typed-password",
 		},
 		{
 			name:      "changed server",
@@ -401,12 +419,14 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 		},
 		{
 			name:         "saved settings with a cleared secret",
+			sameSettings: true,
 			submitted:    unchanged(nil),
 			clearSecrets: []string{"bind_password"},
 			wantToken:    "saved-token",
 		},
 		{
-			name: "same URL inside an object of secrets",
+			name:         "same URL inside an object of secrets",
+			sameSettings: true,
 			submitted: unchanged(func(v map[string]any) {
 				v["servers"] = map[string]any{"main": map[string]any{"url": "https://api.example.invalid", "key": ""}}
 			}),
@@ -442,6 +462,7 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 					"bind_password":{"type":"string","writeOnly":true},
 					"ca_pem":{"type":"string"},
 					"start_tls":{"type":"boolean","default":false},
+					"page_size":{"type":"number","default":100},
 					"connect_timeout":{"type":"number"},
 					"service":{
 						"type":"object",
@@ -489,8 +510,8 @@ func TestStagedConfigReusesSecretsOnlyWithSavedSettings(t *testing.T) {
 					t.Fatalf("servers.main.key = %#v, want %#v", got, tc.wantServerKey)
 				}
 			}
-			if staged["plugin_owned"] != "retained" {
-				t.Fatalf("plugin-owned field = %#v, want it kept", staged["plugin_owned"])
+			if got, present := staged["plugin_owned"]; present != tc.sameSettings {
+				t.Fatalf("undeclared stored field = %#v (present %v), want present %v", got, present, tc.sameSettings)
 			}
 		})
 	}

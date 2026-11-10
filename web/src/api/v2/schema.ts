@@ -3918,7 +3918,7 @@ export interface paths {
     put?: never;
     /**
      * Test an auth plugin's connection with staged, unsaved settings.
-     * @description The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A blank secret field reuses the stored secret only while every other field of that entry matches the stored entry; otherwise the test runs with the secret entered, or none. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically.
+     * @description The running plugin tests the staged configuration (merged over the stored entries it does not replace) and persists nothing. A blank secret field reuses the stored secret only while the rest of that entry is unchanged and no secret in it is entered; otherwise the test runs with only the secrets entered. A failed check is a 200 result with ok false. A plugin without a connection test, or a disabled installation, is 409. The check reaches the provider and is bounded by a server timeout; never retry an uncertain result automatically.
      */
     post: operations["testAdminPluginAuthBinding"];
     delete?: never;
@@ -19873,7 +19873,7 @@ export interface components {
       clear_secrets?: string[];
       /** @description The manifest global_config_schema key */
       key: string;
-      /** @description The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret. A connection test reuses a stored secret only while every other field of the entry matches the stored entry */
+      /** @description The entry's fields, merged over the stored entry. A declared non-secret top-level field sent as null or a blank string is removed so the plugin default applies; blank secret fields preserve the stored secret. A connection test reuses a stored secret only while the rest of the entry is unchanged and no secret in it is entered */
       value: {
         [key: string]: unknown;
       };

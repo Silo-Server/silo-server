@@ -180,10 +180,11 @@ func (s *Service) TestGlobalConfigWithClears(
 // cleared, and the result must validate.
 //
 // A stored secret is reused only while the rest of the entry matches what
-// was saved with it. Once the staged entry changes any other setting (a
-// server URL, issuer, CA or anything else), only the secrets the admin typed
-// reach the plugin, so a test cannot send a saved credential to a destination
-// it was never saved for (issue #2796).
+// was saved with it and no secret is typed. Once the staged entry changes
+// any setting (a server URL, issuer, CA or anything else), only the secrets
+// the admin typed and the fields the schema declares reach the plugin, so a
+// test cannot send a saved credential to a destination it was never saved
+// for (issue #2796).
 // invalid wraps a rejected entry in the caller's error type.
 func (s *Service) prepareStagedGlobalConfig(
 	ctx context.Context,
@@ -207,8 +208,9 @@ func (s *Service) prepareStagedGlobalConfig(
 		return nil, err
 	}
 	removeGlobalConfigClears(manifest, key, merged, value, clearSet)
-	if len(secretPaths) > 0 && stagedConfigChangesSettings(manifest, key, merged, stored, secretPaths) {
+	if len(secretPaths) > 0 && stagedConfigChangesSettings(manifest, key, merged, stored, value, secretPaths) {
 		keepOnlySubmittedSecrets(merged, value, secretPaths)
+		dropStoredUndeclaredFields(manifest, key, merged, value)
 	}
 	if err := validateMergedGlobalConfig(manifest, key, merged, value); err != nil {
 		return nil, invalid(err)
@@ -217,29 +219,48 @@ func (s *Service) prepareStagedGlobalConfig(
 }
 
 // stagedConfigChangesSettings reports whether a staged entry differs from the
-// stored one anywhere outside its secret values. Both sides are compared as JSON
-// values, a blank or null top-level field counts as absent, and an absent
-// field counts as its declared default, so re-sending the saved settings
-// (with the defaults the admin form fills in) is not a change.
+// stored one in anything a stored secret could be sent with. Both sides are
+// compared as JSON values without their secret values, and a blank or null
+// top-level field counts as absent. A field the stored entry lacks matches a
+// staged field holding its declared default, which the admin form fills in;
+// removing a stored value is still a change. A secret the admin typed is a
+// change too: it can be a destination itself (a proxy or webhook URL), and
+// comparing it with the stored value would let a caller guess at secrets.
 func stagedConfigChangesSettings(
 	manifest *pluginv1.PluginManifest,
 	key string,
 	staged map[string]any,
 	stored map[string]any,
+	submitted map[string]any,
 	secretPaths [][]string,
 ) bool {
-	defaults := globalConfigFieldDefaults(manifest, key)
-	stagedSettings, stagedOK := settingsForComparison(staged, secretPaths, defaults)
-	storedSettings, storedOK := settingsForComparison(stored, secretPaths, defaults)
-	// An entry that cannot be compared counts as changed.
-	return !stagedOK || !storedOK || !reflect.DeepEqual(stagedSettings, storedSettings)
+	for _, path := range secretPaths {
+		typed, present := configPathValue(submitted, path)
+		if !present || isClearedConfigValue(typed) {
+			continue
+		}
+		switch typed.(type) {
+		case map[string]any, []any:
+			// A secret object or list is compared whole below.
+		default:
+			return true
+		}
+	}
+	stagedSettings, stagedOK := settingsForComparison(staged, secretPaths)
+	storedSettings, storedOK := settingsForComparison(stored, secretPaths)
+	if !stagedOK || !storedOK {
+		// An entry that cannot be compared counts as changed.
+		return true
+	}
+	for field, fallback := range globalConfigFieldDefaults(manifest, key) {
+		if _, inStored := storedSettings[field]; !inStored && reflect.DeepEqual(stagedSettings[field], fallback) {
+			delete(stagedSettings, field)
+		}
+	}
+	return !reflect.DeepEqual(stagedSettings, storedSettings)
 }
 
-func settingsForComparison(
-	value map[string]any,
-	secretPaths [][]string,
-	defaults map[string]any,
-) (map[string]any, bool) {
+func settingsForComparison(value map[string]any, secretPaths [][]string) (map[string]any, bool) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, false
@@ -267,12 +288,30 @@ func settingsForComparison(
 			delete(normalized, field)
 		}
 	}
-	for field, fallback := range defaults {
-		if _, present := normalized[field]; !present {
-			normalized[field] = fallback
-		}
-	}
 	return normalized, true
+}
+
+// dropStoredUndeclaredFields removes stored top-level fields the schema does
+// not declare and the admin did not submit. Plugin-written state and fields
+// left over from an older manifest can hold credentials the admin API never
+// shows, so they do not go to changed settings either.
+func dropStoredUndeclaredFields(
+	manifest *pluginv1.PluginManifest,
+	key string,
+	merged map[string]any,
+	submitted map[string]any,
+) {
+	public, secrets := GlobalConfigFieldSets(manifest, key)
+	declared := secretFieldSet(append(append([]string(nil), public...), secrets...))
+	for field := range merged {
+		if _, isDeclared := declared[field]; isDeclared {
+			continue
+		}
+		if _, sent := submitted[field]; sent {
+			continue
+		}
+		delete(merged, field)
+	}
 }
 
 // globalConfigFieldDefaults returns the scalar defaults the admin form shows
