@@ -26,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAdminBackupDownloadLinks, useDeleteAdminBackup } from "@/hooks/queries/admin/backups";
+import { useT, type Translate } from "@/i18n";
 import { formatTime } from "@/lib/datetime";
 import { formatFileSize } from "@/lib/mediaFormat";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,6 @@ import {
   BACKUP_KIND_LABELS,
   BACKUP_ROWS_SHOWN,
   BACKUP_STATUS_LABELS,
-  OTHER_KEY_REASON,
   backupDateTime,
   backupErrorMessage,
   backupRowId,
@@ -45,8 +45,15 @@ import {
   isFinished,
   knownSiloVersion,
   otherKeyNote,
+  otherKeyReason,
   restorePath,
 } from "./backupPresentation";
+
+/** Commands named in the download dialog's note on encrypted files. */
+const DECRYPT_COMMAND = "silo backup decrypt <file>.age";
+const RESTORE_FOLDER_COMMAND = "silo backup restore --from <folder>";
+/** Shown in a cell with no value. */
+const NO_VALUE = "—";
 
 function takenLabel(backup: AdminBackup) {
   return backupDateTime(backup.created_at);
@@ -66,15 +73,16 @@ function BackupStatus({
   onToggle: () => void;
   detailsId: string;
 }) {
+  const t = useT();
   if (active?.operation === "delete") {
     return (
       <SettingFieldStatus tone="muted">
         <LoaderCircle aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
-        Deleting
+        {t("web.admin.backups.table.deleting")}
       </SettingFieldStatus>
     );
   }
-  const label = BACKUP_STATUS_LABELS[backup.status];
+  const label = t(BACKUP_STATUS_LABELS[backup.status]);
   switch (backup.status) {
     case "complete":
       return <SettingFieldStatus tone="ok">{label}</SettingFieldStatus>;
@@ -92,7 +100,9 @@ function BackupStatus({
               aria-controls={detailsId}
               className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 rounded-sm text-xs underline-offset-2 outline-none hover:underline focus-visible:ring-[3px]"
             >
-              {expanded ? "Hide details" : "Show details"}
+              {expanded
+                ? t("web.admin.backups.table.hideDetails")
+                : t("web.admin.backups.table.showDetails")}
             </button>
           ) : null}
         </div>
@@ -102,7 +112,12 @@ function BackupStatus({
       return (
         <SettingFieldStatus tone="muted">
           <LoaderCircle aria-hidden="true" className="size-3.5 motion-safe:animate-spin" />
-          {active?.operation === "backup" ? `${label}, ${Math.round(active.progress)}%` : label}
+          {active?.operation === "backup"
+            ? t("web.admin.backups.table.statusWithProgress", {
+                status: label,
+                percent: String(Math.round(active.progress)),
+              })
+            : label}
         </SettingFieldStatus>
       );
     // Unverified: written with another SECRET_KEY, or changed after it was
@@ -116,6 +131,7 @@ function BackupStatus({
 }
 
 function DownloadRow({ link }: { link: AdminBackupDownloadLink }) {
+  const t = useT();
   return (
     <li className="flex items-center justify-between gap-3 py-2.5">
       <div className="min-w-0">
@@ -127,8 +143,10 @@ function DownloadRow({ link }: { link: AdminBackupDownloadLink }) {
       <Button asChild variant="outline" size="sm">
         <a href={link.url} download={link.name} target="_blank" rel="noopener noreferrer">
           <Download data-icon="inline-start" aria-hidden="true" />
-          Download
-          <span className="sr-only"> {link.name}</span>
+          {t("web.admin.backups.download.buttonFile", {
+            name: link.name,
+            sr: (chunks) => <span className="sr-only">{chunks}</span>,
+          })}
         </a>
       </Button>
     </li>
@@ -136,12 +154,11 @@ function DownloadRow({ link }: { link: AdminBackupDownloadLink }) {
 }
 
 /** What the downloaded files are for, in the download dialog's description. */
-function downloadHint(backup: AdminBackup): string {
-  if (backup.kind === "before-upgrade") {
-    return "It holds the database only; uploaded artwork and other files stay where they are. To restore it in full, put the files in one folder.";
-  }
-  const restoreSet = backup.encrypted ? "the decrypted restore set" : "restore-set.tar";
-  return `To restore it in full, put the files in one folder. To restore parts of it on another server, upload ${restoreSet} there.`;
+function downloadHint(t: Translate, backup: AdminBackup): string {
+  if (backup.kind === "before-upgrade") return t("web.admin.backups.download.hintBeforeUpgrade");
+  return backup.encrypted
+    ? t("web.admin.backups.download.hintEncrypted")
+    : t("web.admin.backups.download.hint");
 }
 
 function DownloadDialogBody({
@@ -151,6 +168,7 @@ function DownloadDialogBody({
   backup: AdminBackup;
   links: AdminBackupDownloadLink[];
 }) {
+  const t = useT();
   const restoreSet = useAdminBackupDownloadLinks();
   const [restoreSetLinks, setRestoreSetLinks] = useState<AdminBackupDownloadLink[]>([]);
   const reasonId = useId();
@@ -162,7 +180,7 @@ function DownloadDialogBody({
       {
         onSuccess: setRestoreSetLinks,
         onError: (error) =>
-          toast.error("Couldn't prepare the restore set", {
+          toast.error(t("web.admin.backups.download.restoreSetFailed"), {
             description: backupErrorMessage(error),
           }),
       },
@@ -170,22 +188,34 @@ function DownloadDialogBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Download backup</DialogTitle>
+        <DialogTitle>{t("web.admin.backups.download.title")}</DialogTitle>
         <DialogDescription>
-          {`${takenLabel(backup)}. `}
-          {downloadHint(backup)}
-          {expires ? ` The links stop working at ${formatTime(expires)}.` : null}
+          {expires
+            ? t("web.admin.backups.download.descriptionWithExpiry", {
+                taken: takenLabel(backup),
+                hint: downloadHint(t, backup),
+                time: formatTime(expires),
+              })
+            : t("web.admin.backups.download.description", {
+                taken: takenLabel(backup),
+                hint: downloadHint(t, backup),
+              })}
         </DialogDescription>
       </DialogHeader>
       {backup.encrypted ? (
         <p className="bg-muted/40 rounded-lg border px-3 py-2 text-[13px] leading-relaxed">
-          {otherKey
-            ? `These files are encrypted with another SECRET_KEY${backup.key_check ? ` (key check ${backup.key_check})` : ""}. To read one, run `
-            : "These files are encrypted with this server's SECRET_KEY. To read one, run "}
-          <code className="font-mono text-xs">silo backup decrypt &lt;file&gt;.age</code>
-          {otherKey ? " with that key set; " : " with SECRET_KEY set; "}
-          <code className="font-mono text-xs">silo backup restore --from &lt;folder&gt;</code> reads
-          the encrypted folder directly.
+          {t(
+            otherKey
+              ? backup.key_check
+                ? "web.admin.backups.download.encryptedOtherKeyWithCheck"
+                : "web.admin.backups.download.encryptedOtherKey"
+              : "web.admin.backups.download.encrypted",
+            {
+              key_check: backup.key_check ?? "",
+              decrypt: () => <code className="font-mono text-xs">{DECRYPT_COMMAND}</code>,
+              restore: () => <code className="font-mono text-xs">{RESTORE_FOLDER_COMMAND}</code>,
+            },
+          )}
         </p>
       ) : null}
       <ul className="divide-border/60 divide-y">
@@ -218,11 +248,11 @@ function DownloadDialogBody({
                 ) : (
                   <Download data-icon="inline-start" aria-hidden="true" />
                 )}
-                Download the restore set (decrypted)
+                {t("web.admin.backups.download.restoreSet")}
               </Button>
               {otherKey ? (
                 <p id={reasonId} className="text-muted-foreground text-xs">
-                  {OTHER_KEY_REASON}
+                  {otherKeyReason()}
                 </p>
               ) : null}
             </>
@@ -277,6 +307,7 @@ export function BackupTable({
   deleteBlocker,
   selectiveRestore,
 }: BackupTableProps) {
+  const t = useT();
   const deleteBlockerId = useId();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState<AdminBackup | null>(null);
@@ -304,7 +335,7 @@ export function BackupTable({
           setDownloading(backup);
         },
         onError: (error) =>
-          toast.error("Couldn't prepare the download", {
+          toast.error(t("web.admin.backups.table.downloadFailed"), {
             description: backupErrorMessage(error),
           }),
       },
@@ -316,11 +347,11 @@ export function BackupTable({
     deleteBackup.mutate(target.id, {
       onSuccess: () => {
         setDeleting(null);
-        toast.success("Backup deleted");
+        toast.success(t("web.admin.backups.table.deleted"));
       },
       onError: (error) => {
         setDeleting(null);
-        toast.error("Couldn't delete the backup", {
+        toast.error(t("web.admin.backups.table.deleteFailed"), {
           description: backupErrorMessage(error),
         });
       },
@@ -331,7 +362,7 @@ export function BackupTable({
     <div className="space-y-3">
       {deleteBlocker ? (
         <p id={deleteBlockerId} className="text-muted-foreground text-[13px]">
-          Backups can&apos;t be deleted right now. {deleteBlocker}
+          {t("web.admin.backups.table.deleteBlocked", { reason: deleteBlocker })}
         </p>
       ) : null}
       {/* Below `sm` each row stacks into a small grid (date and status on one
@@ -341,12 +372,14 @@ export function BackupTable({
         <Table className="max-sm:block">
           <TableHeader className="max-sm:hidden">
             <TableRow>
-              <TableHead>Taken</TableHead>
-              <TableHead className="text-right">Size</TableHead>
-              <TableHead className="hidden md:table-cell">Silo version</TableHead>
-              <TableHead>Status</TableHead>
+              <TableHead>{t("web.admin.backups.table.taken")}</TableHead>
+              <TableHead className="text-right">{t("web.admin.backups.table.size")}</TableHead>
+              <TableHead className="hidden md:table-cell">
+                {t("web.admin.backups.table.siloVersion")}
+              </TableHead>
+              <TableHead>{t("web.admin.backups.table.status")}</TableHead>
               <TableHead>
-                <span className="sr-only">Actions</span>
+                <span className="sr-only">{t("web.admin.backups.table.actions")}</span>
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -359,12 +392,10 @@ export function BackupTable({
               const otherKey = encryptedWithOtherKey(backup);
               const otherKeyId = `${backupRowId(backup.id)}-key`;
               const restorable = selectiveRestore && canRestoreParts(backup);
-              const restoreLabel = (
-                <>
-                  Restore…
-                  <span className="sr-only"> from {takenLabel(backup)}</span>
-                </>
-              );
+              const restoreLabel = t("web.admin.backups.table.restore", {
+                taken: takenLabel(backup),
+                sr: (chunks) => <span className="sr-only">{chunks}</span>,
+              });
               return (
                 <Fragment key={backup.id}>
                   <TableRow
@@ -378,7 +409,7 @@ export function BackupTable({
                     <TableCell className={PHONE_CELL}>
                       <div className="font-medium">{takenLabel(backup)}</div>
                       <div className="text-muted-foreground text-xs">
-                        {BACKUP_KIND_LABELS[backup.kind]}
+                        {t(BACKUP_KIND_LABELS[backup.kind])}
                       </div>
                       {otherKey ? (
                         <div id={otherKeyId} className="mt-1 max-w-80 space-y-0.5 text-xs">
@@ -386,7 +417,7 @@ export function BackupTable({
                             {otherKeyNote(backup)}
                           </p>
                           <p className="text-muted-foreground whitespace-normal">
-                            {OTHER_KEY_REASON}
+                            {otherKeyReason()}
                           </p>
                         </div>
                       ) : null}
@@ -398,10 +429,10 @@ export function BackupTable({
                         "max-sm:text-muted-foreground max-sm:row-start-2 max-sm:text-left max-sm:text-xs",
                       )}
                     >
-                      {formatFileSize(backup.size_bytes, { fallback: "—" })}
+                      {formatFileSize(backup.size_bytes, { fallback: NO_VALUE })}
                     </TableCell>
                     <TableCell className="text-muted-foreground hidden md:table-cell">
-                      {knownSiloVersion(backup.silo_version) ?? "—"}
+                      {knownSiloVersion(backup.silo_version) ?? NO_VALUE}
                     </TableCell>
                     <TableCell
                       className={cn(
@@ -444,7 +475,7 @@ export function BackupTable({
                             ) : (
                               <Download data-icon="inline-start" aria-hidden="true" />
                             )}
-                            Download
+                            {t("web.admin.backups.download.button")}
                           </Button>
                         ) : null}
                         {backup.status !== "in_progress" ? (
@@ -454,7 +485,9 @@ export function BackupTable({
                             onClick={() => setDeleting(backup)}
                             disabled={deleteBlocker !== null}
                             aria-describedby={deleteBlocker ? deleteBlockerId : undefined}
-                            aria-label={`Delete the backup from ${takenLabel(backup)}`}
+                            aria-label={t("web.admin.backups.table.deleteLabel", {
+                              taken: takenLabel(backup),
+                            })}
                           >
                             <Trash2 aria-hidden="true" />
                           </Button>
@@ -481,18 +514,25 @@ export function BackupTable({
       </div>
       {hidden > 0 ? (
         <Button variant="outline" size="sm" onClick={() => onShowAllChange(!showAll)}>
-          {showAll ? "Show fewer" : `Show all ${items.length}`}
+          {showAll
+            ? t("web.admin.backups.table.showFewer")
+            : t("web.admin.backups.table.showAll", {
+                count: items.length,
+                count_text: String(items.length),
+              })}
         </Button>
       ) : null}
 
       <ConfirmDialog
         open={deleting !== null}
         onOpenChange={(open) => !open && setDeleting(null)}
-        title="Delete this backup?"
+        title={t("web.admin.backups.table.deleteTitle")}
         description={
-          deleting ? `The backup taken ${takenLabel(deleting)} is removed from storage.` : ""
+          deleting
+            ? t("web.admin.backups.table.deleteDescription", { taken: takenLabel(deleting) })
+            : ""
         }
-        confirmLabel="Delete backup"
+        confirmLabel={t("web.admin.backups.table.deleteConfirm")}
         variant="destructive"
         irreversible
         isPending={deleteBackup.isPending}

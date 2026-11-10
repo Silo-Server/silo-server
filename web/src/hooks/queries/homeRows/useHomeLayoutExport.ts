@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { captureProfileRequestContext } from "@/api/client";
-import { v2, V2ProblemError } from "@/api/v2/request";
+import { problemDisplayText, v2, V2ProblemError } from "@/api/v2/request";
 import { useUserLibraries } from "@/hooks/queries/libraries";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { t } from "@/i18n";
@@ -31,10 +31,11 @@ export function layoutPageQuery(scope: HomeLayoutScope, libraryId?: number) {
 
 export function layoutProblemMessage(error: unknown): string {
   if (error instanceof V2ProblemError) {
-    return (
+    return problemDisplayText(
+      error.problem,
       error.problem.detail?.trim() ||
-      error.problem.title ||
-      t("web.home.layout.transfer.requestFailed")
+        error.problem.title ||
+        t("web.home.layout.transfer.requestFailed"),
     );
   }
   return error instanceof Error ? error.message : t("web.home.layout.transfer.requestFailed");

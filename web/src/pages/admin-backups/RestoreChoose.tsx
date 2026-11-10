@@ -22,6 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
+import { useAppLanguage, useT } from "@/i18n";
 import { pendingCount } from "@/lib/profileDataTypes";
 import { prefersReducedMotion } from "@/hooks/useImmediateSidebarCollapse";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
@@ -64,6 +65,9 @@ import {
   type SelectionKeys,
 } from "./restoreModel";
 
+/** Between the never-restored setting keys. */
+const KEY_SEPARATOR = ", ";
+
 const BAR_COLORS: Record<ItemState, string> = {
   differs: "bg-[var(--settings-accent)]",
   new: "bg-info",
@@ -76,6 +80,7 @@ const BAR_COLORS: Record<ItemState, string> = {
  * beside it. Spans only: it sits inside the section header's paragraph.
  */
 function DifferenceBar({ counts }: { counts: StateCounts }) {
+  useT();
   const total = STATE_ORDER.reduce((sum, state) => sum + counts[state], 0);
   if (total === 0) return null;
   return (
@@ -122,9 +127,13 @@ function SectionIndex({
   selection: SelectionKeys;
   variant: "list" | "chips";
 }) {
+  const t = useT();
   if (variant === "chips") {
     return (
-      <nav aria-label="Sections" className="-mx-1 overflow-x-auto px-1 pb-1 lg:hidden">
+      <nav
+        aria-label={t("web.admin.backups.restore.choose.sectionsLabel")}
+        className="-mx-1 overflow-x-auto px-1 pb-1 lg:hidden"
+      >
         <ul className="flex w-max gap-2">
           {sections.map((section) => (
             <li key={section.id}>
@@ -133,11 +142,11 @@ function SectionIndex({
                 onClick={() => scrollToSection(section.id)}
                 className="border-border hover:bg-accent focus-visible:ring-ring/50 rounded-full border px-3 py-1 text-xs whitespace-nowrap outline-none focus-visible:ring-[3px]"
               >
-                {SECTION_TITLES[section.id]}
-                <span className="text-muted-foreground">
-                  {" "}
-                  · {sectionProgress(section, selection)}
-                </span>
+                {t("web.admin.backups.restore.choose.chip", {
+                  section: t(SECTION_TITLES[section.id]),
+                  progress: sectionProgress(section, selection),
+                  muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+                })}
               </button>
             </li>
           ))}
@@ -146,7 +155,10 @@ function SectionIndex({
     );
   }
   return (
-    <nav aria-label="Sections" className="hidden lg:block">
+    <nav
+      aria-label={t("web.admin.backups.restore.choose.sectionsLabel")}
+      className="hidden lg:block"
+    >
       <ul className="space-y-0.5">
         {sections.map((section) => (
           <li key={section.id}>
@@ -155,7 +167,7 @@ function SectionIndex({
               onClick={() => scrollToSection(section.id)}
               className="hover:bg-accent focus-visible:ring-ring/50 flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-left text-[13px] outline-none focus-visible:ring-[3px]"
             >
-              <span className="truncate">{SECTION_TITLES[section.id]}</span>
+              <span className="truncate">{t(SECTION_TITLES[section.id])}</span>
               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                 {sectionProgress(section, selection)}
               </span>
@@ -186,6 +198,7 @@ interface RowsProps {
 }
 
 function Rows({ sectionId, items, selection, onToggle, names, withLibrary = false }: RowsProps) {
+  useT();
   return (
     <ul>
       {items.map((item) =>
@@ -218,6 +231,7 @@ function LibraryGroupRows({
   items,
   ...rows
 }: Omit<RowsProps, "withLibrary"> & { name: string }) {
+  useT();
   const listId = useId();
   const [open, setOpen] = useState(true);
   return (
@@ -244,6 +258,7 @@ function LibraryGroupRows({
 
 /** One reason items can't be restored: a line, with the items behind a disclosure. */
 function BlockedGroupRows({ group, ...rows }: Omit<RowsProps, "items"> & { group: BlockedGroup }) {
+  const t = useT();
   const listId = useId();
   const [open, setOpen] = useState(false);
   return (
@@ -254,7 +269,9 @@ function BlockedGroupRows({ group, ...rows }: Omit<RowsProps, "items"> & { group
           {group.title}
         </span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open ? "Hide them" : "Show them"}
+          {open
+            ? t("web.admin.backups.restore.choose.hideThem")
+            : t("web.admin.backups.restore.choose.showThem")}
         </Disclosure>
       </div>
       {open ? (
@@ -276,6 +293,7 @@ function SameRows({
   names: LibraryNames;
   label: string;
 }) {
+  useT();
   const listId = useId();
   const [open, setOpen] = useState(false);
   return (
@@ -299,6 +317,7 @@ function SameRows({
 
 /** Settings that belong to this server, behind one line. */
 function NeverRestored({ keys }: { keys: readonly string[] }) {
+  const t = useT();
   const listId = useId();
   const [open, setOpen] = useState(false);
   if (keys.length === 0) return null;
@@ -307,17 +326,19 @@ function NeverRestored({ keys }: { keys: readonly string[] }) {
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-muted-foreground flex items-center gap-1.5 text-[13px]">
           <Lock aria-hidden="true" className="size-3.5 shrink-0" />
-          Settings that belong to this server are never restored.
+          {t("web.admin.backups.restore.choose.neverRestored")}
         </span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open ? "Hide them" : "Show them"}
+          {open
+            ? t("web.admin.backups.restore.choose.hideThem")
+            : t("web.admin.backups.restore.choose.showThem")}
         </Disclosure>
       </div>
       {open ? (
         <p id={listId} className="text-muted-foreground pt-1 pl-5 text-xs leading-relaxed">
           {neverRestoredSettings(keys).map((key, position) => (
             <span key={key}>
-              {position > 0 ? ", " : null}
+              {position > 0 ? KEY_SEPARATOR : null}
               <code className="font-mono">{key}</code>
             </span>
           ))}
@@ -344,6 +365,7 @@ function SectionBlock({
   /** Shown under the groups: omitted accounts, the never-restored note. */
   bottom?: ReactNode;
 }) {
+  const t = useT();
   const filterId = useId();
   const sameListId = useId();
   const [query, setQuery] = useState("");
@@ -356,10 +378,14 @@ function SectionBlock({
         : section.items,
     [section, query, names],
   );
-  const groups = useMemo(() => groupSectionItems(visible), [visible]);
+  // Group headings and library names are resolved here: rebuild them on a language change.
+  const language = useAppLanguage();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- headings are resolved inside the helper
+  const groups = useMemo(() => groupSectionItems(visible), [visible, language]);
   const libraryGroups = useMemo(
     () => (groupsByLibrary(section.id) ? groupByLibrary(groups.restorable, names) : null),
-    [section.id, groups.restorable, names],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- group names are resolved inside the helper
+    [section.id, groups.restorable, names, language],
   );
 
   const restorable = counts.differs + counts.new;
@@ -378,15 +404,21 @@ function SectionBlock({
 
   const nothingMatches =
     visible.length === 0 && query.trim() !== "" ? (
-      <p className="text-muted-foreground py-3 text-[13px]">No matches.</p>
+      <p className="text-muted-foreground py-3 text-[13px]">
+        {t("web.admin.backups.restore.choose.noMatches")}
+      </p>
     ) : null;
 
   return (
     <div id={sectionAnchor(section.id)} className="scroll-mt-6">
       <SettingsGroup
-        title={SECTION_TITLES[section.id]}
+        title={t(SECTION_TITLES[section.id])}
         description={
-          section.count === 0 ? "Nothing in this backup." : <DifferenceBar counts={counts} />
+          section.count === 0 ? (
+            t("web.admin.backups.restore.choose.emptySection")
+          ) : (
+            <DifferenceBar counts={counts} />
+          )
         }
         actions={
           groups.restorable.length > 0 ? (
@@ -397,7 +429,9 @@ function SectionBlock({
                 onCheckedChange={(value) => onToggle(allKeys, value === true)}
               />
               <Label htmlFor={allId} className="text-muted-foreground text-xs">
-                {query.trim() ? "All shown" : "All"}
+                {query.trim()
+                  ? t("web.admin.backups.restore.choose.allShown")
+                  : t("web.admin.backups.restore.choose.all")}
               </Label>
             </span>
           ) : undefined
@@ -412,7 +446,9 @@ function SectionBlock({
                 {nothingToRestoreText(counts)}
               </span>
               <Disclosure open={showAll} onOpenChange={setShowAll} controls={sameListId}>
-                {showAll ? "Hide them" : "Show them"}
+                {showAll
+                  ? t("web.admin.backups.restore.choose.hideThem")
+                  : t("web.admin.backups.restore.choose.showThem")}
               </Disclosure>
             </div>
           ) : null}
@@ -422,7 +458,7 @@ function SectionBlock({
               {filterable ? (
                 <div className="py-2">
                   <Label htmlFor={filterId} className="sr-only">
-                    Filter {SECTION_TITLES[section.id].toLowerCase()}
+                    {t("web.admin.backups.restore.choose.filterLabel", { section: section.id })}
                   </Label>
                   <Input
                     id={filterId}
@@ -431,8 +467,8 @@ function SectionBlock({
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder={
                       section.id === "users"
-                        ? "Filter by name, username, or email"
-                        : "Filter by name or library"
+                        ? t("web.admin.backups.restore.choose.filterUsers")
+                        : t("web.admin.backups.restore.choose.filterItems")
                     }
                     className="border-muted-foreground/25 h-8 max-w-sm text-sm"
                   />
@@ -458,11 +494,10 @@ function SectionBlock({
                 <SameRows
                   items={groups.same}
                   names={names}
-                  label={
-                    groups.same.length === 1
-                      ? "1 matches this server"
-                      : `${groups.same.length} match this server`
-                  }
+                  label={t("web.admin.backups.restore.choose.sameLabel", {
+                    count: groups.same.length,
+                    count_text: String(groups.same.length),
+                  })}
                 />
               ) : null}
             </div>
@@ -492,6 +527,7 @@ export function RestoreChoose({
   onDataTypesChange,
   onReview,
 }: RestoreChooseProps) {
+  const t = useT();
   const index = useMemo(() => indexItems(set), [set]);
   const [notice, setNotice] = useState<string | null>(null);
   const libraries = useAdminLibraries();
@@ -532,25 +568,26 @@ export function RestoreChoose({
         <SectionIndex sections={set.sections} selection={selection} variant="chips" />
         {!set.key_matches ? (
           <SettingFieldStatus tone="warn">
-            This backup was taken with a different SECRET_KEY. Encrypted settings and plugin
-            settings in it can&apos;t be restored here.
+            {t("web.admin.backups.restore.choose.otherKey")}
           </SettingFieldStatus>
         ) : null}
         {set.omitted.length > 0 ? (
           <div>
             <SettingFieldStatus tone="warn">
-              {set.omitted.length === 1
-                ? "1 account isn't in this backup's restore set, so it can't be restored here. The Users section says why."
-                : `${set.omitted.length} accounts aren't in this backup's restore set, so they can't be restored here. The Users section says why.`}
+              {t("web.admin.backups.restore.choose.omitted", {
+                count: set.omitted.length,
+                count_text: String(set.omitted.length),
+              })}
             </SettingFieldStatus>
           </div>
         ) : null}
         {set.missing_blobs.length > 0 ? (
           <div>
             <SettingFieldStatus tone="warn">
-              {set.missing_blobs.length === 1
-                ? "1 file was missing when the backup was taken. Items that use it say so."
-                : `${set.missing_blobs.length} files were missing when the backup was taken. Items that use them say so.`}
+              {t("web.admin.backups.restore.choose.missingFiles", {
+                count: set.missing_blobs.length,
+                count_text: String(set.missing_blobs.length),
+              })}
             </SettingFieldStatus>
           </div>
         ) : null}
@@ -589,15 +626,19 @@ export function RestoreChoose({
       >
         <SectionIndex sections={set.sections} selection={selection} variant="list" />
         <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
-          Silo will
+          {t("web.admin.backups.restore.choose.summaryHeading")}
         </h2>
         {plan.length === 0 ? (
-          <p className="text-muted-foreground text-sm">Choose what to restore.</p>
+          <p className="text-muted-foreground text-sm">
+            {t("web.admin.backups.restore.choose.nothingChosen")}
+          </p>
         ) : (
           <ul className="list-disc space-y-1.5 pl-5 text-sm">
             {plan.flatMap((group) =>
               group.sentences.map((sentence, position) => (
-                <li key={`${group.section}-${position}`}>{sentence}.</li>
+                <li key={`${group.section}-${position}`}>
+                  {t("web.admin.backups.restore.plan.sentence", { sentence })}
+                </li>
               )),
             )}
           </ul>
@@ -608,11 +649,10 @@ export function RestoreChoose({
           </p>
         ) : null}
         <p className="text-muted-foreground text-[13px] leading-relaxed">
-          Before changing anything, Silo saves a backup of this server as it is now. That copy is a
-          recovery point for a full restore.
+          {t("web.admin.backups.restore.choose.recoveryPoint")}
         </p>
         <Button className="w-full" disabled={selection.size === 0} onClick={onReview}>
-          Review restore
+          {t("web.admin.backups.restore.choose.review")}
         </Button>
       </aside>
     </div>

@@ -1,4 +1,5 @@
 import type { PluginInstallation } from "@/api/types";
+import { t } from "@/i18n";
 
 /**
  * Status dot for an installation. A resident plugin (one the server keeps
@@ -11,29 +12,43 @@ export function pluginStatusIndicator(installation: PluginInstallation): {
   title?: string;
 } {
   if (!installation.enabled) {
-    return { dotClass: "bg-muted-foreground", label: "Off" };
+    return { dotClass: "bg-muted-foreground", label: t("web.admin.plugins.statusIndicator.off") };
   }
   const runtime = installation.runtime;
   if (!runtime.resident) {
     if (runtime.state === "failed") {
-      return { dotClass: "bg-destructive", label: "Failed", title: runtime.last_error };
+      return {
+        dotClass: "bg-destructive",
+        label: t("web.admin.plugins.statusIndicator.failed"),
+        title: runtime.last_error,
+      };
     }
-    return { dotClass: "bg-success", label: "Active" };
+    return { dotClass: "bg-success", label: t("web.admin.plugins.statusIndicator.active") };
   }
   switch (runtime.state) {
     case "running":
-      return { dotClass: "bg-success", label: "Running" };
+      return { dotClass: "bg-success", label: t("web.admin.plugins.statusIndicator.running") };
     case "starting":
-      return { dotClass: "bg-warning", label: "Starting" };
+      return { dotClass: "bg-warning", label: t("web.admin.plugins.statusIndicator.starting") };
     case "backoff":
       return {
         dotClass: "bg-warning",
-        label: `Restarting (${runtime.restart_count})`,
+        label: t("web.admin.plugins.statusIndicator.restarting", {
+          restart_count: String(runtime.restart_count),
+        }),
         title: runtime.last_error,
       };
     case "failed":
-      return { dotClass: "bg-destructive", label: "Failed", title: runtime.last_error };
+      return {
+        dotClass: "bg-destructive",
+        label: t("web.admin.plugins.statusIndicator.failed"),
+        title: runtime.last_error,
+      };
     default:
-      return { dotClass: "bg-muted-foreground", label: "Stopped", title: runtime.last_error };
+      return {
+        dotClass: "bg-muted-foreground",
+        label: t("web.admin.plugins.statusIndicator.stopped"),
+        title: runtime.last_error,
+      };
   }
 }

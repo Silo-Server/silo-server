@@ -21,9 +21,27 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useT } from "@/i18n";
 import { SettingField, SettingFieldStatus } from "./SettingField";
 
 type LoginAttempt = { id: string; confirmed: boolean };
+
+/** The sign-in callback shown before the server names its own. */
+const DEFAULT_CALLBACK_URI = "http://127.0.0.1:51121/auth/callback";
+
+/** Which note a saved account carries in the account select. */
+function accountState(account: {
+  plan_ineligible?: boolean;
+  needs_login?: boolean;
+  usage_limited?: boolean;
+  connected?: boolean;
+}): "ineligible" | "signin" | "paused" | "ok" {
+  if (account.plan_ineligible) return "ineligible";
+  if (account.needs_login) return "signin";
+  if (account.usage_limited) return "paused";
+  if (!account.connected) return "signin";
+  return "ok";
+}
 
 export function ChatGPTConnection(props: {
   model: string;
@@ -53,6 +71,7 @@ function ChatGPTConnectionPanel({
   onConnectionConfirmed?: () => void;
   onSettingsTransitionStarted?: () => (change: ChatGPTSettingsChange) => void;
 }) {
+  const t = useT();
   const authority = captureProfileRequestContext();
   const authorityActive = () => authority !== null && isCapturedProfileAuthorityActive(authority);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -89,7 +108,7 @@ function ChatGPTConnectionPanel({
     attempt.confirmed = true;
     resetLoginDialog();
     onConnectionConfirmed?.();
-    toast.success("ChatGPT connected. Review your text model settings.");
+    toast.success(t("web.admin.settings.ai.chatgptConnection.connectedToast"));
     if (firstConnection) setWelcomeOpen(true);
   }
 
@@ -117,7 +136,7 @@ function ChatGPTConnectionPanel({
     const expired = Date.now() >= Date.parse(attempt.expires_at);
     if (!expired && next.attempt_id !== attempt.attempt_id) return;
     clearLogin();
-    toast.error("Sign-in did not complete. Continue with ChatGPT to try again.");
+    toast.error(t("web.admin.settings.ai.chatgptConnection.signInIncomplete"));
   });
   useEffect(() => {
     observeLogin();
@@ -148,7 +167,7 @@ function ChatGPTConnectionPanel({
     } catch {
       if (!authorityActive() || loginAttempt.current !== attempt) return;
       loginAttempt.current = null;
-      toast.error("Could not start ChatGPT sign-in. Refresh the connection status and try again.");
+      toast.error(t("web.admin.settings.ai.chatgptConnection.startFailed"));
     }
   }
 
@@ -179,7 +198,7 @@ function ChatGPTConnectionPanel({
         throw new Error("Invalid callback URL");
       }
     } catch {
-      setCallbackError("Paste the full URL from the address bar after ChatGPT finishes sign-in.");
+      setCallbackError(t("web.admin.settings.ai.chatgptConnection.callbackInvalid"));
       return;
     }
     setCallbackError("");
@@ -191,9 +210,7 @@ function ChatGPTConnectionPanel({
       confirmLogin(attempt, change.firstConnection === true);
     } catch {
       if (!authorityActive() || loginAttempt.current !== attempt || attempt.confirmed) return;
-      setCallbackError(
-        "Could not complete sign-in. Check the pasted URL. If this attempt expired, close this dialog and start again.",
-      );
+      setCallbackError(t("web.admin.settings.ai.chatgptConnection.completeFailed"));
       void status.refetch();
     }
   }
@@ -207,7 +224,7 @@ function ChatGPTConnectionPanel({
       if (change.firstConnection) setWelcomeOpen(true);
     } catch {
       if (!authorityActive()) return;
-      toast.error("Could not switch ChatGPT accounts. Refresh the connection status.");
+      toast.error(t("web.admin.settings.ai.chatgptConnection.switchFailed"));
     }
   }
 
@@ -216,19 +233,17 @@ function ChatGPTConnectionPanel({
     try {
       const result = await disconnect.mutateAsync(clientID);
       if (!authorityActive()) return;
-      if (result.revocation_confirmed) toast.success("ChatGPT disconnected.");
-      else
-        toast.error(
-          "Disconnected locally. Open ChatGPT usage settings to confirm the app is disconnected.",
-        );
+      if (result.revocation_confirmed)
+        toast.success(t("web.admin.settings.ai.chatgptConnection.disconnected"));
+      else toast.error(t("web.admin.settings.ai.chatgptConnection.disconnectedLocally"));
     } catch {
       if (!authorityActive()) return;
-      toast.error(
-        "Could not disconnect ChatGPT. Refresh the connection status before trying again.",
-      );
+      toast.error(t("web.admin.settings.ai.chatgptConnection.disconnectFailed"));
     }
   }
 
+  // The callback URL with its query elided; a URL in every language.
+  const callbackPlaceholder = `${start.data?.callback_uri ?? DEFAULT_CALLBACK_URI}?…`;
   const savedAccounts = status.data?.accounts ?? [];
   const availableModels = models.data?.models ?? [];
   const selectedModelAvailable = availableModels.some((item) => item.id === model);
@@ -236,35 +251,38 @@ function ChatGPTConnectionPanel({
   return (
     <div className="space-y-3 py-3">
       <p className="text-muted-foreground text-xs">
-        Use your ChatGPT plan for subtitle and description translation. Usage counts toward your
-        plan limits.
+        {t("web.admin.settings.ai.chatgptConnection.intro")}
       </p>
       {status.isError ? (
         <div className="flex items-center gap-3">
           <SettingFieldStatus tone="warn">
-            Could not load the ChatGPT connection.
+            {t("web.admin.settings.ai.chatgptConnection.loadFailed")}
           </SettingFieldStatus>
           <Button size="sm" variant="outline" onClick={() => void status.refetch()}>
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       ) : null}
       {savedAccounts.length > 0 ? (
         <SettingField
-          label="ChatGPT account"
+          label={t("web.admin.settings.ai.chatgptConnection.account")}
           type="select"
           value={active?.client_id ?? "disconnected"}
           options={[
-            { value: "disconnected", label: "Choose a connected account", disabled: true },
+            {
+              value: "disconnected",
+              label: t("web.admin.settings.ai.chatgptConnection.chooseAccount"),
+              disabled: true,
+            },
             ...savedAccounts.map((account, index) => {
-              let stateLabel = "";
-              if (account.plan_ineligible) stateLabel = " (plan sharing unavailable)";
-              else if (account.needs_login) stateLabel = " (sign-in required)";
-              else if (account.usage_limited) stateLabel = " (usage paused)";
-              else if (!account.connected) stateLabel = " (sign-in required)";
               return {
                 value: account.client_id,
-                label: `${account.email || "ChatGPT account"} · ${index + 1}${stateLabel}`,
+                label: t("web.admin.settings.ai.chatgptConnection.accountOption", {
+                  state: accountState(account),
+                  account:
+                    account.email || t("web.admin.settings.ai.chatgptConnection.accountFallback"),
+                  number: String(index + 1),
+                }),
                 disabled:
                   account.plan_ineligible === true ||
                   account.needs_login ||
@@ -279,14 +297,20 @@ function ChatGPTConnectionPanel({
       {authenticated ? (
         <>
           {connected ? (
-            <SettingFieldStatus>Using ChatGPT plan · {active.email}</SettingFieldStatus>
+            <SettingFieldStatus>
+              {t("web.admin.settings.ai.chatgptConnection.usingPlan", { email: active.email })}
+            </SettingFieldStatus>
           ) : null}
           <SettingField
-            label="Model"
+            label={t("web.admin.settings.ai.model.label")}
             type="select"
             value={selectedModelAvailable ? model : "choose-model"}
             options={[
-              { value: "choose-model", label: "Choose a ChatGPT model", disabled: true },
+              {
+                value: "choose-model",
+                label: t("web.admin.settings.ai.chatgptConnection.chooseModel"),
+                disabled: true,
+              },
               ...availableModels.map((item) => ({ value: item.id, label: item.name || item.id })),
             ]}
             onChange={onModelChange}
@@ -295,15 +319,15 @@ function ChatGPTConnectionPanel({
           {models.isError ? (
             <div className="flex items-center gap-3">
               <SettingFieldStatus tone="warn">
-                Could not load models. Reconnect if your sign-in expired.
+                {t("web.admin.settings.ai.chatgptConnection.modelsFailed")}
               </SettingFieldStatus>
               <Button size="sm" variant="outline" onClick={() => void models.refetch()}>
-                Retry models
+                {t("web.admin.settings.ai.chatgptConnection.retryModels")}
               </Button>
             </div>
           ) : availableModels.length === 0 && !models.isLoading ? (
             <SettingFieldStatus tone="warn">
-              No text models are available to this ChatGPT account.
+              {t("web.admin.settings.ai.chatgptConnection.noModels")}
             </SettingFieldStatus>
           ) : null}
         </>
@@ -314,7 +338,7 @@ function ChatGPTConnectionPanel({
           onClick={() => void begin()}
           disabled={start.isPending || status.isLoading || status.isError}
         >
-          Continue with ChatGPT
+          {t("web.admin.settings.ai.chatgptConnection.continue")}
         </Button>
         {savedAccounts.map((account, index) => (
           <div key={account.client_id} className="flex flex-wrap items-center gap-2">
@@ -325,7 +349,13 @@ function ChatGPTConnectionPanel({
                 disabled={start.isPending}
                 onClick={() => void begin(account.client_id)}
               >
-                Reconnect {account.email || `account ${index + 1}`}
+                {account.email
+                  ? t("web.admin.settings.ai.chatgptConnection.reconnectEmail", {
+                      email: account.email,
+                    })
+                  : t("web.admin.settings.ai.chatgptConnection.reconnectNumbered", {
+                      number: String(index + 1),
+                    })}
               </Button>
             ) : null}
             {account.client_id !== active?.client_id ? (
@@ -335,17 +365,22 @@ function ChatGPTConnectionPanel({
                 disabled={disconnect.isPending}
                 onClick={() => void signOut(account.client_id)}
               >
-                Disconnect {account.email || `account ${index + 1}`}
+                {account.email
+                  ? t("web.admin.settings.ai.chatgptConnection.disconnectEmail", {
+                      email: account.email,
+                    })
+                  : t("web.admin.settings.ai.chatgptConnection.disconnectNumbered", {
+                      number: String(index + 1),
+                    })}
               </Button>
             ) : null}
             {account.plan_ineligible ? (
               <SettingFieldStatus tone="warn">
-                This account cannot share ChatGPT plan usage. Check ChatGPT usage settings.
+                {t("web.admin.settings.ai.chatgptConnection.planIneligible")}
               </SettingFieldStatus>
             ) : account.usage_limited ? (
               <SettingFieldStatus tone="warn">
-                ChatGPT plan usage is paused. Check ChatGPT usage settings, then choose Test text
-                model to resume.
+                {t("web.admin.settings.ai.chatgptConnection.usagePaused")}
               </SettingFieldStatus>
             ) : null}
           </div>
@@ -357,7 +392,7 @@ function ChatGPTConnectionPanel({
             disabled={disconnect.isPending}
             onClick={() => void signOut(active.client_id)}
           >
-            Disconnect
+            {t("web.admin.settings.ai.chatgptConnection.disconnect")}
           </Button>
         ) : null}
         <a
@@ -366,7 +401,7 @@ function ChatGPTConnectionPanel({
           target="_blank"
           rel="noreferrer"
         >
-          Manage usage
+          {t("web.admin.settings.ai.chatgptConnection.manageUsage")}
         </a>
       </div>
       <Dialog
@@ -380,28 +415,24 @@ function ChatGPTConnectionPanel({
           showCloseButton={!complete.isPending}
         >
           <DialogHeader>
-            <DialogTitle>Continue with ChatGPT</DialogTitle>
+            <DialogTitle>{t("web.admin.settings.ai.chatgptConnection.dialogTitle")}</DialogTitle>
             <DialogDescription>
-              Sign in with ChatGPT in a new tab, then paste the final browser address here to
-              connect your account.
+              {t("web.admin.settings.ai.chatgptConnection.dialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <ol className="list-decimal space-y-3 pl-5 text-sm">
             <li>
-              Open ChatGPT and allow Silo to use your plan.
+              {t("web.admin.settings.ai.chatgptConnection.step1")}
               <div className="mt-2">
                 <Button asChild size="sm">
                   <a href={start.data?.authorization_url} target="_blank" rel="noopener noreferrer">
-                    Open ChatGPT sign-in
+                    {t("web.admin.settings.ai.chatgptConnection.openSignIn")}
                   </a>
                 </Button>
               </div>
             </li>
-            <li>
-              After approval, the tab will go to a local address and may show “can’t connect.” This
-              is expected. Copy the full URL from that tab’s address bar.
-            </li>
-            <li>Return here, paste the URL below, and choose Connect ChatGPT.</li>
+            <li>{t("web.admin.settings.ai.chatgptConnection.step2")}</li>
+            <li>{t("web.admin.settings.ai.chatgptConnection.step3")}</li>
           </ol>
           <form
             className="space-y-3"
@@ -410,11 +441,13 @@ function ChatGPTConnectionPanel({
               void finish();
             }}
           >
-            <Label htmlFor={callbackID}>Browser URL</Label>
+            <Label htmlFor={callbackID}>
+              {t("web.admin.settings.ai.chatgptConnection.browserUrl")}
+            </Label>
             <Input
               id={callbackID}
               type="text"
-              placeholder={`${start.data?.callback_uri ?? "http://127.0.0.1:51121/auth/callback"}?…`}
+              placeholder={callbackPlaceholder}
               value={callbackURL}
               onChange={(event) => {
                 setCallbackURL(event.target.value);
@@ -434,28 +467,30 @@ function ChatGPTConnectionPanel({
               </p>
             ) : null}
             <Button type="submit" disabled={!callbackURL.trim() || complete.isPending}>
-              {complete.isPending ? "Connecting…" : "Connect ChatGPT"}
+              {complete.isPending
+                ? t("web.admin.settings.ai.chatgptConnection.connecting")
+                : t("web.admin.settings.ai.chatgptConnection.connect")}
             </Button>
           </form>
           <p className="text-muted-foreground text-xs">
-            Finish within ten minutes. Silo stores the connected account’s credentials securely on
-            your server.
+            {t("web.admin.settings.ai.chatgptConnection.deadline")}
           </p>
           <Button variant="outline" disabled={complete.isPending} onClick={clearLogin}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         </DialogContent>
       </Dialog>
       <Dialog open={welcomeOpen} onOpenChange={setWelcomeOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>You’re using your ChatGPT plan</DialogTitle>
+            <DialogTitle>{t("web.admin.settings.ai.chatgptConnection.welcomeTitle")}</DialogTitle>
             <DialogDescription>
-              Eligible text AI requests in Silo use your ChatGPT plan. You can manage Silo’s access
-              and usage limits in ChatGPT settings.
+              {t("web.admin.settings.ai.chatgptConnection.welcomeDescription")}
             </DialogDescription>
           </DialogHeader>
-          <Button onClick={() => setWelcomeOpen(false)}>Got it</Button>
+          <Button onClick={() => setWelcomeOpen(false)}>
+            {t("web.admin.settings.ai.chatgptConnection.gotIt")}
+          </Button>
         </DialogContent>
       </Dialog>
     </div>

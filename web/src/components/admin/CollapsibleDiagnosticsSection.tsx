@@ -2,7 +2,12 @@ import type { ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
+
+// Glyphs that stand in for the count; their meaning is in sr-only text.
+const NO_COUNT = "\u2014";
+const ERROR_MARK = "!";
 
 /**
  * CollapsibleDiagnosticsSection renders an expandable administrative diagnostics panel
@@ -32,11 +37,12 @@ export function CollapsibleDiagnosticsSection({
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
 }) {
+  const t = useT();
   const countLabel =
     count === undefined ? (
       <>
-        <span aria-hidden="true">&mdash;</span>
-        <span className="sr-only">Count not loaded</span>
+        <span aria-hidden="true">{NO_COUNT}</span>
+        <span className="sr-only">{t("web.admin.common.diagnosticsSection.countNotLoaded")}</span>
       </>
     ) : (
       count
@@ -64,13 +70,13 @@ export function CollapsibleDiagnosticsSection({
         {isError ? (
           open ? (
             <Badge variant="destructive" className="text-[11px] tabular-nums">
-              <span className="sr-only">Error loading count</span>
-              <span aria-hidden="true">!</span>
+              <span className="sr-only">{t("web.admin.common.diagnosticsSection.countError")}</span>
+              <span aria-hidden="true">{ERROR_MARK}</span>
             </Badge>
           ) : (
             <div className="text-destructive text-2xl leading-none font-bold tabular-nums">
-              <span className="sr-only">Error loading count</span>
-              <span aria-hidden="true">!</span>
+              <span className="sr-only">{t("web.admin.common.diagnosticsSection.countError")}</span>
+              <span aria-hidden="true">{ERROR_MARK}</span>
             </div>
           )
         ) : open ? (

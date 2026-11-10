@@ -3,7 +3,7 @@ import { Search } from "lucide-react";
 import { VisuallyHidden } from "radix-ui";
 import { useNavigate } from "react-router";
 
-import { useT } from "@/i18n";
+import { useAppLanguage, useT } from "@/i18n";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
   countSettingsSearchItems,
@@ -45,9 +45,12 @@ export function AdminSectionCommandDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
+  // Group labels are read when filtering: refilter on a language change.
+  const language = useAppLanguage();
   const filteredSections = useMemo(
     () => filterSettingsSearchGroups(sections, query),
-    [query, sections],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- labels are resolved while filtering
+    [query, sections, language],
   );
   const results = useMemo(
     () => filteredSections.flatMap((section) => section.items),

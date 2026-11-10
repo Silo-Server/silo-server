@@ -32,15 +32,39 @@ import { captureProfileRequestContext } from "@/api/client";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import { useOperationalLogs, useAuditLogs } from "@/hooks/queries/admin/logs";
 import { useAdminLogStream } from "@/hooks/admin/useAdminLogStream";
-import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { useDateTimeFormat } from "@/hooks/useDateTimeFormat";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import {
   LOG_COMPONENT_FILTER_OPTIONS,
   LOG_FILTER_ALL,
   LOG_LEVEL_FILTER_OPTIONS,
   normalizeLogFilterParam,
   withUnknownFilterOption,
+  type LogLevelFilterOption,
 } from "@/pages/adminLogsFilters";
+import {
+  formatClientIP,
+  formatConnectionState,
+  formatDateTime,
+  shortID,
+  stringAttr,
+} from "./AdminLogs.format";
+import { PlaybackSessionSummary } from "./AdminLogsPlaybackSummary";
+
+const SEPARATOR = "·";
+const NO_VALUE = "-";
+
+const LEVEL_LABELS: Record<LogLevelFilterOption, MessageKey> = {
+  debug: "web.admin.logs.level.debug",
+  info: "web.admin.logs.level.info",
+  warn: "web.admin.logs.level.warn",
+  error: "web.admin.logs.level.error",
+};
+
+function levelLabel(t: Translate, value: string): string {
+  const key = LEVEL_LABELS[value as LogLevelFilterOption] as MessageKey | undefined;
+  return key ? t(key) : value;
+}
 
 export default function AdminLogs() {
   useOptionalAuth();
@@ -56,6 +80,7 @@ export default function AdminLogs() {
 }
 
 function AdminLogsPage() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const scope = searchParams.toString();
   const [history, setHistory] = useState<{ scope: string; cursors: (string | undefined)[] }>({
@@ -141,17 +166,17 @@ function AdminLogsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Logs"
-        subtitle="Search application logs and request audit trails without leaving the admin UI."
+        title={t("web.admin.logs.page.title")}
+        subtitle={t("web.admin.logs.page.subtitle")}
         actions={
           <div className="text-right">
             <div className="text-muted-foreground text-xs font-medium tracking-[0.2em] uppercase">
-              Stream
+              {t("web.admin.logs.page.streamLabel")}
             </div>
             <div className="text-sm">
               {browsingHistory
-                ? "Historical results"
-                : formatConnectionState(activeStream.connectionState)}
+                ? t("web.admin.logs.page.historicalResults")
+                : formatConnectionState(t, activeStream.connectionState)}
             </div>
             {!browsingHistory && activeStream.error && (
               <div className="text-muted-foreground text-xs">{activeStream.error}</div>
@@ -163,7 +188,7 @@ function AdminLogsPage() {
                 className="mt-1 h-7 px-2 text-xs"
                 onClick={activeStream.reconnect}
               >
-                Reconnect
+                {t("web.admin.logs.page.reconnect")}
               </Button>
             )}
           </div>
@@ -173,14 +198,14 @@ function AdminLogsPage() {
       <div className="surface-panel rounded-2xl border-0 px-3 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <Input
-            placeholder="Playback Session ID"
+            placeholder={t("web.admin.logs.filters.playbackSessionId")}
             value={playbackSessionID}
             onChange={(e) => updateSearchParam("playback_session_id", e.target.value)}
             className="max-w-md font-mono text-xs"
           />
           {playbackSessionID && (
             <div className="bg-background border-border rounded-md border px-3 py-1.5 text-xs">
-              Playback session {shortID(playbackSessionID)}
+              {t("web.admin.logs.filters.playbackSessionChip", { id: shortID(playbackSessionID) })}
             </div>
           )}
         </div>
@@ -203,20 +228,20 @@ function AdminLogsPage() {
         onValueChange={(value) => updateSearchParam("tab", value)}
       >
         <TabsList>
-          <TabsTrigger value="app">Application</TabsTrigger>
-          <TabsTrigger value="audit">Audit</TabsTrigger>
+          <TabsTrigger value="app">{t("web.admin.logs.tabs.application")}</TabsTrigger>
+          <TabsTrigger value="audit">{t("web.admin.logs.tabs.audit")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="app" className="space-y-4">
           <div className="surface-panel-subtle flex flex-wrap gap-2 rounded-xl p-3">
             <Input
-              placeholder="Request ID"
+              placeholder={t("web.admin.logs.filters.requestId")}
               value={requestID}
               onChange={(e) => updateSearchParam("request_id", e.target.value)}
               className="max-w-xs font-mono"
             />
             <Input
-              placeholder="Message contains..."
+              placeholder={t("web.admin.logs.filters.messageContains")}
               value={messageQuery}
               onChange={(e) => updateSearchParam("q", e.target.value)}
               className="max-w-sm"
@@ -227,21 +252,23 @@ function AdminLogsPage() {
                 updateSearchParam("level", value === LOG_FILTER_ALL ? "" : value)
               }
             >
-              <SelectTrigger className="w-[170px]" aria-label="Level">
+              <SelectTrigger className="w-[170px]" aria-label={t("web.admin.logs.filters.level")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={LOG_FILTER_ALL}>All levels</SelectItem>
+                <SelectItem value={LOG_FILTER_ALL}>
+                  {t("web.admin.logs.filters.allLevels")}
+                </SelectItem>
                 {levelOptions.map((value) => (
                   <SelectItem key={value} value={value}>
-                    {value}
+                    {levelLabel(t, value)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <Input
-              aria-label="Component"
-              placeholder="All components"
+              aria-label={t("web.admin.logs.filters.component")}
+              placeholder={t("web.admin.logs.filters.allComponents")}
               list="log-component-options"
               value={component}
               onChange={(e) => updateSearchParam("component", e.target.value)}
@@ -264,7 +291,9 @@ function AdminLogsPage() {
                   updateSearchParam("component", component === "ffmpeg" ? "" : "ffmpeg")
                 }
               >
-                {component === "ffmpeg" ? "Showing ffmpeg only" : "Filter ffmpeg"}
+                {component === "ffmpeg"
+                  ? t("web.admin.logs.ffmpeg.showingOnly")
+                  : t("web.admin.logs.ffmpeg.filter")}
               </button>
             )}
           </div>
@@ -275,8 +304,8 @@ function AdminLogsPage() {
             }
             empty={
               (browsingHistory ? appHistory.isError : appLogs.error)
-                ? "Application logs could not be loaded."
-                : "No application logs matched the current filters."
+                ? t("web.admin.logs.app.loadError")
+                : t("web.admin.logs.app.empty")
             }
             renderRow={(entry) => (
               <OperationalLogRow
@@ -288,12 +317,12 @@ function AdminLogsPage() {
             )}
             header={
               <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>Level</TableHead>
-                <TableHead>Component</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Message</TableHead>
+                <TableHead>{t("web.admin.logs.columns.time")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.level")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.component")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.status")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.duration")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.message")}</TableHead>
               </TableRow>
             }
           />
@@ -302,48 +331,48 @@ function AdminLogsPage() {
         <TabsContent value="audit" className="space-y-4">
           <div className="surface-panel-subtle flex flex-wrap gap-2 rounded-xl p-3">
             <Input
-              placeholder="Request ID"
+              placeholder={t("web.admin.logs.filters.requestId")}
               value={requestID}
               onChange={(e) => updateSearchParam("request_id", e.target.value)}
               className="max-w-xs font-mono"
             />
             <Input
-              placeholder="Method"
+              placeholder={t("web.admin.logs.filters.method")}
               value={method}
               onChange={(e) => updateSearchParam("method", e.target.value)}
               className="max-w-[120px]"
             />
             <Input
-              placeholder="Client IP"
+              placeholder={t("web.admin.logs.filters.clientIp")}
               value={clientIP}
               onChange={(e) => updateSearchParam("client_ip", e.target.value)}
               className="max-w-xs font-mono"
             />
             <Input
-              aria-label="Audit action"
-              placeholder="Action, e.g. user.updated"
+              aria-label={t("web.admin.logs.filters.auditAction")}
+              placeholder={t("web.admin.logs.filters.auditActionPlaceholder")}
               value={action}
               onChange={(e) => updateSearchParam("action", e.target.value)}
               className="max-w-xs"
             />
             <Input
-              aria-label="Audit actor account"
-              placeholder="Actor account ID"
+              aria-label={t("web.admin.logs.filters.auditActor")}
+              placeholder={t("web.admin.logs.filters.auditActorPlaceholder")}
               inputMode="numeric"
               value={actor}
               onChange={(e) => updateSearchParam("actor_user_id", e.target.value)}
               className="max-w-[180px]"
             />
             <Input
-              aria-label="Audit target type"
-              placeholder="Target type, e.g. user"
+              aria-label={t("web.admin.logs.filters.auditTargetType")}
+              placeholder={t("web.admin.logs.filters.auditTargetTypePlaceholder")}
               value={targetType}
               onChange={(e) => updateSearchParam("target_type", e.target.value)}
               className="max-w-xs"
             />
             <Input
-              aria-label="Audit target ID"
-              placeholder="Target ID"
+              aria-label={t("web.admin.logs.filters.auditTargetId")}
+              placeholder={t("web.admin.logs.filters.auditTargetIdPlaceholder")}
               value={targetID}
               onChange={(e) => updateSearchParam("target_id", e.target.value)}
               className="max-w-[180px]"
@@ -358,23 +387,23 @@ function AdminLogsPage() {
             }
             empty={
               (browsingHistory ? auditHistory.isError : auditLogs.error)
-                ? "Audit logs could not be loaded."
-                : "No audit logs matched the current filters."
+                ? t("web.admin.logs.audit.loadError")
+                : t("web.admin.logs.audit.empty")
             }
             renderRow={(entry) => <AuditLogRow entry={entry} key={`audit-${entry.id}`} />}
             header={
               <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>Action / changes</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead>Method</TableHead>
-                <TableHead>Path</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Actor</TableHead>
-                <TableHead>Session</TableHead>
-                <TableHead>Playback</TableHead>
-                <TableHead>Request</TableHead>
+                <TableHead>{t("web.admin.logs.columns.time")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.actionChanges")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.target")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.method")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.path")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.status")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.client")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.actor")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.session")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.playback")}</TableHead>
+                <TableHead>{t("web.admin.logs.columns.request")}</TableHead>
               </TableRow>
             }
           />
@@ -385,16 +414,18 @@ function AdminLogsPage() {
         {browsingHistory ? (
           <>
             <Button variant="outline" onClick={() => setHistoryCursors([])}>
-              Return to live logs
+              {t("web.admin.logs.history.returnToLive")}
             </Button>
             <Button
               variant="outline"
               disabled={historyCursors.length < 2 || activeHistory.isFetching}
               onClick={() => setHistoryCursors(historyCursors.slice(0, -1))}
             >
-              Newer
+              {t("web.admin.logs.history.newer")}
             </Button>
-            <span className="text-muted-foreground text-sm">Page {historyCursors.length}</span>
+            <span className="text-muted-foreground text-sm">
+              {t("web.admin.logs.history.page", { page: String(historyCursors.length) })}
+            </span>
             <Button
               variant="outline"
               disabled={
@@ -407,25 +438,25 @@ function AdminLogsPage() {
                 if (next) setHistoryCursors([...historyCursors, next]);
               }}
             >
-              Older
+              {t("web.admin.logs.history.older")}
             </Button>
           </>
         ) : (
           // Start with a fresh REST snapshot: the live stream may have trimmed
           // rows since its snapshot cursor was issued.
           <Button variant="outline" onClick={() => setHistoryCursors([undefined])}>
-            Browse log history
+            {t("web.admin.logs.history.browse")}
           </Button>
         )}
         {browsingHistory && activeHistory.isError && (
           <div role="alert" className="flex items-center gap-2">
-            <span>Log history could not be loaded.</span>
+            <span>{t("web.admin.logs.history.loadError")}</span>
             <Button
               variant="outline"
               disabled={activeHistory.isFetching}
               onClick={() => void activeHistory.refetch()}
             >
-              Retry log history
+              {t("web.admin.logs.history.retry")}
             </Button>
           </div>
         )}
@@ -438,33 +469,52 @@ function AdminLogsPage() {
               <SheetHeader>
                 <SheetTitle>{selectedEntry.message}</SheetTitle>
                 <SheetDescription>
-                  {selectedEntry.component} · {selectedEntry.level.toUpperCase()} ·{" "}
-                  {formatDateTime(selectedEntry.timestamp)}
+                  {[
+                    selectedEntry.component,
+                    selectedEntry.level.toUpperCase(),
+                    formatDateTime(selectedEntry.timestamp),
+                  ].join(` ${SEPARATOR} `)}
                 </SheetDescription>
               </SheetHeader>
               <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-6">
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <DetailField label="Request ID" value={selectedEntry.request_id || "-"} mono />
-                  <DetailField label="Node" value={selectedEntry.node_id || "-"} />
-                  <DetailField label="Method" value={stringAttr(selectedEntry, "method")} />
-                  <DetailField label="Status" value={stringAttr(selectedEntry, "status")} />
-                  <DetailField label="Duration" value={durationAttr(selectedEntry)} />
                   <DetailField
-                    label="Client IP"
+                    label={t("web.admin.logs.detail.requestId")}
+                    value={selectedEntry.request_id || "-"}
+                    mono
+                  />
+                  <DetailField
+                    label={t("web.admin.logs.detail.node")}
+                    value={selectedEntry.node_id || "-"}
+                  />
+                  <DetailField
+                    label={t("web.admin.logs.detail.method")}
+                    value={stringAttr(selectedEntry, "method")}
+                  />
+                  <DetailField
+                    label={t("web.admin.logs.detail.status")}
+                    value={stringAttr(selectedEntry, "status")}
+                  />
+                  <DetailField
+                    label={t("web.admin.logs.detail.duration")}
+                    value={durationAttr(t, selectedEntry)}
+                  />
+                  <DetailField
+                    label={t("web.admin.logs.detail.clientIp")}
                     value={selectedEntry.client_ip || stringAttr(selectedEntry, "client_ip")}
                     mono
                   />
                   <DetailField
-                    label="User ID"
+                    label={t("web.admin.logs.detail.userId")}
                     value={selectedEntry.user_id ? String(selectedEntry.user_id) : "-"}
                   />
                   <DetailField
-                    label="Session ID"
+                    label={t("web.admin.logs.detail.sessionId")}
                     value={selectedEntry.session_id || stringAttr(selectedEntry, "session_id")}
                     mono
                   />
                   <DetailField
-                    label="Playback Session"
+                    label={t("web.admin.logs.detail.playbackSession")}
                     value={
                       selectedEntry.playback_session_id ||
                       stringAttr(selectedEntry, "playback_session_id")
@@ -485,17 +535,19 @@ function AdminLogsPage() {
                       setSelectedEntry(null);
                     }}
                   >
-                    View related playback session logs
+                    {t("web.admin.logs.detail.viewPlaybackSessionLogs")}
                   </button>
                 )}
                 <div>
-                  <div className="mb-1 text-sm font-medium">Path</div>
+                  <div className="mb-1 text-sm font-medium">{t("web.admin.logs.detail.path")}</div>
                   <div className="bg-muted rounded-md px-3 py-2 font-mono text-xs break-all">
                     {stringAttr(selectedEntry, "path")}
                   </div>
                 </div>
                 <div>
-                  <div className="mb-1 text-sm font-medium">Attributes</div>
+                  <div className="mb-1 text-sm font-medium">
+                    {t("web.admin.logs.detail.attributes")}
+                  </div>
                   <pre className="bg-muted max-h-[420px] overflow-auto rounded-md p-3 text-xs leading-5 break-all whitespace-pre-wrap">
                     {JSON.stringify(selectedEntry.attrs ?? {}, null, 2)}
                   </pre>
@@ -522,7 +574,10 @@ function LogTable<T>({
   header: ReactNode;
   renderRow: (row: T) => ReactNode;
 }) {
-  if (isLoading) return <div className="text-muted-foreground py-8 text-sm">Loading logs...</div>;
+  const t = useT();
+  if (isLoading) {
+    return <div className="text-muted-foreground py-8 text-sm">{t("web.admin.logs.loading")}</div>;
+  }
   if (rows.length === 0) return <div className="text-muted-foreground py-8 text-sm">{empty}</div>;
 
   return (
@@ -542,6 +597,7 @@ const OperationalLogRow = memo(function OperationalLogRow({
   highlight?: boolean;
   onSelectEntry: (entry: OperationalLogEntry) => void;
 }) {
+  const t = useT();
   useDateTimeFormat();
   return (
     <TableRow
@@ -552,7 +608,7 @@ const OperationalLogRow = memo(function OperationalLogRow({
       <TableCell className="uppercase">{entry.level}</TableCell>
       <TableCell>{entry.component}</TableCell>
       <TableCell>{stringAttr(entry, "status")}</TableCell>
-      <TableCell>{durationAttr(entry)}</TableCell>
+      <TableCell>{durationAttr(t, entry)}</TableCell>
       <TableCell>
         <div className="max-w-[360px] truncate" title={entry.message}>
           {entry.message}
@@ -562,21 +618,30 @@ const OperationalLogRow = memo(function OperationalLogRow({
   );
 });
 
-function auditChangeValue(value: string | undefined, targetType?: string, field?: string): string {
-  if (value === undefined) return "absent";
+function auditChangeValue(
+  t: Translate,
+  value: string | undefined,
+  targetType?: string,
+  field?: string,
+): string {
+  if (value === undefined) return t("web.admin.logs.auditValue.absent");
   try {
     const parsed: unknown = JSON.parse(value);
     if (parsed === null) {
-      if (field === "access_group_id") return "none";
+      if (field === "access_group_id") return t("web.admin.logs.auditValue.none");
       if (targetType === "access_group") {
-        if (field === "library_ids") return "all libraries";
-        if (field === "allowed_permissions") return "all assignable";
-        return "unset";
+        if (field === "library_ids") return t("web.admin.logs.auditValue.allLibraries");
+        if (field === "allowed_permissions") return t("web.admin.logs.auditValue.allAssignable");
+        return t("web.admin.logs.auditValue.unset");
       }
-      return "inherit";
+      return t("web.admin.logs.auditValue.inherit");
     }
-    if (field === "scopes" && Array.isArray(parsed) && !parsed.length) return "full access";
-    if (Array.isArray(parsed)) return parsed.length ? parsed.join(", ") : "none";
+    if (field === "scopes" && Array.isArray(parsed) && !parsed.length) {
+      return t("web.admin.logs.auditValue.fullAccess");
+    }
+    if (Array.isArray(parsed)) {
+      return parsed.length ? parsed.join(", ") : t("web.admin.logs.auditValue.none");
+    }
     return typeof parsed === "object" ? JSON.stringify(parsed) : String(parsed);
   } catch {
     return value;
@@ -585,46 +650,72 @@ function auditChangeValue(value: string | undefined, targetType?: string, field?
 
 // A profile PIN is audited as a set/not-set marker; true → true is a PIN
 // replaced by another one.
-function auditPINChange(before: string | undefined, after: string | undefined): string {
+function auditPINChange(
+  t: Translate,
+  before: string | undefined,
+  after: string | undefined,
+): string {
   if (before !== undefined && after !== undefined) {
-    if (before === after) return "changed";
-    return after === "true" ? "set" : "cleared";
+    if (before === after) return t("web.admin.logs.auditValue.changed");
+    return after === "true"
+      ? t("web.admin.logs.auditValue.pinSet")
+      : t("web.admin.logs.auditValue.pinCleared");
   }
   const label = (value: string | undefined) =>
-    value === undefined ? "absent" : value === "true" ? "set" : "not set";
-  return `${label(before)} → ${label(after)}`;
+    value === undefined
+      ? t("web.admin.logs.auditValue.absent")
+      : value === "true"
+        ? t("web.admin.logs.auditValue.pinSet")
+        : t("web.admin.logs.auditValue.pinNotSet");
+  return t("web.admin.logs.auditValue.transition", { before: label(before), after: label(after) });
 }
 
 type AuditChange = NonNullable<AuditLogEntry["changes"]>[number];
 
-function auditChangeSummary(change: AuditChange, targetType?: string): string {
-  if (change.before === undefined && change.after === undefined) return "changed";
-  if (targetType === "profile" && change.field === "pin") {
-    return auditPINChange(change.before, change.after);
+function auditChangeSummary(t: Translate, change: AuditChange, targetType?: string): string {
+  if (change.before === undefined && change.after === undefined) {
+    return t("web.admin.logs.auditValue.changed");
   }
-  return `${auditChangeValue(change.before, targetType, change.field)} → ${auditChangeValue(change.after, targetType, change.field)}`;
+  if (targetType === "profile" && change.field === "pin") {
+    return auditPINChange(t, change.before, change.after);
+  }
+  return t("web.admin.logs.auditValue.transition", {
+    before: auditChangeValue(t, change.before, targetType, change.field),
+    after: auditChangeValue(t, change.after, targetType, change.field),
+  });
 }
 
-function auditTargetLabel(targetType: string): string {
-  return targetType === "api_key" ? "API key" : targetType.replaceAll("_", " ");
+function auditTargetLabel(t: Translate, targetType: string): string {
+  return targetType === "api_key"
+    ? t("web.admin.logs.audit.targetApiKey")
+    : targetType.replaceAll("_", " ");
 }
 
 const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry }) {
+  const t = useT();
   useDateTimeFormat();
   return (
     <TableRow>
       <TableCell className="whitespace-nowrap">{formatDateTime(entry.timestamp)}</TableCell>
       <TableCell className="max-w-[520px] min-w-[240px]">
-        <div className="font-medium">{entry.action || "HTTP request"}</div>
+        <div className="font-medium">{entry.action || t("web.admin.logs.audit.httpRequest")}</div>
         {entry.changes?.map((change) => (
           <div key={change.field} className="text-muted-foreground text-xs break-words">
-            <span className="font-medium">{change.field.replaceAll("_", " ")}</span>:{" "}
-            {auditChangeSummary(change, entry.target_type)}
+            {t("web.admin.logs.audit.change", {
+              field: change.field.replaceAll("_", " "),
+              summary: auditChangeSummary(t, change, entry.target_type),
+              name: (chunks) => <span className="font-medium">{chunks}</span>,
+            })}
           </div>
         ))}
       </TableCell>
       <TableCell className="whitespace-nowrap">
-        {entry.target_type ? `${auditTargetLabel(entry.target_type)} #${entry.target_id}` : "-"}
+        {entry.target_type
+          ? t("web.admin.logs.audit.target", {
+              type: auditTargetLabel(t, entry.target_type),
+              id: String(entry.target_id),
+            })
+          : NO_VALUE}
       </TableCell>
       <TableCell>{entry.method}</TableCell>
       <TableCell>
@@ -636,149 +727,27 @@ const AuditLogRow = memo(function AuditLogRow({ entry }: { entry: AuditLogEntry 
       <TableCell className="font-mono text-xs">{formatClientIP(entry.client_ip)}</TableCell>
       <TableCell>
         {entry.impersonator_user_id
-          ? `#${entry.impersonator_user_id} (as #${entry.user_id})`
+          ? t("web.admin.logs.audit.impersonatedActor", {
+              impersonator: String(entry.impersonator_user_id),
+              user: String(entry.user_id),
+            })
           : entry.user_id
-            ? `#${entry.user_id}`
-            : "-"}
+            ? t("web.admin.logs.audit.actor", { user: String(entry.user_id) })
+            : NO_VALUE}
       </TableCell>
-      <TableCell className="font-mono text-xs">{entry.session_id || "-"}</TableCell>
-      <TableCell className="font-mono text-xs">{entry.playback_session_id || "-"}</TableCell>
-      <TableCell className="font-mono text-xs">{entry.request_id || "-"}</TableCell>
+      <TableCell className="font-mono text-xs">{entry.session_id || NO_VALUE}</TableCell>
+      <TableCell className="font-mono text-xs">{entry.playback_session_id || NO_VALUE}</TableCell>
+      <TableCell className="font-mono text-xs">{entry.request_id || NO_VALUE}</TableCell>
     </TableRow>
   );
 });
 
-function PlaybackSessionSummary({
-  playbackSessionID,
-  appRows,
-  auditRows,
-  component,
-  onFilterFFmpeg,
-}: {
-  playbackSessionID: string;
-  appRows: OperationalLogEntry[];
-  auditRows: AuditLogEntry[];
-  component: string;
-  onFilterFFmpeg: () => void;
-}) {
-  const { appCount, ffmpegCount, auditCount, firstSeen, lastSeen, nodes } = useMemo(() => {
-    const matchingAppRows = appRows.filter((row) => matchesPlaybackSession(row, playbackSessionID));
-    const matchingAuditRows = auditRows.filter((row) =>
-      matchesPlaybackSession(row, playbackSessionID),
-    );
-    const timestamps = [...matchingAppRows, ...matchingAuditRows]
-      .map((row) => row.timestamp)
-      .sort();
-
-    return {
-      appCount: matchingAppRows.length,
-      ffmpegCount: matchingAppRows.filter((row) => row.component === "ffmpeg").length,
-      auditCount: matchingAuditRows.length,
-      firstSeen: timestamps[0],
-      lastSeen: timestamps[timestamps.length - 1],
-      nodes: new Set(
-        [...matchingAppRows, ...matchingAuditRows].map((row) => row.node_id).filter(Boolean),
-      ),
-    };
-  }, [appRows, auditRows, playbackSessionID]);
-
-  return (
-    <div className="bg-card border-border rounded-lg border p-4 text-sm">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-wrap gap-3 md:grid md:flex-1 md:grid-cols-6">
-          <SummaryMetric label="Playback Session" value={shortID(playbackSessionID)} mono />
-          <SummaryMetric label="Application Logs" value={String(appCount)} />
-          <SummaryMetric label="FFmpeg Logs" value={String(ffmpegCount)} />
-          <SummaryMetric label="Audit Logs" value={String(auditCount)} />
-          <SummaryMetric label="First Seen" value={firstSeen ? formatDateTime(firstSeen) : "-"} />
-          <SummaryMetric
-            label="Nodes Seen"
-            value={nodes.size > 0 ? Array.from(nodes).join(", ") : "-"}
-            mono={nodes.size > 0}
-          />
-          {lastSeen && <SummaryMetric label="Last Seen" value={formatDateTime(lastSeen)} />}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onFilterFFmpeg}
-            className={`rounded-md border px-3 py-2 text-xs font-medium ${
-              component === "ffmpeg"
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border bg-background text-muted-foreground"
-            }`}
-          >
-            {component === "ffmpeg" ? "Showing ffmpeg only" : "Open ffmpeg logs"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SummaryMetric({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div>
-      <div className="text-muted-foreground mb-1 text-xs">{label}</div>
-      <div className={mono ? "font-mono text-xs break-all" : "text-sm"}>{value}</div>
-    </div>
-  );
-}
-
-function matchesPlaybackSession(
-  entry: OperationalLogEntry | AuditLogEntry,
-  playbackSessionID: string,
-) {
-  if (!playbackSessionID) return true;
-  return entry.playback_session_id === playbackSessionID;
-}
-
-function shortID(value: string) {
-  if (value.length <= 12) return value;
-  return `${value.slice(0, 8)}...${value.slice(-4)}`;
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return formatPreferredDateTime(date);
-}
-
-function formatConnectionState(state: "connecting" | "live" | "disconnected") {
-  switch (state) {
-    case "connecting":
-      return "Connecting...";
-    case "live":
-      return "Live";
-    default:
-      return "Disconnected";
-  }
-}
-
-function formatClientIP(value: string) {
-  if (!value) return "-";
-  return value.replace(/\/\d+$/, "");
-}
-
-function stringAttr(entry: OperationalLogEntry, key: string) {
-  const value = entry.attrs?.[key];
-  if (typeof value === "string" && value.length > 0) return value;
-  if (typeof value === "number") return String(value);
-  return "-";
-}
-
-function durationAttr(entry: OperationalLogEntry) {
+function durationAttr(t: Translate, entry: OperationalLogEntry) {
   const value = entry.attrs?.duration_ms;
-  if (typeof value === "number") return `${value} ms`;
-  if (typeof value === "string" && value.length > 0) return `${value} ms`;
+  if (typeof value === "number") return t("web.admin.logs.durationMs", { value: String(value) });
+  if (typeof value === "string" && value.length > 0) {
+    return t("web.admin.logs.durationMs", { value });
+  }
   return "-";
 }
 

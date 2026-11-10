@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { backupUploadsKey } from "@/hooks/queries/admin/backupUploads";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import { uploadRestorePath } from "./backupPresentation";
@@ -74,6 +75,7 @@ export interface UploadBackupDialogProps {
  * it, go on to choose what to restore.
  */
 export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBackupDialogProps) {
+  const t = useT();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,7 +87,7 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
   const [chosenFile, setChosenFile] = useState<{
     name: string;
     size: number;
-    notice: string | null;
+    notice: MessageKey | null;
   } | null>(null);
   const authority = useRef<ProfileRequestContextSnapshot | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -161,7 +163,7 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
           },
           checked,
         );
-      else fail({ kind: "error", detail: "The server couldn't open the file." });
+      else fail({ kind: "error", detail: t("web.admin.backups.upload.couldntOpen") });
     } catch (error) {
       if (controller.signal.aborted) return;
       fail(failureOfError(error, "complete", limits), sent, upload.part_count);
@@ -275,9 +277,9 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
           )}
         >
           <FileUp aria-hidden="true" className="text-muted-foreground size-6" />
-          <p className="text-sm">Drop the file here</p>
+          <p className="text-sm">{t("web.admin.backups.upload.drop")}</p>
           <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
-            Choose a file
+            {t("web.admin.backups.upload.choose")}
           </Button>
           <input
             ref={inputRef}
@@ -305,15 +307,18 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
               {progressLabel(sent, total)}
             </span>
           </div>
-          <Progress value={progressPercent(sent, total)} aria-label="Upload progress" />
+          <Progress
+            value={progressPercent(sent, total)}
+            aria-label={t("web.admin.backups.upload.progressLabel")}
+          />
           {chosenFile?.notice && (
-            <p className="text-muted-foreground text-sm">{chosenFile.notice}</p>
+            <p className="text-muted-foreground text-sm">{t(chosenFile.notice)}</p>
           )}
         </div>
       );
       footer = (
         <Button variant="outline" onClick={cancel}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       );
       break;
@@ -322,7 +327,7 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
       body = (
         <p className="flex items-center gap-2 text-sm" role="status">
           <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
-          Checking the file…
+          {t("web.admin.backups.upload.checking")}
         </p>
       );
       break;
@@ -336,7 +341,7 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
             void navigate(uploadRestorePath(upload.id));
           }}
         >
-          Choose what to restore
+          {t("web.admin.backups.upload.chooseWhat")}
         </Button>
       );
       break;
@@ -361,11 +366,13 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
       footer = (
         <>
           <Button variant="outline" onClick={cancel}>
-            {copy.resumable ? "Cancel" : "Close"}
+            {copy.resumable ? t("common.cancel") : t("web.admin.backups.upload.close")}
           </Button>
           {copy.resumable && upload ? (
             <Button onClick={() => void resume(upload, from)}>
-              {phase.failure.kind === "check_failed" ? "Check again" : "Try again"}
+              {phase.failure.kind === "check_failed"
+                ? t("web.admin.backups.upload.checkAgain")
+                : t("common.tryAgain")}
             </Button>
           ) : (
             <Button
@@ -374,7 +381,7 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
                 setPhase({ step: "choose" });
               }}
             >
-              Choose another file
+              {t("web.admin.backups.upload.chooseAnother")}
             </Button>
           )}
         </>
@@ -393,9 +400,9 @@ export function UploadBackupDialog({ open, onOpenChange, maxBytes }: UploadBacku
     >
       <DialogContent aria-describedby={descriptionId}>
         <DialogHeader>
-          <DialogTitle>Upload a backup</DialogTitle>
+          <DialogTitle>{t("web.admin.backups.upload.title")}</DialogTitle>
           <DialogDescription id={descriptionId}>
-            Use a restore set file. Get one from Download on any Silo server&apos;s Backups page.
+            {t("web.admin.backups.upload.description")}
           </DialogDescription>
         </DialogHeader>
         {body}

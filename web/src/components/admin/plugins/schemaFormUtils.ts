@@ -1,4 +1,5 @@
 import type { PluginAdminForm, PluginAdminFormCondition, PluginAdminFormField } from "@/api/types";
+import { t as appT, type MessageKey, type TextValues } from "@/i18n";
 
 export type SchemaOption = { value: string; label: string };
 
@@ -39,16 +40,22 @@ function isEmpty(value: unknown): boolean {
   return false;
 }
 
+/**
+ * Client-side checks of a plugin form. `t` formats the messages; a component
+ * passes its `useT()` so the messages follow a language change.
+ */
 export function validateSchemaValues(
   descriptor: PluginAdminForm,
   values: Record<string, unknown>,
+  t: (id: MessageKey, values?: TextValues) => string = appT,
 ): Record<string, string> {
   const errors: Record<string, string> = {};
   for (const field of descriptor.fields) {
     if (!fieldIsVisible(descriptor, field, values)) continue;
     const raw = effectiveValue(field, values);
+    const label = field.label || field.key;
     if (field.required && isEmpty(raw)) {
-      errors[field.key] = `${field.label || field.key} is required`;
+      errors[field.key] = t("web.admin.plugins.schemaForm.required", { label });
       continue;
     }
     if (isEmpty(raw)) continue;
@@ -66,22 +73,29 @@ export function validateSchemaValues(
         patternFailed = re !== null && !re.test(raw);
       }
       if (patternFailed) {
-        errors[field.key] = `${field.label || field.key} is invalid`;
+        errors[field.key] = t("web.admin.plugins.schemaForm.invalid", { label });
       } else if (v?.min_length && raw.length < v.min_length) {
-        errors[field.key] =
-          `${field.label || field.key} must be at least ${v.min_length} characters`;
+        errors[field.key] = t("web.admin.plugins.schemaForm.minLength", {
+          label,
+          count: v.min_length,
+          count_text: String(v.min_length),
+        });
       } else if (v?.max_length && raw.length > v.max_length) {
-        errors[field.key] =
-          `${field.label || field.key} must be at most ${v.max_length} characters`;
+        errors[field.key] = t("web.admin.plugins.schemaForm.maxLength", {
+          label,
+          count: v.max_length,
+          count_text: String(v.max_length),
+        });
       }
     }
     if (isNumberControl(field) && typeof raw === "string" && raw.trim() !== "") {
       const n = Number(raw);
-      if (Number.isNaN(n)) errors[field.key] = `${field.label || field.key} must be a number`;
+      if (Number.isNaN(n))
+        errors[field.key] = t("web.admin.plugins.schemaForm.notNumber", { label });
       else if (v?.has_min && n < (v.min ?? 0))
-        errors[field.key] = `${field.label || field.key} must be ≥ ${v.min}`;
+        errors[field.key] = t("web.admin.plugins.schemaForm.min", { label, min: String(v.min) });
       else if (v?.has_max && n > (v.max ?? 0))
-        errors[field.key] = `${field.label || field.key} must be ≤ ${v.max}`;
+        errors[field.key] = t("web.admin.plugins.schemaForm.max", { label, max: String(v.max) });
     }
   }
   return errors;

@@ -9,6 +9,7 @@ import type {
   RequestRoutePreviewRule,
 } from "@/api/v2/adminRequests";
 import { evaluateShowWhen } from "@/components/admin/plugins/schemaFormUtils";
+import { t, type MessageKey, type TextValues } from "@/i18n";
 import { routingCountryName, routingLanguageName } from "@/lib/requestRoutingOptions";
 import { tmdbGenreName } from "@/lib/tmdbGenres";
 
@@ -83,8 +84,8 @@ export function initialChoices(source: RequestRoute | null): {
 /** The caption under the 4K version. */
 export function fourKCaption(forceDual: boolean): string {
   return forceDual
-    ? "Sent along with the HD version for every request (General)."
-    : "Sent along with the HD version when the requester's playback limit allows 4K.";
+    ? t("web.admin.settings.requests.destination.fourKCaptionForceDual")
+    : t("web.admin.settings.requests.destination.fourKCaption");
 }
 
 /** A routing rule while it is being edited. */
@@ -282,29 +283,51 @@ export interface RoutingNames {
   studios?: ReadonlyMap<number, string>;
 }
 
+/**
+ * Formats a catalog message: `t` for text shown in the interface language,
+ * `englishText` for text the client saves (a rule's automatic name).
+ */
+type Text = (id: MessageKey, values?: TextValues) => string;
+
 /** "A", "A or B", "A, B or C". */
-function orList(values: readonly string[]): string {
+function orList(values: readonly string[], tx: Text = t): string {
   if (values.length <= 1) return values[0] ?? "";
-  return `${values.slice(0, -1).join(", ")} or ${values.at(-1)}`;
+  return tx("web.admin.settings.requests.model.orList", {
+    items: values.slice(0, -1).join(", "),
+    last: values.at(-1)!,
+  });
 }
 
 /** "A", "A and B", "A, B and C". */
 function andList(values: readonly string[]): string {
   if (values.length <= 1) return values[0] ?? "";
-  return `${values.slice(0, -1).join(", ")} and ${values.at(-1)}`;
+  return t("web.admin.settings.requests.model.andList", {
+    items: values.slice(0, -1).join(", "),
+    last: values.at(-1)!,
+  });
 }
 
 /** "isn't Horror", "is neither Horror nor War", "is none of A, B or C". */
-function notOneOf(values: readonly string[], verb = "is"): string {
-  if (values.length === 1) return `${verb === "is" ? "isn't" : `${verb} not`} ${values[0]}`;
-  if (values.length === 2) return `${verb} neither ${values[0]} nor ${values[1]}`;
-  return `${verb} none of ${orList(values)}`;
+function notOneOf(values: readonly string[]): string {
+  if (values.length === 1)
+    return t("web.admin.settings.requests.model.clause.isNot", { value: values[0]! });
+  if (values.length === 2) {
+    return t("web.admin.settings.requests.model.clause.isNeither", {
+      first: values[0]!,
+      second: values[1]!,
+    });
+  }
+  return t("web.admin.settings.requests.model.clause.isNoneOf", { values: orList(values) });
 }
 
-export function yearRangeLabel(from?: number, to?: number): string {
-  if (from && to) return from === to ? String(from) : `${from}–${to}`;
-  if (from) return `${from} or later`;
-  if (to) return `${to} or earlier`;
+function yearRangeLabel(from?: number, to?: number, tx: Text = t): string {
+  if (from && to) {
+    return from === to
+      ? String(from)
+      : tx("web.admin.settings.requests.model.years.range", { from: String(from), to: String(to) });
+  }
+  if (from) return tx("web.admin.settings.requests.model.years.from", { from: String(from) });
+  if (to) return tx("web.admin.settings.requests.model.years.to", { to: String(to) });
   return "";
 }
 
@@ -312,43 +335,91 @@ function genreNames(ids: readonly number[], mediaType: RequestRouteMediaType): s
   return ids.map((id) => tmdbGenreName(id, mediaType));
 }
 
-function brandNames(ids: readonly number[], noun: string, names: RoutingNames): string[] {
-  const map = noun.toLowerCase() === "network" ? names.networks : names.studios;
-  return ids.map((id) => map?.get(id) ?? `${noun} ${id}`);
+/** The name of a brand with no known name, in a sentence or (`title`) a rule name. */
+const BRAND_FALLBACK: Record<"network" | "studio", { sentence: MessageKey; title: MessageKey }> = {
+  network: {
+    sentence: "web.admin.settings.requests.model.networkFallback",
+    title: "web.admin.settings.requests.model.networkFallbackTitle",
+  },
+  studio: {
+    sentence: "web.admin.settings.requests.model.studioFallback",
+    title: "web.admin.settings.requests.model.studioFallbackTitle",
+  },
+};
+
+function brandNames(
+  ids: readonly number[],
+  kind: "network" | "studio",
+  names: RoutingNames,
+  form: "sentence" | "title" = "sentence",
+  tx: Text = t,
+): string[] {
+  const map = kind === "network" ? names.networks : names.studios;
+  return ids.map((id) => map?.get(id) ?? tx(BRAND_FALLBACK[kind][form], { id: String(id) }));
 }
 
-function userNames(ids: readonly number[], names: RoutingNames): string[] {
-  return ids.map((id) => names.users?.get(id) ?? `account ${id}`);
+function userNames(ids: readonly number[], names: RoutingNames, tx: Text = t): string[] {
+  return ids.map(
+    (id) =>
+      names.users?.get(id) ??
+      tx("web.admin.settings.requests.model.accountFallback", { id: String(id) }),
+  );
 }
 
 type SeriesStatus = NonNullable<RequestRouteConditions["series_statuses"]>[number];
 
 /** Each status's name; the schema's statuses must all be here. */
 const SERIES_STATUS_LABELS = {
-  returning: "Returning",
-  in_production: "In production",
-  upcoming: "Upcoming",
-  ended: "Ended",
-  cancelled: "Cancelled",
-} satisfies Record<SeriesStatus, string>;
+  returning: "web.admin.settings.requests.model.status.returning",
+  in_production: "web.admin.settings.requests.model.status.inProduction",
+  upcoming: "web.admin.settings.requests.model.status.upcoming",
+  ended: "web.admin.settings.requests.model.status.ended",
+  cancelled: "web.admin.settings.requests.model.status.cancelled",
+} satisfies Record<SeriesStatus, MessageKey>;
 
-/** A series' statuses as the server stores them, in the order the editor offers them. */
-export const SERIES_STATUSES: readonly { value: string; label: string }[] = Object.entries(
+/**
+ * A series' statuses as the server stores them, in the order the editor
+ * offers them. Each `label` is read in the interface language when used.
+ */
+export const SERIES_STATUSES: readonly { value: string; readonly label: string }[] = Object.entries(
   SERIES_STATUS_LABELS,
-).map(([value, label]) => ({ value, label }));
+).map(([value, key]) => ({
+  value,
+  get label() {
+    return t(key);
+  },
+}));
 
 /**
  * One-click status sets. A rule stores the statuses, not the set, so
- * changing a set never changes a saved rule.
+ * changing a set never changes a saved rule. Each `label` is read in the
+ * interface language when used.
  */
-export const SERIES_STATUS_PRESETS: readonly { label: string; values: readonly string[] }[] = [
-  { label: "Continuing or upcoming", values: ["returning", "in_production", "upcoming"] },
-  { label: "Ended or cancelled", values: ["ended", "cancelled"] },
+export const SERIES_STATUS_PRESETS: readonly {
+  readonly label: string;
+  labelKey: MessageKey;
+  values: readonly string[];
+}[] = [
+  {
+    labelKey: "web.admin.settings.requests.model.statusPreset.continuing",
+    get label() {
+      return t(this.labelKey);
+    },
+    values: ["returning", "in_production", "upcoming"],
+  },
+  {
+    labelKey: "web.admin.settings.requests.model.statusPreset.ended",
+    get label() {
+      return t(this.labelKey);
+    },
+    values: ["ended", "cancelled"],
+  },
 ];
 
 /** "Ended"; a status newer than the editor reads as the server sent it. */
-export function seriesStatusLabel(status: string): string {
-  return SERIES_STATUSES.find((entry) => entry.value === status)?.label ?? status;
+export function seriesStatusLabel(status: string, tx: Text = t): string {
+  const key = (SERIES_STATUS_LABELS as Record<string, MessageKey>)[status];
+  return key ? tx(key) : status;
 }
 
 /** The preset a set of statuses is exactly, if any. */
@@ -359,8 +430,8 @@ export function seriesStatusPreset(values: readonly string[]) {
   );
 }
 
-function statusNames(values: readonly string[]): string[] {
-  return values.map(seriesStatusLabel);
+function statusNames(values: readonly string[], tx: Text = t): string[] {
+  return values.map((value) => seriesStatusLabel(value, tx));
 }
 
 function lowerStatusNames(values: readonly string[]): string[] {
@@ -375,58 +446,124 @@ function conditionClauses(
 ): string[] {
   const c = conditions;
   const out: string[] = [];
-  if (c.anime === true) out.push("is anime");
-  if (c.anime === false) out.push("isn't anime");
-  if (c.genre_ids?.length) out.push(`is ${orList(genreNames(c.genre_ids, mediaType))}`);
+  const clause = (key: MessageKey, list: readonly string[]) => t(key, { values: orList(list) });
+  if (c.anime === true) out.push(t("web.admin.settings.requests.model.clause.anime"));
+  if (c.anime === false) out.push(t("web.admin.settings.requests.model.clause.notAnime"));
+  if (c.genre_ids?.length)
+    out.push(
+      clause("web.admin.settings.requests.model.clause.genre", genreNames(c.genre_ids, mediaType)),
+    );
   if (c.exclude_genre_ids?.length) out.push(notOneOf(genreNames(c.exclude_genre_ids, mediaType)));
   if (c.original_languages?.length) {
-    out.push(`is originally in ${orList(c.original_languages.map(routingLanguageName))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.language",
+        c.original_languages.map(routingLanguageName),
+      ),
+    );
   }
   if (c.exclude_original_languages?.length) {
     out.push(
-      `isn't originally in ${orList(c.exclude_original_languages.map(routingLanguageName))}`,
+      clause(
+        "web.admin.settings.requests.model.clause.notLanguage",
+        c.exclude_original_languages.map(routingLanguageName),
+      ),
     );
   }
   if (c.origin_countries?.length) {
-    out.push(`is from ${orList(c.origin_countries.map(routingCountryName))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.country",
+        c.origin_countries.map(routingCountryName),
+      ),
+    );
   }
   if (c.exclude_origin_countries?.length) {
-    out.push(`isn't from ${orList(c.exclude_origin_countries.map(routingCountryName))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.notCountry",
+        c.exclude_origin_countries.map(routingCountryName),
+      ),
+    );
   }
   const years = yearRangeLabel(c.year_from, c.year_to);
-  if (years) out.push(`${mediaType === "series" ? "first aired" : "came out"} in ${years}`);
-  if (c.series_statuses?.length) out.push(`is ${orList(lowerStatusNames(c.series_statuses))}`);
+  if (years)
+    out.push(t("web.admin.settings.requests.model.clause.years", { media_type: mediaType, years }));
+  if (c.series_statuses?.length)
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.status",
+        lowerStatusNames(c.series_statuses),
+      ),
+    );
   if (c.exclude_series_statuses?.length) {
     out.push(notOneOf(lowerStatusNames(c.exclude_series_statuses)));
   }
-  if (c.max_content_rating) out.push(`is rated ${c.max_content_rating} or lower`);
+  if (c.max_content_rating) {
+    out.push(
+      t("web.admin.settings.requests.model.clause.rating", { rating: c.max_content_rating }),
+    );
+  }
   if (c.network_ids?.length)
-    out.push(`is on ${orList(brandNames(c.network_ids, "network", names))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.network",
+        brandNames(c.network_ids, "network", names),
+      ),
+    );
   if (c.exclude_network_ids?.length) {
-    out.push(`isn't on ${orList(brandNames(c.exclude_network_ids, "network", names))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.notNetwork",
+        brandNames(c.exclude_network_ids, "network", names),
+      ),
+    );
   }
   if (c.company_ids?.length) {
-    out.push(`is made by ${orList(brandNames(c.company_ids, "studio", names))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.studio",
+        brandNames(c.company_ids, "studio", names),
+      ),
+    );
   }
   if (c.exclude_company_ids?.length) {
-    out.push(`isn't made by ${orList(brandNames(c.exclude_company_ids, "studio", names))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.notStudio",
+        brandNames(c.exclude_company_ids, "studio", names),
+      ),
+    );
   }
   if (c.requester_user_ids?.length) {
-    out.push(`is requested by ${orList(userNames(c.requester_user_ids, names))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.requester",
+        userNames(c.requester_user_ids, names),
+      ),
+    );
   }
   if (c.exclude_requester_user_ids?.length) {
-    out.push(`isn't requested by ${orList(userNames(c.exclude_requester_user_ids, names))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.notRequester",
+        userNames(c.exclude_requester_user_ids, names),
+      ),
+    );
   }
   if (c.keyword_ids?.length) {
-    out.push(`has TMDB keyword ${orList(c.keyword_ids.map(String))}`);
+    out.push(clause("web.admin.settings.requests.model.clause.keyword", c.keyword_ids.map(String)));
   }
   if (c.exclude_keyword_ids?.length) {
-    out.push(`doesn't have TMDB keyword ${orList(c.exclude_keyword_ids.map(String))}`);
+    out.push(
+      clause(
+        "web.admin.settings.requests.model.clause.notKeyword",
+        c.exclude_keyword_ids.map(String),
+      ),
+    );
   }
   return out;
 }
-
-const ARTICLE: Record<RequestRouteMediaType, string> = { movie: "a movie", series: "a series" };
 
 /** "When a series is Family or Kids and is rated PG or lower". */
 export function ruleSentence(
@@ -435,63 +572,113 @@ export function ruleSentence(
   names: RoutingNames = {},
 ): string {
   const clauses = conditionClauses(conditions, mediaType, names);
-  if (clauses.length === 0) return `Every ${mediaType === "series" ? "series" : "movie"}`;
-  return `When ${ARTICLE[mediaType]} ${andList(clauses)}`;
+  if (clauses.length === 0)
+    return t("web.admin.settings.requests.model.ruleSentenceEvery", { media_type: mediaType });
+  return t("web.admin.settings.requests.model.ruleSentenceWhen", {
+    media_type: mediaType,
+    conditions: andList(clauses),
+  });
 }
 
-/** A short name for a rule, from its conditions: "Anime", "Not English", "Family or Kids, PG or lower". */
+/**
+ * A short name for a rule, from its conditions: "Anime", "Not English",
+ * "Family or Kids, PG or lower". Pass `englishText` for a name the client saves.
+ */
 export function autoRuleName(
   conditions: RequestRouteConditions,
   mediaType: RequestRouteMediaType,
   names: RoutingNames = {},
+  tx: Text = t,
 ): string {
   const c = conditions;
+  const orListTx = (list: readonly string[]) => orList(list, tx);
   const parts: string[] = [];
-  if (c.anime === true) parts.push("Anime");
-  if (c.anime === false) parts.push("Not anime");
-  if (c.genre_ids?.length) parts.push(orList(genreNames(c.genre_ids, mediaType)));
-  if (c.exclude_genre_ids?.length) {
-    parts.push(`Not ${orList(genreNames(c.exclude_genre_ids, mediaType))}`);
-  }
+  const not = (list: readonly string[]) =>
+    tx("web.admin.settings.requests.model.autoName.not", { values: orListTx(list) });
+  const named = (key: MessageKey, list: readonly string[]) => tx(key, { values: orListTx(list) });
+  if (c.anime === true) parts.push(tx("web.admin.settings.requests.model.autoName.anime"));
+  if (c.anime === false) parts.push(tx("web.admin.settings.requests.model.autoName.notAnime"));
+  if (c.genre_ids?.length) parts.push(orListTx(genreNames(c.genre_ids, mediaType)));
+  if (c.exclude_genre_ids?.length) parts.push(not(genreNames(c.exclude_genre_ids, mediaType)));
   if (c.original_languages?.length)
-    parts.push(orList(c.original_languages.map(routingLanguageName)));
+    parts.push(orListTx(c.original_languages.map(routingLanguageName)));
   if (c.exclude_original_languages?.length) {
-    parts.push(`Not ${orList(c.exclude_original_languages.map(routingLanguageName))}`);
+    parts.push(not(c.exclude_original_languages.map(routingLanguageName)));
   }
-  if (c.origin_countries?.length) parts.push(orList(c.origin_countries.map(routingCountryName)));
+  if (c.origin_countries?.length) parts.push(orListTx(c.origin_countries.map(routingCountryName)));
   if (c.exclude_origin_countries?.length) {
-    parts.push(`Not from ${orList(c.exclude_origin_countries.map(routingCountryName))}`);
-  }
-  const years = yearRangeLabel(c.year_from, c.year_to);
-  if (years) parts.push(years);
-  if (c.series_statuses?.length) {
     parts.push(
-      seriesStatusPreset(c.series_statuses)?.label ?? orList(statusNames(c.series_statuses)),
+      named(
+        "web.admin.settings.requests.model.autoName.notCountry",
+        c.exclude_origin_countries.map(routingCountryName),
+      ),
     );
   }
+  const years = yearRangeLabel(c.year_from, c.year_to, tx);
+  if (years) parts.push(years);
+  if (c.series_statuses?.length) {
+    const preset = seriesStatusPreset(c.series_statuses);
+    parts.push(preset ? tx(preset.labelKey) : orListTx(statusNames(c.series_statuses, tx)));
+  }
   if (c.exclude_series_statuses?.length) {
-    parts.push(`Not ${orList(statusNames(c.exclude_series_statuses))}`);
+    parts.push(not(statusNames(c.exclude_series_statuses, tx)));
   }
-  if (c.max_content_rating) parts.push(`${c.max_content_rating} or lower`);
-  if (c.network_ids?.length) parts.push(orList(brandNames(c.network_ids, "Network", names)));
+  if (c.max_content_rating) {
+    parts.push(
+      tx("web.admin.settings.requests.model.autoName.rating", { rating: c.max_content_rating }),
+    );
+  }
+  if (c.network_ids?.length) {
+    parts.push(orListTx(brandNames(c.network_ids, "network", names, "title", tx)));
+  }
   if (c.exclude_network_ids?.length) {
-    parts.push(`Not on ${orList(brandNames(c.exclude_network_ids, "Network", names))}`);
+    parts.push(
+      named(
+        "web.admin.settings.requests.model.autoName.notNetwork",
+        brandNames(c.exclude_network_ids, "network", names, "title", tx),
+      ),
+    );
   }
-  if (c.company_ids?.length) parts.push(orList(brandNames(c.company_ids, "Studio", names)));
+  if (c.company_ids?.length) {
+    parts.push(orListTx(brandNames(c.company_ids, "studio", names, "title", tx)));
+  }
   if (c.exclude_company_ids?.length) {
-    parts.push(`Not by ${orList(brandNames(c.exclude_company_ids, "Studio", names))}`);
+    parts.push(
+      named(
+        "web.admin.settings.requests.model.autoName.notStudio",
+        brandNames(c.exclude_company_ids, "studio", names, "title", tx),
+      ),
+    );
   }
   if (c.requester_user_ids?.length) {
-    parts.push(`Requested by ${orList(userNames(c.requester_user_ids, names))}`);
+    parts.push(
+      named(
+        "web.admin.settings.requests.model.autoName.requester",
+        userNames(c.requester_user_ids, names, tx),
+      ),
+    );
   }
   if (c.exclude_requester_user_ids?.length) {
-    parts.push(`Not requested by ${orList(userNames(c.exclude_requester_user_ids, names))}`);
+    parts.push(
+      named(
+        "web.admin.settings.requests.model.autoName.notRequester",
+        userNames(c.exclude_requester_user_ids, names, tx),
+      ),
+    );
   }
-  if (c.keyword_ids?.length) parts.push(`Keyword ${orList(c.keyword_ids.map(String))}`);
+  if (c.keyword_ids?.length)
+    parts.push(
+      named("web.admin.settings.requests.model.autoName.keyword", c.keyword_ids.map(String)),
+    );
   if (c.exclude_keyword_ids?.length) {
-    parts.push(`Not keyword ${orList(c.exclude_keyword_ids.map(String))}`);
+    parts.push(
+      named(
+        "web.admin.settings.requests.model.autoName.notKeyword",
+        c.exclude_keyword_ids.map(String),
+      ),
+    );
   }
-  const name = parts.join(", ") || "New rule";
+  const name = parts.join(", ") || tx("web.admin.settings.requests.model.autoName.newRule");
   return name.length > 100 ? `${name.slice(0, 99)}…` : name;
 }
 
@@ -499,14 +686,14 @@ export function autoRuleName(
 /* Destinations                                                              */
 /* ------------------------------------------------------------------------ */
 
-const OVERRIDE_LABELS: Record<string, string> = {
-  root_folder: "Folder",
-  quality_profile_id: "Quality",
-  tags: "Tags",
-  series_type: "Series type",
-  minimum_availability: "Minimum availability",
-  search_on_add: "Search on add",
-  season_folder: "Season folder",
+const OVERRIDE_LABELS: Record<string, MessageKey> = {
+  root_folder: "web.admin.settings.requests.model.override.rootFolder",
+  quality_profile_id: "web.admin.settings.requests.model.override.qualityProfile",
+  tags: "web.admin.settings.requests.model.override.tags",
+  series_type: "web.admin.settings.requests.model.override.seriesType",
+  minimum_availability: "web.admin.settings.requests.model.override.minimumAvailability",
+  search_on_add: "web.admin.settings.requests.model.override.searchOnAdd",
+  season_folder: "web.admin.settings.requests.model.override.seasonFolder",
 };
 
 /** The overrides shown on a destination's own rows; the rest go under More settings. */
@@ -537,7 +724,13 @@ export interface OverrideNames {
 
 function overrideValueLabel(key: string, value: unknown, names: OverrideNames): string {
   if (Array.isArray(value)) return value.map((v) => overrideValueLabel(key, v, names)).join(", ");
-  if (typeof value === "boolean") return value ? "on" : "off";
+  if (typeof value === "boolean") {
+    return t(
+      value
+        ? "web.admin.settings.requests.model.override.on"
+        : "web.admin.settings.requests.model.override.off",
+    );
+  }
   const raw = String(value);
   if (SELF_NAMED_OVERRIDES.has(key)) return raw;
   const choices = names.options?.[key] ?? names.fields?.find((f) => f.key === key)?.options;
@@ -545,7 +738,9 @@ function overrideValueLabel(key: string, value: unknown, names: OverrideNames): 
 }
 
 export function overrideLabel(key: string, names: OverrideNames = {}): string {
-  return OVERRIDE_LABELS[key] ?? names.fields?.find((field) => field.key === key)?.label ?? key;
+  const own = OVERRIDE_LABELS[key];
+  if (own) return t(own);
+  return names.fields?.find((field) => field.key === key)?.label ?? key;
 }
 
 function presentOverrides(overrides: Record<string, unknown> | undefined): [string, unknown][] {
@@ -569,7 +764,12 @@ export function overridesSummary(
   names: OverrideNames = {},
 ): string {
   return presentOverrides(overrides)
-    .map(([key, value]) => `${overrideLabel(key, names)} ${overrideValueLabel(key, value, names)}`)
+    .map(([key, value]) =>
+      t("web.admin.settings.requests.model.overrideSummaryItem", {
+        setting: overrideLabel(key, names),
+        value: overrideValueLabel(key, value, names),
+      }),
+    )
     .join(" · ");
 }
 
@@ -583,10 +783,17 @@ export function destinationSentence(
   names: OverrideNames = {},
 ): string {
   const server = servers.find((candidate) => candidate.id === dest.integration_id);
-  const parts = [server?.name ?? "a server that no longer exists"];
+  const parts = [server?.name ?? t("web.admin.settings.requests.model.missingServer")];
   for (const [key, value] of presentOverrides(dest.overrides)) {
     const label = overrideValueLabel(key, value, names);
-    parts.push(INLINE_OVERRIDES.includes(key) ? label : `${overrideLabel(key, names)}: ${label}`);
+    parts.push(
+      INLINE_OVERRIDES.includes(key)
+        ? label
+        : t("web.admin.settings.requests.model.overrideSetting", {
+            setting: overrideLabel(key, names),
+            value: label,
+          }),
+    );
   }
   return parts.join(" · ");
 }
@@ -631,11 +838,17 @@ export function passThroughLabel(
   servers: readonly Pick<RequestIntegration, "id" | "name">[],
 ): string {
   if (below.some((rule) => rule.enabled && decidesTier(rule, tier))) {
-    return "Let the rules below decide";
+    return t("web.admin.settings.requests.model.passThrough.rulesBelow");
   }
   const dest = tier === "hd" ? fallback?.hd : fallback?.uhd;
   const server = servers.find((candidate) => candidate.id === dest?.integration_id);
-  return `Same as Everything else (${server?.name ?? (tier === "hd" ? "none" : "no 4K version")})`;
+  if (server)
+    return t("web.admin.settings.requests.model.passThrough.fallback", { server: server.name });
+  return t(
+    tier === "hd"
+      ? "web.admin.settings.requests.model.passThrough.fallbackNone"
+      : "web.admin.settings.requests.model.passThrough.fallbackNo4K",
+  );
 }
 
 const OVERRIDABLE_CONTROLS = new Set(["SELECT", "MULTI_SELECT", "SWITCH"]);
@@ -745,13 +958,18 @@ export const ROUTING_RATINGS: readonly string[] = [
  */
 export function ratingLabel(rating: string): string {
   const match = /^([A-Za-z]{2,3}):(.+)$/.exec(rating);
-  return match ? `${match[2]} (${match[1]!.toUpperCase()})` : rating;
+  return match
+    ? t("web.admin.settings.requests.model.countryRating", {
+        rating: match[2]!,
+        country: match[1]!.toUpperCase(),
+      })
+    : rating;
 }
 
 /** "anime · Japanese · Japan · 2001 · Ended · Rated PG · Animation, Fantasy". */
 export function factsSentence(facts: RequestRouteFacts, mediaType: RequestRouteMediaType): string {
   return [
-    facts.anime ? "anime" : null,
+    facts.anime ? t("web.admin.settings.requests.model.facts.anime") : null,
     facts.original_language ? routingLanguageName(facts.original_language) : null,
     facts.origin_countries.length > 0
       ? facts.origin_countries.map(routingCountryName).join(", ")
@@ -760,9 +978,13 @@ export function factsSentence(facts: RequestRouteFacts, mediaType: RequestRouteM
     mediaType === "series"
       ? facts.series_status
         ? seriesStatusLabel(facts.series_status)
-        : "Status unknown"
+        : t("web.admin.settings.requests.model.facts.statusUnknown")
       : null,
-    facts.content_rating ? `Rated ${ratingLabel(facts.content_rating)}` : "No rating",
+    facts.content_rating
+      ? t("web.admin.settings.requests.model.facts.rated", {
+          rating: ratingLabel(facts.content_rating),
+        })
+      : t("web.admin.settings.requests.model.facts.noRating"),
     facts.genre_ids.length > 0 ? genreNames(facts.genre_ids, mediaType).join(", ") : null,
   ]
     .filter(Boolean)
@@ -777,8 +999,19 @@ export interface TraceContext {
   requesterUserId?: number;
 }
 
-function has(values: readonly string[], none: string, label: string) {
-  return values.length > 0 ? `${label} ${values.join(", ")}` : none;
+/** A title's fact as a trace reads it: "genre is Animation, Family", or "no genres". */
+function has(values: readonly string[], none: MessageKey, label: MessageKey): string {
+  return values.length > 0 ? t(label, { values: values.join(", ") }) : t(none);
+}
+
+/** "<fact> (wants <wanted>)", or (`except`) "<fact> (wants anything but <wanted>)". */
+function miss(fact: string, wanted: string, except = false): string {
+  return t(
+    except
+      ? "web.admin.settings.requests.model.trace.missExcept"
+      : "web.admin.settings.requests.model.trace.miss",
+    { fact, wanted },
+  );
 }
 
 /**
@@ -793,64 +1026,118 @@ function traceMissSentence(
 ): string {
   const { facts, mediaType, names } = ctx;
   const c = conditions;
-  const genres = genreNames(facts.genre_ids, mediaType);
-  const language = facts.original_language ? [routingLanguageName(facts.original_language)] : [];
-  const countries = facts.origin_countries.map(routingCountryName);
+  const genres = has(
+    genreNames(facts.genre_ids, mediaType),
+    "web.admin.settings.requests.model.trace.noGenres",
+    "web.admin.settings.requests.model.trace.genreIs",
+  );
+  const language = has(
+    facts.original_language ? [routingLanguageName(facts.original_language)] : [],
+    "web.admin.settings.requests.model.trace.noLanguage",
+    "web.admin.settings.requests.model.trace.languageIs",
+  );
+  const countries = has(
+    facts.origin_countries.map(routingCountryName),
+    "web.admin.settings.requests.model.trace.noCountry",
+    "web.admin.settings.requests.model.trace.countryIs",
+  );
   const requester =
     ctx.requesterUserId === undefined ? undefined : userNames([ctx.requesterUserId], names)[0];
+  const requestedBy = requester
+    ? t("web.admin.settings.requests.model.trace.requestedBy", { user: requester })
+    : t("web.admin.settings.requests.model.trace.requestedByAnyone");
   switch (key) {
     case "anime":
-      return c.anime ? "isn't anime (wants anime)" : "is anime (wants not anime)";
+      return t(
+        c.anime
+          ? "web.admin.settings.requests.model.trace.notAnime"
+          : "web.admin.settings.requests.model.trace.anime",
+      );
     case "genre_ids":
-      return `${has(genres, "no genres", "genre is")} (wants ${orList(genreNames(c.genre_ids ?? [], mediaType))})`;
+      return miss(genres, orList(genreNames(c.genre_ids ?? [], mediaType)));
     case "exclude_genre_ids":
-      return `${has(genres, "no genres", "genre is")} (wants anything but ${orList(genreNames(c.exclude_genre_ids ?? [], mediaType))})`;
+      return miss(genres, orList(genreNames(c.exclude_genre_ids ?? [], mediaType)), true);
     case "original_languages":
-      return `${has(language, "no original language", "language is")} (wants ${orList((c.original_languages ?? []).map(routingLanguageName))})`;
+      return miss(language, orList((c.original_languages ?? []).map(routingLanguageName)));
     case "exclude_original_languages":
-      return `${has(language, "no original language", "language is")} (wants anything but ${orList((c.exclude_original_languages ?? []).map(routingLanguageName))})`;
+      return miss(
+        language,
+        orList((c.exclude_original_languages ?? []).map(routingLanguageName)),
+        true,
+      );
     case "origin_countries":
-      return `${has(countries, "no country", "country is")} (wants ${orList((c.origin_countries ?? []).map(routingCountryName))})`;
+      return miss(countries, orList((c.origin_countries ?? []).map(routingCountryName)));
     case "exclude_origin_countries":
-      return `${has(countries, "no country", "country is")} (wants anything but ${orList((c.exclude_origin_countries ?? []).map(routingCountryName))})`;
+      return miss(
+        countries,
+        orList((c.exclude_origin_countries ?? []).map(routingCountryName)),
+        true,
+      );
     case "year_from":
     case "year_to":
-      return `${facts.year ? `year is ${facts.year}` : "no year"} (wants ${yearRangeLabel(c.year_from, c.year_to)})`;
+      return miss(
+        facts.year
+          ? t("web.admin.settings.requests.model.trace.yearIs", { year: String(facts.year) })
+          : t("web.admin.settings.requests.model.trace.noYear"),
+        yearRangeLabel(c.year_from, c.year_to),
+      );
     case "series_statuses":
     case "exclude_series_statuses": {
       const is = facts.series_status
-        ? `status is ${seriesStatusLabel(facts.series_status)}`
-        : "no status";
-      const wanted = orList(statusNames(c[key] ?? []));
-      return `${is} (wants ${key === "series_statuses" ? "" : "anything but "}${wanted})`;
+        ? t("web.admin.settings.requests.model.trace.statusIs", {
+            status: seriesStatusLabel(facts.series_status),
+          })
+        : t("web.admin.settings.requests.model.trace.noStatus");
+      return miss(is, orList(statusNames(c[key] ?? [])), key !== "series_statuses");
     }
     case "max_content_rating":
-      return `${facts.content_rating ? `rated ${ratingLabel(facts.content_rating)}` : "no rating"} (wants ${c.max_content_rating} or lower)`;
+      return t("web.admin.settings.requests.model.trace.missRating", {
+        fact: facts.content_rating
+          ? t("web.admin.settings.requests.model.trace.ratedAs", {
+              rating: ratingLabel(facts.content_rating),
+            })
+          : t("web.admin.settings.requests.model.trace.noRating"),
+        rating: c.max_content_rating ?? "",
+      });
     case "network_ids":
     case "exclude_network_ids": {
-      const on = has(brandNames(facts.network_ids, "network", names), "no network", "network is");
-      const wanted = brandNames(c[key] ?? [], "network", names);
-      return `${on} (wants ${key === "network_ids" ? "" : "anything but "}${orList(wanted)})`;
+      const on = has(
+        brandNames(facts.network_ids, "network", names),
+        "web.admin.settings.requests.model.trace.noNetwork",
+        "web.admin.settings.requests.model.trace.networkIs",
+      );
+      return miss(on, orList(brandNames(c[key] ?? [], "network", names)), key !== "network_ids");
     }
     case "company_ids":
     case "exclude_company_ids": {
-      const by = has(brandNames(facts.company_ids, "studio", names), "no studio", "studio is");
-      const wanted = brandNames(c[key] ?? [], "studio", names);
-      return `${by} (wants ${key === "company_ids" ? "" : "anything but "}${orList(wanted)})`;
+      const by = has(
+        brandNames(facts.company_ids, "studio", names),
+        "web.admin.settings.requests.model.trace.noStudio",
+        "web.admin.settings.requests.model.trace.studioIs",
+      );
+      return miss(by, orList(brandNames(c[key] ?? [], "studio", names)), key !== "company_ids");
     }
     case "requester_user_ids":
-      return `requested by ${requester ?? "anyone"} (wants ${orList(userNames(c.requester_user_ids ?? [], names))})`;
+      return miss(requestedBy, orList(userNames(c.requester_user_ids ?? [], names)));
     case "exclude_requester_user_ids":
-      return `requested by ${requester ?? "anyone"} (wants anyone but ${orList(userNames(c.exclude_requester_user_ids ?? [], names))})`;
+      return t("web.admin.settings.requests.model.trace.missRequesterExcept", {
+        fact: requestedBy,
+        users: orList(userNames(c.exclude_requester_user_ids ?? [], names)),
+      });
     case "keyword_ids":
-      return `no matching TMDB keyword (wants ${orList((c.keyword_ids ?? []).map(String))})`;
+      return t("web.admin.settings.requests.model.trace.missKeyword", {
+        wanted: orList((c.keyword_ids ?? []).map(String)),
+      });
     case "exclude_keyword_ids": {
       const excluded = c.exclude_keyword_ids ?? [];
       const found = excluded.filter((id) => facts.keyword_ids.includes(id)).map(String);
-      return `has TMDB keyword ${orList(found)} (wants none of ${orList(excluded.map(String))})`;
+      return t("web.admin.settings.requests.model.trace.missExcludedKeyword", {
+        found: orList(found),
+        wanted: orList(excluded.map(String)),
+      });
     }
     default:
-      return `fails ${key}`;
+      return t("web.admin.settings.requests.model.trace.fails", { condition: key });
   }
 }
 
@@ -869,14 +1156,19 @@ function traceMisses(
 /** What a matching rule did: "decides HD", "decides HD and 4K", "decides HD: none", "decides 4K: none". */
 function traceDecision(rule: Pick<RequestRoutePreviewRule, "hd" | "uhd">): string {
   const parts: string[] = [];
-  if (rule.hd === "sends" && rule.uhd === "sends") return "decides HD and 4K";
-  if (rule.hd === "sends") parts.push("decides HD");
-  if (rule.hd === "skips") parts.push("decides HD: none");
-  if (rule.uhd === "sends") parts.push("decides 4K");
-  if (rule.uhd === "skips") parts.push("decides 4K: none");
+  if (rule.hd === "sends" && rule.uhd === "sends")
+    return t("web.admin.settings.requests.model.trace.decidesBoth");
+  if (rule.hd === "sends") parts.push(t("web.admin.settings.requests.model.trace.decidesHd"));
+  if (rule.hd === "skips") parts.push(t("web.admin.settings.requests.model.trace.decidesHdNone"));
+  if (rule.uhd === "sends") parts.push(t("web.admin.settings.requests.model.trace.decidesUhd"));
+  if (rule.uhd === "skips") parts.push(t("web.admin.settings.requests.model.trace.decidesUhdNone"));
   if (parts.length > 0) return parts.join(" · ");
   const passed = rule.hd === "passes" || rule.uhd === "passes";
-  return passed ? "leaves it to the rules below" : "earlier rules already decided";
+  return t(
+    passed
+      ? "web.admin.settings.requests.model.trace.passesOn"
+      : "web.admin.settings.requests.model.trace.alreadyDecided",
+  );
 }
 
 /**
@@ -890,12 +1182,24 @@ export function traceLine(
   conditions: RequestRouteConditions | undefined,
   ctx: TraceContext,
 ): string {
-  if (rule.is_fallback) return `Everything else — ${traceDecision(rule)}`;
-  if (!rule.enabled) return `Off: ${rule.route_name}`;
-  const head = `${number}. ${rule.route_name}`;
-  if (rule.unmet_conditions.length === 0) return `${head} — matches · ${traceDecision(rule)}`;
+  if (rule.is_fallback)
+    return t("web.admin.settings.requests.model.trace.fallbackLine", {
+      decision: traceDecision(rule),
+    });
+  if (!rule.enabled)
+    return t("web.admin.settings.requests.model.trace.offLine", { rule: rule.route_name });
+  const head = { number: String(number), rule: rule.route_name };
+  if (rule.unmet_conditions.length === 0) {
+    return t("web.admin.settings.requests.model.trace.matchLine", {
+      ...head,
+      decision: traceDecision(rule),
+    });
+  }
   const misses = conditions
     ? traceMisses(rule.unmet_conditions, conditions, ctx)
     : rule.unmet_conditions;
-  return `${head} — doesn't match: ${misses.join("; ")}`;
+  return t("web.admin.settings.requests.model.trace.missLine", {
+    ...head,
+    misses: misses.join("; "),
+  });
 }

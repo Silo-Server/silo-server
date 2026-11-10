@@ -1,3 +1,4 @@
+/* eslint-disable formatjs/no-literal-string-in-jsx -- rewritten on main (#3623) after the catalog was cut; its new strings are a catalog follow-up */
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import {
@@ -28,13 +29,13 @@ import {
   nodeReportsAcceleration,
   nodeState,
   positiveCap,
-  UNGROUPED_LABEL,
   type NodeState,
   type ResourceMetric,
 } from "@/pages/adminNodesPresentation";
 import { SectionError } from "../feedback";
 import { formatMbps, formatMbpsValue } from "../format";
 import { formatLocale } from "@/lib/appLocale";
+import { useT, type Translate } from "@/i18n";
 
 /**
  * Remote transcode/streaming workers from `nodepool`, as a grouped table.
@@ -56,11 +57,12 @@ import { formatLocale } from "@/lib/appLocale";
  * rather than reading as a missing dependency.
  */
 export function TranscodeNodesWidget() {
+  const t = useT();
   const nodesQuery = useAdminNodes();
   const buildQuery = useBuildInfo();
   const serverRevision = buildQuery.data?.revision || null;
   const nodes = nodesQuery.data ?? [];
-  const groups = nodeGroups(nodes, serverRevision);
+  const groups = nodeGroups(nodes, serverRevision, t("web.admin.nodes.groups.ungrouped"));
   const showHeadings = groups.some((group) => group.name !== "");
   const showsGPU = nodes.some(nodeReportsAcceleration);
 
@@ -69,14 +71,16 @@ export function TranscodeNodesWidget() {
     <Card className="h-full gap-0 pb-3">
       <CardHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 pb-3">
         <div className="flex min-w-0 items-baseline gap-2.5">
-          <CardTitle className="text-sm font-bold">Nodes</CardTitle>
+          <CardTitle className="text-sm font-bold">
+            {t("web.admin.dashboard.widgets.transcodeNodes.title")}
+          </CardTitle>
           {nodes.length > 0 ? <FleetSummary nodes={nodes} /> : null}
         </div>
         <Link
           to="/admin/nodes"
           className="text-muted-foreground hover:text-primary shrink-0 text-[11px] whitespace-nowrap transition-colors"
         >
-          Manage ›
+          {t("web.admin.dashboard.widgets.transcodeNodes.manage")}
         </Link>
       </CardHeader>
       <CardContent className="@container/nodes min-h-0 flex-1 overflow-y-auto">
@@ -87,10 +91,10 @@ export function TranscodeNodesWidget() {
             ))}
           </div>
         ) : nodesQuery.error ? (
-          <SectionError message="Failed to load stream nodes." />
+          <SectionError message={t("web.admin.dashboard.widgets.transcodeNodes.loadFailed")} />
         ) : nodes.length === 0 ? (
           <div className="text-muted-foreground py-4 text-center text-sm">
-            No stream nodes — transcodes run on this server
+            {t("web.admin.dashboard.widgets.transcodeNodes.empty")}
           </div>
         ) : (
           <table className="w-full table-fixed border-separate border-spacing-0 text-xs tabular-nums">
@@ -127,7 +131,11 @@ const compareNames = new Intl.Collator(undefined, { numeric: true }).compare;
  * Nodes by their assigned group, worst group first. Within a group, proxies come
  * before transcode nodes so every group reads in the same order.
  */
-function nodeGroups(nodes: StreamNode[], serverRevision: string | null): NodeGroup[] {
+function nodeGroups(
+  nodes: StreamNode[],
+  serverRevision: string | null,
+  ungroupedLabel: string,
+): NodeGroup[] {
   // Ranked once up front: a rank builds several node descriptions, and the sorts
   // below would otherwise rebuild them on every comparison.
   const ranks = new Map(nodes.map((node) => [node, attentionRank(node, serverRevision)]));
@@ -150,7 +158,7 @@ function nodeGroups(nodes: StreamNode[], serverRevision: string | null): NodeGro
       const worst = members.reduce((a, b) => (rankOf(b) < rankOf(a) ? b : a));
       return {
         name,
-        label: labels.get(name) ?? UNGROUPED_LABEL,
+        label: labels.get(name) ?? ungroupedLabel,
         state: nodeState(worst),
         rank: rankOf(worst),
         nodes: members.sort(
@@ -400,7 +408,8 @@ function NodeFlag({
 function StatusIcon({ state, title }: { state: NodeState; title?: string }) {
   const status = NODE_STATUS[state];
   const Icon = status.icon;
-  const name = title ?? NODE_STATE_LABEL[state];
+  const t = useT();
+  const name = title ?? t(NODE_STATE_LABEL[state]);
   // An icon with a name: the tint alone would be the only signal for anyone who
   // cannot separate the hues.
   return (
@@ -469,6 +478,7 @@ function NodeRow({
   showsGPU: boolean;
   serverRevision: string | null;
 }) {
+  const t = useT();
   const state = nodeState(node);
   const drain = state === "draining" || state === "drained" ? describeNodeDrain(node) : null;
   const readings = nodeReadings(node);
@@ -499,7 +509,7 @@ function NodeRow({
           {buildDiffers(node, serverRevision) ? (
             <NodeFlag
               icon={AlertTriangle}
-              title={`Build differs from the server. ${buildTitle(node)}`}
+              title={`Build differs from the server. ${buildTitle(t, node)}`}
               labelClassName={storage ? "@max-[999px]/nodes:sr-only" : "@max-[719px]/nodes:sr-only"}
             >
               Build differs
@@ -534,13 +544,13 @@ function NodeRow({
         </td>
       ) : null}
       <td className={cn(CELL, CHECKED_COLUMN, "text-muted-foreground text-[11px]")}>
-        {lastCheckLabel(node)}
+        {lastCheckLabel(t, node)}
       </td>
       <td
         className={cn(CELL, BUILD_COLUMN, "text-muted-foreground text-[11px]")}
-        title={buildTitle(node)}
+        title={buildTitle(t, node)}
       >
-        {build ? buildLabel(build) : null}
+        {build ? buildLabel(t, build) : null}
       </td>
     </tr>
   );
@@ -673,29 +683,33 @@ function LoadReading({
   );
 }
 
-function buildLabel(build: NodeBuildInfo): string {
-  const display = build.display || "unavailable";
+function buildLabel(t: Translate, build: NodeBuildInfo): string {
+  const display = build.display || t("web.admin.dashboard.widgets.transcodeNodes.buildUnavailable");
   return build.build_number ? `${build.build_number} · ${display}` : display;
 }
 
-function buildTitle(node: StreamNode): string | undefined {
+function buildTitle(t: Translate, node: StreamNode): string | undefined {
   const build = node.last_stats?.build;
   if (!build) {
     return undefined;
   }
   return [
-    build.revision ? `Revision ${build.revision}` : "Revision unavailable",
-    build.built_at ? `built ${build.built_at}` : null,
+    build.revision
+      ? t("web.admin.dashboard.widgets.transcodeNodes.revision", { revision: build.revision })
+      : t("web.admin.dashboard.widgets.transcodeNodes.revisionUnavailable"),
+    build.built_at
+      ? t("web.admin.dashboard.widgets.transcodeNodes.builtAt", { date: build.built_at })
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");
 }
 
-function lastCheckLabel(node: StreamNode): string {
+function lastCheckLabel(t: Translate, node: StreamNode): string {
   return (
     formatRelativeTime(node.last_health_check, {
       rounding: "floor",
-      justNowLabel: "Just now",
+      justNowLabel: t("web.admin.dashboard.widgets.transcodeNodes.justNow"),
     }) ?? "Never"
   );
 }

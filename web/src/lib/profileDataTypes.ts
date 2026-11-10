@@ -1,5 +1,5 @@
 import type { components } from "@/api/v2/schema";
-import { t } from "@/i18n";
+import { t, type MessageKey } from "@/i18n";
 
 /**
  * The kinds of a profile's own data, shared by a profile's export and import
@@ -42,15 +42,29 @@ export const DATA_TYPE_LABELS: Record<ProfileDataTypeId, string> = {
   },
 };
 
-/** The same, inside a sentence. */
+/** The same, inside a sentence (each read gives the interface language). */
 export const DATA_TYPE_PHRASES: Record<ProfileDataTypeId, string> = {
-  watch_history: "watch history and progress",
-  ratings: "ratings",
-  favorites: "favorites and watchlist",
-  collections: "personal collections",
-  dismissals: 'dismissed and "not interested" titles',
-  preferences: "playback and display preferences",
-  notifications: "notification preferences",
+  get watch_history() {
+    return t("web.admin.backups.dataTypes.phrase.watchHistory");
+  },
+  get ratings() {
+    return t("web.admin.backups.dataTypes.phrase.ratings");
+  },
+  get favorites() {
+    return t("web.admin.backups.dataTypes.phrase.favorites");
+  },
+  get collections() {
+    return t("web.admin.backups.dataTypes.phrase.collections");
+  },
+  get dismissals() {
+    return t("web.admin.backups.dataTypes.phrase.dismissals");
+  },
+  get preferences() {
+    return t("web.admin.backups.dataTypes.phrase.preferences");
+  },
+  get notifications() {
+    return t("web.admin.backups.dataTypes.phrase.notifications");
+  },
 };
 
 /** One data type's merge counts: "3 added, 1 updated, 10 already here, 2 left out". */
@@ -87,15 +101,15 @@ export function titleList(titles: readonly string[]): string {
     : shown;
 }
 
-/** Short nouns for counting pending entries: one and many. */
-const PENDING_NOUNS: Record<ProfileDataTypeId, [string, string]> = {
-  watch_history: ["play", "plays"],
-  ratings: ["rating", "ratings"],
-  favorites: ["favorite", "favorites"],
-  collections: ["collection", "collections"],
-  dismissals: ["dismissal", "dismissals"],
-  preferences: ["preference", "preferences"],
-  notifications: ["notification setting", "notification settings"],
+/** Counts of pending entries per data type ("12 plays"). */
+const PENDING_COUNTS: Record<ProfileDataTypeId, MessageKey> = {
+  watch_history: "web.admin.backups.dataTypes.pending.watchHistory",
+  ratings: "web.admin.backups.dataTypes.pending.ratings",
+  favorites: "web.admin.backups.dataTypes.pending.favorites",
+  collections: "web.admin.backups.dataTypes.pending.collections",
+  dismissals: "web.admin.backups.dataTypes.pending.dismissals",
+  preferences: "web.admin.backups.dataTypes.pending.preferences",
+  notifications: "web.admin.backups.dataTypes.pending.notifications",
 };
 
 /**
@@ -127,9 +141,10 @@ export function pendingSummary(
   );
   const shown = ordered.slice(0, PENDING_TYPES_SHOWN).map((id) => {
     const count = totals.get(id)!;
-    const [one, many] = PENDING_NOUNS[id];
-    return `${count} ${count === 1 ? one : many}`;
+    return t(PENDING_COUNTS[id], { count, count_text: String(count) });
   });
-  const more = ordered.length > PENDING_TYPES_SHOWN ? " and more" : "";
-  return `${shown.join(" · ")}${more} to add`;
+  const items = shown.join(" · ");
+  return ordered.length > PENDING_TYPES_SHOWN
+    ? t("web.admin.backups.dataTypes.pending.toAddMore", { items })
+    : t("web.admin.backups.dataTypes.pending.toAdd", { items });
 }

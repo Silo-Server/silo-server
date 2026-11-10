@@ -150,6 +150,13 @@ function isolateValues<V extends RichValues>(
 export function formatWith(intl: IntlShape, id: MessageKey, values?: TextValues): string;
 export function formatWith(intl: IntlShape, id: MessageKey, values?: RichValues): ReactNode;
 export function formatWith(intl: IntlShape, id: MessageKey, values?: RichValues): ReactNode {
+  // A label table looked up with a value it doesn't list (an enum value the
+  // server added) gives no id. Show nothing, as the English tables did, rather
+  // than fail the render; tests still fail so a missing entry is noticed.
+  if (id === undefined) {
+    if (import.meta.env.MODE === "test") throw new Error("formatWith: no message id");
+    return "";
+  }
   const english = englishMessage(id);
   if (!english) {
     // Admin text before its part has loaded. Ask for it; components using

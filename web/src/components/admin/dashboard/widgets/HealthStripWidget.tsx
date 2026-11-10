@@ -12,6 +12,10 @@ import { cn } from "@/lib/utils";
 import { SectionError } from "../feedback";
 import { formatLatency, formatUptime } from "../format";
 import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
+
+const POSTGRES = "Postgres";
+const REDIS = "Redis";
 
 /**
  * One-line deployment health.
@@ -22,6 +26,7 @@ import { formatLocale } from "@/lib/appLocale";
  * dashboard two answers that can disagree.
  */
 export function HealthStripWidget() {
+  const t = useT();
   const statusQuery = useAdminServerStatus();
   const buildQuery = useBuildInfo();
   const nodesQuery = useAdminNodes();
@@ -29,7 +34,8 @@ export function HealthStripWidget() {
   const status = statusQuery.data;
   const health = status?.health;
   const buildNumber = buildQuery.data?.build_number ?? 0;
-  const versionDisplay = buildQuery.data?.display || "unknown";
+  const versionDisplay =
+    buildQuery.data?.display || t("web.admin.dashboard.widgets.healthStrip.versionUnknown");
   // Only a successful response may claim "none": while the node list is
   // loading or failed, node status is unknown, and "this server transcodes"
   // would be an invented answer.
@@ -49,7 +55,7 @@ export function HealthStripWidget() {
     return (
       <Card className="h-full justify-center py-3">
         <CardContent>
-          <SectionError message="Failed to load server health." />
+          <SectionError message={t("web.admin.dashboard.widgets.healthStrip.loadFailed")} />
         </CardContent>
       </Card>
     );
@@ -62,46 +68,59 @@ export function HealthStripWidget() {
       <CardContent className="grid min-h-0 flex-1 grid-cols-2 content-center gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <HealthCell
           icon={Tag}
-          label="Version"
+          label={t("web.admin.dashboard.widgets.healthStrip.version")}
           value={buildNumber > 0 ? `${buildNumber} · ${versionDisplay}` : versionDisplay}
-          detail={buildQuery.data?.dirty ? "dirty build" : undefined}
+          detail={
+            buildQuery.data?.dirty
+              ? t("web.admin.dashboard.widgets.healthStrip.dirtyBuild")
+              : undefined
+          }
         />
         <HealthCell
           icon={Clock}
-          label="Uptime"
+          label={t("web.admin.dashboard.widgets.healthStrip.uptime")}
           value={formatUptime(status.started_at)}
-          detail={status.restart_required ? "restart required" : undefined}
+          detail={
+            status.restart_required
+              ? t("web.admin.dashboard.widgets.healthStrip.restartRequired")
+              : undefined
+          }
           tone={status.restart_required ? "warn" : undefined}
         />
-        <DependencyCell icon={Database} label="Postgres" component={health?.postgres} />
-        <DependencyCell icon={Zap} label="Redis" component={health?.redis} />
+        <DependencyCell icon={Database} label={POSTGRES} component={health?.postgres} />
+        <DependencyCell icon={Zap} label={REDIS} component={health?.redis} />
         <HealthCell
           icon={Server}
-          label="Nodes"
+          label={t("web.admin.dashboard.widgets.healthStrip.nodes")}
           value={
             !nodesReady
               ? "—"
               : enabledNodes.length === 0
-                ? "none"
+                ? t("web.admin.dashboard.widgets.healthStrip.nodesNone")
                 : `${healthyNodes}/${enabledNodes.length}`
           }
           detail={
             !nodesReady
               ? nodesQuery.isError
-                ? "unavailable"
+                ? t("web.admin.dashboard.widgets.healthStrip.nodesUnavailable")
                 : undefined
               : enabledNodes.length === 0
-                ? "this server transcodes"
-                : "healthy"
+                ? t("web.admin.dashboard.widgets.healthStrip.nodesLocal")
+                : t("web.admin.dashboard.widgets.healthStrip.nodesHealthy")
           }
           tone={nodesReady && healthyNodes < enabledNodes.length ? "warn" : undefined}
         />
         <HealthCell
           icon={AlertTriangle}
-          label="Errors · 24h"
+          label={t("web.admin.dashboard.widgets.healthStrip.errors24h")}
           value={health ? health.errors_24h.toLocaleString(formatLocale()) : "—"}
           detail={
-            health ? `${health.warnings_24h.toLocaleString(formatLocale())} warnings` : undefined
+            health
+              ? t("web.admin.dashboard.widgets.healthStrip.warnings", {
+                  count: health.warnings_24h,
+                  count_text: health.warnings_24h.toLocaleString(formatLocale()),
+                })
+              : undefined
           }
           tone={health && health.errors_24h > 0 ? "error" : undefined}
           to="/admin/logs"
@@ -125,20 +144,35 @@ function DependencyCell({
   label: string;
   component: AdminHealthComponent | undefined;
 }) {
+  const t = useT();
   if (!component) {
     return <HealthCell icon={icon} label={label} value="—" />;
   }
   if (!component.configured) {
-    return <HealthCell icon={icon} label={label} value="Not configured" detail="optional" />;
+    return (
+      <HealthCell
+        icon={icon}
+        label={label}
+        value={t("web.admin.dashboard.widgets.healthStrip.notConfigured")}
+        detail={t("web.admin.dashboard.widgets.healthStrip.optional")}
+      />
+    );
   }
   if (!component.ok) {
-    return <HealthCell icon={icon} label={label} value="Unreachable" tone="error" />;
+    return (
+      <HealthCell
+        icon={icon}
+        label={label}
+        value={t("web.admin.dashboard.widgets.healthStrip.unreachable")}
+        tone="error"
+      />
+    );
   }
   return (
     <HealthCell
       icon={icon}
       label={label}
-      value="OK"
+      value={t("web.admin.dashboard.widgets.healthStrip.ok")}
       detail={component.latency_ms === undefined ? undefined : formatLatency(component.latency_ms)}
     />
   );

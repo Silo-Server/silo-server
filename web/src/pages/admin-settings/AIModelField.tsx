@@ -8,6 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
 } from "@/components/ui/select";
+import { useT } from "@/i18n";
 import { useAIProviderModels, type AICapability } from "@/hooks/queries/admin/aiProviders";
 import { cn } from "@/lib/utils";
 import { SETTINGS_CONTROL_WIDTH, SettingFieldRow } from "./SettingField";
@@ -41,6 +42,7 @@ export function ModelField({
   onCommit?: (value: string) => void;
   placeholder?: string;
 }) {
+  const t = useT();
   const inputID = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const pickerOpen = useRef(false);
@@ -49,11 +51,14 @@ export function ModelField({
   const status =
     providerID === "" ? undefined : models.isError ? (
       <span className="text-muted-foreground text-xs">
-        Could not load the provider&rsquo;s models; type the name.
+        {t("web.admin.settings.ai.modelField.loadFailed")}
       </span>
     ) : suggestions.length > 0 ? (
       <span className="text-muted-foreground text-xs">
-        {suggestions.length} suggested by the provider
+        {t("web.admin.settings.ai.modelField.suggested", {
+          count: suggestions.length,
+          count_text: String(suggestions.length),
+        })}
       </span>
     ) : undefined;
   return (
@@ -85,7 +90,7 @@ export function ModelField({
             onValueChange={onChange}
           >
             <SelectTrigger
-              aria-label={`Choose ${label.toLowerCase()}`}
+              aria-label={t("web.admin.settings.ai.modelField.choose")}
               className="size-9 shrink-0 justify-center px-0"
             />
             <SelectContent

@@ -45,6 +45,7 @@ import {
   useTestServerNotificationChannel,
   useUpdateServerNotificationChannel,
 } from "@/hooks/queries/admin/serverNotificationChannels";
+import { useT, type MessageKey } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 
 type ChannelNotifyKey =
@@ -59,30 +60,65 @@ type ChannelNotifyKey =
 
 interface ChannelNotifyField {
   key: ChannelNotifyKey;
-  label: string;
+  label: MessageKey;
   defaultValue: boolean;
 }
 
-const EVENT_SECTIONS: { label: string; fields: ChannelNotifyField[] }[] = [
+const EVENT_SECTIONS: { label: MessageKey; fields: ChannelNotifyField[] }[] = [
   {
-    label: "New content",
+    label: "web.admin.settings.notifications.serverChannels.events.newContent",
     fields: [
-      { key: "notify_new_movies", label: "New movies", defaultValue: true },
-      { key: "notify_new_episodes", label: "New episodes", defaultValue: true },
-      { key: "notify_new_audiobooks", label: "New audiobooks", defaultValue: true },
-      { key: "notify_new_ebooks", label: "New ebooks", defaultValue: true },
+      {
+        key: "notify_new_movies",
+        label: "web.admin.settings.notifications.serverChannels.events.newMovies",
+        defaultValue: true,
+      },
+      {
+        key: "notify_new_episodes",
+        label: "web.admin.settings.notifications.serverChannels.events.newEpisodes",
+        defaultValue: true,
+      },
+      {
+        key: "notify_new_audiobooks",
+        label: "web.admin.settings.notifications.serverChannels.events.newAudiobooks",
+        defaultValue: true,
+      },
+      {
+        key: "notify_new_ebooks",
+        label: "web.admin.settings.notifications.serverChannels.events.newEbooks",
+        defaultValue: true,
+      },
     ],
   },
   {
-    label: "Media requests",
+    label: "web.admin.settings.notifications.serverChannels.events.mediaRequests",
     fields: [
-      { key: "notify_request_submitted", label: "Request submitted", defaultValue: false },
-      { key: "notify_request_approved", label: "Request approved", defaultValue: false },
-      { key: "notify_request_declined", label: "Request declined", defaultValue: false },
-      { key: "notify_request_fulfilled", label: "Request fulfilled", defaultValue: false },
+      {
+        key: "notify_request_submitted",
+        label: "web.admin.settings.notifications.serverChannels.events.requestSubmitted",
+        defaultValue: false,
+      },
+      {
+        key: "notify_request_approved",
+        label: "web.admin.settings.notifications.serverChannels.events.requestApproved",
+        defaultValue: false,
+      },
+      {
+        key: "notify_request_declined",
+        label: "web.admin.settings.notifications.serverChannels.events.requestDeclined",
+        defaultValue: false,
+      },
+      {
+        key: "notify_request_fulfilled",
+        label: "web.admin.settings.notifications.serverChannels.events.requestFulfilled",
+        defaultValue: false,
+      },
     ],
   },
 ];
+
+/** Example destination URL for a new channel; it reads the same in every language. */
+const DISCORD_WEBHOOK_PLACEHOLDER = "https://discord.com/api/webhooks/…";
 
 const CHANNEL_NOTIFY_FIELDS = EVENT_SECTIONS.flatMap((section) => section.fields);
 
@@ -97,6 +133,7 @@ function ChannelFormDialog({
   channel: ServerNotificationChannel | null;
   onSecret: (secret: string) => void;
 }) {
+  const t = useT();
   const create = useCreateServerNotificationChannel();
   const update = useUpdateServerNotificationChannel();
   const [name, setName] = useState(channel?.name ?? "");
@@ -128,7 +165,7 @@ function ChannelFormDialog({
       return;
     }
     if (!input.url) {
-      toast.error("A webhook URL is required");
+      toast.error(t("web.admin.settings.notifications.serverChannels.urlRequired"));
       return;
     }
     const authority = captureNotificationAuthority();
@@ -140,7 +177,9 @@ function ChannelFormDialog({
           return;
         }
         onOpenChange(false);
-        toast.success(`Channel "${created.name}" created`);
+        toast.success(
+          t("web.admin.settings.notifications.serverChannels.created", { name: created.name }),
+        );
         if (created.signing_secret) {
           onSecret(created.signing_secret);
         }
@@ -151,7 +190,11 @@ function ChannelFormDialog({
         } catch {
           return;
         }
-        toast.error(error instanceof Error ? error.message : "Failed to create channel");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : t("web.admin.settings.notifications.serverChannels.createFailed"),
+        );
       },
     });
   };
@@ -160,43 +203,55 @@ function ChannelFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{editing ? `Edit "${channel.name}"` : "Add server channel"}</DialogTitle>
+          <DialogTitle>
+            {editing
+              ? t("web.admin.settings.notifications.serverChannels.editTitle", {
+                  name: channel.name,
+                })
+              : t("web.admin.settings.notifications.serverChannels.addTitle")}
+          </DialogTitle>
           <DialogDescription>
-            Server channels broadcast server-wide events — every profile sees the same posts.
-            Discord webhook URLs render as native embeds; any other HTTPS endpoint receives signed
-            JSON.
+            {t("web.admin.settings.notifications.serverChannels.dialogDescription")}
           </DialogDescription>
         </DialogHeader>
         <fieldset disabled={pending} className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="server-channel-name">Name</Label>
+            <Label htmlFor="server-channel-name">
+              {t("web.admin.settings.notifications.serverChannels.name")}
+            </Label>
             <Input
               id="server-channel-name"
               value={name}
               maxLength={64}
-              placeholder="Community #new-content"
+              placeholder={t("web.admin.settings.notifications.serverChannels.namePlaceholder")}
               onChange={(event) => setName(event.target.value)}
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="server-channel-url">{editing ? "Replace URL (optional)" : "URL"}</Label>
+            <Label htmlFor="server-channel-url">
+              {editing
+                ? t("web.admin.settings.notifications.serverChannels.replaceUrl")
+                : t("web.admin.settings.notifications.serverChannels.url")}
+            </Label>
             <Input
               id="server-channel-url"
               value={url}
               placeholder={
                 editing
-                  ? `Currently pointing at ${channel.url_host}`
-                  : "https://discord.com/api/webhooks/…"
+                  ? t("web.admin.settings.notifications.serverChannels.currentHost", {
+                      host: channel.url_host,
+                    })
+                  : DISCORD_WEBHOOK_PLACEHOLDER
               }
               onChange={(event) => setUrl(event.target.value)}
             />
           </div>
           {EVENT_SECTIONS.map((section) => (
             <div key={section.label} className="space-y-2">
-              <Label>{section.label}</Label>
+              <Label>{t(section.label)}</Label>
               {section.fields.map((field) => (
                 <div key={field.key} className="flex items-center justify-between gap-3">
-                  <div className="text-sm">{field.label}</div>
+                  <div className="text-sm">{t(field.label)}</div>
                   <Switch
                     checked={events[field.key]}
                     onCheckedChange={(checked) =>
@@ -210,16 +265,30 @@ function ChannelFormDialog({
         </fieldset>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={submit} disabled={pending || !name.trim()}>
             {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {editing ? "Save" : "Create"}
+            {editing
+              ? t("common.save")
+              : t("web.admin.settings.notifications.serverChannels.create")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * Values for a test post's result line. The status runs straight into the
+ * duration ("HTTP 200123ms"), as the line always has.
+ */
+function testResultValues(result: NotificationWebhookTestResult) {
+  return {
+    outcome: result.ok ? "ok" : "failed",
+    status: result.http_status ? String(result.http_status) : "none",
+    duration_ms: String(result.duration_ms),
+  };
 }
 
 function ChannelCard({
@@ -231,6 +300,7 @@ function ChannelCard({
   onEdit: () => void;
   onSecret: (secret: string) => void;
 }) {
+  const t = useT();
   const update = useUpdateServerNotificationChannel();
   const remove = useDeleteServerNotificationChannel();
   const authority = captureProfileRequestContext();
@@ -244,9 +314,16 @@ function ChannelCard({
   const failing =
     channel.last_failure_at != null &&
     (channel.last_success_at == null || channel.last_failure_at > channel.last_success_at);
-  const enabledEvents = CHANNEL_NOTIFY_FIELDS.filter((field) => channel[field.key]).map(
-    (field) => field.label,
+  const enabledEvents = CHANNEL_NOTIFY_FIELDS.filter((field) => channel[field.key]).map((field) =>
+    t(field.label),
   );
+  const failureDetail =
+    channel.last_failure_message ||
+    (channel.last_failure_status != null
+      ? t("web.admin.settings.notifications.serverChannels.httpStatus", {
+          status: String(channel.last_failure_status),
+        })
+      : t("web.admin.settings.notifications.serverChannels.httpError"));
 
   return (
     <div className="border-border/60 space-y-2 rounded-xl border p-4">
@@ -256,7 +333,9 @@ function ChannelCard({
         <span className="text-muted-foreground text-xs">{channel.url_host}</span>
         <div className="ml-auto flex items-center gap-1.5">
           <span className="text-muted-foreground text-xs">
-            {channel.enabled ? "Enabled" : "Disabled"}
+            {channel.enabled
+              ? t("web.admin.settings.notifications.serverChannels.enabled")
+              : t("web.admin.settings.notifications.serverChannels.disabled")}
           </span>
           <Switch
             checked={channel.enabled}
@@ -266,30 +345,46 @@ function ChannelCard({
       </div>
 
       <div className="text-muted-foreground text-xs">
-        {enabledEvents.length > 0 ? enabledEvents.join(" · ") : "No events selected"}
+        {enabledEvents.length > 0
+          ? enabledEvents.join(" · ")
+          : t("web.admin.settings.notifications.serverChannels.noEvents")}
       </div>
 
       {lastSuccess && !failing && (
-        <div className="text-muted-foreground text-xs">Last post: {lastSuccess}</div>
+        <div className="text-muted-foreground text-xs">
+          {t("web.admin.settings.notifications.serverChannels.lastPost", { when: lastSuccess })}
+        </div>
       )}
       {failing && (
         <div className="flex items-start gap-1.5 text-xs text-amber-500">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             {channel.disabled_reason
-              ? `Disabled: ${channel.disabled_reason} Re-enable the channel to resume from now.`
-              : `Last failure${lastFailure ? ` ${lastFailure}` : ""}: ${
-                  channel.last_failure_message || `HTTP ${channel.last_failure_status ?? "error"}`
-                }. Check the destination URL.`}
+              ? t("web.admin.settings.notifications.serverChannels.disabledReason", {
+                  reason: channel.disabled_reason,
+                })
+              : lastFailure
+                ? t("web.admin.settings.notifications.serverChannels.lastFailureWhen", {
+                    when: lastFailure,
+                    detail: failureDetail,
+                  })
+                : t("web.admin.settings.notifications.serverChannels.lastFailure", {
+                    detail: failureDetail,
+                  })}
           </span>
         </div>
       )}
       {testResult && (
         <div className={`text-xs ${testResult.ok ? "text-emerald-500" : "text-amber-500"}`}>
-          Test {testResult.ok ? "succeeded" : "failed"}
-          {testResult.http_status ? ` (HTTP ${testResult.http_status}` : " ("}
-          {`${testResult.duration_ms}ms)`}
-          {testResult.message ? ` — ${testResult.message}` : ""}
+          {testResult.message
+            ? t("web.admin.settings.notifications.serverChannels.testResultWithMessage", {
+                ...testResultValues(testResult),
+                message: testResult.message,
+              })
+            : t(
+                "web.admin.settings.notifications.serverChannels.testResult",
+                testResultValues(testResult),
+              )}
         </div>
       )}
 
@@ -305,7 +400,7 @@ function ChannelCard({
               },
               onError: () => {
                 if (authority && isCapturedProfileAuthorityActive(authority))
-                  toast.error("Test request failed");
+                  toast.error(t("web.admin.settings.notifications.serverChannels.testFailed"));
               },
             })
           }
@@ -315,11 +410,11 @@ function ChannelCard({
           ) : (
             <Send className="mr-1.5 h-3.5 w-3.5" />
           )}
-          Test
+          {t("web.admin.settings.notifications.serverChannels.test")}
         </Button>
         <Button variant="outline" size="sm" onClick={onEdit}>
           <Pencil className="mr-1.5 h-3.5 w-3.5" />
-          Edit
+          {t("web.admin.settings.notifications.serverChannels.edit")}
         </Button>
         {channel.type === "generic" && (
           <Button
@@ -333,7 +428,7 @@ function ChannelCard({
             }
           >
             <KeyRound className="mr-1.5 h-3.5 w-3.5" />
-            Rotate secret
+            {t("web.admin.settings.notifications.serverChannels.rotateSecret")}
           </Button>
         )}
         <Button
@@ -343,21 +438,27 @@ function ChannelCard({
           onClick={() => setConfirmDelete(true)}
         >
           <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-          Delete
+          {t("web.admin.settings.notifications.serverChannels.delete")}
         </Button>
       </div>
 
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title={`Delete "${channel.name}"?`}
-        description="Server events will stop posting to this destination. This cannot be undone."
-        confirmLabel="Delete"
+        title={t("web.admin.settings.notifications.serverChannels.deleteTitle", {
+          name: channel.name,
+        })}
+        description={t("web.admin.settings.notifications.serverChannels.deleteDescription")}
+        confirmLabel={t("web.admin.settings.notifications.serverChannels.deleteConfirm")}
         variant="destructive"
         isPending={remove.isPending}
         onConfirm={() => remove.mutate(channel.id, { onSettled: () => setConfirmDelete(false) })}
       />
-      {update.isPending && <span className="sr-only">Saving…</span>}
+      {update.isPending && (
+        <span className="sr-only">
+          {t("web.admin.settings.notifications.serverChannels.saving")}
+        </span>
+      )}
     </div>
   );
 }
@@ -368,6 +469,7 @@ function ChannelCard({
  * shared audience (e.g. a community Discord channel).
  */
 export default function ServerNotificationChannels() {
+  const t = useT();
   const { data: channels, isLoading } = useServerNotificationChannels();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ServerNotificationChannel | null>(null);
@@ -393,7 +495,7 @@ export default function ServerNotificationChannels() {
           {(channels ?? []).length === 0 && (
             <div className="text-muted-foreground flex items-center gap-2 py-1 text-sm">
               <Megaphone className="h-4 w-4" />
-              No server channels yet. Create one to broadcast new content and request activity.
+              {t("web.admin.settings.notifications.serverChannels.empty")}
             </div>
           )}
           <div>
@@ -406,7 +508,7 @@ export default function ServerNotificationChannels() {
               }}
             >
               <Plus className="mr-1.5 h-4 w-4" />
-              Add server channel
+              {t("web.admin.settings.notifications.serverChannels.add")}
             </Button>
           </div>
         </>
