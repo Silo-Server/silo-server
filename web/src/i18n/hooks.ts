@@ -1,8 +1,10 @@
-import { useCallback, useContext, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useSyncExternalStore, type ReactNode } from "react";
 import { IntlContext, type IntlShape } from "react-intl";
 
 import type { MessageKey } from "@/locales/keys";
+import { adminLoadFailure, requestAdminMessages, subscribeAdminRequest } from "./catalog";
 import {
+  adminMessagesReady,
   appIntl,
   formatWith,
   serverTextWith,
@@ -51,9 +53,21 @@ export function useServerText(): (
  * card lines), so that text follows the language like `useT()` text does.
  */
 export function useAppLanguage(): string {
-  return useSyncExternalStore(subscribeAppIntl, appLanguageTag, appLanguageTag);
+  // The formatter, not just its tag: admin text arriving keeps the language.
+  return useSyncExternalStore(subscribeAppIntl, appIntl, appIntl).locale;
 }
 
-function appLanguageTag(): string {
-  return appIntl().locale;
+/**
+ * Asks for the admin part of the catalog (`web.admin.*` text, kept out of the
+ * launch bundle) and reports whether it is ready in the current language. The
+ * admin layout and the setup wizard render nothing until it is. A failed load
+ * throws to the error boundary, as a failed lazy route does.
+ */
+export function useAdminMessages(): boolean {
+  useEffect(requestAdminMessages, []);
+  const ready = useSyncExternalStore(subscribeAppIntl, adminMessagesReady, adminMessagesReady);
+  // A recorded failure arrives through the request store, not the formatter.
+  const failure = useSyncExternalStore(subscribeAdminRequest, adminLoadFailure, adminLoadFailure);
+  if (!ready && failure !== undefined) throw failure;
+  return ready;
 }

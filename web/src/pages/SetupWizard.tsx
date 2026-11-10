@@ -4,7 +4,7 @@ import { SiloBrand } from "@/components/SiloBrand";
 import { useAuth } from "@/hooks/useAuth";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useHasUnsavedChanges } from "@/hooks/useUnsavedChanges";
-import { useT } from "@/i18n";
+import { useAdminMessages, useT } from "@/i18n";
 import "@/styles/admin-settings.css";
 import "@/styles/setup-wizard.css";
 
@@ -90,8 +90,10 @@ export default function SetupWizard() {
   const { user, loading, setupLoading, setupRequired, setupCompleted } = useAuth();
   const t = useT();
   useDocumentTitle(t("web.setup.wizard.documentTitle"));
+  // The steps reuse admin settings, library and provider forms.
+  const adminMessagesReady = useAdminMessages();
 
-  if (loading || setupLoading) {
+  if (loading || setupLoading || !adminMessagesReady) {
     return <div className="text-muted-foreground p-8 text-sm">{t("web.ui.loading")}</div>;
   }
 

@@ -9,7 +9,13 @@ import type { ReactNode } from "react";
 
 import type { MessageKey } from "@/locales/keys";
 import { interfaceDirection } from "@/lib/appLocale";
-import { englishMessage, type Messages } from "./catalog";
+import {
+  ADMIN_MESSAGE_PREFIX,
+  adminEnglishLoaded,
+  englishMessage,
+  requestAdminMessages,
+  type Messages,
+} from "./catalog";
 
 /** Values for a plain-text message. */
 export type TextValues = Record<string, PrimitiveType>;
@@ -42,6 +48,8 @@ export function createAppIntl(tag: string, messages: Messages): IntlShape {
 }
 
 let current = createAppIntl("en", {});
+/** Whether `current` carries its language's admin part (see `adminMessagesReady`). */
+let currentHasAdmin = false;
 const listeners = new Set<() => void>();
 
 /** The formatter the app uses now; `LocaleProvider` replaces it on a language change. */
@@ -49,11 +57,24 @@ export function appIntl(): IntlShape {
   return current;
 }
 
-/** Called by `LocaleProvider` once a language's messages have loaded. */
-export function setAppIntl(intl: IntlShape): void {
-  if (intl === current) return;
+/**
+ * Called by `LocaleProvider` once a language's messages have loaded; `admin`
+ * says they include the language's admin part.
+ */
+export function setAppIntl(intl: IntlShape, options: { admin?: boolean } = {}): void {
+  const admin = options.admin ?? false;
+  if (intl === current && admin === currentHasAdmin) return;
   current = intl;
+  currentHasAdmin = admin;
   for (const listener of listeners) listener();
+}
+
+/**
+ * Whether admin text renders in the current language: the English admin part
+ * has loaded and, outside English, so has the language's own.
+ */
+export function adminMessagesReady(): boolean {
+  return adminEnglishLoaded() && (currentHasAdmin || current.locale === "en");
 }
 
 /** Calls `listener` whenever the formatter changes, so text from `t()` can re-render. */
@@ -130,6 +151,14 @@ export function formatWith(intl: IntlShape, id: MessageKey, values?: TextValues)
 export function formatWith(intl: IntlShape, id: MessageKey, values?: RichValues): ReactNode;
 export function formatWith(intl: IntlShape, id: MessageKey, values?: RichValues): ReactNode {
   const english = englishMessage(id);
+  if (!english) {
+    // Admin text before its part has loaded. Ask for it; components using
+    // `useT()` or `useAppLanguage()` re-render when it arrives.
+    if (import.meta.env.MODE === "test") throw new Error(`formatWith: ${id} is not loaded`);
+    // Deferred: asking notifies LocaleProvider, which must not update during a render.
+    if (id.startsWith(ADMIN_MESSAGE_PREFIX)) queueMicrotask(requestAdminMessages);
+    return "";
+  }
   const ast = translation(intl, id) ?? english;
   return intl.formatMessage(
     { id, defaultMessage: english },
