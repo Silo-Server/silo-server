@@ -4199,7 +4199,7 @@ func refreshTargetKey(targetType, contentID string) string {
 }
 
 // refreshFailureLeavesNoDebt reports a refresh error that must not become
-// refresh debt. A cancelled refresh is not a failure. A curation-scope refusal
+// refresh debt. A canceled refresh is not a failure. A curation-scope refusal
 // means a delegated curator's refresh would have merged onto an item outside
 // their libraries: debt is retried as automatic work with no curator scope, so
 // recording it would let the retry perform that merge.

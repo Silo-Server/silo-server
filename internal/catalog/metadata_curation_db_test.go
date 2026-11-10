@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestCuratedProviderIDEditsStayInCurationScopeDB(t *testing.T) {
 	pool := newBatchEquivTestPool(t)
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
-	id := func(offset int64) string { return fmt.Sprint(700000000 + (suffix+offset)%100000000) }
+	id := func(offset int64) string { return strconv.FormatInt(700000000+(suffix+offset)%100000000, 10) }
 
 	var libA, libB int
 	for _, lib := range []*int{&libA, &libB} {
@@ -43,7 +44,7 @@ func TestCuratedProviderIDEditsStayInCurationScopeDB(t *testing.T) {
 
 	// Out of scope: one item at the anchor tmdb outB derives, one holding the
 	// IMDb ID outImdb only as a durable provider row. In scope: one in library A.
-	outB, outImdb, inA := id(1), fmt.Sprintf("tt%s", id(2)), id(3)
+	outB, outImdb, inA := id(1), "tt"+id(2), id(3)
 	anchorB, _ := contentid.ForMovie(contentid.ProviderIDs{Tmdb: outB})
 	seed(anchorB, outB, libB)
 	durableB := fmt.Sprintf("curation-identity-durable-%d", suffix)
@@ -51,28 +52,32 @@ func TestCuratedProviderIDEditsStayInCurationScopeDB(t *testing.T) {
 	batchEquivExec(t, pool, `INSERT INTO media_item_provider_ids (content_id, provider, provider_id, item_type) VALUES ($1, 'imdb', $2, 'movie')`, durableB, outImdb)
 	seed(fmt.Sprintf("curation-identity-in-scope-%d", suffix), inA, libA)
 
-	curator := access.MetadataCurationScope{LibraryIDs: []int{libA}}
-	curatorCtx := access.WithMetadataCurationAuthorizer(ctx, curator.Authorizer())
-	adminCtx := access.WithMetadataCurationAuthorizer(ctx, func(ctx context.Context, _ []int) error { return ctx.Err() })
+	curator := access.MetadataCurationScope{LibraryIDs: []int{libA}}.Authorizer()
+	admin := func(ctx context.Context, _ []int) error { return ctx.Err() }
 	repo := NewItemRepository(pool)
 
 	for i, tc := range []struct {
-		name    string
-		ctx     context.Context
-		upd     MetadataUpdate
-		refused bool
+		name string
+		// authorize is the request's curation authorizer; nil is automatic work.
+		authorize access.MetadataCurationAuthorizer
+		upd       MetadataUpdate
+		refused   bool
 	}{
-		{"curator picks the tmdb id of a library B title", curatorCtx, MetadataUpdate{TmdbID: new(" " + outB)}, true},
-		{"curator picks an imdb id a library B title holds", curatorCtx, MetadataUpdate{ImdbID: new(outImdb)}, true},
-		{"curator picks a library A title", curatorCtx, MetadataUpdate{TmdbID: new(inA)}, false},
-		{"curator edits a title only", curatorCtx, MetadataUpdate{Title: new("Renamed")}, false},
-		{"acting admin picks a library B title", adminCtx, MetadataUpdate{TmdbID: new(outB)}, false},
-		{"automatic write picks a library B title", ctx, MetadataUpdate{TmdbID: new(outB)}, false},
+		{"curator picks the tmdb id of a library B title", curator, MetadataUpdate{TmdbID: new(" " + outB)}, true},
+		{"curator picks an imdb id a library B title holds", curator, MetadataUpdate{ImdbID: new(outImdb)}, true},
+		{"curator picks a library A title", curator, MetadataUpdate{TmdbID: new(inA)}, false},
+		{"curator edits a title only", curator, MetadataUpdate{Title: new("Renamed")}, false},
+		{"acting admin picks a library B title", admin, MetadataUpdate{TmdbID: new(outB)}, false},
+		{"automatic write picks a library B title", nil, MetadataUpdate{TmdbID: new(outB)}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			item := fmt.Sprintf("local:curation-identity-%d-%d", suffix, i)
 			seed(item, id(int64(10+i)), libA)
-			err := repo.UpdateMetadata(tc.ctx, item, &tc.upd)
+			editCtx := ctx
+			if tc.authorize != nil {
+				editCtx = access.WithMetadataCurationAuthorizer(ctx, tc.authorize)
+			}
+			err := repo.UpdateMetadata(editCtx, item, &tc.upd)
 			if refused := errors.Is(err, access.ErrMetadataCurationScope); refused != tc.refused || (!tc.refused && err != nil) {
 				t.Fatalf("UpdateMetadata() error = %v, want refused=%v", err, tc.refused)
 			}

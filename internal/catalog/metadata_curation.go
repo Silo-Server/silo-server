@@ -166,8 +166,10 @@ func metadataCurationIdentityOwners(ctx context.Context, tx pgx.Tx, itemType, an
 	}
 	// One branch per lookup so each uses its index: the primary key, the
 	// partial provider-column indexes (WHERE <column> <> ''), and the
-	// media_item_provider_ids (provider, provider_id, item_type) key. Stored
-	// IDs are already trimmed, and IMDb IDs lower-cased, by the writers.
+	// media_item_provider_ids (provider, provider_id, item_type) key. Exact
+	// matching finds every owner a merge can: the merge lookups
+	// (GetByExternalID, FindContentIDByProviderIDs) compare stored IDs exactly
+	// too, against IDs the refresh has sanitized.
 	rows, err := tx.Query(ctx, `
 		SELECT content_id FROM (
 			SELECT content_id, type FROM media_items WHERE $2 <> '' AND content_id = $2
