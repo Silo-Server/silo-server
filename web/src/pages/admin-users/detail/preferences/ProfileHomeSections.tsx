@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import type { SettingsSectionEntry } from "@/api/types";
-import { V2ProblemError } from "@/api/v2/request";
+import { problemFieldDetail, V2ProblemError } from "@/api/v2/request";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SectionOrderList } from "@/components/sections/SectionOrderList";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,8 @@ import { DetailCard } from "../ui";
 function saveErrorMessage(error: unknown): string {
   let reason: string | undefined;
   if (error instanceof V2ProblemError) {
-    reason = error.problem.errors?.[0]?.detail ?? error.problem.detail;
+    const field = error.problem.errors?.[0];
+    reason = field ? problemFieldDetail(field) : error.message;
   } else if (error instanceof Error) {
     reason = error.message;
   }
