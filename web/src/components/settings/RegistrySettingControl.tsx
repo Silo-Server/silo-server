@@ -29,7 +29,7 @@ interface RegistrySettingControlProps {
  * and device settings screens do, rather than only an unset entry.
  */
 function selectOptions(definition: SettingDisplay, value: string) {
-  const options = optionsFor(definition);
+  const options = optionsFor(definition, value);
   const numeric = definition.type === "integer" || definition.type === "number";
   if (!numeric || options.some((option) => option.value !== "")) return options;
   const unsetLabel = definition.unit === "kbps" ? "No limit" : "Unset";

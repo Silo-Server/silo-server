@@ -1208,3 +1208,21 @@ Native adoption is tracked in [Apple #267](https://github.com/Silo-Server/silo-a
 and [Android #300](https://github.com/Silo-Server/silo-android/issues/300).
 Jellyfin clients keep their own seek controls; this does not extend the
 Jellyfin protocol.
+
+## App language
+
+Revision 28 adds `ui.app_language`, the language of a client's menus, buttons and messages. It
+is a nullable `language_tag` stored at `profile` or `profile_device` and resolved
+`profile_device` → `profile` → `default`. The default `null` means "follow the device or browser
+language". The value is an open tag that the server canonicalizes on write (`pt_br` is stored as
+`pt-BR`); the `app_languages` option set is an advisory list. A client applies a stored tag only
+when it ships that language, matched as it matches the device language list (`es-MX` → `es`,
+`zh-CN` → `zh-Hans`), and otherwise behaves as if the value were `null`. Its picker still shows a
+stored tag it does not ship, so a re-save never erases the profile's choice. It is unrelated to
+the spoken-language and text preferences `playback.audio_language`, `playback.subtitle_language`
+and `catalog.metadata_language`.
+
+A household parent sets it for another profile on the account with the usual
+`PUT /api/v2/settings/values/ui.app_language?scope=profile&profile_id=<id>`, and an administrator
+uses `setAdminUserSettingValue`. Jellyfin clients choose their own interface language; this does
+not extend the Jellyfin protocol.
