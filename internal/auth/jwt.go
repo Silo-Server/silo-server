@@ -90,6 +90,16 @@ func (c *Claims) IsOwnLoginSession() bool {
 		!c.IsRemotePlayback()
 }
 
+// SkipsProfilePIN reports whether the credential may act as a PIN-locked
+// profile without that profile's verification token. An API key carries no
+// PIN proof by design. An administrator viewing as the account already holds
+// authority over its profiles (they can reset a profile's PIN), so the PIN
+// does not stand between them and the profile. Household management still
+// needs a real proof: a scope resolved this way is PINVerificationSkipped.
+func (c *Claims) SkipsProfilePIN() bool {
+	return c != nil && (c.TokenType == TokenTypeAPIKey || c.ImpersonatorUserID != nil)
+}
+
 // IsRemotePlayback reports whether the claims belong to a remote-playback
 // handoff session.
 func (c *Claims) IsRemotePlayback() bool {

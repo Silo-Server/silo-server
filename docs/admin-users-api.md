@@ -206,6 +206,10 @@ It creates a login session and has no replay identity. Clients must not retry an
 uncertain response automatically. The web client checks its captured authority
 before installing returned credentials.
 
+The impersonation session opens a PIN-locked profile without its PIN; managing
+the household still needs the primary profile's PIN (see
+[profile-verification-tokens.md](architecture/profile-verification-tokens.md#credentials-that-need-no-token)).
+
 ## Server Owner
 
 The account created by first-run setup is the server Owner. On a server set up

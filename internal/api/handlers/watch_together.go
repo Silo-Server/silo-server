@@ -13,7 +13,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/watchtogether"
@@ -837,7 +836,7 @@ func (h *WatchTogetherHandler) HandleRoomWebSocket(w http.ResponseWriter, r *htt
 		SessionID:           claims.SessionID,
 		ProfileID:           profileID,
 		ProfileToken:        r.URL.Query().Get("profile_token"),
-		SkipPINVerification: claims.TokenType == auth.TokenTypeAPIKey,
+		SkipPINVerification: claims.SkipsProfilePIN(),
 	})
 	if err != nil {
 		status := http.StatusForbidden

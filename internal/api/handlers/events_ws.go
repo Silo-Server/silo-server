@@ -239,8 +239,8 @@ func (h *EventsHandler) withProfileProof(decide func(context.Context) (bool, err
 		SessionID:    claims.SessionID,
 		ProfileID:    profileID,
 		ProfileToken: profileToken,
-		// API keys carry no PIN proof by design, as at the viewer gate.
-		SkipPINVerification: claims.TokenType == auth.TokenTypeAPIKey,
+		// As at the viewer gate (auth.Claims.SkipsProfilePIN).
+		SkipPINVerification: claims.SkipsProfilePIN(),
 	}
 	return func(ctx context.Context) (bool, error) {
 		scope, err := h.profiles.Resolve(ctx, input)

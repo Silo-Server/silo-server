@@ -55,7 +55,7 @@ export default function Profiles() {
   );
   const [addSession, setAddSession] = useState<AddProfileSession | null>(null);
   const [preparingAdd, setPreparingAdd] = useState(false);
-  const { selectProfile, verifyProfilePin, logout } = useAuth();
+  const { selectProfile, verifyProfilePin, logout, isImpersonating } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const redirectTarget = sanitizeAuthRedirect(searchParams.get("redirect"));
@@ -72,7 +72,10 @@ export default function Profiles() {
   }
 
   function handleSelect(profile: Profile) {
-    if (profile.has_pin) {
+    // An administrator viewing as the account opens a locked profile
+    // without its PIN; the server accepts the view-as session the same way.
+    // Managing the household still asks for the primary profile's PIN.
+    if (profile.has_pin && !isImpersonating) {
       setPinRequest({ profile, purpose: "select" });
       return;
     }

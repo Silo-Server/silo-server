@@ -99,17 +99,25 @@ func TestV1ViewerReadWithoutProfileHeader(t *testing.T) {
 		profiles   []userstore.Profile
 		tokenType  string
 		profileID  string
+		viewAs     bool
 		wantStatus int
 	}{
-		{"child profile cannot see the mature series", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "kid", http.StatusNotFound},
-		{"omitting the header no longer unlocks it", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "", http.StatusBadRequest},
-		{"PIN-locked parent still needs its token", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "parent", http.StatusForbidden},
-		{"unlimited household keeps account scope", []userstore.Profile{{ID: "parent", IsPrimary: true}, guest}, auth.TokenTypeAccess, "", http.StatusOK},
-		{"API key keeps profile-less access", []userstore.Profile{parent, kid}, auth.TokenTypeAPIKey, "", http.StatusOK},
+		{"child profile cannot see the mature series", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "kid", false, http.StatusNotFound},
+		{"omitting the header no longer unlocks it", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "", false, http.StatusBadRequest},
+		{"PIN-locked parent still needs its token", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "parent", false, http.StatusForbidden},
+		{"administrator viewing as the account needs no PIN", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "parent", true, http.StatusOK},
+		{"administrator viewing as the account keeps the child's limits", []userstore.Profile{parent, kid}, auth.TokenTypeAccess, "kid", true, http.StatusNotFound},
+		{"unlimited household keeps account scope", []userstore.Profile{{ID: "parent", IsPrimary: true}, guest}, auth.TokenTypeAccess, "", false, http.StatusOK},
+		{"API key keeps profile-less access", []userstore.Profile{parent, kid}, auth.TokenTypeAPIKey, "", false, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/markers/items/episode-mature", nil)
-			req = req.WithContext(apimw.SetClaims(req.Context(), &auth.Claims{UserID: user.ID, Role: user.Role, SessionID: "session-1", TokenType: tc.tokenType}))
+			claims := &auth.Claims{UserID: user.ID, Role: user.Role, SessionID: "session-1", TokenType: tc.tokenType}
+			if tc.viewAs {
+				admin := 1
+				claims.ImpersonatorUserID = &admin
+			}
+			req = req.WithContext(apimw.SetClaims(req.Context(), claims))
 			if tc.profileID != "" {
 				req.Header.Set("X-Profile-Id", tc.profileID)
 			}

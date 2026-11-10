@@ -421,7 +421,9 @@ func newSocketAuthorityValidator(sessions eventsSessionValidator, users access.U
 		if authority.Role != identity.Role {
 			return ctx, nil, errSocketAccessChanged
 		}
-		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken})
+		// A login-session ticket; a view-as session needs no PIN proof, as
+		// at the viewer gate (auth.Claims.SkipsProfilePIN).
+		scope, err := resolver.Resolve(checkCtx, access.ResolveInput{UserID: identity.UserID, SessionID: identity.SessionID, ProfileID: identity.ProfileID, ProfileToken: identity.ProfileToken, SkipPINVerification: identity.ImpersonatorUserID != nil})
 		if errors.Is(err, access.ErrProfileUnverified) || (err == nil && !scope.ProfileVerified) {
 			return ctx, nil, errSocketAccessChanged
 		}
