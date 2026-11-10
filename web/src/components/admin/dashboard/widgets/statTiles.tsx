@@ -21,6 +21,7 @@ import { formatFileCount, formatMbps } from "../format";
 import { latestFreshPoint } from "./timeseriesSeries";
 import { formatLocale } from "@/lib/appLocale";
 import { useT } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 function StatTile({
   label,
@@ -247,7 +248,8 @@ export function StorageStatWidget() {
   if (stats) {
     const storageGB = stats.total_storage_bytes / (1024 * 1024 * 1024);
     const storageTB = storageGB / 1024;
-    storageDisplay = storageTB >= 1 ? `${storageTB.toFixed(1)} TB` : `${storageGB.toFixed(0)} GB`;
+    storageDisplay =
+      storageTB >= 1 ? `${formatDecimal(storageTB, 1)} TB` : `${formatDecimal(storageGB, 0)} GB`;
   }
   return (
     <StatTile

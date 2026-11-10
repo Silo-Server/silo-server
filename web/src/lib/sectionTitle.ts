@@ -2,7 +2,7 @@ import { useCallback } from "react";
 
 import type { SectionTitleKey } from "@/api/types";
 import type { HomeRow } from "@/lib/homeRows/types";
-import { useServerText } from "@/i18n";
+import { serverText, useServerText } from "@/i18n";
 
 /**
  * The title key a v2 section, layout entry or profile section setting carries.
@@ -29,17 +29,27 @@ export function useSectionTitle(): (section: { title: string } & SectionTitleKey
   );
 }
 
+function homeRowTitleWith(
+  sectionTitle: (section: { title: string } & SectionTitleKey) => string,
+  row: Pick<HomeRow, "title" | "titleKey">,
+): string {
+  const keyed = row.titleKey?.title === row.title ? row.titleKey : undefined;
+  return sectionTitle({ title: row.title, title_key: keyed?.key, title_args: keyed?.args });
+}
+
 /**
  * A home row's title for display: its keyed title while the row still has the
  * server's title, so a rename the user typed shows as typed.
  */
 export function useHomeRowTitle(): (row: Pick<HomeRow, "title" | "titleKey">) => string {
   const sectionTitle = useSectionTitle();
-  return useCallback(
-    (row) => {
-      const keyed = row.titleKey?.title === row.title ? row.titleKey : undefined;
-      return sectionTitle({ title: row.title, title_key: keyed?.key, title_args: keyed?.args });
-    },
-    [sectionTitle],
+  return useCallback((row) => homeRowTitleWith(sectionTitle, row), [sectionTitle]);
+}
+
+/** `useHomeRowTitle` for code outside components, in the current language. */
+export function homeRowTitle(row: Pick<HomeRow, "title" | "titleKey">): string {
+  return homeRowTitleWith(
+    (section) => serverText(section.title_key, section.title_args, section.title),
+    row,
   );
 }

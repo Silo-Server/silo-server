@@ -45,8 +45,16 @@ import { libraryPagesOf, pageLabel, pageParam } from "@/lib/homeRows/pages";
 import type { HomeRow, LibraryPage, PageRef } from "@/lib/homeRows/types";
 import { updateCheckboxSelection } from "@/lib/checkboxSelection";
 import { useT, type Translate } from "@/i18n";
+import { useHomeRowTitle, useSectionTitle } from "@/lib/sectionTitle";
 
-function batchFailureText(t: Translate, { title, reason, message }: BatchFailure) {
+type RowTitle = ReturnType<typeof useHomeRowTitle>;
+
+function batchFailureText(
+  t: Translate,
+  rowTitle: RowTitle,
+  { title: stored, titleKey, reason, message }: BatchFailure,
+) {
+  const title = rowTitle({ title: stored, titleKey });
   if (reason === "changed") return t("web.admin.homeRows.select.rowChanged", { title });
   return t("web.admin.homeRows.select.rowFailed", { title, message });
 }
@@ -54,11 +62,12 @@ function batchFailureText(t: Translate, { title, reason, message }: BatchFailure
 /** Reports a select-mode Turn on / Turn off, naming every row left as it was. */
 function reportShownBatch(
   t: Translate,
+  rowTitle: RowTitle,
   { changedIds, failures }: ShownBatchResult,
   shown: boolean,
 ) {
   const attempted = changedIds.length + failures.length;
-  const description = failures.map((failure) => batchFailureText(t, failure)).join(" ");
+  const description = failures.map((failure) => batchFailureText(t, rowTitle, failure)).join(" ");
   if (attempted === 0)
     toast.success(
       t(shown ? "web.admin.homeRows.select.alreadyOn" : "web.admin.homeRows.select.alreadyOff"),
@@ -163,6 +172,8 @@ function reportRestore(
 
 export default function AdminHomeRows() {
   const t = useT();
+  const rowTitle = useHomeRowTitle();
+  const sectionTitle = useSectionTitle();
   const adapter = useAdminHomeRows();
   const { scope, serverCapabilities: capabilities } = adapter;
   const capabilitiesFailed = useAdminSectionCapabilities().isError;
@@ -281,7 +292,7 @@ export default function AdminHomeRows() {
     const ids = selectedSections.map((section) => section.id);
     if (ids.length === 0 || ids.length > MAX_SELECTED_ROWS) return;
     try {
-      reportShownBatch(t, await adapter.setShownMany(ids, shown), shown);
+      reportShownBatch(t, rowTitle, await adapter.setShownMany(ids, shown), shown);
     } catch (error) {
       toast.error(adminSectionMutationMessage(error, t("web.admin.homeRows.select.changeFailed")));
     }
@@ -558,7 +569,7 @@ export default function AdminHomeRows() {
                 onChange: updateSectionSelection,
                 onSelectAll: selectAllRows,
                 onExit: exitSelectMode,
-                label: (row) => t("web.admin.homeRows.select.rowLabel", { title: row.title }),
+                label: (row) => t("web.admin.homeRows.select.rowLabel", { title: rowTitle(row) }),
                 bar: (
                   <SelectModeBar
                     count={selectedSections.length}
@@ -581,7 +592,7 @@ export default function AdminHomeRows() {
       >
         <AdminNextUpDefaultsCard />
         <DeleteRowDialog
-          rowTitle={confirmDeleteSection?.title ?? ""}
+          rowTitle={confirmDeleteSection ? sectionTitle(confirmDeleteSection) : ""}
           pageLabel={currentPageLabel}
           open={confirmDeleteSection !== null}
           conflict={deleteConflict}

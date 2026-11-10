@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link } from "react-router";
 import { Library, ScanLine, Square } from "lucide-react";
+import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -102,7 +103,7 @@ export function LibrariesWidget() {
                       {t("web.admin.dashboard.widgets.libraries.typeAndPaths", {
                         count: lib.paths.length,
                         count_text: String(lib.paths.length),
-                        type: lib.type,
+                        type: libraryTypeLabel(lib.type),
                       })}
                     </span>
                     {scanProgressLabel ? (

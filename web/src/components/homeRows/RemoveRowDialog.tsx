@@ -10,6 +10,7 @@ import {
 import { useT } from "@/i18n";
 import { profilePageKind } from "@/lib/homeRows/describe";
 import type { PageRef } from "@/lib/homeRows/types";
+import { useHomeRowTitle } from "@/lib/sectionTitle";
 import { useReturnFocus } from "./useReturnFocus";
 
 /**
@@ -36,8 +37,9 @@ export function RemoveRowDialog({
   skipReturnFocus?: () => boolean;
 }) {
   const t = useT();
+  const rowTitle = useHomeRowTitle();
   const own = row?.own ?? false;
-  const title = row?.title ?? "";
+  const title = row ? rowTitle(row) : "";
   const returnFocus = useReturnFocus(skipReturnFocus);
   const where = { page_kind: profilePageKind(page, pageLabel), page: pageLabel };
   return (

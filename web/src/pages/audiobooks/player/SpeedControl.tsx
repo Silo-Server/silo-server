@@ -8,12 +8,13 @@ import {
   AUDIOBOOK_RATE_STEP,
   clampAudiobookRate,
 } from "./useAudiobookPrefs";
+import { formatDecimal } from "@/lib/numberFormat";
 
 const HOLD_DELAY_MS = 250;
 const HOLD_REPEAT_MS = 80;
 
 export function formatRate(t: Translate, rate: number): string {
-  return t("web.audiobooks.player.rate", { rate: String(rate) });
+  return t("web.audiobooks.player.rate", { rate: formatDecimal(rate, 2, 0) });
 }
 
 interface SpeedControlProps {

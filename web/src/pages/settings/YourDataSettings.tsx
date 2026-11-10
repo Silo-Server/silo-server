@@ -29,7 +29,7 @@ import { DATA_TYPE_LABELS, dataCountsPhrase, titleList } from "@/lib/profileData
 
 /** A size limit as a person says it: "64 MB", not "64.0 MB". */
 function sizeLimit(bytes: number): string {
-  return formatFileSize(bytes).replace(/\.0(?= )/, "");
+  return formatFileSize(bytes, { trimZeroDecimal: true });
 }
 
 function requireContext() {

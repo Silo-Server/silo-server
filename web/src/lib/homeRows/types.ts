@@ -46,6 +46,8 @@ export interface HomeRow {
   own: boolean;
   /** Profile: the server's own name for a row this profile renamed. */
   renamedFrom?: string;
+  /** The catalog key of `renamedFrom` when the server wrote that name itself. */
+  renamedFromKey?: { key: string; args?: Record<string, string> };
   /**
    * The catalog key of a title the server wrote itself, with the `title` it
    * came with. It translates `title` only while the row still has that title,

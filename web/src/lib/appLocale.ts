@@ -10,6 +10,7 @@
 // Relative with its extension: lib/datetime imports this module, and a
 // datetime test loads it in plain Node, which resolves neither form otherwise.
 import { canonicalLanguageTag } from "./languageTags.ts";
+import { LOCALES } from "../locales/keys.ts";
 
 /**
  * Languages the web client ships, with each one's name in itself for the
@@ -30,16 +31,13 @@ export const SHIPPED_LANGUAGES = [
 export type AppLanguage = (typeof SHIPPED_LANGUAGES)[number]["tag"];
 
 /**
- * Languages whose translation catalog has shipped. Only these can come from
- * the browser's language list, and only these (plus English) are offered in
- * the pickers; a stored choice still selects any shipped language. The
- * PR that ships a language's translations adds it here.
+ * Whether a language's translations have shipped: the generated `LOCALES`
+ * lists a language only once it has translations (English always). Only
+ * these can come from the browser's language list, and only these are offered
+ * in the pickers; a stored choice still selects any shipped language.
  */
-export const CATALOG_LANGUAGES: readonly AppLanguage[] = [];
-
-/** Whether a language's translations have shipped; English always has. */
 export function hasCatalog(language: AppLanguage): boolean {
-  return language === "en" || CATALOG_LANGUAGES.includes(language);
+  return LOCALES.some((locale) => !locale.pseudo && locale.tag === language);
 }
 
 /**

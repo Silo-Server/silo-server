@@ -78,7 +78,7 @@ export function SideNavItem({
       <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
         <Icon className="h-[18px] w-[18px]" />
       </span>
-      <span className="min-w-0 truncate">{label}</span>
+      <span className="line-clamp-2 min-w-0 break-words">{label}</span>
       {badge && <span className="ms-auto">{badge}</span>}
     </>
   );
@@ -171,7 +171,7 @@ export function SideNavTopic({
         <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
           <Icon className="h-[18px] w-[18px]" />
         </span>
-        <span className="min-w-0 truncate">{label}</span>
+        <span className="line-clamp-2 min-w-0 break-words">{label}</span>
         <span className="ms-auto flex items-center gap-2">
           {!open && badge ? badge : null}
           <Chevron className="text-muted-foreground h-3.5 w-3.5" aria-hidden="true" />
@@ -225,7 +225,7 @@ export function SideNavSubItem({
           style={{ background: "var(--primary)" }}
         />
       )}
-      <span className="min-w-0 truncate">{label}</span>
+      <span className="line-clamp-2 min-w-0 break-words">{label}</span>
       {badge && <span className="ms-auto">{badge}</span>}
     </>
   );

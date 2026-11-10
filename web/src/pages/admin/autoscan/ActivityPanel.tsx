@@ -70,6 +70,7 @@ import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/da
 
 import { eventSourceName } from "./sourceDisplay";
 import { formatLocale } from "@/lib/appLocale";
+import { formatDecimal } from "@/lib/numberFormat";
 
 const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const DEFAULT_HISTORY_PAGE_SIZE = 25;
@@ -99,7 +100,7 @@ function formatDuration(t: Translate, ms: number): string {
     return t("web.admin.autoscan.activity.duration.milliseconds", { value: String(ms) });
   if (ms < 60_000)
     return t("web.admin.autoscan.activity.duration.seconds", {
-      value: String(Math.round(ms / 100) / 10),
+      value: formatDecimal(Math.round(ms / 100) / 10, 1, 0),
     });
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.round((ms % 60_000) / 1000);

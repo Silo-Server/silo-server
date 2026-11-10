@@ -23,6 +23,7 @@ import { useT } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { libraryIdsOfFiles } from "@/lib/itemLibraries";
 import { cn } from "@/lib/utils";
+import { formatDecimal } from "@/lib/numberFormat";
 
 type MatchableItem = Pick<
   ItemDetail,
@@ -522,7 +523,7 @@ export default function MatchItemDialog({
                             {candidate.match_score !== undefined ? (
                               <Badge variant="secondary" className="text-[10px] tabular-nums">
                                 {t("web.item.match.score", {
-                                  score: candidate.match_score.toFixed(1),
+                                  score: formatDecimal(candidate.match_score, 1),
                                 })}
                               </Badge>
                             ) : null}

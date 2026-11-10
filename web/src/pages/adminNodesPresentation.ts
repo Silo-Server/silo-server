@@ -12,6 +12,7 @@ import type {
 import { t, type MessageKey } from "@/i18n";
 import { parseHWDeviceList } from "@/lib/hwDevices";
 import { formatFileSize } from "@/lib/mediaFormat";
+import { formatDecimal } from "@/lib/numberFormat";
 
 /**
  * How long a stored capability report may go unconfirmed before it is called
@@ -1005,7 +1006,7 @@ function describeCPU(system: HostSystemStats): ResourceMetric {
   const coreValues = cores != null ? { count: cores, count_text: String(cores) } : null;
   const detail = [
     coreValues && coreValues.count > 0 ? t("web.admin.nodes.cpu.cores", coreValues) : null,
-    load1 != null ? t("web.admin.nodes.cpu.load", { load: load1.toFixed(2) }) : null,
+    load1 != null ? t("web.admin.nodes.cpu.load", { load: formatDecimal(load1, 2) }) : null,
   ]
     .filter((part): part is string => part !== null)
     .join(" · ");
@@ -1013,7 +1014,7 @@ function describeCPU(system: HostSystemStats): ResourceMetric {
   const title = [
     t("web.admin.nodes.cpu.busyTitle", { percent: String(percent) }),
     coreValues && coreValues.count > 0 ? t("web.admin.nodes.cpu.coresTitle", coreValues) : null,
-    load1 != null ? t("web.admin.nodes.cpu.loadTitle", { load: load1.toFixed(2) }) : null,
+    load1 != null ? t("web.admin.nodes.cpu.loadTitle", { load: formatDecimal(load1, 2) }) : null,
   ]
     .filter((part): part is string => part !== null)
     .join(" ");
@@ -1573,7 +1574,7 @@ export function describeNodeEgress(node: StreamNode): ResourceMetric {
 
 /** Kilobits per second as Mbps to one decimal, trailing zero dropped. */
 function formatMbps(kbps: number): string {
-  return (Math.round(kbps / 100) / 10).toString();
+  return formatDecimal(Math.round(kbps / 100) / 10, 1, 0);
 }
 
 /**
@@ -1647,10 +1648,10 @@ export function formatBitsPerSecond(bps: number | null | undefined): string | nu
     return null;
   }
   if (value >= 1e9) {
-    return `${(value / 1e9).toFixed(1)} Gbps`;
+    return `${formatDecimal(value / 1e9, 1)} Gbps`;
   }
   if (value >= 1e6) {
-    return `${(value / 1e6).toFixed(1)} Mbps`;
+    return `${formatDecimal(value / 1e6, 1)} Mbps`;
   }
   if (value >= 1e3) {
     return `${Math.round(value / 1e3)} kbps`;

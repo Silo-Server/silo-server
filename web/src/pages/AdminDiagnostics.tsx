@@ -55,6 +55,7 @@ import {
 import { EmptyState, FeatureStatusBanner, FilterField } from "./AdminDiagnostics.parts";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { useT, type MessageKey, type Translate } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 const PAGE_SIZE = 25;
 const EM_DASH = "—";
@@ -749,7 +750,7 @@ function formatBytes(value?: number) {
     size /= 1024;
     unit = units[index];
   }
-  return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${unit}`;
+  return `${formatDecimal(size, size >= 10 ? 0 : 1)} ${unit}`;
 }
 
 function formatPlatform(value: string) {

@@ -19,6 +19,7 @@ import {
   useRetryLibraryMetadataMatchQueue,
 } from "@/hooks/queries/admin/libraries";
 import { useT, type Translate } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 function formatFailureKind(kind: string): string {
   return kind.replace(/_/g, " ");
@@ -248,12 +249,12 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
                                         <span className="tabular-nums">
                                           {bar === undefined
                                             ? t("web.admin.common.libraryEditor.matcher.score", {
-                                                score: candidate.score.toFixed(1),
+                                                score: formatDecimal(candidate.score, 1),
                                               })
                                             : t(
                                                 "web.admin.common.libraryEditor.matcher.scoreOfBar",
                                                 {
-                                                  score: candidate.score.toFixed(1),
+                                                  score: formatDecimal(candidate.score, 1),
                                                   bar: String(bar),
                                                 },
                                               )}

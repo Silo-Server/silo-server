@@ -41,6 +41,7 @@ import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
+import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
 import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
 import { RealtimeMonitoringBadge } from "@/components/admin/libraries/RealtimeMonitoringBadge";
 import { TrickplayLibraryBadge } from "@/components/admin/trickplay/TrickplayLibraryBadge";
@@ -514,7 +515,7 @@ function LibrariesPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="secondary">{lib.type}</Badge>
+                            <Badge variant="secondary">{libraryTypeLabel(lib.type)}</Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col gap-1">
@@ -837,7 +838,7 @@ function LibrariesPage() {
                           })}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{activeLibrary.type}</Badge>
+                      <Badge variant="secondary">{libraryTypeLabel(activeLibrary.type)}</Badge>
                     </TableCell>
                     <TableCell />
                     <TableCell />

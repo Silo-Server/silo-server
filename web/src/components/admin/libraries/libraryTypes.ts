@@ -111,3 +111,8 @@ export function librarySettingSupport(type: string) {
     boxSets: ["movie", "movies", "mixed"].includes(kind),
   };
 }
+
+/** A stored library type's name in the interface language; an unknown type shows as stored. */
+export function libraryTypeLabel(type: string): string {
+  return findLibraryType(type)?.label ?? type;
+}

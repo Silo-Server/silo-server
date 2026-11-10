@@ -22,6 +22,7 @@ import { useWidgetRange } from "../widgetChrome";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import { formatLocale } from "@/lib/appLocale";
 import { useT, type Translate } from "@/i18n";
+import { formatDecimal } from "@/lib/numberFormat";
 
 const ROW_LIMIT = 8;
 const SEPARATOR = " · ";
@@ -37,7 +38,7 @@ function clientLabel(t: Translate, client: AdminApiClient): string {
 function sharePercent(requests: number, total: number): string {
   if (total <= 0) return "";
   const share = (requests / total) * 100;
-  return share >= 10 ? `${Math.round(share)}%` : `${share.toFixed(1)}%`;
+  return share >= 10 ? `${Math.round(share)}%` : `${formatDecimal(share, 1)}%`;
 }
 
 /**

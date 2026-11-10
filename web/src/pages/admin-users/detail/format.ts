@@ -2,6 +2,7 @@ import { t, type MessageKey } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
 import { formatDate, formatTime, preferredDateLocale } from "@/lib/datetime";
 import { activityMethodMeta, formatDecisionLabel } from "@/pages/adminActivityPresentation";
+import { formatDecimal } from "@/lib/numberFormat";
 
 function validDate(iso: string | null | undefined): Date | null {
   if (!iso) return null;
@@ -107,7 +108,7 @@ export function formatBytes(bytes: number): string {
   if (Number((value / size).toFixed(digits)) >= 1000 && index < BYTE_UNITS.length - 1) {
     ({ unit, size, digits } = BYTE_UNITS[index + 1]!);
   }
-  return t(unit, { value: (value / size).toFixed(digits) });
+  return t(unit, { value: formatDecimal(value / size, digits) });
 }
 
 /**
@@ -119,7 +120,7 @@ export function formatStorageLimit(bytes: number): string {
   const value = Number.isFinite(bytes) ? Math.max(0, bytes) : 0;
   const gb = value / 1024 ** 3;
   if (gb >= 1) {
-    return t("web.admin.users.detail.common.bytes.gb", { value: String(Number(gb.toFixed(1))) });
+    return t("web.admin.users.detail.common.bytes.gb", { value: formatDecimal(gb, 1, 0) });
   }
   return t("web.admin.users.detail.common.bytes.mb", {
     value: String(Math.round(value / 1024 ** 2)),
