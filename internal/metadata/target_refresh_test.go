@@ -15,6 +15,7 @@ type targetRefreshProvider struct {
 	searchResults    []SearchResult
 	seasons          []SeasonResult
 	episodesBySeason map[int][]EpisodeResult
+	episodesErr      error
 	episodeRequests  []int
 	lastEpisodesReq  EpisodesRequest
 }
@@ -41,6 +42,9 @@ func (p *targetRefreshProvider) GetSeasons(context.Context, SeasonsRequest) ([]S
 func (p *targetRefreshProvider) GetEpisodes(_ context.Context, req EpisodesRequest) ([]EpisodeResult, error) {
 	p.episodeRequests = append(p.episodeRequests, req.SeasonNumber)
 	p.lastEpisodesReq = req
+	if p.episodesErr != nil {
+		return nil, p.episodesErr
+	}
 	return append([]EpisodeResult(nil), p.episodesBySeason[req.SeasonNumber]...), nil
 }
 

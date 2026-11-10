@@ -132,9 +132,10 @@ with `content_ids`, and drop any the listing no longer returns. Fetch on
 `GET /api/v2/admin/catalog/capabilities` reports `item_listing`,
 `item_listing_max_content_ids`, `item_change_events`, true when the socket
 carries those changes, `item_match_hints`, true when
-`GET /api/v2/admin/items/{id}/match/hints` is served, and `item_metadata`, true
+`GET /api/v2/admin/items/{id}/match/hints` is served, `item_metadata`, true
 when items carry the stored metadata above and the listing accepts
-`include_people`. The listing and the events have no Apple, Android, or
+`include_people`, and `item_metadata_reset`, true when
+`POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "reset"`. The listing and the events have no Apple, Android, or
 Jellyfin compatibility callers; Jellyfin clients read the catalog through their
 own item queries.
 
@@ -341,8 +342,18 @@ library deleted while it ran can still be stopped.
 ## Item metadata edits and refresh
 
 `POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "quick"` (the
-default) or `mode: "complete"`. The existing resolver chooses the refresh scope,
-then a job is persisted with the requesting account ID. Success is `202` with
+default), `mode: "complete"` or `mode: "reset"`. The existing resolver chooses
+the refresh scope, then a job is persisted with the requesting account ID.
+
+`reset` is Reset to Provider: a quick refresh of the movie, series, season or
+episode that also removes its `locked_fields` and gives every lockable field the
+providers' value, empty when no provider has one. A refresh keeps a stored
+value a provider sends empty, because it can't tell a value the provider lacks
+from one it failed to send; a reset clears it. So a reset fails, and the target
+keeps its values and locks, when a provider in the chain fails to answer. A
+not-found answer, or an enrichment provider that isn't configured, doesn't fail
+it. A series reset leaves its seasons' and episodes' locks alone, and artwork
+and localized text follow the ordinary refresh rules. Success is `202` with
 the typed administrator job, a job `Location`, and `Retry-After: 5`. Delegated
 curators receive the permitted job projection and can poll their own item jobs.
 The web waits on that job; it does not equate submission with completion.

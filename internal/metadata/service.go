@@ -197,6 +197,7 @@ type metadataEpisodeRepo interface {
 	ListBySeasonID(ctx context.Context, seasonID string) ([]*models.Episode, error)
 	Upsert(ctx context.Context, ep *models.Episode) error
 	BulkUpsert(ctx context.Context, seriesID string, episodes []*models.Episode) error
+	ResetEdits(ctx context.Context, contentID string) error
 }
 
 // metadataSeasonRepo defines season repository methods used by MetadataService.
@@ -208,6 +209,7 @@ type metadataSeasonRepo interface {
 	Upsert(ctx context.Context, s *models.Season) error
 	BulkUpsert(ctx context.Context, seasons []*models.Season) error
 	ClearBackdropsExcept(ctx context.Context, seriesID string, keep []int32) error
+	ResetEdits(ctx context.Context, contentID string) error
 }
 
 type metadataItemLocalizationRepo interface {
@@ -2076,6 +2078,9 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			localMetadataUnreadable |= localArtworkItem
 		}
 		if err != nil {
+			if failure := resetProviderFailure(req.resetToProvider, p, "metadata", err); failure != nil {
+				return nil, failure
+			}
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
 				"content_id", req.ContentID,
 			) {
@@ -2866,6 +2871,14 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 
+	// Reset to Provider drops the item's locks with this write, so nothing
+	// below keeps a field for one: the stored locks are gone once it commits,
+	// and a reset that fails before then leaves them in place.
+	if req.resetToProvider && existingItem != nil {
+		existingItem.LockedFields = []int{}
+		locked = nil
+	}
+
 	suppressProviderIDValues(durableIDs, accumulator.recordedStaleProviderIDs)
 	suppressProviderIDValues(durableIDs, accumulator.sameRunStaleProviderIDs)
 	// The identity the item being written holds, before a correction's
@@ -2907,7 +2920,7 @@ func (s *MetadataService) mergeAndPersist(
 		// Fallback text belongs to the provider IDs it was fetched with, so it
 		// applies after persistence moved the item to another content ID too.
 		keepStoredTitle := req.Mode != ModeInitialMatch || existingItem == nil || !isSkeletonLikeStatus(existingItem.Status)
-		if corrected {
+		if corrected || req.resetToProvider {
 			req.fallback.ignoreStoredText()
 		}
 		req.fallback.applyToItem(accumulator, req.Language, existingItem, keepStoredTitle)
@@ -2979,7 +2992,10 @@ func (s *MetadataService) mergeAndPersist(
 					"content_id", contentID, "error", creditsErr)
 			}
 		}
-		if corrected {
+		// A correction's stored values describe another title, and a reset's
+		// are what the admin asked to replace: either way a value the
+		// providers lack must not stay behind.
+		if corrected || req.resetToProvider {
 			clearPreviousMatch(existingResult, mergeLocked)
 		}
 		if isCanonicalWrite {
@@ -3117,8 +3133,11 @@ func (s *MetadataService) mergeAndPersist(
 		existingItem,
 		len(durableIDs) == 0,
 		contentType,
-		req.Mode == ModeIdentify,
-		replacesShow,
+		itemWriteSteps{
+			identityChosen:  req.Mode == ModeIdentify,
+			clearChildEdits: replacesShow,
+			resetLocks:      req.resetToProvider,
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -3310,6 +3329,24 @@ func (s *MetadataService) clearPreviousMatchRows(ctx context.Context, contentID 
 	return nil
 }
 
+// itemWriteSteps are the extra writes that commit with an item's identity
+// write: an Identify's choice, clearing a replaced show's season and episode
+// edits, and a Reset to Provider dropping the item's locks.
+type itemWriteSteps struct {
+	identityChosen  bool
+	clearChildEdits bool
+	resetLocks      bool
+}
+
+// forRetry is the steps for the write retried after conflict recovery. A row
+// recovery merged into holds its own edits and locks; a retry on the same row
+// still owes the clears its first attempt rolled back.
+func (w itemWriteSteps) forRetry(sameRow bool) itemWriteSteps {
+	w.clearChildEdits = w.clearChildEdits && sameRow
+	w.resetLocks = w.resetLocks && sameRow
+	return w
+}
+
 func (s *MetadataService) persistItemAndProviderIDs(
 	ctx context.Context,
 	item *models.MediaItem,
@@ -3318,19 +3355,18 @@ func (s *MetadataService) persistItemAndProviderIDs(
 	existingItem *models.MediaItem,
 	missingDurableIDs bool,
 	contentType string,
-	identityChosen bool,
-	clearChildEdits bool,
+	steps itemWriteSteps,
 ) (string, error) {
 	if item == nil || strings.TrimSpace(item.ContentID) == "" {
 		return "", fmt.Errorf("content_id is required")
 	}
 	if itemRepo, ok := s.itemRepo.(*catalog.ItemRepository); ok && s.dbPool != nil {
 		if providerRepo, ok := s.providerIDRepo.(*catalog.ProviderIDRepository); ok && providerRepo != nil {
-			return s.persistItemAndProviderIDsTx(ctx, itemRepo, providerRepo, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType, identityChosen, clearChildEdits)
+			return s.persistItemAndProviderIDsTx(ctx, itemRepo, providerRepo, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType, steps)
 		}
 	}
 	contentID, err := s.persistItemAndProviderIDsLegacy(ctx, item, providerIDs, isNew, existingItem, missingDurableIDs, contentType)
-	if err == nil && identityChosen {
+	if err == nil && steps.identityChosen {
 		err = s.recordIdentityChoice(ctx, contentID)
 	}
 	return contentID, err
@@ -3346,11 +3382,10 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 	existingItem *models.MediaItem,
 	missingDurableIDs bool,
 	contentType string,
-	identityChosen bool,
-	clearChildEdits bool,
+	steps itemWriteSteps,
 ) (string, error) {
 	contentID := item.ContentID
-	err := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen, clearChildEdits)
+	err := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, steps)
 	if err == nil {
 		return contentID, nil
 	}
@@ -3358,7 +3393,7 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 		return "", fmt.Errorf("persisting provider IDs for %s: %w", contentID, err)
 	}
 
-	reboundTo, dropped, recoverErr := s.recoverProviderIDConflict(ctx, contentID, providerIDs, contentType, true, identityChosen)
+	reboundTo, dropped, recoverErr := s.recoverProviderIDConflict(ctx, contentID, providerIDs, contentType, true, steps.identityChosen)
 	if recoverErr != nil {
 		return "", fmt.Errorf("recovering provider ID conflict for %s: %w", contentID, recoverErr)
 	}
@@ -3367,10 +3402,7 @@ func (s *MetadataService) persistItemAndProviderIDsTx(
 	}
 	item.ContentID = reboundTo
 	clearDroppedIdentityColumns(item, dropped)
-	// A row conflict recovery merged into holds its own edits; a retry on the
-	// same row still owes the clear its first attempt rolled back.
-	clearOnRetry := clearChildEdits && reboundTo == contentID
-	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, identityChosen, clearOnRetry); retryErr != nil {
+	if retryErr := s.persistItemAndProviderIDsOnceTx(ctx, itemRepo, providerRepo, item, providerIDs, steps.forRetry(reboundTo == contentID)); retryErr != nil {
 		return "", fmt.Errorf("persisting provider IDs after conflict recovery for %s: %w", reboundTo, retryErr)
 	}
 	return reboundTo, nil
@@ -3403,8 +3435,7 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	providerRepo *catalog.ProviderIDRepository,
 	item *models.MediaItem,
 	providerIDs map[string]string,
-	identityChosen bool,
-	clearChildEdits bool,
+	steps itemWriteSteps,
 ) error {
 	tx, err := s.dbPool.BeginTx(ctx, catalog.MetadataCurationTxOptions(ctx))
 	if err != nil {
@@ -3414,6 +3445,13 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 
 	if err := catalog.GuardMetadataCurationItems(ctx, tx, item.ContentID); err != nil {
 		return err
+	}
+	// A Reset to Provider drops the stored locks before the upsert, whose
+	// artwork columns read them, and commits or fails with the reset's values.
+	if steps.resetLocks {
+		if err := itemRepo.UpdateMetadataTx(ctx, tx, item.ContentID, &catalog.MetadataUpdate{LockedFields: &[]int{}}); err != nil {
+			return fmt.Errorf("clearing the locks of %s: %w", item.ContentID, err)
+		}
 	}
 
 	if err := itemRepo.UpsertTx(ctx, tx, item); err != nil {
@@ -3426,12 +3464,12 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 	}
 	// An Identify's choice commits with the identity it chose
 	// (identify_sticky.go).
-	if identityChosen {
+	if steps.identityChosen {
 		if err := catalog.MarkIdentityChosenTx(ctx, tx, item.ContentID); err != nil {
 			return err
 		}
 	}
-	if clearChildEdits {
+	if steps.clearChildEdits {
 		if err := catalog.ClearSeriesChildEditsTx(ctx, tx, item.ContentID); err != nil {
 			return err
 		}
@@ -3487,14 +3525,15 @@ func (s *MetadataService) persistItemAndProviderIDsLegacy(
 
 // RefreshItem re-fetches metadata for a single content item.
 func (s *MetadataService) RefreshItem(ctx context.Context, contentID string) error {
-	return s.refreshItemTarget(ctx, contentID, 0, ModeManualRefresh, true)
+	return s.refreshItemTarget(ctx, contentID, 0, ModeManualRefresh, true, false)
 }
 
-func (s *MetadataService) refreshItemTarget(ctx context.Context, contentID string, folderID int, mode RefreshMode, incrementDebtAttempt bool) error {
+func (s *MetadataService) refreshItemTarget(ctx context.Context, contentID string, folderID int, mode RefreshMode, incrementDebtAttempt, reset bool) error {
 	result, err := s.Process(ctx, ProcessRequest{
-		ContentID: contentID,
-		FolderID:  formatFolderID(folderID),
-		Mode:      mode,
+		ContentID:       contentID,
+		FolderID:        formatFolderID(folderID),
+		Mode:            mode,
+		resetToProvider: reset,
 	})
 	if err != nil {
 		s.recordRefreshFailure(ctx, contentID, err, incrementDebtAttempt)
@@ -3542,7 +3581,7 @@ func (s *MetadataService) RefreshScheduledTarget(ctx context.Context, targetType
 			return claim.run(ctx)
 		}
 	}
-	return s.refreshTarget(ctx, targetType, contentID, 0, ModeScheduledRefresh, false)
+	return s.refreshTarget(ctx, targetType, contentID, 0, ModeScheduledRefresh, false, false)
 }
 
 // trailersRefreshRecovery is an inherited trailer-refresh cooldown claim, held
@@ -3600,7 +3639,7 @@ func (r *trailersRefreshRecovery) run(ctx context.Context) error {
 		videoPersistErr.CompareAndSwap(nil, &persistErr)
 	})
 
-	err := r.service.refreshTarget(refreshCtx, RefreshTargetItem, r.contentID, 0, ModeScheduledRefresh, false)
+	err := r.service.refreshTarget(refreshCtx, RefreshTargetItem, r.contentID, 0, ModeScheduledRefresh, false, false)
 	releaseErr := err
 	if releaseErr == nil {
 		if stored := videoPersistErr.Load(); stored != nil {
@@ -3622,26 +3661,28 @@ func (s *MetadataService) RefreshItemForLibrary(ctx context.Context, contentID s
 // RefreshTargetForLibrary re-fetches metadata for a specific target using a
 // specific library's provider chain and metadata language preferences.
 func (s *MetadataService) RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error {
-	return s.refreshTarget(ctx, targetType, contentID, folderID, ModeManualRefresh, true)
+	return s.refreshTarget(ctx, targetType, contentID, folderID, ModeManualRefresh, true, false)
 }
 
-func (s *MetadataService) refreshTarget(ctx context.Context, targetType, contentID string, folderID int, mode RefreshMode, incrementDebtAttempt bool) error {
+// refreshTarget refreshes an item, season or episode; reset makes it a Reset
+// to Provider (ResetTargetForLibrary).
+func (s *MetadataService) refreshTarget(ctx context.Context, targetType, contentID string, folderID int, mode RefreshMode, incrementDebtAttempt, reset bool) error {
 	targetType = NormalizeRefreshTargetType(targetType)
 	if targetType == "" {
 		return fmt.Errorf("unsupported metadata refresh target type")
 	}
 	switch targetType {
 	case RefreshTargetItem:
-		return s.refreshItemTarget(ctx, contentID, folderID, mode, incrementDebtAttempt)
+		return s.refreshItemTarget(ctx, contentID, folderID, mode, incrementDebtAttempt, reset)
 	case RefreshTargetSeason:
-		seriesID, err := s.refreshSeasonTarget(ctx, contentID, folderID, mode)
+		seriesID, err := s.refreshSeasonTarget(ctx, contentID, folderID, mode, reset)
 		if err != nil {
 			s.recordRefreshTargetFailure(ctx, targetType, contentID, err, incrementDebtAttempt)
 			return err
 		}
 		return s.syncRefreshDebtForTargetOrDefer(ctx, targetType, contentID, seriesID)
 	case RefreshTargetEpisode:
-		seriesID, err := s.refreshEpisodeTarget(ctx, contentID, folderID, mode)
+		seriesID, err := s.refreshEpisodeTarget(ctx, contentID, folderID, mode, reset)
 		if err != nil {
 			s.recordRefreshTargetFailure(ctx, targetType, contentID, err, incrementDebtAttempt)
 			return err
@@ -4138,7 +4179,7 @@ func (s *MetadataService) runOnDemandMetadataRefresh(targetType, contentID strin
 		slog.Info("metadata: starting on-demand stale refresh",
 			"target_type", targetType,
 			"content_id", contentID)
-		err := s.refreshTarget(ctx, targetType, contentID, 0, ModeScheduledRefresh, false)
+		err := s.refreshTarget(ctx, targetType, contentID, 0, ModeScheduledRefresh, false, false)
 		if err != nil {
 			slog.Warn("metadata: on-demand stale refresh failed",
 				"target_type", targetType,
@@ -4557,7 +4598,7 @@ func itemHasEpisodeMetadataDebt(item *models.MediaItem) bool {
 }
 
 // refreshSeasonTarget refreshes one season and reports the series it belongs to.
-func (s *MetadataService) refreshSeasonTarget(ctx context.Context, seasonID string, folderID int, mode RefreshMode) (string, error) {
+func (s *MetadataService) refreshSeasonTarget(ctx context.Context, seasonID string, folderID int, mode RefreshMode, reset bool) (string, error) {
 	if s == nil || s.seasonRepo == nil {
 		return "", ErrMetadataNotFound
 	}
@@ -4565,11 +4606,15 @@ func (s *MetadataService) refreshSeasonTarget(ctx context.Context, seasonID stri
 	if err != nil {
 		return "", err
 	}
-	return season.SeriesID, s.refreshSeriesChildTarget(ctx, season.SeriesID, season.SeasonNumber, 0, folderID, mode)
+	var seasonReset *childReset
+	if reset {
+		seasonReset = &childReset{contentID: season.ContentID}
+	}
+	return season.SeriesID, s.refreshSeriesChildTarget(ctx, season.SeriesID, season.SeasonNumber, 0, folderID, mode, seasonReset)
 }
 
 // refreshEpisodeTarget refreshes one episode and reports the series it belongs to.
-func (s *MetadataService) refreshEpisodeTarget(ctx context.Context, episodeID string, folderID int, mode RefreshMode) (string, error) {
+func (s *MetadataService) refreshEpisodeTarget(ctx context.Context, episodeID string, folderID int, mode RefreshMode, reset bool) (string, error) {
 	if s == nil || s.episodeRepo == nil {
 		return "", ErrMetadataNotFound
 	}
@@ -4577,7 +4622,11 @@ func (s *MetadataService) refreshEpisodeTarget(ctx context.Context, episodeID st
 	if err != nil {
 		return "", err
 	}
-	return episode.SeriesID, s.refreshSeriesChildTarget(ctx, episode.SeriesID, episode.SeasonNumber, episode.EpisodeNumber, folderID, mode)
+	var episodeReset *childReset
+	if reset {
+		episodeReset = &childReset{episode: true, contentID: episode.ContentID}
+	}
+	return episode.SeriesID, s.refreshSeriesChildTarget(ctx, episode.SeriesID, episode.SeasonNumber, episode.EpisodeNumber, folderID, mode, episodeReset)
 }
 
 func (s *MetadataService) refreshSeriesChildTarget(
@@ -4587,6 +4636,7 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	episodeNumber int,
 	folderID int,
 	mode RefreshMode,
+	reset *childReset,
 ) error {
 	if s == nil || s.itemRepo == nil || s.seasonRepo == nil || s.episodeRepo == nil {
 		return ErrMetadataNotFound
@@ -4642,6 +4692,9 @@ func (s *MetadataService) refreshSeriesChildTarget(
 	if err != nil {
 		return err
 	}
+	// childReset records that a Reset to Provider emptied its target row, which
+	// happens once, after the providers first answered for it.
+	childReset := false
 	for _, language := range languages {
 		canonicalLanguage := strings.TrimSpace(series.DefaultMetadataLanguage)
 		if canonicalLanguage == "" {
@@ -4655,16 +4708,21 @@ func (s *MetadataService) refreshSeriesChildTarget(
 		if err != nil {
 			return err
 		}
-		seasons, seasonSearched, seasonsComplete, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx, skipLocal)
+		seasons, seasonSearched, seasonsComplete, err := s.fetchTargetSeasonResults(ctx, providerIDs, folderID, language, seasonNumber, childCtx, skipLocal, reset != nil)
 		if err != nil {
 			return err
 		}
-		episodes, episodeSearched, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, skipLocal)
+		episodes, episodeSearched, err := s.fetchTargetEpisodeResults(ctx, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, skipLocal, reset != nil)
 		if err != nil {
 			return err
 		}
 		if len(seasons) == 0 && len(episodes) == 0 {
 			continue
+		}
+		if !childReset {
+			if childReset, err = reset.apply(ctx, s, seasons, episodes); err != nil {
+				return err
+			}
 		}
 		if strings.EqualFold(language, canonicalLanguage) {
 			s.fillTargetChildText(ctx, series, providerIDs, folderID, language, seasonNumber, episodeNumber, childCtx, seasons, episodes, mode, mergeMode)
@@ -4776,7 +4834,7 @@ func (s *MetadataService) resolveSeriesRefreshProviderIDs(ctx context.Context, s
 // fetchTargetSeasonResults also reports localArtworkSeason when the local
 // provider answered, as processInternal records it, and whether every season
 // provider answered, which decides the write's seasonBackdropAuthority.
-func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext, skipLocal bool) ([]SeasonResult, localArtworkLevel, bool, error) {
+func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, childCtx seriesChildLocalContext, skipLocal, reset bool) ([]SeasonResult, localArtworkLevel, bool, error) {
 	seasonChain, err := s.resolveChainCached(ctx, folderID, "season")
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("resolve season provider chain: %w", err)
@@ -4804,6 +4862,9 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 			return nil, 0, false, fmt.Errorf("metadata: %s seasons: %w", p.Slug(), err)
 		}
 		if err != nil {
+			if failure := resetProviderFailure(reset, p, "seasons", err); failure != nil {
+				return nil, 0, false, failure
+			}
 			complete = false
 			if handleScopedProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
@@ -4830,7 +4891,7 @@ func (s *MetadataService) fetchTargetSeasonResults(ctx context.Context, provider
 
 // fetchTargetEpisodeResults also reports localArtworkEpisode when the local
 // provider answered, as processInternal records it.
-func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext, skipLocal bool) ([]EpisodeResult, localArtworkLevel, error) {
+func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, providerIDs map[string]string, folderID int, language string, seasonNumber int, episodeNumber int, childCtx seriesChildLocalContext, skipLocal, reset bool) ([]EpisodeResult, localArtworkLevel, error) {
 	episodeChain, err := s.resolveChainCached(ctx, folderID, "episode")
 	if err != nil {
 		return nil, 0, fmt.Errorf("resolve episode provider chain: %w", err)
@@ -4857,6 +4918,9 @@ func (s *MetadataService) fetchTargetEpisodeResults(ctx context.Context, provide
 			return nil, 0, fmt.Errorf("metadata: %s episodes: %w", p.Slug(), err)
 		}
 		if err != nil {
+			if failure := resetProviderFailure(reset, p, "episodes", err); failure != nil {
+				return nil, 0, failure
+			}
 			if handleScopedProvider404(p.Slug(), providerIDs, err, "season", seasonNumber) {
 				continue
 			}

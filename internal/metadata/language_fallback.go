@@ -567,13 +567,13 @@ func (s *MetadataService) fillTargetChildText(
 	fetchCtx, cancel := fallbackFetchContext(ctx)
 	defer cancel()
 	if seasonGap {
-		if found, _, _, err := s.fetchTargetSeasonResults(fetchCtx, providerIDs, folderID, fallback, seasonNumber, childCtx, true); err == nil {
+		if found, _, _, err := s.fetchTargetSeasonResults(fetchCtx, providerIDs, folderID, fallback, seasonNumber, childCtx, true, false); err == nil {
 			fetched.seasons = make(map[int]SeasonResult)
 			collectFallbackSeasons(fetched.seasons, found, fallback)
 		}
 	}
 	if len(episodeSeasons) > 0 {
-		if found, _, err := s.fetchTargetEpisodeResults(fetchCtx, providerIDs, folderID, fallback, seasonNumber, episodeNumber, childCtx, true); err == nil {
+		if found, _, err := s.fetchTargetEpisodeResults(fetchCtx, providerIDs, folderID, fallback, seasonNumber, episodeNumber, childCtx, true, false); err == nil {
 			fetched.episodes = make(map[episodeResultKey]EpisodeResult)
 			collectFallbackEpisodes(fetched.episodes, found, fallback)
 		}

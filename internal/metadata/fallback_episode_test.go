@@ -1511,3 +1511,31 @@ func TestRefreshSeriesEpisodeMetadataState_KeepsSeriesDebtWhenByDateCheckFails(t
 		t.Errorf("series debt = %+v, want it kept as queued", debt)
 	}
 }
+
+// ResetEdits empties a stored season's lockable fields and locks, as
+// catalog.SeasonRepository.ResetEdits does.
+func (r *fakeSeasonRepo) ResetEdits(_ context.Context, contentID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, s := range r.seasons {
+		if s.ContentID == contentID {
+			s.Title, s.Overview, s.AirDate, s.LockedFields = "", "", nil, []int{}
+			return nil
+		}
+	}
+	return fmt.Errorf("season %s not found", contentID)
+}
+
+// ResetEdits empties a stored episode's lockable fields and locks, as
+// catalog.EpisodeRepository.ResetEdits does.
+func (r *fakeEpisodeRepo) ResetEdits(_ context.Context, contentID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, ep := range r.episodes {
+		if ep.ContentID == contentID {
+			ep.Title, ep.Overview, ep.AirDate, ep.Runtime, ep.LockedFields = "", "", nil, 0, []int{}
+			return nil
+		}
+	}
+	return fmt.Errorf("episode %s not found", contentID)
+}

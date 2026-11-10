@@ -15534,6 +15534,8 @@ export interface components {
       item_match_hints: boolean;
       /** @description listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people */
       item_metadata: boolean;
+      /** @description refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers */
+      item_metadata_reset: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -18279,10 +18281,11 @@ export interface components {
     };
     AdminItemMetadataRefreshInputBody: {
       /**
+       * @description quick rescans the item's folder and refreshes its metadata; complete rebuilds the item from its files first; reset is a quick refresh that also clears the item's field locks and every field its providers have no value for, and fails without changing the item when a provider does not answer. Send reset only when getAdminCatalogCapabilities reports item_metadata_reset
        * @default quick
        * @enum {string}
        */
-      mode: "quick" | "complete";
+      mode: "quick" | "complete" | "reset";
     };
     AdminItemMetadataUpdate: {
       /** @description Season or episode air date; null clears it */

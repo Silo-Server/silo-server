@@ -103,11 +103,7 @@ func ClearSeriesChildEditsTx(ctx context.Context, tx pgx.Tx, seriesID string) er
 		table   string
 		columns []childLockedColumn
 	}{{seasonsTable, seasonLockedColumns}, {episodesTable, episodeLockedColumns}} {
-		assignments := joinColumns(target.columns, ", ", func(c childLockedColumn) string {
-			return fmt.Sprintf("%[1]s = CASE WHEN %[2]d = ANY(locked_fields) THEN %[3]s ELSE %[1]s END", c.column, c.field, c.empty)
-		})
-		query := fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()
-			WHERE series_id = $1 AND locked_fields <> '{}'`, target.table, assignments)
+		query := clearChildEditsSQL(target.table, target.columns, true) + ` WHERE series_id = $1 AND locked_fields <> '{}'`
 		if _, err := tx.Exec(ctx, query, seriesID); err != nil {
 			return fmt.Errorf("clearing %s edits of series %s: %w", target.table, seriesID, err)
 		}
@@ -116,6 +112,46 @@ func ClearSeriesChildEditsTx(ctx context.Context, tx pgx.Tx, seriesID string) er
 	// new show's provider may return no episode to recompute them.
 	if err := refreshSeriesAirDates(ctx, tx, []string{seriesID}); err != nil {
 		return fmt.Errorf("clearing edits of series %s: %w", seriesID, err)
+	}
+	return nil
+}
+
+// clearChildEditsSQL is the UPDATE, without its WHERE clause, that removes a
+// season's or episode's locks and empties its lockable columns: only the
+// locked ones, or all of them.
+func clearChildEditsSQL(table string, columns []childLockedColumn, onlyLocked bool) string {
+	assignments := joinColumns(columns, ", ", func(c childLockedColumn) string {
+		if onlyLocked {
+			return fmt.Sprintf("%[1]s = CASE WHEN %[2]d = ANY(locked_fields) THEN %[3]s ELSE %[1]s END", c.column, c.field, c.empty)
+		}
+		return fmt.Sprintf("%s = %s", c.column, c.empty)
+	})
+	return fmt.Sprintf(`UPDATE %s SET %s, locked_fields = '{}', updated_at = NOW()`, table, assignments)
+}
+
+// ResetEdits empties a season's lockable fields and removes its locks, for
+// Reset to Provider. The refresh that follows writes the provider's values over
+// the empty ones, so a field the provider has no value for stays empty.
+func (r *SeasonRepository) ResetEdits(ctx context.Context, contentID string) error {
+	if _, err := r.pool.Exec(ctx, clearChildEditsSQL(seasonsTable, seasonLockedColumns, false)+` WHERE content_id = $1`, contentID); err != nil {
+		return fmt.Errorf("resetting season %s: %w", contentID, err)
+	}
+	return nil
+}
+
+// ResetEdits is SeasonRepository.ResetEdits for an episode. The series' air
+// dates may come from the cleared date, so they are recomputed with it.
+func (r *EpisodeRepository) ResetEdits(ctx context.Context, contentID string) error {
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		var seriesID string
+		query := clearChildEditsSQL(episodesTable, episodeLockedColumns, false) + ` WHERE content_id = $1 RETURNING series_id`
+		if err := tx.QueryRow(ctx, query, contentID).Scan(&seriesID); err != nil {
+			return err
+		}
+		return refreshSeriesAirDates(ctx, tx, []string{seriesID})
+	})
+	if err != nil {
+		return fmt.Errorf("resetting episode %s: %w", contentID, err)
 	}
 	return nil
 }

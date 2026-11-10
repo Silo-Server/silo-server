@@ -31,6 +31,10 @@ type ItemRefreshMode string
 const (
 	ItemRefreshModeQuick    ItemRefreshMode = "quick"
 	ItemRefreshModeComplete ItemRefreshMode = "complete"
+	// ItemRefreshModeReset is a quick refresh that resets the target to its
+	// providers: it clears the target's locks and every value the providers
+	// lack (Reset to Provider in Edit Metadata).
+	ItemRefreshModeReset ItemRefreshMode = "reset"
 )
 
 var ErrScopeHasNoFiles = errors.New("cannot determine scan scope because this item has no indexed files")
@@ -440,6 +444,15 @@ type ItemRefreshArtworkCacher interface {
 	CacheTargetArtwork(ctx context.Context, targetContentID string) error
 }
 
+// ItemRefreshMetadataRefresher refreshes or resets an item's metadata
+// (metadata.MetadataService).
+type ItemRefreshMetadataRefresher interface {
+	RefreshItem(ctx context.Context, contentID string) error
+	RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
+	RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
+	ResetTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
+}
+
 type ItemRefreshExecutor struct {
 	folderRepo      itemRefreshFolderRepo
 	fileRepo        itemRefreshFileRepo
@@ -450,14 +463,10 @@ type ItemRefreshExecutor struct {
 	episodeRepo     itemRefreshEpisodeRepo
 	ingester        ItemRefreshIngester
 	scanRuns        directScanRunRepository
-	refresher       interface {
-		RefreshItem(ctx context.Context, contentID string) error
-		RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
-		RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
-	}
-	artworkCacher ItemRefreshArtworkCacher
-	eventBus      cache.EventBus
-	realtimeHub   *notifications.Hub
+	refresher       ItemRefreshMetadataRefresher
+	artworkCacher   ItemRefreshArtworkCacher
+	eventBus        cache.EventBus
+	realtimeHub     *notifications.Hub
 	// evictRails drops this node's cached home rails that list the given
 	// content IDs; tests replace it.
 	evictRails func(contentIDs ...string)
@@ -473,11 +482,7 @@ func NewItemRefreshExecutor(
 	episodeRepo itemRefreshEpisodeRepo,
 	ingester ItemRefreshIngester,
 	scanRuns directScanRunRepository,
-	refresher interface {
-		RefreshItem(ctx context.Context, contentID string) error
-		RefreshItemForLibrary(ctx context.Context, contentID string, folderID int) error
-		RefreshTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error
-	},
+	refresher ItemRefreshMetadataRefresher,
 	eventBus cache.EventBus,
 	realtimeHub *notifications.Hub,
 ) *ItemRefreshExecutor {
@@ -584,7 +589,11 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 			refreshTargetType = "item"
 		}
 	}
-	if err := e.refresher.RefreshTargetForLibrary(ctx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
+	refreshTarget := e.refresher.RefreshTargetForLibrary
+	if req.Mode == ItemRefreshModeReset {
+		refreshTarget = e.refresher.ResetTargetForLibrary
+	}
+	if err := refreshTarget(ctx, refreshTargetType, refreshContentID, req.ScanFolderID); err != nil {
 		return nil, fmt.Errorf("refresh metadata: %w", err)
 	}
 	artworkWarning := ""
@@ -725,8 +734,9 @@ func (e *ItemRefreshExecutor) resolveCompleteRefreshTargets(ctx context.Context,
 }
 
 func normalizeItemRefreshMode(mode ItemRefreshMode) ItemRefreshMode {
-	if mode == ItemRefreshModeComplete {
-		return ItemRefreshModeComplete
+	switch mode {
+	case ItemRefreshModeComplete, ItemRefreshModeReset:
+		return mode
 	}
 	return ItemRefreshModeQuick
 }
