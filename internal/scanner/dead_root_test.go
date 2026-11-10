@@ -447,33 +447,42 @@ JSON
 					t.Fatalf("full scan: %v", err)
 				}
 
-				var missing bool
-				if err := pool.QueryRow(ctx, `SELECT missing_since IS NOT NULL FROM media_files WHERE file_path = $1`, bookFile).Scan(&missing); err != nil {
-					t.Fatalf("read file row: %v", err)
-				}
-				if missing == tc.wantKept {
-					t.Fatalf("file marked missing = %v, want %v", missing, !tc.wantKept)
-				}
-				var memberships int
-				if err := pool.QueryRow(ctx, `SELECT count(*) FROM media_item_libraries WHERE content_id = $1`, contentID).Scan(&memberships); err != nil {
-					t.Fatalf("count memberships: %v", err)
-				}
-				if kept := memberships > 0; kept != tc.wantKept {
-					t.Fatalf("library memberships = %d, want kept = %v", memberships, tc.wantKept)
-				}
-				warning, err := catalog.NewFolderRepository(pool).GetScanWarning(ctx, folderID)
-				if err != nil {
-					t.Fatalf("read scan warning: %v", err)
-				}
-				got := ""
-				if warning.Code != nil {
-					got = *warning.Code
-				}
-				if got != tc.wantWarning {
-					t.Fatalf("scan warning = %q, want %q", got, tc.wantWarning)
-				}
+				requireEmptyRootBookState(t, pool, folderID, contentID, bookFile, tc.wantKept, tc.wantWarning)
 			})
 		}
+	}
+}
+
+// requireEmptyRootBookState checks the book under the empty root after the
+// full scan: whether its file and library membership were kept, and the
+// library's scan warning code ("" for none).
+func requireEmptyRootBookState(t *testing.T, pool *pgxpool.Pool, folderID int, contentID, bookFile string, wantKept bool, wantWarning string) {
+	t.Helper()
+	ctx := t.Context()
+	var missing bool
+	if err := pool.QueryRow(ctx, `SELECT missing_since IS NOT NULL FROM media_files WHERE file_path = $1`, bookFile).Scan(&missing); err != nil {
+		t.Fatalf("read file row: %v", err)
+	}
+	if missing == wantKept {
+		t.Fatalf("file marked missing = %v, want %v", missing, !wantKept)
+	}
+	var memberships int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM media_item_libraries WHERE content_id = $1`, contentID).Scan(&memberships); err != nil {
+		t.Fatalf("count memberships: %v", err)
+	}
+	if kept := memberships > 0; kept != wantKept {
+		t.Fatalf("library memberships = %d, want kept = %v", memberships, wantKept)
+	}
+	warning, err := catalog.NewFolderRepository(pool).GetScanWarning(ctx, folderID)
+	if err != nil {
+		t.Fatalf("read scan warning: %v", err)
+	}
+	got := ""
+	if warning.Code != nil {
+		got = *warning.Code
+	}
+	if got != wantWarning {
+		t.Fatalf("scan warning = %q, want %q", got, wantWarning)
 	}
 }
 
