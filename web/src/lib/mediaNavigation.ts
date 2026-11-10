@@ -38,6 +38,11 @@ export function buildItemHref({
   return appendQuery(`/item/${encodeURIComponent(contentId)}`, { libraryId });
 }
 
+/** The page of a movie box set: its TMDB collection in one library. */
+export function buildBoxSetHref({ id, libraryId }: { id: string; libraryId: string | number }) {
+  return appendQuery(`/box-sets/${encodeURIComponent(id)}`, { library_id: libraryId });
+}
+
 export function buildMediaPlayHref({
   contentId,
   type,

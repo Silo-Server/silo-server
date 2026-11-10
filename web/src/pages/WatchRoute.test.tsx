@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import type { Profile, WatchDetail } from "@/api/types";
+import type { FileVersion, Profile, WatchDetail } from "@/api/types";
+import { createAppIntl, setAppIntl, type Messages } from "@/i18n";
+import pseudo from "@/locales/en-XA.json";
 
 import {
   createWatchRouteRequest,
@@ -98,7 +100,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "en",
       subtitleMode: "always",
       showForcedSubtitles: true,
-      profileLanguage: "en",
     });
   });
 
@@ -128,7 +129,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "fr",
       subtitleMode: "off",
       showForcedSubtitles: false,
-      profileLanguage: "en",
       introSkipMode: "ask",
     });
     expect(props.versions[0]?.effective_audio_language).toBe("ja");
@@ -158,7 +158,6 @@ describe("buildWatchPageProps", () => {
       preferredSubtitleLanguage: "",
       subtitleMode: "auto",
       showForcedSubtitles: false,
-      profileLanguage: "en",
     });
   });
 
@@ -342,4 +341,44 @@ describe("buildWatchPageProps", () => {
       expect(props.initialBitmapSubtitleTrackIndexByFileId).toEqual(bitmapIndexes);
     },
   );
+});
+
+describe("initial subtitle track", () => {
+  afterEach(() => setAppIntl(createAppIntl("en", {})));
+
+  it("matches a saved track signature by its stored label in any interface language", () => {
+    // A translated interface: the pseudo-locale changes every message.
+    setAppIntl(createAppIntl("en-XA", pseudo as unknown as Messages));
+    const untitled = { codec: "subrip", external: false };
+    const version = {
+      file_id: 7,
+      resolution: "1080p",
+      codec_video: "h264",
+      codec_audio: "aac",
+      hdr: false,
+      container: "mkv",
+      file_size: 1,
+      duration: 1,
+      bitrate: 1,
+      subtitle_tracks: [untitled, untitled],
+    } satisfies FileVersion;
+    const props = buildWatchPageProps({
+      request: makeRequest(),
+      item: makeWatchDetail({
+        versions: [version],
+        effective_subtitle_mode: "always",
+        effective_subtitle_language: "",
+        // Item pages and other clients store this label in English.
+        effective_subtitle_track_signature: {
+          source: "embedded",
+          language: "unknown",
+          codec: "subrip",
+          label: "Subtitle 2",
+        },
+      }),
+      currentProfile: profile,
+    });
+
+    expect(props.initialSubtitleTrackIndexByFileId).toEqual({ 7: 1 });
+  });
 });

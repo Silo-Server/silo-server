@@ -31,6 +31,17 @@ func applyPersonalQueueMigration(t *testing.T, pool *pgxpool.Pool) {
 	if _, err = pool.Exec(t.Context(), up); err != nil {
 		t.Fatal(err)
 	}
+	// Later run columns that the queue writes on every admission.
+	for _, file := range []string{"20261017042553_add_history_import_run_played_since.sql", "20261109104259_add_history_import_run_checkpoints.sql"} {
+		migration, err = os.ReadFile("../../migrations/sql/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		up, _, _ = strings.Cut(string(migration), "-- +goose Down")
+		if _, err = pool.Exec(t.Context(), up); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func queueTestPoolBeforePersonalMigration(t *testing.T, seedDuplicates bool) *pgxpool.Pool {

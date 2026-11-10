@@ -85,19 +85,22 @@ func TestRequestHostTrustBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	resolver := NewResolver(cidrs)
+	// forwarded is ForwardedHost: the accepted header alone, even when it
+	// matches Host.
 	for _, tc := range []struct {
-		name, peer string
-		values     []string
-		want       string
+		name, peer      string
+		values          []string
+		want, forwarded string
 	}{
-		{"trusted", "127.0.0.1:80", []string{"silo.example.com"}, "silo.example.com"},
-		{"trusted with port", "127.0.0.1:80", []string{" silo.example.com:8443 "}, "silo.example.com:8443"},
-		{"untrusted", "192.0.2.1:80", []string{"hostile.example"}, "example.test:8080"},
-		{"no header", "127.0.0.1:80", nil, "example.test:8080"},
-		{"repeated", "127.0.0.1:80", []string{"a.example", "b.example"}, "example.test:8080"},
-		{"list", "127.0.0.1:80", []string{"a.example, b.example"}, "example.test:8080"},
-		{"empty", "127.0.0.1:80", []string{""}, "example.test:8080"},
-		{"path", "127.0.0.1:80", []string{"a.example/x"}, "example.test:8080"},
+		{"trusted", "127.0.0.1:80", []string{"silo.example.com"}, "silo.example.com", "silo.example.com"},
+		{"trusted with port", "127.0.0.1:80", []string{" silo.example.com:8443 "}, "silo.example.com:8443", "silo.example.com:8443"},
+		{"trusted, same as Host", "127.0.0.1:80", []string{"example.test:8080"}, "example.test:8080", "example.test:8080"},
+		{"untrusted", "192.0.2.1:80", []string{"hostile.example"}, "example.test:8080", ""},
+		{"no header", "127.0.0.1:80", nil, "example.test:8080", ""},
+		{"repeated", "127.0.0.1:80", []string{"a.example", "b.example"}, "example.test:8080", ""},
+		{"list", "127.0.0.1:80", []string{"a.example, b.example"}, "example.test:8080", ""},
+		{"empty", "127.0.0.1:80", []string{""}, "example.test:8080", ""},
+		{"path", "127.0.0.1:80", []string{"a.example/x"}, "example.test:8080", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "http://example.test:8080/", nil)
@@ -106,6 +109,9 @@ func TestRequestHostTrustBoundary(t *testing.T) {
 			Middleware(resolver)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 				if got := RequestHost(r); got != tc.want {
 					t.Fatalf("host=%q want %q", got, tc.want)
+				}
+				if got := ForwardedHost(r); got != tc.forwarded {
+					t.Fatalf("forwarded host=%q want %q", got, tc.forwarded)
 				}
 			})).ServeHTTP(httptest.NewRecorder(), req)
 		})

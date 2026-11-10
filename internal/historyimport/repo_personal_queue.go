@@ -118,6 +118,18 @@ func (r *Repository) enqueuePersonalRun(ctx context.Context, in personalRunAdmis
 	if err = lockMappingTarget(ctx, tx, in.UserID, in.ProfileID); err != nil {
 		return nil, err
 	}
+	// The lock serializes admissions per account so two concurrent requests
+	// cannot both see no active run.
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('history_import_personal_run', $1))`, in.UserID); err != nil {
+		return nil, err
+	}
+	var active bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM history_import_runs WHERE user_id=$1 AND dispatch_kind='personal' AND status IN ('queued','running'))`, in.UserID).Scan(&active); err != nil {
+		return nil, err
+	}
+	if active {
+		return nil, ErrPersonalRunActive
+	}
 	if err = r.consumePersonalSession(ctx, tx, in); err != nil {
 		return nil, err
 	}

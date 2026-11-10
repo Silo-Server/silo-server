@@ -35,7 +35,7 @@ type AdminBrandingAssetUploadInput struct {
 type AdminBrandingAsset struct {
 	Kind string `json:"kind" enum:"wordmark,mark,favicon,login_bg"`
 	Ref  string `json:"ref" doc:"Content-addressed reference of the stored bytes"`
-	URL  string `json:"url" doc:"Stable public asset path with the ref as cache-buster"`
+	URL  string `json:"url" format:"uri-reference" doc:"Stable public asset path with the ref as cache-buster"`
 }
 type AdminBrandingAssetOutput struct{ Body AdminBrandingAsset }
 
@@ -67,7 +67,7 @@ func registerAdminBrandingAssets(reg *Registry) {
 			form := in.RawBody.Data()
 			if form == nil || !form.File.IsSet {
 				return nil, NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
-					WithErrors(ProblemError{Location: "body.file", Code: codeRequired, Detail: "an image file is required"})
+					WithErrors(ProblemError{Location: locationBodyFile, Code: codeRequired, Detail: detailImageFileRequired})
 			}
 			limit := branding.MaxUploadBytes(branding.AssetKind(in.Kind))
 			tooLarge := NewProblem(TypePayloadTooLarge, "The image exceeds the maximum size for this asset.")

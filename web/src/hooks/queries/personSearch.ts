@@ -21,17 +21,19 @@ export function fetchPeopleSearchCapabilities(queryClient: QueryClient) {
 }
 
 /**
- * Whether the server takes the extended rule fields and "is not in the last"
- * (`extended_query_rules`). False until the capability answers, so a rule an
- * older server would refuse is not offered meanwhile.
+ * Which rule extensions the server accepts. False until the capability
+ * answers, so rules an older server would refuse are not offered meanwhile.
  */
-export function useExtendedQueryRules(): boolean {
+export function useQueryRuleCapabilities() {
   const { data } = useQuery({
     queryKey: personKeys.searchCapabilities(),
     queryFn: ({ signal }) => getPeopleSearchCapabilities({ signal }),
     staleTime: 5 * 60 * 1000,
   });
-  return data?.extended_query_rules === true;
+  return {
+    extendedRules: data?.extended_query_rules === true,
+    showTitleRules: data?.show_title_rules === true,
+  };
 }
 
 export function usePersonSearch(

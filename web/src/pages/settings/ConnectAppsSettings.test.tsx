@@ -5,11 +5,15 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CompatConnectInfo, Profile } from "@/api/types";
+import type { AccountIdentity } from "@/hooks/queries/account";
+import type { AuthProviderOption } from "@/hooks/useAuth";
 
 const mocks = vi.hoisted(() => ({
   useProfiles: vi.fn(),
   useAuth: vi.fn(),
   useCompatConnectInfo: vi.fn(),
+  useAccountIdentities: vi.fn(),
+  useAuthProviders: vi.fn(),
   copyTextToClipboard: vi.fn(),
 }));
 
@@ -23,6 +27,14 @@ vi.mock("@/hooks/useAuth", () => ({
 
 vi.mock("@/hooks/queries/compat", () => ({
   useCompatConnectInfo: (...args: unknown[]) => mocks.useCompatConnectInfo(...args),
+}));
+
+vi.mock("@/hooks/queries/account", () => ({
+  useAccountIdentities: (...args: unknown[]) => mocks.useAccountIdentities(...args),
+}));
+
+vi.mock("@/hooks/queries/authProviders", () => ({
+  useAuthProviders: (...args: unknown[]) => mocks.useAuthProviders(...args),
 }));
 
 vi.mock("@/lib/clipboard", () => ({
@@ -75,6 +87,45 @@ function makeConnectInfo(
   };
 }
 
+const LOCAL_PROVIDER: AuthProviderOption = {
+  id: "local",
+  display_name: "Silo account",
+  mode: "credentials",
+  default: true,
+};
+
+const OIDC_PROVIDER: AuthProviderOption = {
+  id: "plugin:3:oidc",
+  display_name: "Company SSO",
+  mode: "oauth",
+  default: false,
+  installation_id: "3",
+  native_start_path: "/api/v2/auth/oauth/3/native/start",
+};
+
+const LDAP_PROVIDER: AuthProviderOption = {
+  id: "plugin:4:ldap",
+  display_name: "Office Directory",
+  mode: "credentials",
+  default: false,
+  installation_id: "4",
+};
+
+function makeIdentity(provider: AuthProviderOption, username = "jdoe"): AccountIdentity {
+  return {
+    id: "7",
+    installation_id: provider.installation_id ?? "0",
+    provider_id: provider.id,
+    provider_name: provider.display_name,
+    username,
+    email: "johndoe@example.test",
+    display_name: "John Doe",
+    linked_at: "2026-04-06T00:00:00.000Z",
+    last_sign_in_at: null,
+    last_checked_at: null,
+  };
+}
+
 function findButton(container: HTMLElement, label: string) {
   return Array.from(container.querySelectorAll("button")).find((button) =>
     button.textContent?.trim().includes(label),
@@ -120,7 +171,34 @@ describe("ConnectAppsSettings", () => {
       data: makeConnectInfo(),
       isLoading: false,
     });
+    mocks.useAccountIdentities.mockReset();
+    mocks.useAccountIdentities.mockReturnValue({
+      data: { items: [], can_unlink: false },
+      isLoading: false,
+    });
+    mocks.useAuthProviders.mockReset();
+    mocks.useAuthProviders.mockReturnValue({
+      data: { items: [LOCAL_PROVIDER], password_login: true },
+      isLoading: false,
+    });
   });
+
+  // An account whose only way in is the server's OIDC provider, with password
+  // sign-in turned off on the server (#2608).
+  function signInWithOIDCOnly() {
+    mocks.useCompatConnectInfo.mockReturnValue({
+      data: makeConnectInfo({}, { password_login_available: false }),
+      isLoading: false,
+    });
+    mocks.useAuthProviders.mockReturnValue({
+      data: { items: [OIDC_PROVIDER], password_login: false },
+      isLoading: false,
+    });
+    mocks.useAccountIdentities.mockReturnValue({
+      data: { items: [makeIdentity(OIDC_PROVIDER)], can_unlink: false },
+      isLoading: false,
+    });
+  }
 
   afterEach(() => {
     act(() => root.unmount());
@@ -224,5 +302,64 @@ describe("ConnectAppsSettings", () => {
         (button) => button.getAttribute("aria-label") === "Copy Server",
       ),
     ).toBeUndefined();
+  });
+
+  it("tells an OIDC-only account to sign in through its provider on the Silo tab", () => {
+    signInWithOIDCOnly();
+
+    render("silo");
+
+    expect(container.textContent).toContain("Choose Company SSO on the sign-in screen");
+    expect(container.textContent).toContain(`${window.location.origin}/activate`);
+    expect(container.textContent).not.toContain("your password");
+    expect(container.textContent).not.toContain("Your account password");
+    expect(container.textContent).not.toContain("Don't add a # to either field here.");
+    // The profile picker still follows sign-in, whatever the method.
+    expect(container.textContent).toContain("profile picker");
+  });
+
+  it("asks a directory account for its directory username and password", () => {
+    mocks.useCompatConnectInfo.mockReturnValue({
+      data: makeConnectInfo({}, { password_login_available: false }),
+      isLoading: false,
+    });
+    mocks.useAuthProviders.mockReturnValue({
+      data: { items: [LDAP_PROVIDER], password_login: true },
+      isLoading: false,
+    });
+    mocks.useAccountIdentities.mockReturnValue({
+      data: { items: [makeIdentity(LDAP_PROVIDER, "j.doe")], can_unlink: false },
+      isLoading: false,
+    });
+
+    render("silo");
+
+    expect(container.textContent).toContain("j.doe");
+    expect(container.textContent).toContain("Your Office Directory password");
+    expect(container.textContent).not.toContain("Your account password");
+  });
+
+  it("withholds Silo sign-in details when the sign-in options fail to load", () => {
+    mocks.useAuthProviders.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+
+    render("silo");
+
+    expect(container.textContent).toContain("Couldn't load your sign-in details");
+    expect(container.textContent).not.toContain("your password");
+  });
+
+  it("points a break-glass account without a provider to the recovery sign-in", () => {
+    mocks.useAuthProviders.mockReturnValue({
+      data: { items: [OIDC_PROVIDER], password_login: false },
+      isLoading: false,
+    });
+
+    render("silo");
+
+    expect(container.textContent).toContain(
+      "Silo's phone apps don't offer this account a way to sign in",
+    );
+    expect(container.textContent).toContain(`${window.location.origin}/login?local=1`);
+    expect(container.textContent).not.toContain("Your account password");
   });
 });

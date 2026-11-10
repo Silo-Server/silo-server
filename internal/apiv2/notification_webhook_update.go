@@ -14,7 +14,7 @@ type NotificationWebhookUpdateInput struct {
 	IfNoneMatch string `header:"If-None-Match"`
 	Body        struct {
 		Name                   *string `json:"name,omitempty"`
-		URL                    *string `json:"url,omitempty"`
+		URL                    *string `json:"url,omitempty" format:"uri"`
 		Enabled                *bool   `json:"enabled,omitempty"`
 		NotifyFavorites        *bool   `json:"notify_favorites,omitempty"`
 		NotifyWatchlist        *bool   `json:"notify_watchlist,omitempty"`

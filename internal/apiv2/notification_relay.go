@@ -16,11 +16,11 @@ type NotificationRelayService interface {
 type NotificationRelayRegisterInput struct {
 	RawBody []byte
 	Body    struct {
-		RelayURL string `json:"relay_url,omitempty"`
+		RelayURL string `json:"relay_url,omitempty" format:"uri-reference"`
 	}
 }
 type NotificationRelayRegistration struct {
-	RelayURL         string   `json:"relay_url"`
+	RelayURL         string   `json:"relay_url" format:"uri"`
 	DeploymentID     ID       `json:"deployment_id"`
 	KeyPrefix        string   `json:"key_prefix"`
 	APIKeyConfigured bool     `json:"api_key_configured"`

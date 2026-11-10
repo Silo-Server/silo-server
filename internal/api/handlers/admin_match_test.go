@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -114,6 +116,52 @@ func TestAdminMatchSearch_FallsBackToItemMetadata(t *testing.T) {
 	}
 	if capturedQuery.Year != 2010 {
 		t.Errorf("expected year fallback to 2010, got %d", capturedQuery.Year)
+	}
+}
+
+// The stored year belongs to the current match, which is usually the wrong
+// one when an admin opens Match Item, so a search without a year must not
+// quietly reuse it. Only the frozen /api/v1 route keeps that fallback.
+func TestSearchAdminItemMatches_SearchesWithoutYearWhenNoneGiven(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"item-2": {ContentID: "item-2", Title: "Parasite", Year: 1982, Type: "movie"},
+		},
+	}
+	captureSvc := &capturingMetadataService{inner: &fakeMatchMetadataService{}}
+	h := NewAdminMatchHandler(items, nil, captureSvc)
+
+	for _, req := range []AdminMatchSearchRequest{{Title: "Parasite"}, {}} {
+		if _, err := h.SearchAdminItemMatches(context.Background(), "item-2", req); err != nil {
+			t.Fatalf("search %+v: %v", req, err)
+		}
+		if captureSvc.lastQuery.Year != 0 || captureSvc.lastQuery.Title != "Parasite" {
+			t.Fatalf("search %+v queried %q (%d), want Parasite with no year", req, captureSvc.lastQuery.Title, captureSvc.lastQuery.Year)
+		}
+	}
+}
+
+// The frozen /api/v1 routes keep answering a failed folder lookup as an invalid
+// library_id. /api/v2 answers it as a 500; its tests cover the other library
+// failures, which both versions share.
+func TestAdminMatchV1_FolderLookupFailureIsInvalidLibrary(t *testing.T) {
+	for _, library := range []string{"", `,"library_id":7`} {
+		for _, action := range []string{"search", "apply"} {
+			t.Run(action+library, func(t *testing.T) {
+				items := &fakeMatchItemLookup{items: map[string]*models.MediaItem{"item-2": {ContentID: "item-2", Title: "Parasite", Type: "movie"}}}
+				h := NewAdminMatchHandler(items, &fakeMatchFolderLookup{}, &fakeMatchMetadataService{})
+				body := `{"provider_ids":{"tmdb":"496243"}` + library + `}`
+				req := httptest.NewRequest(http.MethodPost, "/admin/items/item-2/match/"+action, strings.NewReader(body))
+				rec := httptest.NewRecorder()
+
+				buildMatchRouter(h).ServeHTTP(rec, req)
+
+				const want = `{"error":"bad_request","message":"Invalid library_id"}`
+				if rec.Code != http.StatusBadRequest || strings.TrimSpace(rec.Body.String()) != want {
+					t.Fatalf("got %d %s, want 400 %s", rec.Code, rec.Body, want)
+				}
+			})
+		}
 	}
 }
 
@@ -299,4 +347,36 @@ func (c *capturingMetadataService) SearchAndNormalize(ctx context.Context, query
 
 func (c *capturingMetadataService) Process(ctx context.Context, req metadata.ProcessRequest) (*metadata.ProcessResult, error) {
 	return c.inner.Process(ctx, req)
+}
+
+// A match can move the item to a new content ID. Cached home rails still list
+// the old ID, so both IDs must reach the other API nodes.
+func TestAdminMatchApply_PublishesOldAndNewContentIDs(t *testing.T) {
+	items := &fakeMatchItemLookup{
+		items: map[string]*models.MediaItem{
+			"movie-tmdb-124905": {ContentID: "movie-tmdb-124905", Title: "Godzilla", Year: 2014, Type: "movie"},
+		},
+	}
+	metaSvc := &fakeMatchMetadataService{
+		processResult: &metadata.ProcessResult{ContentID: "movie-tmdb-929", Updated: true},
+	}
+	bus := &recordingEventBus{}
+	h := NewAdminMatchHandler(items, nil, metaSvc)
+	h.EventBus = bus
+
+	if _, err := h.ApplyAdminItemMatch(context.Background(), "movie-tmdb-124905", AdminMatchApplyRequest{
+		ProviderIDs: map[string]string{"tmdb": "929"},
+	}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	var got []string
+	for _, event := range bus.events {
+		if event.Type == cache.EventCatalogItemChanged {
+			got = append(got, event.Payload)
+		}
+	}
+	if len(got) != 2 || got[0] != "movie-tmdb-124905" || got[1] != "movie-tmdb-929" {
+		t.Fatalf("catalog item changes = %v, want old then new content ID", got)
+	}
 }

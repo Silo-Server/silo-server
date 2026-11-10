@@ -162,6 +162,17 @@ type Run struct {
 	CreatedAt         time.Time         `json:"created_at"`
 	StartedAt         *time.Time        `json:"started_at,omitempty"`
 	CompletedAt       *time.Time        `json:"completed_at,omitempty"`
+	// PlayedSince is the lookback cutoff an admin run was queued with; nil
+	// reads the full history. The runner reads it and /api/v2 admin run
+	// responses show it; v1 does not.
+	PlayedSince *time.Time `json:"-"`
+}
+
+// AdminRunOptions shapes an admin-queued run. The zero value is a full import.
+type AdminRunOptions struct {
+	// PlayedSince limits the played-history read to items last played at or
+	// after it. Only Jellyfin sources support it.
+	PlayedSince *time.Time
 }
 
 type UnmatchedSample struct {
@@ -191,6 +202,10 @@ type Record struct {
 	LastPlayedAt    *time.Time
 	PositionSeconds float64
 	DurationSeconds float64
+	// AllowedLibraryIDs limits which episodes a whole-series or whole-season
+	// marker expands to (MatchLeaves): those in these libraries, with their
+	// series in one too. Nil means every library; empty means none.
+	AllowedLibraryIDs []int
 	// Watchlisted marks an entry from the source account's watchlist: the
 	// matched item is added to the importing profile's watchlist instead of
 	// receiving watch state.
@@ -206,6 +221,9 @@ type Record struct {
 	// profile gets a matching Continue Watching dismissal. A show between
 	// episodes has no such item; see ContinueWatchingRow.
 	HiddenFromResume bool
+	// RepeatOfWatch marks a favorite whose item was already delivered as a
+	// watch record, so one item counts once in the run's totals.
+	RepeatOfWatch bool
 	// SourceSeriesID is the source's own ID of an episode's series, which
 	// ties the episode to the source's Continue Watching row.
 	SourceSeriesID string
@@ -309,6 +327,9 @@ type ExecutionSummary struct {
 	Warnings              []string
 	UnmatchedSamples      []UnmatchedSample
 	UnmatchedReasonCounts map[string]int
+	// HiddenSuppressed counts records refused because the profile removed
+	// them from its history.
+	HiddenSuppressed int
 }
 
 // --- Admin types ---

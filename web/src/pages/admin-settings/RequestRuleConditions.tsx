@@ -20,6 +20,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAdminRequestCapabilities } from "@/hooks/queries/admin/requests";
+import { useT, type Translate } from "@/i18n";
 import {
   ROUTING_COUNTRIES,
   ROUTING_DECADES,
@@ -36,6 +38,10 @@ import {
   rowField,
   rowsToConditions,
   ruleSentence,
+  SERIES_STATUS_PRESETS,
+  SERIES_STATUSES,
+  seriesStatusLabel,
+  seriesStatusPreset,
   type ConditionKind,
   type ConditionRow,
   type ListConditionRow,
@@ -50,28 +56,34 @@ export interface ConditionLookups {
   brandsHint?: string;
 }
 
-function kindLabel(kind: ConditionKind, mediaType: RequestRouteMediaType): string {
+function kindLabel(t: Translate, kind: ConditionKind, mediaType: RequestRouteMediaType): string {
   switch (kind) {
     case "anime":
-      return "Anime";
+      return t("web.admin.settings.requests.conditions.kind.anime");
     case "genre":
-      return "Genre";
+      return t("web.admin.settings.requests.conditions.kind.genre");
     case "language":
-      return "Original language";
+      return t("web.admin.settings.requests.conditions.kind.language");
     case "country":
-      return "Country of origin";
+      return t("web.admin.settings.requests.conditions.kind.country");
     case "year":
-      return mediaType === "series" ? "First aired" : "Release year";
+      return t(
+        mediaType === "series"
+          ? "web.admin.settings.requests.conditions.kind.firstAired"
+          : "web.admin.settings.requests.conditions.kind.releaseYear",
+      );
     case "rating":
-      return "Content rating";
+      return t("web.admin.settings.requests.conditions.kind.rating");
+    case "status":
+      return t("web.admin.settings.requests.conditions.kind.status");
     case "network":
-      return "Network";
+      return t("web.admin.settings.requests.conditions.kind.network");
     case "studio":
-      return "Studio";
+      return t("web.admin.settings.requests.conditions.kind.studio");
     case "requester":
-      return "Requested by";
+      return t("web.admin.settings.requests.conditions.kind.requester");
     case "keyword":
-      return "TMDB keyword";
+      return t("web.admin.settings.requests.conditions.kind.keyword");
   }
 }
 
@@ -96,7 +108,8 @@ function parseYear(value: string): number | undefined {
 }
 
 /** An input for a numeric TMDB ID, added with Enter or the button. */
-function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) => void }) {
+export function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) => void }) {
+  const t = useT();
   const [text, setText] = useState("");
   const id = Number(text.trim());
   const valid = Number.isInteger(id) && id > 0;
@@ -112,7 +125,7 @@ function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) => void 
         inputMode="numeric"
         min={1}
         aria-label={label}
-        placeholder="TMDB ID"
+        placeholder={t("web.admin.settings.requests.conditions.tmdbIdPlaceholder")}
         className="h-8 w-28 text-xs"
         value={text}
         onChange={(event) => setText(event.target.value)}
@@ -124,7 +137,7 @@ function IdAdder({ label, onAdd }: { label: string; onAdd: (id: string) => void 
         }}
       />
       <Button type="button" size="sm" variant="outline" onClick={add} disabled={!valid}>
-        Add
+        {t("web.admin.settings.requests.conditions.addId")}
       </Button>
     </div>
   );
@@ -141,6 +154,7 @@ function ListValues({
   lookups: ConditionLookups;
   onChange: (values: string[]) => void;
 }) {
+  const t = useT();
   const brandNames = new Map(
     lookups.brands
       .filter((brand) => brand.tmdb_id)
@@ -148,7 +162,7 @@ function ListValues({
   );
   let options: Choice[] = [];
   let labelOf: (value: string) => string = (value) => value;
-  let addLabel = "Add";
+  let addLabel = t("web.admin.settings.requests.conditions.add");
   switch (row.kind) {
     case "genre":
       options = tmdbGenresFor(mediaType).map((genre) => ({
@@ -156,7 +170,7 @@ function ListValues({
         label: genre.name,
       }));
       labelOf = (value) => tmdbGenreName(Number(value), mediaType);
-      addLabel = "Add a genre";
+      addLabel = t("web.admin.settings.requests.conditions.addGenre");
       break;
     case "language":
       options = ROUTING_LANGUAGES.map((language) => ({
@@ -164,27 +178,40 @@ function ListValues({
         label: language.name,
       }));
       labelOf = routingLanguageName;
-      addLabel = "Add a language";
+      addLabel = t("web.admin.settings.requests.conditions.addLanguage");
       break;
     case "country":
       options = ROUTING_COUNTRIES.map((country) => ({ value: country.code, label: country.name }));
       labelOf = routingCountryName;
-      addLabel = "Add a country";
+      addLabel = t("web.admin.settings.requests.conditions.addCountry");
       break;
     case "network":
     case "studio":
       options = [...brandNames].map(([value, label]) => ({ value, label }));
-      labelOf = (value) => brandNames.get(value) ?? `TMDB ${value}`;
-      addLabel = `Add a ${row.kind}`;
+      labelOf = (value) =>
+        brandNames.get(value) ??
+        t("web.admin.settings.requests.conditions.tmdbFallback", { id: value });
+      addLabel = t(
+        row.kind === "network"
+          ? "web.admin.settings.requests.conditions.addNetwork"
+          : "web.admin.settings.requests.conditions.addStudio",
+      );
       break;
     case "requester":
       options = lookups.users.map((user) => ({ value: String(user.id), label: user.username }));
       labelOf = (value) =>
-        lookups.users.find((user) => String(user.id) === value)?.username ?? `Account ${value}`;
-      addLabel = "Add an account";
+        lookups.users.find((user) => String(user.id) === value)?.username ??
+        t("web.admin.settings.requests.conditions.accountFallback", { id: value });
+      addLabel = t("web.admin.settings.requests.conditions.addAccount");
+      break;
+    case "status":
+      options = [...SERIES_STATUSES];
+      labelOf = seriesStatusLabel;
+      addLabel = t("web.admin.settings.requests.conditions.addStatus");
       break;
     case "keyword":
-      labelOf = (value) => `Keyword ${value}`;
+      labelOf = (value) =>
+        t("web.admin.settings.requests.conditions.keywordFallback", { id: value });
       break;
   }
   const add = (value: string) => {
@@ -204,16 +231,43 @@ function ListValues({
           row.kind === "network" || row.kind === "studio" ? lookups.brandsHint : undefined
         }
       />
+      {row.kind === "status" ? (
+        <div
+          role="group"
+          aria-label={t("web.admin.settings.requests.conditions.statusPresets")}
+          className="flex flex-wrap gap-1.5"
+        >
+          {SERIES_STATUS_PRESETS.map((preset) => {
+            const on = seriesStatusPreset(row.values) === preset;
+            return (
+              <Button
+                key={preset.labelKey}
+                type="button"
+                size="xs"
+                variant={on ? "default" : "outline"}
+                aria-pressed={on}
+                onClick={() => onChange(on ? [] : [...preset.values])}
+              >
+                {preset.label}
+              </Button>
+            );
+          })}
+        </div>
+      ) : null}
       {byId ? (
         <div className="flex flex-wrap items-center gap-2">
           {row.kind !== "keyword" ? (
-            <span className="text-muted-foreground text-xs">Or enter a TMDB ID</span>
+            <span className="text-muted-foreground text-xs">
+              {t("web.admin.settings.requests.conditions.orEnterId")}
+            </span>
           ) : null}
           <IdAdder
             label={
               row.kind === "keyword"
-                ? "TMDB keyword ID"
-                : `${kindLabel(row.kind, mediaType)} TMDB ID`
+                ? t("web.admin.settings.requests.conditions.keywordIdLabel")
+                : t("web.admin.settings.requests.conditions.idLabel", {
+                    condition: kindLabel(t, row.kind, mediaType),
+                  })
             }
             onAdd={add}
           />
@@ -232,31 +286,40 @@ function YearValues({
   onChange: (row: Extract<ConditionRow, { kind: "year" }>) => void;
   invalid: boolean;
 }) {
+  const t = useT();
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-muted-foreground text-xs">between</span>
+        <span className="text-muted-foreground text-xs">
+          {t("web.admin.settings.requests.conditions.yearBetween")}
+        </span>
         <Input
           type="number"
-          aria-label="From year"
-          placeholder="From"
+          aria-label={t("web.admin.settings.requests.conditions.yearFromLabel")}
+          placeholder={t("web.admin.settings.requests.conditions.yearFrom")}
           className="h-8 w-24"
           value={row.from ?? ""}
           onChange={(event) => onChange({ ...row, from: parseYear(event.target.value) })}
           aria-invalid={invalid}
         />
-        <span className="text-muted-foreground text-xs">and</span>
+        <span className="text-muted-foreground text-xs">
+          {t("web.admin.settings.requests.conditions.yearAnd")}
+        </span>
         <Input
           type="number"
-          aria-label="To year"
-          placeholder="To"
+          aria-label={t("web.admin.settings.requests.conditions.yearToLabel")}
+          placeholder={t("web.admin.settings.requests.conditions.yearTo")}
           className="h-8 w-24"
           value={row.to ?? ""}
           onChange={(event) => onChange({ ...row, to: parseYear(event.target.value) })}
           aria-invalid={invalid}
         />
       </div>
-      <div role="group" aria-label="Decades" className="flex flex-wrap gap-1.5">
+      <div
+        role="group"
+        aria-label={t("web.admin.settings.requests.conditions.decades")}
+        className="flex flex-wrap gap-1.5"
+      >
         {ROUTING_DECADES.map((decade) => {
           const on = row.from === decade.from && row.to === decade.to;
           return (
@@ -297,7 +360,8 @@ function ConditionLine({
   onChange: (row: ConditionRow) => void;
   onRemove: () => void;
 }) {
-  const label = kindLabel(row.kind, mediaType);
+  const t = useT();
+  const label = kindLabel(t, row.kind, mediaType);
   let control: ReactNode = null;
   let body: ReactNode = null;
   let hint: string | null = null;
@@ -307,22 +371,32 @@ function ConditionLine({
         value={row.anime ? "yes" : "no"}
         onValueChange={(value) => onChange({ kind: "anime", anime: value === "yes" })}
       >
-        <SelectTrigger size="sm" aria-label="Anime" className="w-40">
+        <SelectTrigger size="sm" aria-label={label} className="w-40">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="yes">is anime</SelectItem>
-          <SelectItem value="no">isn&apos;t anime</SelectItem>
+          <SelectItem value="yes">{t("web.admin.settings.requests.conditions.isAnime")}</SelectItem>
+          <SelectItem value="no">
+            {t("web.admin.settings.requests.conditions.isNotAnime")}
+          </SelectItem>
         </SelectContent>
       </Select>
     );
   } else if (row.kind === "rating") {
     control = (
       <>
-        <span className="text-muted-foreground text-xs">is at most</span>
+        <span className="text-muted-foreground text-xs">
+          {t("web.admin.settings.requests.conditions.ratingAtMost")}
+        </span>
         <Select value={row.max} onValueChange={(max) => onChange({ kind: "rating", max })}>
-          <SelectTrigger size="sm" aria-label="Highest content rating" className="w-28">
-            <SelectValue placeholder="Rating" />
+          <SelectTrigger
+            size="sm"
+            aria-label={t("web.admin.settings.requests.conditions.ratingLabel")}
+            className="w-28"
+          >
+            <SelectValue
+              placeholder={t("web.admin.settings.requests.conditions.ratingPlaceholder")}
+            />
           </SelectTrigger>
           <SelectContent>
             {(ROUTING_RATINGS.includes(row.max) || !row.max
@@ -337,24 +411,31 @@ function ConditionLine({
         </Select>
       </>
     );
-    hint = "Titles without a US rating use their own country's; titles with neither don't match.";
+    hint = t("web.admin.settings.requests.conditions.ratingHint");
   } else if (row.kind === "year") {
     body = <YearValues row={row} onChange={onChange} invalid={Boolean(error)} />;
   } else {
+    if (row.kind === "status") {
+      hint = t("web.admin.settings.requests.conditions.statusHint", { mode: row.mode });
+    }
     control = (
       <Select
         value={row.mode}
         onValueChange={(mode) => onChange({ ...row, mode: mode as ListConditionRow["mode"] })}
       >
-        <SelectTrigger size="sm" aria-label={`${label} match`} className="w-32">
+        <SelectTrigger
+          size="sm"
+          aria-label={t("web.admin.settings.requests.conditions.matchLabel", { condition: label })}
+          className="w-32"
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="any" disabled={takenModes.includes("any")}>
-            is any of
+            {t("web.admin.settings.requests.conditions.isAnyOf")}
           </SelectItem>
           <SelectItem value="none" disabled={takenModes.includes("none")}>
-            is none of
+            {t("web.admin.settings.requests.conditions.isNoneOf")}
           </SelectItem>
         </SelectContent>
       </Select>
@@ -370,7 +451,7 @@ function ConditionLine({
   }
   return (
     <li
-      aria-label={`${label} condition`}
+      aria-label={t("web.admin.settings.requests.conditions.conditionLabel", { condition: label })}
       className="border-border/70 bg-foreground/[0.02] space-y-2 rounded-lg border px-3 py-2.5"
     >
       <div className="flex items-start gap-2">
@@ -383,7 +464,9 @@ function ConditionLine({
           size="icon-sm"
           variant="ghost"
           className="shrink-0"
-          aria-label={`Remove the ${label.toLowerCase()} condition`}
+          aria-label={t("web.admin.settings.requests.conditions.remove", {
+            condition: label.toLowerCase(),
+          })}
           onClick={onRemove}
         >
           <X />
@@ -436,15 +519,27 @@ export function RuleConditionsEditor({
   /** The editor's field errors, keyed like the API's (`conditions.genre_ids`). */
   errors: Record<string, string>;
 }) {
+  const t = useT();
   const headingId = useId();
   const brandKind: ConditionKind = mediaType === "series" ? "network" : "studio";
-  const menu: ConditionKind[] = [...MENU_KINDS, brandKind, "requester"];
+  // A server without the status condition refuses it in a save and ignores
+  // it in a rule another server saved, so it is offered only where the server
+  // says it takes it. A saved status row still shows.
+  const statusSupported = useAdminRequestCapabilities().data?.routing_series_status ?? false;
+  const menu: ConditionKind[] = [
+    ...MENU_KINDS,
+    ...(mediaType === "series" && statusSupported ? (["status"] as const) : []),
+    brandKind,
+    "requester",
+  ];
   // The rule in words, as the list shows it: "When a movie is Action or
   // Documentary and came out in 1970–1979".
   const conditions = rowsToConditions(rows);
   const summary =
     Object.keys(conditions).length > 0
-      ? `${ruleSentence(conditions, mediaType, conditionNames(lookups, mediaType))}.`
+      ? t("web.admin.settings.requests.conditions.summary", {
+          sentence: ruleSentence(conditions, mediaType, conditionNames(lookups, mediaType)),
+        })
       : "";
   const add = (kind: ConditionKind) => {
     const row = newRow(kind, rows);
@@ -462,11 +557,10 @@ export function RuleConditionsEditor({
     <section aria-labelledby={headingId} className="space-y-2">
       <div>
         <h3 id={headingId} className="text-sm font-semibold">
-          Which requests
+          {t("web.admin.settings.requests.conditions.heading")}
         </h3>
         <p className="text-muted-foreground text-xs leading-relaxed">
-          A request has to match every condition. Where a condition lists several values, one of
-          them is enough.
+          {t("web.admin.settings.requests.conditions.description")}
         </p>
       </div>
       <FieldError>{errors.conditions}</FieldError>
@@ -479,7 +573,7 @@ export function RuleConditionsEditor({
                   aria-hidden="true"
                   className="text-muted-foreground px-3 text-xs font-semibold tracking-wide uppercase"
                 >
-                  and
+                  {t("web.admin.settings.requests.conditions.and")}
                 </li>
               ) : null}
               <ConditionLine
@@ -504,15 +598,17 @@ export function RuleConditionsEditor({
           aria-live="polite"
           className="border-border/70 text-muted-foreground rounded-lg border border-dashed px-3 py-2 text-xs"
         >
-          <span className="text-foreground font-medium">Takes: </span>
-          {summary}
+          {t("web.admin.settings.requests.conditions.takes", {
+            summary,
+            label: (chunks) => <span className="text-foreground font-medium">{chunks}</span>,
+          })}
         </p>
       ) : null}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button type="button" size="sm" variant="outline">
             <Plus aria-hidden="true" />
-            Add condition
+            {t("web.admin.settings.requests.conditions.addCondition")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
@@ -522,18 +618,18 @@ export function RuleConditionsEditor({
               disabled={newRow(kind, rows) === null}
               onSelect={() => add(kind)}
             >
-              {kindLabel(kind, mediaType)}
+              {kindLabel(t, kind, mediaType)}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
-            Advanced
+            {t("web.admin.settings.requests.conditions.advanced")}
           </DropdownMenuLabel>
           <DropdownMenuItem
             disabled={newRow("keyword", rows) === null}
             onSelect={() => add("keyword")}
           >
-            TMDB keyword
+            {kindLabel(t, "keyword", mediaType)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

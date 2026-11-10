@@ -183,7 +183,7 @@ func (h *HistoryImportHandler) HandleAdminCreateRun(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid mapping ID")
 		return
 	}
-	run, err := h.service.CreateAdminRun(r.Context(), id)
+	run, err := h.service.CreateAdminRun(r.Context(), id, historyimport.AdminRunOptions{})
 	if err != nil {
 		h.writeHistoryImportError(w, err)
 		return
@@ -200,7 +200,7 @@ func (h *HistoryImportHandler) HandleAdminBulkRun(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid source ID")
 		return
 	}
-	result, err := h.service.BulkCreateAdminRuns(r.Context(), id)
+	result, err := h.service.BulkCreateAdminRuns(r.Context(), id, historyimport.AdminRunOptions{})
 	if err != nil {
 		h.writeHistoryImportError(w, err)
 		return

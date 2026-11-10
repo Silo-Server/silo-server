@@ -206,7 +206,7 @@ export function AccessGroupMembers({
       {failures.length > 0 && (
         <div role="alert" className="text-sm">
           <p>Some users could not be {failedAdding ? "added" : "moved"}:</p>
-          <ul className="list-disc pl-5">
+          <ul className="list-disc ps-5">
             {failures.map((failure) => (
               <li key={failure}>{failure}</li>
             ))}
@@ -231,7 +231,7 @@ export function AccessGroupMembers({
                 <Link to={`/admin/users/${member.id}`} className="font-medium hover:underline">
                   {member.username}
                 </Link>
-                <span className="text-muted-foreground ml-auto truncate">{member.email}</span>
+                <span className="text-muted-foreground ms-auto truncate">{member.email}</span>
               </li>
             ))}
           </ul>
@@ -371,7 +371,7 @@ function AddUsersDialog({
                     }
                   />
                   <span className="font-medium">{user.username}</span>
-                  <span className="text-muted-foreground ml-auto truncate text-xs">
+                  <span className="text-muted-foreground ms-auto truncate text-xs">
                     {user.access_group_id == null
                       ? "No group"
                       : (groupNames.get(String(user.access_group_id)) ?? "Unknown group")}
@@ -497,7 +497,7 @@ function ConfirmMoveDialog({
                 ) : changes.length === 0 ? (
                   <p className="text-muted-foreground">No inherited settings change.</p>
                 ) : (
-                  <ul className="text-muted-foreground list-disc pl-5">
+                  <ul className="text-muted-foreground list-disc ps-5">
                     {changes.map((change) => (
                       <li key={change.label}>
                         {change.label}: {change.from} → {change.to}

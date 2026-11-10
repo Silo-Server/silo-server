@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -324,18 +325,24 @@ func TestResolveAllIsAllOrFail(t *testing.T) {
 	}
 }
 
-// An edited .nfo or replaced image in a video library scans its directory,
-// where change detection re-applies the items whose sidecars changed.
-func TestResolverRoutesLocalMetadataSidecarsToTheirDirectory(t *testing.T) {
+// An edited .nfo, a replaced image, or an added subtitle in a video library
+// scans the directory of the videos it belongs to, where change detection
+// re-applies the items whose sidecars changed. A subtitle in a Subs/ folder
+// belongs to the videos beside that folder.
+func TestResolverRoutesLocalSidecarsToTheirDirectory(t *testing.T) {
 	root := t.TempDir()
 	movie := filepath.Join(root, "Film (2020)")
 	repo := &fakeFolderRepo{folders: []*models.MediaFolder{
 		{ID: 3, Type: "movies", Enabled: true, Paths: []string{root}},
 	}}
 	resolver := NewResolver(repo)
-	for _, name := range []string{"movie.nfo", "poster.jpg", "Film (2020)-fanart.PNG", "clearlogo.webp"} {
+	for _, name := range []string{
+		"movie.nfo", "poster.jpg", "Film (2020)-fanart.PNG", "clearlogo.webp",
+		"Film (2020).en.srt", "Film (2020).idx",
+		"Subs/English.srt", "Subtitles/Film (2020)/2_English.srt",
+	} {
 		path := filepath.Join(movie, name)
-		if err := os.MkdirAll(movie, 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, []byte("sidecar"), 0o600); err != nil {
@@ -344,6 +351,12 @@ func TestResolverRoutesLocalMetadataSidecarsToTheirDirectory(t *testing.T) {
 		target, err := resolver.Resolve(t.Context(), Request{Path: path, Trigger: "realtime_monitor", SidecarFolder: true})
 		if err != nil || target.Mode != ModeSubtree || target.Path != movie || target.Trigger != "realtime_monitor" {
 			t.Fatalf("existing %s: target=%+v err=%v", name, target, err)
+		}
+		// A change publisher that reports the file's directory gets the same
+		// scan.
+		target, err = resolver.Resolve(t.Context(), Request{Path: filepath.Dir(path), Trigger: "realtime_monitor"})
+		if err != nil || target.Mode != ModeSubtree || target.Path != movie {
+			t.Fatalf("directory of %s: target=%+v err=%v", name, target, err)
 		}
 		// The scan API still rejects a path that is not media.
 		var requestErr *RequestError
@@ -356,6 +369,23 @@ func TestResolverRoutesLocalMetadataSidecarsToTheirDirectory(t *testing.T) {
 		target, err = resolver.ResolveVanishedPath(t.Context(), path, "realtime_monitor")
 		if err != nil || target.Mode != ModeSubtree || target.Path != movie {
 			t.Fatalf("vanished %s: target=%+v err=%v", name, target, err)
+		}
+	}
+	// A removed subtitle folder reconciles its videos' directory too.
+	subs := filepath.Join(movie, "Subs")
+	if err := os.RemoveAll(subs); err != nil {
+		t.Fatal(err)
+	}
+	target, err := resolver.ResolveVanishedPath(t.Context(), subs, "realtime_monitor")
+	if err != nil || target.Mode != ModeSubtree || target.Path != movie {
+		t.Fatalf("vanished Subs folder: target=%+v err=%v", target, err)
+	}
+	// The library monitor and autoscan subtree changes resolve through
+	// ResolveMissingSubtree, which must widen the same way.
+	for _, path := range []string{subs, filepath.Join(subs, "Film (2020)")} {
+		target, err = resolver.ResolveMissingSubtree(t.Context(), path, "realtime_monitor")
+		if err != nil || target.Mode != ModeSubtree || target.Path != movie {
+			t.Fatalf("missing subtree %s: target=%+v err=%v", path, target, err)
 		}
 	}
 }
@@ -375,6 +405,8 @@ func TestResolverDoesNotRouteRootOrNonVideoSidecars(t *testing.T) {
 		filepath.Join(books, "Author", "cover.jpg"),
 		// Not a sidecar at all.
 		filepath.Join(root, "Film (2020)", "notes.txt"),
+		// Subtitles in a Subs/ folder directly under a flat library's root.
+		filepath.Join(root, "Subs", "English.srt"),
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -387,5 +419,36 @@ func TestResolverDoesNotRouteRootOrNonVideoSidecars(t *testing.T) {
 		if !errors.As(err, &requestErr) || requestErr.Reason != ReasonUnsupportedExtension {
 			t.Fatalf("%s: err=%v, want unsupported_extension", path, err)
 		}
+	}
+}
+
+// Library-monitor events and scan requests carry fspath-encoded paths; a
+// non-UTF-8 file that exists must classify as present, not as missing or
+// vanished.
+func TestResolverStatsEncodedNonUTF8Path(t *testing.T) {
+	root := t.TempDir()
+	raw := filepath.Join(root, "B\xe5rd", "B\xe5rd.mkv")
+	if err := os.MkdirAll(filepath.Dir(raw), 0o755); err != nil {
+		t.Skipf("file system rejects non-UTF-8 names: %v", err)
+	}
+	if err := os.WriteFile(raw, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encoded := fspath.Encode(raw)
+	resolver := NewResolver(&fakeFolderRepo{folders: []*models.MediaFolder{{ID: 7, Type: "movies", Enabled: true, Paths: []string{root}}}})
+
+	// A movie file resolves to its folder's subtree.
+	target, err := resolver.Resolve(t.Context(), Request{Path: encoded})
+	if err != nil || target.Mode != ModeSubtree || target.Path != filepath.Dir(encoded) {
+		t.Fatalf("Resolve file: target=%+v err=%v", target, err)
+	}
+	target, err = resolver.Resolve(t.Context(), Request{Path: filepath.Dir(encoded)})
+	if err != nil || target.Mode != ModeSubtree {
+		t.Fatalf("Resolve dir: target=%+v err=%v", target, err)
+	}
+	_, err = resolver.ResolveVanishedPath(t.Context(), encoded, "autoscan")
+	var requestErr *RequestError
+	if !errors.As(err, &requestErr) || requestErr.Reason != ReasonPathStillExists {
+		t.Fatalf("ResolveVanishedPath on existing file: %v", err)
 	}
 }

@@ -12,7 +12,7 @@ func (reg *Registry) getAdminSectionCapabilities(ctx context.Context, _ *Capabil
 		return out, nil
 	}
 	caps := reg.deps.AdminSections.AdminSectionCapabilities(ctx)
-	out.Body = AdminSectionCapabilities{Available: true, ResetProfiles: caps.ResetProfiles, Preview: caps.Preview}
+	out.Body = AdminSectionCapabilities{Available: true, ResetProfiles: caps.ResetProfiles, Preview: caps.Preview, WebOnly: true}
 	return out, nil
 }
 
@@ -92,7 +92,7 @@ func (reg *Registry) previewAdminSection(ctx context.Context, in *AdminSectionPr
 		// Preview models carry internal artwork storage keys, not public URLs.
 		// Expose the stable catalog card fields and the poster the service
 		// presigned, without serializing storage state.
-		out.Items = append(out.Items, withShownRatings(CatalogItem{ContentID: item.ContentID, Type: item.Type, Title: item.Title, PlayContentID: item.PlayContentID, Year: item.Year, Runtime: item.Runtime, Genres: NonNil(item.Genres), Keywords: NonNil(item.Keywords), Studios: item.Studios, Networks: item.Networks, ContentRating: item.ContentRating, AdvisoryAge: item.AdvisoryAge, AdvisorySource: item.AdvisorySource, Status: item.Status, ShowStatus: item.ShowStatus, RatingIMDB: item.RatingIMDB, RatingTMDB: item.RatingTMDB, RatingRTCritic: item.RatingRTCritic, RatingRTAudience: item.RatingRTAudience, OriginalLanguage: item.OriginalLanguage, Overview: item.Overview, ReleaseDate: item.ReleaseDate, LastAirDate: item.LastAirDate, PosterURL: value.PosterURLs[item.ContentID], PosterThumbhash: item.PosterThumbhash, BackdropThumbhash: item.BackdropThumbhash}, sel))
+		out.Items = append(out.Items, withShownRatings(CatalogItem{ContentID: item.ContentID, Type: item.Type, Title: item.Title, PlayContentID: item.PlayContentID, Year: item.Year, Runtime: item.Runtime, Genres: NonNil(item.Genres), Keywords: NonNil(item.Keywords), Studios: item.Studios, Networks: item.Networks, ContentRating: item.ContentRating, AdvisoryAge: item.AdvisoryAge, AdvisorySource: item.AdvisorySource, Status: item.Status, ShowStatus: item.ShowStatus, RatingIMDB: item.RatingIMDB, RatingTMDB: item.RatingTMDB, RatingRTCritic: item.RatingRTCritic, RatingRTAudience: item.RatingRTAudience, OriginalLanguage: item.OriginalLanguage, Overview: item.Overview, ReleaseDate: calendarDatePtr(item.ReleaseDate), LastAirDate: calendarDatePtr(item.LastAirDate), PosterURL: value.PosterURLs[item.ContentID], PosterThumbhash: item.PosterThumbhash, BackdropThumbhash: item.BackdropThumbhash}, sel))
 	}
 	return &AdminSectionPreviewOutput{Body: out}, nil
 }

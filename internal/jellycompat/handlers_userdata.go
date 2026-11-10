@@ -69,7 +69,7 @@ func (h *UserDataHandler) HandleGetUserData(w http.ResponseWriter, r *http.Reque
 	progress := progressMap[detail.ContentID]
 
 	if strings.EqualFold(detail.Type, "series") || strings.EqualFold(detail.Type, "season") {
-		targets, err := h.resolvePlayedTargets(r, session, chi.URLParam(r, "itemId"))
+		targets, _, err := h.resolvePlayedTargetsWithParent(r, session, chi.URLParam(r, "itemId"))
 		if err != nil {
 			writeCompatUpstreamError(w, err)
 			return
@@ -209,31 +209,35 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	targets, err := h.resolveMarkTargets(r, session, chi.URLParam(r, "itemId"), played)
+	targets, parent, err := h.resolveMarkTargets(r, session, chi.URLParam(r, "itemId"), played)
 	if err != nil {
 		writeCompatUpstreamError(w, err)
 		return
 	}
+	// A movie or episode mark clears a rewatch's resume position, as Jellyfin
+	// does and as the native mark does; a series or season mark leaves its
+	// episodes' rewatch positions alone, as the native mark does (#3257).
+	recordRewatch := parent.kind == ""
 
 	if !validateOptionalUser(w, r, session) {
 		return
 	}
 	if raw := newCaseInsensitiveQuery(r.URL.Query()).Get("datePlayed"); played && raw != "" {
-		date, parseErr := time.Parse(time.RFC3339Nano, raw)
+		date, parseErr := parseJellyfinDate(raw)
 		if parseErr != nil {
 			writeError(w, 400, "BadRequest", "Invalid datePlayed")
 			return
 		}
 		writer, ok := h.userData.(interface {
-			MarkPlayedBatchAt(context.Context, *Session, []string, time.Time) error
+			MarkPlayedBatchAt(context.Context, *Session, []string, time.Time, bool) error
 		})
 		if !ok {
 			writeError(w, 501, "NotImplemented", "Dated watch state unavailable")
 			return
 		}
-		err = writer.MarkPlayedBatchAt(r.Context(), session, targets, date)
+		err = writer.MarkPlayedBatchAt(r.Context(), session, targets, date, recordRewatch)
 	} else if played {
-		err = h.userData.MarkPlayedBatch(r.Context(), session, targets)
+		err = h.userData.MarkPlayedBatch(r.Context(), session, targets, recordRewatch)
 	} else {
 		err = h.userData.MarkUnplayedBatch(r.Context(), session, targets)
 	}
@@ -244,43 +248,87 @@ func (h *UserDataHandler) handlePlayedMutation(w http.ResponseWriter, r *http.Re
 	h.HandleGetUserData(w, r)
 }
 
-func (h *UserDataHandler) resolvePlayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, error) {
-	targets, _, err := h.resolvePlayedTargetsWithParent(r, session, rawItemID)
-	return targets, err
+// jellyfinDateLayouts are client date forms Jellyfin accepts: the compact Emby
+// form its legacy datePlayed binder handles, then the ISO 8601 date, with or
+// without a time to the minute or second, fraction and offset, that its
+// default binder and JSON reader take. time.Parse accepts a fraction after the
+// seconds in any layout. A value without an offset is read as UTC, as Jellyfin
+// stores it.
+var jellyfinDateLayouts = []string{
+	"20060102150405",
+	time.RFC3339,
+	"2006-01-02T15:04:05Z0700",
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02T15:04Z07:00",
+	"2006-01-02T15:04",
+	time.DateOnly,
 }
 
-// resolveMarkTargets resolves the leaf items a played or unplayed mark writes.
-func (h *UserDataHandler) resolveMarkTargets(r *http.Request, session *Session, rawItemID string, played bool) ([]string, error) {
+// parseJellyfinDate reads a client-supplied date such as datePlayed,
+// LastPlayedDate, or MinPremiereDate.
+func parseJellyfinDate(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	var err error
+	for _, layout := range jellyfinDateLayouts {
+		date, parseErr := time.Parse(layout, raw)
+		if parseErr == nil {
+			return date, nil
+		}
+		err = parseErr
+	}
+	return time.Time{}, err
+}
+
+// clientDate is a JSON date in any form parseJellyfinDate accepts.
+type clientDate time.Time
+
+func (d *clientDate) UnmarshalJSON(data []byte) error {
+	var raw string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	date, err := parseJellyfinDate(raw)
+	if err != nil {
+		return err
+	}
+	*d = clientDate(date)
+	return nil
+}
+
+// resolveMarkTargets resolves the leaf items a played or unplayed mark writes,
+// and the series or season it expanded, if any.
+func (h *UserDataHandler) resolveMarkTargets(r *http.Request, session *Session, rawItemID string, played bool) ([]string, playedParent, error) {
 	if played {
-		return h.resolvePlayedTargets(r, session, rawItemID)
+		return h.resolvePlayedTargetsWithParent(r, session, rawItemID)
 	}
 	return h.resolveUnplayedTargets(r, session, rawItemID)
 }
 
-// resolveUnplayedTargets is resolvePlayedTargets for an unplayed mark. A series
-// or season also clears its watched episodes that no longer have a library
-// file, which the episode listings leave out; otherwise their completed
-// progress keeps the series in Next Up.
-func (h *UserDataHandler) resolveUnplayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, error) {
+// resolveUnplayedTargets is resolvePlayedTargetsWithParent for an unplayed
+// mark. A series or season also clears its watched episodes that no longer
+// have a library file, which the episode listings leave out; otherwise their
+// completed progress keeps the series in Next Up.
+func (h *UserDataHandler) resolveUnplayedTargets(r *http.Request, session *Session, rawItemID string) ([]string, playedParent, error) {
 	targets, parent, err := h.resolvePlayedTargetsWithParent(r, session, rawItemID)
 	if err != nil || parent.kind == "" {
-		return targets, err
+		return targets, parent, err
 	}
 	resolver, ok := h.userData.(interface {
 		ParentUnplayedTargets(context.Context, *Session, string, string) ([]string, error)
 	})
 	if !ok {
-		return targets, nil
+		return targets, parent, nil
 	}
 	extra, err := resolver.ParentUnplayedTargets(r.Context(), session, parent.kind, parent.id)
 	if err != nil {
-		return nil, err
+		return nil, parent, err
 	}
 	seen := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
 		seen[target] = struct{}{}
 	}
-	return appendUniqueContentIDs(targets, seen, extra...), nil
+	return appendUniqueContentIDs(targets, seen, extra...), parent, nil
 }
 
 // playedTargetNotFound answers a played mark on an unknown item.
@@ -373,14 +421,14 @@ func appendUniqueContentIDs(targets []string, seen map[string]struct{}, contentI
 
 // updateUserDataRequest uses pointers so omitted and null fields preserve state.
 type updateUserDataRequest struct {
-	PlaybackPositionTicks *int64     `json:"PlaybackPositionTicks"`
-	PlayedPercentage      *float64   `json:"PlayedPercentage"`
-	Played                *bool      `json:"Played"`
-	IsFavorite            *bool      `json:"IsFavorite"`
-	LastPlayedDate        *time.Time `json:"LastPlayedDate"`
-	PlayCount             *int       `json:"PlayCount"`
-	Rating                *float64   `json:"Rating"`
-	Likes                 *bool      `json:"Likes"`
+	PlaybackPositionTicks *int64      `json:"PlaybackPositionTicks"`
+	PlayedPercentage      *float64    `json:"PlayedPercentage"`
+	Played                *bool       `json:"Played"`
+	IsFavorite            *bool       `json:"IsFavorite"`
+	LastPlayedDate        *clientDate `json:"LastPlayedDate"`
+	PlayCount             *int        `json:"PlayCount"`
+	Rating                *float64    `json:"Rating"`
+	Likes                 *bool       `json:"Likes"`
 }
 
 func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Request) {
@@ -425,7 +473,7 @@ func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Re
 			req.Played = new(*req.PlayCount > 0)
 		}
 		if req.Played != nil {
-			targets, err := h.resolveMarkTargets(r, session, chi.URLParam(r, "itemId"), *req.Played)
+			targets, _, err := h.resolveMarkTargets(r, session, chi.URLParam(r, "itemId"), *req.Played)
 			if err != nil {
 				writeCompatUpstreamError(w, err)
 				return
@@ -446,7 +494,7 @@ func (h *UserDataHandler) HandleUpdateUserData(w http.ResponseWriter, r *http.Re
 				return
 			}
 			if *req.Played {
-				err = h.userData.MarkPlayedBatch(r.Context(), session, targets)
+				err = h.userData.MarkPlayedBatch(r.Context(), session, targets, false)
 			} else {
 				err = h.userData.MarkUnplayedBatch(r.Context(), session, targets)
 			}

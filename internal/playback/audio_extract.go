@@ -10,12 +10,13 @@ import (
 	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
 // AudioChunk is one extracted piece of an audio track. Start is the chunk's
@@ -46,7 +47,7 @@ func ExtractAudioChunks(ctx context.Context, filePath string, audioTrackIndex in
 	args := audioChunkExtractionArgs(filePath, audioTrackIndex, listPath,
 		filepath.Join(dir, "chunk%05d.wav"), 0, chunkSeconds)
 
-	cmd := exec.CommandContext(ctx, audioExtractionFFmpegBinary(ffmpegPath), args...)
+	cmd := fspath.CommandContext(ctx, audioExtractionFFmpegBinary(ffmpegPath), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -115,7 +116,7 @@ func ExtractAudioChunksFrom(
 	cmdCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	cmd := exec.CommandContext(cmdCtx, audioExtractionFFmpegBinary(ffmpegPath), args...)
+	cmd := fspath.CommandContext(cmdCtx, audioExtractionFFmpegBinary(ffmpegPath), args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -361,7 +362,7 @@ func ProbeAudioStartOffset(ctx context.Context, filePath string, audioTrackIndex
 		ffprobe = filepath.Join(filepath.Dir(ffmpegPath), "ffprobe")
 	}
 
-	cmd := exec.CommandContext(ctx, ffprobe,
+	cmd := fspath.CommandContext(ctx, ffprobe,
 		"-v", "error",
 		"-print_format", "json",
 		"-show_entries", "format=start_time",

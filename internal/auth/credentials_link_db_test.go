@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // directoryPlugin is a credentials (LDAP) auth plugin: it answers
@@ -136,5 +137,65 @@ func TestLinkCredentialsIdentityDB(t *testing.T) {
 	}
 	if _, err := link(disabled, "correct horse battery", env.name("glass-2")); !errors.Is(err, ErrUserDisabled) || errors.Is(err, ErrProviderAccountDisabled) {
 		t.Fatalf("disabled account = %v", err)
+	}
+}
+
+// TestExternalSignInCredentialsSessionLocksAccountDB: a directory sign-in
+// opens its login session under the account lock, so an account disabled
+// after account resolution committed is refused and keeps no live session.
+func TestExternalSignInCredentialsSessionLocksAccountDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	users := NewUserRepository(env.pool)
+	sessions := NewSessionRepository(env.pool)
+	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-jwt-secret-synthetic-jwt-secret", time.Minute, time.Hour), sessions, users, nil, nil, nil)
+	identity := env.identity("dana")
+	answer := &pluginv1.AuthenticateResponse{ExternalSubject: identity.Subject, Issuer: "ldaps://ldap.example.test",
+		Username: identity.Username, Email: identity.Email, DisplayName: identity.DisplayName,
+		ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER}
+	directory := &directoryPlugin{users: map[string]*pluginv1.AuthenticateResponse{identity.Username + "\x00dir-pass": answer}}
+	// A role the provider changes signs the account out everywhere, and the
+	// resolver reports that after its transaction commits: an administrator's
+	// disable can land there, before the sign-in opens its session.
+	disableOnRevoke := false
+	resolver := NewAccountResolver(env.pool, NewAccountProvisioner(users, pgstore.NewPostgresProvider(env.pool)), func(ctx context.Context, userID int) {
+		if !disableOnRevoke {
+			return
+		}
+		if _, err := env.pool.Exec(ctx, `UPDATE users SET enabled = false WHERE id = $1`, userID); err != nil {
+			t.Error(err)
+		}
+	})
+	provider := NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: env.installationID, CapabilityID: "ldap", DisplayName: "Directory", AutoProvision: true},
+		sessions, resolver, func(context.Context) (pluginAuthClient, error) { return directory, nil })
+	providerID := PluginProviderID(env.installationID, "ldap")
+	svc.SetPluginProviderSource(staticProviderSource{{
+		Info:     LoginProviderInfo{ID: providerID, DisplayName: "Directory", Mode: ProviderModeCredentials, InstallationID: env.installationID},
+		Provider: provider,
+	}})
+	liveSessions := func(userID int) int {
+		t.Helper()
+		var n int
+		if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM auth_sessions WHERE user_id = $1 AND revoked_at IS NULL`, userID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	_, user, err := svc.LoginWithProvider(ctx, providerID, identity.Username, "dir-pass", "test", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := liveSessions(user.ID); n != 1 {
+		t.Fatalf("first sign-in left %d live sessions, want 1", n)
+	}
+
+	answer.ManagedRole = pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_ADMIN
+	disableOnRevoke = true
+	if _, _, err := svc.LoginWithProvider(ctx, providerID, identity.Username, "dir-pass", "test", ""); !errors.Is(err, ErrUserDisabled) {
+		t.Fatalf("sign-in of an account disabled after resolution = %v, want ErrUserDisabled", err)
+	}
+	if n := liveSessions(user.ID); n != 0 {
+		t.Fatalf("a disabled account kept %d live sessions", n)
 	}
 }

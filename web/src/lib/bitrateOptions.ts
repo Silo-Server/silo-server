@@ -1,4 +1,5 @@
 import type { SettingDefinition } from "@/lib/settingsContract";
+import { formatDecimal } from "@/lib/numberFormat";
 
 /**
  * Bandwidth choices for `playback.max_bitrate_kbps`, shared by every surface
@@ -24,9 +25,22 @@ export const BITRATE_CHOICES_KBPS = [
 export function formatBitrateKbps(kbps: number): string {
   if (kbps >= 1000) {
     const mbps = kbps / 1000;
-    return mbps % 1 === 0 ? `${mbps} Mbps` : `${mbps.toFixed(1)} Mbps`;
+    return mbps % 1 === 0 ? `${mbps} Mbps` : `${formatDecimal(mbps, 1)} Mbps`;
   }
   return `${kbps} kbps`;
+}
+
+/**
+ * A connection speed, budget or learned limit, as every Silo client shows one
+ * in Settings and the admin device page: rounded down, so a lower bound or a
+ * budget never overstates the link. One decimal below 10 Mbps, whole Mbps from
+ * there, kbps below 1 Mbps, and no digit grouping.
+ */
+export function formatConnectionRateKbps(kbps: number): string {
+  const value = Math.max(0, Math.floor(kbps));
+  if (value < 1000) return `${value} kbps`;
+  if (value < 10_000) return `${formatDecimal(Math.floor(value / 100) / 10, 1)} Mbps`;
+  return `${Math.floor(value / 1000)} Mbps`;
 }
 
 /**

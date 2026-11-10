@@ -311,7 +311,10 @@ func TestDrainingNodeReconstructsUntilItReportsDrained(t *testing.T) {
 		t.Fatalf("reconstruct while draining = %v, %v; want the session rebuilt", session, err)
 	}
 	_ = session.CloseProcess()
-	stopSession(t, s, transportID)
+	// The viewer pauses long enough for the idle reaper to close the job. A
+	// stop would fence the transport instead, and the drain check would never
+	// run.
+	s.reapIdleSessions(0)
 
 	if got := healthStatusOf(t, s).Status; got != HealthStatusDrained {
 		t.Fatalf("status = %q, want drained", got)

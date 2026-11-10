@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminPlaybackActivity } from "@/hooks/queries/admin/dashboardInsights";
 import { SectionError } from "../feedback";
 import { rangeHours, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
+import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
+import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
 
 /**
  * Coarse playback health for the chosen window.
@@ -19,18 +22,18 @@ import { WidgetRangePicker } from "../WidgetRangePicker";
  * reverse-engineered from logs. See docs/admin-api.md.
  */
 export function PlaybackReliabilityWidget() {
+  const t = useT();
   const { range } = useWidgetRange();
   const query = useAdminPlaybackActivity(rangeHours(range));
   const reliability = query.data?.reliability;
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">
-          {rangeTitle("Playback reliability", range)}
-        </CardTitle>
+      <WidgetHeader
+        title={rangeTitle(t("web.admin.dashboard.widgets.playbackReliability.title"), range)}
+      >
         <WidgetRangePicker />
-      </CardHeader>
+      </WidgetHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {query.isLoading ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -39,27 +42,36 @@ export function PlaybackReliabilityWidget() {
             ))}
           </div>
         ) : query.error || !reliability ? (
-          <SectionError message="Failed to load playback reliability." />
+          <SectionError message={t("web.admin.dashboard.widgets.playbackReliability.loadFailed")} />
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MiniStat label="Started" value={reliability.sessions_started.toLocaleString()} />
             <MiniStat
-              label="Transcode starts"
-              value={reliability.transcode_starts.toLocaleString()}
+              label={t("web.admin.dashboard.widgets.playbackReliability.started")}
+              value={reliability.sessions_started.toLocaleString(formatLocale())}
             />
             <MiniStat
-              label="Completed"
+              label={t("web.admin.dashboard.widgets.playbackReliability.transcodeStarts")}
+              value={reliability.transcode_starts.toLocaleString(formatLocale())}
+            />
+            <MiniStat
+              label={t("web.admin.dashboard.widgets.playbackReliability.completed")}
               value={formatCompletionRate(
                 reliability.completion_rate,
                 reliability.finalized_sessions,
               )}
               detail={
                 reliability.finalized_sessions > 0
-                  ? `${reliability.completed_sessions.toLocaleString()} of ${reliability.finalized_sessions.toLocaleString()} finished`
-                  : "No finished sessions yet"
+                  ? t("web.admin.dashboard.widgets.playbackReliability.completedDetail", {
+                      completed: reliability.completed_sessions.toLocaleString(formatLocale()),
+                      finished: reliability.finalized_sessions.toLocaleString(formatLocale()),
+                    })
+                  : t("web.admin.dashboard.widgets.playbackReliability.noFinished")
               }
             />
-            <MiniStat label="Profiles" value={reliability.unique_profiles.toLocaleString()} />
+            <MiniStat
+              label={t("web.admin.dashboard.widgets.playbackReliability.profiles")}
+              value={reliability.unique_profiles.toLocaleString(formatLocale())}
+            />
           </div>
         )}
       </CardContent>

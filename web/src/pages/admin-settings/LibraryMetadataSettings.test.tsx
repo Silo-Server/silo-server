@@ -153,14 +153,14 @@ describe("LibraryMetadataSettings", () => {
 
     expect(page).toContain("Not added by an enabled plugin");
     expect(page).toContain("letterboxd");
-    expect(page).not.toContain("No metadata plugin adds ratings.");
+    expect(page).not.toContain("No metadata plugin adds other ratings.");
   });
 
   it("leaves out the Ratings group on a server without rating source support", () => {
     ratingSourceCapabilitiesMock.mockReturnValueOnce({ data: undefined });
     const page = text(render({ "catalog.extra_rating_sources": "kinopoisk" }));
 
-    expect(page).not.toContain("Metadata plugins can add other ratings");
+    expect(page).not.toContain("IMDb and TMDB scores have no switch");
     expect(page).not.toContain("From Kinopoisk Metadata");
   });
 });

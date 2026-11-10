@@ -1,6 +1,9 @@
 {
-  "revision": "8a263a3e6deee13fbe30259bb1fc7c9e6afa8cc557ec344e69f65de6e3adafa4",
+  "revision": "e79e3494e0c6306105765c71ecbd233319ba8d07b83d2d1505fee415f0f045d2",
   "state": "available",
   "allowed": true,
-  "include_items_max": 4
+  "include_items_max": 4,
+  "section_item_limit_max": 100,
+  "row_item_limit_max": 100,
+  "section_title_keys": true
 }

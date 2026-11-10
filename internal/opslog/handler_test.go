@@ -51,6 +51,69 @@ func TestHandlerKeepsAValueItCannotEncode(t *testing.T) {
 	}
 }
 
+func TestAttrValueErrorMasksURLCredentials(t *testing.T) {
+	for _, scheme := range []string{"http", "https", "HTTP", "HTTPS", "hTtP", "hTtPs"} {
+		t.Run(scheme, func(t *testing.T) {
+			presigned := scheme + "://synthetic-user:synthetic-password@bucket.s3.example.test/chapter-images/1/0/original.webp?X-Amz-Credential=AKIDEXAMPLE&X-Amz-Signature=deadbeef#private-fragment"
+			err := fmt.Errorf("upload chapter image: PUT %s: AccessDenied", presigned)
+			got, ok := attrValue(slog.AnyValue(err)).(string)
+			if !ok {
+				t.Fatalf("attrValue(error) = %#v, want a string", got)
+			}
+			for _, secret := range []string{"synthetic-user", "synthetic-password", "X-Amz-Credential", "AKIDEXAMPLE", "X-Amz-Signature", "deadbeef", "private-fragment"} {
+				if strings.Contains(got, secret) {
+					t.Fatalf("attrValue kept %q: %s", secret, got)
+				}
+			}
+			if !strings.Contains(got, strings.ToLower(scheme)+"://bucket.s3.example.test/chapter-images/1/0/original.webp") || !strings.Contains(got, "AccessDenied") {
+				t.Fatalf("attrValue dropped the useful part of the error: %s", got)
+			}
+		})
+	}
+}
+
+// TestAttrValueErrorKeepsQuotedURLs checks that the quote and colon a
+// *url.Error prints after its URL are not taken into the URL, which escaped
+// them into the path or made the URL unparseable.
+func TestAttrValueErrorKeepsQuotedURLs(t *testing.T) {
+	cause := errors.New("connection refused")
+	for _, tc := range []struct{ url, want string }{
+		{"http://node-a:8096", `Get "http://node-a:8096": connection refused`},
+		{"http://node-a:8096/health", `Get "http://node-a:8096/health": connection refused`},
+		{"https://user:pw@cdn.example.test/v.mp4?sig=abc", `Get "https://cdn.example.test/v.mp4": connection refused`},
+	} {
+		err := &url.Error{Op: "Get", URL: tc.url, Err: cause}
+		if got := attrValue(slog.AnyValue(err)); got != tc.want {
+			t.Errorf("attrValue(%q) = %#v, want %q", tc.url, got, tc.want)
+		}
+		plain := errors.New(err.Error())
+		if got := attrValue(slog.AnyValue(plain)); got != tc.want {
+			t.Errorf("attrValue(plain %q) = %#v, want %q", tc.url, got, tc.want)
+		}
+	}
+}
+
+// TestAttrValueErrorMasksSignedTokenBeforePunctuation checks that punctuation
+// ending a sentence does not hide a signed-token path segment it touches.
+func TestAttrValueErrorMasksSignedTokenBeforePunctuation(t *testing.T) {
+	const token = "eyJhbGciOiJIUzI1NiJ9.eyJzZXNzaW9uX2lkIjoic2VjcmV0In0.c2lnbmF0dXJl"
+	for _, end := range []string{"!", ".", ")"} {
+		err := errors.New("fetch https://node.example/stream/direct/" + token + end)
+		got, _ := attrValue(slog.AnyValue(err)).(string)
+		if want := "fetch https://node.example/stream/direct/[REDACTED]" + end; got != want {
+			t.Errorf("attrValue(%q ending) = %q, want %q", end, got, want)
+		}
+	}
+}
+
+func TestAttrValueErrorMasksQueryAfterQuoteInURL(t *testing.T) {
+	err := errors.New(`upload: PUT "https://bucket.s3.example.test/it's<1>.webp?X-Amz-Signature=deadbeef": AccessDenied`)
+	got, _ := attrValue(slog.AnyValue(err)).(string)
+	if strings.Contains(got, "X-Amz-Signature") || strings.Contains(got, "deadbeef") {
+		t.Fatalf("attrValue kept the signature: %s", got)
+	}
+}
+
 // TestHandlerRecordsErrorText checks that an error attr is stored as its
 // text. Errors from errors.New and fmt.Errorf have no exported fields, so a
 // JSON encode would store {} and hide why the logged operation failed.

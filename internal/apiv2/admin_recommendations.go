@@ -88,7 +88,10 @@ func registerAdminRecommendations(reg *Registry) {
 		{"cowatch", "triggerAdminRecommendationCowatch", AdminRecommendationsService.TriggerCowatch},
 		{"recommendations", "triggerAdminRecommendationRefresh", AdminRecommendationsService.TriggerRecommendations},
 	} {
-		Register(reg, op(http.MethodPost, "/trigger/"+action.path, action.id, "Start process-local recommendation work without a durable job receipt."), func(ctx context.Context, _ *struct{}) (*AdminRecommendationStartedOutput, error) {
+		trigger := op(http.MethodPost, "/trigger/"+action.path, action.id, "Start process-local recommendation work without a durable job receipt.")
+		// A job already running on this process or another server is 409.
+		trigger.Errors = append(trigger.Errors, http.StatusConflict)
+		Register(reg, trigger, func(ctx context.Context, _ *struct{}) (*AdminRecommendationStartedOutput, error) {
 			if reg.deps.AdminRecommendations == nil {
 				return nil, unavailable("recommendations")
 			}
@@ -108,7 +111,7 @@ func registerAdminRecommendations(reg *Registry) {
 	reset := op(http.MethodPost, "/embeddings/reset", "resetAdminRecommendationEmbeddings", "Delete the embedding lock, every item embedding, taste clusters and per-profile cached rows, and clear taste profile vectors, in one transaction.")
 	reset.Description = "Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. " +
 		"It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, " +
-		"while a catalog import with embeddings runs, and while saved embedding settings wait for a server restart. " +
+		"while a catalog import with embeddings runs, and while a saved embedding model or base URL waits for a server restart. " +
 		"Run the embedding job afterwards to build the new embedding space."
 	reset.Errors = append(reset.Errors, http.StatusConflict)
 	Register(reg, reset, reg.resetAdminRecommendationEmbeddings)
@@ -128,7 +131,7 @@ func (reg *Registry) resetAdminRecommendationEmbeddings(ctx context.Context, _ *
 			return nil, NewProblem(TypeConflict, "A catalog import with embeddings is running. Reset embeddings after it finishes.")
 		}
 		if errors.Is(err, recommendations.ErrEmbeddingSettingsPendingRestart) {
-			return nil, NewProblem(TypeConflict, "The saved embedding settings take effect after a server restart. Restart the server, then reset embeddings.")
+			return nil, NewProblem(TypeConflict, "The saved embedding model or base URL takes effect after a server restart. Restart the server, then reset embeddings.")
 		}
 		return nil, serviceProblem(err)
 	}

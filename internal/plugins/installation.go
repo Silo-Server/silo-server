@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +15,12 @@ import (
 
 var ErrInstallationNotFound = errors.New("plugin installation not found")
 var ErrArchiveNotFound = errors.New("plugin archive not found")
+
+// ErrArchiveUnreadable marks a stored plugin archive that won't open or
+// extract, or doesn't match the installation row it was read for. That plugin
+// can't load from it; other plugins are unaffected.
+var ErrArchiveUnreadable = errors.New("stored plugin archive is unreadable")
+
 var ErrInstallationDisabled = errors.New("plugin installation is disabled")
 
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate
@@ -46,6 +50,18 @@ type Installation struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	RuntimeGeneration int64 `json:"-"`
+	// UpdateFailure is the last automatic update Silo refused to apply, or
+	// nil. A changed installed version or a later pass that does not fail
+	// clears it.
+	UpdateFailure *UpdateFailure `json:"-"`
+}
+
+// UpdateFailure records an automatic update that was refused. Reason is
+// written for the admin and carries no URL, checksum or credential.
+type UpdateFailure struct {
+	Version  string
+	Reason   string
+	FailedAt time.Time
 }
 
 // IsBuiltin reports whether this is the reserved builtin-host installation.
@@ -94,23 +110,54 @@ type UpdateInstallationInput struct {
 	// comes from. A nil RepositoryID clears it, as for an uploaded package.
 	SetRepository bool
 	RepositoryID  *int
+	// UpdateFailure records a refused automatic update; ClearUpdateFailure
+	// removes the record. Setting Version also removes it, since the record
+	// is about updating from the version that was installed.
+	UpdateFailure      *UpdateFailure
+	ClearUpdateFailure bool
+	// IfVersion, when set, applies the row's column writes only while the
+	// installed version still equals it; otherwise they are a no-op. It does
+	// not guard Capabilities. An update check uses it so a refusal can't land
+	// on a newer version that a concurrent manual update installed.
+	IfVersion *string
 }
 
 type InstallationStore struct {
-	pool *pgxpool.Pool
+	pool installationDB
+}
+
+// installationDB is a pool or a caller's transaction: Begin on a
+// transaction opens a savepoint, so the store's own multi-statement writes
+// stay atomic inside it.
+type installationDB interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 func NewInstallationStore(pool *pgxpool.Pool) *InstallationStore {
+	if pool == nil {
+		return &InstallationStore{}
+	}
 	return &InstallationStore{pool: pool}
 }
 
-const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation`
+// WithTx returns a store whose reads and writes run in tx, so an
+// installation commits or rolls back with the caller's other writes.
+func (s *InstallationStore) WithTx(tx pgx.Tx) *InstallationStore {
+	return &InstallationStore{pool: tx}
+}
+
+const installationColumns = `id, repository_id, plugin_id, version, install_path, enabled, kind, update_policy, available_version, created_at, updated_at, runtime_generation, update_failed_version, update_failure_reason, update_failed_at`
 const capabilityColumns = `plugin_installation_id, capability_type, capability_id, metadata, created_at, updated_at`
 const archiveColumns = `plugin_installation_id, manifest_json, checksum, archive_bytes, created_at, updated_at`
 
 func scanInstallation(row pgx.Row) (*Installation, error) {
 	var installation Installation
 	var repositoryID *int
+	var failedVersion, failureReason *string
+	var failedAt *time.Time
 	if err := row.Scan(
 		&installation.ID,
 		&repositoryID,
@@ -124,6 +171,9 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		&installation.CreatedAt,
 		&installation.UpdatedAt,
 		&installation.RuntimeGeneration,
+		&failedVersion,
+		&failureReason,
+		&failedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrInstallationNotFound
@@ -131,6 +181,9 @@ func scanInstallation(row pgx.Row) (*Installation, error) {
 		return nil, fmt.Errorf("scanning plugin installation: %w", err)
 	}
 	installation.RepositoryID = repositoryID
+	if failedVersion != nil && failureReason != nil && failedAt != nil {
+		installation.UpdateFailure = &UpdateFailure{Version: *failedVersion, Reason: *failureReason, FailedAt: *failedAt}
+	}
 	return &installation, nil
 }
 
@@ -346,20 +399,36 @@ func (s *InstallationStore) Update(ctx context.Context, id int, input UpdateInst
 		args = append(args, input.RepositoryID)
 		argIndex++
 	}
+	switch {
+	case input.UpdateFailure != nil:
+		setClauses = append(setClauses, fmt.Sprintf("update_failed_version = $%d, update_failure_reason = $%d, update_failed_at = $%d", argIndex, argIndex+1, argIndex+2))
+		args = append(args, input.UpdateFailure.Version, input.UpdateFailure.Reason, input.UpdateFailure.FailedAt)
+		argIndex += 3
+	case input.ClearUpdateFailure || input.Version != nil:
+		setClauses = append(setClauses, "update_failed_version = NULL, update_failure_reason = NULL, update_failed_at = NULL")
+	}
 
 	if len(setClauses) > 0 {
 		setClauses = append(setClauses, "updated_at = NOW()")
 		args = append(args, id)
+		where := fmt.Sprintf("id = $%d", argIndex)
+		if input.IfVersion != nil {
+			args = append(args, *input.IfVersion)
+			where += fmt.Sprintf(" AND version = $%d", argIndex+1)
+		}
 		query := fmt.Sprintf(
-			"UPDATE plugin_installations SET %s WHERE id = $%d",
+			"UPDATE plugin_installations SET %s WHERE %s",
 			strings.Join(setClauses, ", "),
-			argIndex,
+			where,
 		)
 		tag, err := tx.Exec(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("updating plugin installation: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
+			if input.IfVersion != nil {
+				return nil
+			}
 			return ErrInstallationNotFound
 		}
 	}
@@ -419,6 +488,25 @@ func (s *InstallationStore) ListCapabilities(ctx context.Context, installationID
 	rows, err := s.pool.Query(ctx, query, installationID)
 	if err != nil {
 		return nil, fmt.Errorf("listing plugin capabilities: %w", err)
+	}
+	defer rows.Close()
+	return scanCapabilities(rows)
+}
+
+// ListCapabilitiesOfType lists one capability type across every installation
+// that is not builtin, enabled or not. q may be a transaction, so a caller that
+// holds one needs no second pool connection.
+func ListCapabilitiesOfType(ctx context.Context, q interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}, capabilityType string,
+) ([]*Capability, error) {
+	rows, err := q.Query(ctx, `SELECT c.plugin_installation_id, c.capability_type, c.capability_id, c.metadata, c.created_at, c.updated_at
+		FROM plugin_capabilities c
+		JOIN plugin_installations i ON i.id = c.plugin_installation_id
+		WHERE c.capability_type = $1 AND i.kind <> $2
+		ORDER BY c.plugin_installation_id ASC, c.capability_id ASC`, capabilityType, KindBuiltin)
+	if err != nil {
+		return nil, fmt.Errorf("listing plugin capabilities of type %s: %w", capabilityType, err)
 	}
 	defer rows.Close()
 	return scanCapabilities(rows)
@@ -486,8 +574,7 @@ func (s *InstallationStore) Delete(ctx context.Context, id int) error {
 		return ErrInstallationNotFound
 	}
 
-	installDir := filepath.Dir(installation.InstallPath)
-	if err := os.RemoveAll(installDir); err != nil {
+	if err := removeInstallationFiles(ctx, installation); err != nil {
 		return fmt.Errorf("removing plugin installation files: %w", err)
 	}
 

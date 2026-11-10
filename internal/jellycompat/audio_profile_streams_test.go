@@ -7,15 +7,17 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-func TestBuildMediaStreamsCarriesAudioProfile(t *testing.T) {
+func TestBuildMediaStreamsCarriesAudioFacts(t *testing.T) {
 	version := catalog.FileVersion{
-		VideoTracks: []models.VideoTrack{{Codec: "hevc"}},
+		VideoTracks: []models.VideoTrack{{Codec: "hevc", Bitrate: 20_000}},
 		AudioTracks: []models.AudioTrack{
 			{
 				Codec:    "eac3",
 				Profile:  "Dolby Digital Plus + Dolby Atmos",
 				Language: "eng",
+				Layout:   "5.1(side)",
 				Channels: 6,
+				Bitrate:  768,
 				Default:  true,
 			},
 			{
@@ -38,7 +40,19 @@ func TestBuildMediaStreamsCarriesAudioProfile(t *testing.T) {
 		t.Fatalf("streams length = %d, want 4", len(streams))
 	}
 
+	// Silo stores kbps; Jellyfin's BitRate is bits per second.
+	if streams[0].BitRate != 20_000_000 {
+		t.Fatalf("video BitRate = %d, want 20000000", streams[0].BitRate)
+	}
+
 	atmos := streams[1]
+	// Jellyfin trims ffprobe's layout variant: "5.1(side)" is reported as "5.1".
+	if atmos.ChannelLayout != "5.1" {
+		t.Fatalf("atmos ChannelLayout = %q, want 5.1", atmos.ChannelLayout)
+	}
+	if atmos.BitRate != 768_000 {
+		t.Fatalf("atmos BitRate = %d, want 768000", atmos.BitRate)
+	}
 	if atmos.Profile != "Dolby Digital Plus + Dolby Atmos" {
 		t.Fatalf("atmos Profile = %q", atmos.Profile)
 	}
@@ -139,7 +153,7 @@ func TestBuildPlaybackSourceUndecodableAudioTrack(t *testing.T) {
 		t.Fatalf("default source = selected %v transcoding %v, want stream 2 with transcoding", source.SelectedAudioStreamIndex, source.SupportsTranscoding)
 	}
 
-	source = h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{AudioStreamIndex: compatIntValuePtr(1)}, true)
+	source = h.buildPlaybackSource("item", "play", version, profile, playbackInfoRequest{AudioStreamIndex: compatIntValueOf(1)}, true)
 	if source.SupportsDirectPlay || source.SupportsDirectStream || source.SupportsTranscoding || source.CanBurnSubtitle || source.HLSRemux || source.TranscodeAudio {
 		t.Fatalf("undecodable selection offers a server route: %+v", source)
 	}

@@ -47,6 +47,14 @@ import (
 // lookup or decision with one also spends the account's Quick Connect code
 // budget (429 rate_limited once spent). They are approved for a profile
 // through approve-handoff; approve answers 409 conflict.
+//
+// Session binding: a device may start a request with binding, base64url
+// (no padding) of SHA-256 of a 32-byte secret it keeps. The lookup shows the
+// binding to the approver, and every poll of a bound request must send the
+// secret as binding_secret; without it the poll is 403
+// device_binding_mismatch and the request is left as it was. A copy of the
+// binding therefore cannot collect tokens. See
+// docs/architecture/device-login.md, "Session binding".
 
 // TokenPair is the credential response login, setup, signup and device poll
 // share. Every response carrying it is Cache-Control: no-store.
@@ -69,6 +77,7 @@ type DeviceLoginCapability struct {
 	ProtocolVersions      []int `json:"protocol_versions" doc:"Pairing protocol versions this server speaks" example:"[2]"`
 	Cancel                bool  `json:"cancel" doc:"Whether a device can withdraw its own request with cancelDeviceLogin" example:"true"`
 	OpenedSignal          bool  `json:"opened_signal" doc:"Whether pollDeviceLogin reports opened once an approver has looked the request up, and lookups hold the code while it is being approved" example:"true"`
+	SessionBinding        bool  `json:"session_binding" doc:"Whether startDeviceLogin accepts binding, getDeviceLogin reports it, and pollDeviceLogin requires the matching binding_secret for a bound request" example:"true"`
 }
 
 // DeviceLoginCapabilityOutput is the getDeviceLoginCapability response.
@@ -87,6 +96,7 @@ type StartDeviceLoginInput struct {
 		DevicePlatform string `json:"device_platform,omitempty" maxLength:"64" doc:"Platform label shown to the approver" example:"tvos"`
 		ClientPurpose  string `json:"client_purpose,omitempty" enum:"device_login,remote_playback" doc:"Pairing purpose; defaults to device_login. remote_playback requires temporary=true and is approved through approve-handoff" example:"device_login"`
 		Temporary      bool   `json:"temporary,omitempty" doc:"Request a temporary session bound to the approver's profile; required for remote_playback" example:"false"`
+		Binding        string `json:"binding,omitempty" pattern:"^[A-Za-z0-9_-]{43}$" doc:"Session binding: base64url without padding of SHA-256 of a 32-byte secret the device keeps. getDeviceLogin shows it to the approver, and every poll of the request must send the secret as binding_secret. Omit for an unbound request; an empty string is malformed like any other value" example:"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU"`
 	}
 }
 
@@ -95,7 +105,7 @@ type DeviceLoginStart struct {
 	DeviceCode              string  `json:"device_code" doc:"Secret the device polls with; never shown to a person" example:"d3v1c3c0d3"`
 	UserCode                string  `json:"user_code" doc:"Short code a person types into the approving browser or app: eight digits, shown grouped 4+4. Lookups ignore spaces and dashes. Unique only on this server" example:"4821-7730"`
 	MatchCode               string  `json:"match_code" doc:"Legacy confirmation words; clients compare user_code instead and do not display this" example:"warm pony"`
-	VerificationURI         string  `json:"verification_uri" doc:"Page on this server where the approver enters the user code; server.public_url when configured, otherwise the address the device used" example:"https://silo.example.test/activate"`
+	VerificationURI         string  `json:"verification_uri" format:"uri" doc:"Page on this server where the approver enters the user code; server.public_url when configured, otherwise the address the device used" example:"https://silo.example.test/activate"`
 	VerificationURIComplete string  `json:"verification_uri_complete" doc:"verification_uri with the user code prefilled, for the QR code" example:"https://silo.example.test/activate?code=48217730"`
 	ExpiresAt               Instant `json:"expires_at" doc:"When the request expires" example:"2026-01-02T03:14:05.678Z"`
 	ExpiresIn               int     `json:"expires_in" doc:"Seconds until the request expires" example:"900"`
@@ -132,6 +142,7 @@ type DeviceLogin struct {
 	Temporary      bool     `json:"temporary" doc:"Whether the resulting session will be temporary" example:"false"`
 	ServerID       string   `json:"server_id,omitempty" doc:"This deployment's server identity, for app links that must reach the same server; absent when unavailable" example:"3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35"`
 	ServerName     string   `json:"server_name" doc:"Server display name the approver signs the device in to" example:"Silo"`
+	Binding        string   `json:"binding,omitempty" doc:"The session binding the device started the request with; absent for an unbound request. An approver that compared one request's code can approve later requests carrying the same binding without comparing again" example:"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU"`
 }
 
 // DeviceLoginOutput is the getDeviceLogin response.
@@ -141,8 +152,10 @@ type DeviceLoginOutput struct {
 
 // PollDeviceLoginInput is the device's poll.
 type PollDeviceLoginInput struct {
+	SignInDeviceHeaders
 	Body struct {
-		DeviceCode string `json:"device_code" minLength:"1" doc:"The device code from startDeviceLogin" example:"d3v1c3c0d3"`
+		DeviceCode    string `json:"device_code" minLength:"1" doc:"The device code from startDeviceLogin" example:"d3v1c3c0d3"`
+		BindingSecret string `json:"binding_secret,omitempty" maxLength:"64" doc:"For a request started with binding: the secret, as base64url without padding, whose SHA-256 is the binding. Required on every poll of a bound request; ignored otherwise" example:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"`
 	}
 }
 
@@ -270,7 +283,8 @@ func registerDeviceLogin(reg *Registry) {
 	}, reg.denyDeviceLogin)
 	poll := humaOp(http.MethodPost, Prefix+"/auth/device/poll", "pollDeviceLogin", "device-login",
 		"Poll a pairing request from the device and collect its tokens once approved.")
-	poll.Errors = []int{http.StatusNotFound}
+	poll.Description = "A request started with binding is polled only with its binding_secret: a poll without it, or with another secret, is 403 device_binding_mismatch and leaves the request unchanged."
+	poll.Errors = []int{http.StatusForbidden, http.StatusNotFound}
 	Register(reg, Operation{
 		Operation: poll, RetrySafety: RetrySafetyNonRetryable,
 		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketDevicePoll,
@@ -305,6 +319,7 @@ func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityIn
 			ProtocolVersions:      []int{2},
 			Cancel:                true,
 			OpenedSignal:          true,
+			SessionBinding:        true,
 		},
 	}, nil
 }
@@ -314,18 +329,32 @@ func (reg *Registry) getDeviceLoginCapability(_ context.Context, _ *CapabilityIn
 // one, since a phone off the TV's network can't open a LAN address;
 // otherwise the origin the device used.
 func (reg *Registry) deviceLoginBaseURL(r *http.Request) string {
-	if reg.deps.ServerConnections.PublicURL != nil {
-		publicURL := strings.TrimSpace(reg.deps.ServerConnections.PublicURL())
-		if origin, ok := netaccess.NormalizeOrigin(publicURL); ok {
-			if u, err := url.Parse(publicURL); err == nil {
-				return origin + strings.TrimRight(u.EscapedPath(), "/")
-			}
-		}
+	if base := reg.publicBaseURL(); base != "" {
+		return base
 	}
 	if r == nil {
 		return ""
 	}
 	return handlers.RequestBaseURL(r)
+}
+
+// publicBaseURL is the configured public URL as a base for absolute links:
+// its origin and any path it is served under, without a trailing slash. It
+// is "" when none is configured or it is not a usable URL.
+func (reg *Registry) publicBaseURL() string {
+	if reg.deps.ServerConnections.PublicURL == nil {
+		return ""
+	}
+	publicURL := strings.TrimSpace(reg.deps.ServerConnections.PublicURL())
+	origin, ok := netaccess.NormalizeOrigin(publicURL)
+	if !ok {
+		return ""
+	}
+	u, err := url.Parse(publicURL)
+	if err != nil {
+		return ""
+	}
+	return origin + strings.TrimRight(u.EscapedPath(), "/")
 }
 
 func (reg *Registry) startDeviceLogin(ctx context.Context, in *StartDeviceLoginInput) (*DeviceLoginStartOutput, error) {
@@ -343,6 +372,7 @@ func (reg *Registry) startDeviceLogin(ctx context.Context, in *StartDeviceLoginI
 		IPAddress:      clientip.FromContext(ctx),
 		ClientPurpose:  in.Body.ClientPurpose,
 		Temporary:      in.Body.Temporary,
+		Binding:        in.Body.Binding,
 	}
 	if r != nil {
 		input.UserAgent = r.UserAgent()
@@ -407,6 +437,7 @@ func (reg *Registry) getDeviceLogin(ctx context.Context, in *GetDeviceLoginInput
 		Temporary:      info.Temporary,
 		ServerName:     reg.serverDisplayName(ctx),
 		ServerID:       reg.knownServerID(ctx),
+		Binding:        info.Binding,
 	}
 	if !info.ExpiresAt.IsZero() {
 		out.ExpiresAt = ptr(NewInstant(info.ExpiresAt))
@@ -428,7 +459,7 @@ func (reg *Registry) pollDeviceLogin(ctx context.Context, in *PollDeviceLoginInp
 	if reg.deps.Devices == nil {
 		return nil, unavailable("device login")
 	}
-	result, err := reg.deps.Devices.PollDeviceLogin(withClientDevice(ctx), in.Body.DeviceCode)
+	result, err := reg.deps.Devices.PollDeviceLogin(withClientDevice(ctx), in.Body.DeviceCode, in.Body.BindingSecret)
 	if err != nil {
 		return nil, deviceProblem(err)
 	}
@@ -540,12 +571,15 @@ func decisionCodes(in *DecideDeviceLoginInput) *Problem {
 
 // deviceProblem renders a device-login seam failure. An expired request keeps
 // its 410 under the domain's own type (the status default,
-// client_upgrade_required, means something else); a rejected purpose is a
-// validation problem at the member; everything else follows the v1 status.
+// client_upgrade_required, means something else), as does a binding
+// mismatch its 403; a rejected purpose or binding is a validation problem at
+// the member; everything else follows the v1 status.
 func deviceProblem(err error) *Problem {
 	var apiErr *handlers.APIError
 	if errors.As(err, &apiErr) {
 		switch {
+		case apiErr.Code == handlers.DeviceBindingMismatchCode:
+			return NewProblem(TypeDeviceBindingMismatch, apiErr.Message+".")
 		case apiErr.Field != "":
 			return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").
 				WithErrors(ProblemError{Location: locationBody + "." + apiErr.Field, Code: codeInvalid, Detail: apiErr.Message})

@@ -21,11 +21,27 @@ expiration closes owned transports; process shutdown drains local FFmpeg
 sessions, cancels and waits for active progressive remux requests, and refuses
 new HLS or progressive-remux admission after the drain begins.
 
-Copy-video playlists retain actual FFmpeg fragment durations. A complete
-playlist inferred from source keyframes is not safe: restarting the HLS muxer
-can change its cut schedule, giving an existing segment URL different content.
-Clients seeking outside the produced window must negotiate a new playback
-transport at the requested source position.
+By default, copy-video playlists retain actual FFmpeg fragment durations. A
+complete playlist inferred from source keyframes is not safe in that mode:
+restarting the HLS muxer can change its cut schedule, giving an existing segment
+URL different content. Clients seeking outside the produced window must
+negotiate a new playback transport at the requested source position.
+
+The experimental `playback.copy_keyframe_playlist` server setting, off by
+default, adds a keyframe-planned mode. With it on, a fresh copy-video
+`POST /transcode/start` carries `keyframe_playlist: true` and the node echoes
+`keyframe_playlist: true` in the start response; the API rejects a missing echo
+and stops the transport. The echo confirms the node understood the request, not
+that it planned. A copy serves one complete playlist planned from the source's
+keyframes only when it starts at the beginning of the source, the duration is
+known, the keyframe index exists and records where the video ends, the plan
+fits within the synthetic playlist's 50,000-segment limit, and the node can
+record the plan in the session's output directory. Any other copy keeps
+FFmpeg's playlist. A keyframe-planned copy never seek-restarts. While FFmpeg is
+running, a request for a segment past the last one it produced waits up to 30
+seconds for the copy to get there. When FFmpeg has stopped, or the segment is
+behind the produced head and gone, the copy restarts from the beginning, so
+FFmpeg cuts the same segments.
 
 The throttle fields belong to the internal API-to-node contract. Apple and
 Android clients require no request or response changes.
@@ -49,6 +65,33 @@ Activity reporting uses `encoder_hw_accel`, falling back to `hw_accel` for
 older nodes that omit it. Stored recipe cards preserve both values; execution
 validates the encoder again when reconstructing a session.
 
+## MPEG-TS copy packaging
+
+`copy_video_mpegts: true` on a copy-video `POST /transcode/start` packages the
+HLS copy as MPEG-TS (`seg_NNNNN.ts`, served as `video/mp2t`, no init segment)
+instead of fMP4. The node echoes `copy_video_mpegts: true` in the start
+response; the protocol-v3 API rejects a missing echo and stops the transport,
+so a node that predates the echo never serves fMP4 under a plan that promises
+MPEG-TS. Recipe cards and signed reconstruction claims (`cvts`) carry the flag,
+so reconstruction, seek restarts, and rehoming keep it.
+
+## Copied audio codec
+
+`copy_audio_codec` on `POST /transcode/start` names the source codec of the
+audio track that `target_codec_audio: "copy"` keeps. When that track is AAC and
+the segments are fMP4, the node adds `aac_adtstoasc`, because fMP4 can't hold
+the ADTS framing that AAC from MPEG-TS uses. The node echoes the codec in the
+start response. For copied AAC into fMP4, protocol-v3 and jellycompat starts
+and protocol-v3 rehoming reject a missing or different echo and stop the
+transport, so they never start that stream on a node that predates the field.
+The receipt is checked only on `POST /transcode/start`: a jellycompat move and
+a node rebuilding a lost session from its token or stored recipe don't check
+it, so an older node reached that way still fails after the first segment. The
+check applies to every copied AAC track, including MKV and MP4 sources whose
+AAC an older node copies correctly without the filter, so update transcode
+nodes before the API server. MPEG-TS segments and other copied codecs don't need the echo. Recipe
+cards and signed reconstruction claims (`cac`) carry the codec.
+
 ## Subtitle renditions
 
 A node that advertises the `hls_subtitle_rendition_v1` transport feature
@@ -57,16 +100,41 @@ accepts `subtitle_rendition: true` on `POST /transcode/start`, together with
 `total_duration`. It emits that text track as WebVTT from the same FFmpeg
 process and echoes `subtitle_rendition: true` in the start response. The API
 rejects a missing echo and stops the transport, so an older node can never
-serve a plan that promises a rendition. The API plans a rendition only when one
-executor can run the whole recipe: itself, or a node that advertises both the
-feature and every server transformation the plan needs. Otherwise the plan
-keeps the sidecar. Recipe cards and signed reconstruction claims carry the
-flag, so reconstruction and restarts keep it.
+serve a plan that promises a rendition. A copy remux (`target_codec_video:
+"copy"`) also needs the `hls_remux_subtitle_rendition_v1` transport feature: a
+node with only `hls_subtitle_rendition_v1` attests no rendition for one. The
+API plans a rendition only when one executor can run the whole recipe: itself,
+or a node that advertises both the feature and every server transformation the
+plan needs. Otherwise the plan keeps the sidecar. A copy remux's request also
+carries `video_range` (`PQ`, `HLG`, or absent for SDR), the `VIDEO-RANGE` its
+variant names; the node rejects any other value, and any value on an encode.
+Recipe cards and signed reconstruction claims carry both fields, so
+reconstruction and restarts keep them.
 
 For such a session, `GET /transcode/{id}/master.m3u8` answers the multivariant
 playlist, and the `silo_rendition` query parameter selects the video or
-subtitle media playlist. `GET /transcode/{id}/segment/sub_NNNNN.vtt` answers a
+subtitle media playlist, which lists the video playlist's segments (for a copy
+remux, its keyframe plan or FFmpeg's `EVENT` playlist). `GET
+/transcode/{id}/segment/sub_NNNNN.vtt` answers a
 WebVTT segment from the cues already on disk, waiting for FFmpeg to reach it
-no longer than its video segment would. It is never acknowledged, pruned, or used to restart
-FFmpeg. The protocol is described in
+no longer than its video segment would; for a keyframe-planned copy, one
+FFmpeg has still not reached answers `404`, as its video segment does. It is
+never acknowledged, pruned, or used to restart FFmpeg. The protocol is described in
 [playback protocol v3](architecture/playback-protocol-v3.md#8-track-identity-and-the-subtitle-ordinal-space).
+
+A node that also advertises `hls_on_demand_subtitle_renditions_v1` accepts
+`subtitle_rendition_tracks` beside `subtitle_rendition: true`: every embedded
+text track to list as a rendition of its own, each with `stream_index`,
+`track_number` (the Matroska TrackNumber or MP4 track ID), `name`, and
+optional `language`, `forced` and `default`, and `subtitle_rendition_source`,
+the source's `size` and `mtime_ns` when the plan read its index: segments are
+read from that version only. The node's FFmpeg then writes no
+cues. `master.m3u8` lists one `EXT-X-MEDIA` per track,
+`silo_rendition=subtitles&silo_track=<track_number>` selects a track's playlist, and `GET /transcode/{id}/segment/sub_<track_number>_NNNNN.vtt`
+reads the segment's cues from the source's own index whenever it is asked
+for. A track the request did not list answers `404`. The start response
+attests `subtitle_rendition_tracks` with the number of tracks the node serves,
+and the API stops a node whose count differs. Recipe cards carry the whole
+list; signed reconstruction claims carry only the track numbers, the default
+and the source version, under a method older nodes refuse, so a session
+rebuilt from a token names its renditions `Track <n>`.

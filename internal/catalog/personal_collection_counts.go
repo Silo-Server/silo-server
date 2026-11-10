@@ -65,15 +65,14 @@ func personalCollectionCountQuery(userID int, c PersonalCollectionDefinition, ac
 	return executor.buildCountQuery(display, access)
 }
 
-// Personal collection counts run as at most personalCollectionCountStatements
-// concurrent statements of at most personalCollectionCountBatchSize
-// definitions each. One statement evaluates its counts one after another, so a
-// single batch makes the list wait for the sum of every smart definition;
-// splitting it bounds the wait by the slowest batch while keeping round trips
-// per call small.
+// Collection counts run as at most collectionCountConcurrency concurrent
+// statements of at most collectionCountBatchSize definitions each. One
+// statement evaluates its counts one after another, so a single batch makes
+// the list wait for the sum of every smart definition; splitting it bounds the
+// wait by the slowest batch while keeping round trips per call small.
 const (
-	personalCollectionCountStatements = 4
-	personalCollectionCountBatchSize  = 32
+	collectionCountConcurrency = 4
+	collectionCountBatchSize   = 32
 )
 
 type collectionCountStatement struct {
@@ -109,27 +108,9 @@ func CountPersonalCollections(ctx context.Context, pool *pgxpool.Pool, userID in
 		seen[key] = c.ID
 		queries = append(queries, collectionCountStatement{id: c.ID, sql: sql, args: args})
 	}
-	if len(queries) > 0 {
-		batchSize := min(personalCollectionCountBatchSize, (len(queries)+personalCollectionCountStatements-1)/personalCollectionCountStatements)
-		var (
-			mu  sync.Mutex
-			wg  sync.WaitGroup
-			sem = make(chan struct{}, personalCollectionCountStatements)
-		)
-		for start := 0; start < len(queries); start += batchSize {
-			batch := queries[start:min(start+batchSize, len(queries))]
-			wg.Go(func() {
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				batchCounts, batchFailures := countPersonalCollectionBatch(ctx, pool, batch)
-				mu.Lock()
-				defer mu.Unlock()
-				maps.Copy(counts, batchCounts)
-				failures = append(failures, batchFailures...)
-			})
-		}
-		wg.Wait()
-	}
+	batchCounts, batchFailures := runCollectionCountStatements(ctx, pool, queries)
+	maps.Copy(counts, batchCounts)
+	failures = append(failures, batchFailures...)
 	for id, copies := range aliases {
 		if count, ok := counts[id]; ok {
 			for _, copyID := range copies {
@@ -140,10 +121,42 @@ func CountPersonalCollections(ctx context.Context, pool *pgxpool.Pool, userID in
 	return counts, errors.Join(failures...)
 }
 
-// countPersonalCollectionBatch evaluates one batch in a single statement. A
+// runCollectionCountStatements runs count statements in batches, as the
+// constants above describe, and returns each statement's count keyed by its
+// id. A statement that fails is absent from the counts and listed in the
+// failures.
+func runCollectionCountStatements(ctx context.Context, pool *pgxpool.Pool, queries []collectionCountStatement) (map[string]int, []error) {
+	counts := make(map[string]int, len(queries))
+	if len(queries) == 0 {
+		return counts, nil
+	}
+	batchSize := min(collectionCountBatchSize, (len(queries)+collectionCountConcurrency-1)/collectionCountConcurrency)
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		failures []error
+		sem      = make(chan struct{}, collectionCountConcurrency)
+	)
+	for start := 0; start < len(queries); start += batchSize {
+		batch := queries[start:min(start+batchSize, len(queries))]
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			batchCounts, batchFailures := countCollectionBatch(ctx, pool, batch)
+			mu.Lock()
+			defer mu.Unlock()
+			maps.Copy(counts, batchCounts)
+			failures = append(failures, batchFailures...)
+		})
+	}
+	wg.Wait()
+	return counts, failures
+}
+
+// countCollectionBatch evaluates one batch in a single statement. A
 // bad persisted definition must not suppress unrelated counts in its batch, so
 // a failed batch is retried one definition at a time.
-func countPersonalCollectionBatch(ctx context.Context, pool *pgxpool.Pool, batch []collectionCountStatement) (map[string]int, []error) {
+func countCollectionBatch(ctx context.Context, pool *pgxpool.Pool, batch []collectionCountStatement) (map[string]int, []error) {
 	counts := make(map[string]int, len(batch))
 	parts := make([]string, 0, len(batch))
 	var args []any

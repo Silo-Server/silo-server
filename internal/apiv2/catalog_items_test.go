@@ -9,10 +9,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/ratingsources"
+	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
 )
 
 // fakeCatalog backs the catalog-items operations: it records the request
@@ -28,7 +31,7 @@ type fakeCatalog struct {
 }
 
 func (f *fakeCatalog) ContextAccessFilter(ctx context.Context, opts handlers.AccessFilterOptions) (catalogpkg.AccessFilter, error) {
-	return catalogpkg.AccessFilter{UserID: claimsFrom(ctx).UserID, ProfileID: "p-owner", AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: opts.PresentationLibraryID, ScopeFilesToLibrary: opts.ScopeFilesToLibrary, SelectedFileID: opts.SelectedFileID, DeviceID: opts.DeviceID}, nil
+	return catalogpkg.AccessFilter{UserID: claimsFrom(ctx).UserID, ProfileID: "p-owner", AllowedLibraryIDs: []int{1, 2}, PresentationLibraryID: opts.PresentationLibraryID, ScopeFilesToLibrary: opts.ScopeFilesToLibrary, SeriesLibraryCoversEpisodes: opts.SeriesLibraryCoversEpisodes, SelectedFileID: opts.SelectedFileID, DeviceID: opts.DeviceID}, nil
 }
 
 func fakeListingCard(id string) handlers.CollectionItemView {
@@ -546,6 +549,11 @@ func TestGetCatalogItem(t *testing.T) {
 	if fake.lastViewer.Access.PresentationLibraryID == nil || *fake.lastViewer.Access.PresentationLibraryID != 2 || fake.lastViewer.Access.SelectedFileID != 120 || fake.lastViewer.Access.ScopeFilesToLibrary {
 		t.Fatalf("viewer = %+v", fake.lastViewer.Access)
 	}
+	// A native read named a library, so an episode opens under a library that
+	// holds its series.
+	if !fake.lastViewer.Access.SeriesLibraryCoversEpisodes {
+		t.Fatalf("viewer = %+v, want SeriesLibraryCoversEpisodes", fake.lastViewer.Access)
+	}
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:nope", "", viewerHeaders()), TypeNotFound)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995?file_id=abc", "", viewerHeaders()), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, "/api/v2/catalog/items/movie:heat-1995", "", bearer(memberToken)), TypeValidationFailed)
@@ -743,5 +751,43 @@ func TestEpisodesOfStatesRatings(t *testing.T) {
 		if _, ok := fields["ratings"]; ok {
 			t.Fatalf("%s carries ratings: %s", ep.ContentID, body)
 		}
+	}
+}
+
+// A stored date that is not YYYY-MM-DD is left out of a format: date member
+// rather than sent as text a typed client cannot decode: first_air_date is
+// free text, and request-provider dates are copied as fetched.
+func TestCatalogDatesLeaveOutFreeText(t *testing.T) {
+	text := func(s string) *string { return &s }
+	shown := func(s *string) string {
+		if s == nil {
+			return "absent"
+		}
+		return *s
+	}
+	detail := catalogItemDetailOf(&catalogpkg.ItemDetail{ContentID: "series:x", Type: "series",
+		FirstAirDate: text("Oct 2015"), ReleaseDate: text("2024-02-30"), LastAirDate: text(" 2025-12-28T00:00:00Z ")}, ratingsources.Selection{})
+	if detail.FirstAirDate != nil || detail.ReleaseDate != nil || detail.LastAirDate == nil || *detail.LastAirDate != "2025-12-28" {
+		t.Fatalf("detail dates = %s %s %s", shown(detail.FirstAirDate), shown(detail.ReleaseDate), shown(detail.LastAirDate))
+	}
+	card := catalogItemOfListing(handlers.CollectionItemView{ContentID: "series:x", Type: "series", ReleaseDate: text("2015"),
+		SortMetrics: &handlers.SortMetricsView{ReleaseDate: text("Oct 2015")}}, ratingsources.Selection{})
+	if card.ReleaseDate != nil || card.SortMetrics != nil {
+		t.Fatalf("card dates = %s %+v", shown(card.ReleaseDate), card.SortMetrics)
+	}
+	request := requestMediaDetailOf(&mediarequests.MediaDetail{ReleaseDate: "1995-12-15", FirstAirDate: "Oct 2015",
+		Seasons: []mediarequests.RequestSeason{{Number: 1, AirDate: "2015"}}})
+	if request.ReleaseDate != "1995-12-15" || request.FirstAirDate != "" || request.Seasons[0].AirDate != "" {
+		t.Fatalf("request dates = %q %q %q", request.ReleaseDate, request.FirstAirDate, request.Seasons[0].AirDate)
+	}
+}
+
+func TestCatalogListingCarriesSectionCardProgress(t *testing.T) {
+	stamp := "2026-01-02T03:04:05Z"
+	view := fakeListingCard("movie:heat-1995")
+	view.ProgressUpdatedAt, view.ItemSource = &stamp, "in_progress"
+	item := catalogItemOfListing(view, ratingsources.Selection{})
+	if item.ItemSource != "in_progress" || item.ProgressUpdatedAt == nil || item.ProgressUpdatedAt.Time.UTC().Format(time.RFC3339) != stamp {
+		t.Fatalf("listing card = source %q at %v, want in_progress at %s", item.ItemSource, item.ProgressUpdatedAt, stamp)
 	}
 }

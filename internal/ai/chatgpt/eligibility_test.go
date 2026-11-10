@@ -53,7 +53,8 @@ func TestPlanEligibilityRestrictionBlocksFreshAndPinnedRequests(t *testing.T) {
 	}
 	store.mu.Lock()
 	store.values[authModeSetting] = "api_key"
-	store.values["ai.base_url"] = "https://api.example.test"
+	store.values["ai.providers"] = `{"version":1,"providers":[{"id":"api","type":"custom","name":"API","base_url":"https://api.example.test","capabilities":["chat"]}]}`
+	store.values["ai.text_provider_id"] = "api"
 	store.mu.Unlock()
 	apiConfig, err := s.TextConfig(t.Context())
 	if err != nil || !apiConfig.TextConfigured() || apiConfig.ChatGPTPlanRejected != nil || apiConfig.ChatGPTTokenSource != nil {

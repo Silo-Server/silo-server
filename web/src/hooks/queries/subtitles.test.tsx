@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 
-import { type SessionFetchResult } from "@/api/client";
+import { setAccessToken, setProfileId, type SessionFetchResult } from "@/api/client";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { resolveSettingValues, type StoredSettingRow } from "@/lib/settingsResolve";
 import { buildSubtitleChoiceRequests } from "@/player/utils/subtitleChoicePersistence";
@@ -44,6 +44,12 @@ function v2Requests(): string[] {
 }
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+
+// The hooks send each write for the profile that made the choice.
+beforeEach(() => {
+  setAccessToken("token");
+  setProfileId("profile-1");
+});
 
 function createHarness() {
   const queryClient = new QueryClient({

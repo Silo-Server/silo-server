@@ -1,6 +1,9 @@
 package taskmanager
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // TriggerType identifies the kind of schedule trigger.
 type TriggerType string
@@ -22,6 +25,16 @@ type TriggerConfig struct {
 	MaxRuntimeMs int64       `json:"max_runtime_ms,omitempty"`
 }
 
+// MaxRuntime is the limit on each run this trigger starts, or 0 for none. The
+// v1 route and plugin manifests accept any int64, so a value too large for a
+// time.Duration counts as no limit instead of wrapping to a tiny or negative one.
+func (c TriggerConfig) MaxRuntime() time.Duration {
+	if c.MaxRuntimeMs <= 0 || c.MaxRuntimeMs > int64(math.MaxInt64/time.Millisecond) {
+		return 0
+	}
+	return time.Duration(c.MaxRuntimeMs) * time.Millisecond
+}
+
 // Trigger is a live scheduling trigger that fires on a channel.
 type Trigger interface {
 	Start(lastResult *ExecutionResult)
@@ -29,4 +42,10 @@ type Trigger interface {
 	NextRunTime() time.Time
 	Config() TriggerConfig
 	C() <-chan struct{}
+}
+
+// SpreadableTrigger is a trigger that accepts its task's start spread. The
+// manager sets it before Start.
+type SpreadableTrigger interface {
+	SetStartSpread(spread time.Duration)
 }

@@ -41,6 +41,7 @@ import { useActiveScans } from "@/hooks/queries/admin/scans";
 import { buildLibraryReorderEntries } from "./adminLibraryOrder";
 import MatchItemDialog from "@/components/MatchItemDialog";
 import { LibraryEditorDialog } from "@/components/admin/libraries/LibraryEditorDialog";
+import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
 import { LibraryRefreshDialog } from "@/components/admin/libraries/LibraryRefreshDialog";
 import { RealtimeMonitoringBadge } from "@/components/admin/libraries/RealtimeMonitoringBadge";
 import { TrickplayLibraryBadge } from "@/components/admin/trickplay/TrickplayLibraryBadge";
@@ -110,7 +111,7 @@ import {
   formatActiveScanMode,
   formatActiveScanProgress,
   formatActiveScanTarget,
-  formatActiveScanTime,
+  formatActiveScanStarted,
   formatActiveScanTrigger,
 } from "@/lib/scanRuns";
 import {
@@ -133,19 +134,16 @@ import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { formatJobProgress } from "@/components/adminCatalogMaintenanceFormatters";
 import { formatDateTime } from "@/lib/datetime";
+import { useT, type Translate } from "@/i18n";
 
 // Keep toast lifetime and delayed state cleanup coordinated so visible feedback
 // disappears before state is cleared.
 const MOUNT_CHECK_FEEDBACK_MS = 5_000;
 
-const DEAD_ROOT_WARNING_TEXT =
-  "One or more library roots are unreachable or mounted but returned no files. Their files are hidden, but nothing will be deleted until the root is back or cleanup is confirmed.";
-const DEAD_ROOT_WARNING_HINT =
-  "Run another scan after storage returns, or use Check Mount to verify connectivity.";
-const EMPTY_ROOT_WARNING_TEXT =
-  "Scan found 0 media files for this library. Cleanup was paused to avoid accidental deletion.";
-const EMPTY_ROOT_WARNING_HINT =
-  "Run another scan after storage returns, or confirm deletion before the next empty-root scan.";
+// Not translated: a separator glyph and a sample year.
+const SEPARATOR = "·";
+const SPACED_SEPARATOR = ` ${SEPARATOR} `;
+const YEAR_PLACEHOLDER = "2024";
 
 // Stable fallbacks while queries load. A fresh `[]` on every render re-ran the
 // effect that copies libraries into the reorder state, so the page re-rendered
@@ -162,6 +160,7 @@ export default function AdminLibraries() {
 }
 
 function LibrariesPage() {
+  const t = useT();
   useEventChannel("scans");
   const { data: libraries = NO_LIBRARIES, isLoading } = useAdminLibraries();
   const { data: libraryCapabilities } = useLibraryCapabilities();
@@ -286,11 +285,11 @@ function LibrariesPage() {
         if (left.runningCount !== right.runningCount) {
           return right.runningCount - left.runningCount;
         }
-        return getLibraryScanGroupName(left.library, left.libraryID).localeCompare(
-          getLibraryScanGroupName(right.library, right.libraryID),
+        return getLibraryScanGroupName(t, left.library, left.libraryID).localeCompare(
+          getLibraryScanGroupName(t, right.library, right.libraryID),
         );
       });
-  }, [activeScansByLibraryId, libraries]);
+  }, [activeScansByLibraryId, libraries, t]);
 
   function handleDelete(lib: Library) {
     setConfirmDeleteLib(lib);
@@ -308,9 +307,9 @@ function LibrariesPage() {
           [libraryId]: result,
         }));
         if (result.healthy) {
-          toast.success(formatMountCheckMessage(result), { duration: MOUNT_CHECK_FEEDBACK_MS });
+          toast.success(formatMountCheckMessage(t, result), { duration: MOUNT_CHECK_FEEDBACK_MS });
         } else {
-          toast.error(formatMountCheckMessage(result), { duration: MOUNT_CHECK_FEEDBACK_MS });
+          toast.error(formatMountCheckMessage(t, result), { duration: MOUNT_CHECK_FEEDBACK_MS });
         }
         const existingTimeout = mountCheckClearTimeoutsRef.current[libraryId];
         if (existingTimeout) {
@@ -330,7 +329,7 @@ function LibrariesPage() {
     });
   }
 
-  if (isLoading) return <div className="pb-8">Loading libraries...</div>;
+  if (isLoading) return <div className="pb-8">{t("web.admin.libraries.page.loading")}</div>;
 
   return (
     <div className="space-y-6">
@@ -339,9 +338,11 @@ function LibrariesPage() {
         onOpenChange={(open) => {
           if (!open) setConfirmDeleteLib(null);
         }}
-        title="Delete library"
-        description={`Delete library "${confirmDeleteLib?.name}"? This action cannot be undone.`}
-        confirmLabel="Delete"
+        title={t("web.admin.libraries.deleteDialog.title")}
+        description={t("web.admin.libraries.deleteDialog.description", {
+          name: confirmDeleteLib?.name ?? "",
+        })}
+        confirmLabel={t("web.admin.libraries.deleteDialog.confirm")}
         variant="destructive"
         onConfirm={() => {
           if (confirmDeleteLib) deleteMutation.mutate(confirmDeleteLib.id);
@@ -353,9 +354,11 @@ function LibrariesPage() {
         onOpenChange={(open) => {
           if (!open) setConfirmEmptyRootLib(null);
         }}
-        title="Confirm empty root cleanup"
-        description={`On the next scan of "${confirmEmptyRootLib?.name}", remove items from roots that are reachable but still empty? Unreachable roots remain protected.`}
-        confirmLabel="Confirm"
+        title={t("web.admin.libraries.emptyRootDialog.title")}
+        description={t("web.admin.libraries.emptyRootDialog.description", {
+          name: confirmEmptyRootLib?.name ?? "",
+        })}
+        confirmLabel={t("web.admin.libraries.emptyRootDialog.confirm")}
         variant="destructive"
         onConfirm={() => {
           if (confirmEmptyRootLib) confirmEmptyRootCleanupMutation.mutate(confirmEmptyRootLib.id);
@@ -363,8 +366,8 @@ function LibrariesPage() {
         }}
       />
       <PageHeader
-        title="Libraries"
-        subtitle="Manage library roots and scans. Catalog import/export now lives under Maintenance."
+        title={t("web.admin.libraries.page.title")}
+        subtitle={t("web.admin.libraries.page.subtitle")}
         actions={
           <div className="flex gap-2">
             {activeScanGroups.length > 0 && (
@@ -383,12 +386,12 @@ function LibrariesPage() {
               disabled={scanAllMutation.isPending}
             >
               <ScanLine className="h-3.5 w-3.5" />
-              Scan All Libraries
+              {t("web.admin.libraries.page.scanAll")}
             </Button>
             <Button variant="outline" size="sm" asChild>
               <Link to="/admin/maintenance">
-                <Wrench className="mr-1 h-4 w-4" />
-                Catalog Maintenance
+                <Wrench className="me-1 h-4 w-4" />
+                {t("web.admin.libraries.page.catalogMaintenance")}
               </Link>
             </Button>
             <Button
@@ -398,7 +401,7 @@ function LibrariesPage() {
                 setDialogOpen(true);
               }}
             >
-              <Plus className="mr-1 h-4 w-4" /> Add Library
+              <Plus className="me-1 h-4 w-4" /> {t("web.admin.libraries.page.addLibrary")}
             </Button>
             <LibraryEditorDialog
               open={dialogOpen}
@@ -453,12 +456,14 @@ function LibrariesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10" />
-                  <TableHead>Name</TableHead>
-                  <TableHead>Paths</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Scanned</TableHead>
-                  <TableHead className="w-[15rem]">Actions</TableHead>
+                  <TableHead>{t("web.admin.libraries.column.name")}</TableHead>
+                  <TableHead>{t("web.admin.libraries.column.paths")}</TableHead>
+                  <TableHead>{t("web.admin.libraries.column.type")}</TableHead>
+                  <TableHead>{t("web.admin.libraries.column.status")}</TableHead>
+                  <TableHead>{t("web.admin.libraries.column.lastScanned")}</TableHead>
+                  <TableHead className="w-[15rem]">
+                    {t("web.admin.libraries.column.actions")}
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <SortableContext
@@ -491,44 +496,66 @@ function LibrariesPage() {
                       <Fragment key={lib.id}>
                         <SortableLibraryRow id={lib.id}>
                           <TableCell className="font-medium">{lib.name}</TableCell>
-                          <TableCell className="font-mono text-xs">
+                          <TableCell className="text-xs">
                             {lib.paths.length === 1 ? (
-                              <span className="text-muted-foreground">{lib.paths[0]}</span>
+                              <span dir="ltr" className="text-muted-foreground font-mono">
+                                {lib.paths[0]}
+                              </span>
                             ) : (
                               <button
                                 type="button"
-                                className="text-muted-foreground hover:text-foreground text-left transition-colors"
+                                className="text-muted-foreground hover:text-foreground text-start transition-colors"
                                 onClick={() => {
                                   setEditingLib(lib);
                                   setDialogOpen(true);
                                 }}
                               >
-                                {lib.paths.length} folders
+                                {t("web.admin.libraries.list.folderCount", {
+                                  count: lib.paths.length,
+                                })}
                               </button>
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="secondary">{lib.type}</Badge>
+                            <Badge variant="secondary">{libraryTypeLabel(lib.type)}</Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-col gap-1">
                               <Badge variant={lib.enabled ? "outline" : "destructive"}>
-                                {lib.enabled ? "Enabled" : "Disabled"}
+                                {lib.enabled
+                                  ? t("web.admin.libraries.list.enabled")
+                                  : t("web.admin.libraries.list.disabled")}
                               </Badge>
                               {runningLibraryScans > 0 ? (
-                                <Badge variant="secondary">{runningLibraryScans} running</Badge>
+                                <Badge variant="secondary">
+                                  {t("web.admin.libraries.scans.running", {
+                                    count: runningLibraryScans,
+                                    count_text: runningLibraryScans,
+                                  })}
+                                </Badge>
                               ) : null}
                               {queuedLibraryScans > 0 ? (
-                                <Badge variant="secondary">{queuedLibraryScans} queued</Badge>
+                                <Badge variant="secondary">
+                                  {t("web.admin.libraries.scans.queued", {
+                                    count: queuedLibraryScans,
+                                    count_text: queuedLibraryScans,
+                                  })}
+                                </Badge>
                               ) : null}
                               {lib.scan_warning_code === "empty_root" ? (
-                                <Badge variant="destructive">Empty root guarded</Badge>
+                                <Badge variant="destructive">
+                                  {t("web.admin.libraries.list.emptyRootGuarded")}
+                                </Badge>
                               ) : null}
                               {lib.scan_warning_code === "dead_root" ? (
-                                <Badge variant="destructive">Root unreachable</Badge>
+                                <Badge variant="destructive">
+                                  {t("web.admin.libraries.list.rootUnreachable")}
+                                </Badge>
                               ) : null}
                               {lib.scan_warning_code === "partial_walk" ? (
-                                <Badge variant="destructive">Partial scan</Badge>
+                                <Badge variant="destructive">
+                                  {t("web.admin.libraries.list.partialScan")}
+                                </Badge>
                               ) : null}
                               <RealtimeMonitoringBadge
                                 entry={realtimeMonitoringByLibraryId.get(lib.id)}
@@ -541,11 +568,13 @@ function LibrariesPage() {
                               <div>
                                 {lib.last_scanned_at
                                   ? formatDateTime(lib.last_scanned_at)
-                                  : "Never"}
+                                  : t("web.admin.libraries.list.neverScanned")}
                               </div>
                               {lib.scan_warning_at ? (
                                 <div className="text-destructive text-[11px]">
-                                  Warning: {formatDateTime(lib.scan_warning_at)}
+                                  {t("web.admin.libraries.list.warningAt", {
+                                    time: formatDateTime(lib.scan_warning_at),
+                                  })}
                                 </div>
                               ) : null}
                             </div>
@@ -561,13 +590,13 @@ function LibrariesPage() {
                                 )}
                                 title={
                                   activeLibraryScans.length > 0
-                                    ? "Stop Library Scans"
-                                    : "Scan Library"
+                                    ? t("web.admin.libraries.list.stopScans")
+                                    : t("web.admin.libraries.list.scanLibrary")
                                 }
                                 aria-label={
                                   activeLibraryScans.length > 0
-                                    ? "Stop Library Scans"
-                                    : "Scan Library"
+                                    ? t("web.admin.libraries.list.stopScans")
+                                    : t("web.admin.libraries.list.scanLibrary")
                                 }
                                 disabled={
                                   activeLibraryScans.length > 0
@@ -595,10 +624,14 @@ function LibrariesPage() {
                                 size="icon"
                                 className={cn("h-7 w-7", activeRefreshJob && "text-destructive")}
                                 title={
-                                  activeRefreshJob ? "Stop Metadata Refresh" : "Rescan Metadata"
+                                  activeRefreshJob
+                                    ? t("web.admin.libraries.list.stopRefresh")
+                                    : t("web.admin.libraries.list.rescanMetadata")
                                 }
                                 aria-label={
-                                  activeRefreshJob ? "Stop Metadata Refresh" : "Rescan Metadata"
+                                  activeRefreshJob
+                                    ? t("web.admin.libraries.list.stopRefresh")
+                                    : t("web.admin.libraries.list.rescanMetadata")
                                 }
                                 disabled={
                                   activeRefreshJob ? isCancellingRefreshJob : isRefreshStarting
@@ -622,10 +655,14 @@ function LibrariesPage() {
                                 size="icon"
                                 className="h-7 w-7"
                                 title={
-                                  mountCheck ? formatMountCheckMessage(mountCheck) : "Verify Mounts"
+                                  mountCheck
+                                    ? formatMountCheckMessage(t, mountCheck)
+                                    : t("web.admin.libraries.list.verifyMounts")
                                 }
                                 aria-label={
-                                  mountCheck ? formatMountCheckMessage(mountCheck) : "Verify Mounts"
+                                  mountCheck
+                                    ? formatMountCheckMessage(t, mountCheck)
+                                    : t("web.admin.libraries.list.verifyMounts")
                                 }
                                 disabled={isCheckingMount}
                                 onClick={() => handleMountCheck(lib.id)}
@@ -639,7 +676,7 @@ function LibrariesPage() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7"
-                                aria-label={`Edit ${lib.name}`}
+                                aria-label={t("web.admin.libraries.list.edit", { name: lib.name })}
                                 onClick={() => {
                                   setEditingLib(lib);
                                   setDialogOpen(true);
@@ -651,7 +688,9 @@ function LibrariesPage() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-7 w-7"
-                                aria-label={`Delete ${lib.name}`}
+                                aria-label={t("web.admin.libraries.list.delete", {
+                                  name: lib.name,
+                                })}
                                 onClick={() => handleDelete(lib)}
                               >
                                 <Trash2 className="h-3 w-3" aria-hidden="true" />
@@ -662,7 +701,7 @@ function LibrariesPage() {
                                   variant="ghost"
                                   size="icon"
                                   className="text-destructive h-7 w-7"
-                                  title="Confirm cleanup for missing or empty roots"
+                                  title={t("web.admin.libraries.list.confirmCleanupTitle")}
                                   disabled={
                                     confirmEmptyRootCleanupMutation.isPending &&
                                     confirmEmptyRootCleanupMutation.variables === lib.id
@@ -710,10 +749,12 @@ function LibrariesPage() {
                           <TableRow key={`${lib.id}-warning`}>
                             <TableCell colSpan={7} className="bg-destructive/5 text-sm">
                               <div className="flex flex-col gap-2 py-1">
-                                <div className="text-destructive font-medium">Partial scan</div>
+                                <div className="text-destructive font-medium">
+                                  {t("web.admin.libraries.list.partialScan")}
+                                </div>
                                 <div className="text-muted-foreground">
                                   {lib.scan_warning_message ??
-                                    "Some paths could not be read. Run another scan after storage is available."}
+                                    t("web.admin.libraries.warning.partialScanHint")}
                                 </div>
                               </div>
                             </TableCell>
@@ -729,45 +770,47 @@ function LibrariesPage() {
                             <div className="flex flex-col gap-2 py-1">
                               <div className="text-destructive font-medium">
                                 {lib.scan_warning_code === "dead_root"
-                                  ? DEAD_ROOT_WARNING_TEXT
-                                  : EMPTY_ROOT_WARNING_TEXT}
+                                  ? t("web.admin.libraries.warning.deadRoot")
+                                  : t("web.admin.libraries.warning.emptyRoot")}
                               </div>
                               <div className="text-muted-foreground">
                                 {lib.scan_warning_message ??
                                   (lib.scan_warning_code === "dead_root"
-                                    ? DEAD_ROOT_WARNING_HINT
-                                    : EMPTY_ROOT_WARNING_HINT)}
+                                    ? t("web.admin.libraries.warning.deadRootHint")
+                                    : t("web.admin.libraries.warning.emptyRootHint"))}
                               </div>
                               <div className="flex gap-2">
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   title={
-                                    mountCheck ? formatMountCheckMessage(mountCheck) : "Check mount"
+                                    mountCheck
+                                      ? formatMountCheckMessage(t, mountCheck)
+                                      : t("web.admin.libraries.warning.checkMountTitle")
                                   }
                                   disabled={isCheckingMount}
                                   onClick={() => handleMountCheck(lib.id)}
                                 >
                                   <MountCheckButtonIcon
-                                    className="mr-1 h-3.5 w-3.5"
+                                    className="me-1 h-3.5 w-3.5"
                                     pending={isCheckingMount}
                                     result={mountCheck}
                                   />
-                                  Check Mount
+                                  {t("web.admin.libraries.warning.checkMount")}
                                 </Button>
                                 {lib.scan_warning_code === "dead_root" ? (
                                   <Button
                                     variant="outline"
                                     size="sm"
-                                    title="Confirm cleanup for missing or empty roots"
+                                    title={t("web.admin.libraries.list.confirmCleanupTitle")}
                                     disabled={
                                       confirmEmptyRootCleanupMutation.isPending &&
                                       confirmEmptyRootCleanupMutation.variables === lib.id
                                     }
                                     onClick={() => handleConfirmEmptyRootCleanup(lib)}
                                   >
-                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
-                                    Confirm Cleanup
+                                    <Trash2 className="me-1 h-3.5 w-3.5" />
+                                    {t("web.admin.libraries.warning.confirmCleanup")}
                                   </Button>
                                 ) : null}
                               </div>
@@ -789,13 +832,19 @@ function LibrariesPage() {
                       <GripVertical className="text-muted-foreground h-4 w-4" />
                     </TableCell>
                     <TableCell className="font-medium">{activeLibrary.name}</TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-xs">
-                      {activeLibrary.paths.length === 1
-                        ? activeLibrary.paths[0]
-                        : `${activeLibrary.paths.length} folders`}
+                    <TableCell className="text-muted-foreground text-xs">
+                      {activeLibrary.paths.length === 1 ? (
+                        <span dir="ltr" className="font-mono">
+                          {activeLibrary.paths[0]}
+                        </span>
+                      ) : (
+                        t("web.admin.libraries.list.folderCount", {
+                          count: activeLibrary.paths.length,
+                        })
+                      )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{activeLibrary.type}</Badge>
+                      <Badge variant="secondary">{libraryTypeLabel(activeLibrary.type)}</Badge>
                     </TableCell>
                     <TableCell />
                     <TableCell />
@@ -814,7 +863,10 @@ function LibrariesPage() {
         <StaleIDsSection />
       </div>
       {/* After the content so its padded row never pushes the page header down. */}
-      <JobPageControls query={refreshJobsQuery} label="Load older refresh jobs" />
+      <JobPageControls
+        query={refreshJobsQuery}
+        label={t("web.admin.libraries.page.loadOlderRefreshJobs")}
+      />
     </div>
   );
 }
@@ -834,6 +886,7 @@ function ScanQueuePopover({
   cancellingLibraryID: number | null;
   onCancel: (libraryID: number) => void;
 }) {
+  const t = useT();
   const totalRunning = groups.reduce((sum, group) => sum + group.runningCount, 0);
   const totalQueued = groups.reduce((sum, group) => sum + group.queuedCount, 0);
   const totalScans = totalRunning + totalQueued;
@@ -847,7 +900,10 @@ function ScanQueuePopover({
             <span className="bg-success relative inline-flex h-2 w-2 rounded-full" />
           </span>
           <span className="tabular-nums">
-            {totalScans} {totalScans === 1 ? "scan" : "scans"}
+            {t("web.admin.libraries.scanQueue.trigger", {
+              count: totalScans,
+              count_text: totalScans,
+            })}
           </span>
         </Button>
       </PopoverTrigger>
@@ -863,20 +919,34 @@ function ScanQueuePopover({
               className="text-primary h-3.5 w-3.5 animate-spin"
               style={{ animationDuration: "3s" }}
             />
-            <span className="text-sm font-semibold">Scan Queue</span>
+            <span className="text-sm font-semibold">
+              {t("web.admin.libraries.scanQueue.title")}
+            </span>
           </div>
           <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
             {totalRunning > 0 && (
               <>
                 <span className="bg-success inline-block h-1.5 w-1.5 rounded-full" />
-                <span className="tabular-nums">{totalRunning} running</span>
+                <span className="tabular-nums">
+                  {t("web.admin.libraries.scans.running", {
+                    count: totalRunning,
+                    count_text: totalRunning,
+                  })}
+                </span>
               </>
             )}
-            {totalRunning > 0 && totalQueued > 0 && <span className="text-border">·</span>}
+            {totalRunning > 0 && totalQueued > 0 && (
+              <span className="text-border">{SEPARATOR}</span>
+            )}
             {totalQueued > 0 && (
               <>
                 <span className="bg-muted-foreground/40 inline-block h-1.5 w-1.5 rounded-full" />
-                <span className="tabular-nums">{totalQueued} queued</span>
+                <span className="tabular-nums">
+                  {t("web.admin.libraries.scans.queued", {
+                    count: totalQueued,
+                    count_text: totalQueued,
+                  })}
+                </span>
               </>
             )}
           </div>
@@ -934,6 +1004,7 @@ function ScanQueueGroup({
   cancelling: boolean;
   onCancel: (libraryID: number) => void;
 }) {
+  const t = useT();
   const { expanded, setExpanded, visibleScans, hiddenCount, collapsible } = useCollapsedScans(
     group.scans,
   );
@@ -943,7 +1014,7 @@ function ScanQueueGroup({
       {/* Library header row */}
       <div className="flex items-center gap-2 py-1.5">
         <span className="text-muted-foreground/60 text-[10px] font-semibold tracking-widest uppercase">
-          {getLibraryScanGroupName(group.library, group.libraryID)}
+          {getLibraryScanGroupName(t, group.library, group.libraryID)}
         </span>
         <div className="bg-border/25 h-px flex-1" />
         <Button
@@ -954,7 +1025,7 @@ function ScanQueueGroup({
           onClick={() => onCancel(group.libraryID)}
         >
           <Square className="h-2.5 w-2.5" />
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
 
@@ -1000,11 +1071,11 @@ function ScanQueueGroup({
               >
                 {formatActiveScanTarget(scan)}
               </code>
-              <span className="text-border/50 shrink-0">·</span>
+              <span className="text-border/50 shrink-0">{SEPARATOR}</span>
               <span className="shrink-0">
                 {scan.status === "running"
-                  ? formatActiveScanTime(scan.started_at, "Started")
-                  : "Waiting for capacity"}
+                  ? formatActiveScanStarted(scan.started_at)
+                  : t("web.admin.libraries.scanQueue.waiting")}
               </span>
             </div>
             {formatActiveScanProgress(scan) && (
@@ -1023,11 +1094,16 @@ function ScanQueueGroup({
         >
           {expanded ? (
             <>
-              Show less <ChevronUp className="h-3 w-3" />
+              {t("web.admin.libraries.scanQueue.showLess")} <ChevronUp className="h-3 w-3" />
             </>
           ) : (
             <>
-              + {hiddenCount} more{hiddenCount <= group.queuedCount ? " queued" : ""}{" "}
+              {t(
+                hiddenCount <= group.queuedCount
+                  ? "web.admin.libraries.scanQueue.moreQueued"
+                  : "web.admin.libraries.scanQueue.more",
+                { count: hiddenCount, count_text: hiddenCount },
+              )}{" "}
               <ChevronDown className="h-3 w-3" />
             </>
           )}
@@ -1040,11 +1116,12 @@ function ScanQueueGroup({
   );
 }
 
-function getLibraryScanGroupName(library: Library | null, libraryID: number) {
-  return library?.name ?? `Library #${libraryID}`;
+function getLibraryScanGroupName(t: Translate, library: Library | null, libraryID: number) {
+  return library?.name ?? t("web.admin.libraries.scanQueue.libraryFallback", { id: libraryID });
 }
 
 function SortableLibraryRow({ id, children }: { id: number; children: React.ReactNode }) {
+  const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
   });
@@ -1060,7 +1137,7 @@ function SortableLibraryRow({ id, children }: { id: number; children: React.Reac
       <TableCell className="w-10">
         <button
           type="button"
-          aria-label="Drag to reorder"
+          aria-label={t("web.admin.libraries.list.dragToReorder")}
           className="hover:bg-surface-hover cursor-grab touch-none rounded-md p-1 transition-colors"
           {...attributes}
           {...listeners}
@@ -1090,23 +1167,26 @@ function LibraryActiveWorkRow({
   onCancelJob: (jobID: string) => void;
   onCancelScans: (libraryID: number) => void;
 }) {
+  const t = useT();
   return (
     <TableRow className="hover:bg-transparent">
       <TableCell colSpan={7} className="bg-muted/20 px-4 py-2">
-        <div className="text-muted-foreground flex flex-col gap-1.5 pl-12 text-[11px]">
+        <div className="text-muted-foreground flex flex-col gap-1.5 ps-12 text-[11px]">
           {activeRefreshJob ? (
             <div className="flex min-w-0 items-start gap-1.5">
               <StopTaskButton
                 disabled={cancellingJobID === activeRefreshJob.id}
-                label="Cancel metadata refresh"
+                label={t("web.admin.libraries.activeWork.cancelRefresh")}
                 onClick={() => onCancelJob(activeRefreshJob.id)}
               />
               <DatabaseBackup className="mt-0.5 h-3 w-3 shrink-0" />
               <div className="min-w-0 flex-1 space-y-0.5">
                 <div className="flex min-w-0 items-center gap-1.5">
-                  <span className="text-foreground/80 font-medium">Metadata</span>
+                  <span className="text-foreground/80 font-medium">
+                    {t("web.admin.libraries.activeWork.metadata")}
+                  </span>
                   <span className="truncate">
-                    {activeRefreshJob.message || "Metadata refresh queued"}
+                    {activeRefreshJob.message || t("web.admin.libraries.activeWork.refreshQueued")}
                   </span>
                 </div>
                 <div className="text-muted-foreground/80 truncate text-[10px]">
@@ -1140,6 +1220,7 @@ function LibraryScanTasks({
   libraryID: number;
   onCancelScans: (libraryID: number) => void;
 }) {
+  const t = useT();
   const { expanded, setExpanded, visibleScans, collapsible } = useCollapsedScans(scans);
   const runningCount = scans.filter((scan) => scan.status === "running").length;
   const queuedCount = scans.length - runningCount;
@@ -1149,18 +1230,30 @@ function LibraryScanTasks({
       <div className="flex min-w-0 items-center gap-1.5">
         <StopTaskButton
           disabled={cancelling}
-          label="Cancel library scans"
+          label={t("web.admin.libraries.activeWork.cancelScans")}
           onClick={() => onCancelScans(libraryID)}
         />
         <RefreshCw
           className={cn("h-3 w-3 shrink-0", runningCount > 0 && "animate-spin")}
           style={{ animationDuration: "2s" }}
         />
-        <span className="text-foreground/80 font-medium">Scan</span>
+        <span className="text-foreground/80 font-medium">
+          {t("web.admin.libraries.activeWork.scan")}
+        </span>
         <span className="tabular-nums">
-          {runningCount > 0 ? `${runningCount} running` : null}
-          {runningCount > 0 && queuedCount > 0 ? " · " : null}
-          {queuedCount > 0 ? `${queuedCount} queued` : null}
+          {runningCount > 0
+            ? t("web.admin.libraries.scans.running", {
+                count: runningCount,
+                count_text: runningCount,
+              })
+            : null}
+          {runningCount > 0 && queuedCount > 0 ? SPACED_SEPARATOR : null}
+          {queuedCount > 0
+            ? t("web.admin.libraries.scans.queued", {
+                count: queuedCount,
+                count_text: queuedCount,
+              })
+            : null}
         </span>
         {collapsible ? (
           <button
@@ -1170,11 +1263,15 @@ function LibraryScanTasks({
           >
             {expanded ? (
               <>
-                Show less <ChevronUp className="h-3 w-3" />
+                {t("web.admin.libraries.scanQueue.showLess")} <ChevronUp className="h-3 w-3" />
               </>
             ) : (
               <>
-                Show all {scans.length} <ChevronDown className="h-3 w-3" />
+                {t("web.admin.libraries.activeWork.showAll", {
+                  count: scans.length,
+                  count_text: scans.length,
+                })}{" "}
+                <ChevronDown className="h-3 w-3" />
               </>
             )}
           </button>
@@ -1182,7 +1279,7 @@ function LibraryScanTasks({
       </div>
       <div
         className={cn(
-          "flex min-w-0 flex-col gap-0.5 pl-[3.375rem]",
+          "flex min-w-0 flex-col gap-0.5 ps-[3.375rem]",
           expanded && "max-h-56 overflow-y-auto",
         )}
       >
@@ -1218,7 +1315,9 @@ function CompactScanRow({ scan }: { scan: ScanRun }) {
         </span>
       )}
       {progress ? (
-        <span className="text-muted-foreground/60 truncate text-[10px]">· {progress}</span>
+        <span className="text-muted-foreground/60 truncate text-[10px]">
+          {SEPARATOR} {progress}
+        </span>
       ) : null}
     </div>
   );
@@ -1268,12 +1367,17 @@ function MountCheckButtonIcon({
   return <HardDrive className={className} />;
 }
 
-function formatMountCheckMessage(result: LibraryMountCheckResponse) {
+function formatMountCheckMessage(t: Translate, result: LibraryMountCheckResponse) {
   const failingRoots = result.roots.filter((root) => !root.reachable);
   const firstFailure = failingRoots[0];
   if (!result.healthy && firstFailure) {
-    const detail = firstFailure.error_message ? ` (${firstFailure.error_message})` : "";
-    return `${result.summary}: ${firstFailure.path}${detail}`;
+    const values = { summary: result.summary, path: firstFailure.path };
+    return firstFailure.error_message
+      ? t("web.admin.libraries.mountCheck.failureWithError", {
+          ...values,
+          error: firstFailure.error_message,
+        })
+      : t("web.admin.libraries.mountCheck.failure", values);
   }
   return result.summary;
 }
@@ -1331,11 +1435,16 @@ function PaginationBar({
   next: () => void;
   last: () => void;
 }) {
+  const t = useT();
   if (total <= PAGE_SIZE) return null;
   return (
     <div className="border-border/40 flex items-center justify-between border-t px-1 pt-3">
       <span className="text-muted-foreground text-xs tracking-tight tabular-nums">
-        {rangeStart}&ndash;{rangeEnd} of {total}
+        {t("web.admin.libraries.pagination.range", {
+          start: rangeStart,
+          end: rangeEnd,
+          total: total,
+        })}
       </span>
       <div className="flex items-center gap-0.5">
         <Button
@@ -1344,7 +1453,7 @@ function PaginationBar({
           className="h-7 w-7"
           disabled={!canPrev}
           onClick={first}
-          title="First page"
+          title={t("web.admin.libraries.pagination.first")}
         >
           <ChevronsLeft className="h-3.5 w-3.5" />
         </Button>
@@ -1354,7 +1463,7 @@ function PaginationBar({
           className="h-7 w-7"
           disabled={!canPrev}
           onClick={prev}
-          title="Previous page"
+          title={t("web.admin.libraries.pagination.previous")}
         >
           <ChevronLeft className="h-3.5 w-3.5" />
         </Button>
@@ -1364,7 +1473,7 @@ function PaginationBar({
           className="h-7 w-7"
           disabled={!canNext}
           onClick={next}
-          title="Next page"
+          title={t("web.admin.libraries.pagination.next")}
         >
           <ChevronRight className="h-3.5 w-3.5" />
         </Button>
@@ -1374,7 +1483,7 @@ function PaginationBar({
           className="h-7 w-7"
           disabled={!canNext}
           onClick={last}
-          title="Last page"
+          title={t("web.admin.libraries.pagination.last")}
         >
           <ChevronsRight className="h-3.5 w-3.5" />
         </Button>
@@ -1451,6 +1560,7 @@ function useSort<K extends string>(defaultField: K, defaultDir: SortDir = "desc"
  * handling loading, confirmed empty, populated warning, and error states.
  */
 function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");
@@ -1490,8 +1600,8 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
 
   return (
     <CollapsibleDiagnosticsSection
-      title="Ambiguous Roots"
-      description="Scanner roots that stay visible but do not enter unattended metadata matching."
+      title={t("web.admin.libraries.ambiguousRoots.title")}
+      description={t("web.admin.libraries.ambiguousRoots.description")}
       count={countUnknown ? undefined : totalRoots}
       isError={loadFailed}
       icon={
@@ -1520,7 +1630,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           }}
         >
           <SelectTrigger className="h-8 w-full text-xs sm:w-[220px]">
-            <SelectValue placeholder="Select library" />
+            <SelectValue placeholder={t("web.admin.libraries.ambiguousRoots.selectLibrary")} />
           </SelectTrigger>
           <SelectContent>
             {libraries.map((library) => (
@@ -1531,15 +1641,15 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
           </SelectContent>
         </Select>
         <div className="relative flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
-            placeholder="Filter by path, title, or sample file..."
+            placeholder={t("web.admin.libraries.ambiguousRoots.filterPlaceholder")}
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
               pag.setPage(0);
             }}
-            className="h-8 pl-8 text-xs"
+            className="h-8 ps-8 text-xs"
           />
         </div>
       </div>
@@ -1548,32 +1658,32 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead>Root</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Confidence</TableHead>
-              <TableHead className="text-right">Files</TableHead>
-              <TableHead className="w-[120px]">Actions</TableHead>
+              <TableHead>{t("web.admin.libraries.column.root")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.type")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.confidence")}</TableHead>
+              <TableHead className="text-end">{t("web.admin.libraries.column.files")}</TableHead>
+              <TableHead className="w-[120px]">{t("web.admin.libraries.column.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loadFailed ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-destructive text-center text-sm">
-                  Failed to load ambiguous roots for this library.
+                  {t("web.admin.libraries.ambiguousRoots.loadFailed")}
                 </TableCell>
               </TableRow>
             ) : countUnknown ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
-                  Loading ambiguous roots for this library.
+                  {t("web.admin.libraries.ambiguousRoots.loading")}
                 </TableCell>
               </TableRow>
             ) : roots.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="text-muted-foreground text-center text-sm">
                   {debouncedSearch.trim()
-                    ? "No ambiguous roots match your filter."
-                    : "No ambiguous roots for this library."}
+                    ? t("web.admin.libraries.ambiguousRoots.noMatches")
+                    : t("web.admin.libraries.ambiguousRoots.empty")}
                 </TableCell>
               </TableRow>
             ) : (
@@ -1589,18 +1699,20 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                       </code>
                       {root.evidence_json ? (
                         <div className="text-muted-foreground truncate text-[11px]">
-                          {buildRootEvidenceSummary(root)}
+                          {buildRootEvidenceSummary(t, root)}
                         </div>
                       ) : null}
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline">{root.inferred_type || "unknown"}</Badge>
+                    <Badge variant="outline">
+                      {root.inferred_type || t("web.admin.libraries.ambiguousRoots.unknownType")}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{root.type_confidence}</Badge>
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                  <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
                     {root.observed_file_count}
                   </TableCell>
                   <TableCell>
@@ -1611,7 +1723,7 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                         className="h-7 text-xs"
                         onClick={() => setEditingRoot(root)}
                       >
-                        Override
+                        {t("web.admin.libraries.ambiguousRoots.override")}
                       </Button>
                       {root.content_id ? (
                         <Button
@@ -1619,9 +1731,11 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                           size="sm"
                           className="h-7 text-xs"
                           asChild
-                          title="Open the matched item; use its Split Versions action to separate wrongly merged files"
+                          title={t("web.admin.libraries.ambiguousRoots.resolveTitle")}
                         >
-                          <Link to={`/item/${encodeURIComponent(root.content_id)}`}>Resolve</Link>
+                          <Link to={`/item/${encodeURIComponent(root.content_id)}`}>
+                            {t("web.admin.libraries.ambiguousRoots.resolve")}
+                          </Link>
                         </Button>
                       ) : null}
                     </div>
@@ -1636,7 +1750,11 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
       {hasNextPage ? (
         <div className="mt-2 flex items-center justify-between gap-3 text-xs">
           <span className="text-muted-foreground tabular-nums">
-            Showing {roots.length} of {totalRoots} ambiguous roots
+            {t("web.admin.libraries.ambiguousRoots.showing", {
+              count: totalRoots,
+              shown: roots.length,
+              count_text: totalRoots,
+            })}
           </span>
           <Button
             variant="outline"
@@ -1647,7 +1765,9 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
               void fetchNextPage();
             }}
           >
-            {isFetchingNextPage ? "Loading…" : "Load more"}
+            {isFetchingNextPage
+              ? t("web.admin.libraries.loadingMore")
+              : t("web.admin.libraries.loadMore")}
           </Button>
         </div>
       ) : null}
@@ -1665,24 +1785,48 @@ function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   );
 }
 
-function buildRootEvidenceSummary(root: LibraryRoot): string {
+function buildRootEvidenceSummary(t: Translate, root: LibraryRoot): string {
   const evidence = root.evidence_json ?? {};
   const parts: string[] = [];
 
   if (typeof evidence.has_folder_ids === "boolean") {
-    parts.push(evidence.has_folder_ids ? "folder IDs" : "no folder IDs");
+    parts.push(
+      evidence.has_folder_ids
+        ? t("web.admin.libraries.ambiguousRoots.evidence.folderIds")
+        : t("web.admin.libraries.ambiguousRoots.evidence.noFolderIds"),
+    );
   }
   if (typeof evidence.season_structure_files === "number" && evidence.season_structure_files > 0) {
-    parts.push(`${evidence.season_structure_files} season-structured files`);
+    parts.push(
+      t("web.admin.libraries.ambiguousRoots.evidence.seasonFiles", {
+        count: evidence.season_structure_files,
+        count_text: evidence.season_structure_files,
+      }),
+    );
   }
   if (typeof evidence.movie_evidence_files === "number" && evidence.movie_evidence_files > 0) {
-    parts.push(`${evidence.movie_evidence_files} movie-shaped files`);
+    parts.push(
+      t("web.admin.libraries.ambiguousRoots.evidence.movieFiles", {
+        count: evidence.movie_evidence_files,
+        count_text: evidence.movie_evidence_files,
+      }),
+    );
   }
   if (typeof evidence.wrapper_collapses === "number" && evidence.wrapper_collapses > 0) {
-    parts.push(`${evidence.wrapper_collapses} wrapper collapses`);
+    parts.push(
+      t("web.admin.libraries.ambiguousRoots.evidence.wrapperCollapses", {
+        count: evidence.wrapper_collapses,
+        count_text: evidence.wrapper_collapses,
+      }),
+    );
   }
   if (typeof evidence.ancestor_promotions === "number" && evidence.ancestor_promotions > 0) {
-    parts.push(`${evidence.ancestor_promotions} ancestor promotions`);
+    parts.push(
+      t("web.admin.libraries.ambiguousRoots.evidence.ancestorPromotions", {
+        count: evidence.ancestor_promotions,
+        count_text: evidence.ancestor_promotions,
+      }),
+    );
   }
 
   return parts.join(" · ");
@@ -1695,6 +1839,7 @@ function RootOverrideDialog({
   root: LibraryRoot;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   const upsertOverride = useUpsertLibraryRootOverride();
   const deleteOverride = useDeleteLibraryRootOverride();
   const [forcedType, setForcedType] = useState(
@@ -1725,70 +1870,77 @@ function RootOverrideDialog({
     <Dialog open={true} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Root Override</DialogTitle>
+          <DialogTitle>{t("web.admin.libraries.rootOverride.title")}</DialogTitle>
           <DialogDescription>
-            Force the inferred identity for <code>{root.root_path}</code>.
+            {t("web.admin.libraries.rootOverride.description", {
+              path: root.root_path,
+              code: (chunks) => <code>{chunks}</code>,
+            })}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label>Type</Label>
+              <Label>{t("web.admin.libraries.rootOverride.type")}</Label>
               <Select
                 value={forcedType || "auto"}
                 onValueChange={(value) => setForcedType(value === "auto" ? "" : value)}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Auto" />
+                  <SelectValue placeholder={t("web.admin.libraries.rootOverride.auto")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto">Auto</SelectItem>
-                  <SelectItem value="movie">Movie</SelectItem>
-                  <SelectItem value="series">Series</SelectItem>
+                  <SelectItem value="auto">{t("web.admin.libraries.rootOverride.auto")}</SelectItem>
+                  <SelectItem value="movie">
+                    {t("web.admin.libraries.rootOverride.movie")}
+                  </SelectItem>
+                  <SelectItem value="series">
+                    {t("web.admin.libraries.rootOverride.series")}
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Year</Label>
+              <Label>{t("web.admin.libraries.rootOverride.year")}</Label>
               <Input
                 value={forcedYear}
                 onChange={(e) => setForcedYear(e.target.value)}
-                placeholder="2024"
+                placeholder={YEAR_PLACEHOLDER}
               />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label>Title</Label>
+            <Label>{t("web.admin.libraries.rootOverride.titleLabel")}</Label>
             <Input
               value={forcedTitle}
               onChange={(e) => setForcedTitle(e.target.value)}
-              placeholder="Forced title"
+              placeholder={t("web.admin.libraries.rootOverride.titlePlaceholder")}
             />
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
-              <Label>TMDB ID</Label>
+              <Label>{t("web.admin.libraries.rootOverride.tmdbId")}</Label>
               <Input value={forcedTmdbID} onChange={(e) => setForcedTmdbID(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>IMDb ID</Label>
+              <Label>{t("web.admin.libraries.rootOverride.imdbId")}</Label>
               <Input value={forcedImdbID} onChange={(e) => setForcedImdbID(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label>TVDB ID</Label>
+              <Label>{t("web.admin.libraries.rootOverride.tvdbId")}</Label>
               <Input value={forcedTvdbID} onChange={(e) => setForcedTvdbID(e.target.value)} />
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label>Note</Label>
+            <Label>{t("web.admin.libraries.rootOverride.note")}</Label>
             <Input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Why this override exists"
+              placeholder={t("web.admin.libraries.rootOverride.notePlaceholder")}
             />
           </div>
 
@@ -1803,7 +1955,7 @@ function RootOverrideDialog({
                 );
               }}
             >
-              Remove Override
+              {t("web.admin.libraries.rootOverride.remove")}
             </Button>
             <Button
               onClick={() => {
@@ -1825,7 +1977,7 @@ function RootOverrideDialog({
               }}
               disabled={upsertOverride.isPending}
             >
-              Save Override
+              {t("web.admin.libraries.rootOverride.save")}
             </Button>
           </div>
         </div>
@@ -1837,6 +1989,7 @@ function RootOverrideDialog({
 type SkippedSortField = "root_path" | "library" | "reason" | "first_seen" | "last_seen";
 
 function SkippedRootsSection() {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -1874,23 +2027,23 @@ function SkippedRootsSection() {
 
   return (
     <CollapsibleDiagnosticsSection
-      title="Troubleshooting"
-      description="Roots with no provider IDs in the folder name or, for movies, in a file name."
+      title={t("web.admin.libraries.skippedRoots.title")}
+      description={t("web.admin.libraries.skippedRoots.description")}
       count={data?.pages[0]?.total}
       icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
       open={open}
       onOpenChange={setOpen}
     >
       <div className="relative mb-2">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
-          placeholder="Filter by path, library, or reason..."
+          placeholder={t("web.admin.libraries.skippedRoots.filterPlaceholder")}
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
             pag.setPage(0);
           }}
-          className="h-8 pl-8 text-xs"
+          className="h-8 ps-8 text-xs"
         />
       </div>
       <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
@@ -1903,7 +2056,7 @@ function SkippedRootsSection() {
                 activeDir={sortDir}
                 onSort={toggle}
               >
-                Item
+                {t("web.admin.libraries.column.item")}
               </SortableHead>
               <SortableHead
                 field="library"
@@ -1911,7 +2064,7 @@ function SkippedRootsSection() {
                 activeDir={sortDir}
                 onSort={toggle}
               >
-                Library
+                {t("web.admin.libraries.column.library")}
               </SortableHead>
               <SortableHead
                 field="reason"
@@ -1919,16 +2072,16 @@ function SkippedRootsSection() {
                 activeDir={sortDir}
                 onSort={toggle}
               >
-                Reason
+                {t("web.admin.libraries.column.reason")}
               </SortableHead>
-              <TableHead className="text-right">Files</TableHead>
+              <TableHead className="text-end">{t("web.admin.libraries.column.files")}</TableHead>
               <SortableHead
                 field="first_seen"
                 activeField={sortField}
                 activeDir={sortDir}
                 onSort={toggle}
               >
-                First seen
+                {t("web.admin.libraries.column.firstSeen")}
               </SortableHead>
               <SortableHead
                 field="last_seen"
@@ -1936,7 +2089,7 @@ function SkippedRootsSection() {
                 activeDir={sortDir}
                 onSort={toggle}
               >
-                Last seen
+                {t("web.admin.libraries.column.lastSeen")}
               </SortableHead>
             </TableRow>
           </TableHeader>
@@ -1955,7 +2108,7 @@ function SkippedRootsSection() {
                         <ChevronRight
                           className={cn(
                             "text-muted-foreground h-3.5 w-3.5 shrink-0 transition-transform",
-                            isExpanded && "rotate-90",
+                            isExpanded && "rotate-90 rtl:-rotate-90",
                           )}
                         />
                         <span className="truncate text-sm font-medium">
@@ -1972,7 +2125,7 @@ function SkippedRootsSection() {
                         {root.reason}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                    <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
                       {root.file_count}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-xs tabular-nums">
@@ -1986,17 +2139,23 @@ function SkippedRootsSection() {
                     <TableRow className="hover:bg-transparent">
                       <TableCell colSpan={6} className="bg-muted/30 border-b px-4 py-3">
                         <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-                          <span className="text-muted-foreground font-medium">Root path</span>
+                          <span className="text-muted-foreground font-medium">
+                            {t("web.admin.libraries.skippedRoots.rootPath")}
+                          </span>
                           <code className="font-mono break-all select-all">{root.root_path}</code>
                           {root.sample_file_path && (
                             <>
-                              <span className="text-muted-foreground font-medium">Sample file</span>
+                              <span className="text-muted-foreground font-medium">
+                                {t("web.admin.libraries.skippedRoots.sampleFile")}
+                              </span>
                               <code className="font-mono break-all select-all">
                                 {root.sample_file_path}
                               </code>
                             </>
                           )}
-                          <span className="text-muted-foreground font-medium">Files affected</span>
+                          <span className="text-muted-foreground font-medium">
+                            {t("web.admin.libraries.skippedRoots.filesAffected")}
+                          </span>
                           <span>{root.file_count}</span>
                         </div>
                       </TableCell>
@@ -2016,7 +2175,9 @@ function SkippedRootsSection() {
           disabled={isFetchingNextPage}
           onClick={() => void fetchNextPage()}
         >
-          {isFetchingNextPage ? "Loading..." : "Load more"}
+          {isFetchingNextPage
+            ? t("web.admin.libraries.skippedRoots.loading")
+            : t("web.admin.libraries.loadMore")}
         </Button>
       ) : null}
     </CollapsibleDiagnosticsSection>
@@ -2030,6 +2191,7 @@ function SkippedRootsSection() {
 const IGNORABLE_UNMATCHED_TYPES = new Set(["movie", "series"]);
 
 function UnmatchedItemsSection() {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const navigationVersion = useRef(0);
   useEffect(
@@ -2096,16 +2258,16 @@ function UnmatchedItemsSection() {
 
   const emptyMessage = ignoredView
     ? search.trim()
-      ? "No ignored items match your search."
-      : "No items are ignored."
+      ? t("web.admin.libraries.unmatched.emptyIgnoredSearch")
+      : t("web.admin.libraries.unmatched.emptyIgnored")
     : search.trim()
-      ? "No unmatched items match your search."
-      : "No items are awaiting a match.";
+      ? t("web.admin.libraries.unmatched.emptyAwaitingSearch")
+      : t("web.admin.libraries.unmatched.emptyAwaiting");
 
   return (
     <CollapsibleDiagnosticsSection
-      title="Unmatched Items"
-      description="Items that could not be matched to any metadata provider."
+      title={t("web.admin.libraries.unmatched.title")}
+      description={t("web.admin.libraries.unmatched.description")}
       count={awaitingTotal}
       icon={<Search className="h-4 w-4 text-amber-500" />}
       open={open}
@@ -2121,23 +2283,27 @@ function UnmatchedItemsSection() {
           }}
         >
           <SelectTrigger
-            aria-label="Unmatched item view"
+            aria-label={t("web.admin.libraries.unmatched.viewLabel")}
             className="h-8 w-full text-xs sm:w-[180px]"
           >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="unmatched">Awaiting a match</SelectItem>
-            <SelectItem value="ignored">Ignored</SelectItem>
+            <SelectItem value="unmatched">
+              {t("web.admin.libraries.unmatched.viewAwaiting")}
+            </SelectItem>
+            <SelectItem value="ignored">
+              {t("web.admin.libraries.unmatched.viewIgnored")}
+            </SelectItem>
           </SelectContent>
         </Select>
         <div className="relative flex-1">
-          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+          <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             placeholder={
               ignoredView
-                ? "Search ignored items by title, library, or type..."
-                : "Search all unmatched items by title, library, or type..."
+                ? t("web.admin.libraries.unmatched.searchIgnored")
+                : t("web.admin.libraries.unmatched.searchAwaiting")
             }
             value={search}
             onChange={(e) => {
@@ -2147,7 +2313,7 @@ function UnmatchedItemsSection() {
               setSearch(e.target.value);
               setPage(0);
             }}
-            className="h-8 pl-8 text-xs"
+            className="h-8 ps-8 text-xs"
           />
         </div>
       </div>
@@ -2155,11 +2321,11 @@ function UnmatchedItemsSection() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead>Title</TableHead>
-              <TableHead>Library</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-[190px]">Actions</TableHead>
+              <TableHead>{t("web.admin.libraries.column.title")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.library")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.type")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.status")}</TableHead>
+              <TableHead className="w-[190px]">{t("web.admin.libraries.column.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2180,7 +2346,9 @@ function UnmatchedItemsSection() {
                       {u.title}
                     </Link>
                     {u.year ? (
-                      <span className="text-muted-foreground ml-1 text-xs">({u.year})</span>
+                      <span className="text-muted-foreground ms-1 text-xs">
+                        {t("web.admin.libraries.unmatched.year", { year: u.year })}
+                      </span>
                     ) : null}
                   </TableCell>
                   <TableCell className="text-sm">{u.library_name}</TableCell>
@@ -2199,7 +2367,7 @@ function UnmatchedItemsSection() {
                         onClick={() => setMatchItem(u)}
                       >
                         <Search className="h-3 w-3" />
-                        Match
+                        {t("web.admin.libraries.match")}
                       </Button>
                       {/* Books keep their own enrichment, so only a movie or series can be ignored. */}
                       {ignoredView || IGNORABLE_UNMATCHED_TYPES.has(u.content_type) ? (
@@ -2210,11 +2378,16 @@ function UnmatchedItemsSection() {
                           disabled={
                             setIgnored.isPending && setIgnored.variables?.contentId === u.content_id
                           }
-                          aria-label={`${ignoredView ? "Restore" : "Ignore"} ${u.title}`}
+                          aria-label={t(
+                            ignoredView
+                              ? "web.admin.libraries.unmatched.restoreLabel"
+                              : "web.admin.libraries.unmatched.ignoreLabel",
+                            { title: u.title },
+                          )}
                           title={
                             ignoredView
-                              ? "Put this item back on the unmatched list so Silo tries to match it again"
-                              : "Mark this item as intentionally unmatched: Silo stops trying to match it and moves it to the Ignored view"
+                              ? t("web.admin.libraries.unmatched.restoreTitle")
+                              : t("web.admin.libraries.unmatched.ignoreTitle")
                           }
                           onClick={() =>
                             setIgnored.mutate({
@@ -2229,7 +2402,9 @@ function UnmatchedItemsSection() {
                           ) : (
                             <EyeOff className="h-3 w-3" />
                           )}
-                          {ignoredView ? "Restore" : "Ignore"}
+                          {ignoredView
+                            ? t("web.admin.libraries.unmatched.restore")
+                            : t("web.admin.libraries.unmatched.ignore")}
                         </Button>
                       ) : null}
                     </div>
@@ -2275,6 +2450,7 @@ function UnmatchedItemsSection() {
 /* ─── Stale External IDs ────────────────────────────────────────── */
 
 function StaleIDsSection() {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -2295,8 +2471,8 @@ function StaleIDsSection() {
 
   return (
     <CollapsibleDiagnosticsSection
-      title="Stale External IDs"
-      description="Provider IDs no longer resolve; metadata refresh will fail until re-matched. Most recently seen first."
+      title={t("web.admin.libraries.staleIds.title")}
+      description={t("web.admin.libraries.staleIds.description")}
       count={stalePages?.pages[0]?.total}
       icon={<Unlink className="h-4 w-4 text-red-400" />}
       iconClassName="bg-red-500/10"
@@ -2304,29 +2480,29 @@ function StaleIDsSection() {
       onOpenChange={setOpen}
     >
       <div className="relative mb-2">
-        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+        <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
-          placeholder="Filter by title, provider, or ID..."
+          placeholder={t("web.admin.libraries.staleIds.filterPlaceholder")}
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
             pag.setPage(0);
           }}
-          className="h-8 pl-8 text-xs"
+          className="h-8 ps-8 text-xs"
         />
       </div>
       <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
-        <Table aria-label="Stale external IDs">
+        <Table aria-label={t("web.admin.libraries.staleIds.tableLabel")}>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead>Title</TableHead>
-              <TableHead>Year</TableHead>
-              <TableHead>Library</TableHead>
-              <TableHead>Provider</TableHead>
-              <TableHead>Provider ID</TableHead>
-              <TableHead>First seen</TableHead>
-              <TableHead>Last seen</TableHead>
-              <TableHead className="w-[100px]">Actions</TableHead>
+              <TableHead>{t("web.admin.libraries.column.title")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.year")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.library")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.provider")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.providerId")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.firstSeen")}</TableHead>
+              <TableHead>{t("web.admin.libraries.column.lastSeen")}</TableHead>
+              <TableHead className="w-[100px]">{t("web.admin.libraries.column.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2353,7 +2529,7 @@ function StaleIDsSection() {
                     onClick={() => setMatchItem(s)}
                   >
                     <Search className="h-3 w-3" />
-                    Match
+                    {t("web.admin.libraries.match")}
                   </Button>
                 </TableCell>
               </TableRow>
@@ -2365,7 +2541,10 @@ function StaleIDsSection() {
       {hasNextPage ? (
         <div className="mt-2 flex items-center justify-between gap-3 text-xs">
           <span className="text-muted-foreground tabular-nums">
-            Showing {staleIDs.length} stale IDs
+            {t("web.admin.libraries.staleIds.showing", {
+              count: staleIDs.length,
+              count_text: staleIDs.length,
+            })}
           </span>
           <Button
             variant="outline"
@@ -2376,7 +2555,9 @@ function StaleIDsSection() {
               void fetchNextPage();
             }}
           >
-            {isFetchingNextPage ? "Loading…" : "Load more"}
+            {isFetchingNextPage
+              ? t("web.admin.libraries.loadingMore")
+              : t("web.admin.libraries.loadMore")}
           </Button>
         </div>
       ) : null}

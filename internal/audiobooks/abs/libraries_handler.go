@@ -1,6 +1,7 @@
 package abs
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -54,7 +56,7 @@ func (h *Handler) handleLibraries(w http.ResponseWriter, r *http.Request) {
 
 // handleLibraryDetail — GET /abs/api/libraries/{libraryId}
 func (h *Handler) handleLibraryDetail(w http.ResponseWriter, r *http.Request) {
-	lib, ok := h.resolveLibrary(w, r)
+	lib, access, ok := h.resolveLibrary(w, r)
 	if !ok {
 		return
 	}
@@ -71,7 +73,7 @@ func (h *Handler) handleLibraryDetail(w http.ResponseWriter, r *http.Request) {
 	// numUserPlaylists drives the bottom-nav "Playlists" tab visibility on the
 	// ABS mobile client (BookshelfNavBar.vue gates the tab on it being truthy).
 	writeJSON(w, http.StatusOK, map[string]any{
-		"filterdata":              h.buildFilterData(r, lib),
+		"filterdata":              h.buildFilterData(r.Context(), lib, access),
 		"issues":                  0,
 		"numUserPlaylists":        h.countUserPlaylists(r),
 		"customMetadataProviders": []any{},
@@ -111,10 +113,8 @@ func (h *Handler) countUserPlaylists(r *http.Request) int {
 // produce different output types (AuthorObj / SeriesObj). A generic helper
 // would need closures at each call site that are longer than the inlined
 // code; the structural parallelism is the cheapest form here.
-func (h *Handler) buildFilterData(r *http.Request, lib AudiobookLibrary) map[string]any {
-	ctx := r.Context()
+func (h *Handler) buildFilterData(ctx context.Context, lib AudiobookLibrary, access catalog.AccessFilter) map[string]any {
 	const fetchCap = 5000
-	access, _, _ := h.accessFilterFromRequest(r)
 
 	authorObjs := []AuthorObj{}
 	if rows, _, err := h.deps.MediaStore.ListLibraryAuthors(ctx, lib.ID, fetchCap, 0, "name", false, access); err == nil {
@@ -160,7 +160,7 @@ func (h *Handler) buildFilterData(r *http.Request, lib AudiobookLibrary) map[str
 // the store). Filter is applied locally after fetching. These limitations
 // are consistent with the plugin at its initial launch.
 func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
-	lib, ok := h.resolveLibrary(w, r)
+	lib, access, ok := h.resolveLibrary(w, r)
 	if !ok {
 		return
 	}
@@ -179,12 +179,6 @@ func (h *Handler) handleLibraryItems(w http.ResponseWriter, r *http.Request) {
 	include := q.Get("include")
 
 	filter, hasFilter := ParseFilter(filterBy)
-
-	access, _, err := h.accessFilterFromRequest(r)
-	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
-		return
-	}
 
 	// authors/series/narrators filters push down into SQL (indexed) so we never
 	// load + hydrate the whole library. This applies even with collapseseries=1
@@ -343,7 +337,7 @@ func (h *Handler) handleAuthorImage(w http.ResponseWriter, r *http.Request) {
 // per-author book counts. Returns the canonical ABS paged envelope to
 // match the continuum-plugin-audiobooks shape verbatim.
 func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
-	lib, ok := h.resolveLibrary(w, r)
+	lib, access, ok := h.resolveLibrary(w, r)
 	if !ok {
 		return
 	}
@@ -360,11 +354,6 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 	}
 	sortBy := r.URL.Query().Get("sort")
 	sortDesc := r.URL.Query().Get("desc") == "1"
-	access, _, err := h.accessFilterFromRequest(r)
-	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
-		return
-	}
 	// Reads the precomputed author materialized view: indexed paginated read +
 	// trivial count, so large libraries aren't capped and full syncs don't blow
 	// the client's background-task window. limit=0 means "return all".
@@ -404,7 +393,7 @@ func (h *Handler) handleLibraryAuthors(w http.ResponseWriter, r *http.Request) {
 // ABS paged envelope; addedAt is 0 because the v1 catalog has no series
 // added-at column (real ABS clients tolerate the placeholder).
 func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
-	lib, ok := h.resolveLibrary(w, r)
+	lib, access, ok := h.resolveLibrary(w, r)
 	if !ok {
 		return
 	}
@@ -414,11 +403,6 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 	limit, page := readPagedQuery(r, 0)
 	if limit <= 0 || limit > maxUnpaginatedSeries {
 		limit = maxUnpaginatedSeries
-	}
-	access, _, err := h.accessFilterFromRequest(r)
-	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
-		return
 	}
 	// Paginate in SQL with a separate COUNT so large libraries aren't truncated
 	// at a fixed cap. limit=0 means "return all" (ABS contract).
@@ -470,7 +454,7 @@ func (h *Handler) handleLibrarySeries(w http.ResponseWriter, r *http.Request) {
 // We keep an extra empty "podcast" bucket anyway since an extra key never
 // crashes a strict client, only a missing one does.
 func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
-	lib, ok := h.resolveLibrary(w, r)
+	lib, access, ok := h.resolveLibrary(w, r)
 	if !ok {
 		return
 	}
@@ -490,11 +474,6 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 	}
 	if q == "" {
 		writeJSON(w, http.StatusOK, empty)
-		return
-	}
-	access, _, err := h.accessFilterFromRequest(r)
-	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
 		return
 	}
 	items, err := h.deps.MediaStore.SearchAudiobooks(r.Context(), lib.ID, q, limit, access)
@@ -598,7 +577,7 @@ func (h *Handler) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 // shelf list by id and skips empties cleanly, but it crashes on a missing
 // shelf id. Matches continuum-plugin-audiobooks/handlePersonalized layout.
 func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
-	lib, ok := h.resolveLibrary(w, r)
+	lib, access, ok := h.resolveLibrary(w, r)
 	if !ok {
 		return
 	}
@@ -613,11 +592,6 @@ func (h *Handler) handlePersonalized(w http.ResponseWriter, r *http.Request) {
 	}
 	baseURL := h.absBaseURL(r)
 	const shelfLimit = 10
-	access, err := h.accessFilterForAuth(r.Context(), a)
-	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
-		return
-	}
 
 	shelves := []map[string]any{
 		{"id": "continue-listening", "label": "Continue Listening", "labelStringKey": "LabelContinueListening", "type": "book", "entities": []any{}, "total": 0},
@@ -683,47 +657,49 @@ func minifiedSlice(items []*models.MediaItem, lib AudiobookLibrary, baseURL stri
 // ---------------------------------------------------------------------------
 
 // resolveLibrary looks up the library identified by the {libraryId} URL
-// param, handling the virtual "silo-audiobooks" sentinel. Returns (lib, true)
-// on success or writes a 404 and returns (zero, false) on failure.
-func (h *Handler) resolveLibrary(w http.ResponseWriter, r *http.Request) (AudiobookLibrary, bool) {
+// param, handling the virtual "silo-audiobooks" sentinel, within the caller's
+// access scope. Returns (lib, access, true) on success, so the handler reads
+// the library with the same filter that authorized it, or writes an error and
+// returns (zero, zero, false).
+func (h *Handler) resolveLibrary(w http.ResponseWriter, r *http.Request) (AudiobookLibrary, catalog.AccessFilter, bool) {
 	idStr := chi.URLParam(r, "libraryId")
 	if idStr == "" {
 		idStr = chi.URLParam(r, "id")
 	}
 
-	access, _, err := h.accessFilterFromRequest(r)
-	if err != nil {
-		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
-		return AudiobookLibrary{}, false
+	a, _ := absAuthFrom(r)
+	access, ok := h.requireAccess(w, r, a)
+	if !ok {
+		return AudiobookLibrary{}, catalog.AccessFilter{}, false
 	}
 	libs, err := h.deps.MediaStore.ListAudiobookLibraries(r.Context(), access)
 	if err != nil {
 		http.Error(w, "list libraries: "+err.Error(), http.StatusInternalServerError)
-		return AudiobookLibrary{}, false
+		return AudiobookLibrary{}, catalog.AccessFilter{}, false
 	}
 
 	// Virtual sentinel → first library.
 	if idStr == "" || idStr == VirtualLibraryID {
 		if len(libs) > 0 {
-			return libs[0], true
+			return libs[0], access, true
 		}
 		// No libraries configured yet: return a virtual one so ABS clients
 		// still get a sensible (empty) browse response.
-		return AudiobookLibrary{ID: 0, Name: VirtualLibraryName, Type: "audiobooks"}, true
+		return virtualAudiobookLibrary(), access, true
 	}
 
 	n, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		http.Error(w, "library not found", http.StatusNotFound)
-		return AudiobookLibrary{}, false
+		return AudiobookLibrary{}, catalog.AccessFilter{}, false
 	}
 	for _, lib := range libs {
 		if lib.ID == n {
-			return lib, true
+			return lib, access, true
 		}
 	}
 	http.Error(w, "library not found", http.StatusNotFound)
-	return AudiobookLibrary{}, false
+	return AudiobookLibrary{}, catalog.AccessFilter{}, false
 }
 
 // ---------------------------------------------------------------------------

@@ -108,7 +108,9 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		},
 	}
 
-	items := SubtitleInventoryV3("sess-1", file, nil)
+	items := SubtitleInventoryV3("sess-1", file, []SubtitleInventoryEntryV3{
+		{Codec: "sub", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 71},
+	})
 
 	cases := []struct {
 		index         int
@@ -119,6 +121,7 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 		{1, "/stream/sess-1/subtitles/1.ass?file_id=44&embedded_stream_index=1", "/stream/sess-1/subtitles/1/fonts?file_id=44&embedded_stream_index=1"},
 		{2, "/stream/sess-1/subtitles/2.sup?file_id=44&embedded_stream_index=2", ""},
 		{3, "", ""},
+		{4, "", ""},
 	}
 	for _, tc := range cases {
 		got := items[tc.index]
@@ -129,6 +132,23 @@ func TestSubtitleInventoryV3_AttachesURLsOnlyToSidecarTracks(t *testing.T) {
 			t.Errorf("item %d font_bundle_url = %q, want %q", tc.index, got.FontBundleURL, tc.fontBundleURL)
 		}
 	}
+	// A stored track without a URL or timing key must still be identifiable
+	// after a plan refresh, so a readiness event cannot auto-select it.
+	raw, err := json.Marshal(items[4])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		StoredID int    `json:"stored_subtitle_id"`
+		SyncKey  string `json:"sync_key"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.StoredID != 71 || wire.SyncKey != "" {
+		t.Fatalf("stored identity or timing support changed: %s", raw)
+	}
+
 }
 
 func TestScopeSubtitleInventoryV3PreservesPinnedIdentity(t *testing.T) {
@@ -320,6 +340,49 @@ func TestBuildSubtitleInventoryV3_SyncKeys(t *testing.T) {
 	for i, item := range items {
 		if item.SyncKey != want[i] {
 			t.Errorf("item %d (%s %s) sync key %q, want %q", i, item.Source, item.Codec, item.SyncKey, want[i])
+		}
+	}
+}
+
+// Embedded rows name their stream in the source and keep their sidecar URL as
+// the fallback; external and downloaded rows have no stream to name.
+func TestSubtitleInventoryV3_EmbeddedRowsCarryStreamIdentity(t *testing.T) {
+	file := &models.MediaFile{
+		ID:                42,
+		ExternalSubtitles: []models.ExternalSubtitle{{Path: "/media/movie.en.srt", Language: "en", Format: "srt"}},
+		SubtitleTracks: []models.SubtitleTrack{
+			{Index: 0, Codec: "subrip"},
+			{Index: 3, ContainerTrackID: "4", Codec: "subrip"},
+		},
+	}
+	additional := []SubtitleInventoryEntryV3{{CombinedIndex: 3, Codec: "srt", Source: SubtitleSourceDownloadedV3, DownloadedSubtitleID: 9}}
+	inventory := BuildSubtitleInventoryV3(file, additional)
+	inventory[2].NativeSelectable = true
+	items := ScopeSubtitleInventoryV3("session-1", file, inventory, nil)
+	if items[2].URL == "" {
+		t.Fatal("a native-selectable row lost its fallback URL")
+	}
+	raw, err := json.Marshal(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	want := []map[string]any{
+		{},
+		{"stream_index": 0.0},
+		{"stream_index": 3.0, "container_track_id": "4", "native_selectable": true},
+		{},
+	}
+	for i, row := range rows {
+		for _, key := range []string{"stream_index", "container_track_id", "native_selectable"} {
+			got, ok := row[key]
+			wantValue, wantOK := want[i][key]
+			if ok != wantOK || got != wantValue {
+				t.Errorf("row %d %s = %v (present %v), want %v (present %v)", i, key, got, ok, wantValue, wantOK)
+			}
 		}
 	}
 }

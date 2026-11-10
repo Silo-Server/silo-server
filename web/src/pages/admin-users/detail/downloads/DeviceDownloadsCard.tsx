@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 import { episodeCode, formatBytes, formatLastSeen, formatShortDate } from "../format";
@@ -66,9 +67,9 @@ function latest(rows: AdminUserDownload[]): string {
   return rows.map((row) => row.created_at).sort((a, b) => b.localeCompare(a))[0] ?? "";
 }
 
-function sharedQuality(rows: AdminUserDownload[]): string {
+function sharedQuality(rows: AdminUserDownload[], mixed: string): string {
   const labels = new Set(rows.map(downloadQualityLabel));
-  return labels.size === 1 ? [...labels][0]! : "Mixed";
+  return labels.size === 1 ? [...labels][0]! : mixed;
 }
 
 function totalSize(rows: AdminUserDownload[]): number {
@@ -82,17 +83,18 @@ function episodeLabel(episode: NonNullable<AdminUserDownload["episode"]>): strin
     .join(" · ");
 }
 
-const sizeCell = "text-muted-foreground text-right tabular-nums";
+const sizeCell = "text-muted-foreground text-end tabular-nums";
 const mutedCell = "text-muted-foreground hidden sm:table-cell";
 
 function GroupRows({ group, android }: { group: DownloadGroup; android: boolean }) {
+  const t = useT();
   // A series with work outstanding opens by default so the admin sees what's left.
   const [open, setOpen] = useState(() =>
     group.episodes.some((episode) => episode.status !== "completed"),
   );
   const monitored = group.monitored ? (
-    <Badge variant="outline" className="ml-2 rounded-full">
-      Monitored
+    <Badge variant="outline" className="ms-2 rounded-full">
+      {t("web.admin.users.detail.downloads.device.monitored")}
     </Badge>
   ) : null;
 
@@ -101,7 +103,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
     const code = row.episode ? episodeLabel(row.episode) : "";
     return (
       <TableRow>
-        <TableCell className="pl-4 whitespace-normal sm:pl-5">
+        <TableCell className="ps-4 whitespace-normal sm:ps-5">
           <span className="font-semibold">{group.title}</span>
           {monitored}
           {code ? <div className="text-muted-foreground text-xs">{code}</div> : null}
@@ -111,7 +113,7 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
         <TableCell>
           <StatusBadge badge={downloadStatusBadge(row.status, android)} />
         </TableCell>
-        <TableCell className={cn(mutedCell, "pr-4 sm:pr-5")}>
+        <TableCell className={cn(mutedCell, "pe-4 sm:pe-5")}>
           {formatShortDate(row.created_at)}
         </TableCell>
       </TableRow>
@@ -121,12 +123,12 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
   return (
     <>
       <TableRow>
-        <TableCell className="pl-4 whitespace-normal sm:pl-5">
+        <TableCell className="ps-4 whitespace-normal sm:ps-5">
           <button
             type="button"
             aria-expanded={open}
             onClick={() => setOpen((value) => !value)}
-            className="hover:text-foreground -ml-1 inline-flex items-center gap-1 text-left font-semibold"
+            className="hover:text-foreground -ms-1 inline-flex items-center gap-1 text-start font-semibold"
           >
             {open ? (
               <ChevronDown aria-hidden className="h-3.5 w-3.5" />
@@ -136,29 +138,33 @@ function GroupRows({ group, android }: { group: DownloadGroup; android: boolean 
             {group.title}
           </button>
           {monitored}
-          <div className="text-muted-foreground pl-4 text-xs">{seriesGroupSubtitle(group)}</div>
+          <div className="text-muted-foreground ps-4 text-xs">{seriesGroupSubtitle(group)}</div>
         </TableCell>
-        <TableCell className={mutedCell}>{sharedQuality(group.episodes)}</TableCell>
+        <TableCell className={mutedCell}>
+          {sharedQuality(group.episodes, t("web.admin.users.detail.downloads.quality.mixed"))}
+        </TableCell>
         <TableCell className={sizeCell}>{formatBytes(totalSize(group.episodes))}</TableCell>
         <TableCell>
           <StatusBadge badge={seriesGroupStatus(group, android)} />
         </TableCell>
-        <TableCell className={cn(mutedCell, "pr-4 sm:pr-5")}>
+        <TableCell className={cn(mutedCell, "pe-4 sm:pe-5")}>
           {formatShortDate(latest(group.episodes))}
         </TableCell>
       </TableRow>
       {open &&
         group.episodes.map((row) => (
           <TableRow key={row.id}>
-            <TableCell className="text-muted-foreground pl-10 whitespace-normal sm:pl-11">
-              {row.episode ? episodeLabel(row.episode) : "Unknown episode"}
+            <TableCell className="text-muted-foreground ps-10 whitespace-normal sm:ps-11">
+              {row.episode
+                ? episodeLabel(row.episode)
+                : t("web.admin.users.detail.downloads.unknownEpisode")}
             </TableCell>
             <TableCell className={mutedCell} />
             <TableCell className={sizeCell}>{formatBytes(row.file_size)}</TableCell>
             <TableCell>
               <StatusBadge badge={downloadStatusBadge(row.status, android)} />
             </TableCell>
-            <TableCell className={cn(mutedCell, "pr-4 sm:pr-5")}>
+            <TableCell className={cn(mutedCell, "pe-4 sm:pe-5")}>
               {formatShortDate(row.created_at)}
             </TableCell>
           </TableRow>
@@ -187,6 +193,7 @@ export function DeviceDownloadsCard({
   monitors: AdminUserDownloadSubscription[];
   profileNames: Map<string, string>;
 }) {
+  const t = useT();
   const android = isAndroidPlatform(device?.device_platform);
   const groups = groupDeviceDownloads(rows, monitors);
   const notRevoked = summaryRows.filter((row) => row.status !== "revoked");
@@ -199,22 +206,31 @@ export function DeviceDownloadsCard({
   const profiles = [
     ...new Set(summaryRows.map((row) => profileNames.get(row.profile_id) || row.profile_id)),
   ];
-  const profileMeta = profiles.length > 0 ? `profile ${profiles.join(", ")}` : "";
+  const profileMeta =
+    profiles.length > 0
+      ? t("web.admin.users.detail.downloads.device.profiles", { names: profiles.join(", ") })
+      : "";
 
   const meta = device
     ? [
         platformLabel(device.device_platform),
         profileMeta,
-        `last seen ${formatLastSeen(device.last_seen_at ?? device.last_updated)}`,
+        t("web.admin.users.detail.downloads.device.lastSeen", {
+          when: formatLastSeen(device.last_seen_at ?? device.last_updated),
+        }),
       ]
     : [shortenId(deviceId), profileMeta];
+  const counted = (key: MessageKey, n: number) => t(key, { count: n, count_text: n });
   const totals = android
     ? [
-        onDevice > 0 ? `${onDevice} on device` : "",
-        `${requested} requested`,
-        preparing > 0 ? `${preparing} preparing` : "",
+        onDevice > 0 ? counted("web.admin.users.detail.downloads.count.onDevice", onDevice) : "",
+        counted("web.admin.users.detail.downloads.count.requested", requested),
+        preparing > 0 ? counted("web.admin.users.detail.downloads.count.preparing", preparing) : "",
       ]
-    : [`${onDevice} on device`, `${inProgress} in progress`];
+    : [
+        counted("web.admin.users.detail.downloads.count.onDevice", onDevice),
+        counted("web.admin.users.detail.downloads.count.inProgress", inProgress),
+      ];
   totals.push(formatBytes(totalSize(notRevoked)));
 
   return (
@@ -222,10 +238,12 @@ export function DeviceDownloadsCard({
       title={
         <span className="flex items-center gap-3">
           <PlatformTile kind={classifyPlatform(device?.device_platform)} />
-          {device ? device.device_name || "Unnamed device" : "Unknown device"}
+          {device
+            ? device.device_name || t("web.admin.users.detail.common.unnamedDevice")
+            : t("web.admin.users.detail.common.unknownDevice")}
         </span>
       }
-      description={<span className="block pl-12">{meta.filter(Boolean).join(" · ")}</span>}
+      description={<span className="block ps-12">{meta.filter(Boolean).join(" · ")}</span>}
       actions={
         <>
           <span className="text-muted-foreground hidden text-xs tabular-nums sm:inline">
@@ -235,7 +253,7 @@ export function DeviceDownloadsCard({
           {device ? (
             <Button variant="outline" size="sm" asChild>
               <Link to={`/admin/devices/${userId}/${encodeURIComponent(deviceId)}`}>
-                Open device
+                {t("web.admin.users.detail.downloads.device.openDevice")}
                 <ArrowUpRight className="h-3 w-3" />
               </Link>
             </Button>
@@ -248,20 +266,26 @@ export function DeviceDownloadsCard({
           role="note"
           className="border-border/60 bg-muted/30 mx-4 mt-3 rounded-lg border px-3 py-2 text-[13px] leading-relaxed sm:mx-5"
         >
-          The Android app doesn&apos;t report finished downloads yet, so these show what the phone
-          requested, not what&apos;s confirmed on it. Series it monitors stay on the phone and
-          don&apos;t appear below.
+          {t("web.admin.users.detail.downloads.device.androidNote")}
         </p>
       )}
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-4 sm:pl-5">Title</TableHead>
-              <TableHead className="hidden sm:table-cell">Quality</TableHead>
-              <TableHead className="text-right">Size</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="hidden pr-4 sm:table-cell sm:pr-5">Added</TableHead>
+              <TableHead className="ps-4 sm:ps-5">
+                {t("web.admin.users.detail.downloads.device.column.title")}
+              </TableHead>
+              <TableHead className="hidden sm:table-cell">
+                {t("web.admin.users.detail.downloads.device.column.quality")}
+              </TableHead>
+              <TableHead className="text-end">
+                {t("web.admin.users.detail.downloads.device.column.size")}
+              </TableHead>
+              <TableHead>{t("web.admin.users.detail.downloads.device.column.status")}</TableHead>
+              <TableHead className="hidden pe-4 sm:table-cell sm:pe-5">
+                {t("web.admin.users.detail.downloads.device.column.added")}
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

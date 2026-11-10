@@ -2,10 +2,13 @@ package plugins
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +18,7 @@ import (
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 func packageErrorTestManifest(pluginID, version string) *pluginv1.PluginManifest {
@@ -64,6 +68,49 @@ func requireTransient(t *testing.T, err error, want bool) {
 	packageErr, ok := AsPackageError(err)
 	if !ok || packageErr.Transient != want {
 		t.Fatalf("error %v transient = %v, want %v", err, ok && packageErr.Transient, want)
+	}
+}
+
+type testZipEntry struct {
+	name string
+	data []byte
+	dir  bool
+}
+
+var testBinaryEntry = testZipEntry{name: "plugin", data: []byte("#!/bin/sh\nexit 0\n")}
+
+// writeTestPluginZip writes a valid silo.metadb manifest whose checksum
+// matches testBinaryEntry, followed by entries in order.
+func writeTestPluginZip(t *testing.T, path string, assets []*pluginv1.PackagedAsset, entries ...testZipEntry) {
+	t.Helper()
+	manifest := testPluginManifest(t, "silo.metadb", "0.0.36")
+	manifest.Checksum = sha256Hex(testBinaryEntry.data)
+	manifest.Assets = assets
+	manifestBytes, err := protojson.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buffer bytes.Buffer
+	archive := zip.NewWriter(&buffer)
+	for _, entry := range append([]testZipEntry{{name: "manifest.json", data: manifestBytes}}, entries...) {
+		header := &zip.FileHeader{Name: entry.name, Method: zip.Deflate}
+		header.SetMode(0o644)
+		if entry.dir {
+			header.SetMode(fs.ModeDir | 0o755)
+		}
+		writer, err := archive.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write(entry.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buffer.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -272,6 +319,34 @@ func TestServiceInstallLocalRefusesBeforeStoppingInstalledPlugin(t *testing.T) {
 		{name: "unsupported API", want: `needs Silo plugin API "v2"`, write: func(t *testing.T, path string) {
 			writePluginArchive(t, path, future)
 		}},
+		// Extraction writes each entry to its cleaned path, so a second entry
+		// for the same file, on a case- or normalization-insensitive
+		// filesystem too, would replace the one that was checked.
+		{name: "manifest alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, nil, testBinaryEntry, testZipEntry{name: "./manifest.json", data: []byte("not json")})
+		}},
+		{name: "binary case alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, nil, testBinaryEntry, testZipEntry{name: "Plugin", data: []byte("other bytes")})
+		}},
+		{name: "asset normalization alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: "web/caf\u00e9.js"}}, testBinaryEntry,
+				testZipEntry{name: "web/caf\u00e9.js", data: []byte("checked")}, testZipEntry{name: "web/cafe\u0301.js", data: []byte("other")})
+		}},
+		{name: "long combining sequence alias", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			checked := "web/a" + strings.Repeat("\u0301", 30) + "\u0327.js"
+			alias := "web/a\u0327" + strings.Repeat("\u0301", 30) + ".js"
+			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: checked}}, testBinaryEntry,
+				testZipEntry{name: checked, data: []byte("checked")}, testZipEntry{name: alias, data: []byte("other")})
+		}},
+		{name: "entry inside binary", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, nil, testBinaryEntry, testZipEntry{name: "plugin/x", data: []byte("x")})
+		}},
+		{name: "binary directory", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, nil, testZipEntry{name: "plugin", data: testBinaryEntry.data, dir: true})
+		}},
+		{name: "asset directory", want: "archive couldn't be read", write: func(t *testing.T, path string) {
+			writeTestPluginZip(t, path, []*pluginv1.PackagedAsset{{Path: "web"}}, testBinaryEntry, testZipEntry{name: "web", dir: true})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			archivePath := filepath.Join(t.TempDir(), "plugin.zip")
@@ -323,22 +398,103 @@ func TestCatalogInvalidDownloadAddressIsPackageError(t *testing.T) {
 	requirePackageError(t, err, "invalid download address")
 }
 
+// A plugin built on a newer SDK prints manifest fields this server doesn't
+// know. They are ignored, as for an archive's manifest, and the plugin
+// installs; output that isn't a manifest at all is still refused. The stored
+// manifest keeps them, so a later server that knows them reads the same
+// manifest the plugin reports.
+func TestLoadManifestFromBinaryIgnoresUnknownFields(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses shell scripts")
+	}
+	known, err := protojson.Marshal(packageErrorTestManifest("test.plugin", "1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(known, &fields); err != nil {
+		t.Fatal(err)
+	}
+	// The plugin reports its own checksum, as the SDK computes it at run time.
+	fields["checksum"] = "CHECKSUM"
+	fields["fieldFromANewerSdk"] = true
+	fields["capabilities"].([]any)[0].(map[string]any)["descriptorFromANewerSdk"] = map[string]any{"flag": true}
+	newer, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := func(output string) []byte {
+		return []byte("#!/bin/sh\nsum=$( (sha256sum \"$0\" 2>/dev/null || shasum -a 256 \"$0\") | cut -d' ' -f1)\n" +
+			"sed \"s/CHECKSUM/$sum/\" <<'MANIFEST'\n" + output + "\nMANIFEST\n")
+	}
+
+	store := newRecordingInstallationStore()
+	result, err := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()}).InstallBinaryUpload(context.Background(), script(string(newer)))
+	if err != nil {
+		t.Fatalf("InstallBinaryUpload() error = %v, want the unknown fields ignored", err)
+	}
+	if result.Manifest.GetPluginId() != "test.plugin" || len(result.Manifest.GetCapabilities()) != 1 {
+		t.Fatalf("manifest = %v, want the known fields kept", result.Manifest)
+	}
+	installed, err := os.ReadFile(result.ManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, stored := range map[string][]byte{"manifest.json": installed, "archive manifest": store.saveArchiveManifest} {
+		if !bytes.Contains(stored, []byte("descriptorFromANewerSdk")) {
+			t.Fatalf("%s = %s, want the plugin's own manifest with the newer fields", name, stored)
+		}
+	}
+
+	_, _, err = loadManifestFromBinary(context.Background(), script("not a manifest"))
+	requirePackageError(t, err, "manifest couldn't be read")
+}
+
 // Only a binary that runs and fails, or isn't an executable at all, is
 // blamed on the package; a canceled request is not.
 func TestLoadManifestFromBinaryClassifiesRunFailures(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses shell scripts")
 	}
-	_, err := loadManifestFromBinary(context.Background(), []byte("#!/bin/sh\nexit 3\n"))
+	_, _, err := loadManifestFromBinary(context.Background(), []byte("#!/bin/sh\nexit 3\n"))
 	requirePackageError(t, err, "couldn't run the plugin")
 
-	_, err = loadManifestFromBinary(context.Background(), []byte("not an executable"))
+	_, _, err = loadManifestFromBinary(context.Background(), []byte("not an executable"))
 	requirePackageError(t, err, "couldn't run the plugin")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = loadManifestFromBinary(ctx, []byte("#!/bin/sh\nexit 0\n"))
+	_, _, err = loadManifestFromBinary(ctx, []byte("#!/bin/sh\nexit 0\n"))
 	if _, ok := AsPackageError(err); ok || !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled manifest read = %v, want context.Canceled and no PackageError", err)
+	}
+}
+
+// Reading the manifest runs the package's binary before an admin enables it,
+// so it gets the plugin environment, not the server's, including when the
+// server has no variable the plugin environment keeps.
+func TestLoadManifestFromBinaryWithholdsServerEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses shell scripts")
+	}
+	for _, onlyHostVariable := range []bool{false, true} {
+		if onlyHostVariable {
+			for _, kv := range os.Environ() {
+				name, _, _ := strings.Cut(kv, "=")
+				t.Setenv(name, "")
+				_ = os.Unsetenv(name)
+			}
+		}
+		t.Setenv("SILO_TEST_HOST_ONLY", "secret")
+		seen := filepath.Join(t.TempDir(), "seen")
+		script := "#!/bin/sh\nprintf '%s' \"${SILO_TEST_HOST_ONLY-absent}\" > '" + seen + "'\n"
+		_, _, _ = loadManifestFromBinary(context.Background(), []byte(script))
+		got, err := os.ReadFile(seen)
+		if err != nil {
+			t.Fatalf("only host variable %v: manifest command did not run: %v", onlyHostVariable, err)
+		}
+		if string(got) != "absent" {
+			t.Fatalf("only host variable %v: manifest command saw SILO_TEST_HOST_ONLY=%q, want it absent", onlyHostVariable, got)
+		}
 	}
 }

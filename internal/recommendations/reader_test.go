@@ -3,6 +3,7 @@ package recommendations
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -36,6 +37,40 @@ func TestClusterRowTitleComesFromTheCachedRow(t *testing.T) {
 	}
 	if row := clusterRow(horror, []ScoredItem{{MediaItemID: "m1", Reason: clusterTitle("")}}); row.Label != unlabeledClusterTitle || row.Subject != "" {
 		t.Fatalf("cached unlabeled title = %q (subject %q), want %q", row.Label, row.Subject, unlabeledClusterTitle)
+	}
+}
+
+// A row title carries its catalog key only while it is worded as titles.go
+// words it, for the row type that uses that wording.
+func TestRowTitleKeys(t *testing.T) {
+	const becauseYouEnjoy = "home.section.becauseYouEnjoy"
+	for _, tc := range []struct {
+		rowType, label, key string
+		args                map[string]string
+	}{
+		{clusterRowType, "For You", "home.section.forYou", nil},
+		{clusterRowType, "Because you enjoy Crime", becauseYouEnjoy, map[string]string{"genres": "Crime"}},
+		// renameClusterRow adds a genre to tell two rows apart.
+		{clusterRowType, "Because you enjoy Crime, Drama", becauseYouEnjoy, map[string]string{"genres": "Crime, Drama"}},
+		{clusterRowType, "Picked from your history", "home.section.pickedFromYourHistory", nil},
+		{RecTypeSimilarUsersLiked, "Profiles Like You Enjoyed", "home.section.profilesLikeYouEnjoyed", nil},
+		{RecTypePopular, "Popular on This Server", "home.section.popularOnServer", nil},
+		{RecTypeRecentlyAdded, "Recently Added", "home.section.recentlyAdded", nil},
+		{RecTypeTopRated, "Highly Rated in Your Library", "home.section.highlyRatedInLibrary", nil},
+		{genreSamplerRowType, "Top Drama", "home.section.topGenre", map[string]string{"genre": "Drama"}},
+		// Other wording, such as a title cached by an older build, and the
+		// right words on another row type carry no key.
+		{clusterRowType, "Because you enjoy ", "", nil},
+		{clusterRowType, "Because You Enjoy Crime", "", nil},
+		{genreSamplerRowType, "Top ", "", nil},
+		{genreSamplerRowType, "Popular in Crime", "", nil},
+		{RecTypePopular, "For You", "", nil},
+		{RecTypeBecauseWatched, "Because You Watched", "", nil},
+	} {
+		key, args := ForYouRow{Type: tc.rowType, Label: tc.label}.TitleKey()
+		if key != tc.key || !maps.Equal(args, tc.args) {
+			t.Errorf("%s %q: key %q %v, want %q %v", tc.rowType, tc.label, key, args, tc.key, tc.args)
+		}
 	}
 }
 
@@ -379,7 +414,7 @@ func TestWatchTonightFallsBackToTheLiveRecentlyAddedRow(t *testing.T) {
 	repo := &fakeReaderRepo{
 		defaults: map[string][]ScoredItem{RecTypeRecentlyAdded: {{MediaItemID: "watched", Score: 2}, {MediaItemID: "recent", Score: 1}}},
 	}
-	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched"))}).WithPersonalRows(false)
+	r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, watchedStore("watched")).WithUserStoreOutsidePostgres(true)}).WithPersonalRows(false)
 	tonight, err := r.GetWatchTonight(t.Context(), 7, "p1", 8, catalog.AccessFilter{})
 	if err != nil || !tonight.IsCold || !slices.Equal(scoredIDs(tonight.Items), []string{"recent"}) {
 		t.Fatalf("watch tonight = %+v, %v; want the live Recently Added row", tonight, err)
@@ -451,7 +486,7 @@ func TestFilterRowsDropsWatchedAndFavoritedTitles(t *testing.T) {
 	signals := NewSignalReader(&fakeSignalRepo{canonical: map[string]string{
 		"episode-watched":  "series-watched",
 		"episode-favorite": "series-favorite",
-	}}, fakeSignalProvider{store: store})
+	}}, fakeSignalProvider{store: store}).WithUserStoreOutsidePostgres(true)
 	r := &Reader{repo: &fakeReaderRepo{}, signals: signals}
 
 	items := func(ids ...string) []ScoredItem {

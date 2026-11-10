@@ -8,16 +8,36 @@ import { Label } from "@/components/ui/label";
 import { useMetadataAIStatus } from "@/hooks/queries/metadataAI";
 import {
   isActiveTranslationJob,
+  type LibraryTranslationJob,
   useCancelLibraryTranslation,
   useLibraryTranslationJobs,
   useTranslateLibraryMetadata,
   watchedLibraryTranslationJobs,
 } from "@/hooks/queries/admin/libraryTranslation";
 import { refreshLocalizedMediaQueries } from "@/hooks/queries/mediaSurfaceRefresh";
-import { LANGUAGES } from "@/player/utils/languageNames";
+import { useT, type Translate } from "@/i18n";
+import { languageOptions } from "@/player/utils/languageNames";
 
 function languageLabel(code: string): string {
-  return LANGUAGES.find((lang) => lang.code === code)?.label ?? code;
+  return languageOptions().find((lang) => lang.code === code)?.label ?? code;
+}
+
+/** A running job's status line: its language when several run, its message, its progress. */
+function jobStatusText(t: Translate, job: LibraryTranslationJob, withLanguage: boolean): string {
+  const message = job.progress_message || t("web.admin.common.libraryEditor.translate.queued");
+  const status =
+    job.fields_total > 0
+      ? t("web.admin.common.libraryEditor.translate.statusWithPercent", {
+          status: message,
+          percent: Math.round(job.progress * 100),
+        })
+      : message;
+  return withLanguage
+    ? t("web.admin.common.libraryEditor.translate.statusWithLanguage", {
+        language: languageLabel(job.target_language),
+        status,
+      })
+    : status;
 }
 
 /**
@@ -28,6 +48,7 @@ function languageLabel(code: string): string {
  * is enabled.
  */
 export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
+  const t = useT();
   const queryClient = useQueryClient();
   const { data: status } = useMetadataAIStatus();
   const enabled = Boolean(status?.enabled);
@@ -59,22 +80,24 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
       if (!watched.delete(job.id)) continue;
       finished = true;
       if (job.status === "completed") {
-        toast.success(job.progress_message || "Library translation finished.");
+        toast.success(
+          job.progress_message || t("web.admin.common.libraryEditor.translate.finished"),
+        );
       } else if (job.status === "failed") {
-        toast.error(job.error_message || "Library translation failed.");
+        toast.error(job.error_message || t("web.admin.common.libraryEditor.translate.failed"));
       }
     }
     if (finished) {
       void refreshLocalizedMediaQueries(queryClient);
     }
-  }, [jobs, watched, queryClient]);
+  }, [jobs, watched, queryClient, t]);
 
   if (!enabled) return null;
 
   const busy = translate.isPending || activeJobs.length > 0;
   const start = () => {
     if (!targetLang) {
-      toast.error("Pick a target language first.");
+      toast.error(t("web.admin.common.libraryEditor.translate.pickLanguage"));
       return;
     }
     translate.mutate(targetLang);
@@ -84,17 +107,17 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
     <div className="border-border bg-muted/30 space-y-3 rounded-md border px-3 py-3">
       <div className="flex items-center gap-2">
         <Languages className="text-muted-foreground h-4 w-4" aria-hidden="true" />
-        <span className="text-sm font-medium">Translate library descriptions</span>
+        <span className="text-sm font-medium">
+          {t("web.admin.common.libraryEditor.translate.title")}
+        </span>
       </div>
       <p className="text-muted-foreground text-xs">
-        Translates every overview and tagline in this library, with season and episode overviews,
-        that is missing in the chosen language. Descriptions that already exist in that language are
-        kept. Viewers otherwise get translations as they browse.
+        {t("web.admin.common.libraryEditor.translate.description")}
       </p>
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <Label htmlFor={`library-translate-target-${libraryId}`} className="text-xs">
-            Language
+            {t("web.admin.common.libraryEditor.translate.language")}
           </Label>
           <select
             id={`library-translate-target-${libraryId}`}
@@ -103,8 +126,8 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
             onChange={(event) => setTargetLang(event.target.value)}
             disabled={busy}
           >
-            <option value="">Select…</option>
-            {LANGUAGES.map((lang) => (
+            <option value="">{t("web.admin.common.libraryEditor.translate.selectLanguage")}</option>
+            {languageOptions().map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {lang.label}
               </option>
@@ -119,20 +142,20 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
             onClick={() => cancel.mutate(activeJob.id)}
             disabled={cancel.isPending}
           >
-            Stop
+            {t("web.admin.common.libraryEditor.translate.stop")}
           </Button>
         ) : (
           <Button type="button" size="sm" onClick={start} disabled={busy}>
-            {translate.isPending ? "Starting…" : "Translate"}
+            {translate.isPending
+              ? t("web.admin.common.libraryEditor.translate.starting")
+              : t("web.admin.common.libraryEditor.translate.translate")}
           </Button>
         )}
       </div>
       {activeJobs.map((job) => (
         <div key={job.id} className="flex items-center gap-2">
           <p className="text-muted-foreground text-xs" role="status">
-            {activeJobs.length > 1 && `${languageLabel(job.target_language)}: `}
-            {job.progress_message || "Queued"}
-            {job.fields_total > 0 && ` (${Math.round(job.progress * 100)}%)`}
+            {jobStatusText(t, job, activeJobs.length > 1)}
           </p>
           {!activeJob && (
             <Button
@@ -142,7 +165,7 @@ export function LibraryTranslatePanel({ libraryId }: { libraryId: number }) {
               onClick={() => cancel.mutate(job.id)}
               disabled={cancel.isPending}
             >
-              Stop
+              {t("web.admin.common.libraryEditor.translate.stop")}
             </Button>
           )}
         </div>

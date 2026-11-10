@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
 )
 
@@ -52,9 +53,9 @@ func (s *MetadataService) canonicalizeLocalContentID(
 	ids contentid.ProviderIDs,
 	itemType string,
 	markIdentity bool,
-) (string, error) {
+) (string, bool, error) {
 	if s == nil || !contentid.IsLocal(from) {
-		return from, nil
+		return from, false, nil
 	}
 	return s.reanchorContentID(ctx, from, ids, itemType, markIdentity)
 }
@@ -72,26 +73,28 @@ func (s *MetadataService) canonicalizeLocalContentID(
 // transaction: that row holds the chosen provider IDs, so the mark commits
 // with them even if the identity write that follows fails. A rename moves only
 // the content id, leaving the old provider IDs until that identity write, so
-// the mark waits for it.
+// the mark waits for it. It reports whether it renamed `from`: a renamed
+// series keeps its seasons and episodes, while a merged one leaves them behind
+// and takes on the target's.
 func (s *MetadataService) reanchorContentID(
 	ctx context.Context,
 	from string,
 	ids contentid.ProviderIDs,
 	itemType string,
 	markIdentity bool,
-) (string, error) {
+) (string, bool, error) {
 	if s == nil {
-		return from, nil
+		return from, false, nil
 	}
 
 	// Derive with no path fallback: we only want a provider-anchored id here, not
 	// another local value.
 	target, err := deriveLogicalContentID(itemType, ids, "")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !contentid.IsProviderAnchored(target) || target == from {
-		return from, nil
+		return from, false, nil
 	}
 
 	// Look up the target, distinguishing "free" (not-found) from a transient
@@ -107,20 +110,20 @@ func (s *MetadataService) reanchorContentID(
 		// onto the canonical target rather than orphaning a duplicate. Safe under
 		// the provider-dedup lock the caller holds.
 		if err := s.rebindItemOnto(ctx, from, target, true, markIdentity); err != nil {
-			return "", fmt.Errorf("merging local item %s into %s: %w", from, target, err)
+			return "", false, fmt.Errorf("merging local item %s into %s: %w", from, target, err)
 		}
-		return target, nil
+		return target, false, nil
 	case err != nil && !errors.Is(err, catalog.ErrItemNotFound):
-		return "", fmt.Errorf("looking up canonical target %s: %w", target, err)
+		return "", false, fmt.Errorf("looking up canonical target %s: %w", target, err)
 	}
 
 	// Target free: pure value-move. A provider-anchored series takes the
 	// season and episode ids composed from its old anchor along with it, so
 	// the show that anchor names can claim them when it is scanned in.
 	if err := s.renameContentID(ctx, from, target, normalizeItemTypeForContentID(itemType) == matchContentTypeSeries); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return target, nil
+	return target, true, nil
 }
 
 // renameContentID moves a content_id value (a media item, season or episode)
@@ -164,6 +167,13 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 		sources = append(sources, childSources...)
 		targets = append(targets, childTargets...)
 	}
+	// The rename drops a source cutoff row that collides with a leftover one
+	// on the new id, and the source's history moves either way, so merge the
+	// cutoffs first or an unmarked play would count as watched again.
+	mergedCutoffs, err := reattribute.MergeHistoryCutoffPairs(ctx, tx, sources, targets)
+	if err != nil {
+		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)
+	}
 	if _, err := tx.Exec(ctx, `SELECT silo_rename_content_ids($1, $2)`, sources, targets); err != nil {
 		return fmt.Errorf("rename content_id %s -> %s: %w", from, to, err)
 	}
@@ -172,6 +182,10 @@ func (s *MetadataService) renameContentID(ctx context.Context, from, to string, 
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit content_id rename transaction: %w", err)
+	}
+	// A raised cutoff can stop the new id's earlier plays counting as watched.
+	if mergedCutoffs > 0 {
+		MarkRecommendationsStale(ctx, s.recsStaler, targets...)
 	}
 	return nil
 }

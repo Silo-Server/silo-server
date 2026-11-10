@@ -118,7 +118,7 @@ type pagedCertTMDBClient struct {
 	fetchedPage []int
 }
 
-func (f *pagedCertTMDBClient) DiscoverSection(_ context.Context, _ string, page int) (*tmdb.MediaPage, error) {
+func (f *pagedCertTMDBClient) ChartPage(_ context.Context, _ tmdb.ChartParams, page int) (*tmdb.MediaPage, error) {
 	f.mu.Lock()
 	f.fetchedPage = append(f.fetchedPage, page)
 	f.mu.Unlock()

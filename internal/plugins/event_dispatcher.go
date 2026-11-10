@@ -306,10 +306,10 @@ func hubEvent(env events.Envelope) producedEvent {
 // consumeHub reads until Stop unsubscribes, so envelopes published while the
 // server drains after its context ended still reach the intake for Stop to
 // store. Until then it waits for room in the intake, leaving envelopes in
-// the hub's buffer.
+// the hub's buffer. V2Only envelopes are for v2 socket clients, not plugins.
 func (d *EventDispatcher) consumeHub(ctx context.Context, ch <-chan events.Envelope) {
 	for env := range ch {
-		if env.SourceID != d.hub.SourceID() || !d.mayHaveSubscribers(env.Event) {
+		if env.V2Only || env.SourceID != d.hub.SourceID() || !d.mayHaveSubscribers(env.Event) {
 			continue
 		}
 		produced := hubEvent(env)

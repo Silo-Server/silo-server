@@ -186,6 +186,7 @@ describe("ProfilesSettings", () => {
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile()],
       isLoading: false,
+      maxProfiles: null,
     });
     mocks.useAvailableUserLibraries.mockReturnValue({
       data: libraries,
@@ -249,6 +250,7 @@ describe("ProfilesSettings", () => {
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile(), makeProfile({ id: "profile-2", name: "Guest" })],
       isLoading: false,
+      maxProfiles: null,
     });
 
     await render(<ProfilesSettings />);
@@ -270,6 +272,7 @@ describe("ProfilesSettings", () => {
     mocks.useProfiles.mockReturnValue({
       data: [makeProfile(), lockedProfile],
       isLoading: false,
+      maxProfiles: null,
     });
 
     await render(<ProfilesSettings />);

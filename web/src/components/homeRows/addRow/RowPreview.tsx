@@ -1,22 +1,22 @@
+import type { LucideIcon } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useT, type Translate } from "@/i18n";
 import type { PreviewState } from "@/hooks/queries/homeRows/useRowPreview";
 import { PREVIEW_ITEM_LIMIT } from "@/hooks/queries/homeRows/useRowPreview";
-import { rowKindGroup } from "@/lib/homeRows/catalog";
+import { rowKindGroup, type RowGroup } from "@/lib/homeRows/catalog";
 import { cn } from "@/lib/utils";
 import { PosterTile } from "@/components/calm/PosterTile";
 import { GROUP_ICONS, GROUP_TINTS } from "../rowIcons";
 
 /** Why the strip has no titles to show, or null when it has (or is loading) some. */
-function emptyMessage(state: PreviewState, offText: string): string | null {
+function emptyMessage(t: Translate, state: PreviewState, offText: string): string | null {
   switch (state.status) {
     case "off":
       return offText;
     case "error":
-      return "The preview didn't load. The row still saves.";
+      return t("web.home.addRow.preview.failed");
     case "ready":
-      return state.items.length === 0
-        ? "No titles match right now. The row stays empty until some do."
-        : null;
+      return state.items.length === 0 ? t("web.home.addRow.preview.empty") : null;
     default:
       return null;
   }
@@ -34,6 +34,8 @@ export function RowPreview({
   offText,
   countUpTo,
   rule,
+  icon,
+  group: groupOverride,
 }: {
   title: string;
   sectionType: string;
@@ -48,20 +50,28 @@ export function RowPreview({
   countUpTo?: number;
   /** What a ready-made row looks for, said when nothing matches it. */
   rule?: string;
+  /** The icon and tint for rows that aren't Home row kinds. */
+  icon?: LucideIcon;
+  group?: RowGroup;
 }) {
-  const group = rowKindGroup(sectionType);
-  const Icon = GROUP_ICONS[group];
-  const message = emptyMessage(state, offText);
+  const t = useT();
+  const group = groupOverride ?? rowKindGroup(sectionType);
+  const Icon = icon ?? GROUP_ICONS[group];
+  const message = emptyMessage(t, state, offText);
   const lookFor = state.status === "ready" && state.items.length === 0 ? rule : undefined;
   return (
     <section
-      aria-label={`Preview of ${title || "this row"}`}
+      aria-label={
+        title
+          ? t("web.home.addRow.preview.label", { title })
+          : t("web.home.addRow.preview.labelUntitled")
+      }
       aria-busy={state.status === "loading" || (state.status === "ready" && state.refreshing)}
-      className="ring-border/85 relative overflow-hidden rounded-2xl bg-[radial-gradient(120%_140%_at_0%_0%,rgb(255_255_255/0.05),transparent_50%)] py-4 pl-4 ring-1 ring-inset sm:pl-[18px]"
+      className="ring-border/85 relative overflow-hidden rounded-2xl bg-[radial-gradient(120%_140%_at_0%_0%,rgb(255_255_255/0.05),transparent_50%)] py-4 ps-4 ring-1 ring-inset sm:ps-[18px]"
     >
-      <div className="mb-3 flex items-baseline justify-between gap-3 pr-4 sm:pr-[18px]">
+      <div className="mb-3 flex items-baseline justify-between gap-3 pe-4 sm:pe-[18px]">
         <span className="truncate text-base font-semibold tracking-[-0.015em]">
-          {title || "Untitled row"}
+          {title || t("web.home.addRow.preview.untitled")}
         </span>
         {state.status === "off" ? null : countUpTo !== undefined && state.status === "ready" ? (
           <span
@@ -70,13 +80,19 @@ export function RowPreview({
               state.refreshing && "opacity-50",
             )}
           >
-            {state.refreshing ? <span className="sr-only">Updating: </span> : null}
-            <b className="text-foreground font-semibold">{state.totalCount}</b>
-            {state.totalCount === 1 ? " title matches" : " titles match"}
-            <span aria-hidden className="mx-1.5">
-              ·
-            </span>
-            showing {Math.min(state.totalCount, countUpTo)}
+            {t("web.home.addRow.preview.count", {
+              refreshing: state.refreshing ? "yes" : "no",
+              count: state.totalCount,
+              total: state.totalCount,
+              shown: Math.min(state.totalCount, countUpTo),
+              hidden: (chunks) => <span className="sr-only">{chunks}</span>,
+              b: (chunks) => <b className="text-foreground font-semibold">{chunks}</b>,
+              dot: (chunks) => (
+                <span aria-hidden className="mx-1.5">
+                  {chunks}
+                </span>
+              ),
+            })}
           </span>
         ) : (
           <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1.5 text-xs">
@@ -89,7 +105,7 @@ export function RowPreview({
         )}
       </div>
       {message ? (
-        <div className="flex items-center gap-3 pr-4">
+        <div className="flex items-center gap-3 pe-4">
           <span
             aria-hidden
             className={cn(
@@ -101,7 +117,11 @@ export function RowPreview({
           </span>
           <div className="text-muted-foreground text-sm" role="status">
             <p>{message}</p>
-            {lookFor ? <p className="mt-0.5 text-[13px]">Looks for: {lookFor}</p> : null}
+            {lookFor ? (
+              <p className="mt-0.5 text-[13px]">
+                {t("web.home.addRow.preview.looksFor", { rule: lookFor })}
+              </p>
+            ) : null}
           </div>
         </div>
       ) : (

@@ -105,6 +105,7 @@ export type TransformationExecutorV3 = "client" | "server";
 
 /** Route-event names the server accepts as playback diagnostics. */
 export type RouteEventNameV3 =
+  | "plan_summary"
   | "plan_selected"
   | "plan_invalidated"
   | "plan_failed"
@@ -136,6 +137,14 @@ export const FEATURE_OUTPUT_CHANGE_V3 = "output_change_v1";
  * this must actually implement the command.
  */
 export const FEATURE_PLAN_INVALIDATED_V3 = "plan_invalidated_v1";
+
+/**
+ * `progressive` delivery feature: the client reopens a progressive remux at its
+ * current position when the stream refuses a mid-stream range. The server then
+ * answers such a range 409 instead of streaming from the origin again, which
+ * the media element would read again from byte zero.
+ */
+export const FEATURE_PROGRESSIVE_RANGE_REFUSAL_V3 = "progressive_range_refusal_v1";
 
 /**
  * `original_http` validated claim: the client maps `selected_tracks.audio.index`
@@ -343,6 +352,10 @@ export interface StartRequestV3 {
   subtitle_track_id?: string;
   subtitle_track_index?: number;
   bandwidth_estimate_kbps?: number;
+  bandwidth_estimate_source?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; only with an `observed_rebuffer` estimate. */
+  observed_throughput_kbps?: number;
+  learned_limit?: "ignore" | "clear";
   bandwidth_cap_kbps?: number;
   client_capabilities: ClientCodecCapabilitiesV3;
   client_playback_context: ClientPlaybackContextV3;
@@ -379,6 +392,10 @@ export interface ReplanRequestV3 {
   quality_preference: string;
   position_seconds: number;
   bandwidth_estimate_kbps?: number;
+  bandwidth_estimate_source?: "probe" | "observed_rebuffer";
+  /** The current plan's measured throughput; only with an `observed_rebuffer` estimate. */
+  observed_throughput_kbps?: number;
+  learned_limit?: "ignore" | "clear";
   bandwidth_cap_kbps?: number;
   selected_tracks: SelectedTracksV3;
   failure?: FailureV3;
@@ -535,6 +552,8 @@ export interface SubtitleInventoryItemV3 {
    * downloaded tracks whose timing the server can correct.
    */
   sync_key?: string;
+  /** Stored row identity, independent of timing support and delivery. */
+  stored_subtitle_id?: number;
 }
 
 export interface SubtitleDecisionV3 {
@@ -577,6 +596,7 @@ export interface AvailableQualityV3 {
 }
 
 export interface PlanV3 {
+  bandwidth_limit?: { kbps: number; source: "observed_rebuffer"; expires_at: string };
   protocol_version: number;
   plan_id: string;
   plan_attempt_key: string;

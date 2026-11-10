@@ -90,48 +90,55 @@ import type {
 } from "@/api/types";
 import { cn } from "@/lib/utils";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
+import { useT, type MessageKey } from "@/i18n";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 const STATUS_CONFIG = {
-  queued: { icon: Clock, color: "text-info", bg: "bg-info/10 border-info/20", label: "Queued" },
+  queued: {
+    icon: Clock,
+    color: "text-info",
+    bg: "bg-info/10 border-info/20",
+    label: "web.admin.historyImport.status.queued",
+  },
   running: {
     icon: Loader2,
     color: "text-warning",
     bg: "bg-warning/10 border-warning/20",
-    label: "Running",
+    label: "web.admin.historyImport.status.running",
     spin: true,
   },
   canceling: {
     icon: Loader2,
     color: "text-warning",
     bg: "bg-warning/10 border-warning/20",
-    label: "Canceling",
+    label: "web.admin.historyImport.status.canceling",
     spin: true,
   },
   completed: {
     icon: CheckCircle2,
     color: "text-success",
     bg: "bg-success/10 border-success/20",
-    label: "Completed",
+    label: "web.admin.historyImport.status.completed",
   },
   failed: {
     icon: XCircle,
     color: "text-destructive",
     bg: "bg-destructive/10 border-destructive/20",
-    label: "Failed",
+    label: "web.admin.historyImport.status.failed",
   },
   cancelled: {
     icon: CircleSlash2,
     color: "text-muted-foreground",
     bg: "bg-muted border-border",
-    label: "Cancelled",
+    label: "web.admin.historyImport.status.cancelled",
   },
 } as const;
 
 function StatusBadge({ status }: { status: AdminImportRun["status"] }) {
+  const t = useT();
   const c = STATUS_CONFIG[status];
   const Icon = c.icon;
   return (
@@ -143,7 +150,7 @@ function StatusBadge({ status }: { status: AdminImportRun["status"] }) {
       )}
     >
       <Icon className={cn("h-3 w-3", "spin" in c && c.spin && "animate-spin")} />
-      {c.label}
+      {t(c.label)}
     </span>
   );
 }
@@ -159,11 +166,30 @@ function formatDate(dateStr: string | undefined) {
 
 type SourceMode = { kind: "create" } | { kind: "edit"; source: HistoryImportSource };
 
-const SOURCE_HINTS = {
-  jellyfin: { name: "My Jellyfin Server", url: "https://jellyfin.example.com" },
-  emby: { name: "My Emby Server", url: "https://emby.example.com" },
-  plex: { name: "My Plex Server", url: "https://plex.example.com:32400" },
-} as const;
+const SOURCE_HINTS: Record<"emby" | "jellyfin" | "plex", { name: MessageKey; url: string }> = {
+  jellyfin: {
+    name: "web.admin.historyImport.sourceDialog.namePlaceholderJellyfin",
+    url: "https://jellyfin.example.com",
+  },
+  emby: {
+    name: "web.admin.historyImport.sourceDialog.namePlaceholderEmby",
+    url: "https://emby.example.com",
+  },
+  plex: {
+    name: "web.admin.historyImport.sourceDialog.namePlaceholderPlex",
+    url: "https://plex.example.com:32400",
+  },
+};
+
+// Product names in the server type picker; not translated.
+const SOURCE_TYPES = [
+  { value: "jellyfin", name: "Jellyfin" },
+  { value: "emby", name: "Emby" },
+  { value: "plex", name: "Plex" },
+] as const;
+
+// An example address in the Plex sign-in fields; not translated.
+const EXAMPLE_EMAIL = "you@example.com";
 
 function SourceDialog({
   mode,
@@ -174,6 +200,7 @@ function SourceDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const isEdit = mode.kind === "edit";
   const [existing, setExisting] = useState(isEdit ? mode.source : null);
   const [conflict, setConflict] = useState(false);
@@ -259,49 +286,55 @@ function SourceDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit server" : "Add source server"}</DialogTitle>
+          <DialogTitle>
+            {isEdit
+              ? t("web.admin.historyImport.sourceDialog.titleEdit")
+              : t("web.admin.historyImport.sourceDialog.titleAdd")}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="src-name">Name</Label>
+              <Label htmlFor="src-name">{t("web.admin.historyImport.sourceDialog.name")}</Label>
               <Input
                 id="src-name"
-                placeholder={hints.name}
+                placeholder={t(hints.name)}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
             {!isEdit ? (
               <div className="space-y-1.5">
-                <Label>Type</Label>
+                <Label>{t("web.admin.historyImport.sourceDialog.type")}</Label>
                 <Select
                   value={sourceType}
                   onValueChange={(v) => {
-                    const t = v as "emby" | "jellyfin" | "plex";
-                    setSourceType(t);
-                    setTokenMode(t === "plex" ? "login" : "token");
+                    const next = v as "emby" | "jellyfin" | "plex";
+                    setSourceType(next);
+                    setTokenMode(next === "plex" ? "login" : "token");
                   }}
                 >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="jellyfin">Jellyfin</SelectItem>
-                    <SelectItem value="emby">Emby</SelectItem>
-                    <SelectItem value="plex">Plex</SelectItem>
+                    {SOURCE_TYPES.map(({ value, name }) => (
+                      <SelectItem key={value} value={value}>
+                        {name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
             ) : (
               <div className="space-y-1.5">
-                <Label>Type</Label>
+                <Label>{t("web.admin.historyImport.sourceDialog.type")}</Label>
                 <Input value={existing?.source_type ?? ""} disabled className="capitalize" />
               </div>
             )}
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="src-url">Server URL</Label>
+            <Label htmlFor="src-url">{t("web.admin.historyImport.sourceDialog.serverUrl")}</Label>
             <Input
               id="src-url"
               placeholder={hints.url}
@@ -313,28 +346,28 @@ function SourceDialog({
 
           {existing?.needs_reconfiguration ? (
             <p role="alert" className="text-warning text-sm">
-              This saved address contains unsupported credential or query settings. Review the
-              address and replace or clear its credential before using the source.
+              {t("web.admin.historyImport.sourceDialog.needsReconfiguration")}
             </p>
           ) : null}
           {isEdit ? (
             <div className="space-y-2">
-              <Label htmlFor="src-replacement-token">Replacement admin credential</Label>
+              <Label htmlFor="src-replacement-token">
+                {t("web.admin.historyImport.sourceDialog.replacementCredential")}
+              </Label>
               <Input
                 id="src-replacement-token"
                 type="password"
                 value={adminToken}
                 disabled={clearCredential}
                 onChange={(e) => setAdminToken(e.target.value)}
-                placeholder="Leave blank to keep the saved credential"
+                placeholder={t("web.admin.historyImport.sourceDialog.replacementPlaceholder")}
               />
               <label className="flex items-center gap-2 text-sm">
                 <Switch checked={clearCredential} onCheckedChange={setClearCredential} />
-                Clear the saved credential
+                {t("web.admin.historyImport.sourceDialog.clearCredential")}
               </label>
               <p className="text-muted-foreground text-xs">
-                Changing the server address requires a replacement credential or clearing the saved
-                one.
+                {t("web.admin.historyImport.sourceDialog.addressChangeHint")}
               </p>
             </div>
           ) : null}
@@ -354,7 +387,7 @@ function SourceDialog({
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    Sign in with Plex
+                    {t("web.admin.historyImport.credential.signInWithPlex")}
                   </button>
                   <button
                     type="button"
@@ -366,7 +399,7 @@ function SourceDialog({
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    Paste token
+                    {t("web.admin.historyImport.credential.pasteToken")}
                   </button>
                 </div>
               )}
@@ -374,16 +407,20 @@ function SourceDialog({
               {isPlex && tokenMode === "login" ? (
                 <div className="space-y-3">
                   <div className="space-y-1.5">
-                    <Label htmlFor="plex-user-create">Plex email or username</Label>
+                    <Label htmlFor="plex-user-create">
+                      {t("web.admin.historyImport.sourceDialog.plexUser")}
+                    </Label>
                     <Input
                       id="plex-user-create"
-                      placeholder="you@example.com"
+                      placeholder={EXAMPLE_EMAIL}
                       value={plexUser}
                       onChange={(e) => setPlexUser(e.target.value)}
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="plex-pass-create">Plex password</Label>
+                    <Label htmlFor="plex-pass-create">
+                      {t("web.admin.historyImport.sourceDialog.plexPassword")}
+                    </Label>
                     <Input
                       id="plex-pass-create"
                       type="password"
@@ -391,30 +428,41 @@ function SourceDialog({
                       onChange={(e) => setPlexPass(e.target.value)}
                     />
                     <p className="text-muted-foreground text-xs">
-                      If your Plex account uses two-step verification, type the 6-digit code
-                      straight after your password.
+                      {t("web.admin.historyImport.credential.twoStepHint")}
                     </p>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-1.5">
                   <Label htmlFor="src-token">
-                    {isPlex ? "Plex auth token" : "Admin API key"}{" "}
-                    <span className="text-muted-foreground font-normal">(optional)</span>
+                    {t(
+                      isPlex
+                        ? "web.admin.historyImport.sourceDialog.plexTokenLabel"
+                        : "web.admin.historyImport.sourceDialog.apiKeyLabel",
+                      {
+                        muted: (chunks) => (
+                          <span className="text-muted-foreground font-normal">{chunks}</span>
+                        ),
+                      },
+                    )}
                   </Label>
                   <div className="relative">
                     <Input
                       id="src-token"
                       type={showToken ? "text" : "password"}
-                      placeholder={isPlex ? "Paste Plex token here…" : "Paste API key here…"}
+                      placeholder={
+                        isPlex
+                          ? t("web.admin.historyImport.sourceDialog.plexTokenPlaceholder")
+                          : t("web.admin.historyImport.sourceDialog.apiKeyPlaceholder")
+                      }
                       value={adminToken}
                       onChange={(e) => setAdminToken(e.target.value)}
-                      className="pr-10"
+                      className="pe-10"
                     />
                     <button
                       type="button"
                       onClick={() => setShowToken((v) => !v)}
-                      className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
+                      className="text-muted-foreground hover:text-foreground absolute end-3 top-1/2 -translate-y-1/2"
                     >
                       {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -426,12 +474,12 @@ function SourceDialog({
 
           <div className="flex items-center gap-3">
             <Switch id="src-enabled" checked={enabled} onCheckedChange={setEnabled} />
-            <Label htmlFor="src-enabled">Enabled</Label>
+            <Label htmlFor="src-enabled">{t("web.admin.historyImport.sourceDialog.enabled")}</Label>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={handleSave}
@@ -443,7 +491,11 @@ function SourceDialog({
               (isEdit && !existing?.etag)
             }
           >
-            {isPending ? "Saving…" : isEdit ? "Save" : "Add server"}
+            {isPending
+              ? t("web.admin.historyImport.credential.saving")
+              : isEdit
+                ? t("common.save")
+                : t("web.admin.historyImport.sourceDialog.addServer")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -460,6 +512,7 @@ function TokenDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const [source, setSource] = useState(initialSource);
   const [conflict, setConflict] = useState(false);
   const reload = async () => {
@@ -510,7 +563,9 @@ function TokenDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Admin API key — {source.name}</DialogTitle>
+          <DialogTitle>
+            {t("web.admin.historyImport.tokenDialog.title", { name: source.name })}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           {/* Mode toggle for Plex sources */}
@@ -526,7 +581,7 @@ function TokenDialog({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                Sign in with Plex
+                {t("web.admin.historyImport.credential.signInWithPlex")}
               </button>
               <button
                 type="button"
@@ -538,7 +593,7 @@ function TokenDialog({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                Paste token
+                {t("web.admin.historyImport.credential.pasteToken")}
               </button>
             </div>
           )}
@@ -546,19 +601,21 @@ function TokenDialog({
           {mode === "login" && isPlex ? (
             <div className="space-y-3">
               <p className="text-muted-foreground text-sm">
-                Sign in with your Plex account to generate an admin token automatically.
+                {t("web.admin.historyImport.tokenDialog.plexSignInIntro")}
               </p>
               <div className="space-y-1.5">
-                <Label htmlFor="plex-user">Email or username</Label>
+                <Label htmlFor="plex-user">{t("web.admin.historyImport.tokenDialog.email")}</Label>
                 <Input
                   id="plex-user"
-                  placeholder="you@example.com"
+                  placeholder={EXAMPLE_EMAIL}
                   value={plexUser}
                   onChange={(e) => setPlexUser(e.target.value)}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="plex-pass">Password</Label>
+                <Label htmlFor="plex-pass">
+                  {t("web.admin.historyImport.tokenDialog.password")}
+                </Label>
                 <Input
                   id="plex-pass"
                   type="password"
@@ -566,8 +623,7 @@ function TokenDialog({
                   onChange={(e) => setPlexPass(e.target.value)}
                 />
                 <p className="text-muted-foreground text-xs">
-                  If your Plex account uses two-step verification, type the 6-digit code straight
-                  after your password.
+                  {t("web.admin.historyImport.credential.twoStepHint")}
                 </p>
               </div>
             </div>
@@ -575,24 +631,26 @@ function TokenDialog({
             <div className="space-y-3">
               <p className="text-muted-foreground text-sm">
                 {isPlex
-                  ? "Paste your Plex auth token directly."
-                  : "This key is used to discover users on the server and import their watch history into Silo."}
+                  ? t("web.admin.historyImport.tokenDialog.plexTokenIntro")
+                  : t("web.admin.historyImport.tokenDialog.apiKeyIntro")}
               </p>
               <div className="space-y-1.5">
-                <Label htmlFor="admin-token">API key / Token</Label>
+                <Label htmlFor="admin-token">
+                  {t("web.admin.historyImport.tokenDialog.tokenLabel")}
+                </Label>
                 <div className="relative">
                   <Input
                     id="admin-token"
                     type={showToken ? "text" : "password"}
-                    placeholder="Paste token here…"
+                    placeholder={t("web.admin.historyImport.tokenDialog.tokenPlaceholder")}
                     value={token}
                     onChange={(e) => setToken(e.target.value)}
-                    className="pr-10"
+                    className="pe-10"
                   />
                   <button
                     type="button"
                     onClick={() => setShowToken((v) => !v)}
-                    className="text-muted-foreground hover:text-foreground absolute top-1/2 right-3 -translate-y-1/2"
+                    className="text-muted-foreground hover:text-foreground absolute end-3 top-1/2 -translate-y-1/2"
                   >
                     {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -603,7 +661,7 @@ function TokenDialog({
 
           {source.has_admin_token && (
             <p className="text-muted-foreground text-xs">
-              A token is already configured. Saving will replace it.
+              {t("web.admin.historyImport.tokenDialog.replaceNotice")}
             </p>
           )}
         </div>
@@ -620,25 +678,27 @@ function TokenDialog({
               }
               disabled={isSaving || conflict || !source.etag}
             >
-              Remove
+              {t("web.admin.historyImport.tokenDialog.remove")}
             </Button>
           )}
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           {mode === "login" && isPlex ? (
             <Button
               onClick={handlePlexLogin}
               disabled={!plexUser.trim() || !plexPass || isSaving || conflict || !source.etag}
             >
-              {isSaving ? "Signing in…" : "Sign in & save"}
+              {isSaving
+                ? t("web.admin.historyImport.tokenDialog.signingIn")
+                : t("web.admin.historyImport.tokenDialog.signInAndSave")}
             </Button>
           ) : (
             <Button
               onClick={handleSaveToken}
               disabled={!token.trim() || isSaving || conflict || !source.etag}
             >
-              {isSaving ? "Saving…" : "Save"}
+              {isSaving ? t("web.admin.historyImport.credential.saving") : t("common.save")}
             </Button>
           )}
         </DialogFooter>
@@ -662,6 +722,7 @@ function DiscoverDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const { data: externalUsers, isFetching, refetch, error } = useDiscoverExternalUsers(source.id);
   const { data: users = [] } = useAdminUsers();
   const createMapping = useCreateAdminMapping();
@@ -691,7 +752,7 @@ function DiscoverDialog({
   const discoverErrorMessage =
     error instanceof Error && error.message.trim()
       ? error.message
-      : "Could not connect. Check the server URL and admin token, then try again.";
+      : t("web.admin.historyImport.discover.errorFallback");
 
   function handleSave() {
     if (!mappingTarget || !userId || !profileId) return;
@@ -717,7 +778,9 @@ function DiscoverDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Discover users on {source.name}</DialogTitle>
+          <DialogTitle>
+            {t("web.admin.historyImport.discover.title", { name: source.name })}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -726,10 +789,10 @@ function DiscoverDialog({
             <div className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl p-8 text-center">
               <Search className="text-muted-foreground h-8 w-8" />
               <p className="text-muted-foreground text-sm">
-                Query the server to find user accounts available for import.
+                {t("web.admin.historyImport.discover.intro")}
               </p>
               <Button onClick={() => refetch()} size="sm">
-                Discover users
+                {t("web.admin.historyImport.discover.start")}
               </Button>
             </div>
           )}
@@ -737,7 +800,9 @@ function DiscoverDialog({
           {isFetching && (
             <div className="flex items-center justify-center gap-2 py-8 text-sm">
               <Loader2 className="text-muted-foreground h-4 w-4 animate-spin" />
-              <span className="text-muted-foreground">Connecting to server…</span>
+              <span className="text-muted-foreground">
+                {t("web.admin.historyImport.discover.connecting")}
+              </span>
             </div>
           )}
 
@@ -748,7 +813,7 @@ function DiscoverDialog({
                 <span>{discoverErrorMessage}</span>
               </div>
               <Button variant="outline" size="sm" onClick={() => refetch()}>
-                Retry
+                {t("common.retry")}
               </Button>
             </div>
           )}
@@ -759,29 +824,32 @@ function DiscoverDialog({
               <div className="flex items-center justify-between">
                 <p className="text-muted-foreground text-sm">
                   {unmappedUsers.length === 0
-                    ? "All users are already mapped."
-                    : `${unmappedUsers.length} unmapped user${unmappedUsers.length !== 1 ? "s" : ""} found`}
+                    ? t("web.admin.historyImport.discover.allMapped")
+                    : t("web.admin.historyImport.discover.unmappedFound", {
+                        count: unmappedUsers.length,
+                        count_text: unmappedUsers.length,
+                      })}
                 </p>
                 <Button variant="ghost" size="sm" onClick={() => refetch()}>
-                  Refresh
+                  {t("web.admin.historyImport.discover.refresh")}
                 </Button>
               </div>
 
               {unmappedUsers.length > 0 && (
                 <>
                   <div className="relative">
-                    <Search className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+                    <Search className="text-muted-foreground absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
                     <Input
-                      placeholder="Search users…"
+                      placeholder={t("web.admin.historyImport.discover.searchPlaceholder")}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      className="pl-9"
+                      className="ps-9"
                     />
                   </div>
                   <div className="surface-panel-subtle max-h-96 divide-y overflow-y-auto rounded-xl border-0">
                     {filteredUsers.length === 0 ? (
                       <p className="text-muted-foreground px-4 py-6 text-center text-sm">
-                        No users matching &ldquo;{search}&rdquo;
+                        {t("web.admin.historyImport.discover.noMatches", { search })}
                       </p>
                     ) : (
                       filteredUsers.map((u) => (
@@ -794,7 +862,7 @@ function DiscoverDialog({
                             setProfileId("");
                           }}
                           className={cn(
-                            "flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors",
+                            "flex w-full items-center justify-between px-4 py-2.5 text-start transition-colors",
                             mappingTarget?.id === u.id ? "bg-accent" : "hover:bg-accent/50",
                           )}
                         >
@@ -804,7 +872,7 @@ function DiscoverDialog({
                           </div>
                           {mappingTarget?.id === u.id ? (
                             <Badge variant="outline" className="shrink-0 text-xs">
-                              Selected
+                              {t("web.admin.historyImport.discover.selected")}
                             </Badge>
                           ) : (
                             <ChevronRight className="text-muted-foreground h-4 w-4 shrink-0" />
@@ -820,12 +888,16 @@ function DiscoverDialog({
               {mappingTarget && (
                 <div className="surface-panel-subtle space-y-4 rounded-xl border-0 p-4">
                   <p className="text-sm font-medium">
-                    Map <span className="text-primary">{mappingTarget.name}</span> to a Silo user
-                    and profile:
+                    {t("web.admin.historyImport.discover.mapPrompt", {
+                      name: mappingTarget.name,
+                      highlight: (chunks) => <span className="text-primary">{chunks}</span>,
+                    })}
                   </p>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Silo user</Label>
+                      <Label className="text-xs">
+                        {t("web.admin.historyImport.discover.siloUser")}
+                      </Label>
                       <Select
                         value={userId}
                         onValueChange={(v) => {
@@ -834,7 +906,9 @@ function DiscoverDialog({
                         }}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Select user…" />
+                          <SelectValue
+                            placeholder={t("web.admin.historyImport.discover.selectUser")}
+                          />
                         </SelectTrigger>
                         <SelectContent>
                           {users.map((u) => (
@@ -846,10 +920,14 @@ function DiscoverDialog({
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Profile</Label>
+                      <Label className="text-xs">
+                        {t("web.admin.historyImport.discover.profile")}
+                      </Label>
                       <Select value={profileId} onValueChange={setProfileId} disabled={!userId}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Select profile…" />
+                          <SelectValue
+                            placeholder={t("web.admin.historyImport.discover.selectProfile")}
+                          />
                         </SelectTrigger>
                         <SelectContent>
                           {profiles.map((p) => (
@@ -869,15 +947,15 @@ function DiscoverDialog({
                     >
                       {createMapping.isPending ? (
                         <>
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          Saving…
+                          <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
+                          {t("web.admin.historyImport.credential.saving")}
                         </>
                       ) : (
-                        "Save mapping"
+                        t("web.admin.historyImport.discover.saveMapping")
                       )}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => setMappingTarget(null)}>
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                   </div>
                 </div>
@@ -888,7 +966,7 @@ function DiscoverDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Done
+            {t("common.done")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -917,6 +995,7 @@ function SourceBar({
   onDelete: (s: HistoryImportSource) => void;
   onSetToken: (s: HistoryImportSource) => void;
 }) {
+  const t = useT();
   if (sources.length === 0) {
     return (
       <div className="surface-panel-subtle flex flex-col items-center gap-4 rounded-xl border-0 px-6 py-12 text-center">
@@ -924,14 +1003,14 @@ function SourceBar({
           <Server className="text-muted-foreground h-6 w-6" />
         </div>
         <div className="space-y-1">
-          <p className="text-sm font-medium">No source servers</p>
+          <p className="text-sm font-medium">{t("web.admin.historyImport.sourceBar.emptyTitle")}</p>
           <p className="text-muted-foreground max-w-sm text-sm">
-            Add the Jellyfin, Emby, or Plex server you want to import watch history from.
+            {t("web.admin.historyImport.sourceBar.emptyBody")}
           </p>
         </div>
         <Button size="sm" onClick={onAdd}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add server
+          <Plus className="me-2 h-4 w-4" />
+          {t("web.admin.historyImport.sourceBar.addServer")}
         </Button>
       </div>
     );
@@ -946,7 +1025,7 @@ function SourceBar({
             onValueChange={(v) => onSelect(Number(v))}
           >
             <SelectTrigger className="w-56">
-              <SelectValue placeholder="Select a server…" />
+              <SelectValue placeholder={t("web.admin.historyImport.sourceBar.selectServer")} />
             </SelectTrigger>
             <SelectContent>
               {sources.map((s) => (
@@ -974,7 +1053,7 @@ function SourceBar({
                 size="sm"
                 variant="ghost"
                 onClick={() => onSetToken(selected)}
-                title="Set API key"
+                title={t("web.admin.historyImport.sourceBar.setApiKey")}
               >
                 <KeyRound className="h-3.5 w-3.5" />
               </Button>
@@ -982,7 +1061,7 @@ function SourceBar({
                 size="sm"
                 variant="ghost"
                 onClick={() => onEdit(selected)}
-                title="Edit server"
+                title={t("web.admin.historyImport.sourceBar.editServer")}
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
@@ -990,15 +1069,15 @@ function SourceBar({
                 size="sm"
                 variant="ghost"
                 onClick={() => onDelete(selected)}
-                title="Delete server"
+                title={t("web.admin.historyImport.sourceBar.deleteServer")}
               >
                 <Trash2 className="text-destructive h-3.5 w-3.5" />
               </Button>
             </>
           )}
           <Button size="sm" variant="outline" onClick={onAdd}>
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Add
+            <Plus className="me-1.5 h-3.5 w-3.5" />
+            {t("web.admin.historyImport.sourceBar.add")}
           </Button>
         </div>
       </div>
@@ -1008,11 +1087,11 @@ function SourceBar({
         <div className="bg-warning/5 flex items-center gap-3 border-b px-4 py-3">
           <AlertTriangle className="text-warning h-4 w-4 shrink-0" />
           <p className="text-muted-foreground flex-1 text-sm">
-            No admin API key configured. Add one to discover users and run imports.
+            {t("web.admin.historyImport.sourceBar.noApiKey")}
           </p>
           <Button size="sm" variant="outline" onClick={() => onSetToken(selected)}>
-            <KeyRound className="mr-1.5 h-3.5 w-3.5" />
-            Set API key
+            <KeyRound className="me-1.5 h-3.5 w-3.5" />
+            {t("web.admin.historyImport.sourceBar.setApiKey")}
           </Button>
         </div>
       )}
@@ -1020,7 +1099,9 @@ function SourceBar({
       {selected && selected.has_admin_token && (
         <div className="flex items-center gap-2 px-4 py-2">
           <span className="bg-success/20 inline-flex h-2 w-2 rounded-full" />
-          <span className="text-muted-foreground text-xs">API key configured</span>
+          <span className="text-muted-foreground text-xs">
+            {t("web.admin.historyImport.sourceBar.apiKeyConfigured")}
+          </span>
         </div>
       )}
     </div>
@@ -1031,6 +1112,16 @@ function SourceBar({
 // User mappings section
 // ---------------------------------------------------------------------------
 
+// How far back a run reads Jellyfin plays. Full history is the default and
+// matches a run started without a lookback.
+const LOOKBACK_CHOICES: { value: string; label: MessageKey; hours?: number }[] = [
+  { value: "full", label: "web.admin.historyImport.lookback.full" },
+  { value: "24", label: "web.admin.historyImport.lookback.last24Hours", hours: 24 },
+  { value: "72", label: "web.admin.historyImport.lookback.last72Hours", hours: 72 },
+  { value: "168", label: "web.admin.historyImport.lookback.last7Days", hours: 168 },
+  { value: "720", label: "web.admin.historyImport.lookback.last30Days", hours: 720 },
+];
+
 function MappingsSection({
   source,
   mappings,
@@ -1038,6 +1129,7 @@ function MappingsSection({
   source: HistoryImportSource;
   mappings: HistoryImportUserMapping[];
 }) {
+  const t = useT();
   const [discoverOpen, setDiscoverOpen] = useState(false);
   const deleteMapping = useDeleteAdminMapping();
   const createRun = useCreateAdminRunForMapping();
@@ -1045,32 +1137,63 @@ function MappingsSection({
   const [deleteTarget, setDeleteTarget] = useState<HistoryImportUserMapping | null>(null);
   const [deleteConflict, setDeleteConflict] = useState(false);
   const { data: users = [] } = useAdminUsers();
+  const { data: capabilities } = useAdminHistoryImportCapabilities();
+  const [lookback, setLookback] = useState("full");
+  // Only Jellyfin sources accept a lookback; the server refuses it elsewhere.
+  const lookbackChoices =
+    capabilities?.played_lookback && source.source_type === "jellyfin"
+      ? LOOKBACK_CHOICES.filter(
+          (choice) => !choice.hours || choice.hours <= capabilities.max_lookback_hours,
+        )
+      : [];
+  const lookbackChoice = lookbackChoices.find((choice) => choice.value === lookback);
+  const lookbackHours = lookbackChoice?.hours;
 
   if (!source.has_admin_token || source.needs_reconfiguration) return null;
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold tracking-wide">User mappings</h2>
-        <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold tracking-wide">
+          {t("web.admin.historyImport.mappings.title")}
+        </h2>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {mappings.length > 0 && lookbackChoices.length > 0 && (
+            <Select value={lookbackChoice ? lookback : "full"} onValueChange={setLookback}>
+              <SelectTrigger
+                size="sm"
+                className="w-36"
+                aria-label={t("web.admin.historyImport.mappings.lookbackLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {lookbackChoices.map((choice) => (
+                  <SelectItem key={choice.value} value={choice.value}>
+                    {t(choice.label)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {mappings.length > 0 && (
             <Button
               size="sm"
               variant="outline"
-              onClick={() => bulkRun.mutate(source.id)}
+              onClick={() => bulkRun.mutate({ id: source.id, lookbackHours })}
               disabled={bulkRun.isPending || mappings.length > 200}
             >
               {bulkRun.isPending ? (
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="me-1.5 h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Play className="mr-1.5 h-3.5 w-3.5" />
+                <Play className="me-1.5 h-3.5 w-3.5" />
               )}
-              Import all
+              {t("web.admin.historyImport.mappings.importAll")}
             </Button>
           )}
           <Button size="sm" onClick={() => setDiscoverOpen(true)}>
-            <Search className="mr-1.5 h-3.5 w-3.5" />
-            Discover users
+            <Search className="me-1.5 h-3.5 w-3.5" />
+            {t("web.admin.historyImport.mappings.discoverUsers")}
           </Button>
         </div>
       </div>
@@ -1078,30 +1201,39 @@ function MappingsSection({
       {bulkRun.data ? (
         <div role="status" className="space-y-1 text-sm">
           <p>
-            {bulkRun.data.accepted} queued, {bulkRun.data.active} already active,{" "}
-            {bulkRun.data.failed} failed.
+            {t("web.admin.historyImport.mappings.bulkSummary", {
+              accepted: bulkRun.data.accepted,
+              active: bulkRun.data.active,
+              failed: bulkRun.data.failed,
+            })}
           </p>
           {bulkRun.data.outcomes.map((outcome) => (
             <p key={outcome.mapping_id}>
-              Mapping {outcome.mapping_id}: {outcome.status}
-              {outcome.error ? ` — ${outcome.error}` : ""}
+              {outcome.error
+                ? t("web.admin.historyImport.mappings.bulkOutcomeWithError", {
+                    id: outcome.mapping_id,
+                    status: outcome.status,
+                    error: outcome.error,
+                  })
+                : t("web.admin.historyImport.mappings.bulkOutcome", {
+                    id: outcome.mapping_id,
+                    status: outcome.status,
+                  })}
             </p>
           ))}
         </div>
       ) : null}
       {mappings.length > 200 ? (
-        <p className="text-sm">
-          Bulk imports support up to 200 mappings. Start individual imports for this source.
-        </p>
+        <p className="text-sm">{t("web.admin.historyImport.mappings.bulkLimit")}</p>
       ) : null}
       {mappings.length === 0 ? (
         <div className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl border-0 py-10 text-center">
           <p className="text-muted-foreground text-sm">
-            No user mappings yet. Discover users on the server to create mappings.
+            {t("web.admin.historyImport.mappings.empty")}
           </p>
           <Button size="sm" variant="outline" onClick={() => setDiscoverOpen(true)}>
-            <Search className="mr-1.5 h-3.5 w-3.5" />
-            Discover users
+            <Search className="me-1.5 h-3.5 w-3.5" />
+            {t("web.admin.historyImport.mappings.discoverUsers")}
           </Button>
         </div>
       ) : (
@@ -1109,13 +1241,15 @@ function MappingsSection({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Source user</TableHead>
+                <TableHead>{t("web.admin.historyImport.mappings.column.sourceUser")}</TableHead>
                 <TableHead className="hidden sm:table-cell">
                   <ArrowRight className="h-3.5 w-3.5" />
                 </TableHead>
-                <TableHead>Silo user</TableHead>
+                <TableHead>{t("web.admin.historyImport.mappings.column.siloUser")}</TableHead>
 
-                <TableHead className="w-24 text-right">Actions</TableHead>
+                <TableHead className="w-24 text-end">
+                  {t("web.admin.historyImport.mappings.column.actions")}
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1132,7 +1266,7 @@ function MappingsSection({
                   <TableCell>
                     <p className="text-sm">
                       {users.find((user) => user.id === m.silo_user_id)?.username ||
-                        `User ${m.silo_user_id}`}
+                        t("web.admin.historyImport.userFallback", { id: m.silo_user_id })}
                     </p>
                     {m.silo_profile_name && (
                       <p className="text-muted-foreground text-xs">{m.silo_profile_name}</p>
@@ -1144,9 +1278,15 @@ function MappingsSection({
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() => createRun.mutate(m.id)}
+                        onClick={() => createRun.mutate({ id: m.id, lookbackHours })}
                         disabled={createRun.isPending}
-                        title="Run import"
+                        title={
+                          lookbackHours && lookbackChoice
+                            ? t("web.admin.historyImport.mappings.runImportWithLookback", {
+                                lookback: t(lookbackChoice.label),
+                              })
+                            : t("web.admin.historyImport.mappings.runImport")
+                        }
                       >
                         <Play className="h-3.5 w-3.5" />
                       </Button>
@@ -1157,7 +1297,7 @@ function MappingsSection({
                           setDeleteTarget(m);
                           setDeleteConflict(false);
                         }}
-                        title="Remove mapping"
+                        title={t("web.admin.historyImport.mappings.removeMapping")}
                       >
                         <Trash2 className="text-destructive h-3.5 w-3.5" />
                       </Button>
@@ -1192,9 +1332,11 @@ function MappingsSection({
             setDeleteConflict(false);
           }
         }}
-        title="Remove mapping"
-        description={`Remove the mapping for "${deleteTarget?.external_user_name || deleteTarget?.external_user_id}"? This won't delete any imported history.`}
-        confirmLabel="Remove"
+        title={t("web.admin.historyImport.mappings.removeDialog.title")}
+        description={t("web.admin.historyImport.mappings.removeDialog.description", {
+          name: String(deleteTarget?.external_user_name || deleteTarget?.external_user_id),
+        })}
+        confirmLabel={t("web.admin.historyImport.mappings.removeDialog.confirm")}
         variant="destructive"
         onConfirm={() => {
           if (deleteTarget)
@@ -1217,6 +1359,12 @@ function MappingsSection({
 
 type RunFilter = "all" | "admin" | "user";
 
+const RUN_FILTERS: { value: RunFilter; label: MessageKey }[] = [
+  { value: "all", label: "web.admin.historyImport.runs.filter.all" },
+  { value: "admin", label: "web.admin.historyImport.runs.filter.admin" },
+  { value: "user", label: "web.admin.historyImport.runs.filter.user" },
+];
+
 function RunsSection({ sourceId }: { sourceId: number }) {
   const {
     data: allRuns = [],
@@ -1225,6 +1373,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
     isFetchingNextPage,
     error,
   } = useAdminHistoryImportRuns(sourceId);
+  const t = useT();
   const { data: users = [] } = useAdminUsers();
   const cancelRun = useCancelAdminRun();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -1247,9 +1396,11 @@ function RunsSection({ sourceId }: { sourceId: number }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold tracking-wide">Recent imports</h2>
+        <h2 className="text-sm font-semibold tracking-wide">
+          {t("web.admin.historyImport.runs.title")}
+        </h2>
         <div className="flex items-center gap-1 rounded-lg border p-0.5">
-          {(["all", "admin", "user"] as const).map((v) => (
+          {RUN_FILTERS.map(({ value: v, label }) => (
             <button
               key={v}
               type="button"
@@ -1261,7 +1412,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {v}
+              {t(label)}
             </button>
           ))}
         </div>
@@ -1269,12 +1420,15 @@ function RunsSection({ sourceId }: { sourceId: number }) {
       <div className="surface-panel overflow-hidden rounded-2xl border-0">
         {runs.length === 0 ? (
           <p className="text-muted-foreground px-4 py-6 text-center text-sm">
-            No {filter === "all" ? "" : filter + " "}imports to show.
+            {t("web.admin.historyImport.runs.empty", { filter })}
           </p>
         ) : (
           <div className="divide-y">
             {runs.map((run) => {
               const expanded = expandedId === run.id;
+              const runUser =
+                userMap.get(run.user_id) ??
+                t("web.admin.historyImport.userFallback", { id: run.user_id });
               return (
                 <div key={run.id}>
                   <div className="flex items-center gap-3 px-4 py-3">
@@ -1291,30 +1445,58 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                     <StatusBadge status={run.status} />
                     <div className="flex-1 space-y-0.5">
                       <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium capitalize">{run.source_type} import</p>
+                        <p className="text-sm font-medium capitalize">
+                          {t("web.admin.historyImport.runs.sourceImport", {
+                            source: run.source_type,
+                          })}
+                        </p>
                         {run.connection_mode === "admin_token" ? (
                           <Badge variant="outline" className="text-[10px]">
-                            Admin
+                            {t("web.admin.historyImport.runs.badgeAdmin")}
                           </Badge>
                         ) : (
                           <Badge variant="secondary" className="text-[10px]">
-                            Self
+                            {t("web.admin.historyImport.runs.badgeSelf")}
                           </Badge>
                         )}
                       </div>
                       <p className="text-muted-foreground text-xs">
-                        {userMap.get(run.user_id) ?? `User ${run.user_id}`}
-                        {" · "}
-                        {formatDate(run.created_at)}
+                        {run.played_since
+                          ? t("web.admin.historyImport.runs.metaWithPlayedSince", {
+                              user: runUser,
+                              created: formatDate(run.created_at),
+                              since: formatDate(run.played_since),
+                            })
+                          : t("web.admin.historyImport.runs.meta", {
+                              user: runUser,
+                              created: formatDate(run.created_at),
+                            })}
                       </p>
                     </div>
                     <div className="text-muted-foreground hidden items-center gap-4 text-xs sm:flex">
-                      {run.fetched > 0 && <span>{run.fetched} fetched</span>}
+                      {run.fetched > 0 && (
+                        <span>
+                          {t("web.admin.historyImport.runs.fetchedCount", {
+                            count: run.fetched,
+                            count_text: run.fetched,
+                          })}
+                        </span>
+                      )}
                       {run.matched > 0 && (
-                        <span className="text-success">{run.matched} matched</span>
+                        <span className="text-success">
+                          {t("web.admin.historyImport.runs.matchedCount", {
+                            count: run.matched,
+                            count_text: run.matched,
+                          })}
+                        </span>
                       )}
                       {run.unmatched > 0 && (
-                        <span className="text-warning">{run.unmatched} unmatched</span>
+                        <span className="text-warning">
+                          {t("web.admin.historyImport.runs.unmatchedCount", {
+                            count: run.unmatched,
+                            count_text: run.unmatched,
+                          })}
+                        </span>
                       )}
                     </div>
                     {run.cancelable && (
@@ -1325,7 +1507,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                         disabled={cancelRun.isPending}
                         className="text-destructive hover:text-destructive"
                       >
-                        Cancel
+                        {t("web.admin.historyImport.runs.cancel")}
                       </Button>
                     )}
                   </div>
@@ -1339,49 +1521,73 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                       )}
                       <div className="text-muted-foreground grid grid-cols-3 gap-2 text-xs sm:grid-cols-6">
                         <div>
-                          <p className="font-medium">Fetched</p>
+                          <p className="font-medium">
+                            {t("web.admin.historyImport.runs.stat.fetched")}
+                          </p>
                           <p>{run.fetched}</p>
                         </div>
                         <div>
-                          <p className="font-medium">Matched</p>
+                          <p className="font-medium">
+                            {t("web.admin.historyImport.runs.stat.matched")}
+                          </p>
                           <p>{run.matched}</p>
                         </div>
                         <div>
-                          <p className="font-medium">Unmatched</p>
+                          <p className="font-medium">
+                            {t("web.admin.historyImport.runs.stat.unmatched")}
+                          </p>
                           <p>{run.unmatched}</p>
                         </div>
                         <div>
-                          <p className="font-medium">Updated</p>
+                          <p className="font-medium">
+                            {t("web.admin.historyImport.runs.stat.updated")}
+                          </p>
                           <p>{run.progress_updated}</p>
                         </div>
                         <div>
-                          <p className="font-medium">History</p>
+                          <p className="font-medium">
+                            {t("web.admin.historyImport.runs.stat.history")}
+                          </p>
                           <p>{run.history_created}</p>
                         </div>
                         <div>
-                          <p className="font-medium">Favorites</p>
+                          <p className="font-medium">
+                            {t("web.admin.historyImport.runs.stat.favorites")}
+                          </p>
                           <p>{run.favorites_imported}</p>
                         </div>
                         <div>
-                          <p className="font-medium">Watchlist</p>
+                          <p className="font-medium">
+                            {t("web.admin.historyImport.runs.stat.watchlist")}
+                          </p>
                           <p>{run.watchlist_added}</p>
                         </div>
                         <div>
-                          <p className="font-medium">Skipped</p>
+                          <p className="font-medium">
+                            {t("web.admin.historyImport.runs.stat.skipped")}
+                          </p>
                           <p>{run.skipped}</p>
                         </div>
                       </div>
                       {run.warnings.length > 0 && (
                         <div className="space-y-1">
                           <p className="text-muted-foreground text-xs font-medium">
-                            Warnings ({run.warnings.length})
+                            {t("web.admin.historyImport.runs.warnings", {
+                              count: run.warnings.length,
+                              count_text: run.warnings.length,
+                            })}
                           </p>
                           <ul className="text-muted-foreground list-inside list-disc space-y-0.5 text-xs">
                             {run.warnings.slice(0, 5).map((w, i) => (
                               <li key={i}>{w}</li>
                             ))}
                             {run.warnings.length > 5 && (
-                              <li className="italic">and {run.warnings.length - 5} more…</li>
+                              <li className="italic">
+                                {t("web.admin.historyImport.runs.moreWarnings", {
+                                  count: run.warnings.length - 5,
+                                  count_text: run.warnings.length - 5,
+                                })}
+                              </li>
                             )}
                           </ul>
                         </div>
@@ -1389,13 +1595,21 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                       {run.unmatched_samples.length > 0 && (
                         <div className="space-y-1">
                           <p className="text-muted-foreground text-xs font-medium">
-                            Unmatched samples
+                            {t("web.admin.historyImport.runs.unmatchedSamples")}
                           </p>
                           <ul className="text-muted-foreground list-inside list-disc space-y-0.5 text-xs">
                             {run.unmatched_samples.map((s, i) => (
                               <li key={i}>
-                                {s.title}
-                                {s.year ? ` (${s.year})` : ""} — {s.reason}
+                                {s.year
+                                  ? t("web.admin.historyImport.runs.sampleWithYear", {
+                                      title: s.title,
+                                      year: s.year,
+                                      reason: s.reason,
+                                    })
+                                  : t("web.admin.historyImport.runs.sample", {
+                                      title: s.title,
+                                      reason: s.reason,
+                                    })}
                               </li>
                             ))}
                           </ul>
@@ -1404,7 +1618,9 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                       {!run.error_message &&
                         run.warnings.length === 0 &&
                         run.unmatched_samples.length === 0 && (
-                          <p className="text-muted-foreground text-xs">No issues.</p>
+                          <p className="text-muted-foreground text-xs">
+                            {t("web.admin.historyImport.runs.noIssues")}
+                          </p>
                         )}
                     </div>
                   )}
@@ -1416,7 +1632,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
       </div>
       {error ? (
         <p role="alert" className="text-destructive text-sm">
-          Import statuses could not be refreshed. Reload to try again.
+          {t("web.admin.historyImport.runs.refreshFailed")}
         </p>
       ) : null}
       {hasNextPage ? (
@@ -1425,7 +1641,7 @@ function RunsSection({ sourceId }: { sourceId: number }) {
           disabled={isFetchingNextPage}
           onClick={() => void fetchNextPage()}
         >
-          Load more imports
+          {t("web.admin.historyImport.runs.loadMore")}
         </Button>
       ) : null}
     </div>
@@ -1442,6 +1658,7 @@ export default function AdminHistoryImport() {
 }
 
 function AdminHistoryImportPage() {
+  const t = useT();
   useEventChannel("history_import");
   const capabilities = useAdminHistoryImportCapabilities();
   const {
@@ -1481,20 +1698,20 @@ function AdminHistoryImportPage() {
   );
 
   if (capabilities.isLoading || sourcesLoading)
-    return <p>Loading history import administration…</p>;
+    return <p>{t("web.admin.historyImport.page.loading")}</p>;
   if (
     !capabilities.data?.available ||
     !capabilities.data.guarded_configuration ||
     !capabilities.data.durable_runs
   )
-    return <p role="alert">History import administration is unavailable on this server.</p>;
+    return <p role="alert">{t("web.admin.historyImport.page.unavailable")}</p>;
   if (sourcesError && sources.length === 0)
-    return <p role="alert">Saved servers could not be loaded.</p>;
+    return <p role="alert">{t("web.admin.historyImport.page.sourcesFailed")}</p>;
   return (
     <div className="space-y-8 pb-4 sm:pb-6">
       <PageHeader
-        title="History Import"
-        subtitle="Import watch history from external servers into Silo user profiles."
+        title={t("web.admin.historyImport.page.title")}
+        subtitle={t("web.admin.historyImport.page.subtitle")}
       />
 
       {/* Source selector */}
@@ -1514,25 +1731,24 @@ function AdminHistoryImportPage() {
       {selected?.source_type === "plex" ? <PlexAdminImportLimits /> : null}
       {selected?.needs_reconfiguration ? (
         <p role="alert" className="text-warning text-sm">
-          This source needs reconfiguration. Edit the server address and credential before
-          discovering users or starting imports.
+          {t("web.admin.historyImport.page.needsReconfiguration")}
         </p>
       ) : null}
       {/* Mappings */}
       {selected &&
         (mappingsQuery.isError ? (
           <div role="alert" className="space-y-2">
-            <p>User mappings could not be loaded.</p>
+            <p>{t("web.admin.historyImport.page.mappingsFailed")}</p>
             <Button
               variant="outline"
               disabled={mappingsQuery.isFetching}
               onClick={() => void mappingsQuery.refetch()}
             >
-              Retry user mappings
+              {t("web.admin.historyImport.page.retryMappings")}
             </Button>
           </div>
         ) : selected.has_admin_token && mappingsQuery.isPending ? (
-          <p role="status">Loading user mappings…</p>
+          <p role="status">{t("web.admin.historyImport.page.loadingMappings")}</p>
         ) : (
           <MappingsSection
             key={`mappings:${selected.id}`}
@@ -1564,9 +1780,11 @@ function AdminHistoryImportPage() {
             setDeleteConflict(false);
           }
         }}
-        title="Delete server"
-        description={`Delete "${deleteSource?.name}"? Remove its user mappings first.`}
-        confirmLabel="Delete"
+        title={t("web.admin.historyImport.page.deleteDialog.title")}
+        description={t("web.admin.historyImport.page.deleteDialog.description", {
+          name: String(deleteSource?.name),
+        })}
+        confirmLabel={t("web.admin.historyImport.page.deleteDialog.confirm")}
         variant="destructive"
         onConfirm={() => {
           if (deleteSource)
@@ -1587,6 +1805,7 @@ function AdminHistoryImportPage() {
 // session history only records finished plays; resume points, titles marked
 // watched, and watchlists are per-user state that only the user's own sign-in reaches.
 function PlexAdminImportLimits() {
+  const t = useT();
   const headingId = useId();
   return (
     <div
@@ -1597,35 +1816,27 @@ function PlexAdminImportLimits() {
       <AlertTriangle className="text-warning mt-0.5 h-4 w-4 shrink-0" />
       <div className="space-y-2">
         <p id={headingId} className="font-medium">
-          Plex admin imports only bring over finished plays
+          {t("web.admin.historyImport.plexLimits.title")}
         </p>
-        <p>
-          Silo reads this server&apos;s play history, which records each title a person played
-          through, and when. It can&apos;t see anything else, so these are not imported:
-        </p>
-        <ul className="list-disc space-y-0.5 pl-5">
-          <li>Resume points for titles still in progress</li>
-          <li>Titles, seasons, or shows marked as watched without playing them</li>
-          <li>Watchlists</li>
+        <p>{t("web.admin.historyImport.plexLimits.intro")}</p>
+        <ul className="list-disc space-y-0.5 ps-5">
+          <li>{t("web.admin.historyImport.plexLimits.resumePoints")}</li>
+          <li>{t("web.admin.historyImport.plexLimits.markedWatched")}</li>
+          <li>{t("web.admin.historyImport.plexLimits.watchlists")}</li>
         </ul>
-        <p>
-          To bring those over, each person imports from their own Plex account in Settings &rarr;
-          History Import.
-        </p>
+        <p>{t("web.admin.historyImport.plexLimits.outro")}</p>
       </div>
     </div>
   );
 }
 
 function ImportEditorConflict({ onReload }: { onReload: () => Promise<void> }) {
+  const t = useT();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   return (
     <div role="alert" className="space-y-2 text-sm">
-      <p>
-        This configuration changed. Your draft or confirmation is kept. Reload the latest version
-        before trying again.
-      </p>
+      <p>{t("web.admin.historyImport.conflict.message")}</p>
       {error ? <p>{error}</p> : null}
       <Button
         type="button"
@@ -1636,13 +1847,17 @@ function ImportEditorConflict({ onReload }: { onReload: () => Promise<void> }) {
           try {
             await onReload();
           } catch (error) {
-            setError(error instanceof Error ? error.message : "Reload failed");
+            setError(
+              error instanceof Error
+                ? error.message
+                : t("web.admin.historyImport.conflict.reloadFailed"),
+            );
           } finally {
             setLoading(false);
           }
         }}
       >
-        Reload latest version
+        {t("web.admin.historyImport.conflict.reload")}
       </Button>
     </div>
   );
@@ -1669,6 +1884,7 @@ function ImportConfirmDialog({
   conflict: boolean;
   onReload: () => Promise<void>;
 }) {
+  const t = useT();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -1679,7 +1895,7 @@ function ImportConfirmDialog({
         {conflict ? <ImportEditorConflict onReload={onReload} /> : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" disabled={isPending} onClick={onConfirm}>
             {confirmLabel}

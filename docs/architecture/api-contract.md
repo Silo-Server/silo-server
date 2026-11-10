@@ -1,6 +1,6 @@
 # Native API contract: Huma and `/api/v2`
 
-**Status: accepted for Silo 1.0; implementation pending.** Tracking issue:
+**Status: accepted for Silo 1.0; implemented, not yet locked.** Tracking issue:
 [#135](https://github.com/Silo-Server/silo-server/issues/135). Commands assume the repository
 root is the cwd.
 
@@ -192,7 +192,7 @@ An entry has two kinds of fields. The first kind is copied from the inventory ro
 projections of `auth_traits`. `make verify-migration-ledger` (the whole `internal/contractledger`
 test package, run in CI) validates the file against `contracts/api/v2/migration.schema.json`,
 reconciles every one of those fields against the inventory, reporting drift per field, and
-enforces the review rules below. The one permitted override is the ten `dynamic_plugin_proxy`
+enforces the review rules below. The one permitted override is the eleven `dynamic_plugin_proxy`
 rows, whose media kinds are recorded as `dynamic_proxy` because a plugin proxy has no static
 request or response shape; the override is anchored to the inventory side, so only a row whose
 inventory handler is one of the two plugin-proxy literals (`/api/v1/plugin-assets/{installation_id}/*`
@@ -356,9 +356,8 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   to the Huma adapter (`RouterConsumer` in the generator config), and only as the constructor's
   own root router at the constructor's top level — never a router derived by `Group()`,
   `Route()` or `With()`, and never inside a closure, a helper function, or a condition. The
-  operations behind it are described by `contracts/api/v2/openapi.json`. `TestRuntimeReconcile`
-  in `internal/apiv2` asserts the routes the assembled router serves are exactly the set the
-  registry declares. The wildcard covers `/api/v2/` and everything under it; the namespace root
+  operations behind it are described by `contracts/api/v2/openapi.json`. The wildcard covers
+  `/api/v2/` and everything under it; the namespace root
   `/api/v2`, with no trailing slash, is outside the v2 surface and is answered by the legacy
   listener like any other unrouted path.
 - **The artifact.** `cmd/apiv2-openapi` renders `contracts/api/v2/openapi.json` from the
@@ -499,11 +498,10 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   refuses `idempotency_key` outright and `documentDeclaration` panics if an input binds the
   `Idempotency-Key` header under any other strategy: the strategy, its required header, and
   the durable replay store land together with the first operation the inventory proves
-  needs them, and the field is never advertised unimplemented. Inventory answer: all 225
-  tier-1 ported mutation rows (219 distinct operations) are classified (101
-  `natural_idempotent`, 24 `unique_constraint`, 12 `domain_identity`, 9 `coalescing`, 3
-  `durable_dispatch`, 70 `non_retryable`, 0 `idempotency_key`, counted per distinct
-  operation) and no residual group justifies a shared generic-key implementation. The `non_retryable` rows are a
+  needs them, and the field is never advertised unimplemented. Inventory answer: every
+  tier-1 ported mutation row is classified (each row's `retry_safety` in `migration.json` is the
+  current record; none is `idempotency_key`) and no residual group justifies a shared
+  generic-key implementation. The `non_retryable` rows are a
   one-shot display or a secret shown once (invite-code top-up, admin session message,
   webhook rotate-secret, webhook test), a destructive command whose retry can hit state the
   first call never touched (node force-reload, per node and fleet-wide), a token-issuing
@@ -534,38 +532,34 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   replace and reset, device forget and device-settings reset, dashboard-layout reset, web-push
   unsubscribe by endpoint, and root-override deletion whose path can resolve to a different content group), so each stays `non_retryable`
   until its owning section guards the resource with a generation precondition or ordering rule; each note says what the v2 port needs before clients may retry. The `durable_dispatch` rows
-  (email-address verification; account and node deletion) name the durable dispatch or cleanup the v2 port must add before
-  their retry is safe. The existing v2 profile creation and deletion operations remain
+  are email-address verification, whose v2 port admits the message into an encrypted outbox,
+  and node deletion, whose note names the durable pool reconciliation the nodes section must
+  add before its retry is safe. The existing v2 profile creation and deletion operations remain
   `non_retryable` until their durable identity and cleanup defects are fixed. Library creation,
   settings updates, stale-ID rematch, provider-chain replacement, and taste seeding also remain
   `non_retryable`: their current seams cannot resume dispatch after saving state, or
-  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Thirty-nine rows (38 distinct operations)
+  repeat unclaimed provider work. Their ledger notes retain the required durable repair. Rows
   carry a `DEFECT` note where v1 gates on
   process-local state, fires an external effect inline, lacks the dedup or ordering its
-  identity implies, or re-runs a side effect a retry should not repeat (task run, collection
-  sync, trailer refresh, person refresh, stale-id rematch, email-address verification,
-  invite-code redemption during signup, playback route events,
-  watch-together selection and promotion, metadata-match-queue retry, playback session
-  progress, download status, ebook reader progress, and onboarding progress,
-  whose last-write-wins update lets a delayed retry rewind a newer report, rating add
-  and remove, the taste seed, subtitle download and upload,
-  whose unique key resolves a retry but whose losing insert deletes the winner's S3
-  object, transcode start, which replaces a live session under the same id, and media
-  request creation, whose partial unique index stops covering a request once it reaches a
-  terminal state, node creation, whose cross-replica pool reload runs after the insert
-  without a transaction, push device registration (Apple and FCM), whose update overwrites
-  a newer token with a retried older one, profile update, which bumps the account-wide access-policy revision on
+  identity implies, or re-runs a side effect a retry should not repeat (trailer refresh,
+  person refresh, stale-id rematch, invite-code redemption during signup,
+  watch-together selection and promotion, metadata-match-queue retry, rating add
+  and remove, the taste seed, transcode start, which replaces a live session under the same
+  id, media request creation, whose partial unique index stops covering a request once it
+  reaches a terminal state, node creation, whose cross-replica pool reload runs after the
+  insert without a transaction, Apple push device registration, whose update overwrites
+  a newer token with a retried older one, web-push subscription, whose stale retry after the
+  endpoint is reassigned deletes the newer profile's pending deliveries, profile update, which
+  bumps the account-wide access-policy revision on
   field presence rather than on an effective change and the profile's PIN revision whenever
-  the request carries a PIN, the provider device-auth poll, whose
-  completion check is a plain read ahead of the plugin call, admin user update, whose
-  password branch re-hashes and revokes every session on each attempt, profile creation,
+  the request carries a PIN, profile creation,
   whose name and limit checks run in application code with no unique index on the
-  account-scoped name, account deletion, whose impersonation-session revocation follows
-  the commit, node deletion, whose pool invalidation follows the commit, subtitle deletion,
-  whose S3 key is lost before cleanup, collection deletion, which never removes uploaded
-  poster variants, and profile deletion, whose object and device cleanup cannot resume after the row disappears,
-  library creation,
-  whose seeding and initial scan run after the insert without a transaction, and the
+  account-scoped name, node deletion, whose pool invalidation follows the commit, subtitle
+  deletion, whose S3 key is lost before cleanup, profile deletion, whose object and device
+  cleanup cannot resume after the row disappears, library creation,
+  whose seeding and initial scan run after the insert without a transaction, library update,
+  which saves settings before dispatching the title sync, metadata refresh and path scan the
+  change triggers, and the
   library provider chain, whose matcher wake fires unconditionally after the save); their
   v2 port must move the gate
   to shared durable state, add the missing unique constraint or event time, gate the
@@ -610,7 +604,8 @@ Validation failures add an `errors` array. Each entry contains `location` using 
 Rejected values are never echoed. Stack traces, database/upstream errors, filesystem paths,
 internal node URLs, credentials, tokens, private media data, and other implementation detail are
 never returned to the client. Problem responses default to `Cache-Control: no-store` unless a
-specific public problem is reviewed as cacheable.
+specific public problem is reviewed as cacheable. Clients translate a problem by its type and
+field codes, not its text; see [interface translation](i18n.md#problem-details).
 
 Server logs remain useful to the self-hosting administrator. They use the existing structured
 logger and `logredact` key-based secret filtering rather than a v2-specific redaction framework.
@@ -691,12 +686,25 @@ Instants are RFC 3339 UTC strings with `Z` and millisecond precision. Date-only 
 milliseconds for client timing and seconds for coarse expiry—unless an existing normative
 protocol such as playback v3 specifies otherwise. User time zones are separate IANA identifiers.
 
+The schema declares these shapes so generated clients can type them, and the spec lint in
+`internal/contractspec` enforces them by member name. A date member declares `format: date`; a
+request member where `""` clears declares a `YYYY-MM-DD` pattern that also admits `""`, and a
+stored date that is not a calendar date is left out of a response rather than sent as text. A
+URL member declares `format: uri` when its value is always absolute and `uri-reference`
+otherwise; a URL-named member whose value the server stores or relays without parsing it as a
+URL carries no format and says "not validated as a URI" in its description. A language or
+country member names its standard (ISO 639, ISO 3166, BCP 47) and carries a `pattern` where every
+value it admits or emits has one shape; members that also accept language names, or emit stored
+values older than canonicalization, carry none.
+
 Enums are lowercase strings, never numbers. Request enums are closed and reject unknown values
 with `422`; response enums are additive and clients retain an unknown/raw fallback. Existing
-values are never renamed or repurposed. Polymorphic objects use a required string discriminator
-and named schemas. Request variants are closed; response variants are additive and native clients
-retain an unknown-variant representation. Untyped maps are limited to intentional named extension
-bags.
+values are never renamed or repurposed. A nullable enum lists `null` among its values, because
+JSON Schema applies `type` and `enum` separately: the generator adds it, and the spec lint fails a
+nullable enum anywhere in a component schema without it unless `apiv2.NullEnumWithheld` names the
+member. Polymorphic objects use a required string discriminator and named schemas. Request
+variants are closed; response variants are additive and native clients retain an unknown-variant
+representation. Untyped maps are limited to intentional named extension bags.
 
 ### Query and pagination conventions
 
@@ -764,10 +772,10 @@ contract or ledger; a Huma upgrade must not silently change these behaviors.
 ### Operation and schema ownership
 
 Operation IDs are explicit, globally unique, lower camel case, and action-first, such as
-`listLibraries`, `getLibrary`, `createLibrary`, `startLibraryScan`, and `getSystemInfo`. They name
+`listLibraries`, `createLibrary`, `startLibraryScan`, and `getSystemInfo`. They name
 product behavior, never handlers, database tables, frameworks, Go packages, or the API major.
-Schema component names are explicit PascalCase product names such as `Library`, `LibrarySummary`,
-`CreateLibraryRequest`, `LibraryCollection`, `PageInfo`, and `Problem`. Huma-generated generic
+Schema component names are explicit PascalCase product names such as `Library`, `LibraryCreate`,
+`LibraryCollection`, `PageInfo`, and `Problem`. Huma-generated generic
 names, Go implementation artifacts, and anonymous top-level JSON objects do not enter the
 committed contract. Every top-level request, success response, problem extension, event, and job
 object has a stable name; primitive parameters may remain inline.
@@ -787,7 +795,7 @@ meaningful resource exists.
 
 Operations share a component only when its meaning, authorization visibility, requiredness,
 nullability, and expected evolution are the same. Purpose-specific projections such as
-`MediaItemSummary` and `MediaItem` are preferred over one universal object filled with optional
+`CatalogItem` and `CatalogItemDetail` are preferred over one universal object filled with optional
 fields. Each shared component has one owning API section in the contract ledger. Foundation owns
 the genuinely cross-cutting problem, validation, pagination, and job components. A pull request
 that changes a shared component lists every affected operation, fixture, and first-party client
@@ -883,8 +891,11 @@ existing `500`. API keys keep their profile-less admin access. A PIN-locked prim
 needs its `X-Profile-Token` because the viewer gate runs before the acting-admin gate on the v1
 admin groups and on every v2 `acting_admin` and `permission_gated` operation; the one v1
 acting-admin route without the viewer gate is `POST /api/v1/theme/catalog/refresh`. The
-admin-role `marker_edit` grant is not an acting-admin decision and is unchanged here (#1911).
-This is the same critical bridge fix.
+admin-role `marker_edit` grant follows the same acting-admin rule as the metadata-curation
+bypass (#1911). This is the same critical bridge fix. The account payload's `permissions` list
+differs by version: v2 `Account.permissions` lists only an admin's explicitly assigned
+permissions, while the frozen v1 account body keeps listing every assignable permission for an
+enabled admin. No gate reads either list.
 
 Routes outside the admin groups that widen what an admin sees or may do (another account's
 media requests and their download-server fields, another account's downloaded subtitles,
@@ -905,23 +916,40 @@ fix recorded in [v1 scope](v1-scope.md#breaking-removals-taken-before-lock).
 The short-lived plugin access cookie is transport-specific because its current path is
 `/api/v1`. V2 plugin launch issues the same five-minute, `HttpOnly`, `SameSite=Lax` credential on
 a narrow common v2 plugin-content parent path, using `Secure` on HTTPS. The old-path cookie is
-expired on the applicable launch/logout transition where practical and otherwise dies within its
-existing five-minute maximum. It is never broadened to `/`.
+expired on the applicable launch/logout transition where practical and otherwise dies five minutes
+after it was last issued or renewed; a page request through a cookie past half its lifetime renews
+it while the login session could still refresh ([plugin content](plugin-content.md)). It is never broadened to `/`.
 
 ### Discovery and capability detection
 
 `GET /api/v2/system/info` is always registered, unauthenticated, and usable before login or
 profile selection. It exposes at least the server build version, API major, contract digest, and
-links to capability documents. The response is bounded — a small fixed document with no
-per-request, per-account, or deployment-topology detail — and carries an explicit reviewed cache
-policy rather than silently inheriting the structured default. The exact response schema, its
-bound, and its cache directives are part of the foundation contract.
+links to capability documents. The response is bounded — a small document with no per-account or
+deployment-topology detail — and carries an explicit reviewed cache policy rather than silently
+inheriting the structured default. The exact response schema, its bound, and its cache directives
+are part of the foundation contract.
+
+Its one per-request member is `request_origin`: the origin the request reached, serialized and
+derived exactly like the OAuth `iss` (`clientip.RequestOrigin`) — the transport scheme and `Host`,
+replaced by `X-Forwarded-Proto` and `X-Forwarded-Host` only from a configured trusted proxy. A
+client that must not send credentials to an origin it did not configure (the Roku client follows
+redirects silently and re-sends a request body on 307) compares it with its configured origin
+before signing in. Because of that member the response is `Cache-Control: private, no-cache`, so a
+shared cache never serves one origin's value to another.
+
+The same clients rely on authenticated `/api/v2` routes not redirecting them to another origin or
+from HTTPS to HTTP. The transcode manifest and segment relay answers a node's redirect with 502
+instead of relaying it, and plugin content answers a plugin redirect that leaves the request's
+origin with 502. The deliberate exceptions are the 307s to a media proxy on `-proxy` download
+routes and on `getPlaybackBandwidthProbe` with `media_path=true`, which a client opts into, and the
+public browser OAuth and Discord-link handshakes.
 
 Exposing the server build version and contract digest before authentication is a deliberate,
 reviewed decision. An updated client must be able to tell a v2 server from a v1-only alpha server
 before it holds a credential, and version obscurity is not a control Silo relies on. That trade is
-accepted for these fields only; the endpoint carries nothing else an unauthenticated caller should
-not see.
+accepted for these fields only; `request_origin` echoes back only what the caller sent or what its
+own path to the server supplied, and the endpoint carries nothing else an unauthenticated caller
+should not see.
 
 Clients use capability documents to decide whether a feature exists. The server version and
 contract digest are for diagnostics, support, cache identity, and last-resort compatibility
@@ -970,7 +998,8 @@ from the exact authorized representation, and conditional `If-None-Match` reques
 configuration before returning 304. Revision and validator identities cover the complete authorized
 representation, so permission and domain-field changes invalidate cached answers. Missing service
 wiring returns a `not_configured` document; a configured service failure remains a dependency
-error. `allowed` can be false while `state` remains `available`, including a denied download policy,
+error, except for the search-provider fallback described below. `allowed` can be false while
+`state` remains `available`, including a denied download policy,
 a child profile requesting email verification, or credentials without the bounded login session
 required by socket and Apple registration operations. A capability
 change publishes a best-effort, authorization-filtered invalidation event containing only a domain
@@ -978,6 +1007,18 @@ scope such as `downloads`, `playback`, or `all`; the event never duplicates capa
 Clients refetch the REST document after an applicable event and also after login, profile changes,
 app foregrounding, and before important feature-specific UI. Server-wide changes invalidate all
 affected principals; account/profile changes are targeted and never disclose another user's state.
+
+Search discovery is an explicit exception to reporting configuration alone:
+`GET /api/v2/catalog/search/capabilities` reports the provider selected by the responding
+server's current ranking-availability checks, together with that provider's window and session
+limits. If those checks select PostgreSQL fallback, discovery succeeds with `provider: postgres`
+and omits Meilisearch limits. The feature flags remain usable during a Meilisearch outage.
+Provider and limit changes affect `revision` and `ETag`; replicas can return different answers,
+and a later search can select a different provider. Clients must use each search response's
+`search_diagnostics` for its actual provider and limits. This document does not certify dependency
+health: even a failed PostgreSQL index-state read can select fallback, so `state: available`
+and `provider: postgres` do not guarantee that the next search succeeds. Missing session storage
+and an unsupported result window retain their errors.
 
 ### Mutation retry safety
 
@@ -1254,7 +1295,7 @@ tombstone. The retained contract is:
   finishes its sessions. See [node-drain.md](node-drain.md).
 
 Probe traffic is excluded from request and activity logging. Consumers stay where they are:
-container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `docker-compose.dev.yml`), orchestrator
+container `HEALTHCHECK`s (`Dockerfile`, `Dockerfile.dev`, `dev/compose.yml`), orchestrator
 probes, the node pool's health sweep, and the Apple/Android reachability monitors that read the
 identity fields (those clients additionally have `GET /api/v2/system/info` for discovery). No
 root `/health` or `/ready` route is added and no probe is redirected. The API process's `/metrics`
@@ -1407,9 +1448,22 @@ in `(added_at DESC, item_id DESC)` order through dedicated `ListFavoritesPage`/`
 added or removed between pages neither repeats nor skips a row and equal timestamps are ordered by
 the unique item id. PostgreSQL keeps full stored timestamp precision in the cursor and
 orders by the raw `added_at` column so the existing profile/time indexes can supply ordered
-rows; visible API instants remain UTC milliseconds. The v1 offset queries are untouched. `has_more` is
-decided from the raw store rows, so an entry the catalog no longer has or the viewer may not
-see never hides the rows behind it. The v1 handlers call the same seams
+rows; visible API instants remain UTC milliseconds. The v1 offset queries are untouched. The
+favorites, watchlist and Not interested page seams answer only entries the viewer may see (an episode
+entry counts as visible when its series is, as its card does), so `has_more` comes from a visible
+probe entry and the cursor row is always an item the viewer may see: a cursor payload is signed, not
+encrypted, and must not name a hidden title. With the PostgreSQL user store a single query per page applies
+the access filter (`ItemRepository.ListVisiblePersonalPage`, reading each list's profile index in page
+order); a SQLite user store has no catalog to join, so there the seams read the store's keyset pages
+in growing batches until a page is full. The user store's own list queries stay unfiltered because
+recommendations read the same lists without an access filter. A watchlist series hidden because it
+is fully watched is still an entry without a card, since the viewer may see it. Ratings follow the
+same access rule as the lists: the lists omit items the viewer may not see, `getRating` and v1 `GET /ratings/{item_id}` answer `404`
+for such an item whether or not it was rated, and the stored rating is kept, so it shows again
+once the restriction is lifted. `RatingsRepo.ListPage` applies the viewer's access filter in the page
+query, so the probe row and the cursor row of `listRatings` are always items the viewer may see. Removing a favorite, watchlist entry or rating runs no access
+check, so a profile can drop an entry for an item that has since left its scope; the answer is
+the same `204` whether or not the entry existed. The v1 handlers call the same seams
 (`PersonalDataHandler.ListFavorites`/`GetFavorite`/`AddFavorite`/`RemoveFavorite` and their
 watchlist twins, `RatingsHandler.ListRatings`/`GetRating`/`SetRating`/`DeleteRating`), so both
 surfaces read and write one store. Operation ids: `listFavorites`, `getFavorite`, `addFavorite`,
@@ -1422,6 +1476,20 @@ no device id because the v2 listener reads no device header. `listWatchlist`,
 `getWatchlistEntry` and v1 `GET /watchlist` first move watchlist entries for titles
 outside the library that have since arrived onto this list; see
 [Watchlist titles](#watchlist-titles).
+
+A `404` for an ordinary "not on the list" answer is indistinguishable from probing to reverse-proxy
+security monitoring: a detail screen that checks an item and its episodes produces a burst of
+distinct 404 paths, and CrowdSec's `http-probing` scenario bans the client's address (issue #952).
+`getFavoriteMembership` (`GET /api/v2/favorites/{item_id}/membership`) and
+`getWatchlistMembership` (`GET /api/v2/watchlist/{item_id}/membership`) therefore answer the same
+check as `200` `PersonalListMembership` `{item_id, is_member, added_at?}` for every item the viewer
+may see; `added_at` is present only for a member. They keep `404` for an item that is missing or
+that the viewer may not see, run through the same `GetFavorite`/`GetWatchlistEntry` seams (so the
+watchlist read still promotes arrived titles), and are the reads clients should use.
+`getFavorite` and `getWatchlistEntry` keep their entry-or-`404` contract for already shipped
+clients, as do the v1 `204`/`404` checks. Clients detect the membership reads through
+`getPersonalListCapability` (`GET /api/v2/capabilities/personal-lists`), whose
+`membership_supported` is true when they answer.
 
 The `profiles` section (Phase 4) ports the rest of the household surface around the pilot's
 `updateProfile`: `listProfiles`, `createProfile`, `deleteProfile`, `listHouseholdSessions`,
@@ -1547,7 +1615,8 @@ the refresh `mode` and `image_size` are strict enums answered `422`; the queued-
 (`deleteLibrary`, `refreshLibraryMetadata`) answer `409` without v1's `active_job` echo, pending
 the long-running-work foundation rule; `uploadLibraryPoster` is the first multipart operation
 (`multipart/form-data` only, else `415`; a wrong part media type is `422` at `body.poster`; over
-10 MiB is `413`); `getLibrarySectionItems` answers the section itself rather than a `{section}`
+10 MiB is `413`); `listLibrarySections` leaves out rows with no items for the viewer, which v1
+answers empty (see catalog-home); `getLibrarySectionItems` answers the section itself rather than a `{section}`
 wrapper, and
 `getLibraryCollections` has one shape whether or not collection groups are configured.
 
@@ -1573,15 +1642,56 @@ same viewer and `image_size` (no cross-row duplicate filter). The rows are built
 under one fixed budget that covers each row's whole build, its item fetch and its card lookups; a
 row that errors or is not built in time is left out rather than failing or delaying the layout,
 and the client reads it from `getHomeSectionItems`. `included_sections` is `[]` when nothing was requested.
+`listHomeSections` and `listLibrarySections` answer only rows that have items for the viewer: a row
+whose titles all sit outside the viewer's library access or rating limits, an off-season seasonal
+row, a row whose fetch failed, and a row whose recipe avoids duplicates and whose items all appeared
+in earlier rows are left out, so no client has to hide an empty row itself. The rule applies to the
+rows each request resolves, so a web-only hero row or a different `item_limit` can still change
+which rows a client gets. The layout still lists every resolved row, because it is built before any row is fetched. `getHomeSectionItems` answers an
+empty row asked for by ID, and answers a row the duplicate filter emptied with its items, because
+the cross-row filter runs only on the aggregate reads. The frozen v1 aggregate reads keep
+answering empty rows other than an off-season seasonal row and one emptied by hiding watched titles.
 Because v2 rejects unknown query parameters, a client sends `include_items` only after
 `getHomeCapabilities` (`GET /api/v2/home/capabilities`, v2-only) reports `include_items_max`, the
 largest value the layout accepts (4); the document is `not_configured`, without the field, when the
 home sections service is not wired.
+`listHomeSections` and `listLibrarySections` take an optional `item_limit` (1 to 100) that caps
+every row: each row's limit becomes the smaller of its own effective limit and `item_limit`, and
+the response's per-row `item_limit` reports the capped value. The cap applies to the resolved rows
+before their items are fetched, so the hide-watched widening and the cross-row duplicate filter
+work from the capped size, and a row whose source answers more cards than its limit, such as an
+admin curated list, is cut to it before the duplicate filter; `total_count` keeps its meaning. Without the parameter every row keeps
+its own limit, and the frozen `/api/v1` reads have no such parameter. A client sends `item_limit`
+only when `getHomeCapabilities` reports `section_item_limit_max` (100), which is present whenever
+`include_items_max` is.
+`getHomeSectionItems` takes the same optional `item_limit`, with the same bounds and meaning for its
+one row. `getHomeLayout` applies it to the rows it includes, each answered exactly as
+`getHomeSectionItems` answers it with the same `item_limit`; the entries in `sections` keep each
+row's own `item_limit`. Neither read runs the cross-row duplicate filter. A row either read
+answers with `item_limit` carries `has_more: true` when it holds more cards than it answered, so
+that reading it again without `item_limit` answers more; the field is absent when false and on
+every other read that answers a `Section`. This includes an admin curated list, which an uncapped
+read can answer past its own `item_limit`. The server fetches and filters a capped row at the
+row's own `item_limit`, exactly as the uncapped read does, and builds only its first cards, so
+`has_more` is true exactly when the uncapped read answers more cards. Fetching at the cap would
+miss cards that a fetcher drops after applying its limit. A client sends `item_limit` to these
+two reads only when `getHomeCapabilities` reports `row_item_limit_max` (100), which a server that
+predates the parameter on them does not send. A row that draws a random subset on each read may answer
+different cards when read again.
+`Section`, `SectionLayoutEntry`, `ProfileSectionSetting`, `AdminSection`, and `RecommendationRow`
+carry optional `title_key` and `title_args` (an object of strings) while the row's `title` is
+server text, so a client can show the title in its own language, and `ProfileSectionSetting` carries
+`default_title_key` and `default_title_args` for its `default_title`; `getHomeCapabilities` reports `section_title_keys: true` when the
+server sends them. A client acts on `title_key` whenever it is present.
+`page_sections.title_key` stores the key beside the title, and a trigger
+clears it on any update that changes the title without changing the key, so an older binary's
+rename cannot leave a stale key. See [the catalog API](../catalog-api.md#section-titles).
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
 `date`-formatted, `filter` and `image_size` are strict enums, and an unknown `timezone` is `422`
 rather than a silent UTC fallback; `library_id` is a string `ID` and `air_at` a UTC-millisecond
 instant; the dismissal `surface` is a path enum, `progress_updated_at` an instant, and both
-dismissal operations answer `204`; `getHomeSectionItems` answers the section itself rather than
+dismissal operations answer `204`; `listHomeSections` leaves out rows with no items for the
+viewer, which v1 answers empty; `getHomeSectionItems` answers the section itself rather than
 a `{section}` wrapper; `listSectionRecipes` groups recipes in an ordered `categories` array of
 `{category, recipes}` instead of a map, never emits `hidden`, and declares each preset's
 `default_params` as the `section-config` extension bag; `listSectionRecipeCandidates` always
@@ -1605,8 +1715,8 @@ The operation answers
 `watched_at` instant, `duration_seconds`, `completed`, `source`); `removeHistoryEntries` takes a
 closed `scope` enum and answers `204`; `syncProgress` takes `position_ms`/`duration_ms` as
 integer milliseconds, string item ids and an `updated_at` instant (a malformed one is `422`, not a
-per-item error) and answers the v1 `results` list; `getWatchState` keeps the profile header
-optional as v1 does (narrowed by the household rule under
+per-item error) and answers `ProgressSyncBatchResult` (per-item `items` plus a bulk `summary`);
+`getWatchState` keeps the profile header optional as v1 does (narrowed by the household rule under
 [Credential continuity](#credential-continuity)), takes `file_id` (string ID) and a strict `image_size`, renders file ids as
 string IDs, `added_at` as an instant, `duration`/`total_duration` as `*_seconds`, markers as
 `{start_seconds, end_seconds}`, and answers a series (not directly playable) as `422` at `path.id`;
@@ -1615,16 +1725,21 @@ played}` echo. All four mutations declare `non_retryable` and are not `If-Match`
 Atomic marking suppresses concurrent duplicate history and provider events, but a delayed
 retry after an intervening unmark can create another watch; a durable client watch identity
 is still needed. History removal and unmark choose a fresh cutoff, so a delayed retry can
-hide an intervening watch. Sync accepts an omitted `updated_at`, so a delayed replay can
+hide an intervening watch (unmark keeps the watch in history but stops it counting as
+watched). Sync accepts an omitted `updated_at`, so a delayed replay can
 overwrite newer progress; every item needs a stable event time before automatic retries are safe.
 Two v2-only operations extend the section without ledger rows: `clearResumePosition`
 (`DELETE /api/v2/progress/{media_item_id}/position`, tag `progress`) clears a movie or episode's
 resume position while keeping its watched state and history, answers `204` (also when there is
-nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for a
-kind `markWatched` does not handle, and is
+nothing to clear), `422` at `path.media_item_id` for a season, series or ebook and `404` for an
+audiobook or a kind `markWatched` does not handle, and is
 `non_retryable` because a delayed retry would also clear a position recorded in between;
 `getProgressCapabilities` (`GET /api/v2/progress/capabilities`) advertises it as
-`clear_resume_position`. Semantics are in [the progress API](../progress-api.md#clearing-a-resume-position).
+`clear_resume_position`. The same document's `mark_watched_records_rewatch` says that
+v2 `markWatched` on a watched movie, episode or audiobook with a resume position records another play and
+clears the position instead of answering a no-op `204`; v1 and season or series marks keep the
+no-op. Semantics are in
+[the progress API](../progress-api.md#clearing-a-resume-position).
 
 **Section catalog-recommendations, stage A (Phase 4).** Seven profile-scoped reads under the
 `recommendations` tag: `listBecauseWatched`, `getDiscover`, `getForYouMain`, `listForYouRows`,
@@ -1632,7 +1747,8 @@ kind `markWatched` does not handle, and is
 shared `CatalogItem`, rendered by the same seam the v1 discover page uses
 (`internal/api/handlers/recommendations_service.go`), so the plain lists are a
 `CatalogItemCollection` (bounded, no `page`) and the grouped reads answer `RecommendationRow`
-(`{type, title, kind, key, items}`). Deliberate differences from v1, all recorded on the ledger
+(`{type, title, kind, key, items}`, plus `title_key` and `title_args` while the title is one the
+server words, as on sections). Deliberate differences from v1, all recorded on the ledger
 rows: the engine's `score`, `reason`, and bare `media_item_id` lists are not carried (no client
 reads them); `label` is `title` and `section_kind`/`section_key` are `kind`/`key`; `for-you/main`
 answers an empty row rather than `null`; `days` and `limit` are declared parameters answered
@@ -1706,8 +1822,9 @@ the ledger rows: the two probes are typed `Capability` documents (`revision`, `s
 fields) with `Cache-Control: private, no-cache`, and the two v1 registrations of
 `/metadata/ai/status` are one operation whose unwired answer is `not_configured`; the three
 background actions keep their v1 `202` with a small body (trailer refresh still answers `200` for
-`cooldown` and `disabled`) and are classified as coalescing actions, not the 202 job-monitor
-contract; an unconfigured action is `409 capability_not_configured` rather than `503`; the trailer
+`cooldown` and `disabled`), not the 202 job-monitor contract; description translation is
+classified `coalescing`, while trailer and person refresh stay `non_retryable` with `DEFECT`
+notes; an unconfigured action is `409 capability_not_configured` rather than `503`; the trailer
 `unsupported_type` refusal is `422` at `path.id`, and a missing `target_language` is `422` at
 `body.target_language`; `translateCatalogItemDescription` answers the job itself rather than
 `{job}`; people and works moved under `/catalog`, the people search is an `{items}` collection
@@ -1999,8 +2116,25 @@ title detail's recommendations) and the title detail carry `in_watchlist`,
 true when the acting profile has the title on its watchlist, in or out of the
 library.
 
+The Discover page follows the admin's layout ([Request Discover rows](request-discover-rows.md)).
+`GET /api/v2/requests/discover` (`listDiscoverSections`) returns, in `items`, the
+enabled title rows that have titles, in layout order, and in the required
+`row_order` every enabled row, brand rows (`studios`, `networks`, `genres`)
+included; a brand row draws the cards of the matching brand list operation, and a
+client skips a row type it does not know. The six built-in rows keep their keys;
+an admin's rows have opaque keys. `GET /api/v2/requests/discover/rows/{row_id}`
+(`getDiscoverRow`) pages any title row. `getDiscoverSection` keeps its six-key enum
+but reads through the layout, so a built-in row the admin turned off or removed
+answers 404. A row page's `next_page` covers rows that leave out titles the
+library has as well as rating backfill, and after a read of several pages reached
+the end it points past `total_pages`. `GET /api/v2/requests/status` advertises
+`discover_rows_supported`. The frozen v1 discovery keeps the six built-in rows
+whatever the layout.
+
 Native Apple and Android request migrations accompany this contract change;
-integrate those client changes before retiring their v1 routes. Jellyfin compatibility does not expose this request
+integrate those client changes before retiring their v1 routes. Shipped apps
+merge only the built-in trending and popular rows, so an admin's rows reach them
+once they read `row_order`. Jellyfin compatibility does not expose this request
 management surface and keeps its existing behavior.
 
 ### Watchlist titles
@@ -2092,9 +2226,12 @@ to 50 entries, default 10, without continuation. Connection and run identifiers 
 strings, and timestamps use the standard UTC instant representation.
 
 Mutation retries remain disabled: device authorization does not claim an exchange
-across API nodes, and manual sync's active-run/cooldown checks and run creation are
-separate calls. A process dispatches the run after creation; this is not a durable
-job-dispatch mechanism. Cooldown problems retain their Retry-After header and the
+across API nodes. Manual sync coalescing, cooldown and reservation now commit under
+the connection row lock, shared with scheduled insertion and terminal updates.
+Scheduled admission skips a live manual reservation within the existing manual
+timeout; scheduled overlap remains unchanged. A process dispatches the run after
+creation, without durable replay. Atomic admission does not guarantee exactly-once
+provider effects, and all API nodes must use the boundary for it to hold. Cooldown problems retain their Retry-After header and the
 web settings page displays the delay. No watch-provider consumers were found in
 the Apple and Android source inventory.
 
@@ -2131,11 +2268,14 @@ ownership through the shared service, and all connection operations retain accou
 ownership checks. Empty or repeated external mapping IDs fail validation before
 replacement. Mutations are conservatively non-retryable after uncertain responses.
 
-External webhook ingress remains separate from native management and continues on
-its existing v1 paths, including the legacy Plex receiver alias. Those externally
-configured URLs require their own migration decision before any v1 tombstone.
-Plex-only management aliases are proposed removals in the ledger and remain on v1;
-this work does not invent their pending reviewer. No webhook-management consumers
+External webhook ingress remains separate from native management. The
+provider-neutral receiver is ported as `receiveExternalWebhook`
+(`POST /api/v2/webhook-sync/webhooks/{secret}`), and v2 connections hand out that URL.
+The v1 receiver paths, including the legacy Plex receiver alias
+`POST /api/v1/plex-sync/webhooks/{secret}` (a documented exclusion), keep answering through
+the bridge and are retired with the v1 tombstone, so Plex servers still configured with a v1
+URL must be re-pointed at the webhook-sync URL before then. The Plex-only management aliases
+are ratified removals, still served on the bridge until the tombstone. No webhook-management consumers
 were found in the native client inventory. Jellyfin protocol user-state behavior
 continues through the existing shared store paths.
 
@@ -2321,6 +2461,16 @@ to Standard is refused with a validation problem while it cannot. The `routing`
 field of `getAdminRequestCapabilities` reports whether the server offers both
 the routing rule operations and the routing mode operations.
 
+The Discover layout (`/admin/request-discover`) is v2-only:
+`GET`/`PUT`/`DELETE /admin/request-discover/layout` read, replace and reset the
+whole layout with `If-Match` on its revision (the default layout, with none
+stored, reads as revision zero; a guarded reset answers 204); list rows carry
+the status of their stored copy. `POST /admin/request-discover/preview` shows a
+row's first page before it is saved, fetching a list row's list live, and
+`GET /admin/request-discover/watch-providers` lists the streaming services a
+discover row can filter on in a region. They work while requests are turned off.
+The `discover_layout` field of `getAdminRequestCapabilities` reports them.
+
 Settings, account limits and integrations require `If-Match` for replacement and
 integration deletion. A shared PostgreSQL sequence assigns a new revision on every
 insert or update, including legacy and background writers, and distinguishes a
@@ -2350,7 +2500,11 @@ slash is dropped, so the saved address is the one the options probe used. An
 address with credentials, a query or a fragment, or another scheme, is a
 `validation_failed` problem on `body.base_url`. An options request that leaves
 `base_url` out tests the saved address; one that sends it blank tests a router
-that declares `base_url_optional` without an address. When `POST
+that declares `base_url_optional` without an address. The options request first runs
+the router's `TestConnection` without the plugin config, because a router can
+answer an empty option list for a server it cannot reach; a failed test
+answers like a failed option load, and a router that does not implement the
+check is judged by its options. When `POST
 /admin/request-integrations/{id}/options` fails, the host answers with its own
 sentences and never echoes the plugin's upstream text. What the admin must fix
 is a `validation_failed` problem on `body.base_url` (wrong address, missing URL
@@ -2519,6 +2673,23 @@ leaves both unchanged, including one that echoes their stored values, does not r
 config. The frozen `/api/v1` single create and update routes do not run this check. Capabilities report whether the
 service, preview, and atomic profile reset are available. Clients do not automatically replay
 administrator section operations after a conflict or a partial multi-request flow.
+
+`web_only` keeps a featured row (a hero banner) on the web app alone. Create and PATCH accept it
+once the capabilities report `web_only`, and every definition answers it. Only a featured row
+keeps it: a save that leaves the row not featured stores `false`, and so does another row taking
+the page's hero spot (`ClearFeaturedForSurface`). A PATCH that makes a row featured stores `false`
+unless it sends `web_only`, so a value an older server left on a demoted row never returns. The
+web shows a page's first featured section as its banner and any later one as a regular row, so
+`web_only` applies to that first featured section only. The viewer section reads (`getHomeLayout`,
+`listHomeSections`, `getHomeSectionItems`, and the three library page equivalents, on v2 and the
+frozen v1 routes alike) answer it only to a caller whose `X-Silo-Client-Family` is `web`. Any
+other caller, including one that sends no family, never gets it: layouts and lists leave it out and
+its single-section read answers `404`. Dropping the row from the frozen v1 reads changes no shape;
+the v1 bridge exists for the same apps the switch is meant for. The rule is a positive match because some native callers,
+such as the tvOS Top Shelf extension, send no client headers at all. A profile that turns the
+row's hero banner off gets a regular row, which every client receives. The profile layout editor
+reads and the catalog browse of a section (`source=section`) are not filtered, so the web's See
+all keeps working. The frozen `/api/v1` admin bodies neither accept nor answer the field.
 
 ### Administrator policy document storage
 

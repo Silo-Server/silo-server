@@ -3,16 +3,19 @@
 `GET /api/v2/compat/connect-info` is an authenticated account read. It requires
 no acting profile. `jellyfin` reports `enabled`, `pending_restart`, `public_url`,
 and `server_name`; `account.password_login_available` reports whether the account
-can use a local password to sign into a compatible client. The enabled flag
-reflects the running listener, while pending restart compares its state with
-stored settings. Only the three compatibility settings needed for this view are
-read. Missing settings fall back to boot configuration, and an unresolved account
+can use a local password to sign into a compatible client: it has a password,
+its own password sign-in is on, and `auth.local_password_login` is on or the
+account is break-glass. The enabled flag reflects the running listener, while pending
+restart compares its state with stored settings. Only the three compatibility
+settings needed for this view and `auth.local_password_login` are read. Missing
+settings fall back to boot configuration, and an unresolved account
 retains the bridge's password-availability fallback. The web Connect Apps page
 uses this v2 operation.
 
 `GET /api/v2/images/capabilities` reports capability `revision` and `state`, the
 query parameter `param`, ordered `sizes`, per-artwork-type `widths`, and
-`original_max_width_px`. Widths come from the current variant ladder. The image
+`original_max_width_px`, plus the members described in
+[the images API](images-api.md). Widths come from the current variant ladder. The image
 operation accepts account-only requests; when an acting profile is supplied,
 viewer-access and PIN verification still apply. This preserves the bridge gate.
 The v2 response uses capability revision/state instead of legacy `schema_version`.

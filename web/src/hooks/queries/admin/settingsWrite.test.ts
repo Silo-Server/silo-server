@@ -251,6 +251,43 @@ it("refreshes the link capabilities when the public URL changes", async () => {
   expect(client.getQueryState(["auth", "password-reset-capability"])?.isInvalidated).toBe(true);
 });
 
+it.each(["batch", "single"] as const)(
+  "drops the cached connect-info after a %s local password switch write",
+  async (mode) => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockImplementation(async (_url, init) =>
+          init?.method === "PUT"
+            ? response({ values: {}, restart_required: false })
+            : response({ "auth.local_password_login": "true" }),
+        ),
+    );
+    const { client, wrapper } = fixture();
+    const connectInfoKey = ["compat", "connect-info"];
+    client.setQueryData(connectInfoKey, { account: { password_login_available: true } });
+    const { result } = renderHook(
+      () => ({
+        read: useAdminServerSettings(),
+        batch: useUpdateServerSettings(),
+        single: useUpdateServerSetting(),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.read.isSuccess).toBe(true));
+    act(() => {
+      if (mode === "batch") {
+        result.current.batch.mutate({ "auth.local_password_login": "false" });
+      } else {
+        result.current.single.mutate({ key: "auth.local_password_login", value: "false" });
+      }
+    });
+    await waitFor(() => expect(result.current[mode].isSuccess).toBe(true));
+    expect(client.getQueryState(connectInfoKey)?.isInvalidated).toBe(true);
+  },
+);
+
 it.each(["select", "complete"] as const)(
   "saves retained drafts after acknowledged %s reconciliation",
   async (operation) => {

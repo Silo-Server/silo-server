@@ -26,7 +26,7 @@ func TestInstallerInstallBinaryPersistsPackagedArchive(t *testing.T) {
 	checksum := sha256.Sum256(binaryData)
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
-	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil)
+	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil, nil)
 	if err != nil {
 		t.Fatalf("installBinary() returned error: %v", err)
 	}
@@ -59,13 +59,14 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 
 	oldRepository := 7
 	result, err := installer.replaceBinary(ctx, &Installation{
-		ID:           15,
-		RepositoryID: &oldRepository,
-		PluginID:     "silo.metadb",
-		Version:      "0.0.18",
-		InstallPath:  oldPath,
-		Enabled:      true,
-	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil)
+		ID:            15,
+		RepositoryID:  &oldRepository,
+		PluginID:      "silo.metadb",
+		Version:       "0.0.18",
+		InstallPath:   oldPath,
+		Enabled:       true,
+		UpdateFailure: &UpdateFailure{Version: "0.0.19", Reason: "refused earlier"},
+	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil)
 	if err != nil {
 		t.Fatalf("replaceBinary() returned error: %v", err)
 	}
@@ -85,6 +86,11 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	}
 	if result.Installation.Version != "0.0.19" {
 		t.Fatalf("result installation version = %q, want 0.0.19", result.Installation.Version)
+	}
+	// The version change cleared the stored refusal; the result must not
+	// report it as still pending.
+	if result.Installation.UpdateFailure != nil {
+		t.Fatalf("result update failure = %+v, want nil after a replacement", result.Installation.UpdateFailure)
 	}
 	if result.Installation.InstallPath == oldPath {
 		t.Fatal("expected replaceBinary() to move the installation to a new path")

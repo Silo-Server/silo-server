@@ -45,6 +45,10 @@ vi.mock("@/hooks/useCurrentProfile", () => ({
   }),
 }));
 
+vi.mock("@/hooks/queries/profiles", () => ({
+  useProfiles: () => ({ data: [], isSuccess: false, maxProfiles: null }),
+}));
+
 vi.mock("@/hooks/queries/libraries", () => ({
   useUserLibraries: () => ({
     data: mockLibraries,
@@ -67,7 +71,7 @@ vi.mock("@/hooks/useUICustomization", () => ({
   useUICustomization: () => ({
     primaryMenu: mockPrimaryMenu,
     shortcuts: { items: [] },
-    cardPresentation: { poster_size: "standard", caption: "title_metadata" },
+    cardPresentation: { poster_size: "standard" },
     isLoading: false,
   }),
 }));

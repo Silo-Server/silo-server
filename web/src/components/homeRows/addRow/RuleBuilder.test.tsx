@@ -7,7 +7,7 @@ import { RuleBuilder, RuleSortField } from "./RuleBuilder";
 
 vi.mock("@/hooks/queries/personSearch", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/queries/personSearch")>()),
-  useExtendedQueryRules: () => true,
+  useQueryRuleCapabilities: () => ({ extendedRules: true, showTitleRules: true }),
 }));
 vi.mock("@/hooks/queries/ratingsCapability", () => ({
   useShownRatingSources: () => new Set(["imdb", "tmdb"]),
@@ -197,21 +197,6 @@ describe("RuleBuilder", () => {
 });
 
 describe("RuleBuilder in a Smart collection", () => {
-  it("offers no all-libraries choice when a library is required", async () => {
-    render(
-      <RuleBuilder
-        context="collection"
-        librariesRequired
-        value={query({ library_ids: [1] })}
-        libraries={libraries}
-        onChange={() => {}}
-      />,
-    );
-    await userEvent.click(screen.getByRole("button", { name: /^Libraries:\s*Movies$/ }));
-    expect(screen.queryByRole("menuitem", { name: "All libraries" })).toBeNull();
-    expect(screen.getByRole("menuitemcheckbox", { name: "TV" })).toBeInTheDocument();
-  });
-
   it("names every library the way the scope does", async () => {
     render(
       <RuleBuilder

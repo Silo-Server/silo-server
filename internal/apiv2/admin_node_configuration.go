@@ -18,16 +18,16 @@ type AdminNodeConfigurationService interface {
 type AdminNodeCreateBody struct {
 	Name             string `json:"name" minLength:"1" maxLength:"1024"`
 	Type             string `json:"type" enum:"proxy,transcode"`
-	URL              string `json:"url" minLength:"1" maxLength:"8192"`
-	PublicURL        string `json:"public_url,omitempty" maxLength:"8192"`
+	URL              string `json:"url" format:"uri-reference" minLength:"1" maxLength:"8192"`
+	PublicURL        string `json:"public_url,omitempty" format:"uri-reference" maxLength:"8192"`
 	Group            string `json:"group,omitempty" maxLength:"1024"`
 	MaxJobs          *int   `json:"max_jobs,omitempty" nullable:"true" maximum:"2147483647" minimum:"-2147483648"`
 	MaxBandwidthKbps *int   `json:"max_bandwidth_kbps,omitempty" nullable:"true" maximum:"2147483647" minimum:"-2147483648"`
 }
 type AdminNodeUpdateBody struct {
 	Name             *string `json:"name,omitempty" minLength:"1" maxLength:"1024"`
-	URL              *string `json:"url,omitempty" minLength:"1" maxLength:"8192"`
-	PublicURL        *string `json:"public_url,omitempty" nullable:"true" maxLength:"8192"`
+	URL              *string `json:"url,omitempty" format:"uri-reference" minLength:"1" maxLength:"8192"`
+	PublicURL        *string `json:"public_url,omitempty" format:"uri-reference" nullable:"true" maxLength:"8192"`
 	Enabled          *bool   `json:"enabled,omitempty"`
 	Group            *string `json:"group,omitempty" maxLength:"1024"`
 	MaxJobs          *int    `json:"max_jobs,omitempty" maximum:"2147483647" minimum:"-2147483648"`

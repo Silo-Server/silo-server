@@ -101,9 +101,11 @@ function playbackSession(
     browserEngine: null,
     nativeOriginalSupport: { containers: [], videoCodecs: [], audioCodecs: [] },
     switchVersion: vi.fn(),
+    versionPinned: vi.fn(() => false),
     switchAudioTrack: vi.fn(),
     changeSubtitleTrack: vi.fn(),
     changeQuality: vi.fn(),
+    setKeptEstimate: vi.fn(),
     recoverFromFailure: vi.fn(),
     recoverConnection: vi.fn(),
     retryConnection: vi.fn(),
@@ -507,16 +509,23 @@ describe("Watch Party source fallback", () => {
     const room = refusedRoom();
     const fallbackSource = vi.fn().mockRejectedValue(new Error("No alternative room source"));
     roomConnectionMock.mockReturnValue({ room, connectionState: "connected", fallbackSource });
+    const refusal = "A lower-resolution source is required because 4K transcoding is disabled.";
     const view = render(createElement(WatchPage, props));
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          "A lower-resolution source is required because 4K transcoding is disabled.",
-        ),
-      ).toBeTruthy(),
-    );
-    expect(fallbackSource).toHaveBeenCalledTimes(1);
+    // The player's first commit shows the refusal before the fallback effect
+    // runs, so wait for the request first and then for the refusal to return.
+    await waitFor(() => expect(fallbackSource).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(refusal)).toBeTruthy());
+    expect(screen.queryByText("Finding a compatible version for everyone...")).toBeNull();
+    // A fresh room object re-runs the fallback effect. A second attempt would
+    // show the pending message synchronously inside rerender's act().
+    roomConnectionMock.mockReturnValue({
+      room: { ...room },
+      connectionState: "connected",
+      fallbackSource,
+    });
     view.rerender(createElement(WatchPage, props));
+    expect(screen.getByText(refusal)).toBeTruthy();
+    expect(screen.queryByText("Finding a compatible version for everyone...")).toBeNull();
     expect(fallbackSource).toHaveBeenCalledTimes(1);
   });
 });

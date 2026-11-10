@@ -189,6 +189,81 @@ func TestHomeSectionsForFetchExpandsOnlyFilteredSections(t *testing.T) {
 	}
 }
 
+func TestCapSectionItemLimits(t *testing.T) {
+	resolved := []sections.ResolvedSection{
+		{ID: "large", ItemLimit: 100},
+		{ID: "small", ItemLimit: 12},
+		{ID: "unset", ItemLimit: 0},
+	}
+	for _, tc := range []struct {
+		name  string
+		limit int
+		want  []int
+	}{
+		{"cap lowers larger rows", 20, []int{20, 12, 0}},
+		{"cap below the default lowers an unset row", 10, []int{10, 10, 10}},
+		{"cap above every row is a no-op", 100, []int{100, 12, 0}},
+		{"no cap is a no-op", 0, []int{100, 12, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := capSectionItemLimits(resolved, tc.limit)
+			for i, want := range tc.want {
+				if got[i].ItemLimit != want {
+					t.Errorf("section %q limit = %d, want %d", got[i].ID, got[i].ItemLimit, want)
+				}
+			}
+			if resolved[0].ItemLimit != 100 || resolved[2].ItemLimit != 0 {
+				t.Errorf("input mutated: %+v", resolved)
+			}
+		})
+	}
+	// The hide-watched widening works from the capped limit.
+	if got := homeSectionsForFetch(capSectionItemLimits(resolved, 20), true)[0].ItemLimit; got != homeWatchedCandidateLimit(20) {
+		t.Errorf("widened fetch limit = %d, want %d", got, homeWatchedCandidateLimit(20))
+	}
+}
+
+// TestCutCappedSectionItems pins that a capped aggregate read answers at most
+// each row's capped limit, including an admin curated list, whose fetcher
+// returns every configured item, and that an uncapped read is left alone.
+func TestCutCappedSectionItems(t *testing.T) {
+	resolved := []sections.ResolvedSection{
+		{ID: "picks", SectionType: sections.SectionAdminCuratedList, ItemLimit: 50},
+		{ID: "unset", SectionType: sections.SectionAdminCuratedList},
+		{ID: "short", SectionType: sections.SectionRecentlyAdded, ItemLimit: 50},
+	}
+	sourceSizes := []int{30, 30, 3}
+	for _, tc := range []struct {
+		name string
+		cap  int
+		want []int
+	}{
+		{"cap below every row", 10, []int{10, 10, 3}},
+		{"cap above an unset row keeps its default", 40, []int{30, 20, 3}},
+		{"uncapped read is a no-op", 0, []int{30, 30, 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Stand in for FetchAll: an admin curated list returns every
+			// configured item whatever its limit.
+			capped := capSectionItemLimits(resolved, tc.cap)
+			rows := make([]sections.SectionWithItems, len(capped))
+			for i, s := range capped {
+				items := make([]*models.MediaItem, sourceSizes[i])
+				for j := range items {
+					items[j] = &models.MediaItem{ContentID: fmt.Sprintf("movie:%s-%d", s.ID, j)}
+				}
+				rows[i] = sections.SectionWithItems{ResolvedSection: s, Items: items, TotalCount: len(items)}
+			}
+			got := cutCappedSectionItems(rows, tc.cap)
+			for i, want := range tc.want {
+				if len(got[i].Items) != want || got[i].TotalCount != sourceSizes[i] {
+					t.Errorf("section %q: %d items, total %d; want %d items, total %d", got[i].ID, len(got[i].Items), got[i].TotalCount, want, sourceSizes[i])
+				}
+			}
+		})
+	}
+}
+
 func TestDropEmptyWatchedHomeSections(t *testing.T) {
 	input := []sections.SectionWithItems{
 		{

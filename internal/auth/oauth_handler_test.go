@@ -1429,21 +1429,9 @@ func TestOAuthRoutesRefuseCredentialsInstallations(t *testing.T) {
 }
 
 // TestOAuthNative_IssuerSerialization: iss is serialized in one canonical
-// form, so the app can compare it with its saved server's origin.
+// form (clientip.SerializeOrigin, tested there), so the app can compare it
+// with its saved server's origin.
 func TestOAuthNative_IssuerSerialization(t *testing.T) {
-	for _, tc := range []struct{ scheme, host, want string }{
-		{"https", "silo.test", "https://silo.test"},
-		{"HTTPS", "Silo.Example.TEST:443", "https://silo.example.test"},
-		{"http", "10.0.0.5:80", "http://10.0.0.5"},
-		{"http", "10.0.0.5:8096", "http://10.0.0.5:8096"},
-		{"https", "[FE80::1]:8443", "https://[fe80::1]:8443"},
-		{"https", "[::1]", "https://[::1]"},
-	} {
-		if got := serializeOrigin(tc.scheme, tc.host); got != tc.want {
-			t.Errorf("serializeOrigin(%q, %q) = %q, want %q", tc.scheme, tc.host, got, tc.want)
-		}
-	}
-
 	// A start on the public origin of a public URL with a path, a default
 	// port and upper case names its origin only.
 	rig := newOAuthRig(t)

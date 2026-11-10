@@ -9,11 +9,19 @@ import (
 	"strconv"
 	"time"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 )
 
+// adminPushTestSender dispatches a test push to a device on userID's account.
+type adminPushTestSender interface {
+	SendApplePushTest(ctx context.Context, userID int, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error)
+	SendAndroidPushTest(ctx context.Context, userID int, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error)
+}
+
 type AdminApplePushHandler struct {
 	system              *notifications.System
+	pushTests           adminPushTestSender
 	settings            ServerSettingsStore
 	client              httpDoer
 	developmentRelayURL string
@@ -24,12 +32,16 @@ type httpDoer interface {
 }
 
 func NewAdminApplePushHandler(system *notifications.System, settings ServerSettingsStore) *AdminApplePushHandler {
-	return &AdminApplePushHandler{
+	h := &AdminApplePushHandler{
 		system:              system,
 		settings:            settings,
 		client:              &http.Client{Timeout: 10 * time.Second},
 		developmentRelayURL: os.Getenv("SILO_PUSH_RELAY_DEVELOPMENT_URL"),
 	}
+	if system != nil {
+		h.pushTests = system
+	}
+	return h
 }
 
 type adminApplePushTestRequest struct {
@@ -64,21 +76,26 @@ type adminPushRelayRegisterResponse struct {
 
 // HandleTest handles POST /admin/notifications/push/apple/test.
 func (h *AdminApplePushHandler) HandleTest(w http.ResponseWriter, r *http.Request) {
-	h.handleTest(w, r, "Apple", func(ctx context.Context, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error) {
-		return h.system.SendApplePushTest(ctx, profileID, serverDeviceID)
+	h.handleTest(w, r, "Apple", func(ctx context.Context, userID int, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error) {
+		return h.pushTests.SendApplePushTest(ctx, userID, profileID, serverDeviceID)
 	})
 }
 
 // HandleTestAndroid handles POST /admin/notifications/push/fcm/test.
 func (h *AdminApplePushHandler) HandleTestAndroid(w http.ResponseWriter, r *http.Request) {
-	h.handleTest(w, r, "Android", func(ctx context.Context, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error) {
-		return h.system.SendAndroidPushTest(ctx, profileID, serverDeviceID)
+	h.handleTest(w, r, "Android", func(ctx context.Context, userID int, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error) {
+		return h.pushTests.SendAndroidPushTest(ctx, userID, profileID, serverDeviceID)
 	})
 }
 
-func (h *AdminApplePushHandler) handleTest(w http.ResponseWriter, r *http.Request, platformLabel string, send func(context.Context, string, string) (*notifications.ApplePushTestResult, error)) {
-	if h == nil || h.system == nil {
+func (h *AdminApplePushHandler) handleTest(w http.ResponseWriter, r *http.Request, platformLabel string, send func(ctx context.Context, userID int, profileID, serverDeviceID string) (*notifications.ApplePushTestResult, error)) {
+	if h == nil || h.pushTests == nil {
 		writeError(w, http.StatusServiceUnavailable, "unavailable", platformLabel+" push delivery is not available")
+		return
+	}
+	claims := apimw.GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
 	var req adminApplePushTestRequest
@@ -86,7 +103,7 @@ func (h *AdminApplePushHandler) handleTest(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "bad_request", "Invalid request body")
 		return
 	}
-	result, err := send(r.Context(), req.ProfileID, req.ServerDeviceID)
+	result, err := send(r.Context(), claims.UserID, req.ProfileID, req.ServerDeviceID)
 	if err != nil {
 		switch {
 		case errors.Is(err, notifications.ErrPushDeliveryInvalid):

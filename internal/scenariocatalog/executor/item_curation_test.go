@@ -95,6 +95,8 @@ func TestRequiredNewItemCuration(t *testing.T) {
 			case "empty_clears":
 				patch(catalogAlpha, `{"overview":"","genres":[],"air_timezone":""}`, admin, ok(catalogAssertion("/overview", "absent", nil), catalogAssertion("/genres", "equals", []string{}), catalogAssertion("/air_timezone", "absent", nil)))
 				want[catalogAlpha]["overview"] = ""
+				// The search document follows the overview it is built from.
+				want[catalogAlpha]["search_overview_vector"] = ""
 				want[catalogAlpha]["genres"] = []any{}
 				want[catalogAlpha]["air_timezone"] = nil
 				changed = true
@@ -102,6 +104,8 @@ func TestRequiredNewItemCuration(t *testing.T) {
 				patch(catalogAlpha, `{"title":"Synthetic renamed item","year":2024,"runtime":95,"genres":["Comedy","Drama"]}`, admin, ok(catalogAssertion("/title", "equals", "Synthetic renamed item"), catalogAssertion("/year", "equals", 2024), catalogAssertion("/runtime", "equals", 95), catalogAssertion("/genres", "equals", []string{"Comedy", "Drama"})))
 				want[catalogAlpha]["title"] = "Synthetic renamed item"
 				want[catalogAlpha]["title_normalized"] = "synthetic renamed item"
+				// The new title is indexed with weight A; the sort title keeps weight B.
+				want[catalogAlpha]["search_title_vector"] = "'alpha':4B 'item':3A 'renamed':2A 'synthetic':1A"
 				want[catalogAlpha]["year"] = float64(2024)
 				want[catalogAlpha]["runtime"] = float64(95)
 				want[catalogAlpha]["genres"] = []any{"Comedy", "Drama"}

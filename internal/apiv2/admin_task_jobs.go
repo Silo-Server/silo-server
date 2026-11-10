@@ -78,10 +78,12 @@ type AdminTaskJob struct {
 	CatalogResult           *AdminTaskJobCatalogResult           `json:"catalog_result,omitempty"`
 	ItemResult              *AdminTaskJobItemResult              `json:"item_result,omitempty"`
 	StorageTransitionResult *AdminTaskJobStorageTransitionResult `json:"storage_transition_result,omitempty"`
+	BackupRestoreSource     *AdminBackupRestoreSource            `json:"backup_restore_source,omitempty" doc:"The backup a backup_restore job restores from, present from the moment it is queued"`
+	BackupRestoreResult     *AdminBackupRestoreReport            `json:"backup_restore_result,omitempty" doc:"A backup_restore job's report: each chosen item restored, unchanged, left out (with a reason), or failed (with an error). Kept when the job is canceled or interrupted."`
 	ArtifactSizeBytes       int64                                `json:"artifact_size_bytes"`
-	DownloadURL             string                               `json:"download_url,omitempty"`
+	DownloadURL             string                               `json:"download_url,omitempty" format:"uri-reference"`
 	DownloadExpiresAt       *Instant                             `json:"download_expires_at,omitempty"`
-	PublicURL               string                               `json:"public_url,omitempty"`
+	PublicURL               string                               `json:"public_url,omitempty" format:"uri-reference"`
 	PublicLinkSupported     bool                                 `json:"public_link_supported" doc:"Whether this server can mint a shareable seven-day link. False when exports are stored locally, because only storage-side presigning produces a URL usable off this server."`
 }
 type AdminTaskJobsInput struct {
@@ -109,7 +111,7 @@ func registerAdminTaskJobs(reg *Registry) {
 		return reg.listAdminTaskJobs(ctx, cursors, in)
 	})
 	Register(reg, Operation{Operation: humaOp("GET", Prefix+"/admin/jobs/{id}", "getAdminJob", "admin-tasks", "Read a retained job. Administrators acting through the account's primary profile may read all jobs; item refresh owners may read their own safe result."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true}, reg.getAdminTaskJob)
-	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a cancellable administrator job. Completed effects and verified storage-copy checkpoints are retained.")
+	cancel := humaOp("POST", Prefix+"/admin/jobs/{id}/cancel", "cancelAdminJob", "admin-tasks", "Request cancellation of a job that reports cancelable: library refresh, storage transition, or image cache cleanup. Completed effects and verified storage-copy checkpoints are retained.")
 	cancel.DefaultStatus = 202
 	cancel.Errors = []int{409}
 	cancel.Responses = map[string]*huma.Response{"200": {
@@ -130,8 +132,8 @@ func (reg *Registry) cancelAdminTaskJob(ctx context.Context, in *AdminTaskJobInp
 	if err != nil {
 		return nil, serviceProblem(err)
 	}
-	if job.JobType != adminjob.JobTypeStorageTransition && job.JobType != adminjob.JobTypeImageCacheCleanup {
-		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled from this endpoint")
+	if !adminjob.IsCancellableJobType(job.JobType) {
+		return nil, NewProblem(TypeJobNotCancelable, "This job cannot be canceled")
 	}
 	canceller, ok := reg.deps.AdminTaskJobs.(interface {
 		RequestAdminTaskJobCancellation(context.Context, string) (*models.AdminJob, error)
@@ -180,6 +182,10 @@ func (reg *Registry) adminTaskJobOf(ctx context.Context, job *models.AdminJob, a
 	}
 	if transitionResult != nil {
 		out.StorageTransitionResult = transitionResult
+	}
+	if job.JobType == adminjob.JobTypeBackupRestore {
+		out.BackupRestoreSource = backupRestoreSourceOf(job)
+		out.BackupRestoreResult = backupRestoreReportOf(job)
 	}
 	if job.JobType == adminjob.JobTypeLibraryRefresh || job.JobType == adminjob.JobTypeDeleteLibrary || job.JobType == adminjob.JobTypeImageCacheCleanup {
 		var request struct {

@@ -1,9 +1,13 @@
 import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
-import { act, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { ItemDetail, Season } from "@/api/types";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import { setAccessToken, setProfileId } from "@/api/client";
+import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
+import type { FileVersion, ItemDetail, Season } from "@/api/types";
+import { catalogKeys } from "@/hooks/queries/keys";
 import EpisodeContent from "./EpisodeContent";
 import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
 
@@ -72,15 +76,6 @@ vi.mock("@/hooks/queries/admin/markers", () => ({
 
 vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryCapabilities: mocks.useLibraryCapabilities,
-}));
-
-const resetProgressMocks = vi.hoisted(() => ({
-  useResetProgressAction: vi.fn((): (() => void) | undefined => undefined),
-}));
-
-vi.mock("@/hooks/queries/progress", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/hooks/queries/progress")>()),
-  useResetProgressAction: resetProgressMocks.useResetProgressAction,
 }));
 
 vi.mock("@/hooks/queries/items", () => ({
@@ -204,9 +199,11 @@ function makeEpisodeItem(overrides: Partial<ItemDetail> = {}) {
 
 function renderEpisode() {
   renderToStaticMarkup(
-    <MemoryRouter initialEntries={["/item/episode-1"]}>
-      <EpisodeContent item={makeEpisodeItem()} />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/item/episode-1"]}>
+        <EpisodeContent item={makeEpisodeItem()} />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -265,14 +262,35 @@ describe("EpisodeContent", () => {
 
   it("links the season breadcrumb segment to the resolved season page", () => {
     const markup = renderToStaticMarkup(
-      <MemoryRouter initialEntries={["/item/episode-1"]}>
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/episode-1"]}>
+          <EpisodeContent item={makeEpisodeItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(countOccurrences(markup, 'href="/item/series-1"')).toBe(1);
     expect(countOccurrences(markup, 'href="/item/season-1"')).toBe(1);
     expect(markup).toContain(">Season 1<");
+  });
+
+  it("keeps the page's library on the season reads and breadcrumbs but not on Play", () => {
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/item/episode-1?libraryId=4"]}>
+          <EpisodeContent item={makeEpisodeItem()} libraryId={4} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(mocks.useSeasonDetail).toHaveBeenLastCalledWith("series-1", 1, 4);
+    expect(mocks.useSeasonEpisodes).toHaveBeenLastCalledWith("series-1", 1, 4);
+    expect(countOccurrences(markup, 'href="/item/series-1?libraryId=4"')).toBe(1);
+    expect(countOccurrences(markup, 'href="/item/season-1?libraryId=4"')).toBe(1);
+    // Playback always sees every version, so Play carries no library.
+    expect(mocks.capturedActionBarProps.value?.playHref).toBe(
+      `/watch/${makeEpisodeItem().content_id}`,
+    );
   });
 
   it("uses season navigation state before season detail finishes loading", () => {
@@ -281,19 +299,21 @@ describe("EpisodeContent", () => {
     });
 
     const markup = renderToStaticMarkup(
-      <MemoryRouter
-        initialEntries={[
-          {
-            pathname: "/item/episode-1",
-            state: {
-              parentSeasonHref: "/item/season-99",
-              parentSeasonLabel: "Season 99",
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter
+          initialEntries={[
+            {
+              pathname: "/item/episode-1",
+              state: {
+                parentSeasonHref: "/item/season-99",
+                parentSeasonLabel: "Season 99",
+              },
             },
-          },
-        ]}
-      >
-        <EpisodeContent item={makeEpisodeItem()} />
-      </MemoryRouter>,
+          ]}
+        >
+          <EpisodeContent item={makeEpisodeItem()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(countOccurrences(markup, 'href="/item/season-99"')).toBe(1);
@@ -304,9 +324,11 @@ describe("EpisodeContent", () => {
     spoilerPrefs.hideOverviews = true;
     try {
       render(
-        <MemoryRouter initialEntries={["/item/episode-1"]}>
-          <EpisodeContent item={makeEpisodeItem({ user_data: { played: false } })} />
-        </MemoryRouter>,
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter initialEntries={["/item/episode-1"]}>
+            <EpisodeContent item={makeEpisodeItem({ user_data: { played: false } })} />
+          </MemoryRouter>
+        </QueryClientProvider>,
       );
       expect(mocks.capturedDetailHeroProps.value?.overviewHidden).toBe(true);
 
@@ -317,6 +339,92 @@ describe("EpisodeContent", () => {
     } finally {
       spoilerPrefs.hideOverviews = false;
     }
+  });
+
+  describe("overview", () => {
+    function renderWithSeries(
+      item: ReturnType<typeof makeEpisodeItem>,
+      series: Partial<ItemDetail>,
+      libraryId?: number,
+    ) {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+      });
+      queryClient.setQueryData(
+        catalogKeys.itemDetail("series-1", libraryId),
+        makeItemDetail("series", { content_id: "series-1", ...series }),
+      );
+      render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={["/item/episode-1"]}>
+            <EpisodeContent item={item} libraryId={libraryId} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      return mocks.capturedDetailHeroProps.value;
+    }
+
+    // The translate control follows whichever overview is on screen.
+    beforeEach(() => {
+      mocks.useOnViewTranslation.mockImplementation((target?: { content_id: string }) => ({
+        translating: false,
+        onTranslate: target ? `translate ${target.content_id}` : undefined,
+      }));
+    });
+
+    it.each([
+      {
+        name: "falls back to the series overview when the episode has none",
+        episodeOverview: "",
+        hideOverviews: false,
+        expected: {
+          overview: "Series overview",
+          overviewMachineTranslated: true,
+          onTranslateOverview: "translate series-1",
+        },
+      },
+      {
+        name: "keeps the episode's own overview",
+        episodeOverview: "Episode overview",
+        hideOverviews: false,
+        expected: {
+          overview: "Episode overview",
+          overviewMachineTranslated: false,
+          onTranslateOverview: "translate episode-1",
+        },
+      },
+      {
+        name: "does not hide the series overview behind episode spoiler protection",
+        episodeOverview: "",
+        hideOverviews: true,
+        expected: { overview: "Series overview", overviewHidden: false },
+      },
+      {
+        // A profile that inherits the library's metadata language gets the
+        // series in that language only when the request names the library.
+        name: "reads the series in the page's library",
+        episodeOverview: "",
+        hideOverviews: false,
+        libraryId: 7,
+        expected: { overview: "Series overview", onTranslateOverview: "translate series-1" },
+      },
+    ])("$name", ({ episodeOverview, hideOverviews, libraryId, expected }) => {
+      spoilerPrefs.hideOverviews = hideOverviews;
+      try {
+        const props = renderWithSeries(
+          makeEpisodeItem({
+            content_id: "episode-1",
+            overview: episodeOverview,
+            user_data: { played: false },
+          }),
+          { overview: "Series overview", machine_translated_fields: ["overview"] },
+          libraryId,
+        );
+        expect(props).toMatchObject(expected);
+      } finally {
+        spoilerPrefs.hideOverviews = false;
+      }
+    });
   });
 
   it("passes marker re-detection only for admins", () => {
@@ -365,4 +473,191 @@ describe("EpisodeContent", () => {
       expect(redetectMarkers).not.toHaveBeenCalled();
     },
   );
+
+  describe("pre-play audio choice", () => {
+    const tracks = [
+      {
+        language: "en",
+        codec: "eac3",
+        channels: 6,
+        layout: "5.1",
+        title: "English",
+        default: true,
+      },
+      { language: "ja", codec: "aac", channels: 2, layout: "stereo", embedded_title: "Japanese" },
+      { language: "und", codec: "ac3", channels: 2 },
+    ];
+    type AudioProps = {
+      audioSelectionMode: string;
+      explicitAudioTrackIndex: number | null;
+      onSelectAudioTrack: (index: number) => void;
+      onResetAudioSelection: () => void;
+      onSelectVersion: (version: FileVersion) => void;
+    };
+    const actionBar = () => mocks.capturedActionBarProps.value as unknown as AudioProps;
+
+    function stubWrites(respond: (call: number) => Promise<Response>) {
+      const requests: { method: string; path: string; body: unknown }[] = [];
+      const fetchMock = vi.fn<typeof fetch>(async (url, init) => {
+        requests.push({
+          method: init?.method ?? "GET",
+          path: new URL(String(url), "http://silo.test").pathname,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        return respond(requests.length);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return requests;
+    }
+
+    function renderWithTracks(versions = [makeFileVersion({ audio_tracks: tracks })]) {
+      render(
+        <QueryClientProvider
+          client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
+        >
+          <MemoryRouter initialEntries={["/item/episode-1"]}>
+            <EpisodeContent item={makeEpisodeItem({ versions })} />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    }
+
+    beforeEach(() => {
+      installPolicyStorageMocks();
+      setAccessToken("account");
+      setProfileId("profile-1");
+    });
+    afterEach(() => {
+      cleanup();
+      vi.unstubAllGlobals();
+    });
+
+    it("saves picks for the series and forgets them on Auto, in the order chosen", async () => {
+      let releaseFirst!: () => void;
+      const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+      const requests = stubWrites(async (call) => {
+        if (call === 1) await firstHeld;
+        return new Response(null, { status: 204 });
+      });
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      act(() => actionBar().onResetAudioSelection());
+      act(() => actionBar().onSelectAudioTrack(2));
+      await waitFor(() => expect(requests).toHaveLength(1));
+      // Auto and the second pick wait for the first pick to land.
+      await act(async () => {});
+      expect(requests).toHaveLength(1);
+      releaseFirst();
+      await waitFor(() => expect(requests).toHaveLength(3));
+
+      expect(requests).toEqual([
+        {
+          method: "PUT",
+          path: "/api/v2/audio-prefs/series-1",
+          body: {
+            audio_track_index: 1,
+            audio_language: "ja",
+            track_signature: {
+              language: "ja",
+              embedded_title: "Japanese",
+              codec: "aac",
+              layout: "stereo",
+              channels: 2,
+            },
+          },
+        },
+        { method: "DELETE", path: "/api/v2/audio-prefs/series-1", body: undefined },
+        {
+          method: "PUT",
+          path: "/api/v2/audio-prefs/series-1",
+          // An undetermined track sets no series language.
+          body: {
+            audio_track_index: 2,
+            track_signature: { language: "und", codec: "ac3", channels: 2 },
+          },
+        },
+      ]);
+      expect(actionBar()).toMatchObject({
+        audioSelectionMode: "explicit",
+        explicitAudioTrackIndex: 2,
+      });
+    });
+
+    it("puts the selector back when a pick is not saved", async () => {
+      stubWrites(async () =>
+        jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      expect(actionBar()).toMatchObject({
+        audioSelectionMode: "explicit",
+        explicitAudioTrackIndex: 1,
+      });
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+    });
+
+    it("does not roll a failed pick back to another version's saved track", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const first = makeFileVersion({ file_id: 1, audio_tracks: tracks });
+      const second = makeFileVersion({ file_id: 2, audio_tracks: tracks });
+      renderWithTracks([first, second]);
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(actionBar()).toMatchObject({ explicitAudioTrackIndex: 1 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      act(() => actionBar().onSelectVersion(second));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+    });
+
+    it("keeps a saved pick when a quicker later pick fails", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+    });
+
+    it("puts the selector back to the last saved choice when quick picks all fail", async () => {
+      stubWrites(async () =>
+        jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+    });
+  });
 });

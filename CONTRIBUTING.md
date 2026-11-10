@@ -2,9 +2,12 @@
 
 > [!IMPORTANT]
 > The most helpful way to contribute to Silo right now is a clear, accurate
-> issue. Pull requests are welcome from contributors who've had one merged in a
-> Silo repository, or when a maintainer asks for one. We close other pull
-> requests without review.
+> issue. Feature ideas go in
+> [Discussions → Ideas](https://github.com/Silo-Server/silo-server/discussions/categories/ideas),
+> not issues. Pull requests are welcome from contributors who've had one merged
+> in a Silo repository, or when a maintainer asks for one; a feature pull request
+> also needs an issue a maintainer has labeled `accepted`. Other pull requests
+> are closed automatically without review.
 
 ## Why we're asking for issues
 
@@ -31,15 +34,13 @@ Using Claude Code or Codex? The
 helps you collect these details and drafts the issue, then has independent
 reviewers check it against your evidence before you post it.
 
-- One problem or proposal per issue.
+- One problem per issue.
 - Describe what you observed before any theory about the cause.
 - Give exact steps to reproduce, expected and actual behavior, the Silo version
   or commit, your deployment, and the clients involved.
 - Paste raw logs rather than a summary. Redact credentials, tokens, personal
   data, and private media details, mark each redaction, and leave the rest
   untouched.
-- For a feature, describe the problem it solves and who it affects, and read
-  [Project non-goals](docs/non-goals.md) first.
 - If you found the cause or have a fix in mind, put it under Technical notes,
   apart from what you observed. Point to the files involved; a short code
   excerpt is fine. We may implement it differently.
@@ -49,28 +50,46 @@ reviewers check it against your evidence before you post it.
 Report security vulnerabilities privately with **Report a vulnerability** on
 the repository's Security tab, not in a public issue.
 
+## Suggest a feature
+
+Post feature ideas in
+[Discussions → Ideas](https://github.com/Silo-Server/silo-server/discussions/categories/ideas),
+not as issues. Search first and upvote an existing idea rather than repeating
+it. Describe the problem the feature solves and who it affects, and read
+[Project non-goals](docs/non-goals.md) first. Maintainers open an issue for an
+idea when they plan to build it or want help building it.
+
 ## Pull requests
 
 Pull requests are welcome from contributors who've had a pull request merged in
 a Silo repository, and from anyone a maintainer has asked for one, usually in
-an issue comment. The rest of this guide applies to those pull requests.
+an issue comment. A feature pull request (a `feat` title) from someone without
+triage or write access must also link, in its description, an issue in this
+repository that a maintainer has labeled `accepted`.
+The rest of this guide applies to those pull requests.
 
-We close other pull requests without review. That isn't a judgment of the
-work. If the problem still matters, open an issue for it and link the closed
-pull request; we may use the code as a reference.
+A workflow closes other pull requests without review when they open. That isn't
+a judgment of the work. If the problem still matters, open an issue for it, or
+post a feature idea in Ideas, and link the closed pull request; we may use the
+code as a reference. Once a feature's issue is labeled `accepted`, link it in
+a new pull request, or ask a maintainer to reopen the closed one. If a
+maintainer asked you for a pull request and you haven't had one merged yet, the
+workflow still closes it when it opens; the maintainer reopens it, and the
+check leaves it alone from then on.
 
 ## Before you start
 
 > [!IMPORTANT]
-> An open issue is not required before a pull request. State the problem in the
-> pull request itself: what breaks or is missing, who it affects, and why this
-> change is the right answer. Link an issue when one already covers the work.
+> Apart from feature pull requests, an open issue is not required before a pull
+> request. State the problem in the pull request itself: what breaks or is
+> missing, who it affects, and why this change is the right answer. Link an
+> issue when one already covers the work.
 
-Silo is pre-1.0 and moves quickly. For features, API or behavior changes, schema
+Silo is pre-1.0 and moves quickly. For API or behavior changes, schema
 migrations, large refactors, or anything else that changes product scope, opening
-an issue or discussion first is still the cheapest way to learn that the work is
-already in flight or outside scope. That is a judgment call, not a gate; the risk
-of a rejected pull request is yours. Read [Project non-goals](docs/non-goals.md)
+an issue first is still the cheapest way to learn that the work is already in
+flight or outside scope. That is a judgment call, not a gate; the risk of a
+rejected pull request is yours. Read [Project non-goals](docs/non-goals.md)
 and the relevant `docs/architecture/` material before proposing a capability.
 
 An open issue is not an unclaimed one. Before implementing someone else's issue,
@@ -196,14 +215,18 @@ go test ./internal/<package>/...
 cd web && pnpm exec vitest run path/to/changed.test.tsx
 ```
 
-Before opening a pull request, run the full gate. This is the one list; the
-[CI workflow](.github/workflows/ci.yml) is authoritative if they ever disagree.
+Before opening a pull request, run the full gate. This is the one list; the CI
+jobs in [trusted-linux-ci.yml](.github/workflows/trusted-linux-ci.yml) and
+[go-checks.mk](.github/actions/ci-tools/go-checks.mk) are authoritative if they
+ever disagree. CI always takes both files from `main`, so edits to them in a
+pull request take effect only after it merges.
 
 ```sh
 # Go
 make embed-stub
 go build ./...
 gofmt -l .                      # must print nothing
+go mod tidy -diff               # must print nothing
 go vet ./...
 make lint-changed                   # BASE_REF=origin/<pr-base> when not main
 make lint-router-recovery
@@ -227,6 +250,7 @@ make verify-migration-ledger
 make verify-scenario-catalogs
 make verify-offline-routes
 make verify-apiv2-openapi
+make verify-apiv2-web-types
 make verify-apiv2-contract          # BASE_REF=origin/<pr-base> when not main
 make verify-apiv2-fixtures
 go test -count=1 -run '^TestCommittedArtifactMatchesRouter$' ./internal/apiv2/
@@ -234,10 +258,10 @@ make verify-local-paths
 make verify-case-collisions
 make verify-actionlint              # actionlint 1.7.12
 make verify-shellcheck              # ShellCheck 0.11.0
-make verify-size-ratchet
+make verify-size-ratchet            # BASE_REF=origin/<pr-base> when not main
 make verify-bidi
-make verify-migrations
-make verify-v1-route-freeze
+make verify-migrations              # BASE_REF=origin/<pr-base> when not main
+make verify-v1-route-freeze         # BASE_REF=origin/<pr-base> when not main
 docker pull prom/prometheus:v3.5.0   # Required first: the target uses --pull=never
 make verify-prometheus-rules
 ```
@@ -248,10 +272,14 @@ include the updated `eslint-suppressions.json` in the change.
 
 PR CI selects Go or Web jobs from a complete diff. Shared contracts, generated
 bindings, workflow changes, unknown inputs, and unavailable diffs run both
-groups. Ordinary Markdown documentation runs the documentation checks. Pushes
-and manual runs keep the full gate. The `CI result` job rejects failed, canceled,
-missing, or unexpectedly skipped work; only jobs excluded by the selection may
-skip. Selection tools come from the trusted reusable workflow's main branch.
+groups. Markdown in the repository root, in `docs/` outside
+`docs/design/schemas/`, or under `.github/`, `scripts/`, or `cmd/` selects
+neither group; only the `Repository checks` job, which runs on every pull
+request, checks it. Other Markdown is selected by its path like any other file.
+Pushes and manual runs keep the full gate. The `CI result` job rejects failed,
+canceled, missing, or unexpectedly skipped work; only jobs excluded by the
+selection may skip. Selection tools come from the trusted reusable workflow's
+main branch.
 
 `Go test` runs the full Go suite, which owns the ledger, scenario,
 offline-route, spec, and fixture assertions. `Go lint` runs the contract checks
@@ -265,9 +293,10 @@ and `Go DB external auth` each start a separate pgvector database, and the unit
 suite has no database. No CI job sets `SILO_SCENARIO_DATABASE_URL`, so the
 scenario executor, which truncates its database, gets none of these databases.
 
-Touching `internal/apiv2` registrations? Run `make apiv2-openapi` and
-`make apiv2-fixtures` and commit what they write; the gates above fail on a
-stale artifact or fixture tree.
+Touching `internal/apiv2` registrations? Run
+`make apiv2-openapi apiv2-fixtures apiv2-web-types` and commit what they write;
+the gates above fail when the artifact, the fixture tree, or the web types are
+stale.
 
 `make test-go` has no database, so every DB-backed test in it skips. The
 `Go DB pins` CI job covers the DB-backed pins listed in
@@ -282,7 +311,7 @@ database; with the PostgreSQL service from
 running under the Compose defaults:
 
 ```sh
-docker compose exec postgres createdb -U silo silo_pins
+docker compose -f dev/compose.yml exec postgres createdb -U silo silo_pins
 export SILO_TEST_DATABASE_URL='postgres://silo:silo@localhost:5432/silo_pins?sslmode=disable'
 DATABASE_URL="$SILO_TEST_DATABASE_URL" SECRET_KEY="$(openssl rand -base64 48)" \
   go run ./cmd/silo/ --migrate-only
@@ -299,9 +328,12 @@ the same disposable, migrated database.
 
 `make lint` runs `golangci-lint` over the whole tree and reports inherited
 findings the repository does not pass yet; CI only gates the lines your branch
-changed. `make lint-changed` checks exactly those lines, and it analyzes only
-the packages your branch touched, so it takes seconds where a cold run over
-`./...` takes minutes of every core. Do not add to the inherited findings.
+changed. `make lint-changed` checks exactly those lines, and it usually
+analyses only the packages your branch touched, so it takes seconds where a
+cold run over `./...` takes minutes of every core. A branch that deletes or
+renames a file in a Go package, or touches shared Go inputs such as `go.mod`,
+`go.sum`, the `Makefile`, a workflow, or the lint config, gets a full-tree
+analysis instead. Do not add to the inherited findings.
 Never pass `--allow-parallel-runners`: concurrent runs queue behind one
 another on purpose.
 
@@ -472,6 +504,18 @@ Maintainers may ask for a smaller change, a different implementation, decline
 work that no longer fits, or take the idea and implement it separately. Opening
 a pull request does not guarantee a merge. If scope is uncertain, ask before
 building.
+
+## Licensing of contributions
+
+Silo Server is licensed under `AGPL-3.0-or-later` with the platform library
+additional permission in [PLATFORM-EXCEPTION.md](PLATFORM-EXCEPTION.md).
+
+By submitting a contribution, you agree that it is licensed under those
+same terms, the AGPL *including* the additional permission. If you cannot
+agree to the additional permission, say so in your pull request before it
+is merged.
+
+You retain copyright in your contribution; no assignment is requested.
 
 ## Instructions for coding agents
 

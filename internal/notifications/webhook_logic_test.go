@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // mapSettingReader is a SettingReader fake; missing keys read as unset.
@@ -447,8 +448,8 @@ func TestDiscordTotalLimitTruncation(t *testing.T) {
 	if err := json.Unmarshal(payload, &body); err != nil {
 		t.Fatal(err)
 	}
-	if len(body.Embeds[0].Title) > discordTitleLimit {
-		t.Fatalf("title exceeds Discord limit: %d bytes", len(body.Embeds[0].Title))
+	if n := discordTextLen(body.Embeds[0].Title); n > discordTitleLimit {
+		t.Fatalf("title exceeds Discord limit: %d characters", n)
 	}
 
 	embed := discordEmbed{
@@ -465,6 +466,226 @@ func TestDiscordTotalLimitTruncation(t *testing.T) {
 	}
 	if len(embed.Fields) != 2 {
 		t.Fatal("description must be truncated before fields are dropped")
+	}
+}
+
+var (
+	digestOverview = strings.Repeat("A long synopsis sentence that keeps going. ", 12)
+	digestGenres   = []string{"Science Fiction & Fantasy", "Action & Adventure", "Documentary"}
+)
+
+func digestEpisodeRows(n int, overview func(i int) string) []DeliveryRow {
+	season, episode := 12, 104
+	rows := make([]DeliveryRow, 0, n)
+	for i := 0; i < n; i++ {
+		row := webhookTestRow()
+		row.ID = fmt.Sprintf("row-%02d", i)
+		row.SeriesTitle = fmt.Sprintf("%02d %s", i, strings.Repeat("Series Title ", 6))
+		row.EpisodeTitle = strings.Repeat("Episode Title ", 6)
+		row.SeasonNumber, row.EpisodeNumber = &season, &episode
+		row.ReasonFlags = []byte(`{"favorite":true,"watchlist":true,"continue_watching":true,"next_up":true}`)
+		row.SeriesOverview, row.EpisodeOverview = overview(i), overview(i)
+		row.Genres = digestGenres
+		row.TVDBID = "123456789"
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+func digestDeclinedRows(n int, title, reason string) []DeliveryRow {
+	rows := make([]DeliveryRow, 0, n)
+	for i := 0; i < n; i++ {
+		flags, _ := json.Marshal(RequestFlags{
+			RequestID: fmt.Sprintf("req-%d", i), TMDBID: 100 + i, MediaType: "movie",
+			Title: fmt.Sprintf("%02d %s", i, title), Reason: reason,
+		})
+		rows = append(rows, DeliveryRow{Delivery: Delivery{
+			ID: fmt.Sprintf("row-%02d", i), Type: DeliveryTypeRequestDeclined, ReasonFlags: flags,
+		}})
+	}
+	return rows
+}
+
+func digestLongDeclines(n int) []DeliveryRow {
+	return digestDeclinedRows(n, strings.Repeat("Requested Title ", 14),
+		strings.Repeat("Not available in any region we can source. ", 20))
+}
+
+func digestContentGroups(n int) []ContentGroup {
+	groups := make([]ContentGroup, 0, n)
+	for i := 0; i < n; i++ {
+		groups = append(groups, ContentGroup{Kind: EventKindMovie, ItemID: fmt.Sprintf("movie-%d", i), Meta: ContentMeta{
+			Title: fmt.Sprintf("%02d %s", i, strings.Repeat("Movie Title ", 18)), Year: 2026,
+			Type: "movie", Overview: digestOverview, Genres: digestGenres, ContentRating: "PG-13", RatingIMDB: 7.9,
+			IMDBID: "tt11280740", TMDBID: "95396", TVDBID: "123456789",
+		}})
+	}
+	return groups
+}
+
+type discordDigestCase struct {
+	name  string
+	items int
+	// wantEmbeds, when set, is the exact embed count expected.
+	wantEmbeds int
+	// links is the provider links each embed's description must keep.
+	links int
+	// fullTeasers requires every teaser to be sent unshortened.
+	fullTeasers bool
+	// fullTitles and fullFields require over-long titles and field values to
+	// be clipped exactly to Discord's character limits, no shorter.
+	fullTitles, fullFields bool
+	build                  func() ([]byte, error)
+}
+
+// TestDiscordDigestMessageLimit covers Discord's 6,000-character cap, which
+// applies across all embeds of one message: a 10-embed digest of rich items
+// must shorten or drop embeds to fit, and the overflow line must count every
+// item left out.
+func TestDiscordDigestMessageLimit(t *testing.T) {
+	sameOverview := func(int) string { return digestOverview }
+	cases := []discordDigestCase{
+		{name: "dm episodes", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestEpisodeRows(10, sameOverview))
+		}},
+		{name: "dm episodes with mixed teaser lengths", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestEpisodeRows(10, func(i int) string {
+				if i == 9 {
+					return digestOverview
+				}
+				return digestOverview[:200]
+			}))
+		}},
+		{name: "dm digest under budget is unchanged", items: 3, wantEmbeds: 3, links: 3, fullTeasers: true, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestEpisodeRows(3, sameOverview))
+		}},
+		{name: "dm non-latin declined requests fit by character count", items: 10, wantEmbeds: 10, links: 1, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestDeclinedRows(10, strings.Repeat("申請作品", 25), strings.Repeat("配信地域外のため", 50)))
+		}},
+		{name: "dm over the embed cap", items: 14, links: 1, build: func() ([]byte, error) {
+			return BuildDiscordDMPayload(digestLongDeclines(14))
+		}},
+		{name: "server channel", items: 10, wantEmbeds: 10, links: 3, build: func() ([]byte, error) {
+			return BuildServerChannelDiscordContent(digestContentGroups(10), false)
+		}},
+		{name: "server channel with an over-long genre", items: 1, wantEmbeds: 1, links: 3, build: func() ([]byte, error) {
+			groups := digestContentGroups(1)
+			groups[0].Meta.Genres = []string{strings.Repeat("ドラマ", 400), "Documentary"}
+			return BuildServerChannelDiscordContent(groups, false)
+		}},
+		{name: "dm non-latin title and reason keep Discord's full limits", items: 1, wantEmbeds: 1, links: 1,
+			fullTitles: true, fullFields: true, build: func() ([]byte, error) {
+				return BuildDiscordDMPayload(digestDeclinedRows(1, strings.Repeat("申請作品", 70), strings.Repeat("配信地域外のため", 140)))
+			}},
+		// A request overview is client-supplied up to the ~1 MiB body cap;
+		// clipping it must not cost time proportional to its length.
+		{name: "request with a 1 MiB overview", items: 1, wantEmbeds: 1, links: 1, build: func() ([]byte, error) {
+			return BuildServerChannelRequestDiscord(ServerChannelEventRequestApproved, RequestEventInfo{
+				TMDBID: 42, MediaType: "movie", Title: "00 Requested Title",
+				Overview: strings.Repeat(digestOverview, 2000),
+			})
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, err := tc.build()
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkDiscordDigest(t, tc, payload)
+		})
+	}
+}
+
+// TestDiscordClipsCountCharacters covers Discord's limits counting
+// characters, not UTF-8 bytes: non-Latin text gets the same room as Latin
+// text, and a character outside the Basic Multilingual Plane (most emoji)
+// counts as two and is never split at the limit.
+func TestDiscordClipsCountCharacters(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		got, want string
+	}{
+		{"accented text at the limit is unchanged", truncateWithEllipsis(strings.Repeat("é", 10), 10), strings.Repeat("é", 10)},
+		{"cjk text over the limit", truncateWithEllipsis(strings.Repeat("申", 11), 10), strings.Repeat("申", 9) + "…"},
+		{"latin text over the limit", truncateWithEllipsis("abcdefghijk", 10), "abcdefghi…"},
+		{"emoji at the limit are unchanged", truncateWithEllipsis(strings.Repeat("😀", 5), 10), strings.Repeat("😀", 5)},
+		{"emoji over the limit", truncateWithEllipsis(strings.Repeat("😀", 6), 10), strings.Repeat("😀", 4) + "…"},
+		{"emoji straddling the limit is dropped whole", truncateWithEllipsis("a😀", 2), "a…"},
+		{"no room beside the ellipsis", truncateWithEllipsis("ab", 1), ""},
+		{"non-latin overview keeps the full teaser", overviewSnippet(strings.Repeat("申", 400)),
+			strings.Repeat("申", discordOverviewLimit-1) + "…"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
+func checkDiscordDigest(t *testing.T, tc discordDigestCase, payload []byte) {
+	t.Helper()
+	var body struct {
+		Content string         `json:"content"`
+		Embeds  []discordEmbed `json:"embeds"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatal(err)
+	}
+	// Discord counts characters of these fields across every embed.
+	total := 0
+	for _, embed := range body.Embeds {
+		total += utf8.RuneCountInString(embed.Title) + utf8.RuneCountInString(embed.Description)
+		if embed.Author != nil {
+			total += utf8.RuneCountInString(embed.Author.Name)
+		}
+		if embed.Footer != nil {
+			total += utf8.RuneCountInString(embed.Footer.Text)
+		}
+		for _, field := range embed.Fields {
+			total += utf8.RuneCountInString(field.Name) + utf8.RuneCountInString(field.Value)
+		}
+	}
+	if total > discordTotalLimit {
+		t.Fatalf("message carries %d embed characters across %d embeds, Discord allows %d",
+			total, len(body.Embeds), discordTotalLimit)
+	}
+	if len(body.Embeds) == 0 || len(body.Embeds) > discordDMMaxEmbeds {
+		t.Fatalf("got %d embeds, want 1..%d", len(body.Embeds), discordDMMaxEmbeds)
+	}
+	if tc.wantEmbeds > 0 && len(body.Embeds) != tc.wantEmbeds {
+		t.Fatalf("got %d embeds, want %d", len(body.Embeds), tc.wantEmbeds)
+	}
+	dropped := 0
+	if body.Content != "" {
+		if _, err := fmt.Sscanf(body.Content, "…and %d more", &dropped); err != nil {
+			t.Fatalf("overflow line %q does not name a count: %v", body.Content, err)
+		}
+	}
+	if len(body.Embeds)+dropped != tc.items {
+		t.Fatalf("%d embeds + %d in the overflow line, want %d items accounted for",
+			len(body.Embeds), dropped, tc.items)
+	}
+	// The newest item always survives.
+	if last := body.Embeds[len(body.Embeds)-1].Title; !strings.HasPrefix(last, fmt.Sprintf("%02d ", tc.items-1)) {
+		t.Fatalf("last embed %q is not the newest item", last)
+	}
+	for _, embed := range body.Embeds {
+		if n := discordTextLen(embed.Title); n > discordTitleLimit || tc.fullTitles && n != discordTitleLimit {
+			t.Fatalf("title carries %d characters, Discord allows %d", n, discordTitleLimit)
+		}
+		for _, field := range embed.Fields {
+			if n := discordTextLen(field.Value); n > discordFieldValueLimit {
+				t.Fatalf("field %q carries %d characters, Discord allows %d", field.Name, n, discordFieldValueLimit)
+			} else if tc.fullFields && field.Name == "Reason" && n != discordFieldValueLimit {
+				t.Fatalf("field %q was clipped to %d characters, Discord allows %d", field.Name, n, discordFieldValueLimit)
+			}
+		}
+		if got := strings.Count(embed.Description, "](https://"); got != tc.links || !strings.HasSuffix(embed.Description, ")") {
+			t.Fatalf("description %q lost its provider links (%d of %d)", embed.Description, got, tc.links)
+		}
+		if tc.fullTeasers && !strings.HasPrefix(embed.Description, overviewSnippet(digestOverview)) {
+			t.Fatalf("under-budget teaser was shortened: %q", embed.Description)
+		}
 	}
 }
 

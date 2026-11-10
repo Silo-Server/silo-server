@@ -31,6 +31,43 @@ func TestBuildBrowsePlanSingleLibraryKeepsFastPathWithDisabledLibraries(t *testi
 	}
 }
 
+func TestBuildBrowsePlanSingleLibraryWithAllowedLibraries(t *testing.T) {
+	plan, earlyEmpty, err := (&BrowseRepository{}).buildBrowsePlan(BrowseFilters{
+		LibraryID:  7,
+		LibraryIDs: []int{3, 7},
+		Sort:       "recently_added",
+		Limit:      20,
+	})
+	if err != nil {
+		t.Fatalf("buildBrowsePlan: %v", err)
+	}
+	if earlyEmpty {
+		t.Fatal("an allowed library must not be treated as empty")
+	}
+	sql, _ := plan.pagedSQL(false)
+	if plan.groupByClause != "" || strings.Contains(sql, "ANY(") || !strings.Contains(sql, "mil.media_folder_id = $1") {
+		t.Fatalf("a library inside the allowed list must browse as a single library; got:\n%s", sql)
+	}
+
+	// Audio and subtitle language matches must still only count files in the
+	// allowed libraries.
+	langPlan, _, err := (&BrowseRepository{}).buildBrowsePlan(BrowseFilters{LibraryID: 7, LibraryIDs: []int{3, 7}, AudioLanguages: []string{"ger"}, Limit: 20})
+	if err != nil {
+		t.Fatalf("buildBrowsePlan: %v", err)
+	}
+	if langSQL, _ := langPlan.pagedSQL(false); !strings.Contains(langSQL, "mf.media_folder_id = ANY") {
+		t.Fatalf("audio language matches must stay limited to allowed libraries; got:\n%s", langSQL)
+	}
+
+	_, earlyEmpty, err = (&BrowseRepository{}).buildBrowsePlan(BrowseFilters{LibraryID: 7, LibraryIDs: []int{3}, Sort: "recently_added"})
+	if err != nil {
+		t.Fatalf("buildBrowsePlan: %v", err)
+	}
+	if !earlyEmpty {
+		t.Fatal("a library outside the allowed list must return nothing")
+	}
+}
+
 func TestFilterWhereClauseDisabledLibrariesUseScopeMembershipTable(t *testing.T) {
 	fromClause, whereClause, _, earlyEmpty := filterWhereClauseForSource(
 		BrowseFilters{DisabledLibraryIDs: []int{9}},

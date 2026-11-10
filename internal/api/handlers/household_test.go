@@ -74,7 +74,7 @@ func TestCanManageHousehold(t *testing.T) {
 		}
 		if pin != "" {
 			if err := store.UpdateProfile(ctx, "primary", userstore.UpdateProfileInput{
-				PIN: &pin,
+				PINHash: storedPIN(t, pin),
 			}); err != nil {
 				t.Fatalf("set pin: %v", err)
 			}
@@ -232,7 +232,7 @@ func TestCanManageHousehold(t *testing.T) {
 		}
 		rating, kidPIN, yes := "PG", "9999", true
 		if err := store.UpdateProfile(ctx, "child", userstore.UpdateProfileInput{
-			MaxContentRating: &rating, IsChild: &yes, PIN: &kidPIN,
+			MaxContentRating: &rating, IsChild: &yes, PINHash: storedPIN(t, kidPIN),
 		}); err != nil {
 			t.Fatalf("edit child: %v", err)
 		}
@@ -240,7 +240,7 @@ func TestCanManageHousehold(t *testing.T) {
 			t.Fatalf("after child edit = (%v, %v), want (true, nil)", ok, err)
 		}
 		newPIN := "4321"
-		if err := store.UpdateProfile(ctx, "primary", userstore.UpdateProfileInput{PIN: &newPIN}); err != nil {
+		if err := store.UpdateProfile(ctx, "primary", userstore.UpdateProfileInput{PINHash: storedPIN(t, newPIN)}); err != nil {
 			t.Fatalf("change primary pin: %v", err)
 		}
 		if _, err := canManageHousehold(householdRequest("primary", false, token), store, tokens); !errors.Is(err, access.ErrProfileUnverified) {
@@ -251,8 +251,14 @@ func TestCanManageHousehold(t *testing.T) {
 	// Nil dependencies must fail closed. A settings handler built without a
 	// token service is not a reason to skip the PIN check.
 	t.Run("pin with no token service may not", func(t *testing.T) {
-		store, _ := setup(t, "1234")
-		_, err := canManageHousehold(householdRequest("primary", false, "tok"), store, nil)
+		store, tokens := setup(t, "1234")
+		token, _, err := tokens.Mint(access.ProfileTokenClaims{
+			UserID: 1, SessionID: "session-1", ProfileID: "primary", PINRevision: pinRevision(t, store, "primary"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = canManageHousehold(householdRequest("primary", false, token), store, nil)
 		if !errors.Is(err, access.ErrProfileUnverified) {
 			t.Fatalf("nil token service err = %v, want ErrProfileUnverified", err)
 		}

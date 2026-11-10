@@ -115,8 +115,9 @@ func TestHWCapabilitiesPublishesCapabilityHash(t *testing.T) {
 	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxExecutionV1) {
 		t.Fatalf("transport features = %v, want progressive remux execution", info.TransportFeatures)
 	}
-	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureHLSSubtitleRenditionV1) {
-		t.Fatalf("transport features = %v, want the HLS subtitle rendition", info.TransportFeatures)
+	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureHLSSubtitleRenditionV1) ||
+		!slices.Contains(info.TransportFeatures, playback.TransportFeatureHLSRemuxSubtitleRenditionV1) {
+		t.Fatalf("transport features = %v, want the HLS subtitle renditions", info.TransportFeatures)
 	}
 	// The hash must describe this payload, not some earlier one.
 	served := info

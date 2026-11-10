@@ -30,7 +30,10 @@ func NewMediaItemLocalizationRepository(pool *pgxpool.Pool) *MediaItemLocalizati
 // taken wholesale (provider data is authoritative for them); overview and
 // tagline respect provenance — a manual value is never overwritten, and an
 // empty incoming value never blanks an existing one (so a provider with no
-// translated overview does not erase an AI or manual translation).
+// translated overview does not erase an AI or manual translation). The one
+// exception is a provider value identical to the base item's: that is a copy
+// of the base text, not a translation, so an empty incoming value clears it
+// and the field falls back to the same base text, open to AI translation.
 func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *models.MediaItemLocalization) error {
 	if loc == nil || loc.ContentID == "" || loc.Language == "" {
 		return fmt.Errorf("invalid media item localization")
@@ -50,6 +53,9 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 			title = EXCLUDED.title,
 			sort_title = EXCLUDED.sort_title,
 			overview = CASE
+				WHEN media_item_localizations.overview_source = 'provider' AND EXCLUDED.overview = ''
+					AND media_item_localizations.overview = (SELECT mi.overview FROM media_items mi WHERE mi.content_id = EXCLUDED.content_id)
+					THEN ''
 				WHEN media_item_localizations.overview_source = 'manual' OR EXCLUDED.overview = ''
 					THEN media_item_localizations.overview
 				ELSE EXCLUDED.overview END,
@@ -58,6 +64,9 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 					THEN media_item_localizations.overview_source
 				ELSE 'provider' END,
 			tagline = CASE
+				WHEN media_item_localizations.tagline_source = 'provider' AND EXCLUDED.tagline = ''
+					AND media_item_localizations.tagline = (SELECT mi.tagline FROM media_items mi WHERE mi.content_id = EXCLUDED.content_id)
+					THEN ''
 				WHEN media_item_localizations.tagline_source = 'manual' OR EXCLUDED.tagline = ''
 					THEN media_item_localizations.tagline
 				ELSE EXCLUDED.tagline END,
@@ -80,6 +89,29 @@ func (r *MediaItemLocalizationRepository) Upsert(ctx context.Context, loc *model
 		loc.LogoPath, loc.LogoSourcePath)
 	if err != nil {
 		return fmt.Errorf("upserting media item localization: %w", err)
+	}
+	return nil
+}
+
+// ClearMatchText empties an item's localized text in every language, after a
+// correction of its match: the text describes the previous title. Upsert can't,
+// since an empty value never blanks stored text. keepTitle and keepText hold the
+// fields an admin locked, and manual translations stay, as Upsert keeps them.
+// Artwork stays for the artwork pass to decide.
+func (r *MediaItemLocalizationRepository) ClearMatchText(ctx context.Context, contentID string, keepTitle, keepText bool) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE media_item_localizations SET
+			title = CASE WHEN $2 THEN title ELSE '' END,
+			sort_title = CASE WHEN $2 THEN sort_title ELSE '' END,
+			overview = CASE WHEN $3 OR overview_source = 'manual' THEN overview ELSE '' END,
+			overview_source = CASE WHEN $3 OR overview_source = 'manual' THEN overview_source ELSE 'provider' END,
+			tagline = CASE WHEN $3 OR tagline_source = 'manual' THEN tagline ELSE '' END,
+			tagline_source = CASE WHEN $3 OR tagline_source = 'manual' THEN tagline_source ELSE 'provider' END,
+			updated_at = NOW()
+		WHERE content_id = $1
+	`, contentID, keepTitle, keepText)
+	if err != nil {
+		return fmt.Errorf("clearing media item localization text: %w", err)
 	}
 	return nil
 }

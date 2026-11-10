@@ -9,6 +9,7 @@ import {
   formatSampleRate,
   mentionsAtmos,
 } from "@/lib/mediaFormat";
+import { t, type MessageKey, type TextValues } from "@/i18n";
 import { videoRangeLabel } from "@/lib/videoRange";
 import type { DeliveryV3, PlanV3 } from "./protocol-v3";
 import {
@@ -18,6 +19,10 @@ import {
   TRANSFORMATION_VIDEO_TO_H264_V3,
 } from "./protocol-v3";
 import type { PlayerAudioTrack, PlayerFileVersion, PlayerVideoTrack, QualityOption } from "./types";
+import { formatDecimal } from "@/lib/numberFormat";
+
+/** `t`, or a component's `useT()` result. */
+type Translate = (id: MessageKey, values?: TextValues) => string;
 
 export interface RuntimePlaybackStats {
   playerWidth?: number;
@@ -67,97 +72,104 @@ export function buildPlaybackInfoSections({
 
   return [
     {
-      title: "Player",
+      title: t("web.player.info.section.player"),
       rows: [
-        { label: "Player", value: browserEngine ? "Browser decoder" : "HTML Video Player" },
-        { label: "Play method", value: formatDelivery(plan.delivery) },
-        { label: "Protocol", value: formatProtocol(streamUrl) },
-        { label: "Stream type", value: formatStreamType(plan) },
-        ...(requestedSource ? [{ label: "Auto-switched from", value: requestedSource }] : []),
+        {
+          label: t("web.player.info.player"),
+          value: browserEngine
+            ? t("web.player.info.playerBrowserDecoder")
+            : t("web.player.info.playerHtmlVideo"),
+        },
+        { label: t("web.player.info.playMethod"), value: formatDelivery(plan.delivery) },
+        { label: t("web.player.info.protocol"), value: formatProtocol(streamUrl) },
+        { label: t("web.player.info.streamType"), value: formatStreamType(plan) },
+        ...(requestedSource
+          ? [{ label: t("web.player.info.autoSwitchedFrom"), value: requestedSource }]
+          : []),
       ],
     },
     {
-      title: "Video Info",
+      title: t("web.player.info.section.video"),
       rows: [
         {
-          label: "Player dimensions",
+          label: t("web.player.info.playerDimensions"),
           value: formatDimensions(runtimeStats.playerWidth, runtimeStats.playerHeight),
         },
         {
-          label: "Video resolution",
+          label: t("web.player.info.videoResolution"),
           value: formatDimensions(runtimeStats.videoWidth, runtimeStats.videoHeight),
         },
         {
-          label: "Dropped frames",
+          label: t("web.player.info.droppedFrames"),
           value: formatFrameCount(runtimeStats.droppedFrames),
         },
         {
-          label: "Corrupted frames",
+          label: t("web.player.info.corruptedFrames"),
           value: formatFrameCount(runtimeStats.corruptedFrames),
         },
       ],
     },
     {
-      title: "Playback Stream Info",
+      title: t("web.player.info.section.stream"),
       rows: [
         {
-          label: "Video codec",
+          label: t("web.player.info.videoCodec"),
           value: formatDeliveredVideoCodec(plan),
         },
         {
-          label: "Audio codec",
+          label: t("web.player.info.audioCodec"),
           value: formatDeliveredAudioCodec(plan),
         },
       ],
     },
     {
-      title: "Current Source File",
+      title: t("web.player.info.section.source"),
       rows: [
         {
-          label: "Container",
+          label: t("web.player.info.container"),
           value: displayValue(currentSourceVersion?.container),
         },
         {
-          label: "Size",
+          label: t("web.player.info.size"),
           value: formatFileSize(currentSourceVersion?.file_size, {
             iecUnits: true,
             fallback: "—",
           }),
         },
         {
-          label: "Bitrate",
+          label: t("web.player.info.bitrate"),
           value: formatMbpsFromKbps(currentSourceVersion?.bitrate),
         },
         {
-          label: "Video codec",
+          label: t("web.player.info.videoCodec"),
           value: formatOriginalVideoCodec(currentSourceVersion, videoTrack),
         },
         {
-          label: "Video bitrate",
+          label: t("web.player.info.videoBitrate"),
           value: formatMbpsFromKbps(videoTrack?.bitrate),
         },
         {
-          label: "Video range type",
+          label: t("web.player.info.videoRangeType"),
           value: formatVideoRangeType(currentSourceVersion, videoTrack),
         },
         {
-          label: "Color range",
+          label: t("web.player.info.colorRange"),
           value: formatColorRange(videoTrack?.color_range),
         },
         {
-          label: "Audio codec",
+          label: t("web.player.info.audioCodec"),
           value: formatOriginalAudioCodec(currentSourceVersion, audioTrack),
         },
         {
-          label: "Audio bitrate",
+          label: t("web.player.info.audioBitrate"),
           value: formatBitrate(audioTrack?.bitrate, "—"),
         },
         {
-          label: "Audio channels",
+          label: t("web.player.info.audioChannels"),
           value: formatAudioChannels(currentSourceVersion, audioTrack),
         },
         {
-          label: "Audio sample rate",
+          label: t("web.player.info.audioSampleRate"),
           value: formatSampleRate(audioTrack?.sample_rate, "—"),
         },
       ],
@@ -174,15 +186,16 @@ export function buildPlaybackInfoSections({
  * not a rung, and it is also how the viewer returns to the source: Auto plays
  * the original file whenever the device and connection can carry it. Older
  * servers still list that source as an "original" entry, which is dropped
- * here.
+ * here. `translate` lets a component that memoizes the entries rebuild them
+ * when the language changes.
  */
-export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
+export function qualityOptionsFromPlanV3(plan: PlanV3, translate: Translate = t): QualityOption[] {
   const rungs = plan.available_qualities
     .filter((quality) => quality.label !== QUALITY_ORIGINAL_V3)
     .map((quality) => ({
       id: quality.label,
       label: quality.display_name || quality.label,
-      sublabel: formatQualityBitrate(quality.bitrate_kbps),
+      sublabel: formatQualityBitrate(translate, quality.bitrate_kbps),
       resolution: quality.height ? `${quality.height}p` : "",
       bitrateKbps: quality.bitrate_kbps ?? 0,
     }));
@@ -193,7 +206,40 @@ export function qualityOptionsFromPlanV3(plan: PlanV3): QualityOption[] {
     return [];
   }
 
-  return [{ id: "auto", label: "Auto", sublabel: "", resolution: "", bitrateKbps: 0 }, ...rungs];
+  return [
+    {
+      id: "auto",
+      label: plan.bandwidth_limit
+        ? translate("bufferingQuality.autoLimited")
+        : translate("web.player.quality.auto"),
+      sublabel: "",
+      resolution: "",
+      bitrateKbps: 0,
+    },
+    ...rungs,
+  ];
+}
+
+/**
+ * The status tags on a quality-menu version row: the version playing now and
+ * the one the viewer asked for, which differ after an automatic switch.
+ */
+export function buildVersionStatusLabels(version: {
+  isCurrentSource: boolean;
+  isRequestedSource: boolean;
+}): string[] {
+  if (version.isCurrentSource && version.isRequestedSource) {
+    return [t("web.player.quality.versionPlaying")];
+  }
+
+  const labels: string[] = [];
+  if (version.isCurrentSource) {
+    labels.push(t("web.player.quality.versionPlaying"));
+  }
+  if (version.isRequestedSource) {
+    labels.push(t("web.player.quality.versionRequested"));
+  }
+  return labels;
 }
 
 /**
@@ -269,13 +315,15 @@ function qualityPreferenceHeight(preference: string): number | null {
 // Quality-menu bitrate label: Mbps with collapsed integers ("8 Mbps", not
 // "8.0 Mbps") — a deliberately different display policy than the canonical
 // formatBitrate/formatMbpsFromKbps in @/lib/mediaFormat.
-function formatQualityBitrate(kbps?: number): string {
+function formatQualityBitrate(translate: Translate, kbps?: number): string {
   if (!isPositive(kbps)) return "";
   if (kbps >= 1000) {
     const mbps = kbps / 1000;
-    return mbps % 1 === 0 ? `${mbps} Mbps` : `${mbps.toFixed(1)} Mbps`;
+    return translate("web.player.quality.bitrateMbps", {
+      mbps: formatDecimal(mbps, mbps % 1 === 0 ? 0 : 1),
+    });
   }
-  return `${kbps} kbps`;
+  return translate("web.player.quality.bitrateKbps", { kbps: kbps });
 }
 
 function formatRequestedSourceVersion(version: PlayerFileVersion): string {
@@ -295,12 +343,12 @@ function formatRequestedSourceVersion(version: PlayerFileVersion): string {
 export function formatDelivery(delivery: DeliveryV3): string {
   switch (delivery) {
     case "original_http":
-      return "Direct Play";
+      return t("web.player.info.delivery.directPlay");
     case "server_remux_progressive":
     case "server_remux_hls":
-      return "Direct Streaming";
+      return t("web.player.info.delivery.directStream");
     case "server_transcode_hls":
-      return "Transcode";
+      return t("web.player.info.delivery.transcode");
   }
 }
 
@@ -314,7 +362,7 @@ export function formatProtocol(streamUrl: string): string {
 }
 
 export function formatStreamType(plan: PlanV3): string {
-  return plan.stream.protocol === "hls" ? "HLS" : "Progressive";
+  return plan.stream.protocol === "hls" ? "HLS" : t("web.player.info.streamTypeProgressive");
 }
 
 export function formatDimensions(width?: number, height?: number): string {
@@ -341,17 +389,20 @@ export function formatFrameCount(value?: number | null): string {
 export function formatDeliveredVideoCodec(plan: PlanV3): string {
   const base = formatCodecLabel(plan.effective_recipe.video_codec);
   if (base === "—") return base;
-  if (plan.delivery === "original_http") return `${base} (direct)`;
-  const transcoded = planTransforms(plan, TRANSFORMATION_VIDEO_TO_H264_V3);
-  return `${base} (${transcoded ? "transcoded" : "copy"})`;
+  return formatDeliveredCodec(base, plan, TRANSFORMATION_VIDEO_TO_H264_V3);
 }
 
 export function formatDeliveredAudioCodec(plan: PlanV3): string {
   const base = formatCodecLabel(plan.effective_recipe.audio_codec);
   if (base === "—") return base;
-  if (plan.delivery === "original_http") return `${base} (direct)`;
-  const transcoded = planTransforms(plan, TRANSFORMATION_AUDIO_TO_AAC_V3);
-  return `${base} (${transcoded ? "transcoded" : "copy"})`;
+  return formatDeliveredCodec(base, plan, TRANSFORMATION_AUDIO_TO_AAC_V3);
+}
+
+function formatDeliveredCodec(codec: string, plan: PlanV3, transformation: string): string {
+  if (plan.delivery === "original_http") return t("web.player.info.codec.direct", { codec });
+  return planTransforms(plan, transformation)
+    ? t("web.player.info.codec.transcoded", { codec })
+    : t("web.player.info.codec.copy", { codec });
 }
 
 function planTransforms(plan: PlanV3, name: string): boolean {
@@ -391,11 +442,11 @@ export function formatVideoRangeType(
 export function formatColorRange(value?: string): string {
   switch (value?.trim().toLowerCase()) {
     case "tv":
-      return "Limited (tv)";
+      return t("web.player.info.colorRangeLimited");
     case "pc":
-      return "Full (pc)";
+      return t("web.player.info.colorRangeFull");
     case "unknown":
-      return "Unknown";
+      return t("web.player.info.colorRangeUnknown");
     default:
       return "—";
   }

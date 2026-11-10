@@ -118,6 +118,7 @@ func (h *Hub) PublishJSON(
 		ProfileID:  opts.ProfileID,
 		AdminOnly:  opts.AdminOnly,
 		AllViewers: opts.AllViewers,
+		V2Only:     opts.V2Only,
 	})
 }
 

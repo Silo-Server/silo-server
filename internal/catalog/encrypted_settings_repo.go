@@ -62,6 +62,8 @@ var SensitiveSettingKeys = map[string]bool{
 	"s3.operational_access_key":   true,
 	"s3.operational_secret_key":   true,
 	"s3.operational_token_secret": true,
+	// The dedicated backup bucket (internal/backup reads it decrypted).
+	"backup.s3.secret_key": true,
 	// A staged storage transition contains a complete target credential bundle.
 	// It is machine-managed and cleared when the transition commits.
 	"storage.transition.target": true,
@@ -76,13 +78,14 @@ var SensitiveSettingKeys = map[string]bool{
 	"mdblist.api_key": true,
 	"introdb.api_key": true,
 
-	// Shared AI endpoint API keys (+ legacy subtitle_ai alias the loader still
-	// falls back to; the legacy row is never renamed because ciphertext is
-	// GCM-bound to its key).
-	"ai.api_key":           true,
-	chatgpt.CredentialsKey: true,
-	"ai.asr_api_key":       true,
-	"subtitle_ai.api_key":  true,
+	// AI provider registry, API keys included. The endpoint keys it replaced
+	// are no longer read, but rows written by older builds stay encrypted
+	// (ciphertext is GCM-bound to its key, so none is ever renamed).
+	config.AIProvidersSettingKey: true,
+	chatgpt.CredentialsKey:       true,
+	"ai.api_key":                 true,
+	"ai.asr_api_key":             true,
+	"subtitle_ai.api_key":        true,
 
 	// Recommendations embedding auth (+ legacy openai alias at db_loader L409).
 	"recommendations.embedding_auth_token": true,
@@ -239,7 +242,42 @@ func (r *EncryptedSettingsRepo) UpdateAtomicInTransaction(
 	ctx context.Context,
 	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
 ) error {
-	encryptedUpdate := func(rawCurrent map[string]string, tx pgx.Tx) (map[string]string, error) {
+	encryptedUpdate := r.encryptedUpdate(update)
+	if inner, ok := r.inner.(interface {
+		UpdateAtomicInTransaction(context.Context, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	}); ok {
+		return inner.UpdateAtomicInTransaction(ctx, encryptedUpdate)
+	}
+	if inner, ok := r.inner.(settingsAtomicUpdater); ok {
+		return inner.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+			return encryptedUpdate(current, nil)
+		})
+	}
+	return errors.New("settings store does not support atomic updates")
+}
+
+// UpdateAtomicWithTx applies the plaintext callback contract inside the
+// caller's transaction, which commits the writes.
+func (r *EncryptedSettingsRepo) UpdateAtomicWithTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	inner, ok := r.inner.(interface {
+		UpdateAtomicWithTx(context.Context, pgx.Tx, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	})
+	if !ok {
+		return errors.New("settings store does not support caller transactions")
+	}
+	return inner.UpdateAtomicWithTx(ctx, tx, r.encryptedUpdate(update))
+}
+
+// encryptedUpdate wraps a plaintext update: stored values are decrypted
+// before it runs and its writes encrypted after.
+func (r *EncryptedSettingsRepo) encryptedUpdate(
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) func(map[string]string, pgx.Tx) (map[string]string, error) {
+	return func(rawCurrent map[string]string, tx pgx.Tx) (map[string]string, error) {
 		current := make(map[string]string, len(rawCurrent))
 		for key, value := range rawCurrent {
 			plain, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
@@ -265,17 +303,6 @@ func (r *EncryptedSettingsRepo) UpdateAtomicInTransaction(
 		}
 		return encrypted, nil
 	}
-	if inner, ok := r.inner.(interface {
-		UpdateAtomicInTransaction(context.Context, func(map[string]string, pgx.Tx) (map[string]string, error)) error
-	}); ok {
-		return inner.UpdateAtomicInTransaction(ctx, encryptedUpdate)
-	}
-	if inner, ok := r.inner.(settingsAtomicUpdater); ok {
-		return inner.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
-			return encryptedUpdate(current, nil)
-		})
-	}
-	return fmt.Errorf("settings store does not support atomic updates")
 }
 
 // SetIfAbsent applies Set's encryption contract to a conditional write: the

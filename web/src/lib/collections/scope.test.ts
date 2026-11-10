@@ -5,7 +5,7 @@ import getAdminCollectionOk from "../../../../contracts/api/v2/fixtures/get_admi
 import getCollectionOk from "../../../../contracts/api/v2/fixtures/get_collection_ok.json";
 import { adminCollectionFromV2 } from "@/api/adminCollections";
 import { collectionFromV2 } from "@/api/personalCollections";
-import type { Collection, LibraryCollection } from "@/api/types";
+import type { Collection, LibraryCollection, QueryDefinition } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
 import { adminKeys, collectionKeys, libraryCollectionKeys } from "@/hooks/queries/keys";
 import {
@@ -41,6 +41,15 @@ function storedQuery(limit: number | undefined) {
     groups: [{ match: "all", rules: [{ field: "genre", op: "is", value: "Comedy" }] }],
     sort: { field: "added_at", order: "desc" },
     ...(limit === undefined ? {} : { limit }),
+  };
+}
+
+/** A new Smart draft's rules with one Genre rule: a Smart collection needs one. */
+function withComedy(draft: { rules?: QueryDefinition }): QueryDefinition {
+  const rules = draft.rules!;
+  return {
+    ...rules,
+    groups: [{ match: "all", rules: [{ field: "genre", op: "is", value: "Comedy" }] }],
   };
 }
 
@@ -188,7 +197,7 @@ describe("create and update send the editor's bodies", () => {
 
   it("creates a server smart collection", async () => {
     const draft = savable(SERVER_SCOPE.toDraft(null, { kind: "smart", libraryId: 1 }));
-    await SERVER_SCOPE.create({ ...draft, name: "New this month" });
+    await SERVER_SCOPE.create({ ...draft, name: "New this month", rules: withComedy(draft) });
     expect(writes()).toEqual(goldens.adminSmartCreate);
   });
 
@@ -237,6 +246,7 @@ describe("create and update send the editor's bodies", () => {
     const result = await PERSONAL_SCOPE.create({
       ...draft,
       name: "Comfort",
+      rules: withComedy(draft),
       artwork: { poster: { file: png("poster.png") } },
     });
     expect(result).toEqual({ id: "c1", warnings: [], failedArtwork: [] });
@@ -426,6 +436,7 @@ describe("invalidate", () => {
     await SERVER_SCOPE.invalidate(client);
     expect(spy.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
       ["libraryCollections"],
+      ["collections", "server"],
       ["catalog"],
       ["admin", "collections"],
       ["admin", "collectionGroups"],

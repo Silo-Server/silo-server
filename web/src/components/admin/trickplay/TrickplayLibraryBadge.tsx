@@ -2,11 +2,13 @@ import { AlertTriangle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import type { AdminTrickplayLibrary } from "@/hooks/queries/admin/trickplay";
+import { useT } from "@/i18n";
 
 import { libraryTrickplayDetail, libraryTrickplayLabel } from "./trickplayStatus";
 
 /** The libraries list's seek-preview badge; renders nothing for a library that makes none. */
 export function TrickplayLibraryBadge({ library }: { library: AdminTrickplayLibrary | undefined }) {
+  const t = useT();
   if (!library) return null;
   const detail = libraryTrickplayDetail(library);
   return (
@@ -17,7 +19,7 @@ export function TrickplayLibraryBadge({ library }: { library: AdminTrickplayLibr
     >
       {library.unusable > 0 ? <AlertTriangle aria-hidden="true" /> : null}
       {libraryTrickplayLabel(library)}
-      <span className="sr-only">. {detail}</span>
+      <span className="sr-only">{t("web.admin.common.trickplay.badge.srDetail", { detail })}</span>
     </Badge>
   );
 }

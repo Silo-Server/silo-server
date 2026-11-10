@@ -7,13 +7,13 @@ import (
 	"log/slog"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -246,11 +246,11 @@ func H264LevelFor(width, height int, frameRate float64, kbps int) int {
 	return h264LevelFor(width, height, frameRate, kbps)
 }
 
-// H264EquivalentKbps is the rate an H.264 encode of a source at sourceKbps in
-// sourceCodec needs for the same quality (sourceEquivalentKbps), or 0 when
-// the source's rate is unknown.
-func H264EquivalentKbps(sourceKbps int, sourceCodec string) int {
-	return sourceEquivalentKbps(SourceDescriptorV3{BitrateKbps: sourceKbps, VideoCodec: sourceCodec}, transcodeCodecH264)
+// EncodeEquivalentKbps is the rate an encode to targetCodec of a source at
+// sourceKbps in sourceCodec needs for the same quality (sourceEquivalentKbps),
+// or 0 when the source's rate is unknown.
+func EncodeEquivalentKbps(sourceKbps int, sourceCodec, targetCodec string) int {
+	return sourceEquivalentKbps(SourceDescriptorV3{BitrateKbps: sourceKbps, VideoCodec: sourceCodec}, targetCodec)
 }
 
 // h264LevelBitrateKbps is the highest cap whose rate and doubled buffer fit
@@ -396,7 +396,7 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 			bin = ffmpegBinary()
 		}
 
-		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd := fspath.CommandContext(ctx, bin, args...)
 		stderr := newBoundedTailBuffer(stderrTailMaxBytes)
 		cmd.Stderr = stderr
 		if logs != nil {

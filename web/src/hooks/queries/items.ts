@@ -1,6 +1,11 @@
-import { getAdminItemImages, applyAdminItemImage } from "@/api/v2/adminImages";
+import {
+  getAdminItemImages,
+  applyAdminItemImage,
+  uploadAdminItemImage,
+  type UploadItemImageType,
+} from "@/api/v2/adminImages";
 import { getAdminItemFiles, splitAdminItem } from "@/api/v2/adminSplit";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useRealtimeEvents } from "@/components/realtimeEventsContext";
 import type {
   ApplyItemImageRequest,
@@ -9,18 +14,26 @@ import type {
   ItemSplitRequest,
   WatchDetail,
 } from "@/api/types";
-import { V2ProblemError, V2TransportError, v2, type V2Result } from "@/api/v2/request";
+import {
+  problemFieldDetail,
+  V2ProblemError,
+  V2TransportError,
+  v2,
+  type V2Result,
+} from "@/api/v2/request";
 import { adminTaskJobFromV2 } from "@/api/v2/adminTasks";
 import { catalogItemDetailFromV2 } from "@/api/v2/catalog";
 import { watchDetailFromV2 } from "@/api/v2/watch";
 import { adminKeys, catalogKeys, episodeKeys, itemKeys, sectionKeys } from "./keys";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import {
   getCachedWatchedInvalidationKeys,
   getWatchedToastMessage,
 } from "@/pages/ItemDetail/watchedState";
 import {
   cancelItemDetailQueries,
+  dropInactiveWatchDetail,
   invalidateMediaSurfaceQueries,
   scheduleMediaSurfaceInvalidation,
   updateCatalogItemDetail,
@@ -88,8 +101,8 @@ export function useRefreshItemMetadata() {
     onMutate: ({ mode }: RefreshItemMetadataVariables): RefreshItemMetadataContext => ({
       toastID: toast.loading(
         mode === "complete"
-          ? "Complete metadata refresh running…"
-          : "Quick metadata refresh running…",
+          ? t("web.item.toast.refreshRunningComplete")
+          : t("web.item.toast.refreshRunningQuick"),
       ),
     }),
     mutationFn: async ({ item, mode }: RefreshItemMetadataVariables) => {
@@ -111,19 +124,22 @@ export function useRefreshItemMetadata() {
       const artworkWarning = result.artwork_cache_warning;
 
       if (artworkWarning) {
-        toast.warning("Metadata refreshed, but artwork caching did not finish", {
+        toast.warning(t("web.item.toast.refreshArtworkWarning"), {
           id: context?.toastID,
           description: artworkWarning,
         });
       } else if (mode === "complete") {
-        toast.success("Complete refresh finished", { id: context?.toastID });
+        toast.success(t("web.item.toast.completeRefreshFinished"), { id: context?.toastID });
       } else if (newFiles > 0) {
         toast.success(
-          `Metadata refreshed. Found ${newFiles} new file version${newFiles === 1 ? "" : "s"}`,
+          t("web.item.toast.refreshedNewFiles", {
+            count: newFiles,
+            new_files: newFiles,
+          }),
           { id: context?.toastID },
         );
       } else {
-        toast.success("Metadata refreshed", { id: context?.toastID });
+        toast.success(t("web.item.toast.refreshed"), { id: context?.toastID });
       }
 
       await Promise.all([
@@ -196,7 +212,7 @@ export function useRefreshItemMetadata() {
       }
     },
     onError: (err, _variables, context) => {
-      toast.error(err instanceof Error ? err.message : "Refresh failed", {
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.refreshFailed"), {
         id: context?.toastID,
       });
     },
@@ -236,12 +252,12 @@ const redetectionToasts = {
   onSuccess: (response: { status: string }) => {
     toast.success(
       response.status === "already_running"
-        ? "Re-detection already running"
-        : "Re-detection started",
+        ? t("web.item.toast.redetectAlreadyRunning")
+        : t("web.item.toast.redetectStarted"),
     );
   },
   onError: (error: unknown) => {
-    toast.error(error instanceof Error ? error.message : "Failed to start re-detection");
+    toast.error(error instanceof Error ? error.message : t("web.item.toast.redetectFailed"));
   },
 };
 
@@ -303,7 +319,6 @@ export interface UpdateItemMetadataRequest {
   air_time?: string | null;
   air_timezone?: string | null;
   air_date?: string | null;
-  status?: string;
   rating_imdb?: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;
@@ -332,10 +347,10 @@ export function useUpdateItemMetadata(contentId: string) {
       void invalidateMediaSurfaceQueries(queryClient, { itemId: contentId }).then(() => {
         bumpHomeRefreshSignal(queryClient);
       });
-      toast.success("Metadata saved");
+      toast.success(t("web.item.toast.metadataSaved"));
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to save metadata");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.saveMetadataFailed"));
     },
   });
 }
@@ -359,6 +374,9 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
         ? v2("POST /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true })
         : v2("DELETE /api/v2/watched/{id}", { path: { id: item.content_id }, keepalive: true }),
     onMutate: async (nextPlayed: boolean) => {
+      // Marking watched no longer always flips the flag (a rewatch stays
+      // watched), so remember what to restore.
+      const previousPlayed = item.user_data?.played ?? !nextPlayed;
       await cancelItemDetailQueries(queryClient, item.content_id);
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
         ...detail,
@@ -370,33 +388,41 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
       }));
+      return { previousPlayed };
     },
     // Revert only this mutation's own field. Restoring a whole snapshot would
     // discard a concurrent favorite/watchlist toggle's optimistic state.
-    onError: (err, nextPlayed) => {
+    onError: (err, nextPlayed, context) => {
+      const previousPlayed = context?.previousPlayed ?? !nextPlayed;
       updateCatalogItemDetail(queryClient, item.content_id, (detail) => ({
         ...detail,
-        user_data: { ...detail.user_data, played: !nextPlayed },
+        user_data: { ...detail.user_data, played: previousPlayed },
         user_state: {
           ...detail.user_state,
-          played: !nextPlayed,
+          played: previousPlayed,
           is_favorite: detail.user_state?.is_favorite ?? false,
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
       }));
-      toast.error(err instanceof Error ? err.message : "Failed to update watched state");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.watchedUpdateFailed"));
     },
     onSuccess: (_data, nextPlayed) => {
       toast.success(getWatchedToastMessage(item, nextPlayed));
     },
-    onSettled: () => {
+    onSettled: (_data, error) => {
       // The detail query has to be refreshed: marking watched also zeroes
       // `position_seconds` and moves season/series counts server-side, and the
-      // optimistic patch above only carries `played`.
+      // optimistic patch above only carries `played`. A mark that landed also
+      // clears the resume position, so a closed player must not start from
+      // its cached one while that refresh waits.
+      const knownRelatedIds = error
+        ? undefined
+        : dropInactiveWatchDetail(queryClient, item.content_id);
       scheduleMediaSurfaceInvalidation(queryClient, {
         itemId: item.content_id,
         watchedKeys: getCachedWatchedInvalidationKeys(queryClient, item),
         skipSimilarItems: true,
+        knownRelatedIds,
       });
     },
   });
@@ -425,9 +451,29 @@ export function useSearchItemMatchCandidates(contentId: string) {
       })),
     retry: false,
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Match search failed");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.matchSearchFailed"));
     },
     meta: { queryClient },
+  });
+}
+
+/**
+ * The title, year, and provider IDs the scanner read from the item's folder
+ * and file names in the given library: what Match Item suggests searching
+ * instead of the item's current, possibly wrong, match.
+ */
+export function useItemMatchHints(contentId: string | undefined, libraryId: number | undefined) {
+  return useQuery({
+    queryKey: itemKeys.matchHints(contentId ?? "", libraryId),
+    queryFn: ({ signal }) =>
+      v2("GET /api/v2/admin/items/{id}/match/hints", {
+        path: { id: contentId ?? "" },
+        query: { library_id: libraryId == null ? undefined : String(libraryId) },
+        signal,
+      }),
+    enabled: Boolean(contentId),
+    staleTime: 30_000,
+    retry: false,
   });
 }
 
@@ -462,7 +508,7 @@ export function useApplyItemMatch() {
     },
     retry: false,
     onSuccess: async (result, { item, onReplaced }) => {
-      toast.success("Match applied successfully");
+      toast.success(t("web.item.toast.matchApplied"));
       const adminLists = Promise.all([
         queryClient.invalidateQueries({ queryKey: adminKeys.staleMediaIDs() }),
         queryClient.invalidateQueries({ queryKey: adminKeys.unmatchedItems() }),
@@ -541,7 +587,7 @@ export function useApplyItemMatch() {
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to apply match");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.matchApplyFailed"));
     },
   });
 }
@@ -567,7 +613,10 @@ export function useSplitItem() {
     onSuccess: async (result, { contentId }) => {
       if (result.dry_run) return;
       toast.success(
-        `Moved ${result.files_moved} file${result.files_moved === 1 ? "" : "s"} to a separate item`,
+        t("web.item.toast.splitMoved", {
+          count: result.files_moved,
+          files_moved: result.files_moved,
+        }),
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["items", "detail", contentId] }),
@@ -578,7 +627,7 @@ export function useSplitItem() {
       ]);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to split item");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.splitFailed"));
     },
   });
 }
@@ -596,6 +645,45 @@ export function useItemImages(contentId: string | undefined, enabled = true) {
 
 type ApplyImageItem = Pick<ItemDetail, "content_id" | "type" | "series_id" | "season_number">;
 
+// A validation problem's first field detail says why an image was refused;
+// its summary only says that it was.
+function imageErrorMessage(err: unknown, fallback: string) {
+  if (err instanceof V2ProblemError) {
+    const field = err.problem.errors?.[0];
+    return field ? problemFieldDetail(field) : err.message;
+  }
+  return err instanceof Error ? err.message : fallback;
+}
+
+// Refreshes every view that shows the item's artwork, and the series' views
+// for a season or episode.
+async function invalidateAppliedImage(queryClient: QueryClient, item: ApplyImageItem) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: adminKeys.itemImages(item.content_id) }),
+    queryClient.invalidateQueries({ queryKey: ["items", "detail", item.content_id] }),
+    queryClient.invalidateQueries({
+      queryKey: ["catalog", "items", item.content_id, "detail"],
+    }),
+    queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", item.content_id] }),
+    queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
+    queryClient.invalidateQueries({ queryKey: sectionKeys.all }),
+  ]);
+
+  // Cascade for seasons/episodes to parent series.
+  if ((item.type === "season" || item.type === "episode") && item.series_id) {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["items", "detail", item.series_id] }),
+      queryClient.invalidateQueries({
+        queryKey: ["catalog", "items", item.series_id, "detail"],
+      }),
+      queryClient.invalidateQueries({ queryKey: episodeKeys.seasons(item.series_id) }),
+      queryClient.invalidateQueries({
+        queryKey: ["catalog", "series", item.series_id, "seasons"],
+      }),
+    ]);
+  }
+}
+
 export function useApplyItemImage() {
   const queryClient = useQueryClient();
 
@@ -609,35 +697,35 @@ export function useApplyItemImage() {
     }) => applyAdminItemImage(item.content_id, request),
     retry: false,
     onSuccess: async (_, { item }) => {
-      toast.success("Image applied successfully");
-
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: adminKeys.itemImages(item.content_id) }),
-        queryClient.invalidateQueries({ queryKey: ["items", "detail", item.content_id] }),
-        queryClient.invalidateQueries({
-          queryKey: ["catalog", "items", item.content_id, "detail"],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["items", "watchDetail", item.content_id] }),
-        queryClient.invalidateQueries({ queryKey: catalogKeys.all }),
-        queryClient.invalidateQueries({ queryKey: sectionKeys.all }),
-      ]);
-
-      // Cascade for seasons/episodes to parent series.
-      if ((item.type === "season" || item.type === "episode") && item.series_id) {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["items", "detail", item.series_id] }),
-          queryClient.invalidateQueries({
-            queryKey: ["catalog", "items", item.series_id, "detail"],
-          }),
-          queryClient.invalidateQueries({ queryKey: episodeKeys.seasons(item.series_id) }),
-          queryClient.invalidateQueries({
-            queryKey: ["catalog", "series", item.series_id, "seasons"],
-          }),
-        ]);
-      }
+      toast.success(t("web.item.toast.imageApplied"));
+      await invalidateAppliedImage(queryClient, item);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to apply image");
+      toast.error(imageErrorMessage(err, t("web.item.toast.imageApplyFailed")));
+    },
+  });
+}
+
+export function useUploadItemImage() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      item,
+      type,
+      file,
+    }: {
+      item: ApplyImageItem;
+      type: UploadItemImageType;
+      file: File;
+    }) => uploadAdminItemImage(item.content_id, type, file),
+    retry: false,
+    onSuccess: async (_, { item }) => {
+      toast.success(t("web.item.toast.imageUploaded"));
+      await invalidateAppliedImage(queryClient, item);
+    },
+    onError: (err) => {
+      toast.error(imageErrorMessage(err, t("web.item.toast.imageUploadFailed")));
     },
   });
 }
@@ -672,7 +760,7 @@ export function useTranslateItemMetadata(contentId: string) {
       });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : "Failed to start translation");
+      toast.error(err instanceof Error ? err.message : t("web.item.toast.translateFailed"));
     },
   });
 }

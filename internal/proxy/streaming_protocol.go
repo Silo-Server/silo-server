@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/workerprotocol"
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -59,7 +60,8 @@ func ProtocolStreaming() []workerprotocol.Operation {
 			switch mount.kind {
 			case kindRemux, kindAudio, kindIdentity:
 				op.Parameters = append(op.Parameters, &huma.Param{Name: seekQuery, In: queryParameter, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Existing progressive seek interpretation; proxy-local and remote-node validation differ."})
-				op.Description += "Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. Local proxy HEAD still starts and drains remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. "
+				op.Parameters = append(op.Parameters, &huma.Param{Name: playback.RemuxRangeQueryParam, In: queryParameter, Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{playback.RemuxRangeRefuse}}, Description: "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin."})
+				op.Description += "Progressive remux streams MP4/audio MP4 locally or relays to the selected transcode transport. Local seek parse failure defaults to zero; local Range/conditional headers are not a resumable-file contract. A URL carrying remux_range=refuse (progressive_range_refusal_v1) answers a GET whose Range starts past byte 0, or is a suffix range, with 409 before any work starts or is relayed; without it that range streams from the origin. Local proxy HEAD answers with the stream headers without starting remux work; remote-node HEAD validates authority without starting an encoder. Failures after200 can truncate output. "
 				if mount.kind == kindRemux {
 					op.Description += "Audio-downmix-v2 recipes are refused404 here and require the versioned audio route. "
 				}

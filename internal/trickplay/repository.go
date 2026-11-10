@@ -208,6 +208,10 @@ type Published struct {
 	// Refined counts the cells a repair read again (see
 	// mediasample.SheetFrames); it is logged, not stored.
 	Refined int
+	// DeliveryScope is the external delivery scope every sheet was fetched
+	// through before publishing, or empty when none was (see
+	// Service.SetExternalDelivery).
+	DeliveryScope string
 }
 
 // Publish makes the claim's uploaded revision of fileID the one served, and
@@ -236,10 +240,11 @@ func (r *Repository) Publish(ctx context.Context, fileID int, leaseToken string,
 			    published_duration = source_duration, published_expires_at = NULL, store_identity = $3,
 			    width = $4, height = $5, tile_columns = $6, tile_rows = $7, interval_ms = $8,
 			    thumbnail_count = $9, sheet_count = $10, bandwidth = $11, sheet_bytes = $12,
-			    decoder = $13, filled = $14, generated_at = now(), updated_at = now()
+			    decoder = $13, filled = $14, delivery_scope = NULLIF($15, ''), delivery_checked_at = now(),
+			    generated_at = now(), updated_at = now()
 			WHERE media_file_id = $1`,
 			fileID, p.Recipe.String(), p.StoreIdentity, p.Recipe.Width, p.Height, columns, rows, p.Recipe.IntervalMS,
-			p.Count, len(p.SheetBytes), p.Recipe.Bandwidth(p.SheetBytes), total, p.Decoder, p.Filled)
+			p.Count, len(p.SheetBytes), p.Recipe.Bandwidth(p.SheetBytes), total, p.Decoder, p.Filled, p.DeliveryScope)
 		if err != nil {
 			return false, fmt.Errorf("publish trickplay: %w", err)
 		}
@@ -258,7 +263,7 @@ const (
 	Unusable
 	// Released returns the file to the queue after a delay without counting
 	// a failure: the cause was this server's, such as a shutdown or no
-	// transcode node to run on.
+	// transcode node able to run the work.
 	Released
 )
 
@@ -557,7 +562,7 @@ func (r *Repository) Manifests(ctx context.Context, fileIDs []int, storeIdentity
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT t.media_file_id, t.revision, t.width, t.height, t.tile_columns, t.tile_rows, t.interval_ms,
-		       t.thumbnail_count, t.sheet_count, COALESCE(t.bandwidth, 0)
+		       t.thumbnail_count, t.sheet_count, COALESCE(t.bandwidth, 0), COALESCE(t.delivery_scope, '')
 		FROM public.media_file_trickplay t
 		JOIN public.media_files mf ON mf.id = t.media_file_id
         JOIN public.media_folders f ON f.id = mf.media_folder_id
@@ -577,12 +582,64 @@ func (r *Repository) Manifests(ctx context.Context, fileIDs []int, storeIdentity
 	for rows.Next() {
 		var m Manifest
 		if err := rows.Scan(&m.FileID, &m.Revision, &m.Width, &m.Height, &m.TileColumns, &m.TileRows, &m.IntervalMS,
-			&m.ThumbnailCount, &m.SheetCount, &m.Bandwidth); err != nil {
+			&m.ThumbnailCount, &m.SheetCount, &m.Bandwidth, &m.DeliveryScope); err != nil {
 			return nil, err
 		}
 		manifests[m.FileID] = m
 	}
 	return manifests, rows.Err()
+}
+
+// DeliveryCheck is a published revision whose sheets are not yet confirmed
+// fetchable through the current external delivery endpoint.
+type DeliveryCheck struct {
+	FileID     int
+	Revision   int64
+	SheetCount int
+}
+
+// ClaimDeliveryChecks returns up to limit revisions published into
+// storeIdentity and not confirmed under scope, least recently checked first,
+// skipping any checked within recheck. Claiming marks them checked, so other
+// servers skip them and one that is not yet fetchable waits recheck.
+func (r *Repository) ClaimDeliveryChecks(ctx context.Context, storeIdentity, scope string, recheck time.Duration, limit int) ([]DeliveryCheck, error) {
+	rows, err := r.pool.Query(ctx, `
+		WITH due AS (
+			SELECT media_file_id FROM public.media_file_trickplay
+			WHERE revision IS NOT NULL AND store_identity = $1 AND delivery_scope IS DISTINCT FROM $2
+			  AND (delivery_checked_at IS NULL OR delivery_checked_at <= now() - make_interval(secs => $3))
+			ORDER BY delivery_checked_at NULLS FIRST, media_file_id
+			LIMIT $4 FOR UPDATE SKIP LOCKED
+		)
+		UPDATE public.media_file_trickplay t SET delivery_checked_at = now()
+		FROM due WHERE t.media_file_id = due.media_file_id
+		RETURNING t.media_file_id, t.revision, COALESCE(t.sheet_count, 0)`,
+		storeIdentity, scope, recheck.Seconds(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("claim trickplay delivery checks: %w", err)
+	}
+	defer rows.Close()
+	var checks []DeliveryCheck
+	for rows.Next() {
+		var check DeliveryCheck
+		if err := rows.Scan(&check.FileID, &check.Revision, &check.SheetCount); err != nil {
+			return nil, err
+		}
+		checks = append(checks, check)
+	}
+	return checks, rows.Err()
+}
+
+// RecordDelivery records that every sheet of fileID's revision is fetchable
+// under scope. A revision replaced since it was claimed is left alone.
+func (r *Repository) RecordDelivery(ctx context.Context, fileID int, revision int64, storeIdentity, scope string) error {
+	if _, err := r.pool.Exec(ctx, `
+		UPDATE public.media_file_trickplay SET delivery_scope = $3
+		WHERE media_file_id = $1 AND revision = $2 AND store_identity = $4`,
+		fileID, revision, scope, storeIdentity); err != nil {
+		return fmt.Errorf("record trickplay delivery: %w", err)
+	}
+	return nil
 }
 
 // Regenerate requeues fileIDs ahead of the backlog, clearing any backoff,

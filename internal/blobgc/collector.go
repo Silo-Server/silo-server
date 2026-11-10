@@ -121,7 +121,7 @@ func (c *Collector) collectOne(ctx context.Context, stats *CollectStats) (bool, 
 		stats.Kept++
 		return false, c.dequeue(ctx, tx, prefix)
 	}
-	removed, err := c.deleteGroup(ctx, prefix)
+	removed, err := c.deleteGroup(ctx, ns.storeOr(c.store), prefix)
 	if err != nil {
 		return false, c.retry(ctx, tx, prefix, attempts, err, stats)
 	}
@@ -132,19 +132,19 @@ func (c *Collector) collectOne(ctx context.Context, stats *CollectStats) (bool, 
 
 // deleteGroup verifies exact object deletions separately from directory
 // deletions: S3 prefix operations append a slash and cannot address an image.
-func (c *Collector) deleteGroup(ctx context.Context, group string) (int, error) {
+func (c *Collector) deleteGroup(ctx context.Context, store Store, group string) (int, error) {
 	if strings.HasSuffix(group, "/") {
-		removed, err := c.store.DeletePrefix(ctx, group)
+		removed, err := store.DeletePrefix(ctx, group)
 		if err == nil {
-			err = c.checkEmpty(ctx, group)
+			err = checkEmpty(ctx, store, group)
 		}
 		return removed, err
 	}
-	removed, err := c.store.Delete(ctx, []string{group})
+	removed, err := store.Delete(ctx, []string{group})
 	if err != nil {
 		return removed, err
 	}
-	if _, err := c.store.Stat(ctx, group); errors.Is(err, blobstore.ErrNotFound) {
+	if _, err := store.Stat(ctx, group); errors.Is(err, blobstore.ErrNotFound) {
 		return removed, nil
 	} else if err != nil {
 		return removed, fmt.Errorf("stat after delete: %w", err)
@@ -152,9 +152,9 @@ func (c *Collector) deleteGroup(ctx context.Context, group string) (int, error) 
 	return removed, fmt.Errorf("object %s remains after delete", group)
 }
 
-// checkEmpty confirms storage holds nothing under prefix any more.
-func (c *Collector) checkEmpty(ctx context.Context, prefix string) error {
-	left, _, err := c.store.List(ctx, prefix, "", 1)
+// checkEmpty confirms store holds nothing under prefix any more.
+func checkEmpty(ctx context.Context, store Store, prefix string) error {
+	left, _, err := store.List(ctx, prefix, "", 1)
 	if err != nil {
 		return fmt.Errorf("list after delete: %w", err)
 	}

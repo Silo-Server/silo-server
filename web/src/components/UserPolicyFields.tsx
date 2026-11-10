@@ -27,6 +27,7 @@ import {
   type PlaybackQualityPreset,
 } from "@/lib/playback-quality";
 import { formatStreamBitrateLimit } from "@/lib/streamBitrateLimit";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 
 // Per-user policy overrides. null = no override, so the field takes its
 // default (see PolicyDefaultSource); a concrete value is an explicit override
@@ -168,28 +169,38 @@ export function policyDefaultSource(
 
 const DEFAULT_SOURCE_TEXT: Record<
   PolicyDefaultSource,
-  { prefix: string; unknown: string; allLibraries: string; revert: string; quality: string }
+  {
+    value: MessageKey;
+    unknown: MessageKey;
+    allLibraries: MessageKey;
+    limitHelp: MessageKey;
+    limitHelpMin: MessageKey;
+    quality: MessageKey;
+  }
 > = {
   group: {
-    prefix: "Inherited",
-    unknown: "Inherited from group",
-    allLibraries: "Inherit from group",
-    revert: "inherit",
-    quality: "Uses the access group's quality ceiling.",
+    value: "web.profiles.userPolicy.groupValue",
+    unknown: "web.profiles.userPolicy.groupUnknown",
+    allLibraries: "web.profiles.userPolicy.groupAllLibraries",
+    limitHelp: "web.profiles.userPolicy.groupLimitHelp",
+    limitHelpMin: "web.profiles.userPolicy.groupLimitHelpMin",
+    quality: "web.profiles.userPolicy.groupQuality",
   },
   admin: {
-    prefix: "Admin default",
-    unknown: "Admin default",
-    allLibraries: "Admin default",
-    revert: "use the admin default",
-    quality: "Uses the admin default quality ceiling.",
+    value: "web.profiles.userPolicy.adminValue",
+    unknown: "web.profiles.userPolicy.adminDefault",
+    allLibraries: "web.profiles.userPolicy.adminDefault",
+    limitHelp: "web.profiles.userPolicy.adminLimitHelp",
+    limitHelpMin: "web.profiles.userPolicy.adminLimitHelpMin",
+    quality: "web.profiles.userPolicy.adminQuality",
   },
   server: {
-    prefix: "Server default",
-    unknown: "Server default",
-    allLibraries: "Server default",
-    revert: "use the server default",
-    quality: "Uses the server default quality ceiling.",
+    value: "web.profiles.userPolicy.serverValue",
+    unknown: "web.profiles.userPolicy.serverDefault",
+    allLibraries: "web.profiles.userPolicy.serverDefault",
+    limitHelp: "web.profiles.userPolicy.serverLimitHelp",
+    limitHelpMin: "web.profiles.userPolicy.serverLimitHelpMin",
+    quality: "web.profiles.userPolicy.serverQuality",
   },
 };
 
@@ -211,7 +222,12 @@ interface PolicyContext {
 // so the form keeps these drafts itself and refuses to save while any remain,
 // even when the Limits tab is not mounted and native validation cannot see the
 // box. Keeping the text, not just a flag, lets a remounted field show it again.
-export type LimitPolicyKey = "maxStreams" | "maxTranscodes" | "maxProfiles";
+export type LimitPolicyKey =
+  | "maxStreams"
+  | "maxTranscodes"
+  | "maxRemoteStreamBitrate"
+  | "maxLocalStreamBitrate"
+  | "maxProfiles";
 
 export interface LimitValidity {
   invalidLimitDrafts: ReadonlyMap<LimitPolicyKey, string>;
@@ -219,9 +235,13 @@ export interface LimitValidity {
   onInvalidLimitDraftChange: (key: LimitPolicyKey, draft: string | undefined) => void;
 }
 
-function defaultHint(source: PolicyDefaultSource, effectiveText: string | undefined): string {
+function defaultHint(
+  t: Translate,
+  source: PolicyDefaultSource,
+  effectiveText: string | undefined,
+): string {
   const text = DEFAULT_SOURCE_TEXT[source];
-  return effectiveText === undefined ? text.unknown : `${text.prefix}: ${effectiveText}`;
+  return effectiveText === undefined ? t(text.unknown) : t(text.value, { value: effectiveText });
 }
 
 const INHERIT = "inherit" as const;
@@ -243,6 +263,7 @@ function BooleanPolicyRow({
   effectiveValue?: boolean;
   disabled?: boolean;
 }) {
+  const t = useT();
   const id = useId();
   const selectValue = value === null ? INHERIT : value ? "allowed" : "blocked";
   return (
@@ -258,19 +279,24 @@ function BooleanPolicyRow({
       >
         <SelectTrigger
           id={id}
-          className="max-w-full min-w-40 shrink-0 text-left whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none"
+          className="max-w-full min-w-40 shrink-0 text-start whitespace-normal data-[size=default]:h-auto data-[size=default]:min-h-9 *:data-[slot=select-value]:line-clamp-none"
         >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={INHERIT}>
             {defaultHint(
+              t,
               source,
-              effectiveValue === undefined ? undefined : effectiveValue ? "Allowed" : "Not allowed",
+              effectiveValue === undefined
+                ? undefined
+                : effectiveValue
+                  ? t("web.profiles.userPolicy.allowed")
+                  : t("web.profiles.userPolicy.notAllowed"),
             )}
           </SelectItem>
-          <SelectItem value="allowed">Allowed</SelectItem>
-          <SelectItem value="blocked">Not allowed</SelectItem>
+          <SelectItem value="allowed">{t("web.profiles.userPolicy.allowed")}</SelectItem>
+          <SelectItem value="blocked">{t("web.profiles.userPolicy.notAllowed")}</SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -303,6 +329,7 @@ function PolicyOverrideField({
   defaultText: string | undefined;
   children: ReactNode;
 }) {
+  const t = useT();
   const overrideId = `${id}-override`;
   return (
     <div className="space-y-1">
@@ -310,7 +337,7 @@ function PolicyOverrideField({
         <Label htmlFor={id}>{label}</Label>
         <div className="flex items-center gap-2">
           <Label htmlFor={overrideId} className="text-muted-foreground text-xs">
-            Override
+            {t("web.profiles.userPolicy.override")}
           </Label>
           <Switch id={overrideId} checked={overridden} onCheckedChange={onOverriddenChange} />
         </div>
@@ -319,7 +346,7 @@ function PolicyOverrideField({
         children
       ) : (
         <p className="text-muted-foreground border-border rounded-md border border-dashed px-3 py-2 text-sm">
-          {defaultHint(source, defaultText)}
+          {defaultHint(t, source, defaultText)}
         </p>
       )}
     </div>
@@ -349,6 +376,7 @@ function LimitPolicyField({
   invalidDraft: string | undefined;
   onInvalidDraftChange: (draft: string | undefined) => void;
 }) {
+  const t = useT();
   const id = useId();
   // Override is tracked locally because "overriding, but nothing typed yet" has
   // no representation in UserPolicyState: while the box is empty the field
@@ -360,9 +388,11 @@ function LimitPolicyField({
   const draftValue = limitDraftValue(draft, min);
   const help =
     draftValue === null
-      ? `Enter a whole number${min > 0 ? ` of at least ${min}` : ""}, or turn Override off to ${DEFAULT_SOURCE_TEXT[source].revert}.`
+      ? min > 0
+        ? t(DEFAULT_SOURCE_TEXT[source].limitHelpMin, { min: min })
+        : t(DEFAULT_SOURCE_TEXT[source].limitHelp)
       : min === 0
-        ? "0 = unlimited"
+        ? t("web.profiles.userPolicy.zeroUnlimited")
         : undefined;
 
   function handleOverrideChange(checked: boolean) {
@@ -400,7 +430,7 @@ function LimitPolicyField({
         effectiveValue === undefined
           ? undefined
           : effectiveValue === 0
-            ? "Unlimited"
+            ? t("web.profiles.userPolicy.unlimited")
             : String(effectiveValue)
       }
     >
@@ -425,6 +455,8 @@ function StreamBitratePolicyField({
   source,
   effectiveValue,
   disabled,
+  invalidDraft,
+  onInvalidDraftChange,
 }: {
   label: string;
   value: number | null;
@@ -432,16 +464,22 @@ function StreamBitratePolicyField({
   source: PolicyDefaultSource;
   effectiveValue?: number;
   disabled?: boolean;
+  // Same contract as LimitPolicyField: the custom Mbps text left invalid when
+  // the field last unmounted, or undefined.
+  invalidDraft: string | undefined;
+  onInvalidDraftChange: (draft: string | undefined) => void;
 }) {
   const id = useId();
   // Same override model as LimitPolicyField: turning Override on seeds the
   // value the field already resolves to, and with no hint the field keeps its
-  // default until the admin picks a limit.
-  const [overridden, setOverridden] = useState(value !== null);
+  // default until the admin picks a limit. That unpicked state is reported as
+  // an empty draft, so the form refuses to save it from another tab too.
+  const [overridden, setOverridden] = useState(value !== null || invalidDraft !== undefined);
 
   function handleOverrideChange(checked: boolean) {
     setOverridden(checked);
     onValueChange(checked ? (effectiveValue ?? null) : null);
+    onInvalidDraftChange(checked && effectiveValue === undefined ? "" : undefined);
   }
 
   return (
@@ -460,11 +498,13 @@ function StreamBitratePolicyField({
         label={label}
         value={value}
         disabled={disabled}
-        // A custom box without a valid value keeps the last one; the form's
-        // required/pattern validation blocks saving until it is fixed.
+        // A custom box without a valid value keeps the last one in the policy
+        // state; the form refuses to save while its invalid draft remains.
         onValueChange={(kbps) => {
           if (kbps !== null) onValueChange(kbps);
         }}
+        invalidDraft={invalidDraft}
+        onInvalidDraftChange={onInvalidDraftChange}
       />
     </PolicyOverrideField>
   );
@@ -479,25 +519,30 @@ export function PolicyAccessFields({
   libraries,
   disabled,
 }: PolicyContext & { libraries: Library[] }) {
+  const t = useT();
   return (
     <>
       <LibraryAccessSelector
         libraries={libraries}
         value={state.libraryIDs}
         onChange={(libraryIDs) => onChange({ ...state, libraryIDs })}
-        allLabel={DEFAULT_SOURCE_TEXT[source].allLibraries}
+        allLabel={t(DEFAULT_SOURCE_TEXT[source].allLibraries)}
         emptyHint={defaultHint(
+          t,
           source,
           effective?.library_ids === undefined
             ? undefined
             : effective.library_ids === null
-              ? "All libraries"
-              : `${effective.library_ids.length} libraries`,
+              ? t("web.profiles.libraryAccess.allLibraries")
+              : t("web.profiles.libraries.count", {
+                  count: effective.library_ids.length,
+                  count_text: effective.library_ids.length,
+                }),
         )}
       />
       <div className="grid gap-2 sm:grid-cols-2">
         <BooleanPolicyRow
-          label="Downloads"
+          label={t("web.profiles.userPolicy.downloads")}
           value={state.downloadAllowed}
           onValueChange={(downloadAllowed) => onChange({ ...state, downloadAllowed })}
           source={source}
@@ -505,7 +550,7 @@ export function PolicyAccessFields({
           disabled={disabled}
         />
         <BooleanPolicyRow
-          label="Download Transcodes"
+          label={t("web.profiles.userPolicy.downloadTranscodes")}
           value={state.downloadTranscodeAllowed}
           onValueChange={(downloadTranscodeAllowed) =>
             onChange({ ...state, downloadTranscodeAllowed })
@@ -516,8 +561,8 @@ export function PolicyAccessFields({
         />
       </div>
       <BooleanPolicyRow
-        label="Media Requests"
-        description="Request new movies and series when requests are enabled."
+        label={t("web.profiles.userPolicy.mediaRequests")}
+        description={t("web.profiles.userPolicy.mediaRequestsHint")}
         value={state.requestsAllowed}
         onValueChange={(requestsAllowed) => onChange({ ...state, requestsAllowed })}
         source={source}
@@ -538,6 +583,7 @@ export function PolicyLimitFields({
   invalidLimitDrafts,
   onInvalidLimitDraftChange,
 }: PolicyContext & LimitValidity) {
+  const t = useT();
   const qualityId = useId();
   const qualityValue: PlaybackQualityPreset | typeof INHERIT =
     state.maxPlaybackQuality === null
@@ -547,7 +593,7 @@ export function PolicyLimitFields({
     <>
       <div className="grid gap-3 sm:grid-cols-2">
         <LimitPolicyField
-          label="Max Streams"
+          label={t("web.profiles.userPolicy.maxStreams")}
           value={state.maxStreams}
           onValueChange={(maxStreams) => onChange({ ...state, maxStreams })}
           source={source}
@@ -556,7 +602,7 @@ export function PolicyLimitFields({
           onInvalidDraftChange={(draft) => onInvalidLimitDraftChange("maxStreams", draft)}
         />
         <LimitPolicyField
-          label="Max Transcodes"
+          label={t("web.profiles.userPolicy.maxTranscodes")}
           value={state.maxTranscodes}
           onValueChange={(maxTranscodes) => onChange({ ...state, maxTranscodes })}
           source={source}
@@ -565,7 +611,7 @@ export function PolicyLimitFields({
           onInvalidDraftChange={(draft) => onInvalidLimitDraftChange("maxTranscodes", draft)}
         />
         <StreamBitratePolicyField
-          label="Max remote stream bitrate"
+          label={t("web.profiles.userPolicy.maxRemoteBitrate")}
           value={state.maxRemoteStreamBitrateKbps}
           onValueChange={(maxRemoteStreamBitrateKbps) =>
             onChange({ ...state, maxRemoteStreamBitrateKbps })
@@ -573,9 +619,13 @@ export function PolicyLimitFields({
           source={source}
           effectiveValue={effective?.max_remote_stream_bitrate_kbps}
           disabled={disabled}
+          invalidDraft={invalidLimitDrafts.get("maxRemoteStreamBitrate")}
+          onInvalidDraftChange={(draft) =>
+            onInvalidLimitDraftChange("maxRemoteStreamBitrate", draft)
+          }
         />
         <StreamBitratePolicyField
-          label="Max local stream bitrate"
+          label={t("web.profiles.userPolicy.maxLocalBitrate")}
           value={state.maxLocalStreamBitrateKbps}
           onValueChange={(maxLocalStreamBitrateKbps) =>
             onChange({ ...state, maxLocalStreamBitrateKbps })
@@ -583,11 +633,15 @@ export function PolicyLimitFields({
           source={source}
           effectiveValue={effective?.max_local_stream_bitrate_kbps}
           disabled={disabled}
+          invalidDraft={invalidLimitDrafts.get("maxLocalStreamBitrate")}
+          onInvalidDraftChange={(draft) =>
+            onInvalidLimitDraftChange("maxLocalStreamBitrate", draft)
+          }
         />
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <BooleanPolicyRow
-          label="Video Transcoding"
+          label={t("web.profiles.userPolicy.videoTranscoding")}
           value={state.transcodeAllowed}
           onValueChange={(transcodeAllowed) => onChange({ ...state, transcodeAllowed })}
           source={source}
@@ -595,8 +649,8 @@ export function PolicyLimitFields({
           disabled={disabled}
         />
         <BooleanPolicyRow
-          label="Audio Transcoding"
-          description="Audio conversion without video encoding."
+          label={t("web.profiles.userPolicy.audioTranscoding")}
+          description={t("web.profiles.userPolicy.audioTranscodingHint")}
           value={state.audioTranscodeAllowed}
           onValueChange={(audioTranscodeAllowed) => onChange({ ...state, audioTranscodeAllowed })}
           source={source}
@@ -605,7 +659,7 @@ export function PolicyLimitFields({
         />
       </div>
       <div className="space-y-1">
-        <Label htmlFor={qualityId}>Max Playback Quality</Label>
+        <Label htmlFor={qualityId}>{t("web.profiles.userPolicy.maxPlaybackQuality")}</Label>
         <Select
           disabled={disabled}
           value={qualityValue}
@@ -625,6 +679,7 @@ export function PolicyLimitFields({
           <SelectContent>
             <SelectItem value={INHERIT}>
               {defaultHint(
+                t,
                 source,
                 effective?.max_playback_quality === undefined
                   ? undefined
@@ -640,12 +695,12 @@ export function PolicyLimitFields({
         </Select>
         <p className="text-muted-foreground text-xs">
           {qualityValue === INHERIT
-            ? DEFAULT_SOURCE_TEXT[source].quality
+            ? t(DEFAULT_SOURCE_TEXT[source].quality)
             : PLAYBACK_QUALITY_OPTIONS.find((option) => option.value === qualityValue)?.description}
         </p>
       </div>
       <LimitPolicyField
-        label="Max Profiles"
+        label={t("web.profiles.userPolicy.maxProfiles")}
         min={1}
         value={state.maxProfiles}
         onValueChange={(maxProfiles) => onChange({ ...state, maxProfiles })}

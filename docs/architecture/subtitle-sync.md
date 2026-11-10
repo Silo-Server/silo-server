@@ -9,7 +9,7 @@ does not line up with the audio at all, which usually means it belongs to a
 different release or title.
 
 The code lives in `internal/subtitles/subsync`; the API is described in
-[subtitles-api.md](../subtitles-api.md#stored-subtitle-sync).
+[subtitles-api.md](../subtitles-api.md#subtitle-sync).
 
 ## Timing correction
 
@@ -19,15 +19,18 @@ on its row (`timing_scale`, `timing_offset_ms`); a sidecar's lives in
 `external_subtitle_timings` (see [sidecar subtitles](#sidecar-subtitles)). The
 bytes never change.
 
-- Every client delivery path applies the timing to the original bytes before
-  any conversion: the playback subtitle route, the Jellyfin subtitle stream,
+- Every client delivery path decodes the original bytes to UTF-8
+  (`subtitles.DecodeText`) and applies the timing before any conversion: the playback subtitle route, the Jellyfin subtitle stream,
   offline downloads, and the source of an AI translation
   (`subtitles.DeliveryBytes` for stored subtitles, `playback.LoadExternalSubtitle`
   for sidecars). Those responses are `Cache-Control: private, no-cache`, since
   the bytes change behind the same URL. The administrator download returns the
   stored bytes unchanged, and content identity and deduplication use them too.
 - `Retime` rewrites SRT, WebVTT, and ASS/SSA timestamps and leaves every other
-  byte as stored. Under a scale it also scales the event-relative times in ASS
+  byte as stored, except that it drops a cue or event the correction ends at or
+  before zero, clamps a negative start to zero, and removes a WebVTT
+  `X-TIMESTAMP-MAP` header line and any inline WebVTT timestamp that no longer
+  falls inside its cue. Under a scale it also scales the event-relative times in ASS
   override tags (karaoke `\k` syllables, `\t`, `\move`, `\fad`, `\fade`),
   so effects keep pace with their stretched event. Other formats cannot be synced or retimed.
 - A timing change bumps the row's revision like any other update, so
@@ -40,7 +43,8 @@ bytes never change.
 
 Silo is a media server, not a media manager: it never writes a sidecar file.
 A sidecar's correction is a row keyed by the media file and the SHA-256 of the
-sidecar's bytes.
+sidecar's bytes on disk, before any UTF-8 decoding, so the lookup on delivery
+and the sync job's change check hash the same bytes.
 
 - **Identity.** Clients name a sidecar by its sync key,
   `external-{sha256 of its path}`, the same path key playback URLs pin it with
@@ -67,8 +71,8 @@ sidecar's bytes.
 1. **Speech levels.** For each sampled window, ffmpeg decodes one audio
    stream (the one in the subtitle's language, else the default), band-limits
    it to the speech band, and the runner reduces it to one level per 10 ms
-   (`mediasample` speech output). A 5.1 or 7.1 stream is read from its centre
-   channel, which carries the dialogue; a file whose centre channel cannot be
+   (`mediasample` speech output). A stream with a numbered layout from 3.0 to 7.1
+   (or six or more channels and no recorded layout) is read from its centre channel, which carries the dialogue; a file whose centre channel cannot be
    read falls back to a downmix of every channel.
 2. **Windows.** Files of 45 minutes or more are sampled as 12 windows of
    2 minutes spread over the runtime. ffmpeg's input seek reads only those
@@ -90,17 +94,38 @@ sidecar's bytes.
 5. **Refinement.** The agreeing windows' correlations are summed over ±0.5 s
    around the fitted line, and the peak sets the final offset. A fitted scale
    the windows cannot tell apart from a standard ratio is snapped to it.
-6. **Decision.** The result is `no_match` unless at least 3 windows and a
+6. **Joint search.** When too few windows agree, each window's own best lag
+   was noise: dialog under a laugh track, a score, or crowd noise rarely
+   wins a single window. The joint search keeps every window's whole lag
+   curve instead, as standard scores (ignoring lags with under 10 s of
+   subtitle text in view), and sums them along every line of a drift grid,
+   for each framerate ratio. Wrong lags scatter and cancel; the right one
+   adds up. Each window is then searched frame by frame within 1 s of the
+   best line, and those lags are fitted and refined as in steps 4 and 5.
+7. **Decision.** The window search matches when at least 3 windows and a
    quarter of those with a lag agree, and their lags stand out from the rest
-   of their search ranges by a mean of 3.75 standard deviations. A result
-   within 150 ms of the current correction over the runtime is
-   `already_synced`; anything else is `synced` and is applied.
+   of their search ranges by a mean of 3.75 standard deviations. Otherwise
+   the joint search matches when at least 3 windows agree and the summed
+   curves stand 6 standard deviations above their sums at other offsets
+   (7 with fewer than 8 windows), or when 90% of 8 or more windows agree and
+   the sums stand 4 above. Anything else is `no_match`. A result within
+   150 ms of the current correction over the runtime is `already_synced`;
+   anything else is `synced` and is applied.
 
 On real files, measured against subtitles whose timing is known (the file's
 own embedded track, or provider subtitles matched to it by text), corrections
 landed within about 120 ms. Subtitles of another title got at most two
 agreeing windows. Cues are spotted slightly ahead of speech and stay up after
 it, which bounds the precision and sets the `already_synced` margin.
+
+The joint search's thresholds were measured on 2,708 production sidecar
+jobs with their cached speech (`eval_test.go`, build tag `subsynceval`):
+it matched 161 of the 502 the window search had rejected, changed no result
+the window search had matched, and matched no subtitle of another episode or
+title among 1,235 pairings, most of them other episodes of the same series.
+Where another sidecar of the same file was matched, the timings it found
+agreed with that sidecar's. What it still rejects is mostly forced
+subtitles, with too few lines to place, and subtitles of other releases.
 
 Alignment runs against the original bytes, so syncing again never compounds a
 correction. Tuning constants, and the measurements behind them, live in
@@ -110,7 +135,8 @@ correction. Tuning constants, and the measurements behind them, live in
 
 Decoding one file's speech takes about 45 CPU-seconds of ffmpeg, once per
 file; the cached levels take about 150 KB. Each alignment then takes about
-0.2 CPU-seconds on the API server. A server runs two sync jobs at a time.
+0.2 CPU-seconds on the API server, or about 0.4 when the window search finds
+nothing and the joint search runs. A server runs two sync jobs at a time.
 
 ## Jobs
 

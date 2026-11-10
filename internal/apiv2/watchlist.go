@@ -58,6 +58,9 @@ func registerWatchlist(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist/{item_id}", "getWatchlistEntry", "watchlist",
 		"Answer whether the item is on the acting profile's watchlist: the entry, or 404 when it is not (or the viewer may not see it).")),
 		reg.getWatchlistEntry)
+	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/watchlist/{item_id}/membership", "getWatchlistMembership", "watchlist",
+		"Answer whether the item is on the acting profile's watchlist as is_member, 200 either way; 404 only when the viewer may not see the item.")),
+		reg.getWatchlistMembership)
 	Register(reg, viewerNoContentMutation(humaOp(http.MethodPut, Prefix+"/watchlist/{item_id}", "addToWatchlist", "watchlist",
 		"Add the item to the acting profile's watchlist. Adding an item already there succeeds and changes nothing, so a retry repeats no change or notification; it cannot resend notifications an interrupted earlier call never sent.")),
 		reg.addToWatchlist)
@@ -67,9 +70,10 @@ func registerWatchlist(reg *Registry) {
 }
 
 // listWatchlist answers from the same listing v1 GET /watchlist uses, paged
-// by keyset. A limit+1 probe decides has_more from the raw rows, so a hidden
-// series, an entry the catalog no longer has, or one the viewer may not see
-// never hides the rows behind it.
+// by keyset; a limit+1 probe decides has_more. The seam answers only entries
+// the viewer may see, so the probe and the cursor row are visible items and a
+// cursor never names a hidden title. A fully-watched series is still an
+// entry without a card, so it never hides the rows behind it.
 func (reg *Registry) listWatchlist(ctx context.Context, cursors *Cursors, in *WatchlistListInput) (*WatchlistCollectionOutput, error) {
 	if reg.deps.PersonalLists == nil {
 		return nil, unavailable("watchlist")
@@ -116,6 +120,21 @@ func (reg *Registry) getWatchlistEntry(ctx context.Context, in *WatchlistItemInp
 		return nil, p
 	}
 	return &WatchlistEntryOutput{Body: WatchlistEntry{ItemID: ID(entry.MediaItemID), AddedAt: added}}, nil
+}
+
+func (reg *Registry) getWatchlistMembership(ctx context.Context, in *WatchlistItemInput) (*PersonalListMembershipOutput, error) {
+	if reg.deps.PersonalLists == nil {
+		return nil, unavailable("watchlist")
+	}
+	viewer, p := personalListViewer(ctx, imagesize.Request{})
+	if p != nil {
+		return nil, p
+	}
+	entry, found, err := reg.deps.PersonalLists.GetWatchlistEntry(ctx, viewer, string(in.ItemID))
+	if err != nil {
+		return nil, serviceProblem(err)
+	}
+	return personalListMembership(in.ItemID, found, entry.AddedAt)
 }
 
 func (reg *Registry) addToWatchlist(ctx context.Context, in *WatchlistItemInput) (*struct{}, error) {

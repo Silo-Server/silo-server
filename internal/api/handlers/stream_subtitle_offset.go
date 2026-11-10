@@ -16,6 +16,12 @@ import (
 // HandleSubtitle serves the canonical track or a receiver-specific WebVTT
 // timeline. Transforming after extraction keeps the shared cache canonical.
 func (h *StreamHandler) HandleSubtitle(w http.ResponseWriter, r *http.Request) {
+	// Every answer, errors included, goes to a fetch from the player page,
+	// which packaged TV apps make with an opaque Origin. Sidecars authorize
+	// with a stream token in the URL or an Authorization header, never a
+	// cookie, so a wildcard grants nothing a cross-site page could use.
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
 	values, present := r.URL.Query()["timestamp_offset"]
 	if !present {
 		h.handleSubtitle(w, r)

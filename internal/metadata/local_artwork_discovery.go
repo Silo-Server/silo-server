@@ -3,11 +3,11 @@ package metadata
 import (
 	"context"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 )
@@ -96,7 +96,7 @@ func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput
 		if folder := probes[folderOf[i]]; !folder.Reachable && folder.ErrorCode != rootcheck.ErrCodePermissionDenied {
 			continue
 		}
-		_, err := os.Lstat(path)
+		_, err := fspath.Lstat(path)
 		visible[i] = err == nil
 	}
 	return visible
@@ -109,8 +109,12 @@ func visibleLocalSidecars(ctx context.Context, local []EnqueueImageCacheJobInput
 // cached copy keeps serving it (preserveCachedArtwork); an empty one would
 // leave a new item without a poster until the copy lands. The copy replaces
 // the stand-in through the source-matched update, because the slot's source
-// stays local. Locked artwork gets no stand-in the admin did not choose.
-func applyLocalArtworkFallback(item *models.MediaItem, images []RemoteImage, preferredLang string) {
+// stays local. With no remote candidate for the slot (always so for a local
+// re-apply, which asks no remote provider), the remote image the stored slot
+// was serving stays as the stand-in, as a cached copy would, so a sidecar
+// whose copy fails never leaves the slot blank. Locked artwork gets no
+// stand-in the admin did not choose.
+func applyLocalArtworkFallback(item, existing *models.MediaItem, images []RemoteImage, preferredLang, fallbackLang string) {
 	if artworkLocked(item) {
 		return
 	}
@@ -121,10 +125,23 @@ func applyLocalArtworkFallback(item *models.MediaItem, images []RemoteImage, pre
 		}
 		if remote == nil {
 			best := &models.MediaItem{}
-			applyBestImages(best, withoutLocalImages(images), MergeReplaceUnlocked, preferredLang)
+			applyBestImages(best, withoutLocalImages(images), MergeReplaceUnlocked, preferredLang, fallbackLang)
 			remote = itemArtworkFields(best)
 		}
-		*field.path = localArtworkFallbackPath(*field.path, *field.source, *remote[i].path)
+		fallback := *remote[i].path
+		if strings.TrimSpace(fallback) == "" {
+			// Clear art stored as the logo is not a wordmark, and a manual
+			// refresh deliberately drops it (applyBestImages): it never
+			// stands in.
+			served := existingImagePath(existing, field.imageType)
+			if isRemoteImageSourcePath(served) && (field.imageType != ImageLogo || !isClearArtPath(served)) {
+				fallback = served
+				if field.thumbhash != nil && *field.thumbhash == "" {
+					*field.thumbhash = existingImageThumbhash(existing, field.imageType)
+				}
+			}
+		}
+		*field.path = localArtworkFallbackPath(*field.path, *field.source, fallback)
 	}
 }
 

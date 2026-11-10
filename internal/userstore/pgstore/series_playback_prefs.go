@@ -17,12 +17,14 @@ func (s *PostgresUserStore) SetSeriesPlaybackPreference(ctx context.Context, pre
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO user_series_playback_preferences (
-			user_id, profile_id, series_id, resolution, hdr, codec_video, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			user_id, profile_id, series_id, resolution, hdr, codec_video, file_id, edition_key, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT(user_id, profile_id, series_id) DO UPDATE SET
 			resolution = excluded.resolution,
 			hdr = excluded.hdr,
 			codec_video = excluded.codec_video,
+			file_id = excluded.file_id,
+			edition_key = excluded.edition_key,
 			updated_at = excluded.updated_at`,
 		s.userID,
 		pref.ProfileID,
@@ -30,6 +32,8 @@ func (s *PostgresUserStore) SetSeriesPlaybackPreference(ctx context.Context, pre
 		pref.Resolution,
 		pref.HDR,
 		pref.CodecVideo,
+		nilIfZero(pref.FileID),
+		nilIfEmpty(pref.EditionKey),
 		pref.UpdatedAt,
 	)
 	if err != nil {
@@ -40,27 +44,49 @@ func (s *PostgresUserStore) SetSeriesPlaybackPreference(ctx context.Context, pre
 }
 
 func (s *PostgresUserStore) GetSeriesPlaybackPreference(ctx context.Context, profileID, seriesID string) (*userstore.SeriesPlaybackPreference, error) {
+	pref, err := scanSeriesPlaybackPreference(s.pool.QueryRow(ctx, seriesPlaybackPreferenceSQL, s.userID, profileID, seriesID))
+	if err != nil {
+		return nil, fmt.Errorf("getting series playback preference for profile %q series %q: %w",
+			profileID, seriesID, err)
+	}
+	return pref, nil
+}
+
+// seriesPlaybackPreferenceSQL reads one preference row: $1 user, $2 profile,
+// $3 series (or a movie's own content ID).
+const seriesPlaybackPreferenceSQL = `
+		SELECT profile_id, series_id, resolution, hdr, codec_video, file_id, edition_key, updated_at
+		FROM user_series_playback_preferences
+		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`
+
+// scanSeriesPlaybackPreference reads the row seriesPlaybackPreferenceSQL
+// selects, nil when there is none.
+func scanSeriesPlaybackPreference(row pgx.Row) (*userstore.SeriesPlaybackPreference, error) {
 	var pref userstore.SeriesPlaybackPreference
 	var updatedAt time.Time
-	err := s.pool.QueryRow(ctx, `
-		SELECT profile_id, series_id, resolution, hdr, codec_video, updated_at
-		FROM user_series_playback_preferences
-		WHERE user_id = $1 AND profile_id = $2 AND series_id = $3`,
-		s.userID, profileID, seriesID,
-	).Scan(
+	var fileID *int
+	var editionKey *string
+	err := row.Scan(
 		&pref.ProfileID,
 		&pref.SeriesID,
 		&pref.Resolution,
 		&pref.HDR,
 		&pref.CodecVideo,
+		&fileID,
+		&editionKey,
 		&updatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("getting series playback preference for profile %q series %q: %w",
-			profileID, seriesID, err)
+		return nil, err
+	}
+	if fileID != nil {
+		pref.FileID = *fileID
+	}
+	if editionKey != nil {
+		pref.EditionKey = *editionKey
 	}
 	pref.UpdatedAt = timeToString(updatedAt)
 	return &pref, nil
@@ -76,4 +102,11 @@ func (s *PostgresUserStore) DeleteSeriesPlaybackPreference(ctx context.Context, 
 			profileID, seriesID, err)
 	}
 	return nil
+}
+
+func nilIfZero(value int) *int {
+	if value == 0 {
+		return nil
+	}
+	return &value
 }

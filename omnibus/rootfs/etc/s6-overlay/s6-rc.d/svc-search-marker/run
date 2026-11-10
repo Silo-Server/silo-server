@@ -1,0 +1,21 @@
+#!/command/with-contenv bash
+# shellcheck shell=bash
+# After Meilisearch is turned off, delete the image's search marker once Silo
+# answers its health check: Silo answers only after storing the PostgreSQL
+# provider init-config handed it, so a start that fails earlier keeps the
+# marker and the next start tries again. This waits on its own instead of
+# making boot wait for Silo, so a stop during a slow or failing start is not
+# held up.
+set -euo pipefail
+# shellcheck source=omnibus/rootfs/etc/silo-omnibus/lib.sh
+source /etc/silo-omnibus/lib.sh
+
+if [[ -e "$STATE_DIR/search-marker.retire" ]]; then
+  port="$(silo_port)"
+  until curl -q -fs -m 2 -o /dev/null "http://127.0.0.1:$port/api/v1/health"; do
+    sleep 2
+  done
+  rm -f "$SEARCH_MARKER" "$STATE_DIR/search-marker.retire"
+  log "catalog search is back on PostgreSQL; the admin UI can change the provider again"
+fi
+exec sleep infinity

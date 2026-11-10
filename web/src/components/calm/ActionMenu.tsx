@@ -101,15 +101,15 @@ function Toggle({ item }: { item: ActionMenuToggle }) {
       onCheckedChange={item.onCheckedChange}
       {...helpAria(id, item)}
       // The switch is drawn at the end, so drop the check indicator's padding.
-      className={cn(ITEM_CLASS, "pl-2.5 [&>span:first-child]:hidden", item.help && "items-start")}
+      className={cn(ITEM_CLASS, "ps-2.5 [&>span:first-child]:hidden", item.help && "items-start")}
     >
       <ItemBody id={id} item={item} />
       <span
         aria-hidden
         data-state={item.checked ? "checked" : "unchecked"}
-        className="group/switch bg-border data-[state=checked]:bg-primary ml-auto inline-flex h-[1.15rem] w-8 shrink-0 items-center rounded-full p-px transition-colors"
+        className="group/switch bg-border data-[state=checked]:bg-primary ms-auto inline-flex h-[1.15rem] w-8 shrink-0 items-center rounded-full p-px transition-colors"
       >
-        <span className="bg-foreground group-data-[state=checked]/switch:bg-primary-foreground size-4 rounded-full transition-transform group-data-[state=checked]/switch:translate-x-[calc(100%-2px)]" />
+        <span className="bg-foreground group-data-[state=checked]/switch:bg-primary-foreground size-4 rounded-full transition-transform group-data-[state=checked]/switch:translate-x-[calc(100%-2px)] rtl:group-data-[state=checked]/switch:-translate-x-[calc(100%-2px)]" />
       </span>
     </DropdownMenuCheckboxItem>
   );
@@ -137,7 +137,7 @@ function Submenu({ item }: { item: ActionMenuSubmenu }) {
                 value={entry.key}
                 disabled={entry.disabled}
                 onSelect={entry.onSelect}
-                className="rounded-[9px] py-2 pr-2.5"
+                className="rounded-[9px] py-2 pe-2.5"
               >
                 {entry.label}
               </DropdownMenuRadioItem>

@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Suggest a feature
+    url: https://github.com/Silo-Server/silo-server/discussions/categories/ideas
+    about: Post feature ideas in Discussions under Ideas, or upvote an existing one. Issues are for bugs.
   - name: Questions and setup help
     url: https://discord.gg/siloserver
     about: Ask how to set up or use Silo in the Silo Discord.

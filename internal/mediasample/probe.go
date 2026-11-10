@@ -36,6 +36,11 @@ type inputInfo struct {
 	// VideoCodec is the decoder's name for the first playable video, such
 	// as "h264" or "mpeg2video".
 	VideoCodec string
+	// AudioStreams are the input's audio streams, by absolute stream index
+	// (ffmpeg's 0:K), whose sample rate the demuxer found. A stream without
+	// one, such as an MPEG-TS track declared but never carried, fails a
+	// stream copy.
+	AudioStreams []int
 }
 
 func (i inputInfo) displayAspect() float64 {
@@ -75,8 +80,10 @@ type inputHeaderParser struct {
 }
 
 var (
-	videoSizePattern = regexp.MustCompile(`(?:^|,\s+)(\d+)x(\d+)(?:\s|,|$)`)
-	videoDARPattern  = regexp.MustCompile(`DAR ([0-9.]+):([0-9.]+)`)
+	audioRatePattern   = regexp.MustCompile(`, [1-9]\d* Hz(?:,|$)`)
+	streamIndexPattern = regexp.MustCompile(`^Stream #0:(\d+)`)
+	videoSizePattern   = regexp.MustCompile(`(?:^|,\s+)(\d+)x(\d+)(?:\s|,|$)`)
+	videoDARPattern    = regexp.MustCompile(`DAR ([0-9.]+):([0-9.]+)`)
 )
 
 func (p *inputHeaderParser) line(line string) {
@@ -118,6 +125,18 @@ func (p *inputHeaderParser) videoGeometry(line string) {
 	trimmed := strings.TrimSpace(line)
 	if strings.HasPrefix(trimmed, "Stream #0:") {
 		p.videoSideData = false
+		if strings.Contains(trimmed, ": Audio: ") {
+			// A multi-program MPEG-TS lists a stream once for each program
+			// it belongs to, so streams are told apart by index.
+			index := streamIndexPattern.FindStringSubmatch(trimmed)
+			if index == nil || !audioRatePattern.MatchString(trimmed) {
+				return
+			}
+			if k, err := strconv.Atoi(index[1]); err == nil && !slices.Contains(p.info.AudioStreams, k) {
+				p.info.AudioStreams = append(p.info.AudioStreams, k)
+			}
+			return
+		}
 		if p.videoSeen || !strings.Contains(trimmed, ": Video:") || strings.Contains(trimmed, "(attached pic)") {
 			return
 		}

@@ -135,6 +135,52 @@ func (s *SessionStore) PutTx(ctx context.Context, tx pgx.Tx, session Session) (S
 	return session, nil
 }
 
+// maxPseudoUserOwnerCandidates bounds the sessions one owner lookup checks.
+// Each candidate whose login session ended is deleted as it is checked, so a
+// later lookup reaches the rest.
+const maxPseudoUserOwnerCandidates = 8
+
+// PseudoUserOwner returns the account and profile of a live compat session
+// signed in as the pseudo-user id, or ErrSessionNotFound. Every candidate goes
+// through Recheck, so a session whose login session was signed out or expired
+// names no owner. A persistent store finds candidates in the database, which
+// sees every replica's sessions; a memory-only store searches its own.
+func (s *SessionStore) PseudoUserOwner(ctx context.Context, id uuid.UUID) (pseudoUserOwner, error) {
+	tokens, err := s.pseudoUserTokens(ctx, id)
+	if err != nil {
+		return pseudoUserOwner{}, err
+	}
+	for _, token := range tokens {
+		session, err := s.Recheck(ctx, token)
+		if errors.Is(err, ErrSessionNotFound) {
+			continue
+		}
+		if err != nil {
+			return pseudoUserOwner{}, err
+		}
+		return pseudoUserOwner{UserID: session.StreamAppUserID, ProfileID: session.ProfileID}, nil
+	}
+	return pseudoUserOwner{}, ErrSessionNotFound
+}
+
+func (s *SessionStore) pseudoUserTokens(ctx context.Context, id uuid.UUID) ([]string, error) {
+	if lookup, ok := s.repo.(pseudoUserTokenLookup); ok {
+		return lookup.PseudoUserTokens(ctx, id, s.now(), maxPseudoUserOwnerCandidates)
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var tokens []string
+	for token, session := range s.sessions {
+		if len(tokens) == maxPseudoUserOwnerCandidates {
+			break
+		}
+		if session.PseudoUserID == id {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens, nil
+}
+
 // txSessionPersistence is a sessionPersistence that can write inside a
 // caller's transaction (SessionRepository).
 type txSessionPersistence interface {
@@ -186,7 +232,7 @@ func (s *SessionStore) Lookup(ctx context.Context, token string) (*Session, erro
 	s.mu.RUnlock()
 	if ok && s.repo == nil {
 		if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
-			s.Delete(token)
+			_ = s.Delete(token)
 			return nil, ErrSessionNotFound
 		}
 		if err := s.checkLoginSession(ctx, &session); err != nil {
@@ -272,7 +318,7 @@ func (s *SessionStore) checkLoginSession(ctx context.Context, session *Session) 
 		// next lookup.
 		deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), signedOutDeleteTimeout)
 		defer cancel()
-		s.delete(deleteCtx, session.Token)
+		_ = s.delete(deleteCtx, session.Token)
 		return ErrSessionNotFound
 	}
 	return nil
@@ -325,18 +371,21 @@ func (s *SessionStore) uncache(token string) {
 	s.mu.Unlock()
 }
 
-// Delete removes a compat session.
-func (s *SessionStore) Delete(token string) {
-	s.delete(context.Background(), token)
+// Delete evicts a compat session locally and removes its stored row. An
+// already-absent row is success; any other storage error is returned.
+func (s *SessionStore) Delete(token string) error {
+	return s.delete(context.Background(), token)
 }
 
-func (s *SessionStore) delete(ctx context.Context, token string) {
+func (s *SessionStore) delete(ctx context.Context, token string) error {
 	s.uncache(token)
 	if s.repo != nil {
 		if err := s.repo.DeleteByToken(ctx, token); err != nil && !errors.Is(err, ErrSessionNotFound) {
 			slog.WarnContext(ctx, "jellycompat session store delete failed", "token_prefix", safeTokenPrefix(token), "error", logredact.SanitizeText(err.Error()))
+			return err
 		}
 	}
+	return nil
 }
 
 // EvictUser drops a Silo account's compat sessions from this store's memory.
@@ -379,7 +428,7 @@ func (s *SessionStore) Update(token string, fn func(*Session) error) error {
 	}
 
 	if !session.ExpiresAt.IsZero() && !session.ExpiresAt.After(s.now()) {
-		s.Delete(token)
+		_ = s.Delete(token)
 		return ErrSessionNotFound
 	}
 	if err := fn(&session); err != nil {

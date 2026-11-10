@@ -30,7 +30,7 @@ type WebhookConnection struct {
 	ServerID                  string   `json:"server_id"`
 	ServerName                string   `json:"server_name"`
 	DefaultProfileID          ID       `json:"default_profile_id"`
-	WebhookURL                string   `json:"webhook_url" doc:"Relative URL of the external webhook receiver; resolve against the server origin."`
+	WebhookURL                string   `json:"webhook_url" format:"uri-reference" doc:"Relative URL of the external webhook receiver; resolve against the server origin."`
 	AccountDiscoveryAvailable bool     `json:"account_discovery_available"`
 	UserCount                 int      `json:"user_count"`
 	LastWebhookReceivedAt     *Instant `json:"last_webhook_received_at,omitempty"`
@@ -63,7 +63,7 @@ type WebhookCreateInput struct {
 		Provider         string `json:"provider" enum:"plex,emby,jellyfin"`
 		ServerID         string `json:"server_id,omitempty" maxLength:"1024"`
 		ServerName       string `json:"server_name" minLength:"1" maxLength:"1024"`
-		BaseURL          string `json:"base_url,omitempty" maxLength:"8192"`
+		BaseURL          string `json:"base_url,omitempty" format:"uri-reference" maxLength:"8192"`
 		AccessToken      string `json:"access_token,omitempty" maxLength:"8192"`
 		DefaultProfileID ID     `json:"default_profile_id" minLength:"1"`
 	}
@@ -71,7 +71,7 @@ type WebhookCreateInput struct {
 type WebhookCreateOutput struct {
 	Body struct {
 		Connection WebhookConnection `json:"connection"`
-		WebhookURL string            `json:"webhook_url"`
+		WebhookURL string            `json:"webhook_url" format:"uri-reference"`
 	}
 }
 type WebhookUpdateInput struct {

@@ -31,7 +31,7 @@ function Row({
   return (
     <FilterRuleRow
       rule={rule}
-      fieldOptions={getFilterRuleFieldOptions(personalized, "movie", undefined, extendedRules)}
+      fieldOptions={getFilterRuleFieldOptions(personalized, "movie", undefined, { extendedRules })}
       allowPersonalizedFilters={personalized}
       onChange={(updates) => {
         const next = { ...rule, ...updates };

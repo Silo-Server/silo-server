@@ -44,13 +44,14 @@
     "hls.js": "^1.6.15",
     "jassub": "^2.5.6",
     "lucide-react": "^0.576.0",
-    "mediabunny": "^1.61.0",
+    "mediabunny": "^1.62.1",
     "node-unrar-js": "^2.0.2",
     "pdfjs-dist": "^6.2.108",
     "radix-ui": "^1.4.3",
     "react": "^19.0.0",
     "react-day-picker": "^10.0.1",
     "react-dom": "^19.0.0",
+    "react-intl": "^12.1.6",
     "react-qr-code": "^2.0.18",
     "react-router": "^8.3.0",
     "sonner": "^2.0.7",
@@ -71,6 +72,7 @@
     "@webgpu/types": "^0.1.74",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-formatjs": "8.1.3",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "jsdom": "^29.0.1",
@@ -81,7 +83,7 @@
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.57.0",
-    "vite": "^6.4.4",
+    "vite": "^6.4.5",
     "vitest": "^4.1.11"
   },
   "pnpm": {
@@ -97,7 +99,7 @@
       "js-yaml@<4.3.2": "4.3.2",
       "picomatch@>=4.0.0 <4.0.4": "4.0.4",
       "postcss@<8.5.23": "8.5.23",
-      "undici@<7.29.1": "7.29.1",
+      "undici@<7.30.1": "7.30.1",
       "vite@>=6.0.0 <6.4.2": "6.4.2"
     }
   }

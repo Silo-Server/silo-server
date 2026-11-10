@@ -14,6 +14,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -23,12 +25,13 @@ import (
 )
 
 // Config holds the connection settings for the shared OpenAI-compatible
-// endpoints. The ASR fields are optional overrides for operators who run a
-// separate Whisper-compatible server next to their chat endpoint; when empty,
-// transcription uses the chat endpoint's base URL and key.
+// endpoints. Chat and transcription are configured independently, each from
+// the provider its job selects; transcription never falls back to the chat
+// endpoint.
 type Config struct {
 	AuthMode             string
 	ReasoningEffort      string
+	ServiceTier          string
 	ChatGPTTokenSource   func(context.Context) (func(context.Context) (string, error), error)
 	ChatGPTTokenRejected func(context.Context, string, bool) error
 	ChatGPTPlanRejected  func(context.Context, string) error
@@ -41,37 +44,24 @@ type Config struct {
 	APIKey           string // empty for keyless local servers
 	ChatModel        string // chat-completions model used for translation
 
-	ASRBaseURL string // optional; empty = BaseURL
-	ASRAPIKey  string // optional; empty = APIKey
+	ASRBaseURL string // empty when no speech-to-text provider is chosen
+	ASRAPIKey  string // empty for keyless local servers
 	ASRModel   string // audio-transcription model, e.g. "whisper-1"
 }
 
 const AuthModeChatGPT = "chatgpt"
 const chatJSONFormat = "json_object"
+const serviceTierUltrafast = "ultrafast"
 
 // ErrQuotaExhausted means the provider requires a billing or quota change;
 // waiting and retrying the same request cannot recover it.
 var ErrQuotaExhausted = errors.New("AI provider credit or spending limit is exhausted")
 
-func (c Config) asrBaseURL() string {
-	if c.ASRBaseURL != "" {
-		return c.ASRBaseURL
-	}
-	return c.BaseURL
-}
-
-func (c Config) asrAPIKey() string {
-	if c.ASRAPIKey != "" {
-		return c.ASRAPIKey
-	}
-	return c.APIKey
-}
-
 // ChatConfigured reports whether chat completions are minimally configured.
 func (c Config) ChatConfigured() bool { return c.BaseURL != "" && c.ChatModel != "" }
 
 // ASRConfigured reports whether audio transcription is minimally configured.
-func (c Config) ASRConfigured() bool { return c.asrBaseURL() != "" && c.ASRModel != "" }
+func (c Config) ASRConfigured() bool { return c.ASRBaseURL != "" && c.ASRModel != "" }
 
 // Client is a minimal OpenAI-compatible API client with shared retry/backoff
 // conventions (429 with Retry-After, 5xx, transport errors, and gateway "200
@@ -124,6 +114,7 @@ type chatCompletionRequest struct {
 	Messages        []Message           `json:"messages"`
 	Temperature     *float32            `json:"temperature,omitempty"`
 	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
+	ServiceTier     string              `json:"service_tier,omitempty"`
 	ResponseFormat  *chatResponseFormat `json:"response_format,omitempty"`
 }
 
@@ -153,10 +144,14 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 	if cfg.AuthMode == AuthModeChatGPT {
 		return c.chatGPT(ctx, cfg, messages, jsonObject)
 	}
+	if cfg.ServiceTier == serviceTierUltrafast {
+		return c.apiResponses(ctx, cfg, messages, jsonObject)
+	}
 	reqBody := chatCompletionRequest{
 		Model:           cfg.ChatModel,
 		Messages:        messages,
 		ReasoningEffort: cfg.ReasoningEffort,
+		ServiceTier:     cfg.ServiceTier,
 	}
 	if !reasoning.OmitTemperature(cfg.ChatModel, cfg.ReasoningEffort) {
 		reqBody.Temperature = new(float32(0.2))
@@ -188,16 +183,17 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 		func(respBody []byte) error {
 			var parsed chatCompletionResponse
 			if err := json.Unmarshal(respBody, &parsed); err != nil {
-				return fmt.Errorf("decode chat response: %w", err)
+				return fmt.Errorf("decode chat response: %w: %w", ErrUnusableResponse, err)
 			}
 			if parsed.Error != nil && parsed.Error.Message != "" {
-				// 200 with an upstream error object — transient on gateways.
-				return fmt.Errorf("chat API error: %s", parsed.Error.Message)
+				// 200 with an upstream error object — transient on gateways,
+				// so it reads as an unavailable upstream once retries run out.
+				return &HTTPError{StatusCode: http.StatusBadGateway, message: "chat API error: " + parsed.Error.Message}
 			}
 			if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
 				slog.WarnContext(ctx, "AI chat returned no choices, retrying", "component", "ai",
 					"model", cfg.ChatModel, "response_bytes", len(respBody))
-				return fmt.Errorf("chat API returned no choices")
+				return fmt.Errorf("chat API returned no choices: %w", ErrUnusableResponse)
 			}
 			content = parsed.Choices[0].Message.Content
 			return nil
@@ -366,10 +362,31 @@ func isExhaustedQuota(body []byte) bool {
 // (https://api.openai.com) and prefixed hosts (https://api.groq.com/openai).
 func endpointURL(base, path string) string {
 	base = strings.TrimRight(base, "/")
-	if strings.Contains(base, "/v1") {
+	if HasAPIVersion(base) {
 		return base + "/" + path
 	}
 	return base + "/v1/" + path
+}
+
+// apiVersionSegment matches a path segment that names an API version: v1,
+// v2, v1beta.
+var apiVersionSegment = regexp.MustCompile(`^v[0-9]+(?:(?:alpha|beta)[0-9]*)?$`)
+
+// HasAPIVersion reports whether baseURL's path already names an API version,
+// as in https://host/v1 or https://host/v1beta/openai. AI clients add /v1 to
+// a base URL that has none. A host or segment that merely starts with v1,
+// such as v1-embed.internal or /v1-router, is not a version.
+func HasAPIVersion(baseURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return false
+	}
+	for _, segment := range strings.Split(parsed.Path, "/") {
+		if apiVersionSegment.MatchString(segment) {
+			return true
+		}
+	}
+	return false
 }
 
 // Truncate caps a string for inclusion in an error or log line.

@@ -6,6 +6,8 @@ package contractspec
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,7 +35,13 @@ const (
 	securityScheme    = "bearerAuth"
 )
 
-const typeObject = "object"
+const (
+	typeObject = "object"
+	typeString = "string"
+)
+
+// componentSchemas prefixes the location of a component schema in findings.
+const componentSchemas = "components.schemas."
 
 // Lint checks the generated document against the contract's shape rules and
 // returns every violation, sorted, so a report names them all at once. The
@@ -42,7 +50,9 @@ const typeObject = "object"
 // (or a named extension bag); every operation documents a success status and
 // each status its class implies; non-public operations require the bearer
 // scheme and public ones carry no security; no schema is a free-form object
-// unless it is marked as an extension bag.
+// unless it is marked as an extension bag; date, URL, and language or
+// country members declare their shape (lintValueShape); a nullable enum
+// lists null (lintNullableEnum).
 func Lint(doc []byte) []string {
 	var d document
 	if err := json.Unmarshal(doc, &d); err != nil {
@@ -70,6 +80,9 @@ func Lint(doc []byte) []string {
 			lintStatuses(fail, where, path, method, op)
 			lintSecurity(fail, where, op)
 			lintDeprecation(fail, where, op)
+			for _, p := range op.Parameters {
+				lintValueShape(fail, where+" parameter "+p.Name, p.Name, p.Description, p.Schema)
+			}
 			if op.RequestBody != nil {
 				for mt, media := range op.RequestBody.Content {
 					lintNamed(fail, where+" request "+mt, media.Schema)
@@ -86,7 +99,9 @@ func Lint(doc []byte) []string {
 		if !isPascal(name) {
 			fail("components.schemas.%s: schema name is not PascalCase", name)
 		}
-		lintFreeForm(fail, "components.schemas."+name, d.Components.Schemas[name])
+		lintFreeForm(fail, componentSchemas+name, d.Components.Schemas[name])
+		lintMemberShapes(fail, componentSchemas+name, d.Components.Schemas[name])
+		lintNullableEnums(fail, componentSchemas+name, d.Components.Schemas[name])
 	}
 	if _, ok := d.Components.SecuritySchemes[securityScheme]; !ok {
 		fail("components.securitySchemes.%s is missing", securityScheme)
@@ -116,7 +131,9 @@ func lintStatuses(fail func(string, ...any), where, path, method string, op oper
 	if !success {
 		fail("%s: no success status is documented", where)
 	}
-	implied := apiv2.ImpliedStatuses(class, demo, serviceBacked, op.RequestBody != nil, strings.Contains(path, "{"), guarded, conditional, createOnly)
+	// The document does not name rate-limit buckets, so the 429 a bucket
+	// implies on a public operation is checked in internal/apiv2 instead.
+	implied := apiv2.ImpliedStatuses(class, demo, serviceBacked, op.RequestBody != nil, strings.Contains(path, "{"), guarded, conditional, createOnly, false)
 	if protocol != "" {
 		if strings.TrimSpace(stringExt(op.Extensions, "x-silo-raw-reason")) == "" {
 			fail("%s: raw protocol requires its exclusion reason", where)
@@ -302,6 +319,145 @@ func lintFreeForm(fail func(string, ...any), where string, s *schema) {
 	lintFreeForm(fail, where+".items", s.Items)
 }
 
+// datePattern is the YYYY-MM-DD shape a date member's pattern carries when it
+// cannot use format: date, such as one that also accepts "" to clear.
+const datePattern = "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+
+// The member names lintValueShape checks, and what satisfies them.
+var (
+	dateName        = regexp.MustCompile(`^(date|.*_date)$`)
+	urlName         = regexp.MustCompile(`^(url|uri|href|endpoint|issuer|.*_ur[il]s?)$`)
+	localeName      = regexp.MustCompile(`language|countr|locale`)
+	uriFormats      = map[string]bool{"uri": true, "uri-reference": true}
+	localeStandards = regexp.MustCompile(`ISO 639|ISO 3166|BCP 47`)
+)
+
+// shapePending lists members whose shape waits on other work, each with the
+// issue or pull request it waits on. The lint fails an entry whose member
+// already declares its shape, so the entry goes when that work lands.
+var shapePending = map[string]string{
+	"components.schemas.AdminItemMetadataUpdate.release_date":   pendingItemDates,
+	"components.schemas.AdminItemMetadataUpdate.first_air_date": pendingItemDates,
+	"components.schemas.AdminItemMetadataUpdate.last_air_date":  pendingItemDates,
+	"components.schemas.AdminItemMetadataUpdate.air_date":       pendingItemDates,
+}
+
+const pendingItemDates = "#2810 validates the item metadata dates in the handler"
+
+// notURI is the description phrase a URL-named member carries instead of a
+// URI format when the server stores or relays its value without parsing it
+// as a URL (admin input, plugin metadata, client input).
+const notURI = "not validated as a URI"
+
+// lintMemberShapes walks a schema's members and array items and applies
+// lintValueShape to each named member; a $ref is checked as its own
+// component.
+func lintMemberShapes(fail func(string, ...any), where string, s *schema) {
+	if s == nil || s.Ref != "" {
+		return
+	}
+	for _, name := range sortedKeys(s.Properties) {
+		member := s.Properties[name]
+		lintValueShape(fail, where+"."+name, name, "", member)
+		lintMemberShapes(fail, where+"."+name, member)
+	}
+	lintMemberShapes(fail, where+".items", s.Items)
+}
+
+// lintNullableEnums walks a schema tree through its members, array items,
+// typed map values, and oneOf, anyOf and allOf branches (every place the
+// generator adds null), and applies lintNullableEnum to each schema; a $ref
+// is checked as its own component.
+func lintNullableEnums(fail func(string, ...any), where string, s *schema) {
+	if s == nil || s.Ref != "" {
+		return
+	}
+	lintNullableEnum(fail, where, s)
+	for _, name := range sortedKeys(s.Properties) {
+		lintNullableEnums(fail, where+"."+name, s.Properties[name])
+	}
+	lintNullableEnums(fail, where+".items", s.Items)
+	if ap, ok := s.AdditionalProperties.(map[string]any); ok {
+		var value schema
+		if raw, err := json.Marshal(ap); err == nil && json.Unmarshal(raw, &value) == nil {
+			lintNullableEnums(fail, where+".additionalProperties", &value)
+		}
+	}
+	for keyword, branches := range map[string][]*schema{"oneOf": s.OneOf, "anyOf": s.AnyOf, "allOf": s.AllOf} {
+		for i, branch := range branches {
+			lintNullableEnums(fail, fmt.Sprintf("%s.%s[%d]", where, keyword, i), branch)
+		}
+	}
+}
+
+// lintNullableEnum requires a nullable schema with an enum to list null in
+// it: JSON Schema applies type and enum separately, so a validator holding
+// ["string", "null"] and an enum of strings alone refuses null. A member in
+// apiv2.NullEnumWithheld must still be such an enum, so its entry goes with
+// the member it was written for.
+func lintNullableEnum(fail func(string, ...any), where string, s *schema) {
+	refused := s.Nullable && len(s.Enum) > 0 && !slices.Contains(s.Enum, nil)
+	if reason, withheld := apiv2.NullEnumWithheld[strings.TrimPrefix(where, componentSchemas)]; withheld {
+		if !refused {
+			fail("%s: no longer a nullable enum without null; delete its apiv2.NullEnumWithheld entry (%s)", where, reason)
+		}
+		return
+	}
+	if refused {
+		fail("%s: nullable enum does not list null", where)
+	}
+}
+
+// lintValueShape requires a string member (or a string array's items) whose
+// name says what it carries to declare that shape, so generated clients can
+// type it: a date declares format date or date-time, or a YYYY-MM-DD
+// pattern; a URL declares format uri or uri-reference, or says in its
+// description that it is not validated as a URI; a language, country,
+// or locale names its standard (ISO 639, ISO 3166, BCP 47) in its
+// description.
+func lintValueShape(fail func(string, ...any), where, name, description string, s *schema) {
+	if s == nil {
+		return
+	}
+	value := s
+	if s.Type == "array" && s.Items != nil {
+		value = s.Items
+	}
+	if value.Ref != "" || value.Type != typeString {
+		return
+	}
+	description += " " + s.Description
+	if value != s {
+		description += " " + value.Description
+	}
+	var problem string
+	switch {
+	case dateName.MatchString(name):
+		if value.Format != "date" && value.Format != "date-time" && !strings.Contains(value.Pattern, datePattern) {
+			problem = "date member declares neither format date nor a YYYY-MM-DD pattern"
+		}
+	case urlName.MatchString(name):
+		if !uriFormats[value.Format] && !strings.Contains(description, notURI) {
+			problem = "URL member declares neither format uri nor uri-reference, nor says it is " + notURI
+		}
+	case localeName.MatchString(name):
+		if !localeStandards.MatchString(description) {
+			problem = "language or country member does not name its standard (ISO 639, ISO 3166, BCP 47)"
+		}
+	default:
+		return
+	}
+	if reason, pending := shapePending[where]; pending {
+		if problem == "" {
+			fail("%s: declares its shape; delete its shapePending entry (%s)", where, reason)
+		}
+		return
+	}
+	if problem != "" {
+		fail("%s: %s", where, problem)
+	}
+}
+
 // --- document model (only the members the lint reads) -----------------------
 
 type document struct {
@@ -314,6 +470,7 @@ type document struct {
 
 type operation struct {
 	OperationID string                `json:"operationId"`
+	Parameters  []parameter           `json:"parameters"`
 	RequestBody *requestBody          `json:"requestBody"`
 	Responses   map[string]response   `json:"responses"`
 	Security    []map[string][]string `json:"security"`
@@ -330,6 +487,12 @@ func (o *operation) UnmarshalJSON(b []byte) error {
 	*o = operation(p)
 	o.Extensions = extensions(b)
 	return nil
+}
+
+type parameter struct {
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Schema      *schema `json:"schema"`
 }
 
 type requestBody struct {
@@ -357,10 +520,20 @@ type mediaType struct {
 type schema struct {
 	Ref                  string             `json:"$ref"`
 	Type                 schemaType         `json:"type"`
+	Format               string             `json:"format"`
+	Pattern              string             `json:"pattern"`
+	Description          string             `json:"description"`
 	Properties           map[string]*schema `json:"properties"`
 	Items                *schema            `json:"items"`
 	AdditionalProperties any                `json:"additionalProperties"`
-	Extensions           map[string]any     `json:"-"`
+	Enum                 []any              `json:"enum"`
+	OneOf                []*schema          `json:"oneOf"`
+	AnyOf                []*schema          `json:"anyOf"`
+	AllOf                []*schema          `json:"allOf"`
+	// Nullable is set when the type list names "null"; Type keeps the
+	// other name.
+	Nullable   bool           `json:"-"`
+	Extensions map[string]any `json:"-"`
 }
 
 // schemaType is the JSON Schema `type` member: a single name, or in OpenAPI
@@ -396,6 +569,12 @@ func (s *schema) UnmarshalJSON(b []byte) error {
 	}
 	*s = schema(p)
 	s.Extensions = extensions(b)
+	var typed struct {
+		Type []string `json:"type"`
+	}
+	if json.Unmarshal(b, &typed) == nil {
+		s.Nullable = slices.Contains(typed.Type, "null")
+	}
 	return nil
 }
 

@@ -18,7 +18,7 @@ import (
 // outside the shared, user-agnostic cache.
 func (f *Fetcher) fetchRecommendationRowWithTitle(ctx context.Context, section ResolvedSection, libraryID *int, libraryIDs []int, userID int, profileID string, filter catalog.AccessFilter, reader recommendationReader) (SectionWithItems, error) {
 	result := SectionWithItems{ResolvedSection: section, Items: []*models.MediaItem{}}
-	// The main row and its fill share one walk of the watch history.
+	// The main row and its fill share one read of the watched set.
 	ctx = recommendations.WithWatchedSetMemo(ctx)
 	var row *recommendations.ForYouRow
 	var err error
@@ -49,7 +49,10 @@ func (f *Fetcher) fetchRecommendationRowWithTitle(ctx context.Context, section R
 	result.Items = limitRecommendationItems(items, section.ItemLimit)
 	result.TotalCount = len(result.Items)
 	if len(result.Items) > 0 {
-		result.Title = recommendationSectionTitle(section.Title, row)
+		if title := recommendationSectionTitle(section.Title, row); title != section.Title {
+			result.Title = title
+			result.TitleKey, result.TitleArgs = row.TitleKey()
+		}
 	}
 	return result, nil
 }

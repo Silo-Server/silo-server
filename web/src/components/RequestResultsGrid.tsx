@@ -3,15 +3,15 @@ import RequestPosterCard from "@/components/RequestPosterCard";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoadMoreOnScroll } from "@/components/LoadMoreOnScroll";
-import { useSubmitMediaRequest } from "@/hooks/useSubmitMediaRequest";
 import { useUICustomization } from "@/hooks/useUICustomization";
 import { useWatchlistTitleToggle } from "@/hooks/useWatchlistTitleToggle";
 import { cardGridClasses } from "@/lib/uiCustomization";
 import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
 
 /**
- * TMDB titles on the library's poster grid, each with the hover Request
- * and watchlist actions. Used by the Discover, studio/network/genre, and search "Request to
+ * TMDB titles on the library's poster grid, each with the hover watchlist
+ * action. Used by the Discover, studio/network/genre, and search "Request to
  * add" grids.
  */
 export default function RequestResultsGrid({
@@ -29,7 +29,6 @@ export default function RequestResultsGrid({
   className?: string;
 }) {
   const { cardPresentation } = useUICustomization();
-  const { submit, isSubmitting } = useSubmitMediaRequest();
   const watchlist = useWatchlistTitleToggle();
   return (
     <div className={cn(cardGridClasses(cardPresentation.poster_size), className)}>
@@ -38,8 +37,6 @@ export default function RequestResultsGrid({
           key={`${item.media_type}-${item.tmdb_id}`}
           variant="discover"
           item={item}
-          isSubmitting={isSubmitting(item)}
-          onRequest={() => submit(item)}
           onToggleWatchlist={watchlist.enabled ? () => watchlist.toggle(item) : undefined}
           isWatchlistPending={watchlist.isPending(item)}
           fluid
@@ -91,13 +88,14 @@ export function RequestResultsLoadMore({
   isError: boolean;
   onLoadMore: () => void;
 }) {
+  const t = useT();
   return (
     <LoadMoreOnScroll
       hasNextPage={hasNextPage}
       isFetchingNextPage={isFetchingNextPage}
       isError={isError}
       onLoadMore={onLoadMore}
-      errorMessage="Couldn’t load more titles."
+      errorMessage={t("web.requests.results.loadMoreFailed")}
     />
   );
 }
@@ -114,7 +112,7 @@ export function RequestResultsPager({
   onPrevious,
   onNext,
   disabled = false,
-  label = "Result pages",
+  label,
 }: {
   /** Where the viewer is, such as "Page 2 of 9". Omitted when it isn't known. */
   position?: string;
@@ -125,17 +123,21 @@ export function RequestResultsPager({
   disabled?: boolean;
   label?: string;
 }) {
+  const t = useT();
   if (!hasPrevious && !hasNext) return null;
   return (
-    <nav aria-label={label} className="flex items-center justify-center gap-3 pt-2">
+    <nav
+      aria-label={label ?? t("web.requests.results.pages")}
+      className="flex items-center justify-center gap-3 pt-2"
+    >
       <Button variant="outline" size="sm" disabled={disabled || !hasPrevious} onClick={onPrevious}>
-        Previous
+        {t("web.requests.results.previous")}
       </Button>
       {position ? (
         <span className="text-muted-foreground text-sm tabular-nums">{position}</span>
       ) : null}
       <Button variant="outline" size="sm" disabled={disabled || !hasNext} onClick={onNext}>
-        Next
+        {t("web.requests.results.next")}
       </Button>
     </nav>
   );

@@ -23,7 +23,6 @@ import {
   MoreVertical,
   Plus,
   RotateCcw,
-  TimerReset,
   ThumbsDown,
   X,
 } from "lucide-react";
@@ -39,9 +38,9 @@ import { useRefreshItemMetadata, useWatchedStateMutation } from "@/hooks/queries
 import { type DismissHomeItemVariables, useDismissHomeItem } from "@/hooks/queries/homeDismissals";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useToggleWatchlist } from "@/hooks/queries/watchlist";
-import { useClearResumePosition } from "@/hooks/queries/progress";
 import { canMarkNotInterested, useToggleNotInterested } from "@/hooks/queries/notInterested";
 import { getWatchedActionLabel } from "@/pages/ItemDetail/watchedState";
+import { useT, type MessageKey, type Translate } from "@/i18n";
 import { LocalErrorBoundary } from "@/components/LocalErrorBoundary";
 import MangaFilesDialog from "@/components/MangaFilesDialog";
 import RefreshMetadataDialog from "@/components/RefreshMetadataDialog";
@@ -124,7 +123,8 @@ type MediaItemMenuEntry =
       key:
         | "playFromBeginning"
         | "toggleWatched"
-        | "resetProgress"
+        | "markWatched"
+        | "markUnwatched"
         | "toggleFavorite"
         | "toggleWatchlist"
         | "toggleNotInterested"
@@ -145,14 +145,17 @@ interface BuildMediaItemMenuModelOptions {
   userState?: MediaItemUserState;
   hasPartialProgress?: boolean;
   /**
-   * Whether the item has a resume position to clear, rewatches included.
-   * Defaults to hasPartialProgress.
+   * Whether the item has a resume position, rewatches included. A movie or
+   * episode with one offers both Mark Watched and Mark Unwatched. Defaults to
+   * hasPartialProgress.
    */
   hasResumePosition?: boolean;
   isAdmin: boolean;
   canCurateMetadata?: boolean;
   showCollectionActions?: boolean;
   dismissLabel?: string;
+  /** Formats the entry labels; components pass `useT()`. */
+  t: Translate;
 }
 
 interface MediaItemMenuProps {
@@ -171,8 +174,8 @@ interface MediaItemMenuProps {
   dismissAction?: DismissHomeItemVariables;
   hasPartialProgress?: boolean;
   /**
-   * Whether the item has a resume position to clear, rewatches included, for
-   * lists that hide a watched item's progress. Defaults to hasPartialProgress.
+   * Whether the item has a resume position, rewatches included, for lists that
+   * hide a watched item's progress. Defaults to hasPartialProgress.
    */
   hasResumePosition?: boolean;
   /** Enables the watched shortcut on wide cards such as Continue Watching. */
@@ -187,6 +190,10 @@ interface MediaItemMenuProps {
   itemTitle?: string;
 }
 
+function isInProgressVideo(mediaType: MediaItemType, hasResumePosition: boolean) {
+  return (mediaType === "movie" || mediaType === "episode") && hasResumePosition;
+}
+
 export function buildMediaItemMenuModel({
   mediaType,
   userState,
@@ -196,6 +203,7 @@ export function buildMediaItemMenuModel({
   canCurateMetadata = isAdmin,
   showCollectionActions = true,
   dismissLabel,
+  t,
 }: BuildMediaItemMenuModelOptions): MediaItemMenuEntry[] {
   const entries: MediaItemMenuEntry[] = [];
   const isAudiobook = mediaType === "audiobook";
@@ -205,21 +213,30 @@ export function buildMediaItemMenuModel({
     entries.push({
       kind: "action",
       key: "playFromBeginning",
-      label: isAudiobook ? "Listen from Beginning" : "Play from Beginning",
+      label: t(
+        isAudiobook ? "web.item.menu.listenFromBeginning" : "web.item.menu.playFromBeginning",
+      ),
     });
   }
 
-  if (userState) {
+  // A partly watched movie or episode, a rewatch included, offers both: Mark
+  // Watched records a play, and Mark Unwatched clears the watched state and
+  // the resume position. Neither removes anything from watch history.
+  if (isInProgressVideo(mediaType, hasResumePosition)) {
+    if (userState) {
+      entries.push({ kind: "action", key: "markWatched", label: t("web.item.menu.markWatched") });
+    }
+    entries.push({
+      kind: "action",
+      key: "markUnwatched",
+      label: t("web.item.menu.markUnwatched"),
+    });
+  } else if (userState) {
     entries.push({
       kind: "action",
       key: "toggleWatched",
       label: getWatchedActionLabel({ type: mediaType, user_data: { played: userState.played } }),
     });
-  }
-
-  // Clears the resume point without passing through watched (issue #2134).
-  if ((mediaType === "movie" || mediaType === "episode") && hasResumePosition) {
-    entries.push({ kind: "action", key: "resetProgress", label: "Reset Progress" });
   }
 
   if (userState && showCollectionActions) {
@@ -231,28 +248,40 @@ export function buildMediaItemMenuModel({
       entries.push({
         kind: "action",
         key: "toggleFavorite",
-        label: userState.is_favorite ? "Remove from Favorites" : "Add to Favorites",
+        label: t(
+          userState.is_favorite
+            ? "web.item.menu.removeFromFavorites"
+            : "web.item.menu.addToFavorites",
+        ),
       });
     }
     if (canAdd || userState.in_watchlist) {
       entries.push({
         kind: "action",
         key: "toggleWatchlist",
-        label: userState.in_watchlist ? "Remove from Watchlist" : "Add to Watchlist",
+        label: t(
+          userState.in_watchlist
+            ? "web.item.menu.removeFromWatchlist"
+            : "web.item.menu.addToWatchlist",
+        ),
       });
     }
     if (canMarkNotInterested(mediaType)) {
       entries.push({
         kind: "action",
         key: "toggleNotInterested",
-        label: userState.not_interested ? "Show in Recommendations" : "Not Interested",
+        label: t(
+          userState.not_interested
+            ? "web.item.menu.showInRecommendations"
+            : "web.item.menu.notInterested",
+        ),
       });
     }
   }
 
   // Manga series get a local file inspector (folder path, per-volume files).
   if (mediaType === "manga") {
-    entries.push({ kind: "action", key: "viewDetails", label: "View Details" });
+    entries.push({ kind: "action", key: "viewDetails", label: t("web.item.menu.viewDetails") });
   }
 
   if (isAdmin || canCurateMetadata) {
@@ -264,7 +293,7 @@ export function buildMediaItemMenuModel({
       entries.push({
         kind: "action",
         key: "viewPlayHistory",
-        label: "View Play History",
+        label: t("web.item.menu.viewPlayHistory"),
       });
     }
 
@@ -272,7 +301,7 @@ export function buildMediaItemMenuModel({
       entries.push({
         kind: "action",
         key: "refreshMetadata",
-        label: "Refresh Metadata",
+        label: t("web.item.menu.refreshMetadata"),
       });
 
       if (mediaType === "movie" || mediaType === "series") {
@@ -280,12 +309,12 @@ export function buildMediaItemMenuModel({
           {
             kind: "action",
             key: "editMetadata",
-            label: "Edit Metadata",
+            label: t("web.item.menu.editMetadata"),
           },
           {
             kind: "action",
             key: "matchItem",
-            label: "Match Item",
+            label: t("web.item.menu.matchItem"),
           },
         );
       }
@@ -329,8 +358,10 @@ function MediaItemMenuActionIcon({
       ) : (
         <EyeOff aria-hidden="true" className="size-4" />
       );
-    case "resetProgress":
-      return <TimerReset aria-hidden="true" className="size-4" />;
+    case "markWatched":
+      return <EyeOff aria-hidden="true" className="size-4" />;
+    case "markUnwatched":
+      return <Eye aria-hidden="true" className="size-4" />;
     case "toggleFavorite":
       return (
         <Heart
@@ -380,7 +411,7 @@ function MediaItemActionSheetRow({
       type="button"
       disabled={disabled}
       onClick={onSelect}
-      className="hover:bg-accent/60 active:bg-accent flex min-h-11 w-full items-center gap-3 px-5 py-3 text-left text-sm font-medium transition-colors disabled:opacity-50"
+      className="hover:bg-accent/60 active:bg-accent flex min-h-11 w-full items-center gap-3 px-5 py-3 text-start text-sm font-medium transition-colors disabled:opacity-50"
     >
       {children}
     </button>
@@ -410,6 +441,7 @@ function MediaItemActionSheet({
   isRefreshing: boolean;
   onSelectAction: (actionKey: MediaItemMenuActionKey) => void;
 }) {
+  const t = useT();
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -418,8 +450,12 @@ function MediaItemActionSheet({
         className="max-h-[80svh] gap-0 overflow-y-auto rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)]"
       >
         <SheetHeader className="px-5 pt-4 pb-2">
-          <SheetTitle className="truncate text-left text-base">{title ?? "Actions"}</SheetTitle>
-          <SheetDescription className="sr-only">Choose an action for this item.</SheetDescription>
+          <SheetTitle className="truncate text-start text-base">
+            {title ?? t("web.item.menu.sheetTitle")}
+          </SheetTitle>
+          <SheetDescription className="sr-only">
+            {t("web.item.menu.sheetDescription")}
+          </SheetDescription>
         </SheetHeader>
         <div className="flex flex-col pb-3">
           {entries.map((entry, index) =>
@@ -603,7 +639,12 @@ export function PosterCardFavoriteButton({
   density?: PosterActionDensity;
   onToggle: () => void;
 }) {
-  const label = isFavorite ? "Remove from favorites" : "Add to favorites";
+  const t = useT();
+  const label = t(
+    isFavorite
+      ? "web.item.menu.removeFromFavoritesShortcut"
+      : "web.item.menu.addToFavoritesShortcut",
+  );
 
   return (
     <CardQuickActionButton
@@ -682,14 +723,14 @@ type MetadataAction = "edit" | "match";
 /** What the status dialog stands in for: the item fetch or the dialog's own chunk. */
 type MetadataActionPending = "details" | "dialog";
 
-const PENDING_TEXT: Record<MetadataActionPending, { loading: string; failed: string }> = {
+const PENDING_TEXT: Record<MetadataActionPending, { loading: MessageKey; failed: MessageKey }> = {
   details: {
-    loading: "Loading the latest item details…",
-    failed: "The item details could not be loaded.",
+    loading: "web.item.menu.loadingDetails",
+    failed: "web.item.menu.detailsFailed",
   },
   dialog: {
-    loading: "Loading the dialog…",
-    failed: "The dialog could not be loaded.",
+    loading: "web.item.menu.loadingDialog",
+    failed: "web.item.menu.dialogFailed",
   },
 };
 
@@ -698,7 +739,7 @@ function MetadataActionStatusDialog({
   pending,
   loading,
   error,
-  retryLabel = "Try Again",
+  retryLabel,
   onRetry,
   onClose,
 }: {
@@ -710,7 +751,10 @@ function MetadataActionStatusDialog({
   onRetry?: () => void;
   onClose: () => void;
 }) {
-  const actionLabel = action === "edit" ? "Edit Metadata" : "Match Item";
+  const t = useT();
+  const actionLabel = t(
+    action === "edit" ? "web.item.dialog.editMetadataTitle" : "web.item.dialog.matchItemTitle",
+  );
   const text = PENDING_TEXT[pending];
 
   return (
@@ -718,20 +762,20 @@ function MetadataActionStatusDialog({
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>{actionLabel}</DialogTitle>
-          <DialogDescription>{loading ? text.loading : text.failed}</DialogDescription>
+          <DialogDescription>{t(loading ? text.loading : text.failed)}</DialogDescription>
         </DialogHeader>
         {loading ? (
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <LoaderCircle className="size-4 animate-spin" />
-            Loading…
+            {t("web.item.menu.loading")}
           </div>
         ) : (
           <div className="flex items-center justify-between gap-3">
             <p className="text-muted-foreground text-sm">
-              {error instanceof Error ? error.message : "Please try again."}
+              {error instanceof Error ? error.message : t("web.item.menu.pleaseTryAgain")}
             </p>
             <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-              {retryLabel}
+              {retryLabel ?? t("web.item.menu.tryAgain")}
             </Button>
           </div>
         )}
@@ -751,6 +795,7 @@ export function MetadataActionDialogHost({
   libraryId?: number;
   onClose: () => void;
 }) {
+  const t = useT();
   const {
     data: item,
     error,
@@ -770,7 +815,7 @@ export function MetadataActionDialogHost({
             pending="dialog"
             loading={false}
             error={dialogError}
-            retryLabel="Reload Page"
+            retryLabel={t("web.item.menu.reloadPage")}
             onRetry={() => window.location.reload()}
             onClose={onClose}
           />
@@ -1000,7 +1045,6 @@ function MediaItemMenuEngine({
   const notInterestedMutation = useToggleNotInterested(contentId);
   const refreshMetadataMutation = useRefreshItemMetadata();
   const dismissHomeItemMutation = useDismissHomeItem();
-  const clearResumePositionMutation = useClearResumePosition();
   const currentHref = `${location.pathname}${location.search}`;
 
   const isPending =
@@ -1009,8 +1053,7 @@ function MediaItemMenuEngine({
     watchlistMutation.isPending ||
     notInterestedMutation.isPending ||
     refreshMetadataMutation.isPending ||
-    dismissHomeItemMutation.isPending ||
-    clearResumePositionMutation.isPending;
+    dismissHomeItemMutation.isPending;
   const watchedPending = watchedMutation.isPending;
   const favoritePending = favoriteMutation.isPending;
   const refreshPending = refreshMetadataMutation.isPending;
@@ -1055,6 +1098,25 @@ function MediaItemMenuEngine({
     );
   }
 
+  // A partly watched item's Mark Watched and Mark Unwatched set the state
+  // instead of toggling it. Mark Watched marks even an item that is already
+  // watched: on a rewatch the server records another play and clears the
+  // resume position.
+  async function handleSetWatched(played: boolean) {
+    if (watchedMutation.isPending) return;
+    const previousPlayed = currentUserState?.played;
+    setCurrentUserState((previous) => (previous ? { ...previous, played } : previous));
+    try {
+      await watchedMutation.mutateAsync(played);
+    } catch {
+      setCurrentUserState((previous) =>
+        previous && previousPlayed !== undefined
+          ? { ...previous, played: previousPlayed }
+          : previous,
+      );
+    }
+  }
+
   async function handleFavoriteToggle() {
     await runOptimisticToggle("is_favorite", favoriteMutation.isPending, (_, previousValue) =>
       favoriteMutation.mutateAsync(previousValue),
@@ -1082,8 +1144,12 @@ function MediaItemMenuEngine({
         await handleWatchedToggle();
         return;
       }
-      case "resetProgress": {
-        clearResumePositionMutation.mutate({ contentId });
+      case "markWatched": {
+        await handleSetWatched(true);
+        return;
+      }
+      case "markUnwatched": {
+        await handleSetWatched(false);
         return;
       }
       case "toggleFavorite": {
@@ -1231,6 +1297,7 @@ export default function MediaItemMenu({
   longPressRef,
   itemTitle,
 }: MediaItemMenuProps) {
+  const t = useT();
   const user = useOptionalAuth()?.user;
   const { profile: currentProfile, hasSelectedProfile } = useCurrentProfile();
   const profileIsResolved = !hasSelectedProfile || Boolean(currentProfile);
@@ -1284,13 +1351,15 @@ export default function MediaItemMenu({
 
   const dismissLabel =
     dismissAction?.surface === "continue_watching"
-      ? mediaType === "audiobook"
-        ? "Remove from Continue Listening"
-        : mediaType === "ebook"
-          ? "Remove from Continue Reading"
-          : "Remove from Continue Watching"
+      ? t(
+          mediaType === "audiobook"
+            ? "web.item.menu.removeFromContinueListening"
+            : mediaType === "ebook"
+              ? "web.item.menu.removeFromContinueReading"
+              : "web.item.menu.removeFromContinueWatching",
+        )
       : dismissAction?.surface === "next_up"
-        ? "Remove from Next Up"
+        ? t("web.item.menu.removeFromNextUp")
         : undefined;
 
   const model = buildMediaItemMenuModel({
@@ -1302,6 +1371,7 @@ export default function MediaItemMenu({
     canCurateMetadata,
     showCollectionActions,
     dismissLabel,
+    t,
   });
   const offersMetadataDialogs = model.some(
     (entry) =>
@@ -1371,9 +1441,14 @@ export default function MediaItemMenu({
     showFavoriteShortcut &&
     showsFavoriteQuickAction(quickActionMode) &&
     model.some((entry) => entry.kind === "action" && entry.key === "toggleFavorite");
-  const hasWatchedAction = model.some(
-    (entry) => entry.kind === "action" && entry.key === "toggleWatched",
+  // An in-progress item's shortcut marks it watched, as its menu does, rather
+  // than toggling a rewatch to unwatched.
+  const watchedShortcutMarks = model.some(
+    (entry) => entry.kind === "action" && entry.key === "markWatched",
   );
+  const hasWatchedAction =
+    watchedShortcutMarks ||
+    model.some((entry) => entry.kind === "action" && entry.key === "toggleWatched");
   const rootPosterSupportsWatchedShortcut =
     variant === "poster" && (mediaType === "movie" || mediaType === "series");
   const showWatchedQuickAction =
@@ -1399,6 +1474,7 @@ export default function MediaItemMenu({
     onContextMenu: () => warmUp({ dropdown }),
   });
 
+  /* eslint-disable silo/no-physical-direction -- quick actions sit on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus */
   return (
     <>
       {(showWatchedQuickAction || showPosterFavorite) && currentUserState && (
@@ -1420,11 +1496,17 @@ export default function MediaItemMenu({
           {showWatchedQuickAction && (
             <WatchedQuickActionButton
               mediaType={mediaType}
-              isWatched={currentUserState.played}
+              isWatched={watchedShortcutMarks ? false : currentUserState.played}
               isPending={pending.watched}
               variant={variant}
               density={posterActionDensity}
-              onToggle={() => requestEngine({ kind: "toggleWatched" })}
+              onToggle={() =>
+                requestEngine(
+                  watchedShortcutMarks
+                    ? { kind: "action", key: "markWatched" }
+                    : { kind: "toggleWatched" },
+                )
+              }
             />
           )}
           {showPosterFavorite && (
@@ -1448,12 +1530,18 @@ export default function MediaItemMenu({
                 ? "right-1.5 bottom-1.5 sm:right-2 sm:bottom-2"
                 : "right-1.5 bottom-1.5 sm:right-2.5 sm:bottom-2.5",
         )}
+        /* eslint-enable silo/no-physical-direction -- end of the quick-action corners */
         onClick={stopMenuEvent}
         onPointerDown={stopMenuEvent}
         {...warmUpHandlers(true)}
       >
         {model.length === 0 ? (
-          <button type="button" aria-label="More actions" disabled className={triggerClassName}>
+          <button
+            type="button"
+            aria-label={t("web.item.menu.moreActions")}
+            disabled
+            className={triggerClassName}
+          >
             <MoreVertical className={mediaItemMenuIconClassName(variant, posterActionDensity)} />
           </button>
         ) : (
@@ -1461,7 +1549,7 @@ export default function MediaItemMenu({
             ref={menuTriggerRef}
             id={triggerId}
             type="button"
-            aria-label="More actions"
+            aria-label={t("web.item.menu.moreActions")}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             aria-controls={menuOpen ? menuId : undefined}
