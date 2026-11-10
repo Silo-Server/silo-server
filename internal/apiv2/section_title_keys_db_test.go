@@ -3,13 +3,19 @@ package apiv2
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	catalogpkg "github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/recommendations"
 	"github.com/Silo-Server/silo-server/internal/sections"
 )
 
@@ -104,4 +110,130 @@ func TestSectionTitleKeysOnRowReadsAndAdminSectionsDB(t *testing.T) {
 	if items, listed, single := keys(); items != "" || listed != "" || single != "" {
 		t.Fatalf("renamed row keys: items %q, admin list %q, admin read %q; want none", items, listed, single)
 	}
+}
+
+// Recommendation rows read through the real recommendations seam carry the
+// key of every title the server words, with its arguments, on the row lists
+// and on a row read on its own.
+func TestRecommendationRowTitleKeysDB(t *testing.T) {
+	pool := viewerAccessTestPool(t)
+	recs := recommendations.NewRepo(pool)
+	genre := seedRecommendationRows(t, pool, recs)
+	ratings := catalogpkg.NewRatingsRepo(pool)
+	svc := handlers.NewRecommendationsHandler(nil, recommendations.NewReader(recs, ratings, nil, nil), nil, ratings, recs, false)
+	svc.Fetcher = sections.NewFetcher(pool)
+	deps := scopedViewerDeps(t, &access.Scope{}, &fakeLibraryViews{}, &fakeLibraryViews{})
+	deps.Recommendations = svc
+	h := newTestHandler(t, deps)
+
+	type row struct {
+		Type      string            `json:"type"`
+		Title     string            `json:"title"`
+		TitleKey  string            `json:"title_key"`
+		TitleArgs map[string]string `json:"title_args"`
+	}
+	// The server's English for each row type, and the key it carries.
+	type keyed struct {
+		key  string
+		args map[string]string
+	}
+	want := map[[2]string]keyed{
+		{"cluster", "For You"}:                               {"home.section.forYou", nil},
+		{"popular", "Popular on This Server"}:                {"home.section.popularOnServer", nil},
+		{"recently_added", "Recently Added"}:                 {"home.section.recentlyAdded", nil},
+		{"top_rated", "Highly Rated in Your Library"}:        {"home.section.highlyRatedInLibrary", nil},
+		{"genre_sampler", "Top " + genre}:                    {"home.section.topGenre", map[string]string{"genre": genre}},
+		{"similar_users_liked", "Profiles Like You Enjoyed"}: {"home.section.profilesLikeYouEnjoyed", nil},
+	}
+	check := func(path string, r row) {
+		t.Helper()
+		w, ok := want[[2]string{r.Type, r.Title}]
+		if !ok {
+			// Rows another test left in the shared cache, such as other
+			// genres, are worded by the same code; only the ones above are
+			// asserted.
+			return
+		}
+		if r.TitleKey != w.key || !maps.Equal(r.TitleArgs, w.args) {
+			t.Errorf("%s: %s %q has key %q %v, want %q %v", path, r.Type, r.Title, r.TitleKey, r.TitleArgs, w.key, w.args)
+		}
+	}
+	read := func(path string, out any) {
+		t.Helper()
+		rec := do(t, h, http.MethodGet, path, "", viewerHeaders())
+		if rec.Code != 200 {
+			t.Fatalf("%s: %d %s", path, rec.Code, rec.Body.String())
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), out); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var discover struct{ Items []row }
+	read(Prefix+"/recommendations/discover", &discover)
+	seen := map[string]bool{}
+	for _, r := range discover.Items {
+		check("discover", r)
+		seen[r.Type] = true
+	}
+	if !seen["top_rated"] || !seen["recently_added"] {
+		t.Fatalf("discover rows %+v; want the Highly Rated and Recently Added rows", discover.Items)
+	}
+	var main row
+	read(Prefix+"/recommendations/for-you/main", &main)
+	check("for-you main", main)
+	if main.TitleKey == "" {
+		t.Errorf("for-you main %q carries no key", main.Title)
+	}
+	var rest struct{ Items []row }
+	read(Prefix+"/recommendations/for-you/rows", &rest)
+	for _, r := range rest.Items {
+		check("for-you rows", r)
+	}
+	for _, path := range []string{
+		Prefix + "/recommendations/section/top-rated",
+		Prefix + "/recommendations/section/recently-added",
+		Prefix + "/recommendations/section/genre?key=" + url.QueryEscape(genre),
+	} {
+		var r row
+		read(path, &r)
+		if _, ok := want[[2]string{r.Type, r.Title}]; !ok {
+			t.Fatalf("%s answered %s %q", path, r.Type, r.Title)
+		}
+		check(path, r)
+	}
+}
+
+// seedRecommendationRows seeds a library whose titles fill the Highly Rated and
+// Recently Added rows, and a cached genre row over one of them, and returns
+// the genre.
+func seedRecommendationRows(t *testing.T, pool *pgxpool.Pool, recs *recommendations.Repo) string {
+	t.Helper()
+	ctx := t.Context()
+	suffix := time.Now().UnixNano()
+	library := seedLibrary(t, pool, fmt.Sprintf("rec-title-keys-%d", suffix))
+	items := catalogpkg.NewItemRepository(pool)
+	var ids []string
+	// Two rated titles for Highly Rated and an unrated one only Recently
+	// Added holds, since Discover shows a title in one row.
+	for i := range 3 {
+		id := fmt.Sprintf("movie:rec-title-keys-%d-%d", suffix, i)
+		if err := items.Upsert(ctx, &models.MediaItem{ContentID: id, Type: "movie", Title: id, Status: "matched"}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { mustExec(t, pool, `DELETE FROM media_items WHERE content_id = $1`, id) })
+		if i < 2 {
+			mustExec(t, pool, `UPDATE media_items SET rating_imdb = 8.5 WHERE content_id = $1`, id)
+		}
+		mustExec(t, pool, `INSERT INTO media_item_libraries (content_id, media_folder_id) VALUES ($1, $2)`, id, library)
+		ids = append(ids, id)
+	}
+	genre := fmt.Sprintf("Drama %d", suffix)
+	genreRow := recommendations.RecTypeGenreSamplerPrefix + genre
+	if err := recs.UpsertRecommendationCache(ctx, recommendations.GlobalCacheUserID, recommendations.GlobalCacheProfileID, genreRow, "",
+		[]recommendations.ScoredItem{{MediaItemID: ids[0]}}, time.Now().Add(time.Hour).Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mustExec(t, pool, `DELETE FROM recommendation_cache WHERE rec_type = $1`, genreRow) })
+	return genre
 }

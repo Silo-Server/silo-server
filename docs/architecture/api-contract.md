@@ -1677,11 +1677,12 @@ miss cards that a fetcher drops after applying its limit. A client sends `item_l
 two reads only when `getHomeCapabilities` reports `row_item_limit_max` (100), which a server that
 predates the parameter on them does not send. A row that draws a random subset on each read may answer
 different cards when read again.
-`Section`, `SectionLayoutEntry`, `ProfileSectionSetting`, and `AdminSection` carry optional
-`title_key` and `title_args` (an object of strings) while the row's `title` is server text, so a
-client can show the title in its own language, and `ProfileSectionSetting` carries
+`Section`, `SectionLayoutEntry`, `ProfileSectionSetting`, `AdminSection`, and `RecommendationRow`
+carry optional `title_key` and `title_args` (an object of strings) while the row's `title` is
+server text, so a client can show the title in its own language, and `ProfileSectionSetting` carries
 `default_title_key` and `default_title_args` for its `default_title`; `getHomeCapabilities` reports `section_title_keys: true` when the
-server sends them. `page_sections.title_key` stores the key beside the title, and a trigger
+server sends them. A client acts on `title_key` whenever it is present.
+`page_sections.title_key` stores the key beside the title, and a trigger
 clears it on any update that changes the title without changing the key, so an older binary's
 rename cannot leave a stale key. See [the catalog API](../catalog-api.md#section-titles).
 Deliberate differences from v1, all recorded on the ledger rows: the calendar `start`/`end` are
@@ -1745,7 +1746,8 @@ no-op. Semantics are in
 shared `CatalogItem`, rendered by the same seam the v1 discover page uses
 (`internal/api/handlers/recommendations_service.go`), so the plain lists are a
 `CatalogItemCollection` (bounded, no `page`) and the grouped reads answer `RecommendationRow`
-(`{type, title, kind, key, items}`). Deliberate differences from v1, all recorded on the ledger
+(`{type, title, kind, key, items}`, plus `title_key` and `title_args` while the title is one the
+server words, as on sections). Deliberate differences from v1, all recorded on the ledger
 rows: the engine's `score`, `reason`, and bare `media_item_id` lists are not carried (no client
 reads them); `label` is `title` and `section_kind`/`section_key` are `kind`/`key`; `for-you/main`
 answers an empty row rather than `null`; `days` and `limit` are declared parameters answered

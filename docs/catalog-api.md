@@ -52,14 +52,19 @@ wants the rest of it in place reads the row again at its own limit
 ## Section titles
 
 A `Section` and a `SectionLayoutEntry` (Home and library pages), each row of
-`getProfileSectionSettings`, and each `AdminSection` (`listAdminSections`,
-`getAdminSection`, and the responses that answer one) carry `title_key` and
-`title_args` while their `title` is the server's own text: a built-in row name such as
+`getProfileSectionSettings`, each `AdminSection` (`listAdminSections`,
+`getAdminSection`, and the responses that answer one), and each `RecommendationRow`
+(`getDiscover`, `getForYouMain`, `listForYouRows`, `getRecommendationSection`) carry
+`title_key` and `title_args` while their `title` is the server's own text: a built-in row name such as
 `home.section.continueWatching`, a generated library row (`home.section.recentlyAddedIn` with `{"library": "Movies"}`),
 the synthetic Next Up row, a Because You Watched heading that names its title
-(`home.section.becauseYouWatchedTitle` with `title`), and the shared row a For You or
+(`home.section.becauseYouWatchedTitle` with `title`), the shared row a For You or
 taste-match section shows a new profile (`home.section.popularOnServer`,
-`home.section.topGenre` with `genre`). The key names a message in the shared translation
+`home.section.topGenre` with `genre`), and every recommendation row title the server words
+(`home.section.forYou`, `home.section.becauseYouEnjoy` with `genres`, the cluster's
+comma-separated genre names, `home.section.pickedFromYourHistory`,
+`home.section.profilesLikeYouEnjoyed`). A home row that still
+holds the older default "Trending on Server" carries `home.section.trendingOnServer`. The key names a message in the shared translation
 catalog, and `title_args` fills its placeholders by name. A client that has the key shows
 its translation; otherwise, and whenever the fields are absent, it shows `title`.
 `title_args` and `default_title_args` are left out when the message has no placeholders,
@@ -70,19 +75,21 @@ server replaced the stored title with one of an item or season (a seasonal row's
 title, an editorial subject). That replacement happens when the row's items are read: the
 `Section` from that read carries the title to show, while the layout entry and the profile's
 section settings keep the stored title and its key, so a client heads a loaded row with the
-fetched `Section`'s title fields. The server records the key with the row it writes, and an
-update that changes a row's title without changing its key clears it, so whether a row keeps
+fetched `Section`'s title fields. For a stored section, the server records the key with the
+row it writes, and an update that changes the row's title without changing its key clears it, so whether a row keeps
 its key never depends on comparing text. A library rename re-keys the generated rows that
 still carry their own key, with the new name in `title_args`; a generated row without a key
 is renamed only while its title still reads as the old library name. Upgrading keyed the existing rows whose title is
 exactly a built-in name, because stored rows don't record who wrote them, so a typed title
-identical to a built-in name shows that name's translation. A profile
+identical to a built-in name shows that name's translation. For a recommendation row, the server derives the key from the row's type and wording when
+it builds the response, so a title in other wording, such as one an older build cached, has none. A profile
 title override equal to the administrator's title keeps the key. A profile settings row
 also carries `default_title_key` and `default_title_args` for its `default_title`, the
 administrator's title a renamed row can go back to, under the same rules. An
 `AdminSection` describes the stored row, so an editor still edits `title` itself.
 `getHomeCapabilities`
-reports `section_title_keys: true` on a server that sends them. The frozen `/api/v1` reads
+reports `section_title_keys: true` on a server that sends them; it is informational, and a
+client acts on `title_key` whenever it is present. The frozen `/api/v1` reads
 and the Jellyfin surface do not carry them.
 
 ## People search
