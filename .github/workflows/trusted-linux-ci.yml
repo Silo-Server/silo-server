@@ -45,7 +45,7 @@ jobs:
             --jq '.actions_caches[] | {id, key, ref, createdAt: .created_at}' > "$RUNNER_TEMP/go-caches.json"
           cache_ids="$(jq -sr --arg ref "$GITHUB_REF" '
             map(select(.ref == $ref) | . + {
-              prefix: (.key | capture("^(?<prefix>go-(lint|test|integration|db-pins|db-auth|mod)-)").prefix)
+              prefix: (.key | capture("^(?<prefix>go-(lint|vet|test|integration|db-pins|db-auth|mod)-)").prefix)
             })
             | group_by(.prefix)[]
             | sort_by(.createdAt, .id) | reverse
@@ -360,8 +360,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # golangci-lint and the contract diff need the merge base to tell
-          # this branch's lines from the ones it inherited.
+          # golangci-lint needs the merge base to tell this branch's lines
+          # from the ones it inherited.
           fetch-depth: 0
           persist-credentials: false
 
@@ -447,24 +447,84 @@ jobs:
 
       - name: Check Go module tidiness without rewriting
         run: go mod tidy -diff
-      - name: Scan reachable Go vulnerabilities
-        if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
-          govulncheck -scan=symbol -show=verbose ./...
       # - name: Check dependency edges with depaware
       #   run: depaware ./...
       # Not measured; needs a prototype with reviewed edge allowances.
 
-      - name: Run Go lint and contract checks
+      - name: Run Go lint
         shell: bash
         env:
           LINT_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'push' && github.event.before || format('origin/{0}', github.event.repository.default_branch) }}
           LINT_BASE_MODE: ${{ github.event_name == 'pull_request' && 'pr-merge' || github.event_name == 'push' && 'revision' || 'merge-base' }}
           LINT_CHANGED_TARGET_REF: ${{ format('origin/{0}', github.event.repository.default_branch) }}
           LINT_CHANGED_FULL_TREE: ${{ (github.event_name == 'schedule' || github.repository == 'Silo-Server/silo-server' && github.ref_name == 'main') && '1' || '0' }}
+        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk --keep-going lint
+
+      - name: Save the Go cache
+        if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
+        uses: ./.github/actions/save-go-cache
+        with:
+          job-status: ${{ job.status }}
+          cache-key: ${{ steps.setup-go.outputs.cache-key }}
+
+  # Whole-tree go vet and the contract checks run beside Go lint rather than
+  # after it: golangci-lint (changed lines, then router recovery) and go vet
+  # each took about half of the old combined job, and over 15 minutes when a
+  # pull request changed go.mod and every cache missed.
+  go-vet:
+    name: Go vet and contracts
+    needs: select
+    if: ${{ !cancelled() && (needs.select.result != 'success' || needs.select.outputs.go != 'false') }}
+    runs-on: ${{ inputs.self_hosted && (github.repository == 'Silo-Server/silo-server' && ((github.event_name == 'pull_request' && contains(fromJSON(vars.SILO_CI_MEMBERS || '[]'), github.event.pull_request.user.login)) || (github.event_name != 'pull_request' && contains(fromJSON('["refs/heads/main","refs/heads/apiv2"]'), github.ref)))) && fromJSON(format('["self-hosted","linux","x64","silo-linux","silo-run-{0}-{1}","silo-job-go-vet"]', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
+    steps:
+      - *libvips-cache-key
+      - *libvips-restore
+      - *libvips-install
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The contract diff needs the merge base with the target branch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # After the PR checkout, which would otherwise clean it away, and
+      # before any PR code runs.
+      - name: Check out the CI tools from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Silo-Server/silo-server
+          ref: ${{ job.workflow_sha || 'refs/heads/main' }}
+          path: .ci-tools
+          fetch-depth: 1
+          sparse-checkout: |
+            /.github/actions/ci-tools/
+            /scripts/lint-changed.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        id: setup-go
+        with:
+          cache-name: vet
+
+      - *libvips-save
+
+      - name: Normalize tracked source mtimes
+        run: python3 scripts/ci/content_mtimes.py
+
+      - name: Scan reachable Go vulnerabilities
+        if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck -scan=symbol -show=verbose ./...
+
+      - name: Run go vet and contract checks
+        shell: bash
+        env:
           CONTRACT_BASE_REF: ${{ github.base_ref || github.event.repository.default_branch }}
-        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk --keep-going lint contracts
+        run: make -f .ci-tools/.github/actions/ci-tools/go-checks.mk --keep-going vet contracts
 
       - name: Save the Go cache
         if: success() && runner.environment == 'github-hosted' && github.ref_name == github.event.repository.default_branch && github.event_name != 'pull_request' && github.event_name != 'schedule'
@@ -1031,7 +1091,7 @@ jobs:
   result:
     name: CI result
     if: always()
-    needs: [select, repo-checks, go-lint, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
+    needs: [select, repo-checks, go-lint, go-vet, go-test, go-integration, go-db-pins, go-db-auth, web, web-test]
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the CI tools from main

@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 
-GO_JOBS = ("go-lint", "go-test", "go-integration", "go-db-pins", "go-db-auth")
+GO_JOBS = ("go-lint", "go-vet", "go-test", "go-integration", "go-db-pins", "go-db-auth")
 WEB_JOBS = ("web", "web-test")
 # Run on every event regardless of what the diff touched.
 ALWAYS_JOBS = ("repo-checks",)
