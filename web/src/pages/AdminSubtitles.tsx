@@ -18,10 +18,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminDownloadedSubtitles } from "@/hooks/queries/admin/subtitles";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { formatLocale } from "@/lib/appLocale";
+import { useT } from "@/i18n";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 
 export default function AdminSubtitles() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: users = [] } = useAdminUsers();
 
@@ -110,15 +112,18 @@ export default function AdminSubtitles() {
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
       <PageHeader
-        title="Subtitles"
-        subtitle="Manage stored subtitle files across the library — user uploads and provider downloads."
+        title={t("web.admin.subtitles.page.title")}
+        subtitle={t("web.admin.subtitles.page.subtitle")}
       />
 
       <div className="surface-panel-subtle grid gap-4 rounded-2xl px-4 py-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatBlock label="Total stored" value={total} />
-        <StatBlock label="User uploads" value={uploads} />
-        <StatBlock label="Provider downloads" value={providerDownloads} />
-        <StatBlock label="Languages on page" value={languageCount} />
+        <StatBlock label={t("web.admin.subtitles.stats.totalStored")} value={total} />
+        <StatBlock label={t("web.admin.subtitles.stats.userUploads")} value={uploads} />
+        <StatBlock
+          label={t("web.admin.subtitles.stats.providerDownloads")}
+          value={providerDownloads}
+        />
+        <StatBlock label={t("web.admin.subtitles.stats.languagesOnPage")} value={languageCount} />
       </div>
 
       <AdminSubtitlesFilters
@@ -135,7 +140,9 @@ export default function AdminSubtitles() {
       />
 
       {subtitlesQuery.isError && (
-        <p role="alert">Unable to load subtitles. {subtitlesQuery.error.message}</p>
+        <p role="alert">
+          {t("web.admin.subtitles.page.loadFailed", { error: subtitlesQuery.error.message })}
+        </p>
       )}
 
       <AdminSubtitlesTable
@@ -148,7 +155,10 @@ export default function AdminSubtitles() {
       {(total > 0 || page > 0) && (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-muted-foreground text-sm">
-            {subtitles.length} subtitles on this page; {total} currently match
+            {t("web.admin.subtitles.page.summary", {
+              count: subtitles.length,
+              total: String(total),
+            })}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Select
@@ -164,7 +174,7 @@ export default function AdminSubtitles() {
               <SelectContent>
                 {PAGE_SIZE_OPTIONS.map((size) => (
                   <SelectItem key={size} value={size}>
-                    {size} / page
+                    {t("web.admin.subtitles.page.pageSizeOption", { count: Number(size) })}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -175,9 +185,11 @@ export default function AdminSubtitles() {
               disabled={!canPrev}
               onClick={() => setPagination({ scope, cursors: cursors.slice(0, -1) })}
             >
-              Previous
+              {t("web.admin.subtitles.page.previous")}
             </Button>
-            <span className="text-muted-foreground px-1 text-sm">Page {page + 1}</span>
+            <span className="text-muted-foreground px-1 text-sm">
+              {t("web.admin.subtitles.page.pageNumber", { page: String(page + 1) })}
+            </span>
             <Button
               type="button"
               variant="outline"
@@ -186,7 +198,7 @@ export default function AdminSubtitles() {
                 if (nextCursor) setPagination({ scope, cursors: [...cursors, nextCursor] });
               }}
             >
-              Next
+              {t("web.admin.subtitles.page.next")}
             </Button>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useAppLanguage } from "@/i18n";
 import { Link, useLocation } from "react-router";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import {
@@ -498,6 +499,8 @@ function PreparationRow({
   prep: AdminDownloadPreparation;
   onNavigate: () => void;
 }) {
+  // The preparation helpers return catalog text; re-render it on a language change.
+  useAppLanguage();
   const percent = preparationPercent(prep);
   const worker = preparationWorker(prep);
   const detail = [

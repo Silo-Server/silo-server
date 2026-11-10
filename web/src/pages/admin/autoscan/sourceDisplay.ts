@@ -1,4 +1,5 @@
 import type { AutoscanSource } from "@/api/types";
+import { t } from "@/i18n";
 import { pluginDisplayNameKey, type SourceLabelLookups } from "@/lib/autoscanLabels";
 
 import { WEBHOOK_PROVIDER_KEY, isWebhookSource } from "./sourceForm";
@@ -85,7 +86,9 @@ export function eventSourceName(
   const title = sourceTitle(source, typeName);
   if (isWebhookSource(source) || title !== typeName || !source.connection_id) return title;
   const connection = lookups.connectionByID.get(source.connection_id)?.trim();
-  return connection ? `${title} · via ${connection}` : title;
+  return connection
+    ? `${title} · ${t("web.admin.autoscan.sources.subtitle.via", { connection })}`
+    : title;
 }
 
 /**
@@ -105,14 +108,25 @@ export function effectivePollIntervalSeconds(
 
 /** "45 s", "10 min", "2 h", "1 h 30 min", "1 day". */
 export function formatInterval(seconds: number): string {
-  if (seconds < 60) return `${seconds} s`;
+  if (seconds < 60) {
+    return t("web.admin.autoscan.sources.interval.seconds", { seconds: String(seconds) });
+  }
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) {
+    return t("web.admin.autoscan.sources.interval.minutes", { minutes: String(minutes) });
+  }
   const days = Math.floor(minutes / 1440);
-  if (days >= 1 && minutes % 1440 === 0) return days === 1 ? "1 day" : `${days} days`;
+  if (days >= 1 && minutes % 1440 === 0) {
+    return t("web.admin.autoscan.sources.interval.days", { count: days, count_text: String(days) });
+  }
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+  return rest === 0
+    ? t("web.admin.autoscan.sources.interval.hours", { hours: String(hours) })
+    : t("web.admin.autoscan.sources.interval.hoursMinutes", {
+        hours: String(hours),
+        minutes: String(rest),
+      });
 }
 
 export function describeSource({
@@ -133,16 +147,21 @@ export function describeSource({
 
   const parts: string[] = [];
   if (isWebhookSource(source)) {
-    parts.push(title === typeName ? "Webhook" : typeName);
+    parts.push(title === typeName ? t("web.admin.autoscan.sources.subtitle.webhook") : typeName);
     if (label && provider) parts.push(provider);
-    else if (!provider && detectsArrProvider(source)) parts.push("auto-detects Sonarr or Radarr");
+    else if (!provider && detectsArrProvider(source))
+      parts.push(t("web.admin.autoscan.sources.subtitle.autoDetects"));
   } else {
     if (title !== typeName) parts.push(typeName);
     const connection = source.connection_id ? connectionNames.get(source.connection_id) : undefined;
-    if (connection) parts.push(`via ${connection}`);
+    if (connection) parts.push(t("web.admin.autoscan.sources.subtitle.via", { connection }));
     const seconds = effectivePollIntervalSeconds(source.poll_interval_seconds, defaultPollSeconds);
     parts.push(
-      seconds == null ? "polls on the default schedule" : `polls every ${formatInterval(seconds)}`,
+      seconds == null
+        ? t("web.admin.autoscan.sources.subtitle.pollsDefault")
+        : t("web.admin.autoscan.sources.subtitle.pollsEvery", {
+            interval: formatInterval(seconds),
+          }),
     );
   }
 
@@ -175,28 +194,44 @@ export function sourceHealth(source: AutoscanSource): SourceHealth {
     if (errorMs > 0 && errorMs >= receivedMs) {
       return {
         kind: "error",
-        headline: "Delivery failed",
-        message: source.webhook_last_error_message || source.last_error || "Delivery failed",
+        headline: t("web.admin.autoscan.sources.status.deliveryFailed"),
+        message:
+          source.webhook_last_error_message ||
+          source.last_error ||
+          t("web.admin.autoscan.sources.status.deliveryFailed"),
         at: source.webhook_last_error_at ?? null,
       };
     }
     if (receivedMs > 0) {
-      return { kind: "ok", headline: "Last delivery", at: source.webhook_last_received_at! };
+      return {
+        kind: "ok",
+        headline: t("web.admin.autoscan.sources.status.lastDelivery"),
+        at: source.webhook_last_received_at!,
+      };
     }
     if (!source.webhook_configured) {
-      return { kind: "missing-endpoint", headline: "No webhook URL yet" };
+      return {
+        kind: "missing-endpoint",
+        headline: t("web.admin.autoscan.sources.status.noWebhookUrl"),
+      };
     }
-    return { kind: "idle", headline: "No deliveries yet" };
+    return { kind: "idle", headline: t("web.admin.autoscan.sources.status.noDeliveries") };
   }
 
   if (source.last_error) {
     return {
       kind: "error",
-      headline: "Last poll failed",
+      headline: t("web.admin.autoscan.sources.status.lastPollFailed"),
       message: source.last_error,
       at: source.last_run_at,
     };
   }
-  if (source.last_run_at) return { kind: "ok", headline: "Last checked", at: source.last_run_at };
-  return { kind: "idle", headline: "Not run yet" };
+  if (source.last_run_at) {
+    return {
+      kind: "ok",
+      headline: t("web.admin.autoscan.sources.status.lastChecked"),
+      at: source.last_run_at,
+    };
+  }
+  return { kind: "idle", headline: t("web.admin.autoscan.sources.status.notRun") };
 }

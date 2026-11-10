@@ -25,6 +25,7 @@ import {
   useAvailableScanSources,
   useDeleteAutoscanSource,
 } from "@/hooks/queries/useAutoscan";
+import { useAppLanguage, useT } from "@/i18n";
 import { buildPluginDisplayNames } from "@/lib/autoscanLabels";
 
 import { SourceDialog } from "./SourceDialog";
@@ -35,6 +36,9 @@ import { SourceList, SourceListRow } from "./SourceList";
 import { describeTargets, sourceTargets } from "./sourceTargets";
 
 export default function SourcesPanel() {
+  const t = useT();
+  // Source subtitles and target summaries come from plain helpers.
+  useAppLanguage();
   const sources = useAutoscanSources();
   const connections = useAutoscanConnections();
   const settings = useAutoscanSettings();
@@ -107,16 +111,18 @@ export default function SourcesPanel() {
     }));
 
   if (sources.isLoading) {
-    return <p className="text-muted-foreground py-4 text-sm">Loading sources…</p>;
+    return (
+      <p className="text-muted-foreground py-4 text-sm">
+        {t("web.admin.autoscan.sources.loading")}
+      </p>
+    );
   }
 
   // A failed refetch keeps the last list on screen. Replacing the panel with
   // the error would unmount the add dialog and lose its "Connect it" step.
   if (sources.isError && !sources.data) {
     return (
-      <p className="text-destructive py-4 text-sm">
-        Failed to load scan sources. Please reload the page.
-      </p>
+      <p className="text-destructive py-4 text-sm">{t("web.admin.autoscan.sources.loadFailed")}</p>
     );
   }
 
@@ -140,11 +146,13 @@ export default function SourcesPanel() {
     <div className="space-y-4">
       <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-muted-foreground text-xs">
-          Scan-source plugins are installed from the{" "}
-          <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
-            Plugins page
-          </Link>
-          . Add a source for each thing you want to watch.
+          {t("web.admin.autoscan.sources.pluginsHint", {
+            link: (chunks) => (
+              <Link to="/admin/plugins" className="text-primary underline-offset-4 hover:underline">
+                {chunks}
+              </Link>
+            ),
+          })}
         </p>
         <Button
           variant="outline"
@@ -153,21 +161,20 @@ export default function SourcesPanel() {
           onClick={() => setAddOpen(true)}
         >
           <Plus />
-          Add source
+          {t("web.admin.autoscan.sources.add")}
         </Button>
       </div>
 
       {sources.isError && (
-        <p className="text-destructive text-sm">
-          Could not refresh scan sources. Showing the last loaded list.
-        </p>
+        <p className="text-destructive text-sm">{t("web.admin.autoscan.sources.refreshFailed")}</p>
       )}
 
       {list.length === 0 ? (
         <div className="rounded-lg border border-dashed p-8 text-center">
           <p className="text-muted-foreground text-sm">
-            No scan sources yet. Click <span className="font-medium">Add source</span> to create one
-            from an installed scan-source plugin.
+            {t("web.admin.autoscan.sources.empty", {
+              b: (chunks) => <span className="font-medium">{chunks}</span>,
+            })}
           </p>
         </div>
       ) : (
@@ -200,10 +207,15 @@ export default function SourcesPanel() {
           key={`${editTarget.id}:${editTarget.session}`}
           mode="edit"
           open={editTarget.open}
-          onOpenChange={(open) => setEditTarget((t) => (t ? { ...t, open } : t))}
+          onOpenChange={(open) =>
+            setEditTarget((target) => (target ? { ...target, open } : target))
+          }
           source={editSource}
           title={editDisplay.title}
-          description={[editDisplay.subtitle, editFeeds && `Feeds: ${editFeeds}`]
+          description={[
+            editDisplay.subtitle,
+            editFeeds && t("web.admin.autoscan.sources.editFeeds", { feeds: editFeeds }),
+          ]
             .filter(Boolean)
             .join(" · ")}
           connectionOptions={connectionOptions}
@@ -215,28 +227,31 @@ export default function SourcesPanel() {
       <AlertDialog open={deleteOpen} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete source?</AlertDialogTitle>
+            <AlertDialogTitle>{t("web.admin.autoscan.sources.deleteTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              &ldquo;{deleteTarget ? displayFor(deleteTarget.source).title : ""}&rdquo; will be
-              permanently removed. This cannot be undone.
+              {t("web.admin.autoscan.sources.deleteDescription", {
+                name: deleteTarget ? displayFor(deleteTarget.source).title : "",
+              })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
                 if (deleteTarget) {
                   deleteSource.mutateCaptured(deleteTarget.intent);
                   // The edit dialog for a deleted source has nothing left to save.
-                  setEditTarget((t) =>
-                    t && t.id === deleteTarget.source.id ? { ...t, open: false } : t,
+                  setEditTarget((target) =>
+                    target && target.id === deleteTarget.source.id
+                      ? { ...target, open: false }
+                      : target,
                   );
                   setDeleteTarget(null);
                 }
               }}
             >
-              Delete
+              {t("web.admin.autoscan.sources.deleteConfirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
