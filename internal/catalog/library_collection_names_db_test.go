@@ -27,7 +27,8 @@ func TestLibraryCollectionNamesDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pool.Close()
+	// Registered first, so it runs after the cleanups that delete the fixtures.
+	t.Cleanup(pool.Close)
 	stamp := time.Now().UnixNano()
 	library := func(name string) int {
 		var id int
@@ -50,7 +51,7 @@ func TestLibraryCollectionNamesDB(t *testing.T) {
 		wantTakenIn      string
 	}{
 		{key: "picks", title: "Server Picks", slug: "server-picks", libraries: []int{movies}, unique: true, wantSlug: "server-picks"},
-		{title: " server   PICKS ", slug: "server-picks", libraries: []int{movies}, unique: true, wantTakenIn: moviesName},
+		{title: "\t server   PICKS\n", slug: "server-picks", libraries: []int{movies}, unique: true, wantTakenIn: moviesName},
 		// Shares Movies, though its first library (the slug's) is Shows.
 		{title: "Server Picks", slug: "server-picks", libraries: []int{shows, movies}, unique: true, wantTakenIn: moviesName},
 		{title: "Server Picks", slug: "server-picks", libraries: []int{shows}, unique: true, wantSlug: "server-picks"},

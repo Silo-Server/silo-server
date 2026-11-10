@@ -74,7 +74,7 @@ func checkLibraryCollectionTitleFree(ctx context.Context, tx pgx.Tx, collectionI
 	var libraryName string
 	err := tx.QueryRow(ctx, `
 		WITH self AS (
-			SELECT id, library_id, lower(regexp_replace(btrim(title), '[[:space:]]+', ' ', 'g')) AS title
+			SELECT id, library_id, lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) AS title
 			FROM library_collections
 			WHERE id = $1
 		), self_libraries AS (
@@ -86,7 +86,7 @@ func checkLibraryCollectionTitleFree(ctx context.Context, tx pgx.Tx, collectionI
 		SELECT mf.name
 		FROM self
 		JOIN library_collections other
-			ON other.id <> self.id AND lower(regexp_replace(btrim(other.title), '[[:space:]]+', ' ', 'g')) = self.title
+			ON other.id <> self.id AND lower(btrim(regexp_replace(other.title, '[[:space:]]+', ' ', 'g'))) = self.title
 		JOIN self_libraries sl ON (
 			EXISTS (SELECT 1 FROM library_collection_libraries lcl WHERE lcl.collection_id = other.id AND lcl.library_id = sl.library_id)
 			OR (other.library_id = sl.library_id

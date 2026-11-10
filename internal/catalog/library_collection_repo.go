@@ -721,6 +721,18 @@ func (r *LibraryCollectionRepository) Update(ctx context.Context, input UpdateLi
 		if err := lockLibraryCollectionParent(ctx, tx, input.ID); err != nil {
 			return err
 		}
+		if input.UniqueTitle && input.LibraryIDs == nil && input.SetGroupID == nil {
+			// A rename takes its libraries' order locks, as a create and a
+			// scope change do, so two renames into one name can't both pass
+			// the title check.
+			var legacyLibraryID int
+			if err := tx.QueryRow(ctx, `SELECT library_id FROM library_collections WHERE id = $1`, input.ID).Scan(&legacyLibraryID); err != nil {
+				return fmt.Errorf("loading collection library: %w", err)
+			}
+			if err := lockLibraryCollectionMembershipOrders(ctx, tx, input.ID, []int{legacyLibraryID}); err != nil {
+				return err
+			}
+		}
 
 		if input.LibraryIDs != nil || input.SetGroupID != nil {
 			var requested []int

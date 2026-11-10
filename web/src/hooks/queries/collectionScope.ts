@@ -375,8 +375,12 @@ export function useCollectionDraft<Raw extends WireCollection>(
   );
 
   const setDraft = useCallback(
-    (update: (draft: CollectionDraft) => CollectionDraft) =>
-      setState((previous) => ({ ...previous, draft: update(previous.draft) })),
+    (update: (draft: CollectionDraft) => CollectionDraft) => {
+      const name = current.current.draft.name;
+      setState((previous) => ({ ...previous, draft: update(previous.draft) }));
+      // A refusal is about the name it was given; editing the name drops it.
+      if (current.current.draft.name !== name) setNameRefusal(null);
+    },
     [setState],
   );
 
@@ -512,6 +516,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
           conflicts: [],
         }));
       }
+      setNameRefusal(null);
       return { id: outcome.id, failedItems, sync: outcome.sync, warnings: outcome.warnings };
     } catch (error) {
       const refused = nameFieldError(error);
@@ -545,6 +550,8 @@ export function useCollectionDraft<Raw extends WireCollection>(
     if (!id) return false;
     setSaving(true);
     setSaveError(null);
+    // The name the refused request carried, not whatever is typed when it answers.
+    let submittedName = current.current.draft.name;
     try {
       // Created, but never read back: read it before sending a version.
       if (!current.current.etag) {
@@ -553,9 +560,11 @@ export function useCollectionDraft<Raw extends WireCollection>(
       }
       for (let attempt = 0; ; attempt++) {
         const { draft, etag, base } = current.current;
+        submittedName = draft.name;
         try {
           const outcome = await scope.update({ id, etag: etag ?? "" }, draft as SavableDraft, base);
           await rebase(id, draft, outcome.failedArtwork, outcome.warnings);
+          setNameRefusal(null);
           return true;
         } catch (error) {
           if (!isPreconditionFailed(error)) throw error;
@@ -573,9 +582,7 @@ export function useCollectionDraft<Raw extends WireCollection>(
       }
     } catch (error) {
       const refused = nameFieldError(error);
-      setNameRefusal(
-        refused === null ? null : { name: current.current.draft.name, message: refused },
-      );
+      setNameRefusal(refused === null ? null : { name: submittedName, message: refused });
       setSaveError(refused ?? scope.errorMessage(error, saveFailed()));
       return false;
     } finally {
